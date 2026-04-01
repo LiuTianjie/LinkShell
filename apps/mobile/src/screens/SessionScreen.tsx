@@ -10,8 +10,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { InputBar } from "../components/InputBar";
-import type { InputBarHandle } from "../components/InputBar";
 import { TerminalView } from "../components/TerminalView";
 import type { TerminalViewHandle } from "../components/TerminalView";
 import type { ConnectionStatus } from "../hooks/useSession";
@@ -51,10 +49,10 @@ export function SessionScreen({
   const topSurfaceColor = theme.mode === "light" ? theme.bgCard : theme.bgElevated;
   const topBorderColor = theme.mode === "light" ? theme.border : theme.borderLight;
   const termRef = useRef<TerminalViewHandle>(null);
-  const inputRef = useRef<InputBarHandle>(null);
   const writtenCountRef = useRef(0);
   const [keyboardHintVisible, setKeyboardHintVisible] = useState(true);
   const [zoomPercent, setZoomPercent] = useState(100);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   const hasControl = controllerId === deviceId;
   const isControlledByOther = Boolean(controllerId && controllerId !== deviceId);
@@ -98,13 +96,7 @@ export function SessionScreen({
     if (inputDisabled) return;
     setKeyboardHintVisible(false);
     termRef.current?.focusCursor();
-    inputRef.current?.focus();
   }, [inputDisabled]);
-
-  const handleSpecialKey = useCallback((key: string) => {
-    if (inputDisabled) return;
-    onSendInput(key);
-  }, [inputDisabled, onSendInput]);
 
   const handleZoomIn = useCallback(() => {
     termRef.current?.zoomIn();
@@ -124,14 +116,13 @@ export function SessionScreen({
   const handleLeave = useCallback(() => {
     Keyboard.dismiss();
     termRef.current?.blurCursor();
-    inputRef.current?.blur();
     onDisconnect();
   }, [onDisconnect]);
 
   useEffect(() => {
     if (inputDisabled) {
       termRef.current?.blurCursor();
-      inputRef.current?.blur();
+      Keyboard.dismiss();
     }
   }, [inputDisabled]);
 
@@ -149,8 +140,8 @@ export function SessionScreen({
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const showSub = Keyboard.addListener(showEvent, refitTerminal);
-    const hideSub = Keyboard.addListener(hideEvent, refitTerminal);
+    const showSub = Keyboard.addListener(showEvent, () => { setKeyboardVisible(true); refitTerminal(); });
+    const hideSub = Keyboard.addListener(hideEvent, () => { setKeyboardVisible(false); refitTerminal(); });
 
     return () => {
       showSub.remove();
@@ -267,16 +258,7 @@ export function SessionScreen({
               ) : null}
             </View>
           </View>
-          <View style={{ height: insets.bottom, backgroundColor: theme.bgTerminal }} />
-        </View>
-
-        <View style={styles.hiddenInputWrap}>
-          <InputBar
-            ref={inputRef}
-            onSendText={handleTerminalInput}
-            onSpecialKey={handleSpecialKey}
-            disabled={inputDisabled}
-          />
+          {!keyboardVisible && <View style={{ height: insets.bottom, backgroundColor: theme.bgTerminal }} />}
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -399,12 +381,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 6,
   },
   tapHintText: { fontSize: 12, fontWeight: "600" },
-  hiddenInputWrap: {
-    position: "absolute",
-    left: 0,
-    bottom: 0,
-    width: 1,
-    height: 1,
-    opacity: 0.01,
-  },
 });

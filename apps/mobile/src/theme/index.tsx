@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { Appearance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type ThemeMode = "dark" | "light";
@@ -123,6 +124,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [mode, setThemeMode]);
 
   const theme = mode === "dark" ? darkTheme : lightTheme;
+
+  useEffect(() => {
+    Appearance.setColorScheme(mode);
+  }, [mode]);
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme, setThemeMode }}>

@@ -247,9 +247,6 @@ function AppInner() {
               backgroundColor: theme.tabBg,
               borderTopColor: theme.tabBorder,
               borderTopWidth: StyleSheet.hairlineWidth,
-              height: 60,
-              paddingBottom: 6,
-              paddingTop: 6,
               elevation: 0,
             },
             tabBarItemStyle: {
