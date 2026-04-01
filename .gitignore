@@ -26,6 +26,9 @@ apps/mobile/web-build/
 apps/mobile/android/
 apps/mobile/ios/
 
+# Generated files
+apps/mobile/src/generated/
+
 # Environment and local overrides
 .env
 .env.local
@@ -35,6 +38,7 @@ apps/mobile/ios/
 .DS_Store
 Thumbs.db
 .idea/
+.vscode/
 
 # Runtime leftovers
 *.log

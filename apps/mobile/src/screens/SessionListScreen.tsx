@@ -97,7 +97,10 @@ export function SessionListScreen({
             ) : null}
           </View>
         }
-        contentContainerStyle={sessions.length === 0 ? styles.emptyContainer : styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          sessions.length === 0 && styles.emptyContainer,
+        ]}
         renderItem={({ item, index }) => (
           <Pressable
             style={[styles.sessionCard, { backgroundColor: theme.bgCard, borderColor: theme.border }, index === sessions.length - 1 && styles.lastCard]}
@@ -107,13 +110,13 @@ export function SessionListScreen({
               <View style={styles.rowLeft}>
                 <View style={[styles.dot, item.hasHost ? styles.dotOnline : styles.dotOffline]} />
                 <View style={styles.titleGroup}>
-                  <Text style={[styles.hostname, { color: theme.text }]}>
+                  <Text numberOfLines={1} style={[styles.hostname, { color: theme.text }]}>
                     {item.hostname ?? item.id.slice(0, 8)}
                   </Text>
-                  <Text style={[styles.sessionIdText, { color: theme.textTertiary }]}>{item.id.slice(0, 8)}</Text>
+                  <Text numberOfLines={1} style={[styles.sessionIdText, { color: theme.textTertiary }]}>{item.id.slice(0, 8)}</Text>
                 </View>
               </View>
-              <Text style={[styles.provider, { color: theme.textSecondary, backgroundColor: theme.bgInput }]}>{item.provider ?? "未知来源"}</Text>
+              <Text numberOfLines={1} style={[styles.provider, { color: theme.textSecondary, backgroundColor: theme.bgInput }]}>{item.provider ?? "未知来源"}</Text>
             </View>
 
             <Text style={[styles.meta, { color: theme.textSecondary }]}>
@@ -162,11 +165,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#F2F4F7",
   },
   headerWrap: {
-    paddingHorizontal: 20,
     paddingBottom: 10,
     gap: 12,
+    alignItems: "stretch",
   },
   heroCard: {
+    width: "100%",
+    alignSelf: "stretch",
     borderRadius: 28,
     borderWidth: 1,
     padding: 20,
@@ -208,6 +213,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   errorBar: {
+    width: "100%",
+    alignSelf: "stretch",
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -221,6 +228,8 @@ const styles = StyleSheet.create({
     paddingBottom: 22,
   },
   sessionCard: {
+    width: "100%",
+    alignSelf: "stretch",
     borderWidth: 1,
     borderRadius: 22,
     padding: 18,
@@ -238,7 +247,7 @@ const styles = StyleSheet.create({
   rowTop: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 12,
   },
   rowLeft: {
@@ -246,10 +255,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     flex: 1,
+    minWidth: 0,
   },
   titleGroup: {
     flex: 1,
     gap: 3,
+    minWidth: 0,
   },
   dot: {
     width: 8,
@@ -277,6 +288,8 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 999,
     overflow: "hidden",
+    flexShrink: 1,
+    maxWidth: "42%",
   },
   meta: {
     fontSize: 12,
@@ -297,7 +310,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   emptyContainer: {
-    flex: 1,
+    flexGrow: 1,
   },
   emptyWrap: {
     flex: 1,

@@ -48,6 +48,9 @@ export function SessionScreen({
   const { theme } = useTheme();
   const topSurfaceColor = theme.mode === "light" ? theme.bgCard : theme.bgElevated;
   const topBorderColor = theme.mode === "light" ? theme.border : theme.borderLight;
+  const toolbarBg = theme.mode === "light" ? "#f2f2f7" : "rgba(255,255,255,0.08)";
+  const toolbarBorder = theme.mode === "light" ? "rgba(60,60,67,0.18)" : "rgba(255,255,255,0.1)";
+  const toolbarPressedBg = theme.mode === "light" ? "#e5e7eb" : "rgba(255,255,255,0.14)";
   const termRef = useRef<TerminalViewHandle>(null);
   const writtenCountRef = useRef(0);
   const [keyboardHintVisible, setKeyboardHintVisible] = useState(true);
@@ -94,9 +97,12 @@ export function SessionScreen({
 
   const focusTerminalInput = useCallback(() => {
     if (inputDisabled) return;
+    if (keyboardVisible) return;
     setKeyboardHintVisible(false);
     termRef.current?.focusCursor();
-  }, [inputDisabled]);
+  }, [inputDisabled, keyboardVisible]);
+
+  const showTapOverlay = !inputDisabled && !keyboardVisible;
 
   const handleZoomIn = useCallback(() => {
     termRef.current?.zoomIn();
@@ -169,7 +175,17 @@ export function SessionScreen({
               <Text style={[styles.statusLabel, { color: theme.textSecondary }]}>{statusText}</Text>
               <Text style={[styles.sessionText, { color: theme.textTertiary }]} numberOfLines={1}>{sessionId.slice(0, 8)}</Text>
             </View>
-            <Pressable style={[styles.leaveBtn, { backgroundColor: theme.errorLight }]} onPress={handleLeave} hitSlop={8}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.leaveBtn,
+                {
+                  backgroundColor: pressed ? theme.error : theme.errorLight,
+                  borderColor: theme.mode === "light" ? "rgba(220,38,38,0.18)" : "rgba(239,68,68,0.18)",
+                },
+              ]}
+              onPress={handleLeave}
+              hitSlop={10}
+            >
               <Text style={[styles.leaveBtnText, { color: theme.error }]}>退出</Text>
             </Pressable>
           </View>
@@ -181,24 +197,42 @@ export function SessionScreen({
             </View>
 
             <View style={styles.topRight}>
-              <View style={styles.zoomGroup}>
-                <Pressable style={[styles.zoomBtn, { backgroundColor: theme.bgInput }]} onPress={handleZoomOut} hitSlop={6}>
+              <View style={[styles.zoomGroup, { backgroundColor: toolbarBg, borderColor: toolbarBorder }]}>
+                <Pressable
+                  style={({ pressed }) => [styles.zoomBtn, pressed && { backgroundColor: toolbarPressedBg }]}
+                  onPress={handleZoomOut}
+                  hitSlop={10}
+                >
                   <Text style={[styles.zoomBtnText, { color: theme.textSecondary }]}>A-</Text>
                 </Pressable>
-                <Pressable style={[styles.zoomBadge, { backgroundColor: theme.bgInput }]} onPress={handleZoomReset} hitSlop={6}>
+                <Pressable
+                  style={({ pressed }) => [styles.zoomBadge, pressed && { backgroundColor: toolbarPressedBg }]}
+                  onPress={handleZoomReset}
+                  hitSlop={10}
+                >
                   <Text style={[styles.zoomBadgeText, { color: theme.accent }]}>{zoomPercent}%</Text>
                 </Pressable>
-                <Pressable style={[styles.zoomBtn, { backgroundColor: theme.bgInput }]} onPress={handleZoomIn} hitSlop={6}>
+                <Pressable
+                  style={({ pressed }) => [styles.zoomBtn, pressed && { backgroundColor: toolbarPressedBg }]}
+                  onPress={handleZoomIn}
+                  hitSlop={10}
+                >
                   <Text style={[styles.zoomBtnText, { color: theme.textSecondary }]}>A+</Text>
                 </Pressable>
               </View>
               <Pressable
-                style={[
+                style={({ pressed }) => [
                   styles.controlBtn,
-                  { backgroundColor: hasControl ? theme.accentLight : theme.bgInput },
+                  {
+                    backgroundColor: pressed
+                      ? (hasControl ? theme.accent : toolbarPressedBg)
+                      : (hasControl ? theme.accentLight : toolbarBg),
+                    borderColor: hasControl ? theme.accentLight : toolbarBorder,
+                  },
                 ]}
                 onPress={hasControl ? onReleaseControl : onClaimControl}
                 disabled={status !== "connected" && status !== "host_disconnected"}
+                hitSlop={10}
               >
                 <Text style={[styles.controlBtnText, { color: hasControl ? theme.accent : theme.textSecondary }]}> 
                   {hasControl ? "释放" : "接管"}
@@ -238,9 +272,11 @@ export function SessionScreen({
               ref={termRef}
               onInput={handleTerminalInput}
               onResize={handleTerminalResize}
-              onTap={focusTerminalInput}
             />
             <View pointerEvents="box-none" style={styles.terminalTouchLayer}>
+              {showTapOverlay ? (
+                <Pressable style={styles.tapCaptureLayer} onPress={focusTerminalInput} />
+              ) : null}
               {keyboardHintVisible && !inputDisabled ? (
                 <Pressable
                   style={[
@@ -326,34 +362,52 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   topLeft: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
-  topRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  topRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusLabel: { fontSize: 12, fontWeight: "600" },
   sessionText: { fontSize: 11, fontFamily: "Courier" },
   controlSummary: { flex: 1, gap: 2 },
   controlSummaryTitle: { fontSize: 14, fontWeight: "700" },
   controlSummaryBody: { fontSize: 12 },
-  zoomGroup: { flexDirection: "row", alignItems: "center", gap: 2 },
+  zoomGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 0,
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
   zoomBtn: {
-    minHeight: 28, minWidth: 28, borderRadius: 6,
+    minHeight: 34,
+    minWidth: 38,
     alignItems: "center", justifyContent: "center",
   },
-  zoomBtnText: { fontSize: 10, fontWeight: "700" },
+  zoomBtnText: { fontSize: 12, fontWeight: "700" },
   zoomBadge: {
-    minHeight: 28, minWidth: 40, borderRadius: 6,
+    minHeight: 34,
+    minWidth: 56,
     alignItems: "center", justifyContent: "center",
+    paddingHorizontal: 8,
   },
-  zoomBadgeText: { fontSize: 10, fontWeight: "700" },
+  zoomBadgeText: { fontSize: 12, fontWeight: "700" },
   controlBtn: {
-    minHeight: 28, borderRadius: 6,
-    paddingHorizontal: 10, alignItems: "center", justifyContent: "center",
+    minHeight: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  controlBtnText: { fontSize: 11, fontWeight: "700" },
+  controlBtnText: { fontSize: 13, fontWeight: "700" },
   leaveBtn: {
-    minHeight: 28, borderRadius: 6,
-    paddingHorizontal: 10, alignItems: "center", justifyContent: "center",
+    minHeight: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  leaveBtnText: { fontSize: 11, fontWeight: "700" },
+  leaveBtnText: { fontSize: 13, fontWeight: "700" },
   banner: {
     paddingHorizontal: 12, paddingVertical: 8,
     flexDirection: "row",
@@ -373,6 +427,9 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
     alignItems: "center",
+  },
+  tapCaptureLayer: {
+    ...StyleSheet.absoluteFillObject,
   },
   tapHintPill: {
     position: "absolute",

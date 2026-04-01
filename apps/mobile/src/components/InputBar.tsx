@@ -1,4 +1,4 @@
-import React, { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
+import React, { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
 import {
   Pressable,
   Platform,
@@ -13,6 +13,7 @@ interface InputBarProps {
   onSendText: (text: string) => void;
   onSpecialKey: (key: string) => void;
   disabled?: boolean;
+  onFocusChange?: (focused: boolean) => void;
 }
 
 export interface InputBarHandle {
@@ -35,34 +36,74 @@ const SPECIAL_KEYS = [
 const ACCESSORY_ID = "terminal-input-accessory";
 
 export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar(
-  { onSendText, onSpecialKey, disabled },
+  { onSendText, onSpecialKey, disabled, onFocusChange },
   ref,
 ) {
   const { theme } = useTheme();
   const inputRef = useRef<TextInput>(null);
-  const [buffer, setBuffer] = useState("");
+  const isFocusedRef = useRef(false);
+  const composingTextRef = useRef("");
 
-  useImperativeHandle(ref, () => ({
-    focus: () => {
-      if (!disabled) {
-        inputRef.current?.focus();
-      }
-    },
-    blur: () => {
-      inputRef.current?.blur();
-    },
-  }), [disabled]);
-
-  const handleChangeText = useCallback((text: string) => {
+  const focusInput = useCallback(() => {
     if (disabled) {
-      setBuffer("");
       return;
     }
 
-    if (text.length > 0) {
-      onSendText(text);
+    if (isFocusedRef.current) {
+      return;
     }
-    setBuffer("");
+
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      setTimeout(() => {
+        if (!isFocusedRef.current) {
+          inputRef.current?.focus();
+        }
+      }, 60);
+    });
+  }, [disabled]);
+
+  useImperativeHandle(ref, () => ({
+    focus: focusInput,
+    blur: () => {
+      inputRef.current?.blur();
+    },
+  }), [focusInput]);
+
+  const handleChangeText = useCallback((text: string) => {
+    if (disabled) {
+      if (text) {
+        inputRef.current?.clear();
+      }
+      composingTextRef.current = "";
+      return;
+    }
+
+    composingTextRef.current = text;
+
+    if (text && /[^\x00-\x7F]/.test(text)) {
+      onSendText(text);
+      composingTextRef.current = "";
+      inputRef.current?.clear();
+    }
+  }, [disabled, onSendText]);
+
+  const handleTextInput = useCallback(({ nativeEvent }: { nativeEvent: { text: string } }) => {
+    if (disabled) {
+      composingTextRef.current = "";
+      inputRef.current?.clear();
+      return;
+    }
+
+    if (!nativeEvent.text || nativeEvent.text === "\n") {
+      return;
+    }
+
+    if (/[^\x00-\x7F]/.test(nativeEvent.text)) {
+      onSendText(nativeEvent.text);
+    }
+    composingTextRef.current = "";
+    inputRef.current?.clear();
   }, [disabled, onSendText]);
 
   const handleKeyPress = useCallback(({ nativeEvent }: { nativeEvent: { key: string } }) => {
@@ -72,15 +113,23 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
     if (nativeEvent.key === "Backspace") {
       onSpecialKey("\x7f");
-      setBuffer("");
+      composingTextRef.current = "";
+      inputRef.current?.clear();
       return;
     }
 
     if (nativeEvent.key === "Enter") {
       onSpecialKey("\r");
-      setBuffer("");
+      composingTextRef.current = "";
+      inputRef.current?.clear();
+      return;
     }
-  }, [disabled, onSpecialKey]);
+
+    if (nativeEvent.key.length === 1 && !composingTextRef.current) {
+      onSendText(nativeEvent.key);
+      inputRef.current?.clear();
+    }
+  }, [disabled, onSendText, onSpecialKey]);
 
   const handleSubmitEditing = useCallback(() => {
     if (disabled) {
@@ -88,8 +137,24 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     }
 
     onSpecialKey("\r");
-    setBuffer("");
+    composingTextRef.current = "";
+    inputRef.current?.clear();
   }, [disabled, onSpecialKey]);
+
+  const handleFocus = useCallback(() => {
+    isFocusedRef.current = true;
+    onFocusChange?.(true);
+  }, [onFocusChange]);
+
+  const handleBlur = useCallback(() => {
+    isFocusedRef.current = false;
+    composingTextRef.current = "";
+    onFocusChange?.(false);
+  }, [onFocusChange]);
+
+  const platformInputProps = Platform.OS === "ios"
+    ? ({ onTextInput: handleTextInput } as Record<string, unknown>)
+    : {};
 
   const accessoryKeys = (
     <>
@@ -119,14 +184,18 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         ref={inputRef}
         autoCapitalize="none"
         autoCorrect={false}
+        autoComplete="off"
         blurOnSubmit={false}
         caretHidden={Platform.OS === "ios"}
         contextMenuHidden
         editable={!disabled}
         showSoftInputOnFocus
         inputAccessoryViewID={ACCESSORY_ID}
+        keyboardType="default"
         keyboardAppearance={theme.mode === "dark" ? "dark" : "light"}
         onChangeText={handleChangeText}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         onKeyPress={handleKeyPress}
         onSubmitEditing={handleSubmitEditing}
         returnKeyType="default"
@@ -134,7 +203,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         selectionColor="transparent"
         spellCheck={false}
         style={styles.hiddenInput}
-        value={buffer}
+        {...platformInputProps}
       />
       <KeyboardAccessory nativeID={ACCESSORY_ID} title="终端快捷键">
         {accessoryKeys}
@@ -163,9 +232,9 @@ const styles = StyleSheet.create({
   },
   hiddenInput: {
     position: "absolute",
-    width: 1,
-    height: 1,
-    opacity: 0.01,
+    width: 16,
+    height: 16,
+    opacity: 0.02,
     left: 0,
     top: 0,
   },
