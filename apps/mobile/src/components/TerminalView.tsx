@@ -37,6 +37,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         cursor: theme.accent,
         selectionBackground: isDark ? "#334155" : "#cbd5e1",
       };
+      const kbtnBg = isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.78)";
+      const kbtnBorder = isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)";
+      const kbtnColor = isDark ? "#e2e8f0" : "#1e293b";
+      const kbtnActive = isDark ? "rgba(255,255,255,0.16)" : "rgba(226,232,240,0.95)";
+      const kdoneColor = theme.accent;
 
       // Resize observer + orientation + delayed fits
       const resizeBridgeScript = `
@@ -51,6 +56,47 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   }
   window.addEventListener('orientationchange',schedule);
   setTimeout(schedule,0);setTimeout(schedule,80);setTimeout(schedule,220);
+})();
+</script>`;
+
+      const accessoryBarScript = `
+<style>
+#kbar{position:fixed;left:0;right:0;bottom:0;z-index:999;display:none;flex-direction:row;align-items:center;padding:6px 6px;gap:4px;background:transparent;}
+#kbar .ks{display:flex;gap:4px;flex-direction:row;align-items:center;flex:1;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+#kbar .ks::-webkit-scrollbar{display:none;}
+#kbar .kb{font-size:12px;font-weight:600;color:${kbtnColor};background:${kbtnBg};border:0.5px solid ${kbtnBorder};border-radius:8px;padding:6px 8px;text-align:center;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation;flex-shrink:0;}
+#kbar .kb:active{background:${kbtnActive};}
+#kbar .kd{font-size:14px;font-weight:600;color:${kdoneColor};background:transparent;border:none;padding:6px 8px;white-space:nowrap;flex-shrink:0;}
+</style>
+<div id="kbar">
+  <div class="ks">
+    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b')">Esc</button>
+    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\t')">Tab</button>
+    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x03')">Ctrl+C</button>
+    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x04')">Ctrl+D</button>
+    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x0c')">Ctrl+L</button>
+    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b[A')">↑</button>
+    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b[B')">↓</button>
+    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b[C')">→</button>
+    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b[D')">←</button>
+  </div>
+  <button class="kd" ontouchend="dismissKb()" onclick="dismissKb()">完成</button>
+</div>
+<script>
+function sendKey(d){try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:d}));if(window.term)window.term.focus();}catch(e){}}
+function dismissKb(){try{if(window.term&&window.term.textarea)window.term.textarea.blur();document.activeElement&&document.activeElement.blur();}catch(e){}}
+(function(){
+  var bar=document.getElementById('kbar');
+  var hideTimer=null;
+  function showBar(){if(hideTimer){clearTimeout(hideTimer);hideTimer=null;}bar.style.display='flex';}
+  function hideBar(){if(hideTimer)return;hideTimer=setTimeout(function(){bar.style.display='none';hideTimer=null;},150);}
+  function watchTextarea(){
+    if(!window.term||!window.term.textarea){setTimeout(watchTextarea,200);return;}
+    var ta=window.term.textarea;
+    ta.addEventListener('focus',showBar);
+    ta.addEventListener('blur',hideBar);
+  }
+  watchTextarea();
 })();
 </script>`;
 
@@ -69,7 +115,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           `if (term.textarea) {\n  term.textarea.readOnly = false;\n  term.textarea.tabIndex = 0;\n  term.textarea.style.colorScheme = '${theme.mode}';\n  term.textarea.setAttribute('autocapitalize', 'off');\n  term.textarea.setAttribute('autocorrect', 'off');\n  term.textarea.setAttribute('spellcheck', 'false');\n}`
         )
         .replace(/theme:\{background:'#020617',foreground:'#e2e8f0',cursor:'#3b82f6',selectionBackground:'#334155'\}/, `theme:${JSON.stringify(termTheme)}`)
-        .replace("</body>", `${resizeBridgeScript}</body>`);
+        .replace("</body>", `${accessoryBarScript}${resizeBridgeScript}</body>`);
     }, [theme.accent, theme.bgTerminal, theme.mode]);
 
     const postToWebView = useCallback((msg: object) => {

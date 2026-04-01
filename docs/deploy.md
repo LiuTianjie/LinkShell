@@ -5,7 +5,7 @@
 ### 最小部署
 
 ```bash
-git clone https://github.com/user/linkshell
+git clone https://github.com/LiuTianjie/LinkShell
 cd linkshell
 docker compose up -d
 ```

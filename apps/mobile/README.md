@@ -91,7 +91,7 @@ pnpm --filter @linkshell/app typecheck
 
 ```bash
 pnpm dev:gateway
-pnpm --filter @linkshell/cli dev start --gateway ws://localhost:8787/ws --provider custom --command bash
+pnpm --filter linkshell-cli dev start --gateway ws://localhost:8787/ws --provider custom --command bash
 ```
 
 ## 8. 当前最适合下一个 AI 的切入方式

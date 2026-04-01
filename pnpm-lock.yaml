@@ -97,6 +97,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@linkshell/gateway':
+        specifier: workspace:*
+        version: link:../gateway
       '@linkshell/protocol':
         specifier: workspace:*
         version: link:../shared-protocol

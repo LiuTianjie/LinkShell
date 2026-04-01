@@ -137,7 +137,7 @@ pnpm dev:app
 CLI 联调：
 
 ```bash
-pnpm --filter @linkshell/cli dev start --gateway ws://localhost:8787/ws --provider custom --command bash
+pnpm --filter linkshell-cli dev start --gateway ws://localhost:8787/ws --provider custom --command bash
 ```
 
 移动端单独类型检查：

@@ -1,4 +1,5 @@
 import * as readline from "node:readline";
+import { hostname } from "node:os";
 import { loadConfig, saveConfig, getConfigPath } from "../config.js";
 import type { LinkShellConfig } from "../config.js";
 
@@ -45,7 +46,7 @@ export async function runSetup(): Promise<void> {
     command = await ask(rl, "Custom command", existing.command ?? "bash");
   }
 
-  const clientName = await ask(rl, "Client name", existing.clientName ?? require("os").hostname());
+  const clientName = await ask(rl, "Client name", existing.clientName ?? hostname());
 
   rl.close();
 

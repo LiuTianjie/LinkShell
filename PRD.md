@@ -110,7 +110,7 @@ curl -X POST http://localhost:8787/pairings -H 'content-type: application/json' 
 启动 CLI 示例：
 
 ```bash
-pnpm --filter @linkshell/cli dev -- start \
+pnpm --filter linkshell-cli dev start \
 	--gateway ws://localhost:8787/ws \
 	--session-id <session-id> \
 	--provider custom \

@@ -11,7 +11,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "dev:gateway": "pnpm --filter @linkshell/gateway dev",
-    "dev:cli": "pnpm --filter @linkshell/cli dev",
+    "dev:cli": "pnpm --filter linkshell-cli dev",
     "dev:app": "pnpm --filter @linkshell/app start",
     "dev:web": "pnpm --filter @linkshell/web-debug dev"
   },

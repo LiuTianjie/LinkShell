@@ -55,16 +55,10 @@ export async function runDoctor(gatewayUrl?: string): Promise<void> {
   // node-pty
   results.push(check("node-pty", () => {
     try {
-      require("node-pty");
+      execSync("node -e \"require('node-pty')\"", { timeout: 5000, stdio: "pipe" });
       return "loaded";
     } catch {
-      // Try dynamic import path for ESM
-      try {
-        execSync("node -e \"require('node-pty')\"", { timeout: 5000, stdio: "pipe" });
-        return "loaded";
-      } catch {
-        throw new Error("native module not built — run: pnpm approve-builds && pnpm install --force");
-      }
+      throw new Error("native module not built — run: pnpm approve-builds && pnpm install --force");
     }
   }));
 
