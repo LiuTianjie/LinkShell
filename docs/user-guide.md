@@ -8,7 +8,7 @@ LinkShell 让你在手机上远程查看和控制电脑上的 Claude Code / Code
 
 ```bash
 npm install -g linkshell-cli
-linkshell start --provider claude
+linkshell start --daemon --provider claude
 ```
 
 ## 两种使用模式

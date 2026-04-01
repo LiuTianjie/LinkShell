@@ -9,6 +9,7 @@ export interface TerminalViewHandle {
   clear: () => void;
   resize: (cols: number, rows: number) => void;
   refit: () => void;
+  scrollToBottom: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;
@@ -135,6 +136,9 @@ function dismissKb(){try{if(window.term&&window.term.textarea)window.term.textar
       },
       refit() {
         webViewRef.current?.injectJavaScript("try{fitAddon.fit();sendSize();}catch(e){}true;");
+      },
+      scrollToBottom() {
+        webViewRef.current?.injectJavaScript("try{window.term.scrollToBottom();}catch(e){}true;");
       },
       zoomIn() {
         postToWebView({ type: "zoom_in" });

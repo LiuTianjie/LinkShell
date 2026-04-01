@@ -102,7 +102,7 @@ export function SessionScreen({
     termRef.current?.focusCursor();
   }, [inputDisabled, keyboardVisible]);
 
-  const showTapOverlay = !inputDisabled && !keyboardVisible;
+  const showTapOverlay = false; // Disabled — let WebView handle touch natively to avoid scroll→keyboard issue
 
   const handleZoomIn = useCallback(() => {
     termRef.current?.zoomIn();
@@ -146,7 +146,7 @@ export function SessionScreen({
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const showSub = Keyboard.addListener(showEvent, () => { setKeyboardVisible(true); refitTerminal(); });
+    const showSub = Keyboard.addListener(showEvent, () => { setKeyboardVisible(true); refitTerminal(); setTimeout(() => termRef.current?.scrollToBottom(), 100); });
     const hideSub = Keyboard.addListener(hideEvent, () => { setKeyboardVisible(false); refitTerminal(); });
 
     return () => {

@@ -15,14 +15,14 @@ program
   .description(
     "Bridge a local Claude/Codex terminal session to a remote gateway",
   )
-  .version("0.1.8");
+  .version("0.1.9");
 
 // ── start ───────────────────────────────────────────────────────────
 
 program
   .command("start")
   .description("Start a bridge session (with built-in or remote gateway)")
-  .option("--gateway <url>", "Gateway websocket URL (omit to start built-in gateway)")
+  .option("--gateway <url>", "Gateway websocket URL (omit to start built-in gateway)", config.gateway ?? undefined)
   .option("--pairing-gateway <url-or-host>", "Public HTTP gateway used in QR/deep link output", config.pairingGateway)
   .option("--port <port>", "Port for built-in gateway", "8787")
   .option("--session-id <id>", "Session identifier (auto-created if omitted)")

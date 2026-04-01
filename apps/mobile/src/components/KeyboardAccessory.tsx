@@ -37,7 +37,7 @@ export function KeyboardAccessory({
       <View
         style={[
           styles.toolbar,
-          { backgroundColor: "transparent" },
+          { backgroundColor: theme.keyboardBarBg, borderTopWidth: 1, borderTopColor: theme.keyboardBarBorder },
         ]}
       >
         <View style={styles.headerRow}>
