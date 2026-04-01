@@ -1,0 +1,22 @@
+{
+  "name": "@linkshell/gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@linkshell/protocol": "workspace:*",
+    "zod": "^3.24.3",
+    "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.3",
+    "vitest": "^3.2.1"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "@linkshell/app",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "prebuild-terminal": "node scripts/build-terminal-html.mjs",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@linkshell/protocol": "workspace:*",
+    "@react-native-async-storage/async-storage": "^2.1.2",
+    "@react-navigation/bottom-tabs": "^7.3.10",
+    "@react-navigation/native": "^7.1.6",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
+    "expo": "~54.0.0",
+    "expo-blur": "~15.0.8",
+    "expo-camera": "~17.0.10",
+    "expo-status-bar": "~2.2.0",
+    "react": "18.3.1",
+    "react-native": "0.77.1",
+    "react-native-safe-area-context": "~5.4.0",
+    "react-native-screens": "~4.10.0",
+    "react-native-webview": "^13.13.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "typescript": "^5.8.3"
+  }
+}

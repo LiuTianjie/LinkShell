@@ -1,0 +1,22 @@
+{
+  "name": "linkshell",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.18.3",
+  "pnpm": {
+    "onlyBuiltDependencies": ["node-pty", "esbuild"]
+  },
+  "scripts": {
+    "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "dev:gateway": "pnpm --filter @linkshell/gateway dev",
+    "dev:cli": "pnpm --filter @linkshell/cli dev",
+    "dev:app": "pnpm --filter @linkshell/app start",
+    "dev:web": "pnpm --filter @linkshell/web-debug dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "typescript": "^5.8.3"
+  }
+}
