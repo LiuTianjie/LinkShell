@@ -1,15 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Animated,
   Keyboard,
   KeyboardAvoidingView,
   LayoutChangeEvent,
-  LayoutAnimation,
   Platform,
   Pressable,
   StyleSheet,
   Text,
-  UIManager,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -51,13 +48,13 @@ export function SessionScreen({
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
+  const topSurfaceColor = theme.mode === "light" ? theme.bgCard : theme.bgElevated;
+  const topBorderColor = theme.mode === "light" ? theme.border : theme.borderLight;
   const termRef = useRef<TerminalViewHandle>(null);
   const inputRef = useRef<InputBarHandle>(null);
   const writtenCountRef = useRef(0);
   const [keyboardHintVisible, setKeyboardHintVisible] = useState(true);
   const [zoomPercent, setZoomPercent] = useState(100);
-  const [capsuleExpanded, setCapsuleExpanded] = useState(false);
-  const capsuleAnim = useRef(new Animated.Value(0)).current;
 
   const hasControl = controllerId === deviceId;
   const isControlledByOther = Boolean(controllerId && controllerId !== deviceId);
@@ -97,33 +94,12 @@ export function SessionScreen({
     });
   }, []);
 
-  const setCapsuleOpen = useCallback((nextOpen: boolean) => {
-    LayoutAnimation.configureNext(
-      LayoutAnimation.create(280, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity),
-    );
-    Animated.spring(capsuleAnim, {
-      toValue: nextOpen ? 1 : 0,
-      useNativeDriver: true,
-      damping: 20,
-      stiffness: 220,
-      mass: 0.9,
-    }).start();
-    setCapsuleExpanded(nextOpen);
-  }, [capsuleAnim]);
-
-  const toggleCapsule = useCallback(() => {
-    setCapsuleOpen(!capsuleExpanded);
-  }, [capsuleExpanded, setCapsuleOpen]);
-
   const focusTerminalInput = useCallback(() => {
     if (inputDisabled) return;
-    if (capsuleExpanded) {
-      setCapsuleOpen(false);
-    }
     setKeyboardHintVisible(false);
     termRef.current?.focusCursor();
     inputRef.current?.focus();
-  }, [capsuleExpanded, inputDisabled, setCapsuleOpen]);
+  }, [inputDisabled]);
 
   const handleSpecialKey = useCallback((key: string) => {
     if (inputDisabled) return;
@@ -164,12 +140,6 @@ export function SessionScreen({
   }, [status]);
 
   useEffect(() => {
-    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-      UIManager.setLayoutAnimationEnabledExperimental(true);
-    }
-  }, []);
-
-  useEffect(() => {
     const refitTerminal = () => {
       setTimeout(() => {
         termRef.current?.refit();
@@ -193,36 +163,84 @@ export function SessionScreen({
   const controlCopy = getControlCopy(hasControl, isControlledByOther);
   const banner = getSessionBanner(status);
   const showReconnectButton = status === "disconnected" || (status.startsWith("error:") && Boolean(sessionId));
-  const capsuleBg = theme.mode === "light" ? "rgba(255,255,255,0.92)" : "rgba(7,12,22,0.82)";
-  const capsuleBorder = theme.mode === "light" ? "rgba(148,163,184,0.24)" : "rgba(148,163,184,0.14)";
-  const capsuleShadow = theme.mode === "light" ? "#94a3b8" : "#000000";
-  const chevronRotate = capsuleAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["45deg", "-135deg"],
-  });
-  const capsuleBodyStyle = {
-    opacity: capsuleAnim,
-    transform: [
-      {
-        translateY: capsuleAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [-10, 0],
-        }),
-      },
-      {
-        scale: capsuleAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0.98, 1],
-        }),
-      },
-    ],
-  };
   return (
     <View style={[styles.container, { backgroundColor: theme.bgTerminal }]}> 
       <KeyboardAvoidingView
         style={[styles.keyboardContainer, { backgroundColor: theme.bgTerminal }]}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
+        <View style={{ height: insets.top, backgroundColor: topSurfaceColor }} />
+
+        <View style={[styles.topBar, { backgroundColor: topSurfaceColor, borderBottomColor: topBorderColor }]}> 
+          <View style={styles.topMetaRow}>
+            <View style={styles.topLeft}>
+              <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+              <Text style={[styles.statusLabel, { color: theme.textSecondary }]}>{statusText}</Text>
+              <Text style={[styles.sessionText, { color: theme.textTertiary }]} numberOfLines={1}>{sessionId.slice(0, 8)}</Text>
+            </View>
+            <Pressable style={[styles.leaveBtn, { backgroundColor: theme.errorLight }]} onPress={handleLeave} hitSlop={8}>
+              <Text style={[styles.leaveBtnText, { color: theme.error }]}>退出</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.topControlRow}>
+            <View style={styles.controlSummary}>
+              <Text style={[styles.controlSummaryTitle, { color: theme.text }]}>{controlCopy.title}</Text>
+              <Text style={[styles.controlSummaryBody, { color: theme.textSecondary }]}>{controlCopy.description}</Text>
+            </View>
+
+            <View style={styles.topRight}>
+              <View style={styles.zoomGroup}>
+                <Pressable style={[styles.zoomBtn, { backgroundColor: theme.bgInput }]} onPress={handleZoomOut} hitSlop={6}>
+                  <Text style={[styles.zoomBtnText, { color: theme.textSecondary }]}>A-</Text>
+                </Pressable>
+                <Pressable style={[styles.zoomBadge, { backgroundColor: theme.bgInput }]} onPress={handleZoomReset} hitSlop={6}>
+                  <Text style={[styles.zoomBadgeText, { color: theme.accent }]}>{zoomPercent}%</Text>
+                </Pressable>
+                <Pressable style={[styles.zoomBtn, { backgroundColor: theme.bgInput }]} onPress={handleZoomIn} hitSlop={6}>
+                  <Text style={[styles.zoomBtnText, { color: theme.textSecondary }]}>A+</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                style={[
+                  styles.controlBtn,
+                  { backgroundColor: hasControl ? theme.accentLight : theme.bgInput },
+                ]}
+                onPress={hasControl ? onReleaseControl : onClaimControl}
+                disabled={status !== "connected" && status !== "host_disconnected"}
+              >
+                <Text style={[styles.controlBtnText, { color: hasControl ? theme.accent : theme.textSecondary }]}> 
+                  {hasControl ? "释放" : "接管"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+
+        {banner ? (
+          <View
+            style={[
+              styles.banner,
+              { backgroundColor: banner.tone === "error" ? theme.errorLight : theme.accentLight },
+            ]}
+          >
+            <Text style={[styles.bannerText, { color: banner.tone === "error" ? theme.error : theme.accent }]}>
+              {banner.text}
+            </Text>
+            {showReconnectButton ? (
+              <Pressable style={[styles.reconnectBtn, { backgroundColor: theme.bgInput }]} onPress={onReconnect}>
+                <Text style={[styles.reconnectBtnText, { color: theme.accent }]}>重试</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        {connectionDetail && !banner ? (
+          <View style={[styles.detailBar, { backgroundColor: topSurfaceColor }]}> 
+            <Text style={[styles.detailText, { color: theme.textTertiary }]}>{connectionDetail}</Text>
+          </View>
+        ) : null}
+
         <View style={[styles.terminalArea, { backgroundColor: theme.bgTerminal }]} onLayout={handleTerminalLayout}> 
           <View style={styles.terminalWrap}>
             <TerminalView
@@ -231,112 +249,6 @@ export function SessionScreen({
               onResize={handleTerminalResize}
               onTap={focusTerminalInput}
             />
-            <View pointerEvents="box-none" style={[styles.capsuleHost, { top: insets.top + 10 }]}> 
-              <Pressable
-                style={[
-                  styles.capsulePill,
-                  {
-                    backgroundColor: capsuleBg,
-                    borderColor: capsuleBorder,
-                    shadowColor: capsuleShadow,
-                  },
-                ]}
-                onPress={toggleCapsule}
-              >
-                <View style={styles.capsuleHeader}>
-                  <View style={styles.capsuleHeaderMain}>
-                    <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-                    <View style={styles.capsuleCopy}>
-                      <Text style={[styles.capsuleTitle, { color: theme.text }]}>{statusText}</Text>
-                      <Text style={[styles.capsuleSubtitle, { color: theme.textSecondary }]} numberOfLines={1}>
-                        {controlCopy.title}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.capsuleHeaderSide}>
-                    <Text style={[styles.capsuleSessionText, { color: theme.textTertiary }]}>{sessionId.slice(0, 8)}</Text>
-                    <Animated.View style={[styles.capsuleChevron, { borderColor: theme.textSecondary, transform: [{ rotate: chevronRotate }] }]} />
-                  </View>
-                </View>
-              </Pressable>
-
-              {capsuleExpanded ? (
-                <Animated.View
-                  style={[
-                    styles.capsulePanel,
-                    capsuleBodyStyle,
-                    {
-                      backgroundColor: capsuleBg,
-                      borderColor: capsuleBorder,
-                      shadowColor: capsuleShadow,
-                    },
-                  ]}
-                >
-                  <View style={[styles.capsuleDivider, { backgroundColor: theme.mode === "light" ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.12)" }]} />
-
-                  <View style={styles.capsuleSummary}>
-                    <Text style={[styles.controlSummaryTitle, { color: theme.text }]}>{controlCopy.title}</Text>
-                    <Text style={[styles.controlSummaryBody, { color: theme.textSecondary }]}>{controlCopy.description}</Text>
-                  </View>
-
-                  {connectionDetail ? (
-                    <Text style={[styles.capsuleDetailText, { color: theme.textTertiary }]}>{connectionDetail}</Text>
-                  ) : null}
-
-                  {banner ? (
-                    <View
-                      style={[
-                        styles.capsuleBanner,
-                        { backgroundColor: banner.tone === "error" ? theme.errorLight : theme.accentLight },
-                      ]}
-                    >
-                      <Text style={[styles.bannerText, { color: banner.tone === "error" ? theme.error : theme.accent }]}>
-                        {banner.text}
-                      </Text>
-                      {showReconnectButton ? (
-                        <Pressable style={[styles.reconnectBtn, { backgroundColor: theme.bgInput }]} onPress={onReconnect}>
-                          <Text style={[styles.reconnectBtnText, { color: theme.accent }]}>重试</Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  ) : null}
-
-                  <View style={styles.capsuleActionRow}>
-                    <View style={styles.zoomGroup}>
-                      <Pressable style={[styles.zoomBtn, { backgroundColor: theme.bgInput }]} onPress={handleZoomOut} hitSlop={6}>
-                        <Text style={[styles.zoomBtnText, { color: theme.textSecondary }]}>A-</Text>
-                      </Pressable>
-                      <Pressable style={[styles.zoomBadge, { backgroundColor: theme.bgInput }]} onPress={handleZoomReset} hitSlop={6}>
-                        <Text style={[styles.zoomBadgeText, { color: theme.accent }]}>{zoomPercent}%</Text>
-                      </Pressable>
-                      <Pressable style={[styles.zoomBtn, { backgroundColor: theme.bgInput }]} onPress={handleZoomIn} hitSlop={6}>
-                        <Text style={[styles.zoomBtnText, { color: theme.textSecondary }]}>A+</Text>
-                      </Pressable>
-                    </View>
-
-                    <View style={styles.capsuleButtons}>
-                      <Pressable
-                        style={[
-                          styles.controlBtn,
-                          { backgroundColor: hasControl ? theme.accentLight : theme.bgInput },
-                        ]}
-                        onPress={hasControl ? onReleaseControl : onClaimControl}
-                        disabled={status !== "connected" && status !== "host_disconnected"}
-                      >
-                        <Text style={[styles.controlBtnText, { color: hasControl ? theme.accent : theme.textSecondary }]}> 
-                          {hasControl ? "释放" : "接管"}
-                        </Text>
-                      </Pressable>
-
-                      <Pressable style={[styles.leaveBtn, { backgroundColor: theme.errorLight }]} onPress={handleLeave} hitSlop={8}>
-                        <Text style={[styles.leaveBtnText, { color: theme.error }]}>退出</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </Animated.View>
-              ) : null}
-            </View>
             <View pointerEvents="box-none" style={styles.terminalTouchLayer}>
               {keyboardHintVisible && !inputDisabled ? (
                 <Pressable
@@ -412,77 +324,31 @@ function getSessionBanner(status: ConnectionStatus): { text: string; tone: "warn
 const styles = StyleSheet.create({
   container: { flex: 1 },
   keyboardContainer: { flex: 1 },
-  capsuleHost: {
-    position: "absolute",
-    left: 0,
-    right: 0,
+  topBar: {
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+  },
+  topMetaRow: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    zIndex: 20,
+    justifyContent: "space-between",
+    gap: 12,
   },
-  capsulePill: {
-    minWidth: 216,
-    maxWidth: "92%",
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.16,
-    shadowRadius: 18,
-    elevation: 10,
-  },
-  capsulePanel: {
-    width: "100%",
+  topControlRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
     marginTop: 10,
-    borderRadius: 26,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.16,
-    shadowRadius: 22,
-    elevation: 10,
   },
-  capsuleHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  capsuleHeaderMain: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
-  capsuleHeaderSide: { flexDirection: "row", alignItems: "center", gap: 10 },
-  capsuleCopy: { flex: 1, gap: 1 },
-  capsuleTitle: { fontSize: 14, fontWeight: "700" },
-  capsuleSubtitle: { fontSize: 11, fontWeight: "500" },
-  capsuleSessionText: { fontSize: 11, fontFamily: "Courier" },
-  capsuleChevron: {
-    width: 8,
-    height: 8,
-    borderRightWidth: 1.5,
-    borderBottomWidth: 1.5,
-    marginTop: -2,
-  },
-  capsuleDivider: { height: 1, borderRadius: 1 },
-  capsuleSummary: { gap: 2 },
-  capsuleDetailText: { fontSize: 11, lineHeight: 15 },
-  capsuleBanner: {
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  capsuleActionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  capsuleButtons: { flexDirection: "row", alignItems: "center", gap: 8 },
+  topLeft: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
+  topRight: { flexDirection: "row", alignItems: "center", gap: 6 },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusLabel: { fontSize: 12, fontWeight: "600" },
+  sessionText: { fontSize: 11, fontFamily: "Courier" },
+  controlSummary: { flex: 1, gap: 2 },
   controlSummaryTitle: { fontSize: 14, fontWeight: "700" },
   controlSummaryBody: { fontSize: 12 },
   zoomGroup: { flexDirection: "row", alignItems: "center", gap: 2 },
@@ -506,12 +372,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, alignItems: "center", justifyContent: "center",
   },
   leaveBtnText: { fontSize: 11, fontWeight: "700" },
+  banner: {
+    paddingHorizontal: 12, paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center", justifyContent: "space-between",
+  },
   bannerText: { fontSize: 12, fontWeight: "600", flex: 1 },
   reconnectBtn: {
     borderRadius: 6,
     paddingHorizontal: 10, paddingVertical: 4, marginLeft: 8,
   },
   reconnectBtnText: { fontSize: 11, fontWeight: "700" },
+  detailBar: { paddingHorizontal: 12, paddingVertical: 4 },
+  detailText: { fontSize: 11 },
   terminalArea: { flex: 1 },
   terminalWrap: { flex: 1 },
   terminalTouchLayer: {

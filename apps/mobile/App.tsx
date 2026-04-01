@@ -1,11 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
-import { BlurView } from "expo-blur";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionSheet } from "./src/components/ConnectionSheet";
 import { useAppState } from "./src/hooks/useAppState";
 import { useSession } from "./src/hooks/useSession";
@@ -53,7 +52,6 @@ function TabIcon({ kind, focused, color }: { kind: "home" | "sessions" | "settin
 
 function AppInner() {
   const { theme } = useTheme();
-  const insets = useSafeAreaInsets();
   const [gatewayBaseUrl, setGatewayBaseUrl] = useState(DEFAULT_GATEWAY);
   const [activeScreen, setActiveScreen] = useState<"tabs" | "scanner" | "terminal">("tabs");
   const [pendingPairing, setPendingPairing] = useState<{ code: string; gateway?: string } | null>(null);
@@ -244,72 +242,23 @@ function AppInner() {
         <Tab.Navigator
           screenOptions={{
             headerShown: false,
-            tabBarVariant: "uikit",
             tabBarHideOnKeyboard: true,
             tabBarStyle: {
-              position: "absolute",
-              left: "13%",
-              right: "13%",
-              bottom: Math.max(insets.bottom, 12),
-              height: 72,
-              paddingBottom: 10,
-              paddingTop: 8,
-              backgroundColor: "transparent",
-              borderTopWidth: 0,
-              borderRadius: 999,
-              overflow: "hidden",
+              backgroundColor: theme.tabBg,
+              borderTopColor: theme.tabBorder,
+              borderTopWidth: StyleSheet.hairlineWidth,
+              height: 60,
+              paddingBottom: 6,
+              paddingTop: 6,
               elevation: 0,
-              shadowColor: "#000000",
-              shadowOffset: { width: 0, height: 10 },
-              shadowOpacity: theme.mode === "light" ? 0.1 : 0.18,
-              shadowRadius: 18,
             },
             tabBarItemStyle: {
-              borderRadius: 999,
-              marginHorizontal: 4,
-              marginVertical: 6,
+              paddingVertical: 2,
             },
-            tabBarActiveBackgroundColor:
-              theme.mode === "light" ? "rgba(255,255,255,0.58)" : "rgba(255,255,255,0.12)",
             tabBarActiveTintColor: theme.tabActive,
             tabBarInactiveTintColor: theme.tabInactive,
             tabBarLabelStyle: { fontSize: 11, fontWeight: "600", marginBottom: 0 },
             tabBarIconStyle: { marginTop: 1 },
-            tabBarBackground: () => (
-              <View
-                style={[
-                  StyleSheet.absoluteFillObject,
-                  styles.tabBarGlassFrame,
-                  {
-                    borderColor: theme.mode === "light" ? "rgba(255,255,255,0.76)" : "rgba(255,255,255,0.08)",
-                    backgroundColor: theme.mode === "light" ? "rgba(248,250,252,0.5)" : "rgba(12,18,30,0.38)",
-                  },
-                ]}
-              >
-                <BlurView
-                  style={StyleSheet.absoluteFillObject}
-                  intensity={theme.mode === "light" ? 92 : 84}
-                  tint={theme.mode === "light" ? "systemUltraThinMaterialLight" : "systemChromeMaterialDark"}
-                />
-                <View
-                  style={[
-                    StyleSheet.absoluteFillObject,
-                    {
-                      backgroundColor:
-                        theme.mode === "light" ? "rgba(255,255,255,0.18)" : "rgba(15,23,42,0.12)",
-                    },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.tabBarInnerGlow,
-                    {
-                      borderColor: theme.mode === "light" ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.04)",
-                    },
-                  ]}
-                />
-              </View>
-            ),
           }}
         >
           <Tab.Screen
@@ -445,16 +394,5 @@ const styles = StyleSheet.create({
     alignSelf: "flex-end",
     marginRight: 2,
     marginTop: -4,
-  },
-  tabBarGlassFrame: {
-    borderRadius: 999,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  tabBarInnerGlow: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 999,
-    borderWidth: 1,
-    opacity: 0.75,
   },
 });
