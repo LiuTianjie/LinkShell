@@ -31,8 +31,9 @@ export async function runSetup(): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   process.stdout.write("\n  LinkShell Setup\n\n");
+  process.stdout.write("  Tip: leave Gateway URL empty to use the built-in gateway (recommended for LAN use).\n\n");
 
-  const gateway = await ask(rl, "Gateway URL", existing.gateway ?? "wss://localhost:8787/ws");
+  const gateway = await ask(rl, "Gateway URL (leave empty for built-in)", "");
 
   const provider = await choose(
     rl,
@@ -51,7 +52,7 @@ export async function runSetup(): Promise<void> {
   rl.close();
 
   const config: LinkShellConfig = {
-    gateway,
+    gateway: gateway || undefined,
     provider,
     command,
     clientName,

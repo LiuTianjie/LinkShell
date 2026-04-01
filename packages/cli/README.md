@@ -11,56 +11,74 @@ npm install -g linkshell-cli
 ## 一条命令开始
 
 ```bash
-linkshell start --provider claude
+linkshell start --daemon --provider claude
 ```
 
-CLI 会自动：
+CLI 会在后台：
 1. 启动内置 Gateway（端口 8787）
 2. 检测局域网 IP
 3. 创建配对并打印 QR 码
 4. 手机扫码即连
 
-```
-  Built-in gateway started on port 8787
-  LAN address: http://192.168.1.12:8787
+App 断开不影响后台进程，重新扫码即可恢复。
 
-  Pairing code: 847293
-  Session: a1b2c3d4-...
-
-  Scan to connect:
-  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ...
-```
-
-## 更多用法
-
-```bash
-# 桥接 Claude Code
-linkshell start --provider claude
-
-# 桥接 Codex
-linkshell start --provider codex
-
-# 桥接任意命令
-linkshell start --provider custom --command bash
-
-# 指定端口
-linkshell start --provider claude --port 9000
-
-# 连接远程 Gateway（不启动内置 Gateway）
-linkshell start --gateway wss://your-server.com:8787/ws --provider claude
-
-# 指定 QR 码中的公网地址
-linkshell start --gateway ws://127.0.0.1:8787/ws --pairing-gateway 203.0.113.10 --provider claude
-```
-
-## 命令
+## 命令一览
 
 | 命令 | 说明 |
 |------|------|
-| `linkshell start` | 启动桥接会话（内置或远程 Gateway） |
+| `linkshell start` | 启动桥接会话（支持 `--daemon` 后台运行） |
+| `linkshell stop` | 停止所有后台进程 |
+| `linkshell status` | 查看运行状态 |
+| `linkshell gateway` | 启动独立 Gateway（支持 `--daemon`） |
+| `linkshell gateway stop` | 停止后台 Gateway |
+| `linkshell gateway status` | 查看 Gateway 状态 |
 | `linkshell setup` | 交互式配置向导 |
 | `linkshell doctor` | 环境检查和连通性诊断 |
+
+## 使用示例
+
+```bash
+# 后台启动（推荐）
+linkshell start --daemon --provider claude
+
+# 前台启动
+linkshell start --provider claude
+
+# 桥接 Codex
+linkshell start --daemon --provider codex
+
+# 桥接任意命令
+linkshell start --daemon --provider custom --command bash
+
+# 指定端口
+linkshell start --daemon --provider claude --port 9000
+
+# 连接远程 Gateway（不启动内置 Gateway）
+linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider claude
+
+# 查看状态和日志
+linkshell status
+tail -f ~/.linkshell/bridge.log
+
+# 停止
+linkshell stop
+```
+
+## 服务器部署 Gateway
+
+```bash
+# 后台启动独立 Gateway
+linkshell gateway --daemon --port 8787
+
+# 查看状态
+linkshell gateway status
+
+# 查看日志
+tail -f ~/.linkshell/gateway.log
+
+# 停止
+linkshell gateway stop
+```
 
 ## start 选项
 
@@ -70,6 +88,7 @@ linkshell start --gateway ws://127.0.0.1:8787/ws --pairing-gateway 203.0.113.10 
 --pairing-gateway <url>   QR 码中给手机使用的地址
 --provider <name>         claude | codex | custom（默认 claude）
 --command <cmd>           自定义命令（custom provider 必填）
+--daemon                  后台运行
 --session-id <id>         手动指定 session ID
 --client-name <name>      显示名称（默认 local-cli）
 --cols <n>                终端列数（默认 120）
@@ -83,7 +102,7 @@ linkshell start --gateway ws://127.0.0.1:8787/ws --pairing-gateway 203.0.113.10 
 linkshell setup
 ```
 
-配置保存在 `~/.linkshell/config.json`，后续启动自动读取。
+配置保存在 `~/.linkshell/config.json`。
 
 ## doctor 检查项
 
@@ -97,18 +116,23 @@ linkshell doctor
 - 配置文件状态
 - Gateway 连通性和延迟
 
-## 工作原理
+## 文件位置
 
 ```
-你的电脑 (CLI + 内置 Gateway)  ◄──WebSocket──►  手机 (App)
+~/.linkshell/
+├── config.json      # 配置文件
+├── bridge.pid       # 桥接进程 PID
+├── bridge.log       # 桥接进程日志
+├── gateway.pid      # Gateway 进程 PID
+└── gateway.log      # Gateway 进程日志
 ```
 
-1. CLI 启动内置 Gateway（或连接远程 Gateway）
-2. 通过 PTY 启动目标进程（Claude/Codex/bash）
-3. 终端输出通过 WebSocket 转发给手机 App
-4. App 的输入回传给 CLI，写入 PTY
+## 代码入口
 
-支持断线自动重连、ACK 确认、scrollback 缓冲（1000 条）、心跳检测（15s）和协议版本协商。
+1. src/index.ts — CLI 命令定义
+2. src/providers.ts — Provider 适配
+3. src/runtime/bridge-session.ts — 核心会话
+4. src/utils/daemon.ts — 后台进程管理
 
 ## License
 
