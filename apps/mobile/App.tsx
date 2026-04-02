@@ -278,6 +278,7 @@ function AppInner() {
                 connectionDetail={session.connectionDetail}
                 onOpenConnectionSheet={() => setConnectionSheetVisible(true)}
                 onConnectSession={handleConnectSession}
+                refreshKey={sessionRefreshKey}
               />
             )}
           </Tab.Screen>

@@ -2,6 +2,7 @@
   "expo": {
     "name": "LinkShell",
     "slug": "linkshell",
+    "version": "1.0.0",
     "scheme": "linkshell",
     "icon": "./assets/adaptive-icon.png",
     "splash": {

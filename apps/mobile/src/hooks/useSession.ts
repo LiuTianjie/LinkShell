@@ -156,30 +156,56 @@ export function useSession({
       socketRef.current = ws;
 
       ws.onopen = () => {
-        setStatus("connected");
+        // Don't set "connected" yet — we only know the gateway accepted the WS.
+        // Stay in connecting/reconnecting until we confirm the host is actually online.
         setConnectionDetail(null);
         reconnectAttempts.current = 0;
         startHeartbeat();
         requestControl(sid);
-        // Health probe: verify host is actually online via REST
+        // Health probe immediately to verify host status
         if (healthProbeRef.current) clearTimeout(healthProbeRef.current);
-        healthProbeRef.current = setTimeout(async () => {
-          // Only probe if we're still in "connected" state (no host_disconnected received yet)
-          if (statusRef.current !== "connected") return;
+        (async () => {
           try {
             const res = await fetch(
               `${resolvedGateway}/sessions/${encodeURIComponent(sid)}`,
             );
-            if (!res.ok) return;
+            if (!res.ok) {
+              // Can't verify — fallback to connected
+              if (
+                statusRef.current === "connecting" ||
+                statusRef.current === "reconnecting"
+              ) {
+                setStatus("connected");
+              }
+              return;
+            }
             const body = (await res.json()) as { hasHost?: boolean };
-            if (body.hasHost === false && statusRef.current === "connected") {
-              setStatus("host_disconnected" as ConnectionStatus);
-              setConnectionDetail("Host is not connected to this session.");
+            if (body.hasHost === false) {
+              if (
+                statusRef.current === "connecting" ||
+                statusRef.current === "reconnecting"
+              ) {
+                setStatus("host_disconnected" as ConnectionStatus);
+                setConnectionDetail("Host is not connected to this session.");
+              }
+            } else {
+              if (
+                statusRef.current === "connecting" ||
+                statusRef.current === "reconnecting"
+              ) {
+                setStatus("connected");
+              }
             }
           } catch {
-            // REST probe failed, rely on WS messages
+            // REST probe failed — fallback to connected
+            if (
+              statusRef.current === "connecting" ||
+              statusRef.current === "reconnecting"
+            ) {
+              setStatus("connected");
+            }
           }
-        }, 1500);
+        })();
         if (isReconnect) {
           sendRaw(
             createEnvelope({
@@ -201,6 +227,14 @@ export function useSession({
 
         switch (envelope.type) {
           case "terminal.output": {
+            // Receiving data means host is definitely alive
+            if (
+              statusRef.current === "connecting" ||
+              statusRef.current === "reconnecting"
+            ) {
+              setStatus("connected");
+              setConnectionDetail(null);
+            }
             const p = parseTypedPayload("terminal.output", envelope.payload);
             setTerminalLines((prev) => [...prev, p.data]);
             if (envelope.seq !== undefined) {

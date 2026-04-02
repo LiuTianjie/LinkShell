@@ -34,6 +34,7 @@ interface HomeScreenProps {
   connectionDetail?: string | null;
   onOpenConnectionSheet: () => void;
   onConnectSession: (sessionId: string, serverUrl?: string) => void;
+  refreshKey?: number;
 }
 
 export function HomeScreen({
@@ -42,6 +43,7 @@ export function HomeScreen({
   connectionDetail,
   onOpenConnectionSheet,
   onConnectSession,
+  refreshKey,
 }: HomeScreenProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -64,7 +66,7 @@ export function HomeScreen({
 
   useEffect(() => {
     refresh().catch(() => {});
-  }, [refresh, gatewayBaseUrl, status]);
+  }, [refresh, gatewayBaseUrl, status, refreshKey]);
 
   const latest = history[0];
   const isLoading = status === "claiming" || status === "connecting";
