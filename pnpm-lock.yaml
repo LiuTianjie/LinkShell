@@ -96,6 +96,9 @@ importers:
       '@types/react':
         specifier: ^19.1.17
         version: 19.1.17
+      babel-preset-expo:
+        specifier: ~54.0.0
+        version: 54.0.10(@babel/core@7.29.0)(@babel/runtime@7.29.2)(expo@54.0.33)(react-refresh@0.14.2)
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -125,8 +128,8 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: ^0.1.1
-        version: 0.1.1
+        specifier: ^0.1.7
+        version: 0.1.7
       '@linkshell/protocol':
         specifier: ^0.1.0
         version: 0.1.0
@@ -1184,8 +1187,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@linkshell/gateway@0.1.1':
-    resolution: {integrity: sha512-PzM+gS5wmst6PNviGf5dwMSi2M2asAmSAvPEwg+r6dCgcgP2nd9qkF0cEtwGZMvijjcT9oQ47E9FErs8+C6tuA==}
+  '@linkshell/gateway@0.1.7':
+    resolution: {integrity: sha512-C+ucZkpF2v5fMU8ckRqWYHRh+XjavI+PUOQaHxbmv/PcjxzCW6PE8e39VmnoowDBFwBkJ7G1bJxsav9179O6VQ==}
 
   '@linkshell/protocol@0.1.0':
     resolution: {integrity: sha512-Nyh4RF9mtgoog5SYDzlfz6fNgIO3vFStKDLpR0toic0Nda5gyFSdj3ZsaTqWeVaqD8k9EDvCvkSf/1xiBP7WfQ==}
@@ -4844,7 +4847,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@linkshell/gateway@0.1.1':
+  '@linkshell/gateway@0.1.7':
     dependencies:
       '@linkshell/protocol': 0.1.0
       ws: 8.20.0
@@ -5047,9 +5050,7 @@ snapshots:
       metro-runtime: 0.83.3
     transitivePeerDependencies:
       - '@babel/core'
-      - bufferutil
       - supports-color
-      - utf-8-validate
 
   '@react-native/normalize-colors@0.81.5': {}
 
