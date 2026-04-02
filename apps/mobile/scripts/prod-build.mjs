@@ -10,7 +10,7 @@
  */
 
 import { execSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { platform as hostPlatform } from "node:os";
@@ -44,6 +44,16 @@ function run(cmd, opts = {}) {
     process.exit(result.status ?? 1);
   }
 }
+
+// ── Step 0: Auto-increment iOS build number ─────────────────────────
+const appJsonPath = resolve(appRoot, "app.json");
+const appJson = JSON.parse(readFileSync(appJsonPath, "utf8"));
+const prevBuild = parseInt(appJson.expo?.ios?.buildNumber ?? "0", 10);
+const nextBuild = String(prevBuild + 1);
+if (!appJson.expo.ios) appJson.expo.ios = {};
+appJson.expo.ios.buildNumber = nextBuild;
+writeFileSync(appJsonPath, JSON.stringify(appJson, null, 2) + "\n", "utf8");
+console.log(`\n  ✦ Build number: ${prevBuild} → ${nextBuild}`);
 
 // ── Step 1: Prebuild terminal HTML ──────────────────────────────────
 console.log("\n  ━━━ Step 1/5: Build terminal HTML ━━━");
@@ -114,7 +124,6 @@ const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>`;
 
-import { writeFileSync } from "node:fs";
 writeFileSync(exportPlist, plistContent, "utf8");
 
 run([

@@ -30,6 +30,8 @@
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
+      "buildNumber": "4",
+      "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {
         "NSAppTransportSecurity": {
@@ -45,7 +47,8 @@
               "NSIncludesSubdomains": true
             }
           }
-        }
+        },
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
