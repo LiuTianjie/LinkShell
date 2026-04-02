@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN" class="scroll-smooth">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,7 +8,9 @@
   <meta name="description" content="LinkShell 终端桥接方案，始于桌面，续于任何地方" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -34,19 +37,25 @@
     }
   </script>
   <style>
-    body { background-color: #fafafa; color: #0a0a0a; }
+    body {
+      background-color: #fafafa;
+      color: #0a0a0a;
+    }
+
     .glass-nav {
       background: rgba(255, 255, 255, 0.75);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
-      border-bottom: 1px solid rgba(0,0,0,0.04);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.04);
     }
+
     .gradient-text {
       background-clip: text;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-image: linear-gradient(135deg, #111111 0%, #6ab04c 100%);
     }
+
     .terminal-mockup {
       background: #111;
       border-radius: 8px;
@@ -54,9 +63,10 @@
       color: #fff;
       font-size: 13px;
       line-height: 1.6;
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
       font-family: 'JetBrains Mono', monospace;
     }
+
     .terminal-cursor {
       display: inline-block;
       width: 8px;
@@ -65,13 +75,25 @@
       vertical-align: middle;
       animation: blink 1s step-end infinite;
     }
-    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-    
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0;
+      }
+    }
+
     .bento-grid {
       display: grid;
       grid-template-columns: repeat(12, 1fr);
       gap: 1.5rem;
     }
+
     .bento-card {
       background: var(--card, #ffffff);
       border: 1px solid var(--border, #eaeaea);
@@ -79,31 +101,49 @@
       padding: 2rem;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
+
     .bento-card:hover {
       transform: translateY(-2px);
-      box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.08), 0 0 4px rgba(0,0,0,0.03);
+      box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.08), 0 0 4px rgba(0, 0, 0, 0.03);
     }
 
     @keyframes scan {
-      0% { top: -5%; opacity: 0; }
-      10% { opacity: 1; }
-      90% { opacity: 1; }
-      100% { top: 105%; opacity: 0; }
+      0% {
+        top: -5%;
+        opacity: 0;
+      }
+
+      10% {
+        opacity: 1;
+      }
+
+      90% {
+        opacity: 1;
+      }
+
+      100% {
+        top: 105%;
+        opacity: 0;
+      }
     }
   </style>
 </head>
+
 <body class="antialiased selection:bg-brand selection:text-white">
 
   <!-- Navbar -->
   <nav class="fixed top-0 inset-x-0 z-50 glass-nav">
     <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white font-bold text-sm tracking-tighter">LS</div>
+        <div
+          class="w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white font-bold text-sm tracking-tighter">
+          LS</div>
         <span class="font-semibold tracking-tight text-lg">LinkShell</span>
       </div>
       <div class="flex items-center gap-6 text-sm font-medium text-muted">
         <a href="#how" class="hover:text-brand transition-colors" data-i18n="navDocs">工作原理</a>
-        <a href="https://github.com/LiuTianjie/LinkShell" class="hover:text-brand transition-colors" data-i18n="navGithub">GitHub</a>
+        <a href="https://github.com/LiuTianjie/LinkShell" class="hover:text-brand transition-colors"
+          data-i18n="navGithub">GitHub</a>
         <div class="w-px h-4 bg-border"></div>
         <button id="lang-toggle" class="hover:text-brand transition-colors uppercase tracking-wider">EN</button>
       </div>
@@ -114,219 +154,129 @@
     <!-- Hero Section -->
     <section class="max-w-5xl mx-auto px-6 text-center mt-12 mb-24 relative">
       <!-- Minimal top badge -->
-      <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-border text-xs font-semibold tracking-wide mb-8 shadow-sm">
+      <div
+        class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-border text-xs font-semibold tracking-wide mb-8 shadow-sm">
         <span class="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></span>
         <span data-i18n="heroBadge">LinkShell v1.0 现已发布</span>
       </div>
-      
+
       <h1 class="text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6">
-        <span data-i18n="heroTitle1">终端漫游</span><br/>
+        <span data-i18n="heroTitle1">终端漫游</span><br />
         <span class="gradient-text" data-i18n="heroTitle2">随时随地，自由接管</span>
       </h1>
-      
+
       <p class="text-lg md:text-xl text-muted max-w-2xl mx-auto mb-10 leading-relaxed font-medium" data-i18n="heroLead">
         始于桌面，续于任何地方，随时切回。会话完全驻留在你的电脑上，手机只是一个窗口。
       </p>
-      
+
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-        <a href="#quickstart" class="px-8 py-3.5 rounded-full bg-brand text-white font-semibold text-sm hover:bg-gray-800 transition-colors shadow-lg hover:shadow-xl hover:-translate-y-0.5" data-i18n="btnStart">
+        <a href="#quickstart"
+          class="px-8 py-3.5 rounded-full bg-brand text-white font-semibold text-sm hover:bg-gray-800 transition-colors shadow-lg hover:shadow-xl hover:-translate-y-0.5"
+          data-i18n="btnStart">
           立即开始
         </a>
-        <a href="https://github.com/LiuTianjie/LinkShell" class="px-8 py-3.5 rounded-full bg-surface border border-border text-brand font-semibold text-sm hover:bg-gray-50 transition-all" data-i18n="btnGithub">
+        <a href="https://github.com/LiuTianjie/LinkShell"
+          class="px-8 py-3.5 rounded-full bg-surface border border-border text-brand font-semibold text-sm hover:bg-gray-50 transition-all"
+          data-i18n="btnGithub">
           查看工作流
         </a>
       </div>
     </section>
 
-    <!-- Core Philosophy: Bento Grid -->
-    <section class="max-w-7xl mx-auto px-6 mb-32" id="how">
-      <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-12 text-center" data-i18n="featureSectionTitle">始于桌面，续于任何地方，随时切回。</h2>
-      
-      <div class="bento-grid">
-        <!-- Feature 1 -->
-        <div class="col-span-12 md:col-span-4 bento-card flex flex-col items-center text-center">
-          <div class="w-16 h-16 rounded-2xl bg-surface border border-border flex items-center justify-center mb-6">
-            <svg class="w-8 h-8 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M12 5l7 7-7 7" /></svg>
-          </div>
-          <h3 class="text-xl font-bold mb-3" data-i18n="f1Title">本地核心</h3>
-          <p class="text-muted leading-relaxed" data-i18n="f1Desc">繁重的计算和环境依赖都在你高性能的桌面上完成。没有云端限制，不搬家，不中断。</p>
-        </div>
-        
-        <!-- Feature 2 -->
-        <div class="col-span-12 md:col-span-4 bento-card flex flex-col items-center text-center group bg-brand text-white border-transparent">
-          <div class="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center mb-6">
-            <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
-          </div>
-          <h3 class="text-xl font-bold mb-3" data-i18n="f2Title">远程接管</h3>
-          <p class="text-gray-300 leading-relaxed" data-i18n="f2Desc">通过 PWA 或移动浏览器访问一切。零延迟体验，立刻接管终端输入。</p>
-        </div>
-
-        <!-- Feature 3 -->
-        <div class="col-span-12 md:col-span-4 bento-card flex flex-col items-center text-center">
-          <div class="w-16 h-16 rounded-2xl bg-surface border border-border flex items-center justify-center mb-6">
-            <svg class="w-8 h-8 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-          </div>
-          <h3 class="text-xl font-bold mb-3" data-i18n="f3Title">无缝切换</h3>
-          <p class="text-muted leading-relaxed" data-i18n="f3Desc">在多个视图间无缝流转。手机随时接管，回到电脑敲双空格切回本地，会话同步不丢失。</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Lifestyle Section -->
-    <section class="max-w-7xl mx-auto px-6 mb-32 group">
-      <div class="mb-16 text-center">
-        <h2 class="text-3xl md:text-5xl font-bold tracking-tight mb-6" data-i18n="lifestyleSectionTitle">LinkShell 工作流</h2>
-        <p class="text-muted text-lg md:text-xl max-w-2xl mx-auto font-medium" data-i18n="lifestyleLead">不仅是远程命令行桥接；更是打破工位束缚的极客探索。</p>
-      </div>
-      
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 relative">
-        <!-- 装饰性背景光晕 -->
-        <div class="absolute -inset-4 bg-brand/5 blur-3xl -z-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
-        
-        <!-- Card 1 -->
-        <div class="bg-surface border border-border rounded-[2rem] p-10 hover:shadow-2xl hover:shadow-brand/5 transition-all duration-500 hover:-translate-y-2">
-          <div class="w-16 h-16 rounded-2xl bg-brand/5 border border-border flex items-center justify-center mb-8 text-3xl group-hover:scale-110 transition-transform duration-500">
-            🏔️
-          </div>
-          <h3 class="text-2xl font-bold mb-4" data-i18n="l1Title">挂起并离开</h3>
-          <p class="text-muted leading-relaxed" data-i18n="l1Desc">编译、构建、拉镜像... 常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell 默默守护当前状态。</p>
-        </div>
-        
-        <!-- Card 2 -->
-        <div class="bg-brand text-white border border-transparent rounded-[2rem] p-10 shadow-[0_0_40px_-10px_rgba(0,0,0,0.5)] hover:shadow-brand/20 transition-all duration-500 hover:-translate-y-2 md:translate-y-6 relative overflow-hidden group">
-          <!-- 内部点束光 -->
-          <div class="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
-          <div class="absolute -right-10 -top-10 w-40 h-40 bg-white/10 blur-3xl rounded-full group-hover:scale-150 transition-transform duration-700"></div>
-          
-          <div class="relative z-10 w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center mb-8 text-3xl shadow-inner group-hover:scale-110 transition-transform duration-500">
-            ☕
-          </div>
-          <h3 class="text-2xl font-bold mb-4 relative z-10" data-i18n="l2Title">随时审查</h3>
-          <p class="text-gray-300 leading-relaxed relative z-10" data-i18n="l2Desc">随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。</p>
-        </div>
-        
-        <!-- Card 3 -->
-        <div class="bg-surface border border-border rounded-[2rem] p-10 hover:shadow-2xl hover:shadow-brand/5 transition-all duration-500 hover:-translate-y-2">
-          <div class="w-16 h-16 rounded-2xl bg-brand/5 border border-border flex items-center justify-center mb-8 text-3xl group-hover:scale-110 transition-transform duration-500">
-            🚶
-          </div>
-          <h3 class="text-2xl font-bold mb-4" data-i18n="l3Title">直接修正</h3>
-          <p class="text-muted leading-relaxed" data-i18n="l3Desc">发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Technical Details -->
-    <section class="max-w-7xl mx-auto px-6 mb-32">
-      <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-12 text-center" data-i18n="powerSectionTitle">原汁原味的体验</h2>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div class="bento-card">
-          <h3 class="font-bold text-lg mb-2" data-i18n="p1Title">全功能终端</h3>
-          <p class="text-sm text-muted mb-6 line-clamp-2" data-i18n="p1Desc">需要介入？你的口袋里就有一个全功能终端。修复问题，敲击命令。</p>
-          <div class="terminal-mockup">
-            <div class="text-green-400">$ linkshell status</div>
-            <div class="text-gray-400">● Session <span class="text-emerald-300">Active</span></div>
-            <div class="text-blue-300 mt-2">Owner: Mobile Client _</div>
-          </div>
-        </div>
-        <div class="bento-card">
-           <h3 class="font-bold text-lg mb-2" data-i18n="p2Title">断线续联</h3>
-           <p class="text-sm text-muted mb-6 line-clamp-2" data-i18n="p2Desc">完善的 ACK 机制与命令回放，电梯里断网立刻接回之前状态。</p>
-           <div class="terminal-mockup border border-yellow-500/30">
-            <div class="text-yellow-400">[!] Reconnecting relay...</div>
-            <div class="flex items-center gap-2 mt-2">
-              <span class="text-green-400">[✓] Synced 42 missed frames</span>
-            </div>
-          </div>
-        </div>
-        <div class="bento-card">
-           <h3 class="font-bold text-lg mb-2" data-i18n="p3Title">一号位接管</h3>
-           <p class="text-sm text-muted mb-6 line-clamp-2" data-i18n="p3Desc">单控制者模型，谁在看终端，谁就拥有输入权。拒绝多平台抢输入的混乱。</p>
-           <div class="bg-surface rounded-xl p-4 mt-2 border border-border">
-             <div class="flex items-center justify-between mb-2">
-               <span class="text-xs font-semibold text-muted">CURRENT OWNER</span>
-               <span class="flex h-2 w-2 relative">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                </span>
-             </div>
-             <p class="font-mono text-sm font-bold">iPhone 15 Pro Max</p>
-           </div>
-        </div>
-      </div>
-    </section>
-
     <!-- Quickstart -->
-    <section class="max-w-5xl mx-auto px-6 mb-24" id="quickstart">
-      <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-16 text-center" data-i18n="howItWorksTitle">只需三步，连接你的终端</h2>
-      
+    <section class="max-w-7xl mx-auto px-6 mb-32" id="quickstart">
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-16 text-center" data-i18n="howItWorksTitle">
+        只需三步，连接你的终端</h2>
+
       <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
         <!-- Step 1 -->
         <div class="bento-card relative">
-          <div class="absolute -top-5 left-6 w-10 h-10 rounded-xl bg-brand text-white flex items-center justify-center font-bold text-lg shadow-lg">1</div>
-          <h3 class="font-bold text-lg mb-3 mt-2" data-i18n="step1Title">部署 Gateway</h3>
-          <p class="text-sm text-muted mb-4" data-i18n="step1Desc">基于 Docker 轻松部署。公网机器充当信令与 WebSocket 中转，安全无留存。</p>
-          <div class="bg-brand text-white font-mono text-xs p-4 rounded-xl space-y-2 overflow-x-auto shadow-inner h-[280px] flex flex-col justify-center">
-            <div class="text-gray-400"># 使用 Docker 启动网关</div>
-            <div class="text-green-400">$ <span class="text-white">git clone https://.../linkshell</span></div>
-            <div class="text-green-400">$ <span class="text-white">cd linkshell/packages/gateway</span></div>
-            <div class="text-green-400">$ <span class="text-white">docker compose up -d</span></div>
-            <div class="text-gray-400 mt-3"># 验证连通性</div>
-            <div class="text-gray-300">curl http://127.0.0.1:8787/healthz</div>
-            <div class="text-emerald-300 mt-1">{"status":"ok"}</div>
+          <div
+            class="absolute -top-5 left-6 w-10 h-10 rounded-xl bg-brand text-white flex items-center justify-center font-bold text-lg shadow-lg">
+            1</div>
+          <h3 class="font-bold text-lg mb-3 mt-2" data-i18n="step1Title">安装 CLI</h3>
+          <p class="text-sm text-muted mb-4" data-i18n="step1Desc">一条命令全局安装。内置网关开箱即用，无需额外部署服务器。</p>
+          <div
+            class="bg-brand text-white font-mono text-xs p-4 rounded-xl space-y-2 overflow-x-auto shadow-inner h-[280px] flex flex-col justify-center">
+            <div class="text-gray-400"># 全局安装 CLI</div>
+            <div class="text-green-400">$ <span class="text-white">npm i -g linkshell-cli</span></div>
+            <div class="text-gray-400 mt-3"># 初始化配置</div>
+            <div class="text-green-400">$ <span class="text-white">linkshell setup</span></div>
+            <div class="text-gray-400 mt-3"># 检查环境</div>
+            <div class="text-green-400">$ <span class="text-white">linkshell doctor</span></div>
+            <div class="text-emerald-300 mt-1">✓ All checks passed</div>
           </div>
         </div>
 
         <!-- Step 2 -->
         <div class="bento-card relative">
-          <div class="absolute -top-5 left-6 w-10 h-10 rounded-xl bg-brand text-white flex items-center justify-center font-bold text-lg shadow-lg">2</div>
-          <h3 class="font-bold text-lg mb-3 mt-2" data-i18n="step2Title">终端打印对接码</h3>
-          <p class="text-sm text-muted mb-4" data-i18n="step2Desc">全局安装并直接桥接你的 AI 代理进程，终端会直接打印二维码以供扫描。</p>
-          <div class="bg-brand text-white font-mono text-xs p-4 rounded-xl space-y-1.5 overflow-x-auto shadow-inner h-[280px]">
-            <div class="text-gray-400"># 安装并体检环境</div>
-            <div class="text-green-400">$ <span class="text-white">npm i -g @linkshell/cli</span></div>
-            <div class="text-gray-400 mt-1"># 桥接工作流</div>
+          <div
+            class="absolute -top-5 left-6 w-10 h-10 rounded-xl bg-brand text-white flex items-center justify-center font-bold text-lg shadow-lg">
+            2</div>
+          <h3 class="font-bold text-lg mb-3 mt-2" data-i18n="step2Title">启动桥接</h3>
+          <p class="text-sm text-muted mb-4" data-i18n="step2Desc">一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。</p>
+          <div
+            class="bg-brand text-white font-mono text-xs p-4 rounded-xl space-y-1.5 overflow-x-auto shadow-inner h-[280px]">
+            <div class="text-gray-400"># 启动桥接（自动启动内置网关）</div>
             <div class="text-green-400">$ <span class="text-white">linkshell start</span></div>
+            <div class="text-gray-300 mt-1 text-[10px]"> Built-in gateway started on port 8787</div>
+            <div class="text-gray-300 text-[10px]"> LAN address: http://192.168.1.10:8787</div>
             <div class="text-gray-300 mt-2 leading-[8px] text-[8px] sm:text-[10px] sm:leading-[10px] font-black">
-██████████████████████████████<br>
-██ ▄▄▄▄▄ ██▄▄▀▄ ▄█▄█ ▄▄▄▄▄ ██<br>
-██ █   █ ████▀█▀▄ ▀█ █   █ ██<br>
-██ █▄▄▄█ ██   █▄█▀▄█ █▄▄▄█ ██<br>
-██▄▄▄▄▄▄▄█▄█▄█▄▀▄▀▄█▄▄▄▄▄▄▄██<br>
-██▄█▄▀  ▄▄▄█▄  █▀ ▀█ █▀  ▀ ██<br>
-██  █▀█▀▄▄ ▄▄   ▀███▄▄██▀▀▄██<br>
-██▄▄▄▄▄▄▄█ ▄█▄██  ██▄ ▀▄ ▄▄██<br>
-██ ▄▄▄▄▄ █▄█ ▀ █▀█ █ ▀█ █▀ ██<br>
-██ █   █ █ ▀ ▄██▄█▄█▀█▄▀█████<br>
-██ █▄▄▄█ █ ▄▀█  ██▄▄  ▀▄▀▄███<br>
-██▄▄▄▄▄▄▄█▄████▄█▄▄██████▄███<br>
-██████████████████████████████
+              ██████████████████████████████<br>
+              ██ ▄▄▄▄▄ ██▄▄▀▄ ▄█▄█ ▄▄▄▄▄ ██<br>
+              ██ █ █ ████▀█▀▄ ▀█ █ █ ██<br>
+              ██ █▄▄▄█ ██ █▄█▀▄█ █▄▄▄█ ██<br>
+              ██▄▄▄▄▄▄▄█▄█▄█▄▀▄▀▄█▄▄▄▄▄▄▄██<br>
+              ██▄█▄▀ ▄▄▄█▄ █▀ ▀█ █▀ ▀ ██<br>
+              ██ █▀█▀▄▄ ▄▄ ▀███▄▄██▀▀▄██<br>
+              ██▄▄▄▄▄▄▄█ ▄█▄██ ██▄ ▀▄ ▄▄██<br>
+              ██ ▄▄▄▄▄ █▄█ ▀ █▀█ █ ▀█ █▀ ██<br>
+              ██ █ █ █ ▀ ▄██▄█▄█▀█▄▀█████<br>
+              ██ █▄▄▄█ █ ▄▀█ ██▄▄ ▀▄▀▄███<br>
+              ██▄▄▄▄▄▄▄█▄████▄█▄▄██████▄███<br>
+              ██████████████████████████████
             </div>
-            <div class="text-emerald-300 mt-1 font-semibold text-[10px]">➜ Code: <span class="bg-emerald-900 px-1 rounded text-white tracking-widest">847293</span></div>
+            <div class="text-emerald-300 mt-1 font-semibold text-[10px]">➜ Code: <span
+                class="bg-emerald-900 px-1 rounded text-white tracking-widest">847293</span></div>
           </div>
         </div>
 
         <!-- Step 3 -->
         <div class="bento-card relative border-2 border-brand shadow-xl">
-          <div class="absolute -top-5 left-6 w-10 h-10 rounded-xl border-2 border-brand bg-white text-brand flex items-center justify-center font-bold text-lg shadow-lg">3</div>
+          <div
+            class="absolute -top-5 left-6 w-10 h-10 rounded-xl border-2 border-brand bg-white text-brand flex items-center justify-center font-bold text-lg shadow-lg">
+            3</div>
           <h3 class="font-bold text-lg mb-3 mt-2 text-brand" data-i18n="step3Title">手机扫码，即刻接管</h3>
-          <p class="text-sm text-muted mb-4" data-i18n="step3Desc">用 Expo App 相机直接对准终端上的二维码一扫（或手动填码）即可获取控制特权。</p>
-          <div class="bg-surface border-2 border-brand/20 font-mono text-sm p-4 rounded-xl flex flex-col items-center justify-center h-[280px] overflow-hidden relative">
+          <p class="text-sm text-muted mb-4" data-i18n="step3Desc">打开 LinkShell App（iOS / Android），对准终端二维码扫一扫，立刻接管会话。
+          </p>
+          <div
+            class="bg-surface border-2 border-brand/20 font-mono text-sm p-4 rounded-xl flex flex-col items-center justify-center h-[280px] overflow-hidden relative">
             <div class="absolute inset-0 bg-brand/5"></div>
-            
+
             <!-- 扫码动效演示 -->
             <div class="relative w-28 h-28 mb-4">
-              <div class="absolute inset-0 bg-white border-2 border-gray-200 rounded-xl p-3 shadow-sm flex items-center justify-center">
-                <svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full text-brand opacity-90"><path d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm13-2h-3v2h3zm-3 2h-2v2h2zm2 2h3v-2h-3zm-2 2h-2v2h2zm2 0v2h3v-2h-3z"/></svg>
+              <div
+                class="absolute inset-0 bg-white border-2 border-gray-200 rounded-xl p-3 shadow-sm flex items-center justify-center">
+                <svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full text-brand opacity-90">
+                  <path
+                    d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm13-2h-3v2h3zm-3 2h-2v2h2zm2 2h3v-2h-3zm-2 2h-2v2h2zm2 0v2h3v-2h-3z" />
+                </svg>
               </div>
-              <div class="absolute inset-0 border-[3px] border-brand rounded-xl scale-105 pointer-events-none opacity-50"></div>
-              
+              <div
+                class="absolute inset-0 border-[3px] border-brand rounded-xl scale-105 pointer-events-none opacity-50">
+              </div>
+
               <!-- 扫描线 -->
-              <div class="absolute top-0 left-0 w-full h-[2px] bg-brand shadow-[0_0_12px_3px_rgba(0,0,0,0.4)] animate-[scan_2.5s_ease-in-out_infinite] shadow-brand"></div>
+              <div
+                class="absolute top-0 left-0 w-full h-[2px] bg-brand shadow-[0_0_12px_3px_rgba(0,0,0,0.4)] animate-[scan_2.5s_ease-in-out_infinite] shadow-brand">
+              </div>
             </div>
 
-            <div class="text-brand mb-2 text-xs uppercase font-bold tracking-widest text-center relative z-10 bg-white/80 px-2 py-0.5 rounded">正在扫描终端终端码...</div>
-            <div class="flex gap-1.5 text-xl font-bold tracking-widest text-brand bg-white px-3 py-2 rounded-lg shadow-sm border border-brand/30 relative z-10">
+            <div
+              class="text-brand mb-2 text-xs uppercase font-bold tracking-widest text-center relative z-10 bg-white/80 px-2 py-0.5 rounded">
+              正在扫描终端终端码...</div>
+            <div
+              class="flex gap-1.5 text-xl font-bold tracking-widest text-brand bg-white px-3 py-2 rounded-lg shadow-sm border border-brand/30 relative z-10">
               <span class="px-1 border-b-2 border-brand opacity-100">8</span>
               <span class="px-1 border-b-2 border-brand opacity-100">4</span>
               <span class="px-1 border-b-2 border-brand opacity-40">7</span>
@@ -340,12 +290,116 @@
       </div>
     </section>
 
+    <!-- Core Philosophy: Bento Grid -->
+    <section class="max-w-7xl mx-auto px-6 mb-32" id="how">
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-12 text-center" data-i18n="featureSectionTitle">
+        始于桌面，续于任何地方，随时切回。</h2>
+
+      <div class="bento-grid">
+        <!-- Feature 1 -->
+        <div class="col-span-12 md:col-span-4 bento-card flex flex-col items-center text-center">
+          <div class="w-16 h-16 rounded-2xl bg-surface border border-border flex items-center justify-center mb-6">
+            <svg class="w-8 h-8 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M12 5l7 7-7 7" />
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3" data-i18n="f1Title">本地核心</h3>
+          <p class="text-muted leading-relaxed" data-i18n="f1Desc">繁重的计算和环境依赖都在你高性能的桌面上完成。没有云端限制，不搬家，不中断。</p>
+        </div>
+
+        <!-- Feature 2 -->
+        <div
+          class="col-span-12 md:col-span-4 bento-card flex flex-col items-center text-center group bg-brand text-white border-transparent">
+          <div class="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center mb-6">
+            <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3" data-i18n="f2Title">远程接管</h3>
+          <p class="text-gray-300 leading-relaxed" data-i18n="f2Desc">通过 iOS / Android 原生 App 接管一切。零延迟体验，立刻掌控终端。</p>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="col-span-12 md:col-span-4 bento-card flex flex-col items-center text-center">
+          <div class="w-16 h-16 rounded-2xl bg-surface border border-border flex items-center justify-center mb-6">
+            <svg class="w-8 h-8 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3" data-i18n="f3Title">无缝切换</h3>
+          <p class="text-muted leading-relaxed" data-i18n="f3Desc">在多个视图间无缝流转。手机随时接管，回到电脑敲双空格切回本地，会话同步不丢失。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Lifestyle Section -->
+    <section class="max-w-7xl mx-auto px-6 mb-32 group">
+      <div class="mb-16 text-center">
+        <h2 class="text-3xl md:text-5xl font-bold tracking-tight mb-6" data-i18n="lifestyleSectionTitle">LinkShell 工作流
+        </h2>
+        <p class="text-muted text-lg md:text-xl max-w-2xl mx-auto font-medium" data-i18n="lifestyleLead">
+          不仅是远程命令行桥接；更是打破工位束缚的极客探索。</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 relative">
+        <!-- 装饰性背景光晕 -->
+        <div
+          class="absolute -inset-4 bg-brand/5 blur-3xl -z-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-1000">
+        </div>
+
+        <!-- Card 1 -->
+        <div
+          class="bg-surface border border-border rounded-[2rem] p-10 hover:shadow-2xl hover:shadow-brand/5 transition-all duration-500 hover:-translate-y-2">
+          <div
+            class="w-16 h-16 rounded-2xl bg-brand/5 border border-border flex items-center justify-center mb-8 text-3xl group-hover:scale-110 transition-transform duration-500">
+            🏔️
+          </div>
+          <h3 class="text-2xl font-bold mb-4" data-i18n="l1Title">挂起并离开</h3>
+          <p class="text-muted leading-relaxed" data-i18n="l1Desc">编译、构建、拉镜像... 常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell
+            默默守护当前状态。</p>
+        </div>
+
+        <!-- Card 2 -->
+        <div
+          class="bg-brand text-white border border-transparent rounded-[2rem] p-10 shadow-[0_0_40px_-10px_rgba(0,0,0,0.5)] hover:shadow-brand/20 transition-all duration-500 hover:-translate-y-2 md:translate-y-6 relative overflow-hidden group">
+          <!-- 内部点束光 -->
+          <div class="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
+          <div
+            class="absolute -right-10 -top-10 w-40 h-40 bg-white/10 blur-3xl rounded-full group-hover:scale-150 transition-transform duration-700">
+          </div>
+
+          <div
+            class="relative z-10 w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center mb-8 text-3xl shadow-inner group-hover:scale-110 transition-transform duration-500">
+            ☕
+          </div>
+          <h3 class="text-2xl font-bold mb-4 relative z-10" data-i18n="l2Title">随时审查</h3>
+          <p class="text-gray-300 leading-relaxed relative z-10" data-i18n="l2Desc">
+            随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。</p>
+        </div>
+
+        <!-- Card 3 -->
+        <div
+          class="bg-surface border border-border rounded-[2rem] p-10 hover:shadow-2xl hover:shadow-brand/5 transition-all duration-500 hover:-translate-y-2">
+          <div
+            class="w-16 h-16 rounded-2xl bg-brand/5 border border-border flex items-center justify-center mb-8 text-3xl group-hover:scale-110 transition-transform duration-500">
+            🚶
+          </div>
+          <h3 class="text-2xl font-bold mb-4" data-i18n="l3Title">直接修正</h3>
+          <p class="text-muted leading-relaxed" data-i18n="l3Desc">发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。</p>
+        </div>
+      </div>
+    </section>
+
     <!-- Final CTA -->
     <section class="max-w-4xl mx-auto px-6 text-center mb-12">
       <div class="bg-surface border border-border rounded-[2rem] p-12">
         <h2 class="text-2xl font-bold tracking-tight mb-4" data-i18n="ctaTitle">准备好漫游了吗？</h2>
         <p class="text-muted mb-8" data-i18n="ctaDesc">加入这场革命。停止死盯屏幕上的进度条，开始享受你的自由生活。</p>
-        <a href="#quickstart" class="inline-block px-8 py-3.5 rounded-full bg-brand text-white font-semibold text-sm hover:bg-gray-800 transition-colors shadow-lg" data-i18n="btnStart">立刻开始</a>
+        <a href="#quickstart"
+          class="inline-block px-8 py-3.5 rounded-full bg-brand text-white font-semibold text-sm hover:bg-gray-800 transition-colors shadow-lg"
+          data-i18n="btnStart">立刻开始</a>
       </div>
     </section>
 
@@ -361,13 +415,14 @@
         出于对漫游体验的热爱。© 2026 基于 MIT 协议开源。为终端自由漫游而生。
       </p>
       <div class="flex gap-6 text-sm font-medium">
-        <a href="https://github.com/LiuTianjie/LinkShell" class="text-muted hover:text-brand transition-colors">GitHub</a>
+        <a href="https://github.com/LiuTianjie/LinkShell"
+          class="text-muted hover:text-brand transition-colors">GitHub</a>
         <a href="#how" class="text-muted hover:text-brand transition-colors" data-i18n="navDocs">原理</a>
       </div>
     </div>
   </footer>
 
-    <script>
+  <script>
     const translations = {
       zh: {
         pageTitle: "LinkShell | 始于桌面，随处接管",
@@ -394,20 +449,14 @@
         l2Desc: "随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。",
         l3Title: "直接修正",
         l3Desc: "发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。",
-        powerSectionTitle: "不妥协的工程体验",
-        p1Title: "全功能屏幕视图",
-        p1Desc: "使用 xterm.js 构建画面。哪怕只看手机屏幕，Vim、HTop、交互环境等富终端应用依然拥有极致呈现。",
-        p2Title: "ACK 断线续联",
-        p2Desc: "自研 WebSocket 缓冲与 ACK 序列指令机制。进电梯断网？重连后从缓存栈补齐每一行丢失的日志。",
-        p3Title: "严苛输入保护",
-        p3Desc: "多重锁定唯一 Owner。谁在看终端，谁就是唯一写入者。Desktop 和 App 端壁垒分明，不再误导指令流。",
+
         howItWorksTitle: "只需三步，建立你的终端链路",
-        step1Title: "部署 Gateway",
-        step1Desc: "在一台公网机器上启动网关服务，负责信令与数据包的中转，不碰你的终端内容。",
-        step2Title: "启动本地桥接",
-        step2Desc: "回到你的工作电脑，使用 CLI 将当前终端进程桥接到刚才部署的 Gateway 上。",
-        step3Title: "手机端接管",
-        step3Desc: "用你的手机浏览器打开调试端页面，输入刚生成的 6 位配对码，立刻接管本地会话。",
+        step1Title: "安装 CLI",
+        step1Desc: "一条命令全局安装。内置网关开箱即用，无需额外部署服务器。",
+        step2Title: "启动桥接",
+        step2Desc: "一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。",
+        step3Title: "手机扫码，即刻接管",
+        step3Desc: "打开 LinkShell App（iOS / Android），对准终端二维码扫一扫，立刻接管会话。",
         ctaTitle: "准备好你的第一次漫游了吗？",
         ctaDesc: "放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。",
         footerText: "出于对 Vibe Coding 的热爱。© 2026 基于 MIT 协议开源。探索自由编程边界。"
@@ -437,20 +486,14 @@
         l2Desc: "Pull out your phone and jump back in. Check build limits and scroll through colorful logs with zero cloud decay.",
         l3Title: "Quick Hotfix",
         l3Desc: "Spot an error? The mobile xterm.js instance takes focus. Type the fix, hit enter, and drop your phone back in your pocket.",
-        powerSectionTitle: "Uncompromising Engineering",
-        p1Title: "Full Render View",
-        p1Desc: "Built on top of xterm.js. Experience uncompromised fidelity for Vim, HTop, and interactive TUI apps on any screen.",
-        p2Title: "ACK Reconnection",
-        p2Desc: "Custom WebSocket buffers with an ACK replay mechanism. Network dropped in an elevator? Resync every single log line instantly.",
-        p3Title: "Isolated Control",
-        p3Desc: "Strict Owner locking. Whoever views the session commands the buffer. Desktop and Mobile environments never clash on keystrokes.",
+
         howItWorksTitle: "Establish your link in 3 steps",
-        step1Title: "Deploy Gateway",
-        step1Desc: "Host the relay server on a public IP to route websocket payloads without touching their contents.",
-        step2Title: "Bridge Local PTY",
-        step2Desc: "Hop back to your dev machine. Use the CLI to bridge the active terminal session to your Gateway.",
-        step3Title: "Claim on Phone",
-        step3Desc: "Open the mobile app or web client, punch in the 6-digit code, and fully take over your local session.",
+        step1Title: "Install CLI",
+        step1Desc: "One command to install globally. Built-in gateway works out of the box — no extra server needed.",
+        step2Title: "Start Bridge",
+        step2Desc: "One command to start the built-in gateway and bridge your AI agent process. QR code prints right in the terminal.",
+        step3Title: "Scan & Take Over",
+        step3Desc: "Open the LinkShell App (iOS / Android), scan the terminal QR code, and instantly take over the session.",
         ctaTitle: "Ready for your first roam?",
         ctaDesc: "Skip the heavy cloud VM migrations. Set up the relay in seconds and put your whole dev environment in your pocket.",
         footerText: "Crafted for Vibe Coding. © 2026 Open Source / MIT. Pushing the boundaries of freedom."
@@ -464,7 +507,7 @@
     function applyLanguage(lang) {
       const dict = translations[lang];
       document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
-      
+
       textNodes.forEach(node => {
         const key = node.getAttribute('data-i18n');
         if (dict[key]) {
@@ -483,4 +526,5 @@
     applyLanguage('zh');
   </script>
 </body>
+
 </html>
