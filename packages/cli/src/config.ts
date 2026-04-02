@@ -8,6 +8,7 @@ export interface LinkShellConfig {
   provider?: "claude" | "codex" | "custom";
   command?: string;
   clientName?: string;
+  hostname?: string;
   cols?: number;
   rows?: number;
 }

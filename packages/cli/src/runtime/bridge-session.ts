@@ -21,6 +21,7 @@ export interface BridgeSessionOptions {
   cols: number;
   rows: number;
   clientName: string;
+  hostname?: string;
   verbose?: boolean;
   providerConfig: ProviderConfig;
 }
@@ -208,7 +209,7 @@ export class BridgeSession {
             clientName: this.options.clientName,
             provider: this.options.providerConfig.provider,
             protocolVersion: PROTOCOL_VERSION,
-            hostname: hostname(),
+            hostname: this.options.hostname || hostname(),
             platform: platform(),
           },
         }),

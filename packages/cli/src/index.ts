@@ -22,14 +22,39 @@ program
 program
   .command("start")
   .description("Start a bridge session (with built-in or remote gateway)")
-  .option("--gateway <url>", "Gateway websocket URL (omit to start built-in gateway)", config.gateway ?? undefined)
-  .option("--pairing-gateway <url-or-host>", "Public HTTP gateway used in QR/deep link output", config.pairingGateway)
+  .option(
+    "--gateway <url>",
+    "Gateway websocket URL (omit to start built-in gateway)",
+    config.gateway ?? undefined,
+  )
+  .option(
+    "--pairing-gateway <url-or-host>",
+    "Public HTTP gateway used in QR/deep link output",
+    config.pairingGateway,
+  )
   .option("--port <port>", "Port for built-in gateway", "8787")
   .option("--session-id <id>", "Session identifier (auto-created if omitted)")
-  .option("--provider <provider>", "claude | codex | custom", config.provider ?? "claude")
+  .option(
+    "--provider <provider>",
+    "claude | codex | custom",
+    config.provider ?? "claude",
+  )
   .option("--command <command>", "Override provider executable", config.command)
-  .option("--client-name <name>", "Display name for this CLI", config.clientName ?? "local-cli")
-  .option("--cols <cols>", "Initial terminal columns", String(config.cols ?? 120))
+  .option(
+    "--client-name <name>",
+    "Display name for this CLI",
+    config.clientName ?? "local-cli",
+  )
+  .option(
+    "--hostname <name>",
+    "Override hostname sent to gateway",
+    config.hostname,
+  )
+  .option(
+    "--cols <cols>",
+    "Initial terminal columns",
+    String(config.cols ?? 120),
+  )
   .option("--rows <rows>", "Initial terminal rows", String(config.rows ?? 36))
   .option("--daemon", "Run in background (detached)")
   .option("--verbose", "Enable verbose logging")
@@ -50,11 +75,13 @@ program
       // Rebuild args for the child, replacing --daemon with --_foreground-bridge
       const childArgs = ["start", "--_foreground-bridge"];
       if (options.gateway) childArgs.push("--gateway", options.gateway);
-      if (options.pairingGateway) childArgs.push("--pairing-gateway", options.pairingGateway);
+      if (options.pairingGateway)
+        childArgs.push("--pairing-gateway", options.pairingGateway);
       childArgs.push("--port", String(options.port));
       childArgs.push("--provider", options.provider);
       if (options.command) childArgs.push("--command", options.command);
       childArgs.push("--client-name", options.clientName);
+      if (options.hostname) childArgs.push("--hostname", options.hostname);
       childArgs.push("--cols", String(options.cols));
       childArgs.push("--rows", String(options.rows));
       if (options.verbose) childArgs.push("--verbose");
@@ -70,12 +97,16 @@ program
       process.stderr.write(`  Log: ${daemon.getLogFile("bridge")}\n\n`);
       process.stderr.write(`  Stop:   linkshell stop\n`);
       process.stderr.write(`  Status: linkshell status\n`);
-      process.stderr.write(`  Logs:   tail -f ${daemon.getLogFile("bridge")}\n\n`);
+      process.stderr.write(
+        `  Logs:   tail -f ${daemon.getLogFile("bridge")}\n\n`,
+      );
       return;
     }
 
     // Foreground mode
-    const passthroughArgs = command.args.filter((value: string) => value !== "--");
+    const passthroughArgs = command.args.filter(
+      (value: string) => value !== "--",
+    );
     const providerConfig = resolveProviderConfig({
       provider: options.provider,
       command: options.command,
@@ -88,7 +119,8 @@ program
     let embeddedGatewayHandle: { close: () => Promise<void> } | undefined;
 
     if (!gatewayUrl) {
-      const { startEmbeddedGateway } = await import("@linkshell/gateway/embedded");
+      const { startEmbeddedGateway } =
+        await import("@linkshell/gateway/embedded");
       const port = Number(options.port);
       const gw = await startEmbeddedGateway({
         port,
@@ -127,6 +159,7 @@ program
       cols: Number(options.cols),
       rows: Number(options.rows),
       clientName: options.clientName,
+      hostname: options.hostname,
       verbose: Boolean(options.verbose),
       providerConfig,
     });
@@ -135,8 +168,12 @@ program
       daemon.removePid("bridge");
       if (embeddedGatewayHandle) await embeddedGatewayHandle.close();
     };
-    process.on("SIGINT", () => { cleanup().then(() => process.exit(0)); });
-    process.on("SIGTERM", () => { cleanup().then(() => process.exit(0)); });
+    process.on("SIGINT", () => {
+      cleanup().then(() => process.exit(0));
+    });
+    process.on("SIGTERM", () => {
+      cleanup().then(() => process.exit(0));
+    });
 
     await session.start();
   });
@@ -147,7 +184,11 @@ const gatewayCmd = program
   .command("gateway")
   .description("Manage the standalone gateway server")
   .option("--port <port>", "Listen port", "8787")
-  .option("--log-level <level>", "Log level: debug | info | warn | error", "info")
+  .option(
+    "--log-level <level>",
+    "Log level: debug | info | warn | error",
+    "info",
+  )
   .option("--daemon", "Run in background (detached)")
   .option("--_foreground-gw", undefined) // internal
   .action(async (options) => {
@@ -156,14 +197,19 @@ const gatewayCmd = program
     if (options.daemon && !options._foregroundGw) {
       const existingPid = daemon.readPid("gateway");
       if (existingPid) {
-        process.stderr.write(`  Gateway already running (PID ${existingPid})\n`);
+        process.stderr.write(
+          `  Gateway already running (PID ${existingPid})\n`,
+        );
         process.stderr.write(`  Run: linkshell gateway stop\n\n`);
         return;
       }
       const pid = daemon.spawnDaemon("gateway", [
-        "gateway", "--_foreground-gw",
-        "--port", String(options.port),
-        "--log-level", options.logLevel,
+        "gateway",
+        "--_foreground-gw",
+        "--port",
+        String(options.port),
+        "--log-level",
+        options.logLevel,
       ]);
       process.stderr.write(`\n  LinkShell Gateway started in background\n`);
       process.stderr.write(`  PID: ${pid}\n`);
@@ -171,12 +217,15 @@ const gatewayCmd = program
       process.stderr.write(`  Log: ${daemon.getLogFile("gateway")}\n\n`);
       process.stderr.write(`  Stop:   linkshell gateway stop\n`);
       process.stderr.write(`  Status: linkshell gateway status\n`);
-      process.stderr.write(`  Logs:   tail -f ${daemon.getLogFile("gateway")}\n\n`);
+      process.stderr.write(
+        `  Logs:   tail -f ${daemon.getLogFile("gateway")}\n\n`,
+      );
       return;
     }
 
     // Foreground mode
-    const { startEmbeddedGateway } = await import("@linkshell/gateway/embedded");
+    const { startEmbeddedGateway } =
+      await import("@linkshell/gateway/embedded");
     const port = Number(options.port);
     const gw = await startEmbeddedGateway({
       port,
@@ -190,8 +239,12 @@ const gatewayCmd = program
     process.stderr.write(`  Listening on http://0.0.0.0:${gw.port}\n`);
     process.stderr.write(`  PID: ${process.pid}\n`);
     process.stderr.write(`  Log level: ${options.logLevel}\n\n`);
-    process.stderr.write(`  Clients connect via: ws://your-server:${gw.port}/ws\n`);
-    process.stderr.write(`  Health check: curl http://your-server:${gw.port}/healthz\n\n`);
+    process.stderr.write(
+      `  Clients connect via: ws://your-server:${gw.port}/ws\n`,
+    );
+    process.stderr.write(
+      `  Health check: curl http://your-server:${gw.port}/healthz\n\n`,
+    );
 
     const shutdown = async () => {
       process.stderr.write("[gateway] shutting down...\n");
