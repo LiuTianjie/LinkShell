@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   FlatList,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Platform,
   Pressable,
   ScrollView,
@@ -11,9 +13,13 @@ import {
   TextInput,
   View,
 } from "react-native";
+import * as Haptics from "expo-haptics";
+import { Swipeable } from "react-native-gesture-handler";
+import { useFocusEffect } from "@react-navigation/native";
 import { KeyboardAccessory } from "../components/KeyboardAccessory";
 import { ServerPicker } from "../components/ServerPicker";
 import { useTheme } from "../theme";
+import { AppSymbol } from "../components/AppSymbol";
 import { getDefaultServer, touchServer } from "../storage/servers";
 import {
   clearHistory,
@@ -61,6 +67,13 @@ export function PairingScreen({
     loadRecent();
   }, [loadRecent, onGatewayChange]);
 
+  // Refresh history every time tab gains focus (e.g. after gateway deletion)
+  useFocusEffect(
+    useCallback(() => {
+      loadRecent();
+    }, [loadRecent]),
+  );
+
   const handleClaim = useCallback(async () => {
     if (!pairingCode.trim()) return;
     await touchServer(gatewayBaseUrl);
@@ -78,22 +91,11 @@ export function PairingScreen({
 
   const handleDeleteRecord = useCallback(
     (record: ConnectionRecord) => {
-      Alert.alert(
-        "删除最近会话",
-        "删除后不会影响服务器中的真实会话，只会移除本机记录。",
-        [
-          { text: "取消", style: "cancel" },
-          {
-            text: "删除",
-            style: "destructive",
-            onPress: () => {
-              removeFromHistory(record)
-                .then(loadRecent)
-                .catch(() => {});
-            },
-          },
-        ],
-      );
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      removeFromHistory(record)
+        .then(loadRecent)
+        .catch(() => {});
     },
     [loadRecent],
   );
@@ -288,26 +290,12 @@ export function PairingScreen({
               }
               scrollEnabled={false}
               renderItem={({ item }) => (
-                <View style={styles.recentRow}>
-                  <Pressable
-                    style={styles.recentMain}
-                    onPress={() => handleReconnect(item)}
-                  >
-                    <Text style={styles.recentTitle}>
-                      {item.hostname ?? item.sessionId.slice(0, 8)}
-                    </Text>
-                    <Text style={styles.recentMeta}>
-                      {safeHost(item.serverUrl)} · {timeAgo(item.connectedAt)}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.deleteBtn}
-                    onPress={() => handleDeleteRecord(item)}
-                    hitSlop={8}
-                  >
-                    <Text style={styles.deleteText}>删除</Text>
-                  </Pressable>
-                </View>
+                <SwipeableHistoryRow
+                  record={item}
+                  theme={theme}
+                  onPress={() => handleReconnect(item)}
+                  onDelete={() => handleDeleteRecord(item)}
+                />
               )}
             />
           )}
@@ -329,6 +317,73 @@ function safeHost(url: string): string {
   } catch {
     return url;
   }
+}
+
+/* ── Swipeable history row ─────────────────────── */
+function SwipeableHistoryRow({
+  record,
+  theme,
+  onPress,
+  onDelete,
+}: {
+  record: ConnectionRecord;
+  theme: ReturnType<typeof useTheme>["theme"];
+  onPress: () => void;
+  onDelete: () => void;
+}) {
+  const renderRightActions = useCallback(
+    (
+      _progress: Animated.AnimatedInterpolation<number>,
+      dragX: Animated.AnimatedInterpolation<number>,
+    ) => {
+      const scale = dragX.interpolate({
+        inputRange: [-80, 0],
+        outputRange: [1, 0.6],
+        extrapolate: "clamp",
+      });
+      return (
+        <Pressable
+          style={{
+            backgroundColor: "#ef4444",
+            justifyContent: "center",
+            alignItems: "center",
+            width: 76,
+            borderRadius: 12,
+            marginLeft: -12,
+          }}
+          onPress={onDelete}
+        >
+          <Animated.View style={{ transform: [{ scale }], alignItems: "center", gap: 2 }}>
+            <AppSymbol name="trash.fill" size={16} color="#ffffff" />
+            <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "600" }}>删除</Text>
+          </Animated.View>
+        </Pressable>
+      );
+    },
+    [onDelete],
+  );
+
+  return (
+    <View style={styles.recentRow}>
+      <Swipeable
+        renderRightActions={renderRightActions}
+        overshootRight={false}
+        friction={2}
+      >
+        <Pressable
+          style={[styles.recentMain, { backgroundColor: theme.bgCard, borderColor: theme.borderLight }]}
+          onPress={onPress}
+        >
+          <Text style={[styles.recentTitle, { color: theme.text }]}>
+            {record.hostname ?? record.sessionId.slice(0, 8)}
+          </Text>
+          <Text style={[styles.recentMeta, { color: theme.textTertiary }]}>
+            {safeHost(record.serverUrl)} · {timeAgo(record.connectedAt)}
+          </Text>
+        </Pressable>
+      </Swipeable>
+    </View>
+  );
 }
 
 function getStatusCopy(status: string): {
@@ -583,10 +638,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   recentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
     marginBottom: 8,
+    borderRadius: 12,
+    overflow: "hidden" as const,
   },
   recentMain: {
     flex: 1,
@@ -606,20 +660,5 @@ const styles = StyleSheet.create({
   recentMeta: {
     color: "#6b7280",
     fontSize: 12,
-  },
-  deleteBtn: {
-    minHeight: 36,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#fecaca",
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fff1f2",
-  },
-  deleteText: {
-    color: "#dc2626",
-    fontSize: 12,
-    fontWeight: "600",
   },
 });

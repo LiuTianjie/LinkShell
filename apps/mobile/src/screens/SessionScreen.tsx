@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
   LayoutChangeEvent,
@@ -157,6 +158,24 @@ export function SessionScreen({
   const banner = getSessionBanner(status);
   const showReconnectButton = status === "disconnected" || (status.startsWith("error:") && Boolean(sessionId));
 
+  const isConnecting = status === "connecting" || status === "claiming";
+  const isHostOffline = status === "host_disconnected";
+  const isErrorState = status === "disconnected" || status.startsWith("error:");
+  const showFullOverlay = isConnecting || isHostOffline || isErrorState;
+
+  // Host status tag
+  const hostOnline = status === "connected" || status === "session_exited";
+  const hostTagColor = isConnecting ? "#fbbf24" : hostOnline ? "#4ade80" : "#ef4444";
+  const hostTagText = isConnecting ? "连接中" : hostOnline ? "主机在线" : isHostOffline ? "主机离线" : status === "reconnecting" ? "重连中" : "已断开";
+  const hostTagBg = isConnecting ? "rgba(251,191,36,0.12)" : hostOnline ? "rgba(74,222,128,0.12)" : "rgba(239,68,68,0.10)";
+
+  // Session status tag
+  const sessionExited = status === "session_exited";
+  const sessionUnknown = !hostOnline && !sessionExited && !isConnecting;
+  const sessionTagColor = sessionExited ? "#6b7280" : isConnecting || sessionUnknown ? theme.textTertiary : "#4ade80";
+  const sessionTagText = sessionExited ? "进程已退出" : isConnecting ? "等待中" : sessionUnknown ? "状态未知" : "进程运行中";
+  const sessionTagBg = sessionExited ? "rgba(107,114,128,0.12)" : isConnecting || sessionUnknown ? "rgba(107,114,128,0.08)" : "rgba(74,222,128,0.12)";
+
   const toolbarBg = theme.mode === "light" ? "#e5e5ea" : "rgba(255,255,255,0.1)";
 
   return (
@@ -177,11 +196,19 @@ export function SessionScreen({
           paddingBottom: 10,
           gap: 8,
         }}>
-          {/* Row 1: Status + Leave */}
+          {/* Row 1: Host/Session status + Leave */}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusColor }} />
-              <Text style={{ fontSize: 13, fontWeight: "600", color: theme.text }}>{statusText}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+              {/* Host status tag */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: hostTagBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderCurve: "continuous" as const }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: hostTagColor }} />
+                <Text style={{ fontSize: 11, fontWeight: "600", color: hostTagColor }}>{hostTagText}</Text>
+              </View>
+              {/* Session status tag */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: sessionTagBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderCurve: "continuous" as const }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: sessionTagColor }} />
+                <Text style={{ fontSize: 11, fontWeight: "600", color: sessionTagColor }}>{sessionTagText}</Text>
+              </View>
               <Text style={{ fontSize: 11, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", color: theme.textTertiary }} numberOfLines={1}>{sessionId.slice(0, 8)}</Text>
             </View>
             <Pressable
@@ -315,6 +342,112 @@ export function SessionScreen({
           </View>
         ) : null}
 
+        {showFullOverlay ? (
+          <View style={{ flex: 1, backgroundColor: theme.bgTerminal, alignItems: "center", justifyContent: "center", paddingHorizontal: 40, gap: 16 }}>
+            {isConnecting ? (
+              <>
+                <ActivityIndicator size="large" color={theme.accent} />
+                <Text style={{ fontSize: 17, fontWeight: "600", color: theme.text, textAlign: "center" }}>
+                  {status === "claiming" ? "正在配对…" : "正在连接…"}
+                </Text>
+                <Text style={{ fontSize: 14, color: theme.textTertiary, textAlign: "center" }}>
+                  {connectionDetail ?? "正在建立与主机的连接"}
+                </Text>
+                <Pressable
+                  style={({ pressed }) => ({
+                    marginTop: 8,
+                    paddingHorizontal: 20,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    borderCurve: "continuous" as const,
+                    backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
+                  })}
+                  onPress={handleLeave}
+                >
+                  <Text style={{ fontSize: 15, fontWeight: "600", color: theme.error }}>取消</Text>
+                </Pressable>
+              </>
+            ) : isHostOffline ? (
+              <>
+                <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(251,191,36,0.15)", alignItems: "center", justifyContent: "center" }}>
+                  <AppSymbol name="wifi.slash" size={26} color="#fbbf24" />
+                </View>
+                <Text style={{ fontSize: 17, fontWeight: "600", color: theme.text, textAlign: "center" }}>
+                  主机离线
+                </Text>
+                <Text style={{ fontSize: 14, color: theme.textTertiary, textAlign: "center", lineHeight: 20 }}>
+                  主机当前不可用，可以等待主机恢复后重试，{"\n"}或退出返回会话列表。
+                </Text>
+                <View style={{ flexDirection: "row", gap: 12, marginTop: 4 }}>
+                  <Pressable
+                    style={({ pressed }) => ({
+                      paddingHorizontal: 20,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      borderCurve: "continuous" as const,
+                      backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
+                    })}
+                    onPress={handleLeave}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: "600", color: theme.error }}>退出</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => ({
+                      paddingHorizontal: 20,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      borderCurve: "continuous" as const,
+                      backgroundColor: pressed ? theme.accent : theme.accentLight,
+                    })}
+                    onPress={onReconnect}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: "600", color: theme.accent }}>重试</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              /* isErrorState */
+              <>
+                <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(239,68,68,0.12)", alignItems: "center", justifyContent: "center" }}>
+                  <AppSymbol name="exclamationmark.triangle.fill" size={26} color={theme.error} />
+                </View>
+                <Text style={{ fontSize: 17, fontWeight: "600", color: theme.text, textAlign: "center" }}>
+                  连接失败
+                </Text>
+                <Text style={{ fontSize: 14, color: theme.textTertiary, textAlign: "center", lineHeight: 20 }}>
+                  {connectionDetail ?? "无法连接到主机"}
+                </Text>
+                <View style={{ flexDirection: "row", gap: 12, marginTop: 4 }}>
+                  <Pressable
+                    style={({ pressed }) => ({
+                      paddingHorizontal: 20,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      borderCurve: "continuous" as const,
+                      backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
+                    })}
+                    onPress={handleLeave}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: "600", color: theme.error }}>退出</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => ({
+                      paddingHorizontal: 20,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      borderCurve: "continuous" as const,
+                      backgroundColor: pressed ? theme.accent : theme.accentLight,
+                    })}
+                    onPress={onReconnect}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: "600", color: theme.accent }}>重试</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+            {!keyboardVisible && <View style={{ height: insets.bottom }} />}
+          </View>
+        ) : (
         <View style={{ flex: 1, backgroundColor: theme.bgTerminal }} onLayout={handleTerminalLayout}>
           <View style={{ flex: 1 }}>
             <TerminalView
@@ -351,6 +484,7 @@ export function SessionScreen({
           </View>
           {!keyboardVisible && <View style={{ height: insets.bottom, backgroundColor: theme.bgTerminal }} />}
         </View>
+        )}
       </KeyboardAvoidingView>
     </View>
   );

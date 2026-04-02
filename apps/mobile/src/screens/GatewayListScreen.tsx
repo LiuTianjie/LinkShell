@@ -311,6 +311,7 @@ function SwipeableServerRow({
       }}
       renderRightActions={renderRightActions}
       overshootRight={false}
+      friction={2}
     >
       <View
         style={{

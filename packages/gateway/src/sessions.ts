@@ -122,9 +122,7 @@ export class SessionManager {
   claimControl(sessionId: string, deviceId: string): boolean {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
-    if (session.controllerId && session.controllerId !== deviceId) {
-      return false;
-    }
+    // Always allow takeover – last claimer wins
     session.controllerId = deviceId;
     return true;
   }
@@ -153,7 +151,9 @@ export class SessionManager {
     return {
       id: session.id,
       state: session.state,
-      hasHost: !!session.host,
+      hasHost:
+        !!session.host &&
+        session.host.socket.readyState === session.host.socket.OPEN,
       clientCount: session.clients.size,
       controllerId: session.controllerId ?? null,
       lastActivity: session.lastActivity,

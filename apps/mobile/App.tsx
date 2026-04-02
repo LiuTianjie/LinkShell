@@ -2,8 +2,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useState } from "react";
-import { Linking, StyleSheet, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Animated, Dimensions, Linking, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppSymbol } from "./src/components/AppSymbol";
@@ -38,15 +38,20 @@ function AppInner() {
   const [pendingPairing, setPendingPairing] = useState<{ code: string; gateway?: string } | null>(null);
   const [connectionSheetVisible, setConnectionSheetVisible] = useState(false);
   const [gatewayListVisible, setGatewayListVisible] = useState(false);
+  const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
+  const gatewaySlideAnim = useRef(new Animated.Value(Dimensions.get("window").width)).current;
   const lastSavedSessionRef = React.useRef<string | null>(null);
 
   const session = useSession({ gatewayBaseUrl });
 
   const isInSession =
     session.status === "connected" ||
+    session.status === "connecting" ||
+    session.status === "claiming" ||
     session.status === "reconnecting" ||
     session.status === "session_exited" ||
-    (session.status as string) === "host_disconnected";
+    session.status === "host_disconnected" ||
+    session.status.startsWith("error:");
 
   const currentScreen = isInSession ? "terminal" : activeScreen;
 
@@ -116,8 +121,9 @@ function AppInner() {
     fetchWithTimeout(`${gatewayBaseUrl}/sessions`)
       .then((res) => (res.ok ? res.json() : null))
       .then((body: { sessions: Array<{ id: string; hostname?: string; provider?: string; platform?: string }> } | null) => {
-        if (!body) return;
+        if (!body) { console.log("[LinkShell] enrich: no body from /sessions"); return; }
         const info = body.sessions.find((s) => s.id === session.sessionId);
+        console.log("[LinkShell] enrich session", session.sessionId, "match:", JSON.stringify(info ?? null));
         if (info) enrichHistory(session.sessionId, info);
       })
       .catch(() => {});
@@ -289,6 +295,7 @@ function AppInner() {
               <SessionListScreen
                 gatewayBaseUrl={gatewayBaseUrl}
                 onSelectSession={handleConnectSession}
+                refreshKey={sessionRefreshKey}
               />
             )}
           </Tab.Screen>
@@ -302,22 +309,46 @@ function AppInner() {
               ),
             }}
           >
-            {() => <SettingsScreen gatewayBaseUrl={gatewayBaseUrl} onGatewayChange={setGatewayBaseUrl} onOpenGatewayList={() => setGatewayListVisible(true)} />}
+            {() => <SettingsScreen gatewayBaseUrl={gatewayBaseUrl} onGatewayChange={setGatewayBaseUrl} onOpenGatewayList={() => {
+              setGatewayListVisible(true);
+              gatewaySlideAnim.setValue(Dimensions.get("window").width);
+              Animated.timing(gatewaySlideAnim, {
+                toValue: 0,
+                duration: 300,
+                useNativeDriver: true,
+              }).start();
+            }} />}
           </Tab.Screen>
         </Tab.Navigator>
       </NavigationContainer>
 
       {gatewayListVisible ? (
-        <View style={StyleSheet.absoluteFill}>
+        <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: gatewaySlideAnim }] }]}>
           <GatewayListScreen
-            onBack={() => setGatewayListVisible(false)}
+            onBack={() => {
+              Animated.timing(gatewaySlideAnim, {
+                toValue: Dimensions.get("window").width,
+                duration: 300,
+                useNativeDriver: true,
+              }).start(() => {
+                setGatewayListVisible(false);
+                setSessionRefreshKey((k) => k + 1);
+              });
+            }}
             onAddGateway={() => {
-              setGatewayListVisible(false);
-              setConnectionSheetVisible(true);
+              Animated.timing(gatewaySlideAnim, {
+                toValue: Dimensions.get("window").width,
+                duration: 300,
+                useNativeDriver: true,
+              }).start(() => {
+                setGatewayListVisible(false);
+                setSessionRefreshKey((k) => k + 1);
+                setConnectionSheetVisible(true);
+              });
             }}
             onGatewayChange={setGatewayBaseUrl}
           />
-        </View>
+        </Animated.View>
       ) : null}
 
       <ConnectionSheet

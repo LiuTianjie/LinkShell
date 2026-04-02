@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { useTheme } from "../theme";
@@ -36,6 +37,13 @@ export function SettingsScreen({ gatewayBaseUrl, onGatewayChange, onOpenGatewayL
   useEffect(() => {
     refreshCounts();
   }, [refreshCounts]);
+
+  // Refresh counts every time settings tab gains focus (e.g. after gateway deletion)
+  useFocusEffect(
+    useCallback(() => {
+      refreshCounts();
+    }, [refreshCounts]),
+  );
 
   const handleClearHistory = useCallback(() => {
     if (historyCount === 0) return;

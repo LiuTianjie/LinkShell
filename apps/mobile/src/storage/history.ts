@@ -27,7 +27,11 @@ export async function addToHistory(
   record: Omit<ConnectionRecord, "connectedAt">,
 ): Promise<void> {
   const history = await loadHistory();
-  history.unshift({ ...record, connectedAt: Date.now() });
+  history.unshift({
+    ...record,
+    serverUrl: record.serverUrl.replace(/\/+$/, ""),
+    connectedAt: Date.now(),
+  });
   if (history.length > MAX_RECORDS) history.length = MAX_RECORDS;
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(history));
 }
@@ -58,8 +62,11 @@ export async function removeBySessionId(sessionId: string): Promise<void> {
 }
 
 export async function removeByServerUrl(serverUrl: string): Promise<void> {
+  const normalized = serverUrl.replace(/\/+$/, "");
   const history = await loadHistory();
-  const filtered = history.filter((item) => item.serverUrl !== serverUrl);
+  const filtered = history.filter(
+    (item) => item.serverUrl.replace(/\/+$/, "") !== normalized,
+  );
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
 }
 

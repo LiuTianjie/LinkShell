@@ -157,26 +157,15 @@ function handleClientMessage(
       break;
     }
     case "control.claim": {
-      const granted = sessions.claimControl(session.id, deviceId);
-      if (granted) {
-        const grantMsg = createEnvelope({
-          type: "control.grant",
-          sessionId: session.id,
-          payload: { deviceId },
-        });
-        socket.send(serializeEnvelope(grantMsg));
-        sendToHost(session, grantMsg);
-      } else {
-        socket.send(
-          serializeEnvelope(
-            createEnvelope({
-              type: "control.reject",
-              sessionId: session.id,
-              payload: { deviceId, reason: "Another device holds control" },
-            }),
-          ),
-        );
-      }
+      sessions.claimControl(session.id, deviceId);
+      const grantMsg = createEnvelope({
+        type: "control.grant",
+        sessionId: session.id,
+        payload: { deviceId },
+      });
+      // Broadcast to ALL clients so previous controller updates its state
+      broadcastToClients(session, grantMsg);
+      sendToHost(session, grantMsg);
       break;
     }
     case "control.release": {

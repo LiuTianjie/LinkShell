@@ -70,7 +70,9 @@ function getClientIp(req: IncomingMessage): string {
  * Start an embedded gateway. Returns a handle to get URLs and close it.
  * Used by CLI when no external --gateway is provided.
  */
-export function startEmbeddedGateway(options: EmbeddedGatewayOptions = {}): Promise<EmbeddedGateway> {
+export function startEmbeddedGateway(
+  options: EmbeddedGatewayOptions = {},
+): Promise<EmbeddedGateway> {
   const targetPort = options.port ?? 0; // 0 = random available port
   const logLevel = options.logLevel ?? "warn";
   const silent = options.silent ?? false;
@@ -139,6 +141,7 @@ export function startEmbeddedGateway(options: EmbeddedGatewayOptions = {}): Prom
           createdAt: s.createdAt,
           provider: s.provider ?? null,
           hostname: s.hostname ?? null,
+          platform: s.platform ?? null,
         }));
         json(res, 200, { sessions });
         return;
@@ -169,19 +172,31 @@ export function startEmbeddedGateway(options: EmbeddedGatewayOptions = {}): Prom
       json(res, 404, { error: "not_found" });
     } catch (err) {
       if (err instanceof ZodError) {
-        json(res, 400, { error: "invalid_message", message: err.errors[0]?.message ?? "Validation failed" });
+        json(res, 400, {
+          error: "invalid_message",
+          message: err.errors[0]?.message ?? "Validation failed",
+        });
       } else if (err instanceof BodyTooLargeError) {
-        json(res, 413, { error: "body_too_large", message: "Request body exceeds limit" });
+        json(res, 413, {
+          error: "body_too_large",
+          message: "Request body exceeds limit",
+        });
       } else if (err instanceof SyntaxError) {
         json(res, 400, { error: "invalid_json", message: "Malformed JSON" });
       } else {
         log("error", `unhandled: ${err}`);
-        json(res, 500, { error: "internal_error", message: "Internal server error" });
+        json(res, 500, {
+          error: "internal_error",
+          message: "Internal server error",
+        });
       }
     }
   });
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_MESSAGE_SIZE });
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: MAX_WS_MESSAGE_SIZE,
+  });
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
@@ -194,88 +209,117 @@ export function startEmbeddedGateway(options: EmbeddedGatewayOptions = {}): Prom
     });
   });
 
-  wss.on("connection", (socket: WebSocket, _request: IncomingMessage, url: URL) => {
-    const sessionId = url.searchParams.get("sessionId");
-    const role = url.searchParams.get("role") as "host" | "client" | null;
+  wss.on(
+    "connection",
+    (socket: WebSocket, _request: IncomingMessage, url: URL) => {
+      const sessionId = url.searchParams.get("sessionId");
+      const role = url.searchParams.get("role") as "host" | "client" | null;
 
-    if (!sessionId || !role || (role !== "host" && role !== "client")) {
-      socket.close(1008, "missing sessionId or role");
-      return;
-    }
-
-    const deviceId = url.searchParams.get("deviceId") ?? randomUUID();
-    const device = { socket, role, deviceId, connectedAt: Date.now() };
-
-    if (role === "host") {
-      const existingSession = sessionManager.get(sessionId);
-      const isReconnect = existingSession && existingSession.clients.size > 0 && existingSession.state === "host_disconnected";
-      sessionManager.setHost(sessionId, device);
-      if (isReconnect) {
-        const notification = serializeEnvelope(
-          createEnvelope({ type: "session.host_reconnected", sessionId, payload: {} }),
-        );
-        for (const [, client] of existingSession.clients) {
-          if (client.socket.readyState === client.socket.OPEN) client.socket.send(notification);
-        }
+      if (!sessionId || !role || (role !== "host" && role !== "client")) {
+        socket.close(1008, "missing sessionId or role");
+        return;
       }
-    } else {
-      sessionManager.addClient(sessionId, device);
-    }
 
-    socket.send(
-      serializeEnvelope(
-        createEnvelope({
-          type: "session.connect",
-          sessionId,
-          payload: { role, clientName: deviceId, protocolVersion: PROTOCOL_VERSION },
-        }),
-      ),
-    );
+      const deviceId = url.searchParams.get("deviceId") ?? randomUUID();
+      const device = { socket, role, deviceId, connectedAt: Date.now() };
 
-    const pingTimer = setInterval(() => {
-      if (socket.readyState === socket.OPEN) socket.ping();
-    }, PING_INTERVAL);
-
-    socket.on("message", (data: WebSocket.RawData) => {
-      handleSocketMessage(socket, data.toString(), role, sessionId, deviceId, sessionManager);
-    });
-
-    socket.on("close", () => {
-      clearInterval(pingTimer);
       if (role === "host") {
-        const result = sessionManager.removeHost(sessionId);
-        if (result) {
+        const existingSession = sessionManager.get(sessionId);
+        const isReconnect =
+          existingSession &&
+          existingSession.clients.size > 0 &&
+          existingSession.state === "host_disconnected";
+        sessionManager.setHost(sessionId, device);
+        if (isReconnect) {
           const notification = serializeEnvelope(
-            createEnvelope({ type: "session.host_disconnected", sessionId, payload: { reason: "host connection closed" } }),
+            createEnvelope({
+              type: "session.host_reconnected",
+              sessionId,
+              payload: {},
+            }),
           );
-          for (const [, client] of result.clients) {
-            if (client.socket.readyState === client.socket.OPEN) client.socket.send(notification);
+          for (const [, client] of existingSession.clients) {
+            if (client.socket.readyState === client.socket.OPEN)
+              client.socket.send(notification);
           }
         }
       } else {
-        sessionManager.removeClient(sessionId, deviceId);
+        sessionManager.addClient(sessionId, device);
       }
-    });
 
-    socket.on("error", () => {});
-  });
+      socket.send(
+        serializeEnvelope(
+          createEnvelope({
+            type: "session.connect",
+            sessionId,
+            payload: {
+              role,
+              clientName: deviceId,
+              protocolVersion: PROTOCOL_VERSION,
+            },
+          }),
+        ),
+      );
+
+      const pingTimer = setInterval(() => {
+        if (socket.readyState === socket.OPEN) socket.ping();
+      }, PING_INTERVAL);
+
+      socket.on("message", (data: WebSocket.RawData) => {
+        handleSocketMessage(
+          socket,
+          data.toString(),
+          role,
+          sessionId,
+          deviceId,
+          sessionManager,
+        );
+      });
+
+      socket.on("close", () => {
+        clearInterval(pingTimer);
+        if (role === "host") {
+          const result = sessionManager.removeHost(sessionId);
+          if (result) {
+            const notification = serializeEnvelope(
+              createEnvelope({
+                type: "session.host_disconnected",
+                sessionId,
+                payload: { reason: "host connection closed" },
+              }),
+            );
+            for (const [, client] of result.clients) {
+              if (client.socket.readyState === client.socket.OPEN)
+                client.socket.send(notification);
+            }
+          }
+        } else {
+          sessionManager.removeClient(sessionId, deviceId);
+        }
+      });
+
+      socket.on("error", () => {});
+    },
+  );
 
   return new Promise<EmbeddedGateway>((resolve, reject) => {
     server.on("error", reject);
     server.listen(targetPort, () => {
       const addr = server.address();
-      const actualPort = typeof addr === "object" && addr ? addr.port : targetPort;
+      const actualPort =
+        typeof addr === "object" && addr ? addr.port : targetPort;
       log("info", `embedded gateway on port ${actualPort}`);
       resolve({
         port: actualPort,
         httpUrl: `http://127.0.0.1:${actualPort}`,
         wsUrl: `ws://127.0.0.1:${actualPort}/ws`,
-        close: () => new Promise<void>((res) => {
-          wss.clients.forEach((ws) => ws.close(1001, "shutting down"));
-          sessionManager.destroy();
-          pairingManager.destroy();
-          server.close(() => res());
-        }),
+        close: () =>
+          new Promise<void>((res) => {
+            wss.clients.forEach((ws) => ws.close(1001, "shutting down"));
+            sessionManager.destroy();
+            pairingManager.destroy();
+            server.close(() => res());
+          }),
       });
     });
   });

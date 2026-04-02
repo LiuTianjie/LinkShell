@@ -48,6 +48,7 @@ interface GatewayGroup {
 interface SessionListScreenProps {
   gatewayBaseUrl: string;
   onSelectSession: (sessionId: string, serverUrl?: string) => void;
+  refreshKey?: number;
 }
 
 /* ── Skeleton pulse ─────────────────────────────── */
@@ -385,6 +386,7 @@ function GatewaySection({
 export function SessionListScreen({
   gatewayBaseUrl,
   onSelectSession,
+  refreshKey,
 }: SessionListScreenProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -435,7 +437,7 @@ export function SessionListScreen({
 
   useEffect(() => {
     fetchAllGateways();
-  }, [fetchAllGateways]);
+  }, [fetchAllGateways, refreshKey]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);

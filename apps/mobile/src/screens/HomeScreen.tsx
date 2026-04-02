@@ -174,9 +174,7 @@ export function HomeScreen({
                 {latest.sessionId.slice(0, 8)} · {timeAgo(latest.connectedAt)}
               </Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 }}>
-                {latest.platform ? (
-                  <AppSymbol name={platformIcon(latest.platform)} size={12} color={theme.textTertiary} />
-                ) : null}
+                <AppSymbol name={platformIcon(latest.platform)} size={12} color={theme.textTertiary} />
                 <Text style={{ color: theme.textTertiary, fontSize: 12 }} numberOfLines={1}>
                   {latest.hostname ?? safeHost(latest.serverUrl)}
                 </Text>
@@ -305,9 +303,7 @@ function SwipeableRow({
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ color: theme.text, fontSize: 15 }} numberOfLines={1}>{item.sessionId.slice(0, 8)}</Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            {item.platform ? (
-              <AppSymbol name={platformIcon(item.platform)} size={12} color={theme.textTertiary} />
-            ) : null}
+            <AppSymbol name={platformIcon(item.platform)} size={12} color={theme.textTertiary} />
             <Text style={{ color: theme.textTertiary, fontSize: 13 }} numberOfLines={1}>{item.hostname ?? safeHost(item.serverUrl)}</Text>
             <Text style={{ color: theme.textTertiary, fontSize: 13 }}> · {timeAgo(item.connectedAt)}</Text>
           </View>

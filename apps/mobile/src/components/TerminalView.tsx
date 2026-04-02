@@ -120,7 +120,7 @@ function dismissKb(){try{if(window.term&&window.term.textarea)window.term.textar
     }, [theme.accent, theme.bgTerminal, theme.mode]);
 
     const postToWebView = useCallback((msg: object) => {
-      const js = `window.handleRNMessage(${JSON.stringify(JSON.stringify(msg))});true;`;
+      const js = `if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify(msg))})}true;`;
       webViewRef.current?.injectJavaScript(js);
     }, []);
 

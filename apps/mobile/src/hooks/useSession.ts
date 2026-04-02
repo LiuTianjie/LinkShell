@@ -71,6 +71,7 @@ export function useSession({
   const socketRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const healthProbeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempts = useRef(0);
   const deviceIdRef = useRef(generateId());
   const sessionIdRef = useRef("");
@@ -160,6 +161,25 @@ export function useSession({
         reconnectAttempts.current = 0;
         startHeartbeat();
         requestControl(sid);
+        // Health probe: verify host is actually online via REST
+        if (healthProbeRef.current) clearTimeout(healthProbeRef.current);
+        healthProbeRef.current = setTimeout(async () => {
+          // Only probe if we're still in "connected" state (no host_disconnected received yet)
+          if (statusRef.current !== "connected") return;
+          try {
+            const res = await fetch(
+              `${resolvedGateway}/sessions/${encodeURIComponent(sid)}`,
+            );
+            if (!res.ok) return;
+            const body = (await res.json()) as { hasHost?: boolean };
+            if (body.hasHost === false && statusRef.current === "connected") {
+              setStatus("host_disconnected" as ConnectionStatus);
+              setConnectionDetail("Host is not connected to this session.");
+            }
+          } catch {
+            // REST probe failed, rely on WS messages
+          }
+        }, 1500);
         if (isReconnect) {
           sendRaw(
             createEnvelope({
@@ -226,6 +246,7 @@ export function useSession({
             break;
           }
           case "control.reject":
+            console.warn("[useSession] control.reject received (unexpected)");
             break;
           case "control.release": {
             const p = parseTypedPayload("control.release", envelope.payload);
@@ -420,6 +441,10 @@ export function useSession({
       clearTimeout(reconnectRef.current);
       reconnectRef.current = null;
     }
+    if (healthProbeRef.current) {
+      clearTimeout(healthProbeRef.current);
+      healthProbeRef.current = null;
+    }
     socketRef.current?.close();
     socketRef.current = null;
     reconnectAttempts.current = 0;
@@ -436,6 +461,7 @@ export function useSession({
     return () => {
       stopHeartbeat();
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      if (healthProbeRef.current) clearTimeout(healthProbeRef.current);
       socketRef.current?.close();
     };
   }, [stopHeartbeat]);

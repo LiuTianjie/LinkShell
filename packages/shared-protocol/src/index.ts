@@ -85,7 +85,7 @@ export const sessionAckPayloadSchema = z.object({
 });
 
 export const sessionResumePayloadSchema = z.object({
-  lastAckedSeq: z.number().int().nonnegative(),
+  lastAckedSeq: z.number().int().min(-1),
 });
 
 export const sessionHeartbeatPayloadSchema = z.object({

@@ -28,7 +28,7 @@
       "bundler": "metro"
     },
     "ios": {
-      "bundleIdentifier": "com.nickname4th.linkshell",
+      "bundleIdentifier": "com.bd.linkshell",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {
         "NSAppTransportSecurity": {
@@ -56,7 +56,7 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.nickname4th.linkshell"
+      "package": "com.bd.linkshell"
     }
   }
 }

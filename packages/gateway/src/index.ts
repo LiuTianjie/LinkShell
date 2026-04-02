@@ -199,6 +199,7 @@ async function handleRequest(
       createdAt: s.createdAt,
       provider: s.provider ?? null,
       hostname: s.hostname ?? null,
+      platform: s.platform ?? null,
     }));
     json(res, 200, { sessions });
     return;
@@ -317,6 +318,29 @@ wss.on(
         }),
       ),
     );
+
+    // If client just joined and host is not connected, notify immediately
+    if (role === "client") {
+      const sessionAfterJoin = sessionManager.get(sessionId);
+      if (sessionAfterJoin) {
+        const hostGone =
+          !sessionAfterJoin.host ||
+          sessionAfterJoin.state === "host_disconnected" ||
+          sessionAfterJoin.host.socket.readyState !==
+            sessionAfterJoin.host.socket.OPEN;
+        if (hostGone) {
+          socket.send(
+            serializeEnvelope(
+              createEnvelope({
+                type: "session.host_disconnected",
+                sessionId,
+                payload: { reason: "host not connected" },
+              }),
+            ),
+          );
+        }
+      }
+    }
 
     // Ping/pong for liveness
     const pingTimer = setInterval(() => {

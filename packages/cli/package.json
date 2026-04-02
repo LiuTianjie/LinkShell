@@ -1,6 +1,6 @@
 {
   "name": "linkshell-cli",
-  "version": "0.1.10",
+  "version": "0.1.15",
   "description": "Remote terminal bridge for Claude Code / Codex — control from your phone",
   "type": "module",
   "main": "dist/index.js",
@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@linkshell/protocol": "^0.1.0",
-    "@linkshell/gateway": "^0.1.1",
+    "@linkshell/gateway": "^0.1.7",
     "commander": "^13.1.0",
     "node-pty": "^1.0.0",
     "qrcode-terminal": "^0.12.0",
