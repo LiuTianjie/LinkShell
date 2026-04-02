@@ -72,6 +72,7 @@ export const sessionConnectPayloadSchema = z.object({
   provider: z.enum(["claude", "codex", "custom"]).optional(),
   protocolVersion: z.number().int().optional(),
   hostname: z.string().optional(),
+  platform: z.string().optional(),
 });
 
 export const terminalExitPayloadSchema = z.object({

@@ -1,12 +1,32 @@
 # LinkShell Gateway 部署指南
 
-## Docker 部署（推荐）
+## 方式 1：用 CLI 直接跑（最简单）
+
+不需要 clone 仓库，不需要 Docker。
+
+```bash
+npm install -g linkshell-cli
+
+# 后台运行（推荐）
+linkshell gateway --daemon --port 8787
+
+# 查看状态
+linkshell gateway status
+
+# 查看日志
+tail -f ~/.linkshell/gateway.log
+
+# 停止
+linkshell gateway stop
+```
+
+## 方式 2：Docker 部署
 
 ### 最小部署
 
 ```bash
 git clone https://github.com/LiuTianjie/LinkShell
-cd linkshell
+cd LinkShell
 docker compose up -d
 ```
 

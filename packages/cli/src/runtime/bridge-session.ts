@@ -1,6 +1,6 @@
 import * as pty from "node-pty";
 import WebSocket from "ws";
-import { hostname } from "node:os";
+import { hostname, platform } from "node:os";
 import {
   createEnvelope,
   parseEnvelope,
@@ -11,6 +11,7 @@ import {
 import type { Envelope } from "@linkshell/protocol";
 import type { ProviderConfig } from "../providers.js";
 import { ScrollbackBuffer } from "./scrollback.js";
+import { getLanIp } from "../utils/lan-ip.js";
 
 export interface BridgeSessionOptions {
   gatewayUrl: string;
@@ -39,7 +40,13 @@ function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
       hostname === "0.0.0.0" ||
       hostname === "::1"
     ) {
-      return undefined;
+      // Replace localhost with LAN IP so real devices can reach it
+      const lanIp = getLanIp();
+      if (lanIp === "127.0.0.1") {
+        return undefined; // No LAN interface found, can't help
+      }
+      url.hostname = lanIp;
+      return url.toString().replace(/\/+$/, "");
     }
     return url.toString().replace(/\/+$/, "");
   } catch {
@@ -106,7 +113,9 @@ export class BridgeSession {
   }
 
   async start(): Promise<void> {
-    this.log(`starting session (gateway=${this.options.gatewayUrl}, provider=${this.options.providerConfig.provider})`);
+    this.log(
+      `starting session (gateway=${this.options.gatewayUrl}, provider=${this.options.providerConfig.provider})`,
+    );
     if (!this.sessionId) {
       await this.createPairing();
     }
@@ -200,6 +209,7 @@ export class BridgeSession {
             provider: this.options.providerConfig.provider,
             protocolVersion: PROTOCOL_VERSION,
             hostname: hostname(),
+            platform: platform(),
           },
         }),
       );
@@ -208,7 +218,9 @@ export class BridgeSession {
 
     this.socket.on("message", (data) => {
       const envelope = parseEnvelope(data.toString());
-      this.log(`recv ${envelope.type}${envelope.seq !== undefined ? ` seq=${envelope.seq}` : ""}`);
+      this.log(
+        `recv ${envelope.type}${envelope.seq !== undefined ? ` seq=${envelope.seq}` : ""}`,
+      );
       this.handleMessage(envelope);
     });
 

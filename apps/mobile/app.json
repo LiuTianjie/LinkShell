@@ -3,8 +3,20 @@
     "name": "LinkShell",
     "slug": "linkshell",
     "scheme": "linkshell",
+    "icon": "./assets/adaptive-icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#131314"
+    },
     "platforms": ["ios", "android", "web"],
     "plugins": [
+      [
+        "expo-dev-client",
+        {
+          "launchMode": "most-recent"
+        }
+      ],
       [
         "expo-camera",
         {
@@ -14,6 +26,37 @@
     ],
     "web": {
       "bundler": "metro"
+    },
+    "ios": {
+      "bundleIdentifier": "com.nickname4th.linkshell",
+      "icon": "./assets/adaptive-icon.png",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true,
+          "NSExceptionDomains": {
+            "69.5.20.235": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            },
+            "httpbin.org": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            }
+          }
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#131314"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.nickname4th.linkshell"
     }
   }
 }

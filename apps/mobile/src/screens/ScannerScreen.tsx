@@ -2,13 +2,15 @@ import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import type { BarcodeScanningResult } from "expo-camera";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppSymbol } from "../components/AppSymbol";
 import { parsePairingLink } from "../utils/pairing-link";
 
 interface ScannerScreenProps {
@@ -20,6 +22,8 @@ export function ScannerScreen({ onClose, onScan }: ScannerScreenProps) {
   const [permission, requestPermission] = useCameraPermissions();
   const [error, setError] = useState<string | null>(null);
   const [scanned, setScanned] = useState(false);
+  const scannedRef = React.useRef(false);
+  const insets = useSafeAreaInsets();
 
   const permissionState = useMemo(() => {
     if (!permission) return "loading" as const;
@@ -28,54 +32,95 @@ export function ScannerScreen({ onClose, onScan }: ScannerScreenProps) {
   }, [permission]);
 
   const handleBarcodeScanned = useCallback((result: BarcodeScanningResult) => {
-    if (scanned) return;
+    if (scannedRef.current) return;
+    scannedRef.current = true;
 
+    console.log('[LinkShell] Scanned raw:', result.data);
     const parsed = parsePairingLink(result.data);
     if (!parsed) {
+      console.warn('[LinkShell] QR parse failed for:', result.data);
       setScanned(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError("当前二维码不是 LinkShell 配对二维码。请在 CLI 中重新生成。");
       return;
     }
 
+    console.log('[LinkShell] Parsed QR:', JSON.stringify(parsed));
     setScanned(true);
     setError(null);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onScan(parsed);
-  }, [onScan, scanned]);
+  }, [onScan]);
 
   const handleTryAgain = useCallback(() => {
     setError(null);
     setScanned(false);
+    scannedRef.current = false;
   }, []);
 
   if (permissionState === "loading") {
     return (
-      <SafeAreaView style={styles.centeredScreen}>
-        <ActivityIndicator size="small" color="#93c5fd" />
-        <Text style={styles.helperText}>正在准备摄像头...</Text>
-      </SafeAreaView>
+      <View style={{ flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center", gap: 12 }}>
+        <ActivityIndicator size="small" color="#ffffff" />
+        <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 15 }}>正在准备摄像头…</Text>
+      </View>
     );
   }
 
   if (permissionState === "denied") {
     return (
-      <SafeAreaView style={styles.centeredScreen}>
-        <View style={styles.permissionCard}>
-          <Text style={styles.permissionTitle}>需要摄像头权限</Text>
-          <Text style={styles.permissionText}>用于扫描终端展示的配对二维码。</Text>
-          <Pressable style={styles.primaryButton} onPress={requestPermission}>
-            <Text style={styles.primaryButtonText}>授权摄像头</Text>
+      <View style={{ flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <View style={{
+          width: "100%",
+          borderRadius: 14,
+          borderCurve: "continuous",
+          padding: 24,
+          backgroundColor: "#1c1c1e",
+          alignItems: "center",
+          gap: 12,
+        }}>
+          <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255,149,0,0.15)", alignItems: "center", justifyContent: "center", marginBottom: 4 }}>
+            <AppSymbol name="camera.fill" size={26} color="#ff9500" />
+          </View>
+          <Text style={{ color: "#ffffff", fontSize: 20, fontWeight: "600", textAlign: "center" }}>需要摄像头权限</Text>
+          <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 15, lineHeight: 21, textAlign: "center" }}>用于扫描终端展示的配对二维码。</Text>
+          <Pressable
+            style={({ pressed }) => ({
+              marginTop: 4,
+              width: "100%",
+              minHeight: 50,
+              borderRadius: 12,
+              borderCurve: "continuous" as const,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? "#0064d2" : "#007aff",
+            })}
+            onPress={requestPermission}
+          >
+            <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>授权摄像头</Text>
           </Pressable>
-          <Pressable style={styles.secondaryButton} onPress={onClose}>
-            <Text style={styles.secondaryButtonText}>稍后再说</Text>
+          <Pressable
+            style={({ pressed }) => ({
+              width: "100%",
+              minHeight: 50,
+              borderRadius: 12,
+              borderCurve: "continuous" as const,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: pressed ? 0.7 : 1,
+            })}
+            onPress={onClose}
+          >
+            <Text style={{ color: "#007aff", fontSize: 17, fontWeight: "500" }}>稍后再说</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.cameraLayer}>
+    <View style={{ flex: 1, backgroundColor: "#000" }}>
+      <View style={{ flex: 1 }}>
         <CameraView
           style={StyleSheet.absoluteFill}
           facing="back"
@@ -83,176 +128,80 @@ export function ScannerScreen({ onClose, onScan }: ScannerScreenProps) {
           onBarcodeScanned={handleBarcodeScanned}
         />
 
-        <View style={styles.topOverlay}>
-          <Pressable onPress={onClose} style={styles.closeBtn}>
-            <Text style={styles.closeText}>关闭</Text>
+        {/* Top bar */}
+        <View style={{
+          paddingTop: insets.top + 8,
+          paddingBottom: 12,
+          paddingHorizontal: 16,
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+          backgroundColor: "rgba(0,0,0,0.3)",
+        }}>
+          <Pressable
+            style={({ pressed }) => ({
+              width: 32, height: 32, borderRadius: 16,
+              backgroundColor: pressed ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.18)",
+              alignItems: "center", justifyContent: "center",
+            })}
+            onPress={onClose}
+            hitSlop={8}
+          >
+            <AppSymbol name="xmark" size={12} color="#ffffff" />
           </Pressable>
-          <Text style={styles.title}>扫码连接</Text>
-          <View style={styles.closeBtnPlaceholder} />
+          <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>扫码连接</Text>
+          <View style={{ width: 32 }} />
         </View>
 
-        <View style={styles.frameWrap} pointerEvents="none">
-          <View style={styles.frameCard}>
-            <View style={styles.scanFrame} />
-            <Text style={styles.frameHint}>将终端中显示的配对二维码放入框内</Text>
-          </View>
+        {/* Scan frame */}
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }} pointerEvents="none">
+          <View style={{
+            width: 240, height: 240,
+            borderRadius: 20,
+            borderCurve: "continuous",
+            borderWidth: 3,
+            borderColor: "rgba(255,255,255,0.9)",
+          }} />
+          <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: "500", marginTop: 16 }}>
+            将配对二维码放入框内
+          </Text>
         </View>
 
-        <View style={styles.bottomOverlay}>
-          <Text style={styles.tipTitle}>将二维码置于取景框内</Text>
-          <Text style={styles.tipText}>扫描成功后会自动填入配对码和网关地址。</Text>
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {/* Bottom info */}
+        <View style={{
+          backgroundColor: "rgba(0,0,0,0.5)",
+          paddingHorizontal: 20,
+          paddingTop: 16,
+          paddingBottom: Math.max(insets.bottom, 16) + 8,
+          gap: 8,
+        }}>
+          {error ? (
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+              <AppSymbol name="exclamationmark.triangle.fill" size={18} color="#ff453a" style={{ marginTop: 1 }} />
+              <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 14, lineHeight: 20, flex: 1 }}>{error}</Text>
+            </View>
+          ) : (
+            <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 14, lineHeight: 20 }}>
+              扫描成功后会自动填入配对码和网关地址。
+            </Text>
+          )}
           {scanned ? (
-            <Pressable style={styles.primaryButton} onPress={handleTryAgain}>
-              <Text style={styles.primaryButtonText}>重新扫描</Text>
+            <Pressable
+              style={({ pressed }) => ({
+                minHeight: 50,
+                borderRadius: 12,
+                borderCurve: "continuous" as const,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed ? "#0064d2" : "#007aff",
+              })}
+              onPress={handleTryAgain}
+            >
+              <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>重新扫描</Text>
             </Pressable>
           ) : null}
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: "#000000",
-  },
-  cameraLayer: {
-    flex: 1,
-  },
-  centeredScreen: {
-    flex: 1,
-    backgroundColor: "#0b1220",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-    gap: 10,
-  },
-  helperText: {
-    color: "#e5e7eb",
-    fontSize: 15,
-  },
-  permissionCard: {
-    width: "100%",
-    borderRadius: 18,
-    padding: 20,
-    backgroundColor: "#111827",
-    gap: 12,
-  },
-  permissionTitle: {
-    color: "#f9fafb",
-    fontSize: 21,
-    fontWeight: "700",
-  },
-  permissionText: {
-    color: "#cbd5e1",
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  topOverlay: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 14,
-    backgroundColor: "rgba(0,0,0,0.28)",
-  },
-  closeBtn: {
-    minHeight: 34,
-    minWidth: 54,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.14)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-  },
-  closeText: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  closeBtnPlaceholder: {
-    minWidth: 54,
-  },
-  title: {
-    color: "#ffffff",
-    fontSize: 17,
-    fontWeight: "700",
-  },
-  frameWrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-  },
-  frameCard: {
-    width: "100%",
-    alignItems: "center",
-    gap: 14,
-  },
-  scanFrame: {
-    width: 250,
-    height: 250,
-    borderRadius: 28,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.95)",
-    backgroundColor: "rgba(255,255,255,0.04)",
-  },
-  frameHint: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  bottomOverlay: {
-    backgroundColor: "rgba(0,0,0,0.56)",
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 20,
-    gap: 8,
-  },
-  tipTitle: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  tipText: {
-    color: "#d1d5db",
-    fontSize: 14,
-    lineHeight: 19,
-  },
-  errorText: {
-    color: "#fecaca",
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  primaryButton: {
-    marginTop: 4,
-    minHeight: 46,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#2563eb",
-    paddingHorizontal: 14,
-  },
-  primaryButtonText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  secondaryButton: {
-    minHeight: 46,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-  },
-  secondaryButtonText: {
-    color: "#e5e7eb",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-});

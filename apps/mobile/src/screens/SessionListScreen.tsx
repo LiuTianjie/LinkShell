@@ -1,15 +1,29 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  FlatList,
+  Animated,
+  LayoutAnimation,
+  Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
+  UIManager,
   View,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useTheme } from "../theme";
+import { AppSymbol } from "../components/AppSymbol";
+import { useTheme, type Theme } from "../theme";
+import { loadServers, type SavedServer } from "../storage/servers";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
+
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 interface SessionInfo {
   id: string;
@@ -21,6 +35,14 @@ interface SessionInfo {
   createdAt: number;
   provider: string | null;
   hostname: string | null;
+  platform: string | null;
+}
+
+interface GatewayGroup {
+  server: SavedServer;
+  sessions: SessionInfo[];
+  loading: boolean;
+  error: string | null;
 }
 
 interface SessionListScreenProps {
@@ -28,117 +50,504 @@ interface SessionListScreenProps {
   onSelectSession: (sessionId: string, serverUrl?: string) => void;
 }
 
+/* ── Skeleton pulse ─────────────────────────────── */
+function SkeletonRow({ theme }: { theme: Theme }) {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 0.7,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.3,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        gap: 12,
+      }}
+    >
+      <View
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 7,
+          backgroundColor: theme.borderLight,
+        }}
+      />
+      <View style={{ flex: 1, gap: 6 }}>
+        <View
+          style={{
+            width: "60%",
+            height: 14,
+            borderRadius: 4,
+            backgroundColor: theme.borderLight,
+          }}
+        />
+        <View
+          style={{
+            width: "40%",
+            height: 10,
+            borderRadius: 4,
+            backgroundColor: theme.borderLight,
+          }}
+        />
+      </View>
+    </Animated.View>
+  );
+}
+
+/* ── Fade-in wrapper ────────────────────────────── */
+function FadeIn({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(8)).current;
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateY, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, delay);
+    return () => clearTimeout(timeout);
+  }, [opacity, translateY, delay]);
+
+  return (
+    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+      {children}
+    </Animated.View>
+  );
+}
+
+/* ── Gateway Section ────────────────────────────── */
+function GatewaySection({
+  group,
+  theme,
+  onSelect,
+  index,
+}: {
+  group: GatewayGroup;
+  theme: Theme;
+  onSelect: (sessionId: string, serverUrl: string) => void;
+  index: number;
+}) {
+  return (
+    <FadeIn delay={index * 80}>
+      <View style={{ marginTop: index > 0 ? 24 : 16 }}>
+        {/* Section header */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 20,
+            paddingBottom: 8,
+            gap: 8,
+          }}
+        >
+          <View
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 3,
+              backgroundColor: group.error
+                ? theme.error
+                : group.loading
+                  ? theme.textTertiary
+                  : group.sessions.length > 0
+                    ? theme.success
+                    : theme.textTertiary,
+            }}
+          />
+          <Text
+            style={{
+              color: theme.text,
+              fontSize: 15,
+              fontWeight: "600",
+              flex: 1,
+            }}
+            numberOfLines={1}
+          >
+            {group.server.name}
+          </Text>
+          {group.server.isDefault ? (
+            <Text
+              style={{
+                color: theme.accent,
+                fontSize: 11,
+                fontWeight: "600",
+                backgroundColor: theme.accentLight,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                borderRadius: 999,
+                overflow: "hidden",
+              }}
+            >
+              默认
+            </Text>
+          ) : null}
+          {!group.loading ? (
+            <Text
+              style={{
+                color: theme.textTertiary,
+                fontSize: 12,
+                fontVariant: ["tabular-nums"],
+              }}
+            >
+              {group.sessions.length} 个会话
+            </Text>
+          ) : null}
+        </View>
+
+        <Text
+          style={{
+            color: theme.textTertiary,
+            fontSize: 12,
+            paddingHorizontal: 34,
+            marginTop: -4,
+            marginBottom: 8,
+          }}
+          numberOfLines={1}
+        >
+          {group.server.url}
+        </Text>
+
+        {/* Content card */}
+        <View
+          style={{
+            marginHorizontal: 20,
+            backgroundColor: theme.bgCard,
+            borderRadius: 12,
+            borderCurve: "continuous" as const,
+            overflow: "hidden",
+          }}
+        >
+          {group.loading ? (
+            <>
+              <SkeletonRow theme={theme} />
+              <View
+                style={{
+                  height: StyleSheet.hairlineWidth,
+                  backgroundColor: theme.separator,
+                  marginLeft: 58,
+                }}
+              />
+              <SkeletonRow theme={theme} />
+            </>
+          ) : group.error ? (
+            <View
+              style={{
+                paddingVertical: 20,
+                paddingHorizontal: 16,
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <AppSymbol
+                name="exclamationmark.triangle.fill"
+                size={20}
+                color={theme.error}
+              />
+              <Text
+                style={{
+                  color: theme.error,
+                  fontSize: 13,
+                  textAlign: "center",
+                }}
+              >
+                {group.error}
+              </Text>
+            </View>
+          ) : group.sessions.length === 0 ? (
+            <View
+              style={{
+                paddingVertical: 20,
+                paddingHorizontal: 16,
+                alignItems: "center",
+              }}
+            >
+              <Text
+                style={{
+                  color: theme.textTertiary,
+                  fontSize: 14,
+                }}
+              >
+                暂无活动会话
+              </Text>
+            </View>
+          ) : (
+            group.sessions.map((session, i) => (
+              <React.Fragment key={session.id}>
+                {i > 0 ? (
+                  <View
+                    style={{
+                      height: StyleSheet.hairlineWidth,
+                      backgroundColor: theme.separator,
+                      marginLeft: 58,
+                    }}
+                  />
+                ) : null}
+                <Pressable
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingVertical: 12,
+                    paddingHorizontal: 16,
+                    gap: 12,
+                    backgroundColor: pressed ? theme.bgInput : "transparent",
+                  })}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    onSelect(session.id, group.server.url);
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 7,
+                      borderCurve: "continuous" as const,
+                      backgroundColor: session.hasHost
+                        ? theme.success
+                        : theme.error,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <AppSymbol name="terminal.fill" size={16} color="#ffffff" />
+                  </View>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                      <Text
+                        numberOfLines={1}
+                        style={{ color: theme.text, fontSize: 15, flexShrink: 1 }}
+                      >
+                        {session.hostname ?? session.id.slice(0, 8)}
+                      </Text>
+                      {session.platform ? (
+                        <AppSymbol
+                          name={platformIcon(session.platform)}
+                          size={13}
+                          color={theme.textTertiary}
+                        />
+                      ) : null}
+                    </View>
+                    <Text
+                      numberOfLines={1}
+                      style={{ color: theme.textTertiary, fontSize: 13 }}
+                    >
+                      {session.hasHost ? "主机在线" : "主机离线"}
+                      {session.clientCount > 0
+                        ? ` · ${session.clientCount} 个客户端`
+                        : ""}
+                      {" · "}
+                      {timeAgo(session.lastActivity)}
+                    </Text>
+                  </View>
+                  <AppSymbol
+                    name="chevron.right"
+                    size={10}
+                    color={theme.textTertiary}
+                  />
+                </Pressable>
+              </React.Fragment>
+            ))
+          )}
+        </View>
+      </View>
+    </FadeIn>
+  );
+}
+
+/* ── Main Screen ────────────────────────────────── */
 export function SessionListScreen({
   gatewayBaseUrl,
   onSelectSession,
 }: SessionListScreenProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [groups, setGroups] = useState<GatewayGroup[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [initialLoad, setInitialLoad] = useState(true);
 
-  const fetchSessions = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const fetchAllGateways = useCallback(async () => {
+    const servers = await loadServers();
 
-    try {
-      const res = await fetchWithTimeout(`${gatewayBaseUrl}/sessions`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { sessions: SessionInfo[] };
-      setSessions(
-        body.sessions.sort((a, b) => b.lastActivity - a.lastActivity),
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "获取会话失败");
-    }
+    // Set loading skeleton for all gateways
+    setGroups(
+      servers.map((s) => ({
+        server: s,
+        sessions: [],
+        loading: true,
+        error: null,
+      })),
+    );
 
-    setLoading(false);
+    // Fetch all in parallel
+    const results = await Promise.allSettled(
+      servers.map(async (server) => {
+        const res = await fetchWithTimeout(`${server.url}/sessions`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as { sessions: SessionInfo[] };
+        return body.sessions.sort((a, b) => b.lastActivity - a.lastActivity);
+      }),
+    );
+
+    const finalGroups: GatewayGroup[] = servers.map((server, i) => {
+      const result = results[i]!;
+      return {
+        server,
+        sessions: result.status === "fulfilled" ? result.value : [],
+        loading: false,
+        error:
+          result.status === "rejected"
+            ? (result.reason as Error).message
+            : null,
+      };
+    });
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setGroups(finalGroups);
+    setInitialLoad(false);
   }, [gatewayBaseUrl]);
 
   useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+    fetchAllGateways();
+  }, [fetchAllGateways]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchAllGateways();
+    setRefreshing(false);
+  }, [fetchAllGateways]);
+
+  const totalSessions = groups.reduce(
+    (sum, g) => sum + g.sessions.length,
+    0,
+  );
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      <FlatList
-        data={sessions}
-        keyExtractor={(item) => item.id}
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingBottom: Math.max(insets.bottom, 20),
+          ...(initialLoad && groups.length === 0
+            ? { flexGrow: 1 }
+            : undefined),
+        }}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={loading}
-            onRefresh={fetchSessions}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
             tintColor={theme.accent}
           />
         }
-        ListHeaderComponent={
-          <View style={[styles.headerWrap, { paddingTop: Math.max(insets.top + 10, 24) }]}>
-            <View style={[styles.heroCard, { backgroundColor: theme.bgCard, borderColor: theme.border }]}> 
-              <Text style={[styles.eyebrow, { color: theme.textSecondary }]}>会话</Text>
-              <Text style={[styles.title, { color: theme.text }]}>当前网关上的活动终端</Text>
-              <Text style={[styles.subtitle, { color: theme.textSecondary }]}>不需要重新输入配对码，直接接管已有会话。</Text>
-              <View style={styles.heroMetaRow}>
-                <View style={[styles.heroMetaPill, { backgroundColor: theme.bgInput }]}> 
-                  <Text style={[styles.heroMetaLabel, { color: theme.textTertiary }]}>网关</Text>
-                  <Text style={[styles.heroMetaValue, { color: theme.text }]}>{safeHost(gatewayBaseUrl)}</Text>
-                </View>
-                <View style={[styles.heroMetaPill, { backgroundColor: theme.bgInput }]}> 
-                  <Text style={[styles.heroMetaLabel, { color: theme.textTertiary }]}>在线数</Text>
-                  <Text style={[styles.heroMetaValue, { color: theme.text }]}>{sessions.length}</Text>
-                </View>
-              </View>
-            </View>
-
-            {error ? (
-              <View style={[styles.errorBar, { backgroundColor: theme.errorLight }]}> 
-                <Text style={[styles.errorText, { color: theme.error }]}>{error}</Text>
-              </View>
-            ) : null}
-          </View>
-        }
-        contentContainerStyle={[
-          styles.listContent,
-          sessions.length === 0 && styles.emptyContainer,
-        ]}
-        renderItem={({ item, index }) => (
-          <Pressable
-            style={[styles.sessionCard, { backgroundColor: theme.bgCard, borderColor: theme.border }, index === sessions.length - 1 && styles.lastCard]}
-            onPress={() => onSelectSession(item.id, gatewayBaseUrl)}
+      >
+        {/* Header */}
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingTop: insets.top + 2,
+            paddingBottom: 4,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 34,
+              fontWeight: "700",
+              color: theme.text,
+              letterSpacing: 0.37,
+            }}
           >
-            <View style={styles.rowTop}>
-              <View style={styles.rowLeft}>
-                <View style={[styles.dot, item.hasHost ? styles.dotOnline : styles.dotOffline]} />
-                <View style={styles.titleGroup}>
-                  <Text numberOfLines={1} style={[styles.hostname, { color: theme.text }]}>
-                    {item.hostname ?? item.id.slice(0, 8)}
-                  </Text>
-                  <Text numberOfLines={1} style={[styles.sessionIdText, { color: theme.textTertiary }]}>{item.id.slice(0, 8)}</Text>
-                </View>
-              </View>
-              <Text numberOfLines={1} style={[styles.provider, { color: theme.textSecondary, backgroundColor: theme.bgInput }]}>{item.provider ?? "未知来源"}</Text>
-            </View>
+            会话
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              color: theme.textTertiary,
+              marginTop: 2,
+              fontVariant: ["tabular-nums"],
+            }}
+          >
+            {groups.length} 个网关
+            {!initialLoad ? ` · ${totalSessions} 个活动会话` : ""}
+          </Text>
+        </View>
 
-            <Text style={[styles.meta, { color: theme.textSecondary }]}>
-              {item.hasHost ? "主机在线" : "主机离线"}
-              {item.clientCount > 0 ? ` · ${item.clientCount} 个客户端` : ""}
+        {/* Gateway sections */}
+        {groups.map((group, index) => (
+          <GatewaySection
+            key={group.server.url}
+            group={group}
+            theme={theme}
+            onSelect={onSelectSession}
+            index={index}
+          />
+        ))}
+
+        {/* Global empty state (no servers at all — unlikely but safe) */}
+        {!initialLoad && groups.length === 0 ? (
+          <View
+            style={{
+              flex: 1,
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 40,
+              paddingTop: 80,
+              gap: 8,
+            }}
+          >
+            <AppSymbol
+              name="server.rack"
+              size={36}
+              color={theme.textTertiary}
+              style={{ marginBottom: 4 }}
+            />
+            <Text
+              style={{
+                color: theme.text,
+                fontSize: 17,
+                fontWeight: "600",
+              }}
+            >
+              没有网关服务器
             </Text>
-
-            <View style={styles.rowBottom}>
-              <Text style={[styles.activeTime, { color: theme.textTertiary }]}>最近活动 {timeAgo(item.lastActivity)}</Text>
-              <Text style={[styles.joinText, { color: theme.accent }]}>进入</Text>
-            </View>
-          </Pressable>
-        )}
-        ListEmptyComponent={
-          !loading ? (
-            <View style={styles.emptyWrap}>
-              <Text style={[styles.emptyTitle, { color: theme.text }]}>当前没有活动会话</Text>
-              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>先在本地启动 CLI bridge，然后下拉刷新这里的列表。</Text>
-            </View>
-          ) : null
-        }
-      />
+            <Text
+              style={{
+                color: theme.textTertiary,
+                fontSize: 15,
+                textAlign: "center",
+                lineHeight: 20,
+              }}
+            >
+              在首页的连接面板中添加网关服务器。
+            </Text>
+          </View>
+        ) : null}
+      </ScrollView>
     </View>
   );
 }
@@ -151,6 +560,15 @@ function safeHost(url: string): string {
   }
 }
 
+function platformIcon(platform: string | null | undefined): string {
+  switch (platform) {
+    case "darwin": return "apple.logo";
+    case "linux": return "server.rack";
+    case "win32": return "pc";
+    default: return "desktopcomputer";
+  }
+}
+
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts;
   if (diff < 60_000) return "刚刚";
@@ -158,176 +576,3 @@ function timeAgo(ts: number): string {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
   return `${Math.floor(diff / 86_400_000)} 天前`;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F2F4F7",
-  },
-  headerWrap: {
-    paddingBottom: 10,
-    gap: 12,
-    alignItems: "stretch",
-  },
-  heroCard: {
-    width: "100%",
-    alignSelf: "stretch",
-    borderRadius: 28,
-    borderWidth: 1,
-    padding: 20,
-    gap: 10,
-  },
-  eyebrow: {
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-  },
-  title: {
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: "800",
-  },
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  heroMetaRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 6,
-  },
-  heroMetaPill: {
-    flex: 1,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 4,
-  },
-  heroMetaLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.7,
-  },
-  heroMetaValue: {
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  errorBar: {
-    width: "100%",
-    alignSelf: "stretch",
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  errorText: {
-    fontSize: 13,
-    textAlign: "center",
-  },
-  listContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 22,
-  },
-  sessionCard: {
-    width: "100%",
-    alignSelf: "stretch",
-    borderWidth: 1,
-    borderRadius: 22,
-    padding: 18,
-    marginBottom: 14,
-    gap: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  lastCard: {
-    marginBottom: 0,
-  },
-  rowTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  rowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    flex: 1,
-    minWidth: 0,
-  },
-  titleGroup: {
-    flex: 1,
-    gap: 3,
-    minWidth: 0,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotOnline: {
-    backgroundColor: "#22c55e",
-  },
-  dotOffline: {
-    backgroundColor: "#ef4444",
-  },
-  hostname: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  sessionIdText: {
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  provider: {
-    fontSize: 12,
-    fontWeight: "600",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    overflow: "hidden",
-    flexShrink: 1,
-    maxWidth: "42%",
-  },
-  meta: {
-    fontSize: 12,
-  },
-  rowBottom: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: "#eef0f4",
-  },
-  activeTime: {
-    fontSize: 12,
-  },
-  joinText: {
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  emptyContainer: {
-    flexGrow: 1,
-  },
-  emptyWrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 32,
-    gap: 8,
-  },
-  emptyTitle: {
-    color: "#374151",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  emptyText: {
-    color: "#6b7280",
-    fontSize: 13,
-    textAlign: "center",
-    lineHeight: 18,
-  },
-});

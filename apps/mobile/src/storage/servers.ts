@@ -24,7 +24,10 @@ export async function saveServers(servers: SavedServer[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(servers));
 }
 
-export async function addServer(url: string, name?: string): Promise<SavedServer[]> {
+export async function addServer(
+  url: string,
+  name?: string,
+): Promise<SavedServer[]> {
   const servers = await loadServers();
   const normalized = url.replace(/\/+$/, "");
   const existing = servers.find((s) => s.url === normalized);
@@ -53,6 +56,15 @@ export async function removeServer(url: string): Promise<SavedServer[]> {
   }
   await saveServers(servers);
   return servers;
+}
+
+/** Remove a server AND all history records associated with it. */
+export async function removeServerWithHistory(
+  url: string,
+): Promise<SavedServer[]> {
+  const { removeByServerUrl } = await import("./history");
+  await removeByServerUrl(url);
+  return removeServer(url);
 }
 
 export async function setDefaultServer(url: string): Promise<SavedServer[]> {

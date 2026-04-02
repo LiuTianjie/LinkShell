@@ -4,15 +4,24 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.18.3",
   "pnpm": {
-    "onlyBuiltDependencies": ["node-pty", "esbuild"]
+    "onlyBuiltDependencies": [
+      "node-pty",
+      "esbuild"
+    ]
   },
   "scripts": {
     "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "devbuild": "pnpm --filter @linkshell/app devbuild",
+    "devbuild:ios": "pnpm --filter @linkshell/app devbuild:ios",
+    "devbuild:iphone": "pnpm --filter @linkshell/app devbuild:ios:device",
+    "devbuild:iphone:install": "pnpm --filter @linkshell/app devbuild:ios:device:install",
+    "devbuild:android": "pnpm --filter @linkshell/app devbuild:android",
     "dev:gateway": "pnpm --filter @linkshell/gateway dev",
     "dev:cli": "pnpm --filter linkshell-cli dev",
     "dev:app": "pnpm --filter @linkshell/app start",
+    "dev:ios": "pnpm --filter @linkshell/app start:lan",
     "dev:web": "pnpm --filter @linkshell/web-debug dev"
   },
   "devDependencies": {

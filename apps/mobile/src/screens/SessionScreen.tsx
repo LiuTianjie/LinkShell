@@ -9,7 +9,9 @@ import {
   Text,
   View,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppSymbol } from "../components/AppSymbol";
 import { TerminalView } from "../components/TerminalView";
 import type { TerminalViewHandle } from "../components/TerminalView";
 import type { ConnectionStatus } from "../hooks/useSession";
@@ -46,11 +48,6 @@ export function SessionScreen({
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
-  const topSurfaceColor = theme.mode === "light" ? theme.bgCard : theme.bgElevated;
-  const topBorderColor = theme.mode === "light" ? theme.border : theme.borderLight;
-  const toolbarBg = theme.mode === "light" ? "#f2f2f7" : "rgba(255,255,255,0.08)";
-  const toolbarBorder = theme.mode === "light" ? "rgba(60,60,67,0.18)" : "rgba(255,255,255,0.1)";
-  const toolbarPressedBg = theme.mode === "light" ? "#e5e7eb" : "rgba(255,255,255,0.14)";
   const termRef = useRef<TerminalViewHandle>(null);
   const writtenCountRef = useRef(0);
   const [keyboardHintVisible, setKeyboardHintVisible] = useState(true);
@@ -157,139 +154,197 @@ export function SessionScreen({
 
   const statusColor = STATUS_COLORS[status] ?? theme.textSecondary;
   const statusText = getStatusText(status);
-  const controlCopy = getControlCopy(hasControl, isControlledByOther);
   const banner = getSessionBanner(status);
   const showReconnectButton = status === "disconnected" || (status.startsWith("error:") && Boolean(sessionId));
+
+  const toolbarBg = theme.mode === "light" ? "#e5e5ea" : "rgba(255,255,255,0.1)";
+
   return (
-    <View style={[styles.container, { backgroundColor: theme.bgTerminal }]}> 
+    <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
       <KeyboardAvoidingView
-        style={[styles.keyboardContainer, { backgroundColor: theme.bgTerminal }]}
+        style={{ flex: 1, backgroundColor: theme.bgTerminal }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <View style={{ height: insets.top, backgroundColor: topSurfaceColor }} />
+        <View style={{ height: insets.top, backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated }} />
 
-        <View style={[styles.topBar, { backgroundColor: topSurfaceColor, borderBottomColor: topBorderColor }]}> 
-          <View style={styles.topMetaRow}>
-            <View style={styles.topLeft}>
-              <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-              <Text style={[styles.statusLabel, { color: theme.textSecondary }]}>{statusText}</Text>
-              <Text style={[styles.sessionText, { color: theme.textTertiary }]} numberOfLines={1}>{sessionId.slice(0, 8)}</Text>
+        {/* Top Bar */}
+        <View style={{
+          backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.separator,
+          paddingHorizontal: 16,
+          paddingTop: 8,
+          paddingBottom: 10,
+          gap: 8,
+        }}>
+          {/* Row 1: Status + Leave */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusColor }} />
+              <Text style={{ fontSize: 13, fontWeight: "600", color: theme.text }}>{statusText}</Text>
+              <Text style={{ fontSize: 11, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", color: theme.textTertiary }} numberOfLines={1}>{sessionId.slice(0, 8)}</Text>
             </View>
             <Pressable
-              style={({ pressed }) => [
-                styles.leaveBtn,
-                {
-                  backgroundColor: pressed ? theme.error : theme.errorLight,
-                  borderColor: theme.mode === "light" ? "rgba(220,38,38,0.18)" : "rgba(239,68,68,0.18)",
-                },
-              ]}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 14,
+                borderCurve: "continuous" as const,
+                backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
+              })}
               onPress={handleLeave}
               hitSlop={10}
             >
-              <Text style={[styles.leaveBtnText, { color: theme.error }]}>退出</Text>
+              <AppSymbol name="xmark.circle.fill" size={14} color={theme.error} />
+              <Text style={{ fontSize: 13, fontWeight: "600", color: theme.error }}>退出</Text>
             </Pressable>
           </View>
 
-          <View style={styles.topControlRow}>
-            <View style={styles.controlSummary}>
-              <Text style={[styles.controlSummaryTitle, { color: theme.text }]}>{controlCopy.title}</Text>
-              <Text style={[styles.controlSummaryBody, { color: theme.textSecondary }]}>{controlCopy.description}</Text>
-            </View>
+          {/* Row 2: Control + Zoom */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            {/* Control button */}
+            <Pressable
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 14,
+                borderCurve: "continuous" as const,
+                backgroundColor: hasControl
+                  ? (pressed ? theme.accent : theme.accentLight)
+                  : (pressed ? toolbarBg : "transparent"),
+              })}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                hasControl ? onReleaseControl() : onClaimControl();
+              }}
+              disabled={status !== "connected" && status !== "host_disconnected"}
+            >
+              <AppSymbol
+                name={hasControl ? "hand.raised.fill" : "hand.raised"}
+                size={14}
+                color={hasControl ? theme.accent : theme.textSecondary}
+              />
+              <Text style={{ fontSize: 13, fontWeight: "500", color: hasControl ? theme.accent : theme.textSecondary }}>
+                {hasControl ? "已接管 · 释放" : isControlledByOther ? "只读 · 接管" : "接管控制"}
+              </Text>
+            </Pressable>
 
-            <View style={styles.topRight}>
-              <View style={[styles.zoomGroup, { backgroundColor: toolbarBg, borderColor: toolbarBorder }]}>
-                <Pressable
-                  style={({ pressed }) => [styles.zoomBtn, pressed && { backgroundColor: toolbarPressedBg }]}
-                  onPress={handleZoomOut}
-                  hitSlop={10}
-                >
-                  <Text style={[styles.zoomBtnText, { color: theme.textSecondary }]}>A-</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.zoomBadge, pressed && { backgroundColor: toolbarPressedBg }]}
-                  onPress={handleZoomReset}
-                  hitSlop={10}
-                >
-                  <Text style={[styles.zoomBadgeText, { color: theme.accent }]}>{zoomPercent}%</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.zoomBtn, pressed && { backgroundColor: toolbarPressedBg }]}
-                  onPress={handleZoomIn}
-                  hitSlop={10}
-                >
-                  <Text style={[styles.zoomBtnText, { color: theme.textSecondary }]}>A+</Text>
-                </Pressable>
-              </View>
+            {/* Zoom controls */}
+            <View style={{
+              flexDirection: "row",
+              alignItems: "center",
+              borderRadius: 8,
+              borderCurve: "continuous",
+              backgroundColor: toolbarBg,
+              overflow: "hidden",
+            }}>
               <Pressable
-                style={({ pressed }) => [
-                  styles.controlBtn,
-                  {
-                    backgroundColor: pressed
-                      ? (hasControl ? theme.accent : toolbarPressedBg)
-                      : (hasControl ? theme.accentLight : toolbarBg),
-                    borderColor: hasControl ? theme.accentLight : toolbarBorder,
-                  },
-                ]}
-                onPress={hasControl ? onReleaseControl : onClaimControl}
-                disabled={status !== "connected" && status !== "host_disconnected"}
-                hitSlop={10}
+                style={({ pressed }) => ({
+                  width: 34, height: 30,
+                  alignItems: "center", justifyContent: "center",
+                  backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
+                })}
+                onPress={handleZoomOut}
               >
-                <Text style={[styles.controlBtnText, { color: hasControl ? theme.accent : theme.textSecondary }]}> 
-                  {hasControl ? "释放" : "接管"}
-                </Text>
+                <AppSymbol name="textformat.size.smaller" size={14} color={theme.textSecondary} />
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => ({
+                  minWidth: 44, height: 30,
+                  alignItems: "center", justifyContent: "center",
+                  paddingHorizontal: 4,
+                  backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
+                })}
+                onPress={handleZoomReset}
+              >
+                <Text style={{ fontSize: 12, fontWeight: "600", color: theme.accent, fontVariant: ["tabular-nums"] }}>{zoomPercent}%</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => ({
+                  width: 34, height: 30,
+                  alignItems: "center", justifyContent: "center",
+                  backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
+                })}
+                onPress={handleZoomIn}
+              >
+                <AppSymbol name="textformat.size.larger" size={14} color={theme.textSecondary} />
               </Pressable>
             </View>
           </View>
         </View>
 
         {banner ? (
-          <View
-            style={[
-              styles.banner,
-              { backgroundColor: banner.tone === "error" ? theme.errorLight : theme.accentLight },
-            ]}
-          >
-            <Text style={[styles.bannerText, { color: banner.tone === "error" ? theme.error : theme.accent }]}>
+          <View style={{
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: banner.tone === "error" ? theme.errorLight : theme.accentLight,
+          }}>
+            <Text style={{ fontSize: 13, fontWeight: "500", color: banner.tone === "error" ? theme.error : theme.accent, flex: 1 }}>
               {banner.text}
             </Text>
             {showReconnectButton ? (
-              <Pressable style={[styles.reconnectBtn, { backgroundColor: theme.bgInput }]} onPress={onReconnect}>
-                <Text style={[styles.reconnectBtnText, { color: theme.accent }]}>重试</Text>
+              <Pressable
+                style={({ pressed }) => ({
+                  borderRadius: 6,
+                  borderCurve: "continuous" as const,
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  marginLeft: 8,
+                  backgroundColor: pressed ? "rgba(128,128,128,0.2)" : theme.bgCard,
+                })}
+                onPress={onReconnect}
+              >
+                <Text style={{ fontSize: 13, fontWeight: "600", color: theme.accent }}>重试</Text>
               </Pressable>
             ) : null}
           </View>
         ) : null}
 
         {connectionDetail && !banner ? (
-          <View style={[styles.detailBar, { backgroundColor: topSurfaceColor }]}> 
-            <Text style={[styles.detailText, { color: theme.textTertiary }]}>{connectionDetail}</Text>
+          <View style={{ backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated, paddingHorizontal: 16, paddingVertical: 4 }}>
+            <Text style={{ fontSize: 11, color: theme.textTertiary }}>{connectionDetail}</Text>
           </View>
         ) : null}
 
-        <View style={[styles.terminalArea, { backgroundColor: theme.bgTerminal }]} onLayout={handleTerminalLayout}> 
-          <View style={styles.terminalWrap}>
+        <View style={{ flex: 1, backgroundColor: theme.bgTerminal }} onLayout={handleTerminalLayout}>
+          <View style={{ flex: 1 }}>
             <TerminalView
               ref={termRef}
               onInput={handleTerminalInput}
               onResize={handleTerminalResize}
             />
-            <View pointerEvents="box-none" style={styles.terminalTouchLayer}>
+            <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", alignItems: "center" }}>
               {showTapOverlay ? (
-                <Pressable style={styles.tapCaptureLayer} onPress={focusTerminalInput} />
+                <Pressable style={StyleSheet.absoluteFillObject} onPress={focusTerminalInput} />
               ) : null}
               {keyboardHintVisible && !inputDisabled ? (
                 <Pressable
-                  style={[
-                    styles.tapHintPill,
-                    {
-                      backgroundColor: theme.bgElevated,
-                      borderColor: theme.border,
-                      bottom: Math.max(16, insets.bottom + 8),
-                    },
-                  ]}
+                  style={{
+                    position: "absolute",
+                    bottom: Math.max(16, insets.bottom + 8),
+                    borderRadius: 20,
+                    borderCurve: "continuous",
+                    backgroundColor: theme.bgElevated,
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
+                  }}
                   onPress={focusTerminalInput}
                 >
-                  <Text style={[styles.tapHintText, { color: theme.text }]}>点按这里开始输入</Text>
+                    <AppSymbol name="keyboard" size={16} color={theme.accent} />
+                  <Text style={{ fontSize: 13, fontWeight: "500", color: theme.text }}>点按开始输入</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -331,111 +386,10 @@ function getControlCopy(hasControl: boolean, isControlledByOther: boolean) {
 
 function getSessionBanner(status: ConnectionStatus): { text: string; tone: "warn" | "error" } | null {
   switch (status) {
-    case "reconnecting": return { text: "连接暂时中断，正在自动重连。", tone: "warn" };
-    case "disconnected": return { text: "连接已经断开。", tone: "error" };
+    case "reconnecting": return { text: "连接暂时中断，正在自动重连…", tone: "warn" };
+    case "disconnected": return { text: "连接已断开。", tone: "error" };
     case "host_disconnected": return { text: "主机当前离线，恢复后会继续同步。", tone: "warn" };
-    case "session_exited": return { text: "当前会话已经结束。", tone: "error" };
+    case "session_exited": return { text: "当前会话已结束。", tone: "error" };
     default: return null;
   }
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  keyboardContainer: { flex: 1 },
-  topBar: {
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
-  topMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  topControlRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    marginTop: 10,
-  },
-  topLeft: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
-  topRight: { flexDirection: "row", alignItems: "center", gap: 10 },
-  statusDot: { width: 7, height: 7, borderRadius: 4 },
-  statusLabel: { fontSize: 12, fontWeight: "600" },
-  sessionText: { fontSize: 11, fontFamily: "Courier" },
-  controlSummary: { flex: 1, gap: 2 },
-  controlSummaryTitle: { fontSize: 14, fontWeight: "700" },
-  controlSummaryBody: { fontSize: 12 },
-  zoomGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 0,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  zoomBtn: {
-    minHeight: 34,
-    minWidth: 38,
-    alignItems: "center", justifyContent: "center",
-  },
-  zoomBtnText: { fontSize: 12, fontWeight: "700" },
-  zoomBadge: {
-    minHeight: 34,
-    minWidth: 56,
-    alignItems: "center", justifyContent: "center",
-    paddingHorizontal: 8,
-  },
-  zoomBadgeText: { fontSize: 12, fontWeight: "700" },
-  controlBtn: {
-    minHeight: 34,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  controlBtnText: { fontSize: 13, fontWeight: "700" },
-  leaveBtn: {
-    minHeight: 34,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  leaveBtnText: { fontSize: 13, fontWeight: "700" },
-  banner: {
-    paddingHorizontal: 12, paddingVertical: 8,
-    flexDirection: "row",
-    alignItems: "center", justifyContent: "space-between",
-  },
-  bannerText: { fontSize: 12, fontWeight: "600", flex: 1 },
-  reconnectBtn: {
-    borderRadius: 6,
-    paddingHorizontal: 10, paddingVertical: 4, marginLeft: 8,
-  },
-  reconnectBtnText: { fontSize: 11, fontWeight: "700" },
-  detailBar: { paddingHorizontal: 12, paddingVertical: 4 },
-  detailText: { fontSize: 11 },
-  terminalArea: { flex: 1 },
-  terminalWrap: { flex: 1 },
-  terminalTouchLayer: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "flex-end",
-    alignItems: "center",
-  },
-  tapCaptureLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  tapHintPill: {
-    position: "absolute",
-    borderRadius: 20,
-    borderWidth: 1,
-    paddingHorizontal: 14, paddingVertical: 6,
-  },
-  tapHintText: { fontSize: 12, fontWeight: "600" },
-});

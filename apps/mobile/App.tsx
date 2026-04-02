@@ -3,18 +3,23 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, StyleSheet, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { AppSymbol } from "./src/components/AppSymbol";
 import { ConnectionSheet } from "./src/components/ConnectionSheet";
 import { useAppState } from "./src/hooks/useAppState";
 import { useSession } from "./src/hooks/useSession";
+import { GatewayListScreen } from "./src/screens/GatewayListScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { ScannerScreen } from "./src/screens/ScannerScreen";
 import { SessionListScreen } from "./src/screens/SessionListScreen";
 import { SessionScreen } from "./src/screens/SessionScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
-import { addToHistory } from "./src/storage/history";
+import { addToHistory, enrichHistory } from "./src/storage/history";
+import { addServer } from "./src/storage/servers";
 import { ThemeProvider, useTheme } from "./src/theme";
+import { fetchWithTimeout } from "./src/utils/fetch-with-timeout";
 import { parsePairingLink } from "./src/utils/pairing-link";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
@@ -22,32 +27,8 @@ const LAST_SESSION_KEY = "@linkshell/last_session";
 
 const Tab = createBottomTabNavigator();
 
-function TabIcon({ kind, focused, color }: { kind: "home" | "sessions" | "settings"; focused: boolean; color: string }) {
-  return (
-    <View style={styles.tabIconWrap}>
-      {kind === "home" ? (
-        <>
-          <View style={[styles.homeRoof, { borderBottomColor: color, opacity: focused ? 1 : 0.78 }]} />
-          <View style={[styles.homeBody, { borderColor: color, opacity: focused ? 1 : 0.78 }]} />
-        </>
-      ) : null}
-      {kind === "sessions" ? (
-        <>
-          <View style={[styles.listLine, { backgroundColor: color, opacity: focused ? 1 : 0.78 }]} />
-          <View style={[styles.listLine, { backgroundColor: color, opacity: focused ? 1 : 0.78 }]} />
-          <View style={[styles.listLineShort, { backgroundColor: color, opacity: focused ? 1 : 0.78 }]} />
-        </>
-      ) : null}
-      {kind === "settings" ? (
-        <>
-          <View style={[styles.settingRail, { backgroundColor: color, opacity: focused ? 1 : 0.78 }]} />
-          <View style={[styles.settingKnobTop, { backgroundColor: color, opacity: focused ? 1 : 0.78 }]} />
-          <View style={[styles.settingRail, { backgroundColor: color, opacity: focused ? 1 : 0.78 }]} />
-          <View style={[styles.settingKnobBottom, { backgroundColor: color, opacity: focused ? 1 : 0.78 }]} />
-        </>
-      ) : null}
-    </View>
-  );
+function SFIcon({ name, color, size = 22 }: { name: string; color: string; size?: number }) {
+  return <AppSymbol name={name} size={size} color={color} />;
 }
 
 function AppInner() {
@@ -56,6 +37,7 @@ function AppInner() {
   const [activeScreen, setActiveScreen] = useState<"tabs" | "scanner" | "terminal">("tabs");
   const [pendingPairing, setPendingPairing] = useState<{ code: string; gateway?: string } | null>(null);
   const [connectionSheetVisible, setConnectionSheetVisible] = useState(false);
+  const [gatewayListVisible, setGatewayListVisible] = useState(false);
   const lastSavedSessionRef = React.useRef<string | null>(null);
 
   const session = useSession({ gatewayBaseUrl });
@@ -86,27 +68,36 @@ function AppInner() {
   useEffect(() => {
     if (!pendingPairing) return;
     if (pendingPairing.gateway && pendingPairing.gateway !== gatewayBaseUrl) {
+      console.log('[LinkShell] Gateway differs, updating:', pendingPairing.gateway);
       setGatewayBaseUrl(pendingPairing.gateway);
       return;
     }
 
-    let cancelled = false;
     const pairing = pendingPairing;
     setPendingPairing(null);
 
-    const run = async () => {
-      const sid = await session.claim(pairing.code);
-      if (!cancelled && sid) {
+    console.log('[LinkShell] Claiming with code:', pairing.code, 'gateway:', gatewayBaseUrl);
+
+    let active = true;
+    session.claim(pairing.code).then((sid) => {
+      if (!active) return;
+      console.log('[LinkShell] Claim result:', sid ? 'success' : 'failed');
+      if (sid) {
         setConnectionSheetVisible(false);
         setActiveScreen("terminal");
+      } else {
+        setActiveScreen("tabs");
+        setConnectionSheetVisible(true);
       }
-    };
+    }).catch((err) => {
+      if (!active) return;
+      console.warn('[LinkShell] Claim error:', err);
+      setActiveScreen("tabs");
+      setConnectionSheetVisible(true);
+    });
 
-    run().catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [gatewayBaseUrl, pendingPairing, session.claim]);
+    return () => { active = false; };
+  }, [gatewayBaseUrl, pendingPairing, session]);
 
   useEffect(() => {
     if (!session.sessionId) {
@@ -119,6 +110,17 @@ function AppInner() {
     addToHistory({ serverUrl: gatewayBaseUrl, sessionId: session.sessionId }).catch(() => {
       lastSavedSessionRef.current = null;
     });
+    // Also ensure gateway is saved in the servers list
+    addServer(gatewayBaseUrl).catch(() => {});
+    // Enrich history with hostname/platform from gateway API
+    fetchWithTimeout(`${gatewayBaseUrl}/sessions`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { sessions: Array<{ id: string; hostname?: string; provider?: string; platform?: string }> } | null) => {
+        if (!body) return;
+        const info = body.sessions.find((s) => s.id === session.sessionId);
+        if (info) enrichHistory(session.sessionId, info);
+      })
+      .catch(() => {});
   }, [gatewayBaseUrl, session.sessionId]);
 
   const handleForeground = useCallback(async () => {
@@ -249,21 +251,17 @@ function AppInner() {
               borderTopWidth: StyleSheet.hairlineWidth,
               elevation: 0,
             },
-            tabBarItemStyle: {
-              paddingVertical: 2,
-            },
             tabBarActiveTintColor: theme.tabActive,
             tabBarInactiveTintColor: theme.tabInactive,
-            tabBarLabelStyle: { fontSize: 11, fontWeight: "600", marginBottom: 0 },
-            tabBarIconStyle: { marginTop: 1 },
+            tabBarLabelStyle: { fontSize: 10, fontWeight: "500" },
           }}
         >
           <Tab.Screen
             name="Home"
             options={{
               tabBarLabel: "首页",
-              tabBarIcon: ({ focused, color }) => (
-                <TabIcon kind="home" focused={focused} color={color} />
+              tabBarIcon: ({ color }) => (
+                <SFIcon name="house.fill" color={color} />
               ),
             }}
           >
@@ -271,6 +269,7 @@ function AppInner() {
               <HomeScreen
                 gatewayBaseUrl={gatewayBaseUrl}
                 status={session.status}
+                connectionDetail={session.connectionDetail}
                 onOpenConnectionSheet={() => setConnectionSheetVisible(true)}
                 onConnectSession={handleConnectSession}
               />
@@ -281,8 +280,8 @@ function AppInner() {
             name="Sessions"
             options={{
               tabBarLabel: "会话",
-              tabBarIcon: ({ focused, color }) => (
-                <TabIcon kind="sessions" focused={focused} color={color} />
+              tabBarIcon: ({ color }) => (
+                <SFIcon name="list.bullet.rectangle.fill" color={color} />
               ),
             }}
           >
@@ -298,20 +297,34 @@ function AppInner() {
             name="Settings"
             options={{
               tabBarLabel: "设置",
-              tabBarIcon: ({ focused, color }) => (
-                <TabIcon kind="settings" focused={focused} color={color} />
+              tabBarIcon: ({ color }) => (
+                <SFIcon name="gearshape.fill" color={color} />
               ),
             }}
           >
-            {() => <SettingsScreen />}
+            {() => <SettingsScreen gatewayBaseUrl={gatewayBaseUrl} onGatewayChange={setGatewayBaseUrl} onOpenGatewayList={() => setGatewayListVisible(true)} />}
           </Tab.Screen>
         </Tab.Navigator>
       </NavigationContainer>
+
+      {gatewayListVisible ? (
+        <View style={StyleSheet.absoluteFill}>
+          <GatewayListScreen
+            onBack={() => setGatewayListVisible(false)}
+            onAddGateway={() => {
+              setGatewayListVisible(false);
+              setConnectionSheetVisible(true);
+            }}
+            onGatewayChange={setGatewayBaseUrl}
+          />
+        </View>
+      ) : null}
 
       <ConnectionSheet
         visible={connectionSheetVisible}
         gatewayBaseUrl={gatewayBaseUrl}
         status={session.status}
+        connectionDetail={session.connectionDetail}
         onClose={() => setConnectionSheetVisible(false)}
         onGatewayChange={setGatewayBaseUrl}
         onClaim={handleClaim}
@@ -324,72 +337,16 @@ function AppInner() {
   );
 }
 
-export default function App(): JSX.Element {
+export default function App(): React.JSX.Element {
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <AppInner />
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AppInner />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
-const styles = StyleSheet.create({
-  tabIconWrap: {
-    width: 22,
-    height: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-  },
-  homeRoof: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 6,
-    borderRightWidth: 6,
-    borderBottomWidth: 6,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    marginBottom: -1,
-  },
-  homeBody: {
-    width: 12,
-    height: 8,
-    borderWidth: 1.6,
-    borderTopWidth: 0,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 2,
-  },
-  listLine: {
-    width: 14,
-    height: 2,
-    borderRadius: 99,
-  },
-  listLineShort: {
-    width: 10,
-    height: 2,
-    borderRadius: 99,
-  },
-  settingRail: {
-    width: 14,
-    height: 2,
-    borderRadius: 99,
-  },
-  settingKnobTop: {
-    width: 5,
-    height: 5,
-    borderRadius: 99,
-    alignSelf: "flex-start",
-    marginLeft: 2,
-    marginTop: -4,
-    marginBottom: -1,
-  },
-  settingKnobBottom: {
-    width: 5,
-    height: 5,
-    borderRadius: 99,
-    alignSelf: "flex-end",
-    marginRight: 2,
-    marginTop: -4,
-  },
-});
+const styles = StyleSheet.create({});

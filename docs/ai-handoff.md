@@ -38,17 +38,24 @@ LinkShell 是一个三段式终端桥接系统：
 
 当前活跃开发重点在 apps/mobile。
 
+技术栈：Expo SDK 54 + React Native 0.81.5 + React 19.1.0。
+
 已经完成的方向：
 
-1. 主导航重构为 首页 / 中央新建 / 会话 / 设置。
-2. 新建连接入口收口到全局底部 + 按钮。
-3. 会话详情页做过多轮安全区、主题、输入法工具栏和终端样式修正。
-4. 页面整体语言已逐步切到中文。
-5. 会话列表、设置页、首页都做过一轮新的信息架构整理。
+1. 主导航为 首页 / 会话 / 设置 三个 Tab。
+2. 新建连接入口收口到首页按钮 + ConnectionSheet（Modal，iOS sheet detents）。
+3. 首页：标题/副标题、新建连接按钮、继续上次会话、最近会话历史（Swipeable 左滑删除，LayoutAnimation 过渡）。
+4. 会话列表：按网关分组（并行拉取所有已保存网关的 /sessions），骨架加载动画、FadeIn 过渡、错误与空状态。
+5. ConnectionSheet：扫码/手动输入分段控制、iOS pageSheet + sheet detents。
+6. ServerPicker：多网关管理、检测、默认设置、全部主题化。
+7. 完整 dark/light 主题系统：暗色科技风 + 浅色 iOS 系统风。
+8. 集成 react-native-gesture-handler + react-native-reanimated。
+9. 页面语言全部中文化。
+10. 所有页面 safe area 修正完毕。
 
 仍然最可能继续改的区域：
 
-1. apps/mobile/src/screens/SessionScreen.tsx
+1. apps/mobile/src/screens/SessionScreen.tsx（终端体验核心）
 2. apps/mobile/src/components/InputBar.tsx
 3. apps/mobile/src/components/KeyboardAccessory.tsx
 4. apps/mobile/src/components/ConnectionSheet.tsx
@@ -150,18 +157,25 @@ pnpm --filter @linkshell/app typecheck
 
 1. 使用 pnpm workspace。
 2. TypeScript 为主。
-3. Mobile 端主题统一从 apps/mobile/src/theme/index.tsx 读取。
-4. Mobile UI 近期设计方向是“更像 iOS 原生的终端工具”，避免多余装饰。
-5. 新建连接入口已经收口，不建议再把 gateway 管理和会话列表塞回连接弹窗。
+3. Mobile 端主题统一从 apps/mobile/src/theme/index.tsx 读取，dark/light 均有完整独立配色。
+4. Mobile UI 风格为 iOS 原生工具类 App，使用 SF Symbols，中文优先，避免多余装饰。
+5. 新建连接入口已收口到首页按钮 + ConnectionSheet，不在其他位置重复。
+6. 网络加载统一使用骨架动画 + FadeIn/LayoutAnimation 过渡。
+7. 所有组件使用 useTheme() 动态主题 token，不硬编码颜色。
+8. Expo/RN runtime 不支持 AbortSignal.timeout()，统一使用 src/utils/fetch-with-timeout.ts。
 
-## 7. 最近一轮移动端 UI 调整摘要
+## 7. 最近移动端 UI 调整摘要
 
-1. 会话页顶部和终端区域支持 light/dark 主题联动。
-2. terminal WebView 内部 xterm theme 已与主题同步。
-3. 输入法工具栏和系统键盘的衔接样式做过一轮修正。
-4. tab bar 不再使用英文文字图标。
-5. Sessions 页面补了 safe area 并做了中文化。
-6. ConnectionSheet 收敛为“扫码 + 6 位配对码”两种入口。
+1. 首页重写：标题/副标题、新建连接按钮（带 loading 状态）、继续上次会话卡片、最近会话列表（react-native-gesture-handler Swipeable 左滑删除，LayoutAnimation 过渡）。
+2. 会话列表重写：按网关分组（并行拉取所有已保存网关），每组独立 loading 骨架（pulsing skeleton）、错误提示、空状态，FadeIn 动画 + LayoutAnimation 过渡。
+3. ConnectionSheet 重写：pageSheet + iOS sheet detents（scan 0.55/0.7、manual 0.7/large），扫码/手动分段控制，配对码 + 网关地址输入，状态反馈。
+4. ServerPicker 全面主题化：移除全部硬编码颜色（~200 行 StyleSheet），改用 useTheme() 动态 token + 内联样式。
+5. 完整 dark/light 主题系统：lightTheme 不再是 darkTheme 的 spread copy，有独立的 iOS 系统色配色方案。
+6. 集成 react-native-gesture-handler + react-native-reanimated（含 babel.config.js plugin）。
+7. App.tsx 外层包裹 GestureHandlerRootView。
+8. 历史记录支持按 sessionId 去重和删除。
+9. 所有页面 safe area 修正（使用 useSafeAreaInsets + paddingTop: insets.top + 2）。
+10. useSession.ts 清理了调试用的 httpbin 诊断日志。
 
 ## 8. 如果下一个 AI 要继续做什么
 

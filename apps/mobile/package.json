@@ -4,8 +4,15 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --dev-client",
+    "start:lan": "expo start --dev-client --host lan",
+    "start:expo": "expo start",
     "prebuild-terminal": "node scripts/build-terminal-html.mjs",
+    "devbuild": "node scripts/dev-build.mjs",
+    "devbuild:ios": "node scripts/dev-build.mjs ios",
+    "devbuild:ios:device": "node scripts/dev-build.mjs ios --device",
+    "devbuild:ios:device:install": "node scripts/dev-build.mjs ios --device --install-only",
+    "devbuild:android": "node scripts/dev-build.mjs android",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
@@ -13,6 +20,7 @@
     "build": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
     "@linkshell/protocol": "workspace:*",
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@react-navigation/bottom-tabs": "^7.3.10",
@@ -23,15 +31,23 @@
     "expo": "~54.0.0",
     "expo-blur": "~15.0.8",
     "expo-camera": "~17.0.10",
-    "expo-status-bar": "~2.2.0",
-    "react": "18.3.1",
-    "react-native": "0.77.1",
-    "react-native-safe-area-context": "~5.4.0",
-    "react-native-screens": "~4.10.0",
-    "react-native-webview": "^13.13.5"
+    "expo-dev-client": "~6.0.20",
+    "expo-haptics": "~15.0.8",
+    "expo-image": "~3.0.11",
+    "expo-status-bar": "~3.0.9",
+    "expo-symbols": "^55.0.5",
+    "metro-runtime": "^0.84.2",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-gesture-handler": "^2.30.1",
+    "react-native-reanimated": "^4.3.0",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.16.0",
+    "react-native-webview": "^13.15.0"
   },
   "devDependencies": {
-    "@types/react": "^18.3.12",
+    "@rnx-kit/metro-resolver-symlinks": "^0.2.11",
+    "@types/react": "^19.1.17",
     "typescript": "^5.8.3"
   }
 }

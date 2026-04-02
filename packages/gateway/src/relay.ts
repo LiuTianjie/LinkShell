@@ -25,7 +25,10 @@ export function handleSocketMessage(
         createEnvelope({
           type: "session.error",
           sessionId,
-          payload: { code: "invalid_message", message: "Failed to parse envelope" },
+          payload: {
+            code: "invalid_message",
+            message: "Failed to parse envelope",
+          },
         }),
       ),
     );
@@ -62,8 +65,13 @@ function handleHostMessage(
     case "session.connect": {
       // Extract metadata from host's connect message
       const p = parseTypedPayload("session.connect", envelope.payload);
-      if (p.provider || p.hostname) {
-        sessions.setMetadata(session.id, p.provider ?? undefined, p.hostname ?? undefined);
+      if (p.provider || p.hostname || p.platform) {
+        sessions.setMetadata(
+          session.id,
+          p.provider ?? undefined,
+          p.hostname ?? undefined,
+          p.platform ?? undefined,
+        );
       }
       break;
     }
@@ -105,7 +113,10 @@ function handleClientMessage(
             createEnvelope({
               type: "session.error",
               sessionId: session.id,
-              payload: { code: "control_conflict", message: "Not the controller" },
+              payload: {
+                code: "control_conflict",
+                message: "Not the controller",
+              },
             }),
           ),
         );
@@ -203,7 +214,10 @@ function sendToHost(
   session: ReturnType<SessionManager["get"]> & {},
   envelope: Envelope,
 ): void {
-  if (session.host && session.host.socket.readyState === session.host.socket.OPEN) {
+  if (
+    session.host &&
+    session.host.socket.readyState === session.host.socket.OPEN
+  ) {
     session.host.socket.send(serializeEnvelope(envelope));
   }
 }

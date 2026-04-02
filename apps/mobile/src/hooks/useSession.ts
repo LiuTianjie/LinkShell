@@ -296,27 +296,43 @@ export function useSession({
   const claim = useCallback(
     async (pairingCode: string) => {
       setStatus("claiming");
-      const res = await fetch(`${gatewayBaseUrl}/pairings/claim`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pairingCode }),
-      });
-      const body = (await res.json()) as { sessionId?: string; error?: string };
-      if (!res.ok || !body.sessionId) {
-        setConnectionDetail(body.error ?? "Claim failed");
-        setStatus(
-          ("error:" + (body.error ?? "claim_failed")) as ConnectionStatus,
-        );
+      const claimUrl = `${gatewayBaseUrl}/pairings/claim`;
+
+      try {
+        const res = await fetch(claimUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pairingCode }),
+        });
+        const body = (await res.json()) as {
+          sessionId?: string;
+          error?: string;
+        };
+        if (!res.ok || !body.sessionId) {
+          const errMsg = body.error ?? "Claim failed";
+          setConnectionDetail(errMsg);
+          setStatus(
+            ("error:" + (body.error ?? "claim_failed")) as ConnectionStatus,
+          );
+          return null;
+        }
+        manualDisconnectRef.current = false;
+        setConnectionDetail(null);
+        setSessionId(body.sessionId);
+        setControllerId(null);
+        setTerminalLines([]);
+        setLastAckedSeq(-1);
+        connectSocket(body.sessionId);
+        return body.sessionId;
+      } catch (error) {
+        const name = error instanceof Error ? error.name : "Unknown";
+        const message =
+          error instanceof Error ? error.message : "Network request failed";
+        console.warn(`[LinkShell] claim error [${name}]:`, message);
+        setConnectionDetail(`${name}: ${message}`);
+        setStatus("error:network");
         return null;
       }
-      manualDisconnectRef.current = false;
-      setConnectionDetail(null);
-      setSessionId(body.sessionId);
-      setControllerId(null);
-      setTerminalLines([]);
-      setLastAckedSeq(-1);
-      connectSocket(body.sessionId);
-      return body.sessionId;
     },
     [gatewayBaseUrl, connectSocket],
   );

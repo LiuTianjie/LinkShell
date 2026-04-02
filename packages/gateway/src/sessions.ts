@@ -23,6 +23,7 @@ export interface Session {
   // Metadata from host's session.connect
   provider: string | undefined;
   hostname: string | undefined;
+  platform: string | undefined;
 }
 
 const OUTPUT_BUFFER_CAPACITY = 200;
@@ -52,6 +53,7 @@ export class SessionManager {
         hostDisconnectedAt: undefined,
         provider: undefined,
         hostname: undefined,
+        platform: undefined,
       };
       this.sessions.set(sessionId, session);
     }
@@ -159,14 +161,21 @@ export class SessionManager {
       bufferSize: session.outputBuffer.length,
       provider: session.provider ?? null,
       hostname: session.hostname ?? null,
+      platform: session.platform ?? null,
     };
   }
 
-  setMetadata(sessionId: string, provider?: string, hostname?: string): void {
+  setMetadata(
+    sessionId: string,
+    provider?: string,
+    hostname?: string,
+    platform?: string,
+  ): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     if (provider) session.provider = provider;
     if (hostname) session.hostname = hostname;
+    if (platform) session.platform = platform;
   }
 
   private maybeDelete(sessionId: string): void {

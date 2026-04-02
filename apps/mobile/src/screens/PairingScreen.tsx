@@ -130,8 +130,14 @@ export function PairingScreen({
         <View style={[styles.heroCard, { backgroundColor: theme.bgCard }]}>
           <View style={styles.heroTopRow}>
             <View style={styles.titleWrap}>
-              <Text style={[styles.heroTitle, { color: theme.text }]}>LinkShell</Text>
-              <Text style={[styles.heroSubtitle, { color: theme.textSecondary }]}>Remote Terminal</Text>
+              <Text style={[styles.heroTitle, { color: theme.text }]}>
+                LinkShell
+              </Text>
+              <Text
+                style={[styles.heroSubtitle, { color: theme.textSecondary }]}
+              >
+                Remote Terminal
+              </Text>
             </View>
             <View
               style={[
