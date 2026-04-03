@@ -217,10 +217,14 @@ function AppInner() {
           controllerId={session.controllerId}
           connectionDetail={session.connectionDetail}
           terminalLines={session.terminalLines}
+          screenStatus={session.screenStatus}
+          screenFrame={session.screenFrame}
           onSendInput={session.sendInput}
           onSendResize={session.sendResize}
           onClaimControl={session.claimControl}
           onReleaseControl={session.releaseControl}
+          onStartScreen={session.startScreen}
+          onStopScreen={session.stopScreen}
           onReconnect={session.reconnect}
           onDisconnect={handleDisconnect}
         />

@@ -35,6 +35,8 @@ export interface SessionHandle {
   terminalLines: string[];
   lastAckedSeq: number;
   connectionDetail: string | null;
+  screenStatus: { active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string };
+  screenFrame: { data: string; width: number; height: number; frameId: number } | null;
   claim: (pairingCode: string) => Promise<string | null>;
   connectToSession: (
     sessionId: string,
@@ -44,6 +46,8 @@ export interface SessionHandle {
   sendResize: (cols: number, rows: number) => void;
   claimControl: () => void;
   releaseControl: () => void;
+  startScreen: (fps: number, quality: number, scale: number) => void;
+  stopScreen: () => void;
   reconnect: () => void;
   disconnect: () => void;
 }
@@ -67,6 +71,8 @@ export function useSession({
   const [terminalLines, setTerminalLines] = useState<string[]>([]);
   const [lastAckedSeq, setLastAckedSeq] = useState(-1);
   const [connectionDetail, setConnectionDetail] = useState<string | null>(null);
+  const [screenStatus, setScreenStatus] = useState<{ active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string }>({ active: false, mode: "off" });
+  const [screenFrame, setScreenFrame] = useState<{ data: string; width: number; height: number; frameId: number } | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -76,6 +82,7 @@ export function useSession({
   const deviceIdRef = useRef(generateId());
   const sessionIdRef = useRef("");
   const lastAckedSeqRef = useRef(-1);
+  const chunkBufRef = useRef<{ frameId: number; chunks: Map<number, string>; total: number; width: number; height: number } | null>(null);
   const activeGatewayBaseUrlRef = useRef(gatewayBaseUrl);
   const statusRef = useRef<ConnectionStatus>("idle");
   const manualDisconnectRef = useRef(false);
@@ -300,6 +307,37 @@ export function useSession({
             setStatus("connected");
             setConnectionDetail(null);
             break;
+          case "screen.frame": {
+            const p = parseTypedPayload("screen.frame", envelope.payload);
+            // Reassemble chunks if needed
+            if (p.chunkTotal <= 1) {
+              setScreenFrame({ data: p.data, width: p.width, height: p.height, frameId: p.frameId });
+            } else {
+              // Simple chunk reassembly via ref
+              if (!chunkBufRef.current || chunkBufRef.current.frameId !== p.frameId) {
+                chunkBufRef.current = { frameId: p.frameId, chunks: new Map(), total: p.chunkTotal, width: p.width, height: p.height };
+              }
+              chunkBufRef.current.chunks.set(p.chunkIndex, p.data);
+              if (chunkBufRef.current.chunks.size === chunkBufRef.current.total) {
+                let fullData = "";
+                for (let i = 0; i < chunkBufRef.current.total; i++) {
+                  fullData += chunkBufRef.current.chunks.get(i) ?? "";
+                }
+                setScreenFrame({ data: fullData, width: chunkBufRef.current.width, height: chunkBufRef.current.height, frameId: p.frameId });
+                chunkBufRef.current = null;
+              }
+            }
+            break;
+          }
+          case "screen.status": {
+            const p = parseTypedPayload("screen.status", envelope.payload);
+            setScreenStatus({ active: p.active, mode: p.mode, error: p.error });
+            break;
+          }
+          case "screen.offer":
+          case "screen.ice":
+            // WebRTC signaling — will be handled in Phase 2
+            break;
           default:
             break;
         }
@@ -447,6 +485,27 @@ export function useSession({
     );
   }, [sendRaw]);
 
+  const startScreen = useCallback((fps: number, quality: number, scale: number) => {
+    sendRaw(
+      createEnvelope({
+        type: "screen.start",
+        sessionId: sessionIdRef.current,
+        payload: { fps, quality, scale },
+      }),
+    );
+  }, [sendRaw]);
+
+  const stopScreen = useCallback(() => {
+    sendRaw(
+      createEnvelope({
+        type: "screen.stop",
+        sessionId: sessionIdRef.current,
+        payload: {},
+      }),
+    );
+    setScreenStatus({ active: false, mode: "off" });
+  }, [sendRaw]);
+
   const reconnect = useCallback(() => {
     const sid = sessionIdRef.current;
     if (!sid) {
@@ -508,12 +567,16 @@ export function useSession({
     terminalLines,
     lastAckedSeq,
     connectionDetail,
+    screenStatus,
+    screenFrame,
     claim,
     connectToSession,
     sendInput,
     sendResize,
     claimControl,
     releaseControl,
+    startScreen,
+    stopScreen,
     reconnect,
     disconnect,
   };

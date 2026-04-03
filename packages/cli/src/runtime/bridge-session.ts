@@ -11,6 +11,7 @@ import {
 import type { Envelope } from "@linkshell/protocol";
 import type { ProviderConfig } from "../providers.js";
 import { ScrollbackBuffer } from "./scrollback.js";
+import { ScreenFallback } from "./screen-fallback.js";
 import { getLanIp } from "../utils/lan-ip.js";
 
 export interface BridgeSessionOptions {
@@ -23,6 +24,7 @@ export interface BridgeSessionOptions {
   clientName: string;
   hostname?: string;
   verbose?: boolean;
+  screen?: boolean;
   providerConfig: ProviderConfig;
 }
 
@@ -101,6 +103,7 @@ export class BridgeSession {
   private sessionId = "";
   private exited = false;
   private stopped = false;
+  private screenCapture: ScreenFallback | undefined;
 
   constructor(options: BridgeSessionOptions) {
     this.options = options;
@@ -267,6 +270,15 @@ export class BridgeSession {
       }
       case "session.heartbeat":
         break;
+      case "screen.start": {
+        const p = parseTypedPayload("screen.start", envelope.payload);
+        this.startScreenCapture(p.fps, p.quality, p.scale);
+        break;
+      }
+      case "screen.stop": {
+        this.stopScreenCapture();
+        break;
+      }
       default:
         break;
     }
@@ -373,6 +385,39 @@ export class BridgeSession {
     }
   }
 
+  private startScreenCapture(fps: number, quality: number, scale: number): void {
+    if (!this.options.screen) {
+      this.log("screen sharing not enabled (use --screen)");
+      this.send(
+        createEnvelope({
+          type: "screen.status",
+          sessionId: this.sessionId,
+          payload: { active: false, mode: "off" as const, error: "Screen sharing not enabled on host. Start CLI with --screen flag." },
+        }),
+      );
+      return;
+    }
+    this.stopScreenCapture();
+    this.log(`starting screen capture (fps=${fps}, quality=${quality}, scale=${scale})`);
+    this.screenCapture = new ScreenFallback({
+      fps,
+      quality,
+      scale,
+      sessionId: this.sessionId,
+      onFrame: (envelope) => this.send(envelope),
+      onStatus: (envelope) => this.send(envelope),
+    });
+    this.screenCapture.start();
+  }
+
+  private stopScreenCapture(): void {
+    if (this.screenCapture) {
+      this.log("stopping screen capture");
+      this.screenCapture.stop();
+      this.screenCapture = undefined;
+    }
+  }
+
   private scheduleReconnect(): void {
     if (this.reconnecting || this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
       process.stderr.write(
@@ -408,6 +453,7 @@ export class BridgeSession {
     this.stopped = true;
     this.exited = true;
     this.stopHeartbeat();
+    this.stopScreenCapture();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;

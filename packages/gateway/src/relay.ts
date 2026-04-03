@@ -91,6 +91,13 @@ function handleHostMessage(
     case "control.reject":
       broadcastToClients(session, envelope);
       break;
+    // Screen sharing: host → clients
+    case "screen.frame":
+    case "screen.status":
+    case "screen.offer":
+    case "screen.ice":
+      broadcastToClients(session, envelope);
+      break;
     default:
       broadcastToClients(session, envelope);
       break;
@@ -180,6 +187,13 @@ function handleClientMessage(
       break;
     }
     case "session.heartbeat":
+      break;
+    // Screen sharing: client → host
+    case "screen.start":
+    case "screen.stop":
+    case "screen.answer":
+    case "screen.ice":
+      sendToHost(session, envelope);
       break;
     default:
       sendToHost(session, envelope);

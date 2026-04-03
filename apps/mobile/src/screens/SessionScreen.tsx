@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { TerminalView } from "../components/TerminalView";
 import type { TerminalViewHandle } from "../components/TerminalView";
+import { ScreenView } from "../components/ScreenView";
 import type { ConnectionStatus } from "../hooks/useSession";
 import { useTheme } from "../theme";
 
@@ -25,10 +26,14 @@ interface SessionScreenProps {
   controllerId: string | null;
   connectionDetail: string | null;
   terminalLines: string[];
+  screenStatus: { active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string };
+  screenFrame: { data: string; width: number; height: number; frameId: number } | null;
   onSendInput: (data: string) => void;
   onSendResize: (cols: number, rows: number) => void;
   onClaimControl: () => void;
   onReleaseControl: () => void;
+  onStartScreen: (fps: number, quality: number, scale: number) => void;
+  onStopScreen: () => void;
   onReconnect: () => void;
   onDisconnect: () => void;
 }
@@ -40,10 +45,14 @@ export function SessionScreen({
   controllerId,
   connectionDetail,
   terminalLines,
+  screenStatus,
+  screenFrame,
   onSendInput,
   onSendResize,
   onClaimControl,
   onReleaseControl,
+  onStartScreen,
+  onStopScreen,
   onReconnect,
   onDisconnect,
 }: SessionScreenProps) {
@@ -54,6 +63,18 @@ export function SessionScreen({
   const [keyboardHintVisible, setKeyboardHintVisible] = useState(true);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [activeTab, setActiveTab] = useState<"terminal" | "desktop">("terminal");
+
+  const switchToDesktop = useCallback(() => {
+    setActiveTab("desktop");
+    Keyboard.dismiss();
+    termRef.current?.blurCursor();
+  }, []);
+
+  const switchToTerminal = useCallback(() => {
+    setActiveTab("terminal");
+    onStopScreen();
+  }, [onStopScreen]);
 
   const hasControl = controllerId === deviceId;
   const isControlledByOther = Boolean(controllerId && controllerId !== deviceId);
@@ -304,6 +325,44 @@ export function SessionScreen({
               </Pressable>
             </View>
           </View>
+
+          {/* Tab switcher: Terminal | Desktop */}
+          <View style={{
+            flexDirection: "row",
+            paddingHorizontal: 16,
+            paddingBottom: 8,
+            gap: 0,
+            backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated,
+          }}>
+            <Pressable
+              style={{
+                flex: 1,
+                paddingVertical: 6,
+                alignItems: "center",
+                borderBottomWidth: 2,
+                borderBottomColor: activeTab === "terminal" ? theme.accent : "transparent",
+              }}
+              onPress={switchToTerminal}
+            >
+              <Text style={{ fontSize: 13, fontWeight: "600", color: activeTab === "terminal" ? theme.accent : theme.textTertiary }}>
+                Terminal
+              </Text>
+            </Pressable>
+            <Pressable
+              style={{
+                flex: 1,
+                paddingVertical: 6,
+                alignItems: "center",
+                borderBottomWidth: 2,
+                borderBottomColor: activeTab === "desktop" ? theme.accent : "transparent",
+              }}
+              onPress={switchToDesktop}
+            >
+              <Text style={{ fontSize: 13, fontWeight: "600", color: activeTab === "desktop" ? theme.accent : theme.textTertiary }}>
+                Desktop
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         {banner ? (
@@ -447,6 +506,19 @@ export function SessionScreen({
             )}
             {!keyboardVisible && <View style={{ height: insets.bottom }} />}
           </View>
+        ) : activeTab === "desktop" ? (
+        <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
+          <ScreenView
+            sessionId={sessionId}
+            active={screenStatus.active}
+            mode={screenStatus.mode}
+            error={screenStatus.error}
+            screenFrame={screenFrame}
+            onStart={onStartScreen}
+            onStop={onStopScreen}
+          />
+          {!keyboardVisible && <View style={{ height: insets.bottom, backgroundColor: theme.bgTerminal }} />}
+        </View>
         ) : (
         <View style={{ flex: 1, backgroundColor: theme.bgTerminal }} onLayout={handleTerminalLayout}>
           <View style={{ flex: 1 }}>

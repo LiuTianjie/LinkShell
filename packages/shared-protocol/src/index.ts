@@ -129,6 +129,45 @@ export const sessionHostDisconnectedPayloadSchema = z.object({
 
 export const sessionHostReconnectedPayloadSchema = z.object({});
 
+// ── Screen sharing payloads ─────────────────────────────────────────
+
+export const screenStartPayloadSchema = z.object({
+  fps: z.number().int().min(1).max(30).default(5),
+  quality: z.number().int().min(10).max(100).default(60),
+  scale: z.number().min(0.1).max(1).default(0.5),
+});
+
+export const screenStopPayloadSchema = z.object({});
+
+export const screenFramePayloadSchema = z.object({
+  data: z.string(),           // base64 JPEG
+  width: z.number().int(),
+  height: z.number().int(),
+  frameId: z.number().int(),
+  chunkIndex: z.number().int().default(0),
+  chunkTotal: z.number().int().default(1),
+});
+
+export const screenStatusPayloadSchema = z.object({
+  active: z.boolean(),
+  mode: z.enum(["webrtc", "fallback", "off"]).default("off"),
+  error: z.string().optional(),
+});
+
+export const screenOfferPayloadSchema = z.object({
+  sdp: z.string(),
+});
+
+export const screenAnswerPayloadSchema = z.object({
+  sdp: z.string(),
+});
+
+export const screenIcePayloadSchema = z.object({
+  candidate: z.string(),
+  sdpMid: z.string().nullable().optional(),
+  sdpMLineIndex: z.number().nullable().optional(),
+});
+
 export const errorPayloadSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
@@ -155,6 +194,13 @@ export const protocolMessageSchemas = {
   "control.release": controlReleasePayloadSchema,
   "session.host_disconnected": sessionHostDisconnectedPayloadSchema,
   "session.host_reconnected": sessionHostReconnectedPayloadSchema,
+  "screen.start": screenStartPayloadSchema,
+  "screen.stop": screenStopPayloadSchema,
+  "screen.frame": screenFramePayloadSchema,
+  "screen.status": screenStatusPayloadSchema,
+  "screen.offer": screenOfferPayloadSchema,
+  "screen.answer": screenAnswerPayloadSchema,
+  "screen.ice": screenIcePayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

@@ -56,6 +56,7 @@ program
     String(config.cols ?? 120),
   )
   .option("--rows <rows>", "Initial terminal rows", String(config.rows ?? 36))
+  .option("--screen", "Enable screen sharing capability")
   .option("--daemon", "Run in background (detached)")
   .option("--verbose", "Enable verbose logging")
   .option("--_foreground-bridge", undefined) // internal
@@ -85,6 +86,7 @@ program
       childArgs.push("--cols", String(options.cols));
       childArgs.push("--rows", String(options.rows));
       if (options.verbose) childArgs.push("--verbose");
+      if (options.screen) childArgs.push("--screen");
       if (options.sessionId) childArgs.push("--session-id", options.sessionId);
       // Pass through extra args
       const extra = command.args.filter((v: string) => v !== "--");
@@ -161,6 +163,7 @@ program
       clientName: options.clientName,
       hostname: options.hostname,
       verbose: Boolean(options.verbose),
+      screen: Boolean(options.screen),
       providerConfig,
     });
 
