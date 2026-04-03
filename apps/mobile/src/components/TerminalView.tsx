@@ -8,8 +8,8 @@ import React, {
   useRef,
   useState,
 } from "react";
+import * as Clipboard from "expo-clipboard";
 import {
-  Clipboard,
   FlatList,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -94,13 +94,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const flushSnapshot = useCallback(() => {
       const cursorRow = isFocused ? bufferRef.current.cursorRow : undefined;
       const cursorCol = isFocused ? bufferRef.current.cursorCol : undefined;
-      setSnapshot(createTerminalSnapshot(bufferRef.current, {
+      setSnapshot((previousSnapshot) => createTerminalSnapshot(bufferRef.current, {
         cursorRow,
         cursorCol,
         cursorStyle: isFocused
           ? { bg: theme.accent, fg: theme.textInverse }
           : undefined,
-      }));
+      }, previousSnapshot));
     }, [isFocused, theme.accent, theme.textInverse]);
 
     const scheduleFlush = useCallback(() => {
@@ -176,6 +176,14 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       emitResize();
     }, [emitResize, fontSize, lineHeight]);
 
+    const writeClipboardText = useCallback(async (text: string) => {
+      try {
+        await Clipboard.setStringAsync(text);
+      } catch (error) {
+        console.warn("[TerminalView] clipboard write failed", error);
+      }
+    }, []);
+
     useImperativeHandle(ref, () => ({
       clear() {
         clearTerminalBuffer(bufferRef.current);
@@ -220,14 +228,14 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       copy() {
         const text = selectedText || snapshot.plainText;
         if (text) {
-          Clipboard.setString(text);
+          void writeClipboardText(text);
         }
       },
       async paste() {
         if (disabled) {
           return;
         }
-        const text = await Clipboard.getString();
+        const text = await Clipboard.getStringAsync();
         if (text) {
           onInput?.(text);
         }
@@ -235,10 +243,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       selectAll() {
         const text = snapshot.plainText;
         if (text) {
-          Clipboard.setString(text);
+          void writeClipboardText(text);
         }
       },
-    }), [disabled, emitResize, onInput, scheduleFlush, scrollToBottom, selectedText, snapshot.plainText]);
+    }), [disabled, emitResize, onInput, scheduleFlush, scrollToBottom, selectedText, snapshot.plainText, writeClipboardText]);
 
     const handleViewportLayout = useCallback((event: LayoutChangeEvent) => {
       const { width, height } = event.nativeEvent.layout;
@@ -294,11 +302,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         return;
       }
       setSelectedLineId(line.id);
-      Clipboard.setString(line.plainText);
+      void writeClipboardText(line.plainText);
       if (!disabled) {
         inputRef.current?.focus();
       }
-    }, [disabled]);
+    }, [disabled, writeClipboardText]);
 
     const renderItem = useCallback(({ item }: ListRenderItemInfo<TerminalRenderLine>) => (
       <TerminalLineRow

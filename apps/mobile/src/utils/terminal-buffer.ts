@@ -7,11 +7,13 @@ export interface TerminalCellStyle {
 
 interface TerminalCell {
   char: string;
+  written: boolean;
   style: TerminalCellStyle;
 }
 
 interface TerminalLine {
   id: number;
+  version: number;
   cells: TerminalCell[];
 }
 
@@ -28,6 +30,8 @@ export interface TerminalRenderSegment {
 
 export interface TerminalRenderLine {
   id: number;
+  version: number;
+  cacheKey: string;
   plainText: string;
   segments: TerminalRenderSegment[];
 }
@@ -46,6 +50,7 @@ export interface TerminalBufferState {
   lines: TerminalLine[];
   nextLineId: number;
   savedCursor: SavedCursorState | null;
+  pendingEscape: string | null;
 }
 
 export interface TerminalSnapshotOptions {
@@ -89,6 +94,7 @@ export function createTerminalBuffer(cols = 80, rows = 24): TerminalBufferState 
     lines: [createEmptyLine(0)],
     nextLineId: 1,
     savedCursor: null,
+    pendingEscape: null,
   };
 }
 
@@ -98,6 +104,7 @@ export function clearTerminalBuffer(state: TerminalBufferState): void {
   state.currentStyle = {};
   state.lines = [createEmptyLine(state.nextLineId++)];
   state.savedCursor = null;
+  state.pendingEscape = null;
 }
 
 export function replaceTerminalBuffer(
@@ -113,6 +120,7 @@ export function replaceTerminalBuffer(
   state.currentStyle = {};
   state.lines = [createEmptyLine(state.nextLineId++)];
   state.savedCursor = null;
+  state.pendingEscape = null;
 
   for (const chunk of chunks) {
     appendTerminalChunk(state, chunk);
@@ -134,15 +142,21 @@ export function appendTerminalChunk(
   state: TerminalBufferState,
   chunk: string,
 ): void {
+  const source = state.pendingEscape ? state.pendingEscape + chunk : chunk;
+  state.pendingEscape = null;
   let index = 0;
 
-  while (index < chunk.length) {
-    const char = chunk[index];
+  while (index < source.length) {
+    const char = source[index];
 
     if (char === "\u001b") {
-      const consumed = consumeEscapeSequence(state, chunk, index);
-      if (consumed > 0) {
-        index += consumed;
+      const result = consumeEscapeSequence(state, source, index);
+      if (result.pending) {
+        state.pendingEscape = result.pending;
+        break;
+      }
+      if (result.consumed > 0) {
+        index += result.consumed;
         continue;
       }
     }
@@ -166,7 +180,10 @@ export function appendTerminalChunk(
     }
 
     if (char === "\t") {
-      const nextStop = Math.min(state.cols - 1, Math.floor(state.cursorCol / 8) * 8 + 8);
+      const nextStop = Math.min(
+        state.cols - 1,
+        Math.floor(state.cursorCol / 8) * 8 + 8,
+      );
       while (state.cursorCol < nextStop) {
         writePrintable(state, " ");
       }
@@ -185,6 +202,7 @@ export function appendTerminalChunk(
 export function createTerminalSnapshot(
   state: TerminalBufferState,
   options: TerminalSnapshotOptions = {},
+  previousSnapshot?: TerminalRenderSnapshot,
 ): TerminalRenderSnapshot {
   const maxLineCount = Math.min(MAX_BUFFER_LINES, state.lines.length);
   const startIndex = Math.max(0, state.lines.length - maxLineCount);
@@ -194,35 +212,26 @@ export function createTerminalSnapshot(
   const renderedLines: TerminalRenderLine[] = [];
 
   for (let lineIndex = startIndex; lineIndex < state.lines.length; lineIndex++) {
-    const line = state.lines[lineIndex];
-    const isCursorLine = cursorRow === lineIndex;
-    const cursorCellIndex = isCursorLine ? Math.max(0, cursorCol ?? 0) : -1;
-    const lastCellIndex = line.cells.reduce((max, cell, idx) => (
-      isBlankCell(cell) ? max : idx
-    ), -1);
-    const renderLength = Math.max(lastCellIndex + 1, isCursorLine ? cursorCellIndex + 1 : 0);
-    const segments: TerminalRenderSegment[] = [];
-    let plainText = "";
+    const nextLine = createTerminalRenderLine(
+      state,
+      lineIndex,
+      cursorRow,
+      cursorCol,
+      cursorStyle,
+    );
+    const previousLine = previousSnapshot?.lines[renderedLines.length];
 
-    for (let cellIndex = 0; cellIndex < renderLength; cellIndex++) {
-      const cell = line.cells[cellIndex] ?? { char: " ", style: {} };
-      const style = isCursorLine && cellIndex === cursorCellIndex
-        ? mergeStyles(cell.style, cursorStyle)
-        : cell.style;
-      const char = isCursorLine && cellIndex === cursorCellIndex && cell.char === " "
-        ? " "
-        : cell.char;
-
-      plainText += char;
-      pushSegment(segments, char, style);
+    if (
+      previousLine
+      && previousLine.id === nextLine.id
+      && previousLine.version === nextLine.version
+      && previousLine.cacheKey === nextLine.cacheKey
+    ) {
+      renderedLines.push(previousLine);
+      continue;
     }
 
-    plainText = plainText.replace(/\s+$/u, "");
-    renderedLines.push({
-      id: line.id,
-      plainText,
-      segments: segments.length > 0 ? segments : [{ text: "", style: {} }],
-    });
+    renderedLines.push(nextLine);
   }
 
   return {
@@ -235,10 +244,13 @@ function consumeEscapeSequence(
   state: TerminalBufferState,
   chunk: string,
   start: number,
-): number {
+): {
+  consumed: number;
+  pending?: string;
+} {
   const next = chunk[start + 1];
   if (!next) {
-    return 0;
+    return { consumed: 0, pending: chunk.slice(start) };
   }
 
   if (next === "[") {
@@ -247,25 +259,25 @@ function consumeEscapeSequence(
       const code = chunk.charCodeAt(cursor);
       if (code >= 0x40 && code <= 0x7e) {
         handleCsi(state, chunk.slice(start + 2, cursor), chunk[cursor]);
-        return cursor - start + 1;
+        return { consumed: cursor - start + 1 };
       }
       cursor++;
     }
-    return chunk.length - start;
+    return { consumed: 0, pending: chunk.slice(start) };
   }
 
   if (next === "]") {
     let cursor = start + 2;
     while (cursor < chunk.length) {
       if (chunk[cursor] === "\u0007") {
-        return cursor - start + 1;
+        return { consumed: cursor - start + 1 };
       }
       if (chunk[cursor] === "\u001b" && chunk[cursor + 1] === "\\") {
-        return cursor - start + 2;
+        return { consumed: cursor - start + 2 };
       }
       cursor++;
     }
-    return chunk.length - start;
+    return { consumed: 0, pending: chunk.slice(start) };
   }
 
   if (next === "7") {
@@ -274,7 +286,7 @@ function consumeEscapeSequence(
       col: state.cursorCol,
       style: { ...state.currentStyle },
     };
-    return 2;
+    return { consumed: 2 };
   }
 
   if (next === "8") {
@@ -284,10 +296,10 @@ function consumeEscapeSequence(
       state.currentStyle = { ...state.savedCursor.style };
       ensureCursorLine(state);
     }
-    return 2;
+    return { consumed: 2 };
   }
 
-  return 2;
+  return { consumed: 2 };
 }
 
 function handleCsi(
@@ -311,7 +323,10 @@ function handleCsi(
       ensureCursorLine(state);
       break;
     case "C":
-      state.cursorCol = Math.min(state.cols - 1, state.cursorCol + getCsiParam(params, 1, 1));
+      state.cursorCol = Math.min(
+        state.cols - 1,
+        state.cursorCol + getCsiParam(params, 1, 1),
+      );
       break;
     case "D":
       state.cursorCol = Math.max(0, state.cursorCol - getCsiParam(params, 1, 1));
@@ -330,12 +345,11 @@ function handleCsi(
       state.cursorCol = clampColumn(state, getCsiParam(params, 1, 1) - 1);
       break;
     case "H":
-    case "f": {
+    case "f":
       state.cursorRow = Math.max(0, getCsiParam(params, 1, 1) - 1);
       state.cursorCol = clampColumn(state, getCsiParam(params, 2, 1) - 1);
       ensureCursorLine(state);
       break;
-    }
     case "J":
       clearDisplay(state, getCsiParam(params, 1, 0));
       break;
@@ -368,10 +382,6 @@ function handleCsi(
       break;
     case "h":
     case "l":
-      if (!privatePrefix) {
-        break;
-      }
-      break;
     default:
       break;
   }
@@ -386,18 +396,22 @@ function clearDisplay(state: TerminalBufferState, mode: number): void {
   if (mode === 1) {
     for (let lineIndex = 0; lineIndex < state.cursorRow; lineIndex++) {
       state.lines[lineIndex].cells = [];
+      touchLine(state.lines[lineIndex]);
     }
     const currentLine = ensureCursorLine(state);
     for (let cellIndex = 0; cellIndex <= state.cursorCol; cellIndex++) {
-      currentLine.cells[cellIndex] = { char: " ", style: {} };
+      currentLine.cells[cellIndex] = createWrittenSpaceCell();
     }
+    touchLine(currentLine);
     return;
   }
 
   const currentLine = ensureCursorLine(state);
   currentLine.cells.splice(state.cursorCol);
+  touchLine(currentLine);
   for (let lineIndex = state.cursorRow + 1; lineIndex < state.lines.length; lineIndex++) {
     state.lines[lineIndex].cells = [];
+    touchLine(state.lines[lineIndex]);
   }
 }
 
@@ -406,31 +420,36 @@ function clearLine(state: TerminalBufferState, mode: number): void {
 
   if (mode === 2) {
     line.cells = [];
+    touchLine(line);
     return;
   }
 
   if (mode === 1) {
     for (let index = 0; index <= state.cursorCol; index++) {
-      line.cells[index] = { char: " ", style: {} };
+      line.cells[index] = createWrittenSpaceCell();
     }
+    touchLine(line);
     return;
   }
 
   line.cells.splice(state.cursorCol);
+  touchLine(line);
 }
 
 function deleteCharacters(state: TerminalBufferState, count: number): void {
   const line = ensureCursorLine(state);
   const deleteCount = Math.max(1, count);
   line.cells.splice(state.cursorCol, deleteCount);
+  touchLine(line);
 }
 
 function eraseCharacters(state: TerminalBufferState, count: number): void {
   const line = ensureCursorLine(state);
   const eraseCount = Math.max(1, count);
   for (let index = 0; index < eraseCount; index++) {
-    line.cells[state.cursorCol + index] = { char: " ", style: {} };
+    line.cells[state.cursorCol + index] = createWrittenSpaceCell();
   }
+  touchLine(line);
 }
 
 function applySgr(state: TerminalBufferState, params: number[]): void {
@@ -527,8 +546,10 @@ function writePrintable(state: TerminalBufferState, char: string): void {
   const line = ensureCursorLine(state);
   line.cells[state.cursorCol] = {
     char,
+    written: true,
     style: { ...state.currentStyle },
   };
+  touchLine(line);
 
   state.cursorCol += 1;
 
@@ -584,6 +605,48 @@ function pushSegment(
   });
 }
 
+function createTerminalRenderLine(
+  state: TerminalBufferState,
+  lineIndex: number,
+  cursorRow?: number,
+  cursorCol?: number,
+  cursorStyle: TerminalCellStyle = {},
+): TerminalRenderLine {
+  const line = state.lines[lineIndex];
+  const isCursorLine = cursorRow === lineIndex;
+  const cursorCellIndex = isCursorLine ? Math.max(0, cursorCol ?? 0) : -1;
+  const lastCellIndex = line.cells.reduce((max, cell, idx) => (
+    isBlankCell(cell) ? max : idx
+  ), -1);
+  const renderLength = Math.max(
+    lastCellIndex + 1,
+    isCursorLine ? cursorCellIndex + 1 : 0,
+  );
+  const segments: TerminalRenderSegment[] = [];
+  let plainText = "";
+
+  for (let cellIndex = 0; cellIndex < renderLength; cellIndex++) {
+    const cell = line.cells[cellIndex] ?? createEmptyCell();
+    const style = isCursorLine && cellIndex === cursorCellIndex
+      ? mergeStyles(cell.style, cursorStyle)
+      : cell.style;
+    const char = isCursorLine && cellIndex === cursorCellIndex && cell.char === " "
+      ? " "
+      : cell.char;
+
+    plainText += char;
+    pushSegment(segments, char, style);
+  }
+
+  return {
+    id: line.id,
+    version: line.version,
+    cacheKey: `${line.version}:${isCursorLine ? cursorCellIndex : -1}:${isCursorLine ? serializeStyle(cursorStyle) : ""}`,
+    plainText,
+    segments: segments.length > 0 ? segments : [{ text: "", style: {} }],
+  };
+}
+
 function sameStyle(a: TerminalCellStyle, b: TerminalCellStyle): boolean {
   return a.fg === b.fg
     && a.bg === b.bg
@@ -598,12 +661,38 @@ function mergeStyles(base: TerminalCellStyle, overlay: TerminalCellStyle): Termi
   };
 }
 
+function serializeStyle(style: TerminalCellStyle): string {
+  return `${style.fg ?? ""}|${style.bg ?? ""}|${style.bold ? "1" : "0"}|${style.inverse ? "1" : "0"}`;
+}
+
 function isBlankCell(cell: TerminalCell): boolean {
-  return cell.char === " "
-    && !cell.style.bg
-    && !cell.style.fg
-    && !cell.style.bold
-    && !cell.style.inverse;
+  const hasStyle =
+    Boolean(cell.style.bg)
+    || Boolean(cell.style.fg)
+    || Boolean(cell.style.bold)
+    || Boolean(cell.style.inverse);
+
+  return cell.written === false && cell.char === " " && !hasStyle;
+}
+
+function touchLine(line: TerminalLine): void {
+  line.version += 1;
+}
+
+function createEmptyCell(): TerminalCell {
+  return {
+    char: " ",
+    style: {},
+    written: false,
+  };
+}
+
+function createWrittenSpaceCell(): TerminalCell {
+  return {
+    char: " ",
+    style: {},
+    written: true,
+  };
 }
 
 function convert256Color(value: number): string {
@@ -641,6 +730,7 @@ function clampChannel(value: number): number {
 function createEmptyLine(id: number): TerminalLine {
   return {
     id,
+    version: 0,
     cells: [],
   };
 }
