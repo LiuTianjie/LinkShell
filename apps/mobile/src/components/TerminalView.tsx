@@ -1,9 +1,37 @@
-import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, forwardRef } from "react";
-import { Clipboard, StyleSheet, View } from "react-native";
-import { WebView } from "react-native-webview";
-import { TERMINAL_HTML } from "../generated/terminal-html";
+import React, {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  Clipboard,
+  FlatList,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import type { ListRenderItemInfo, LayoutChangeEvent } from "react-native";
+import { InputBar, type InputBarHandle } from "./InputBar";
 import type { TerminalStream } from "../hooks/useSession";
 import { useTheme } from "../theme";
+import {
+  appendTerminalChunk,
+  clearTerminalBuffer,
+  createTerminalBuffer,
+  createTerminalSnapshot,
+  replaceTerminalBuffer,
+  setTerminalSize,
+  type TerminalRenderLine,
+} from "../utils/terminal-buffer";
 
 export interface TerminalViewHandle {
   clear: () => void;
@@ -24,163 +52,301 @@ interface TerminalViewProps {
   stream: TerminalStream;
   onInput?: (data: string) => void;
   onResize?: (cols: number, rows: number) => void;
+  disabled?: boolean;
 }
 
+const DEFAULT_FONT_SIZE = 13;
+const MIN_FONT_SIZE = 9;
+const MAX_FONT_SIZE = 22;
+
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  function TerminalView({ stream, onInput, onResize }, ref) {
+  function TerminalView({ disabled = false, stream, onInput, onResize }, ref) {
     const { theme } = useTheme();
-    const webViewRef = useRef<WebView>(null);
-    const readyRef = useRef(false);
+    const bufferRef = useRef(createTerminalBuffer());
+    const inputRef = useRef<InputBarHandle>(null);
+    const listRef = useRef<FlatList<TerminalRenderLine>>(null);
+    const frameRef = useRef<number | null>(null);
+    const shouldStickToBottomRef = useRef(true);
+    const rowsRef = useRef(24);
+    const colsRef = useRef(80);
+    const viewportHeightRef = useRef(0);
+    const viewportWidthRef = useRef(0);
+    const charSizeRef = useRef({ width: DEFAULT_FONT_SIZE * 0.62, height: DEFAULT_FONT_SIZE * 1.35 });
+    const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+    const [isFocused, setIsFocused] = useState(false);
+    const [selectedLineId, setSelectedLineId] = useState<number | null>(null);
+    const [snapshot, setSnapshot] = useState(() => createTerminalSnapshot(bufferRef.current));
 
-    const terminalHtml = useMemo(() => {
-      const isDark = theme.mode === "dark";
-      const termTheme = {
-        background: theme.bgTerminal,
-        foreground: isDark ? "#e2e8f0" : "#0f172a",
-        cursor: theme.accent,
-        selectionBackground: isDark ? "#334155" : "#cbd5e1",
-      };
-      // Keep the terminal responsive to orientation changes without continuously refitting on DOM mutations.
-      const resizeBridgeScript = `
-<script>
-(function(){
-  var sched=false;
-  function run(){sched=false;try{if(window.fitAddon&&window.term){if(typeof safeFit==='function')safeFit();else window.fitAddon.fit();if(typeof sendSize==='function')sendSize();}}catch(e){}}
-  function schedule(){if(sched)return;sched=true;requestAnimationFrame(run);}
-  window.addEventListener('orientationchange',schedule);
-  window.addEventListener('resize',schedule);
-  setTimeout(schedule,0);setTimeout(schedule,80);setTimeout(schedule,220);
-})();
-</script>`;
+    const lineHeight = useMemo(() => Math.round(fontSize * 1.35), [fontSize]);
+    const fontFamily = useMemo(
+      () => ({ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" as const }),
+      [],
+    );
+    const selectedText = useMemo(() => {
+      if (selectedLineId === null) {
+        return "";
+      }
+      return snapshot.lines.find((line) => line.id === selectedLineId)?.plainText ?? "";
+    }, [selectedLineId, snapshot.lines]);
 
-      return TERMINAL_HTML
-        .replace('<html>', `<html style="color-scheme:${theme.mode}">`)
-        .replace('<meta charset="utf-8"/>', `<meta charset="utf-8"/><meta name="color-scheme" content="${theme.mode}">`)
-        .replace(/background:#020617;display:flex;flex-direction:column/g, `background:${theme.bgTerminal};display:flex;flex-direction:column`)
-        .replace(/background-color: #000;/g, `background-color: ${theme.bgTerminal};`)
-        .replace(
-          /\.xterm-viewport\{scroll-behavior:auto !important;-webkit-overflow-scrolling:auto !important;\}/,
-          ".xterm-viewport{-webkit-overflow-scrolling:touch !important;touch-action:pan-y !important;overscroll-behavior:contain !important;}"
-        )
-        .replace(
-          /\.xterm \.xterm-viewport \{\n    \/\* On OS X this is required in order for the scroll bar to appear fully opaque \*\/\n    background-color: #000;\n    overflow-y: scroll;\n    cursor: default;\n    position: absolute;\n    right: 0;\n    left: 0;\n    top: 0;\n    bottom: 0;\n\}/,
-          `.xterm .xterm-viewport {\n    background-color: ${theme.bgTerminal};\n    overflow-y: scroll;\n    cursor: default;\n    position: absolute;\n    right: 0;\n    left: 0;\n    top: 0;\n    bottom: 0;\n    -webkit-overflow-scrolling: touch;\n  }`
-        )
-        // Let xterm own keyboard input so IME composition and candidate selection work natively.
-        .replace(
-          /if \(term\.textarea\) \{\n  term\.textarea\.readOnly = true;\n  term\.textarea\.tabIndex = -1;\n  term\.textarea\.setAttribute\('inputmode', 'none'\);\n  term\.textarea\.blur\(\);\n\}/,
-          `if (term.textarea) {\n  term.textarea.readOnly = false;\n  term.textarea.tabIndex = 0;\n  term.textarea.style.colorScheme = '${theme.mode}';\n  term.textarea.setAttribute('autocapitalize', 'off');\n  term.textarea.setAttribute('autocorrect', 'off');\n  term.textarea.setAttribute('spellcheck', 'false');\n}`
-        )
-        .replace("window.addEventListener('resize',function(){fitAddon.fit();});", "window.addEventListener('resize',function(){safeFit();sendSize();});")
-        .replace(/theme:\{background:'#020617',foreground:'#e2e8f0',cursor:'#3b82f6',selectionBackground:'#334155'\}/, `theme:${JSON.stringify(termTheme)}`)
-        .replace("</body>", `${resizeBridgeScript}<script>\n(function(){\n  var _snapRaf = 0;\n  function viewport(){\n    return document.querySelector('.xterm-viewport');\n  }\n  function isNearBottom(){\n    var vp = viewport();\n    return !vp || vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 32;\n  }\n  function deferSnap(){\n    if(_snapRaf) return;\n    _snapRaf = requestAnimationFrame(function(){ _snapRaf = 0; snapBottom(); });\n  }\n  function restoreChunks(chunks){\n    term.reset();\n    if(Array.isArray(chunks)){\n      for(var i = 0; i < chunks.length; i++){\n        term.write(chunks[i]);\n      }\n    }\n    safeFit();\n    snapBottom();\n    sendSize();\n  }\n  var prevHandle = window.handleRNMessage;\n  window.handleRNMessage = function(msg){\n    try{\n      var p = JSON.parse(msg);\n      if(p.type==='restore'){\n        restoreChunks(p.chunks);\n        return;\n      }\n      if(p.type==='refit'){\n        safeFit();\n        if(p.stickToBottom || isNearBottom()){\n          deferSnap();\n        }\n        sendSize();\n        return;\n      }\n      if(p.type==='scroll_bottom'){\n        deferSnap();\n        return;\n      }\n      if(p.type==='write'){\n        var wasNear = isNearBottom();\n        term.write(p.data || '');\n        if(wasNear) deferSnap();\n        return;\n      }\n      if(p.type==='focus_cursor'){\n        deferSnap();\n        focusCursor();\n        return;\n      }\n    } catch(e) {}\n    if(prevHandle){\n      prevHandle(msg);\n    }\n  };\n})();\n</script></body>`);
-    }, [theme.accent, theme.bgTerminal, theme.mode]);
+    const flushSnapshot = useCallback(() => {
+      const cursorRow = isFocused ? bufferRef.current.cursorRow : undefined;
+      const cursorCol = isFocused ? bufferRef.current.cursorCol : undefined;
+      setSnapshot(createTerminalSnapshot(bufferRef.current, {
+        cursorRow,
+        cursorCol,
+        cursorStyle: isFocused
+          ? { bg: theme.accent, fg: theme.textInverse }
+          : undefined,
+      }));
+    }, [isFocused, theme.accent, theme.textInverse]);
 
-    const postToWebView = useCallback((msg: object) => {
-      const js = `if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify(msg))})}true;`;
-      webViewRef.current?.injectJavaScript(js);
+    const scheduleFlush = useCallback(() => {
+      if (frameRef.current !== null) {
+        return;
+      }
+
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null;
+        flushSnapshot();
+        if (shouldStickToBottomRef.current) {
+          requestAnimationFrame(() => {
+            listRef.current?.scrollToEnd({ animated: false });
+          });
+        }
+      });
+    }, [flushSnapshot]);
+
+    const emitResize = useCallback(() => {
+      const width = viewportWidthRef.current;
+      const height = viewportHeightRef.current;
+      const charWidth = charSizeRef.current.width;
+      const charHeight = charSizeRef.current.height;
+      if (width <= 0 || height <= 0 || charWidth <= 0 || charHeight <= 0) {
+        return;
+      }
+
+      const nextCols = Math.max(1, Math.floor((width - 8) / charWidth));
+      const nextRows = Math.max(1, Math.floor(Math.max(0, height - 8) / charHeight));
+      colsRef.current = nextCols;
+      rowsRef.current = nextRows;
+      setTerminalSize(bufferRef.current, nextCols, nextRows);
+      onResize?.(nextCols, nextRows);
+      scheduleFlush();
+    }, [onResize, scheduleFlush]);
+
+    const scrollToBottom = useCallback((animated = false) => {
+      shouldStickToBottomRef.current = true;
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated });
+      });
     }, []);
 
-    const restoreSnapshot = useCallback(() => {
-      const snapshot = stream.getSnapshot();
-      if (!readyRef.current) return;
-      postToWebView({ type: "restore", chunks: snapshot.chunks });
-    }, [postToWebView, stream]);
+    useEffect(() => {
+      const initial = stream.getSnapshot();
+      replaceTerminalBuffer(bufferRef.current, initial.chunks, colsRef.current, rowsRef.current);
+      flushSnapshot();
+    }, [flushSnapshot, stream]);
 
     useEffect(() => {
       const unsubscribe = stream.subscribe((event) => {
-        if (!readyRef.current) return;
         if (event.type === "reset") {
-          postToWebView({ type: "restore", chunks: event.snapshot.chunks });
+          replaceTerminalBuffer(bufferRef.current, event.snapshot.chunks, colsRef.current, rowsRef.current);
+          shouldStickToBottomRef.current = true;
+          scheduleFlush();
           return;
         }
-        postToWebView({ type: "write", data: event.chunk });
+
+        appendTerminalChunk(bufferRef.current, event.chunk);
+        scheduleFlush();
       });
 
       return unsubscribe;
-    }, [postToWebView, stream]);
+    }, [scheduleFlush, stream]);
+
+    useEffect(() => () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+      }
+    }, []);
+
+    useEffect(() => {
+      emitResize();
+    }, [emitResize, fontSize, lineHeight]);
 
     useImperativeHandle(ref, () => ({
       clear() {
-        postToWebView({ type: "clear" });
+        clearTerminalBuffer(bufferRef.current);
+        setSelectedLineId(null);
+        shouldStickToBottomRef.current = true;
+        scheduleFlush();
       },
       resize(cols: number, rows: number) {
-        postToWebView({ type: "resize", cols, rows });
+        colsRef.current = cols;
+        rowsRef.current = rows;
+        setTerminalSize(bufferRef.current, cols, rows);
+        scheduleFlush();
       },
       refit(stickToBottom = false) {
-        postToWebView({ type: "refit", stickToBottom });
+        if (stickToBottom) {
+          shouldStickToBottomRef.current = true;
+        }
+        emitResize();
       },
       scrollToBottom() {
-        postToWebView({ type: "scroll_bottom" });
+        scrollToBottom(false);
       },
       zoomIn() {
-        postToWebView({ type: "zoom_in" });
+        setFontSize((current) => Math.min(MAX_FONT_SIZE, current + 1));
       },
       zoomOut() {
-        postToWebView({ type: "zoom_out" });
+        setFontSize((current) => Math.max(MIN_FONT_SIZE, current - 1));
       },
       resetZoom() {
-        postToWebView({ type: "zoom_reset" });
+        setFontSize(DEFAULT_FONT_SIZE);
       },
       focusCursor() {
-        webViewRef.current?.injectJavaScript(
-          `try{if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "focus_cursor" }))});}}catch(e){}true;`
-        );
+        if (disabled) {
+          return;
+        }
+        inputRef.current?.focus();
+        scrollToBottom(false);
       },
       blurCursor() {
-        webViewRef.current?.injectJavaScript("try{window.term.blur();document.activeElement&&document.activeElement.blur();}catch(e){}true;");
+        inputRef.current?.blur();
       },
       copy() {
-        postToWebView({ type: "copy" });
+        const text = selectedText || snapshot.plainText;
+        if (text) {
+          Clipboard.setString(text);
+        }
       },
       async paste() {
+        if (disabled) {
+          return;
+        }
         const text = await Clipboard.getString();
-        if (text) postToWebView({ type: "paste", data: text });
+        if (text) {
+          onInput?.(text);
+        }
       },
       selectAll() {
-        postToWebView({ type: "select_all" });
-      },
-    }), [postToWebView]);
-
-    const handleMessage = useCallback((event: { nativeEvent: { data: string } }) => {
-      try {
-        const msg = JSON.parse(event.nativeEvent.data) as { type: string; data?: string; cols?: number; rows?: number };
-        if (msg.type === "input" && msg.data && onInput) {
-          onInput(msg.data);
-        } else if (msg.type === "resize" && msg.cols && msg.rows && onResize) {
-          onResize(msg.cols, msg.rows);
-        } else if (msg.type === "selection" && msg.data) {
-          // Auto-copy selection to clipboard
-          Clipboard.setString(msg.data);
-        } else if (msg.type === "clipboard_copy" && msg.data) {
-          Clipboard.setString(msg.data);
+        const text = snapshot.plainText;
+        if (text) {
+          Clipboard.setString(text);
         }
-      } catch {}
-    }, [onInput, onResize]);
+      },
+    }), [disabled, emitResize, onInput, scheduleFlush, scrollToBottom, selectedText, snapshot.plainText]);
+
+    const handleViewportLayout = useCallback((event: LayoutChangeEvent) => {
+      const { width, height } = event.nativeEvent.layout;
+      viewportWidthRef.current = width;
+      viewportHeightRef.current = height;
+      emitResize();
+    }, [emitResize]);
+
+    const handleCharMeasureLayout = useCallback((event: LayoutChangeEvent) => {
+      const { width, height } = event.nativeEvent.layout;
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+      charSizeRef.current = {
+        width: width / 10,
+        height,
+      };
+      emitResize();
+    }, [emitResize]);
+
+    const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+      shouldStickToBottomRef.current =
+        contentOffset.y + layoutMeasurement.height >= contentSize.height - lineHeight * 2;
+    }, [lineHeight]);
+
+    const handleContentSizeChange = useCallback(() => {
+      if (shouldStickToBottomRef.current) {
+        scrollToBottom(false);
+      }
+    }, [scrollToBottom]);
+
+    const handleFocusChange = useCallback((focused: boolean) => {
+      setIsFocused(focused);
+      if (focused) {
+        scrollToBottom(false);
+      }
+    }, [scrollToBottom]);
+
+    const handleLinePress = useCallback((line: TerminalRenderLine) => {
+      setSelectedLineId(line.id);
+      if (!disabled) {
+        inputRef.current?.focus();
+      }
+    }, [disabled]);
+
+    const handleLineLongPress = useCallback((line: TerminalRenderLine) => {
+      if (!line.plainText) {
+        if (!disabled) {
+          inputRef.current?.focus();
+        }
+        return;
+      }
+      setSelectedLineId(line.id);
+      Clipboard.setString(line.plainText);
+      if (!disabled) {
+        inputRef.current?.focus();
+      }
+    }, [disabled]);
+
+    const renderItem = useCallback(({ item }: ListRenderItemInfo<TerminalRenderLine>) => (
+      <TerminalLineRow
+        fontFamily={fontFamily}
+        fontSize={fontSize}
+        line={item}
+        lineHeight={lineHeight}
+        onLongPress={handleLineLongPress}
+        onPress={handleLinePress}
+        selected={item.id === selectedLineId}
+        theme={theme}
+      />
+    ), [fontFamily, fontSize, handleLineLongPress, handleLinePress, lineHeight, selectedLineId, theme]);
 
     return (
-      <View style={styles.container}>
-        <WebView
-          ref={webViewRef}
-          source={{ html: terminalHtml }}
-          style={[styles.webview, { backgroundColor: theme.bgTerminal }]}
-          originWhitelist={["*"]}
-          javaScriptEnabled
-          domStorageEnabled
-          onMessage={handleMessage}
-          scrollEnabled={false}
-          bounces={false}
-          overScrollMode="never"
-          keyboardDisplayRequiresUserAction={false}
-          hideKeyboardAccessoryView
-          allowsInlineMediaPlayback
-          mixedContentMode="always"
-          injectedJavaScript={`document.documentElement.style.colorScheme='${theme.mode}';true;`}
-          onLoadEnd={() => {
-            readyRef.current = true;
-            requestAnimationFrame(() => {
-              restoreSnapshot();
-            });
+      <View style={[styles.container, { backgroundColor: theme.bgTerminal }]} onLayout={handleViewportLayout}>
+        <Text
+          onLayout={handleCharMeasureLayout}
+          style={[
+            styles.measureText,
+            fontFamily,
+            { fontSize, lineHeight, color: theme.bgTerminal },
+          ]}
+        >
+          MMMMMMMMMM
+        </Text>
+
+        <FlatList
+          ref={listRef}
+          data={snapshot.lines}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderItem}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="always"
+          onContentSizeChange={handleContentSizeChange}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          style={styles.list}
+        />
+
+        <InputBar
+          ref={inputRef}
+          disabled={disabled || !onInput}
+          onFocusChange={handleFocusChange}
+          onSendText={(text) => {
+            scrollToBottom(false);
+            onInput?.(text);
+          }}
+          onSpecialKey={(key) => {
+            scrollToBottom(false);
+            onInput?.(key);
           }}
         />
       </View>
@@ -188,11 +354,99 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   },
 );
 
+const TerminalLineRow = memo(function TerminalLineRow({
+  fontFamily,
+  fontSize,
+  line,
+  lineHeight,
+  onLongPress,
+  onPress,
+  selected,
+  theme,
+}: {
+  fontFamily: { fontFamily: string };
+  fontSize: number;
+  line: TerminalRenderLine;
+  lineHeight: number;
+  onLongPress: (line: TerminalRenderLine) => void;
+  onPress: (line: TerminalRenderLine) => void;
+  selected: boolean;
+  theme: ReturnType<typeof useTheme>["theme"];
+}) {
+  return (
+    <Pressable
+      delayLongPress={250}
+      onLongPress={() => onLongPress(line)}
+      onPress={() => onPress(line)}
+      style={({ pressed }) => [
+        styles.linePressable,
+        {
+          backgroundColor: selected
+            ? theme.accentLight
+            : pressed
+              ? theme.mode === "dark"
+                ? "rgba(255,255,255,0.04)"
+                : "rgba(58,95,200,0.06)"
+              : "transparent",
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.lineText,
+          fontFamily,
+          {
+            color: theme.text,
+            fontSize,
+            lineHeight,
+          },
+        ]}
+      >
+        {line.segments.length > 0
+          ? line.segments.map((segment, index) => {
+            const fg = segment.style.inverse ? segment.style.bg ?? theme.bgTerminal : segment.style.fg ?? theme.text;
+            const bg = segment.style.inverse ? segment.style.fg ?? theme.text : segment.style.bg;
+            return (
+              <Text
+                key={`${line.id}:${index}`}
+                style={{
+                  color: fg,
+                  backgroundColor: bg,
+                  fontWeight: segment.style.bold ? "700" : "400",
+                }}
+              >
+                {segment.text.length > 0 ? segment.text : " "}
+              </Text>
+            );
+          })
+          : "\u200b"}
+      </Text>
+    </Pressable>
+  );
+});
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  webview: {
+  list: {
     flex: 1,
+  },
+  content: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  linePressable: {
+    borderRadius: 6,
+    paddingHorizontal: 2,
+  },
+  lineText: {
+    includeFontPadding: false,
+  },
+  measureText: {
+    position: "absolute",
+    opacity: 0,
+    left: -1000,
+    top: -1000,
   },
 });

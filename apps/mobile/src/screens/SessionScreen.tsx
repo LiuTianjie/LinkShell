@@ -610,6 +610,7 @@ const TerminalStage = memo(function TerminalStage({
       <View style={{ flex: 1, paddingBottom: terminalBottomInset }}>
         <TerminalView
           ref={termRef}
+          disabled={inputDisabled}
           stream={stream}
           onInput={onInput}
           onResize={onResize}
