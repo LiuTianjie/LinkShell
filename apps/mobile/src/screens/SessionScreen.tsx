@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Keyboard,
+  KeyboardAvoidingView,
   LayoutChangeEvent,
   Platform,
   Pressable,
@@ -207,8 +208,9 @@ export function SessionScreen({
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
-      <View
+      <KeyboardAvoidingView
         style={{ flex: 1, backgroundColor: theme.bgTerminal }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <View style={{ height: insets.top, backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated }} />
 
@@ -562,7 +564,7 @@ export function SessionScreen({
           {!keyboardVisible && <View style={{ height: insets.bottom, backgroundColor: theme.bgTerminal }} />}
         </View>
         )}
-      </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }

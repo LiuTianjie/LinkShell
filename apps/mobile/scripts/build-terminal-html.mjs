@@ -29,6 +29,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#020617;display:flex
 .xterm{padding:2px}
 .xterm-viewport::-webkit-scrollbar{width:4px}
 .xterm-viewport::-webkit-scrollbar-thumb{background:#334155;border-radius:2px}
+.xterm-viewport{scroll-behavior:auto !important;-webkit-overflow-scrolling:auto !important;}
 </style>
 </head>
 <body>
