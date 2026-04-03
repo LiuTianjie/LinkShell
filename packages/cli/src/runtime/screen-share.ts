@@ -36,14 +36,15 @@ export class ScreenShare {
   }
 
   static isAvailable(): boolean {
-    // Check if werift can be imported and ffmpeg exists
+    // Check ffmpeg exists
     try {
       execSync("which ffmpeg", { stdio: "pipe" });
     } catch {
       return false;
     }
+    // Check werift can be imported (try dynamic import synchronously via a child process)
     try {
-      require.resolve("werift");
+      execSync('node -e "require(\'werift\')"', { stdio: "pipe", timeout: 5000 });
       return true;
     } catch {
       return false;

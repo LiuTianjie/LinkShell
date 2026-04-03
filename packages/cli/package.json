@@ -1,6 +1,6 @@
 {
   "name": "linkshell-cli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Remote terminal bridge for Claude Code / Codex — control from your phone",
   "type": "module",
   "main": "dist/index.js",

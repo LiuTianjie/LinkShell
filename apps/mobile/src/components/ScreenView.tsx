@@ -3,9 +3,11 @@ import {
   ActivityIndicator,
   Image,
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { useTheme } from "../theme";
@@ -126,6 +128,7 @@ export function ScreenView({
   onSignal,
 }: ScreenViewProps) {
   const { theme } = useTheme();
+  const { width: winW, height: winH } = useWindowDimensions();
   const webViewRef = useRef<WebView>(null);
   const [fps, setFps] = useState(5);
   const [quality, setQuality] = useState(60);
@@ -133,8 +136,10 @@ export function ScreenView({
   const [paused, setPaused] = useState(false);
   const [displayFps, setDisplayFps] = useState(0);
   const [rtcState, setRtcState] = useState<string>("new");
+  const [fullscreen, setFullscreen] = useState(false);
   const frameCountRef = useRef(0);
   const lastFrameIdRef = useRef(-1);
+  const isLandscape = winW > winH;
 
   // FPS counter
   useEffect(() => {
@@ -204,6 +209,19 @@ export function ScreenView({
     setPaused((p) => !p);
   }, []);
 
+  const toggleFullscreen = useCallback(() => {
+    setFullscreen((f) => !f);
+  }, []);
+
+  // Auto-fullscreen in landscape when active
+  useEffect(() => {
+    if (isLandscape && active && !isOff) {
+      setFullscreen(true);
+    } else if (!isLandscape) {
+      setFullscreen(false);
+    }
+  }, [isLandscape, active]);
+
   const cycleFps = useCallback(() => {
     const options = [2, 5, 10, 15, 30];
     const next = options[(options.indexOf(fps) + 1) % options.length] ?? 5;
@@ -224,7 +242,12 @@ export function ScreenView({
   const showWebRTC = mode === "webrtc" && !isOff;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bgTerminal }]}>
+    <View style={[
+      styles.container,
+      { backgroundColor: theme.bgTerminal },
+      fullscreen && { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 },
+    ]}>
+      {fullscreen && <StatusBar hidden />}
       {/* WebRTC video player (always mounted when active, hidden when fallback) */}
       {showWebRTC ? (
         <WebView
@@ -327,6 +350,13 @@ export function ScreenView({
               {mode === "off" ? "OFF" : mode === "fallback" ? "IMG" : "RTC"}
             </Text>
           </View>
+          {!isOff && (
+            <Pressable style={[styles.settingBtn, { backgroundColor: fullscreen ? theme.accent : theme.bgInput }]} onPress={toggleFullscreen}>
+              <Text style={[styles.settingBtnText, { color: fullscreen ? theme.textInverse : theme.textSecondary }]}>
+                {fullscreen ? "Exit" : "Full"}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </View>
