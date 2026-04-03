@@ -198,9 +198,7 @@ export function createTerminalSnapshot(
     const isCursorLine = cursorRow === lineIndex;
     const cursorCellIndex = isCursorLine ? Math.max(0, cursorCol ?? 0) : -1;
     const lastCellIndex = line.cells.reduce((max, cell, idx) => (
-      cell.char === " " && !cell.style.bg && !cell.style.fg && !cell.style.bold && !cell.style.inverse
-        ? max
-        : idx
+      isBlankCell(cell) ? max : idx
     ), -1);
     const renderLength = Math.max(lastCellIndex + 1, isCursorLine ? cursorCellIndex + 1 : 0);
     const segments: TerminalRenderSegment[] = [];
@@ -600,6 +598,14 @@ function mergeStyles(base: TerminalCellStyle, overlay: TerminalCellStyle): Termi
   };
 }
 
+function isBlankCell(cell: TerminalCell): boolean {
+  return cell.char === " "
+    && !cell.style.bg
+    && !cell.style.fg
+    && !cell.style.bold
+    && !cell.style.inverse;
+}
+
 function convert256Color(value: number): string {
   if (value < 16) {
     return value < 8 ? ANSI_COLORS.dark[value] : ANSI_COLORS.bright[value - 8];
@@ -615,7 +621,11 @@ function convert256Color(value: number): string {
   const green = Math.floor((index % 36) / 6);
   const blue = index % 6;
   const scale = [0, 95, 135, 175, 215, 255];
-  return rgbToHex(scale[red], scale[green], scale[blue]);
+  return rgbToHex(
+    scale[Math.min(5, Math.max(0, red))] ?? 0,
+    scale[Math.min(5, Math.max(0, green))] ?? 0,
+    scale[Math.min(5, Math.max(0, blue))] ?? 0,
+  );
 }
 
 function rgbToHex(red: number, green: number, blue: number): string {

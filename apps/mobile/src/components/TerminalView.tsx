@@ -58,6 +58,8 @@ interface TerminalViewProps {
 const DEFAULT_FONT_SIZE = 13;
 const MIN_FONT_SIZE = 9;
 const MAX_FONT_SIZE = 22;
+const TERMINAL_VIEWPORT_PADDING = 8;
+const AUTO_SCROLL_THRESHOLD_LINES = 2;
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function TerminalView({ disabled = false, stream, onInput, onResize }, ref) {
@@ -78,8 +80,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const [snapshot, setSnapshot] = useState(() => createTerminalSnapshot(bufferRef.current));
 
     const lineHeight = useMemo(() => Math.round(fontSize * 1.35), [fontSize]);
-    const fontFamily = useMemo(
-      () => ({ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" as const }),
+    const fontFamilyStyle = useMemo(
+      () => ({ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }),
       [],
     );
     const selectedText = useMemo(() => {
@@ -126,8 +128,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         return;
       }
 
-      const nextCols = Math.max(1, Math.floor((width - 8) / charWidth));
-      const nextRows = Math.max(1, Math.floor(Math.max(0, height - 8) / charHeight));
+      const nextCols = Math.max(1, Math.floor((width - TERMINAL_VIEWPORT_PADDING) / charWidth));
+      const nextRows = Math.max(1, Math.floor(Math.max(0, height - TERMINAL_VIEWPORT_PADDING) / charHeight));
       colsRef.current = nextCols;
       rowsRef.current = nextRows;
       setTerminalSize(bufferRef.current, nextCols, nextRows);
@@ -260,7 +262,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
       shouldStickToBottomRef.current =
-        contentOffset.y + layoutMeasurement.height >= contentSize.height - lineHeight * 2;
+        contentOffset.y + layoutMeasurement.height
+          >= contentSize.height - lineHeight * AUTO_SCROLL_THRESHOLD_LINES;
     }, [lineHeight]);
 
     const handleContentSizeChange = useCallback(() => {
@@ -299,7 +302,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 
     const renderItem = useCallback(({ item }: ListRenderItemInfo<TerminalRenderLine>) => (
       <TerminalLineRow
-        fontFamily={fontFamily}
+        fontFamilyStyle={fontFamilyStyle}
         fontSize={fontSize}
         line={item}
         lineHeight={lineHeight}
@@ -308,7 +311,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         selected={item.id === selectedLineId}
         theme={theme}
       />
-    ), [fontFamily, fontSize, handleLineLongPress, handleLinePress, lineHeight, selectedLineId, theme]);
+    ), [fontFamilyStyle, fontSize, handleLineLongPress, handleLinePress, lineHeight, selectedLineId, theme]);
 
     return (
       <View style={[styles.container, { backgroundColor: theme.bgTerminal }]} onLayout={handleViewportLayout}>
@@ -316,7 +319,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           onLayout={handleCharMeasureLayout}
           style={[
             styles.measureText,
-            fontFamily,
+            fontFamilyStyle,
             { fontSize, lineHeight, color: theme.bgTerminal },
           ]}
         >
@@ -355,7 +358,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 );
 
 const TerminalLineRow = memo(function TerminalLineRow({
-  fontFamily,
+  fontFamilyStyle,
   fontSize,
   line,
   lineHeight,
@@ -364,7 +367,7 @@ const TerminalLineRow = memo(function TerminalLineRow({
   selected,
   theme,
 }: {
-  fontFamily: { fontFamily: string };
+  fontFamilyStyle: { fontFamily: string };
   fontSize: number;
   line: TerminalRenderLine;
   lineHeight: number;
@@ -394,7 +397,7 @@ const TerminalLineRow = memo(function TerminalLineRow({
       <Text
         style={[
           styles.lineText,
-          fontFamily,
+          fontFamilyStyle,
           {
             color: theme.text,
             fontSize,
@@ -404,14 +407,13 @@ const TerminalLineRow = memo(function TerminalLineRow({
       >
         {line.segments.length > 0
           ? line.segments.map((segment, index) => {
-            const fg = segment.style.inverse ? segment.style.bg ?? theme.bgTerminal : segment.style.fg ?? theme.text;
-            const bg = segment.style.inverse ? segment.style.fg ?? theme.text : segment.style.bg;
+            const { backgroundColor, color } = getSegmentColors(segment, theme);
             return (
               <Text
                 key={`${line.id}:${index}`}
                 style={{
-                  color: fg,
-                  backgroundColor: bg,
+                  color,
+                  backgroundColor,
                   fontWeight: segment.style.bold ? "700" : "400",
                 }}
               >
@@ -424,6 +426,26 @@ const TerminalLineRow = memo(function TerminalLineRow({
     </Pressable>
   );
 });
+
+function getSegmentColors(
+  segment: TerminalRenderLine["segments"][number],
+  theme: ReturnType<typeof useTheme>["theme"],
+): {
+  color: string;
+  backgroundColor: string | undefined;
+} {
+  if (segment.style.inverse) {
+    return {
+      color: segment.style.bg ?? theme.bgTerminal,
+      backgroundColor: segment.style.fg ?? theme.text,
+    };
+  }
+
+  return {
+    color: segment.style.fg ?? theme.text,
+    backgroundColor: segment.style.bg,
+  };
+}
 
 const styles = StyleSheet.create({
   container: {
