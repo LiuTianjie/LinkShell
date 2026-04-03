@@ -72,6 +72,8 @@ export interface SessionHandle {
     height: number;
     frameId: number;
   } | null;
+  pendingOffer: { sdp: string } | null;
+  pendingIce: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null;
   claim: (pairingCode: string) => Promise<string | null>;
   connectToSession: (
     sessionId: string,
@@ -83,6 +85,7 @@ export interface SessionHandle {
   releaseControl: () => void;
   startScreen: (fps: number, quality: number, scale: number) => void;
   stopScreen: () => void;
+  sendScreenSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
   reconnect: () => void;
   disconnect: () => void;
 }
@@ -115,6 +118,8 @@ export function useSession({
     height: number;
     frameId: number;
   } | null>(null);
+  const [pendingOffer, setPendingOffer] = useState<{ sdp: string } | null>(null);
+  const [pendingIce, setPendingIce] = useState<{ candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -459,10 +464,16 @@ export function useSession({
             setScreenStatus({ active: p.active, mode: p.mode, error: p.error });
             break;
           }
-          case "screen.offer":
-          case "screen.ice":
-            // WebRTC signaling — will be handled in Phase 2
+          case "screen.offer": {
+            const p = parseTypedPayload("screen.offer", envelope.payload);
+            setPendingOffer({ sdp: p.sdp });
             break;
+          }
+          case "screen.ice": {
+            const p = parseTypedPayload("screen.ice", envelope.payload);
+            setPendingIce({ candidate: p.candidate, sdpMid: p.sdpMid, sdpMLineIndex: p.sdpMLineIndex });
+            break;
+          }
           default:
             break;
         }
@@ -632,6 +643,18 @@ export function useSession({
       }),
     );
     setScreenStatus({ active: false, mode: "off" });
+    setPendingOffer(null);
+    setPendingIce(null);
+  }, [sendRaw]);
+
+  const sendScreenSignal = useCallback((type: "screen.answer" | "screen.ice", payload: any) => {
+    sendRaw(
+      createEnvelope({
+        type,
+        sessionId: sessionIdRef.current,
+        payload,
+      }),
+    );
   }, [sendRaw]);
 
   const reconnect = useCallback(() => {
@@ -696,6 +719,8 @@ export function useSession({
     connectionDetail,
     screenStatus,
     screenFrame,
+    pendingOffer,
+    pendingIce,
     claim,
     connectToSession,
     sendInput,
@@ -704,6 +729,7 @@ export function useSession({
     releaseControl,
     startScreen,
     stopScreen,
+    sendScreenSignal,
     reconnect,
     disconnect,
   };

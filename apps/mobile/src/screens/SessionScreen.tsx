@@ -33,12 +33,15 @@ interface SessionScreenProps {
   terminalStream: TerminalStream;
   screenStatus: { active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string };
   screenFrame: { data: string; width: number; height: number; frameId: number } | null;
+  pendingOffer: { sdp: string } | null;
+  pendingIce: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null;
   onSendInput: (data: string) => void;
   onSendResize: (cols: number, rows: number) => void;
   onClaimControl: () => void;
   onReleaseControl: () => void;
   onStartScreen: (fps: number, quality: number, scale: number) => void;
   onStopScreen: () => void;
+  onScreenSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
   onReconnect: () => void;
   onDisconnect: () => void;
 }
@@ -52,12 +55,15 @@ export function SessionScreen({
   terminalStream,
   screenStatus,
   screenFrame,
+  pendingOffer,
+  pendingIce,
   onSendInput,
   onSendResize,
   onClaimControl,
   onReleaseControl,
   onStartScreen,
   onStopScreen,
+  onScreenSignal,
   onReconnect,
   onDisconnect,
 }: SessionScreenProps) {
@@ -331,7 +337,10 @@ export function SessionScreen({
               mode={screenStatus.mode}
               onStart={onStartScreen}
               onStop={onStopScreen}
+              onSignal={onScreenSignal}
               screenFrame={screenFrame}
+              pendingOffer={pendingOffer}
+              pendingIce={pendingIce}
               sessionId={sessionId}
               theme={theme}
               active={screenStatus.active}
@@ -708,7 +717,10 @@ const DesktopStage = memo(function DesktopStage({
   mode,
   onStart,
   onStop,
+  onSignal,
   screenFrame,
+  pendingOffer,
+  pendingIce,
   sessionId,
   theme,
 }: {
@@ -717,7 +729,10 @@ const DesktopStage = memo(function DesktopStage({
   mode: "webrtc" | "fallback" | "off";
   onStart: (fps: number, quality: number, scale: number) => void;
   onStop: () => void;
+  onSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
   screenFrame: { data: string; width: number; height: number; frameId: number } | null;
+  pendingOffer: { sdp: string } | null;
+  pendingIce: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null;
   sessionId: string;
   theme: Theme;
 }) {
@@ -729,8 +744,11 @@ const DesktopStage = memo(function DesktopStage({
         mode={mode}
         error={error}
         screenFrame={screenFrame}
+        pendingOffer={pendingOffer}
+        pendingIce={pendingIce}
         onStart={onStart}
         onStop={onStop}
+        onSignal={onSignal}
       />
     </View>
   );

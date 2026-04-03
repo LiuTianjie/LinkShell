@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { WebView } from "react-native-webview";
 import { useTheme } from "../theme";
 
 interface ScreenFrame {
@@ -22,9 +23,95 @@ interface ScreenViewProps {
   mode: "webrtc" | "fallback" | "off";
   error?: string;
   screenFrame: ScreenFrame | null;
+  // WebRTC signaling from host
+  pendingOffer: { sdp: string } | null;
+  pendingIce: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null;
   onStart: (fps: number, quality: number, scale: number) => void;
   onStop: () => void;
+  onSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
 }
+
+const WEBRTC_PLAYER_HTML = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000}
+video{width:100%;height:100%;object-fit:contain;background:#000}
+</style>
+</head>
+<body>
+<video id="v" autoplay playsinline muted></video>
+<script>
+var pc = null;
+var video = document.getElementById('v');
+
+function post(msg) {
+  window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+}
+
+async function handleOffer(sdp) {
+  var config = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' }
+    ]
+  };
+  pc = new RTCPeerConnection(config);
+
+  pc.ontrack = function(event) {
+    video.srcObject = event.streams[0] || new MediaStream([event.track]);
+  };
+
+  pc.onicecandidate = function(event) {
+    if (event.candidate) {
+      post({
+        type: 'ice',
+        candidate: event.candidate.candidate,
+        sdpMid: event.candidate.sdpMid,
+        sdpMLineIndex: event.candidate.sdpMLineIndex
+      });
+    }
+  };
+
+  pc.onconnectionstatechange = function() {
+    post({ type: 'state', state: pc.connectionState });
+  };
+
+  await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: sdp }));
+  var answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  post({ type: 'answer', sdp: answer.sdp });
+}
+
+async function addIce(candidate, sdpMid, sdpMLineIndex) {
+  if (!pc) return;
+  try {
+    await pc.addIceCandidate(new RTCIceCandidate({
+      candidate: candidate,
+      sdpMid: sdpMid || '0',
+      sdpMLineIndex: sdpMLineIndex || 0
+    }));
+  } catch(e) {}
+}
+
+function cleanup() {
+  if (pc) { try { pc.close(); } catch(e) {} pc = null; }
+  video.srcObject = null;
+}
+
+window.handleRNMessage = function(msg) {
+  try {
+    var p = JSON.parse(msg);
+    if (p.type === 'offer') handleOffer(p.sdp);
+    else if (p.type === 'ice') addIce(p.candidate, p.sdpMid, p.sdpMLineIndex);
+    else if (p.type === 'close') cleanup();
+  } catch(e) {}
+};
+</script>
+</body>
+</html>`;
 
 export function ScreenView({
   sessionId,
@@ -32,15 +119,20 @@ export function ScreenView({
   mode,
   error,
   screenFrame,
+  pendingOffer,
+  pendingIce,
   onStart,
   onStop,
+  onSignal,
 }: ScreenViewProps) {
   const { theme } = useTheme();
+  const webViewRef = useRef<WebView>(null);
   const [fps, setFps] = useState(5);
   const [quality, setQuality] = useState(60);
   const [scale, setScale] = useState(0.5);
   const [paused, setPaused] = useState(false);
   const [displayFps, setDisplayFps] = useState(0);
+  const [rtcState, setRtcState] = useState<string>("new");
   const frameCountRef = useRef(0);
   const lastFrameIdRef = useRef(-1);
 
@@ -53,7 +145,7 @@ export function ScreenView({
     return () => clearInterval(timer);
   }, []);
 
-  // Count frames
+  // Count fallback frames
   useEffect(() => {
     if (screenFrame && screenFrame.frameId !== lastFrameIdRef.current) {
       lastFrameIdRef.current = screenFrame.frameId;
@@ -61,13 +153,50 @@ export function ScreenView({
     }
   }, [screenFrame]);
 
+  // Forward SDP offer to WebView
+  useEffect(() => {
+    if (pendingOffer && mode === "webrtc") {
+      const js = `window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "offer", sdp: pendingOffer.sdp }))});true;`;
+      webViewRef.current?.injectJavaScript(js);
+    }
+  }, [pendingOffer, mode]);
+
+  // Forward ICE candidates to WebView
+  useEffect(() => {
+    if (pendingIce && mode === "webrtc") {
+      const js = `window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "ice", ...pendingIce }))});true;`;
+      webViewRef.current?.injectJavaScript(js);
+    }
+  }, [pendingIce, mode]);
+
+  const handleWebViewMessage = useCallback((event: { nativeEvent: { data: string } }) => {
+    try {
+      const msg = JSON.parse(event.nativeEvent.data) as any;
+      if (msg.type === "answer") {
+        onSignal("screen.answer", { sdp: msg.sdp });
+      } else if (msg.type === "ice") {
+        onSignal("screen.ice", {
+          candidate: msg.candidate,
+          sdpMid: msg.sdpMid,
+          sdpMLineIndex: msg.sdpMLineIndex,
+        });
+      } else if (msg.type === "state") {
+        setRtcState(msg.state);
+      }
+    } catch {}
+  }, [onSignal]);
+
   const handleStart = useCallback(() => {
     setPaused(false);
+    setRtcState("new");
     onStart(fps, quality, scale);
   }, [fps, quality, scale, onStart]);
 
   const handleStop = useCallback(() => {
     setPaused(false);
+    // Tell WebView to close RTCPeerConnection
+    webViewRef.current?.injectJavaScript(`window.handleRNMessage('{"type":"close"}');true;`);
+    setRtcState("new");
     onStop();
   }, [onStop]);
 
@@ -76,7 +205,7 @@ export function ScreenView({
   }, []);
 
   const cycleFps = useCallback(() => {
-    const options = [2, 5, 10];
+    const options = [2, 5, 10, 15, 30];
     const next = options[(options.indexOf(fps) + 1) % options.length] ?? 5;
     setFps(next);
     if (active) onStart(next, quality, scale);
@@ -91,11 +220,28 @@ export function ScreenView({
 
   const isOff = mode === "off" || !active;
   const hasError = Boolean(error);
-  const showFrame = screenFrame && !isOff && !paused;
+  const showFallbackFrame = screenFrame && mode === "fallback" && !paused;
+  const showWebRTC = mode === "webrtc" && !isOff;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bgTerminal }]}>
-      {showFrame ? (
+      {/* WebRTC video player (always mounted when active, hidden when fallback) */}
+      {showWebRTC ? (
+        <WebView
+          ref={webViewRef}
+          source={{ html: WEBRTC_PLAYER_HTML }}
+          style={styles.videoView}
+          originWhitelist={["*"]}
+          javaScriptEnabled
+          domStorageEnabled
+          onMessage={handleWebViewMessage}
+          scrollEnabled={false}
+          bounces={false}
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
+          mixedContentMode="always"
+        />
+      ) : showFallbackFrame ? (
         <Image
           source={{ uri: `data:image/jpeg;base64,${screenFrame.data}` }}
           style={styles.screenImage}
@@ -146,17 +292,24 @@ export function ScreenView({
               <Pressable style={[styles.controlBtn, { backgroundColor: theme.errorLight }]} onPress={handleStop}>
                 <Text style={[styles.controlBtnText, { color: theme.error }]}>Stop</Text>
               </Pressable>
-              <Pressable style={[styles.controlBtn, { backgroundColor: theme.bgInput }]} onPress={handleTogglePause}>
-                <Text style={[styles.controlBtnText, { color: theme.text }]}>{paused ? "Resume" : "Pause"}</Text>
-              </Pressable>
+              {mode === "fallback" && (
+                <Pressable style={[styles.controlBtn, { backgroundColor: theme.bgInput }]} onPress={handleTogglePause}>
+                  <Text style={[styles.controlBtnText, { color: theme.text }]}>{paused ? "Resume" : "Pause"}</Text>
+                </Pressable>
+              )}
             </>
           )}
         </View>
 
         <View style={styles.controlRight}>
-          {!isOff && (
+          {!isOff && mode === "fallback" && (
             <Text style={[styles.fpsLabel, { color: theme.textTertiary }]}>
               {displayFps} fps
+            </Text>
+          )}
+          {!isOff && mode === "webrtc" && (
+            <Text style={[styles.fpsLabel, { color: rtcState === "connected" ? theme.success : theme.textTertiary }]}>
+              {rtcState}
             </Text>
           )}
           <Pressable style={[styles.settingBtn, { backgroundColor: theme.bgInput }]} onPress={cycleFps}>
@@ -165,8 +318,12 @@ export function ScreenView({
           <Pressable style={[styles.settingBtn, { backgroundColor: theme.bgInput }]} onPress={cycleQuality}>
             <Text style={[styles.settingBtnText, { color: theme.textSecondary }]}>Q{quality}</Text>
           </Pressable>
-          <View style={[styles.modeBadge, { backgroundColor: mode === "fallback" ? "rgba(251,191,36,0.15)" : theme.bgInput }]}>
-            <Text style={[styles.modeBadgeText, { color: mode === "fallback" ? "#fbbf24" : theme.textTertiary }]}>
+          <View style={[styles.modeBadge, {
+            backgroundColor: mode === "webrtc" ? "rgba(74,222,128,0.15)" : mode === "fallback" ? "rgba(251,191,36,0.15)" : theme.bgInput,
+          }]}>
+            <Text style={[styles.modeBadgeText, {
+              color: mode === "webrtc" ? "#4ade80" : mode === "fallback" ? "#fbbf24" : theme.textTertiary,
+            }]}>
               {mode === "off" ? "OFF" : mode === "fallback" ? "IMG" : "RTC"}
             </Text>
           </View>
@@ -178,6 +335,7 @@ export function ScreenView({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  videoView: { flex: 1, backgroundColor: "#000" },
   screenImage: { flex: 1, width: "100%" },
   placeholder: {
     flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 40,

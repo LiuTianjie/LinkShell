@@ -219,12 +219,15 @@ function AppInner() {
           terminalStream={session.terminalStream}
           screenStatus={session.screenStatus}
           screenFrame={session.screenFrame}
+          pendingOffer={session.pendingOffer}
+          pendingIce={session.pendingIce}
           onSendInput={session.sendInput}
           onSendResize={session.sendResize}
           onClaimControl={session.claimControl}
           onReleaseControl={session.releaseControl}
           onStartScreen={session.startScreen}
           onStopScreen={session.stopScreen}
+          onScreenSignal={session.sendScreenSignal}
           onReconnect={session.reconnect}
           onDisconnect={handleDisconnect}
         />

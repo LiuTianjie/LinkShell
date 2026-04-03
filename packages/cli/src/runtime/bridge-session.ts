@@ -12,6 +12,7 @@ import type { Envelope } from "@linkshell/protocol";
 import type { ProviderConfig } from "../providers.js";
 import { ScrollbackBuffer } from "./scrollback.js";
 import { ScreenFallback } from "./screen-fallback.js";
+import { ScreenShare } from "./screen-share.js";
 import { getLanIp } from "../utils/lan-ip.js";
 
 export interface BridgeSessionOptions {
@@ -104,6 +105,7 @@ export class BridgeSession {
   private exited = false;
   private stopped = false;
   private screenCapture: ScreenFallback | undefined;
+  private screenShare: ScreenShare | undefined;
 
   constructor(options: BridgeSessionOptions) {
     this.options = options;
@@ -279,6 +281,16 @@ export class BridgeSession {
         this.stopScreenCapture();
         break;
       }
+      case "screen.answer": {
+        const p = parseTypedPayload("screen.answer", envelope.payload);
+        this.screenShare?.handleAnswer(p.sdp);
+        break;
+      }
+      case "screen.ice": {
+        const p = parseTypedPayload("screen.ice", envelope.payload);
+        this.screenShare?.handleIceCandidate(p.candidate, p.sdpMid, p.sdpMLineIndex);
+        break;
+      }
       default:
         break;
     }
@@ -399,6 +411,30 @@ export class BridgeSession {
     }
     this.stopScreenCapture();
     this.log(`starting screen capture (fps=${fps}, quality=${quality}, scale=${scale})`);
+
+    // Try WebRTC first, fall back to screenshot stream
+    if (ScreenShare.isAvailable()) {
+      this.log("WebRTC available, starting screen share");
+      this.screenShare = new ScreenShare({
+        sessionId: this.sessionId,
+        fps,
+        quality,
+        scale,
+        onSignal: (envelope) => this.send(envelope),
+        onStatus: (envelope) => this.send(envelope),
+      });
+      this.screenShare.start().catch((err) => {
+        this.log(`WebRTC failed, falling back to screenshot stream: ${err}`);
+        this.screenShare = undefined;
+        this.startFallbackCapture(fps, quality, scale);
+      });
+    } else {
+      this.log("WebRTC not available (missing werift or ffmpeg), using screenshot fallback");
+      this.startFallbackCapture(fps, quality, scale);
+    }
+  }
+
+  private startFallbackCapture(fps: number, quality: number, scale: number): void {
     this.screenCapture = new ScreenFallback({
       fps,
       quality,
@@ -411,8 +447,13 @@ export class BridgeSession {
   }
 
   private stopScreenCapture(): void {
+    if (this.screenShare) {
+      this.log("stopping WebRTC screen share");
+      this.screenShare.stop();
+      this.screenShare = undefined;
+    }
     if (this.screenCapture) {
-      this.log("stopping screen capture");
+      this.log("stopping screenshot capture");
       this.screenCapture.stop();
       this.screenCapture = undefined;
     }

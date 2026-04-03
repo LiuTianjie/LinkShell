@@ -44,6 +44,9 @@
     "ws": "^8.18.1",
     "zod": "^3.24.3"
   },
+  "optionalDependencies": {
+    "werift": "^0.22.9"
+  },
   "devDependencies": {
     "@types/ws": "^8.5.14",
     "tsx": "^4.19.3"
