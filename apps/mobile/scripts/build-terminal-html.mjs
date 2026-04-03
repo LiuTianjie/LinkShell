@@ -79,6 +79,14 @@ function blurCursor(){
   } catch (e) {}
 }
 
+// Instant snap to bottom — no animation, no visible scroll
+function snapBottom(){
+  try {
+    var vp = document.querySelector('.xterm-viewport');
+    if (vp) vp.scrollTop = vp.scrollHeight;
+  } catch(e) {}
+}
+
 function sendSize(){
   window.ReactNativeWebView.postMessage(JSON.stringify({type:'resize',cols:term.cols,rows:term.rows}));
 }
@@ -107,12 +115,12 @@ term.onSelectionChange(function(){
 window.handleRNMessage = function(msg){
   try{
     var p = JSON.parse(msg);
-    if(p.type==='write'){term.write(p.data);term.scrollToBottom();}
+    if(p.type==='write'){term.write(p.data);snapBottom();}
     else if(p.type==='clear') term.clear();
-    else if(p.type==='resize'){term.resize(p.cols,p.rows);fitAddon.fit();term.scrollToBottom();}
-    else if(p.type==='zoom_in'){setFontSize((term.options.fontSize || DEFAULT_FONT_SIZE) + 1);term.scrollToBottom();}
-    else if(p.type==='zoom_out'){setFontSize((term.options.fontSize || DEFAULT_FONT_SIZE) - 1);term.scrollToBottom();}
-    else if(p.type==='zoom_reset'){setFontSize(DEFAULT_FONT_SIZE);term.scrollToBottom();}
+    else if(p.type==='resize'){term.resize(p.cols,p.rows);fitAddon.fit();snapBottom();}
+    else if(p.type==='zoom_in'){setFontSize((term.options.fontSize || DEFAULT_FONT_SIZE) + 1);snapBottom();}
+    else if(p.type==='zoom_out'){setFontSize((term.options.fontSize || DEFAULT_FONT_SIZE) - 1);snapBottom();}
+    else if(p.type==='zoom_reset'){setFontSize(DEFAULT_FONT_SIZE);snapBottom();}
     else if(p.type==='focus_cursor'){focusCursor();}
     else if(p.type==='blur_cursor'){blurCursor();}
     else if(p.type==='paste'){term.paste(p.data || '');}

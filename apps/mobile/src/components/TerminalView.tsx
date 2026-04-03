@@ -49,7 +49,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 <script>
 (function(){
   var sched=false;
-  function run(){sched=false;try{if(window.fitAddon&&window.term){window.fitAddon.fit();if(typeof sendSize==='function')sendSize();window.term.scrollToBottom();}}catch(e){}}
+  function run(){sched=false;try{if(window.fitAddon&&window.term){window.fitAddon.fit();if(typeof sendSize==='function')sendSize();if(typeof snapBottom==='function')snapBottom();}}catch(e){}}
   function schedule(){if(sched)return;sched=true;requestAnimationFrame(run);}
   if(typeof ResizeObserver!=='undefined'){
     var o=new ResizeObserver(schedule);o.observe(document.body);
@@ -138,7 +138,7 @@ function dismissKb(){try{if(window.term&&window.term.textarea)window.term.textar
         webViewRef.current?.injectJavaScript("try{fitAddon.fit();sendSize();}catch(e){}true;");
       },
       scrollToBottom() {
-        webViewRef.current?.injectJavaScript("try{window.term.scrollToBottom();}catch(e){}true;");
+        webViewRef.current?.injectJavaScript("try{if(typeof snapBottom==='function')snapBottom();else{var vp=document.querySelector('.xterm-viewport');if(vp)vp.scrollTop=vp.scrollHeight;}}catch(e){}true;");
       },
       zoomIn() {
         postToWebView({ type: "zoom_in" });
