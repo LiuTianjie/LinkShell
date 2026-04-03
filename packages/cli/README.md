@@ -41,6 +41,9 @@ App 断开不影响后台进程，重新扫码即可恢复。
 # 后台启动（推荐）
 linkshell start --daemon --provider claude
 
+# 启用远程桌面查看
+linkshell start --daemon --provider claude --screen
+
 # 前台启动
 linkshell start --provider claude
 

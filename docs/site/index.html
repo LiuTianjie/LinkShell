@@ -331,6 +331,21 @@
           <h3 class="text-xl font-bold mb-3" data-i18n="f3Title">无缝切换</h3>
           <p class="text-muted leading-relaxed" data-i18n="f3Desc">在多个视图间无缝流转。手机随时接管，回到电脑敲双空格切回本地，会话同步不丢失。</p>
         </div>
+
+        <!-- Feature 4: Remote Desktop -->
+        <div class="col-span-12 bento-card flex flex-col items-center text-center bg-gradient-to-br from-emerald-50 to-white border-emerald-100">
+          <div class="w-16 h-16 rounded-2xl bg-emerald-100 border border-emerald-200 flex items-center justify-center mb-6">
+            <svg class="w-8 h-8 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3" data-i18n="f4Title">远程桌面</h3>
+          <p class="text-muted leading-relaxed max-w-xl" data-i18n="f4Desc">不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC 30fps 丝滑体验，自动降级到截图流兜底。看 Claude 操作浏览器、编辑器，尽在掌握。</p>
+          <div class="mt-4 bg-brand text-white font-mono text-xs px-4 py-2 rounded-lg">
+            linkshell start --daemon --provider claude --screen
+          </div>
+        </div>
       </div>
     </section>
 
@@ -441,6 +456,8 @@
         f2Desc: "支持 React Native / Expo 移动端与 Web 页面调试端。纯粹的单一协议，跨平台劫持终端流。",
         f3Title: "强一致性同步",
         f3Desc: "独有的单控制者防冲突模型（Single Controller）。避免多端并抢焦点，画面精准对齐不串流。",
+        f4Title: "远程桌面",
+        f4Desc: "不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC 30fps 丝滑体验，自动降级到截图流兜底。",
         lifestyleSectionTitle: "LinkShell 工作流",
         lifestyleLead: "不仅是远程命令行桥接；更是打破工位束缚的极客探索。",
         l1Title: "挂起并离开",
@@ -478,6 +495,8 @@
         f2Desc: "Supports React Native, Expo, and Web clients natively via a unified protocol. Instantly hijack the I/O stream.",
         f3Title: "Strict State Sync",
         f3Desc: "Features a Single Controller locking model. Prevent multi-device input races and keep screens meticulously synchronized.",
+        f4Title: "Remote Desktop",
+        f4Desc: "Not just terminal. Add --screen to view your desktop in real-time. WebRTC at 30fps with automatic screenshot fallback.",
         lifestyleSectionTitle: "The LinkShell Workflow",
         lifestyleLead: "It's not just a remote bridge. It's your declaration of independence from the desk.",
         l1Title: "Suspend & Walk",

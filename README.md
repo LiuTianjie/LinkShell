@@ -58,6 +58,14 @@ linkshell start --daemon --provider claude
 
 手机和电脑在同一 WiFi，CLI 自动检测局域网 IP 生成 QR 码。
 
+### 远程桌面查看
+
+```bash
+linkshell start --daemon --provider claude --screen
+```
+
+加 `--screen` 后，App 端可以切换到 Desktop 标签查看电脑桌面。支持 WebRTC（30fps）和截图流（fallback）两种模式，自动选择最优方案。
+
 ### 远程模式（独立 Gateway，跨网络）
 
 在服务器上：

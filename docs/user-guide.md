@@ -77,6 +77,9 @@ linkshell doctor
 # 后台启动（推荐）
 linkshell start --daemon --provider claude
 
+# 启用远程桌面查看（需要 ffmpeg）
+linkshell start --daemon --provider claude --screen
+
 # 前台启动
 linkshell start --provider claude
 
