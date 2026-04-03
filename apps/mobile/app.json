@@ -10,7 +10,11 @@
       "resizeMode": "contain",
       "backgroundColor": "#131314"
     },
-    "platforms": ["ios", "android", "web"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "plugins": [
       [
         "expo-dev-client",
@@ -30,7 +34,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
-      "buildNumber": "4",
+      "buildNumber": "5",
       "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {
