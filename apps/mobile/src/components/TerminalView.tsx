@@ -49,7 +49,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 <script>
 (function(){
   var sched=false;
-  function run(){sched=false;try{if(window.fitAddon&&window.term){window.fitAddon.fit();if(typeof sendSize==='function')sendSize();if(typeof snapBottom==='function')snapBottom();}}catch(e){}}
+  function run(){sched=false;try{if(window.fitAddon&&window.term){if(typeof safeFit==='function')safeFit();else window.fitAddon.fit();if(typeof sendSize==='function')sendSize();}}catch(e){}}
   function schedule(){if(sched)return;sched=true;requestAnimationFrame(run);}
   if(typeof ResizeObserver!=='undefined'){
     var o=new ResizeObserver(schedule);o.observe(document.body);
