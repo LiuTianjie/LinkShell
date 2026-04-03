@@ -42,102 +42,81 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const { theme } = useTheme();
   const inputRef = useRef<TextInput>(null);
   const isFocusedRef = useRef(false);
-  const composingTextRef = useRef("");
+  const sentViaKeyPressRef = useRef(false);
 
   const focusInput = useCallback(() => {
-    if (disabled) {
-      return;
-    }
-
-    if (isFocusedRef.current) {
-      return;
-    }
-
+    if (disabled || isFocusedRef.current) return;
     requestAnimationFrame(() => {
       inputRef.current?.focus();
       setTimeout(() => {
-        if (!isFocusedRef.current) {
-          inputRef.current?.focus();
-        }
+        if (!isFocusedRef.current) inputRef.current?.focus();
       }, 60);
     });
   }, [disabled]);
 
   useImperativeHandle(ref, () => ({
     focus: focusInput,
-    blur: () => {
-      inputRef.current?.blur();
-    },
+    blur: () => inputRef.current?.blur(),
   }), [focusInput]);
 
-  const handleChangeText = useCallback((text: string) => {
-    if (disabled) {
-      if (text) {
-        inputRef.current?.clear();
-      }
-      composingTextRef.current = "";
-      return;
-    }
-
-    composingTextRef.current = text;
-
-    if (text && /[^\x00-\x7F]/.test(text)) {
-      onSendText(text);
-      composingTextRef.current = "";
-      inputRef.current?.clear();
-    }
-  }, [disabled, onSendText]);
-
-  const handleTextInput = useCallback(({ nativeEvent }: { nativeEvent: { text: string } }) => {
-    if (disabled) {
-      composingTextRef.current = "";
-      inputRef.current?.clear();
-      return;
-    }
-
-    if (!nativeEvent.text || nativeEvent.text === "\n") {
-      return;
-    }
-
-    if (/[^\x00-\x7F]/.test(nativeEvent.text)) {
-      onSendText(nativeEvent.text);
-    }
-    composingTextRef.current = "";
-    inputRef.current?.clear();
-  }, [disabled, onSendText]);
-
+  // onKeyPress fires BEFORE onChangeText.
+  // For ASCII keys (letters, digits, punctuation), send immediately here.
+  // Mark as sent so onChangeText doesn't double-send.
   const handleKeyPress = useCallback(({ nativeEvent }: { nativeEvent: { key: string } }) => {
-    if (disabled) {
-      return;
-    }
+    if (disabled) return;
+    sentViaKeyPressRef.current = false;
 
     if (nativeEvent.key === "Backspace") {
       onSpecialKey("\x7f");
-      composingTextRef.current = "";
+      sentViaKeyPressRef.current = true;
       inputRef.current?.clear();
       return;
     }
 
     if (nativeEvent.key === "Enter") {
       onSpecialKey("\r");
-      composingTextRef.current = "";
+      sentViaKeyPressRef.current = true;
       inputRef.current?.clear();
       return;
     }
 
-    if (nativeEvent.key.length === 1 && !composingTextRef.current) {
-      onSendText(nativeEvent.key);
-      inputRef.current?.clear();
+    // Single ASCII character — send directly (covers letters, digits, punctuation)
+    if (nativeEvent.key.length === 1) {
+      const code = nativeEvent.key.charCodeAt(0);
+      if (code >= 0x20 && code <= 0x7e) {
+        onSendText(nativeEvent.key);
+        sentViaKeyPressRef.current = true;
+        // Clear on next tick to avoid race with onChangeText
+        setTimeout(() => inputRef.current?.clear(), 0);
+        return;
+      }
     }
   }, [disabled, onSendText, onSpecialKey]);
 
-  const handleSubmitEditing = useCallback(() => {
+  // onChangeText handles non-ASCII (CJK, emoji, etc.)
+  // Skip if already sent via onKeyPress.
+  const handleChangeText = useCallback((text: string) => {
     if (disabled) {
+      inputRef.current?.clear();
       return;
     }
 
+    if (sentViaKeyPressRef.current) {
+      sentViaKeyPressRef.current = false;
+      // Already sent via keyPress, just clear
+      setTimeout(() => inputRef.current?.clear(), 0);
+      return;
+    }
+
+    if (text && text.length > 0) {
+      onSendText(text);
+      setTimeout(() => inputRef.current?.clear(), 0);
+    }
+  }, [disabled, onSendText]);
+
+  const handleSubmitEditing = useCallback(() => {
+    if (disabled) return;
     onSpecialKey("\r");
-    composingTextRef.current = "";
     inputRef.current?.clear();
   }, [disabled, onSpecialKey]);
 
@@ -148,13 +127,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   const handleBlur = useCallback(() => {
     isFocusedRef.current = false;
-    composingTextRef.current = "";
     onFocusChange?.(false);
   }, [onFocusChange]);
-
-  const platformInputProps = Platform.OS === "ios"
-    ? ({ onTextInput: handleTextInput } as Record<string, unknown>)
-    : {};
 
   const accessoryKeys = (
     <>
@@ -203,7 +177,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         selectionColor="transparent"
         spellCheck={false}
         style={styles.hiddenInput}
-        {...platformInputProps}
       />
       <KeyboardAccessory nativeID={ACCESSORY_ID} title="终端快捷键">
         {accessoryKeys}
