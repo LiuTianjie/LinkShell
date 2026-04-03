@@ -34,7 +34,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
-      "buildNumber": "13",
+      "buildNumber": "14",
       "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {
