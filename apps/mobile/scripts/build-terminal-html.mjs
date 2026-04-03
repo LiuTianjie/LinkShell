@@ -107,12 +107,12 @@ term.onSelectionChange(function(){
 window.handleRNMessage = function(msg){
   try{
     var p = JSON.parse(msg);
-    if(p.type==='write') term.write(p.data);
+    if(p.type==='write'){term.write(p.data);term.scrollToBottom();}
     else if(p.type==='clear') term.clear();
-    else if(p.type==='resize'){term.resize(p.cols,p.rows);fitAddon.fit();}
-    else if(p.type==='zoom_in'){setFontSize((term.options.fontSize || DEFAULT_FONT_SIZE) + 1);}
-    else if(p.type==='zoom_out'){setFontSize((term.options.fontSize || DEFAULT_FONT_SIZE) - 1);}
-    else if(p.type==='zoom_reset'){setFontSize(DEFAULT_FONT_SIZE);}
+    else if(p.type==='resize'){term.resize(p.cols,p.rows);fitAddon.fit();term.scrollToBottom();}
+    else if(p.type==='zoom_in'){setFontSize((term.options.fontSize || DEFAULT_FONT_SIZE) + 1);term.scrollToBottom();}
+    else if(p.type==='zoom_out'){setFontSize((term.options.fontSize || DEFAULT_FONT_SIZE) - 1);term.scrollToBottom();}
+    else if(p.type==='zoom_reset'){setFontSize(DEFAULT_FONT_SIZE);term.scrollToBottom();}
     else if(p.type==='focus_cursor'){focusCursor();}
     else if(p.type==='blur_cursor'){blurCursor();}
     else if(p.type==='paste'){term.paste(p.data || '');}

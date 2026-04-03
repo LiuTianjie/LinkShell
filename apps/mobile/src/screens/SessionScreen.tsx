@@ -92,11 +92,24 @@ export function SessionScreen({
 
   useEffect(() => {
     if (!termRef.current) return;
-    const newLines = terminalLines.slice(writtenCountRef.current);
-    for (const line of newLines) {
-      termRef.current.write(line);
+    const total = terminalLines.length;
+    const written = writtenCountRef.current;
+
+    if (written === 0 && total > 200) {
+      // First render or reconnect — only show last 200 chunks to avoid flooding
+      const recent = terminalLines.slice(-200);
+      for (const line of recent) {
+        termRef.current.write(line);
+      }
+      writtenCountRef.current = total;
+    } else {
+      const newLines = terminalLines.slice(written);
+      for (const line of newLines) {
+        termRef.current.write(line);
+      }
+      writtenCountRef.current = total;
     }
-    writtenCountRef.current = terminalLines.length;
+    termRef.current.scrollToBottom();
   }, [terminalLines]);
 
   const handleTerminalInput = useCallback((data: string) => {
