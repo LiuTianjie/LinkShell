@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Keyboard,
-  KeyboardAvoidingView,
   LayoutChangeEvent,
   Platform,
   Pressable,
@@ -169,17 +168,11 @@ export function SessionScreen({
   }, [status]);
 
   useEffect(() => {
-    const refitTerminal = () => {
-      setTimeout(() => {
-        termRef.current?.refit();
-      }, 30);
-    };
-
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const showSub = Keyboard.addListener(showEvent, () => { setKeyboardVisible(true); refitTerminal(); setTimeout(() => termRef.current?.scrollToBottom(), 100); });
-    const hideSub = Keyboard.addListener(hideEvent, () => { setKeyboardVisible(false); refitTerminal(); });
+    const showSub = Keyboard.addListener(showEvent, () => { setKeyboardVisible(true); });
+    const hideSub = Keyboard.addListener(hideEvent, () => { setKeyboardVisible(false); });
 
     return () => {
       showSub.remove();
@@ -214,9 +207,8 @@ export function SessionScreen({
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
-      <KeyboardAvoidingView
+      <View
         style={{ flex: 1, backgroundColor: theme.bgTerminal }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <View style={{ height: insets.top, backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated }} />
 
@@ -570,7 +562,7 @@ export function SessionScreen({
           {!keyboardVisible && <View style={{ height: insets.bottom, backgroundColor: theme.bgTerminal }} />}
         </View>
         )}
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }
