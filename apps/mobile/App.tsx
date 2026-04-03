@@ -216,7 +216,7 @@ function AppInner() {
           deviceId={session.deviceId}
           controllerId={session.controllerId}
           connectionDetail={session.connectionDetail}
-          terminalLines={session.terminalLines}
+          terminalStream={session.terminalStream}
           screenStatus={session.screenStatus}
           screenFrame={session.screenFrame}
           onSendInput={session.sendInput}

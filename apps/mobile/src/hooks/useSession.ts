@@ -27,16 +27,51 @@ export interface UseSessionOptions {
   gatewayBaseUrl: string;
 }
 
+export interface TerminalStreamSnapshot {
+  sessionId: string;
+  chunks: string[];
+}
+
+export interface TerminalStreamEventReset {
+  type: "reset";
+  snapshot: TerminalStreamSnapshot;
+}
+
+export interface TerminalStreamEventAppend {
+  type: "append";
+  sessionId: string;
+  chunk: string;
+}
+
+export type TerminalStreamEvent =
+  | TerminalStreamEventReset
+  | TerminalStreamEventAppend;
+
+export interface TerminalStream {
+  getSnapshot: () => TerminalStreamSnapshot;
+  subscribe: (listener: (event: TerminalStreamEvent) => void) => () => void;
+}
+
+const TERMINAL_REPLAY_LIMIT = 400;
+
 export interface SessionHandle {
   status: ConnectionStatus;
   sessionId: string;
   deviceId: string;
   controllerId: string | null;
-  terminalLines: string[];
-  lastAckedSeq: number;
+  terminalStream: TerminalStream;
   connectionDetail: string | null;
-  screenStatus: { active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string };
-  screenFrame: { data: string; width: number; height: number; frameId: number } | null;
+  screenStatus: {
+    active: boolean;
+    mode: "webrtc" | "fallback" | "off";
+    error?: string;
+  };
+  screenFrame: {
+    data: string;
+    width: number;
+    height: number;
+    frameId: number;
+  } | null;
   claim: (pairingCode: string) => Promise<string | null>;
   connectToSession: (
     sessionId: string,
@@ -68,11 +103,18 @@ export function useSession({
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [sessionId, setSessionId] = useState("");
   const [controllerId, setControllerId] = useState<string | null>(null);
-  const [terminalLines, setTerminalLines] = useState<string[]>([]);
-  const [lastAckedSeq, setLastAckedSeq] = useState(-1);
   const [connectionDetail, setConnectionDetail] = useState<string | null>(null);
-  const [screenStatus, setScreenStatus] = useState<{ active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string }>({ active: false, mode: "off" });
-  const [screenFrame, setScreenFrame] = useState<{ data: string; width: number; height: number; frameId: number } | null>(null);
+  const [screenStatus, setScreenStatus] = useState<{
+    active: boolean;
+    mode: "webrtc" | "fallback" | "off";
+    error?: string;
+  }>({ active: false, mode: "off" });
+  const [screenFrame, setScreenFrame] = useState<{
+    data: string;
+    width: number;
+    height: number;
+    frameId: number;
+  } | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -82,7 +124,32 @@ export function useSession({
   const deviceIdRef = useRef(generateId());
   const sessionIdRef = useRef("");
   const lastAckedSeqRef = useRef(-1);
-  const chunkBufRef = useRef<{ frameId: number; chunks: Map<number, string>; total: number; width: number; height: number } | null>(null);
+  const terminalSnapshotRef = useRef<TerminalStreamSnapshot>({
+    sessionId: "",
+    chunks: [],
+  });
+  const terminalListenersRef = useRef(
+    new Set<(event: TerminalStreamEvent) => void>(),
+  );
+  const terminalStreamRef = useRef<TerminalStream>({
+    getSnapshot: () => ({
+      sessionId: terminalSnapshotRef.current.sessionId,
+      chunks: [...terminalSnapshotRef.current.chunks],
+    }),
+    subscribe: (listener) => {
+      terminalListenersRef.current.add(listener);
+      return () => {
+        terminalListenersRef.current.delete(listener);
+      };
+    },
+  });
+  const chunkBufRef = useRef<{
+    frameId: number;
+    chunks: Map<number, string>;
+    total: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const activeGatewayBaseUrlRef = useRef(gatewayBaseUrl);
   const statusRef = useRef<ConnectionStatus>("idle");
   const manualDisconnectRef = useRef(false);
@@ -95,11 +162,50 @@ export function useSession({
     statusRef.current = status;
   }, [status]);
   useEffect(() => {
-    lastAckedSeqRef.current = lastAckedSeq;
-  }, [lastAckedSeq]);
-  useEffect(() => {
     activeGatewayBaseUrlRef.current = gatewayBaseUrl;
   }, [gatewayBaseUrl]);
+
+  const emitTerminalEvent = useCallback((event: TerminalStreamEvent) => {
+    for (const listener of terminalListenersRef.current) {
+      listener(event);
+    }
+  }, []);
+
+  const resetTerminalStream = useCallback(
+    (nextSessionId: string) => {
+      terminalSnapshotRef.current = {
+        sessionId: nextSessionId,
+        chunks: [],
+      };
+      emitTerminalEvent({
+        type: "reset",
+        snapshot: {
+          sessionId: nextSessionId,
+          chunks: [],
+        },
+      });
+    },
+    [emitTerminalEvent],
+  );
+
+  const appendTerminalChunk = useCallback(
+    (chunk: string) => {
+      const snapshot = terminalSnapshotRef.current;
+      snapshot.chunks.push(chunk);
+      if (snapshot.chunks.length > TERMINAL_REPLAY_LIMIT) {
+        snapshot.chunks.splice(
+          0,
+          snapshot.chunks.length - TERMINAL_REPLAY_LIMIT,
+        );
+      }
+      emitTerminalEvent({
+        type: "append",
+        sessionId: snapshot.sessionId,
+        chunk,
+      });
+    },
+    [emitTerminalEvent],
+  );
 
   const wsUrl = useCallback((sid: string, gatewayOverride?: string) => {
     const base = (gatewayOverride ?? activeGatewayBaseUrlRef.current)
@@ -243,12 +349,11 @@ export function useSession({
               setConnectionDetail(null);
             }
             const p = parseTypedPayload("terminal.output", envelope.payload);
-            setTerminalLines((prev) => [...prev, p.data]);
+            appendTerminalChunk(p.data);
             if (envelope.seq !== undefined) {
-              const newSeq = envelope.seq;
-              setLastAckedSeq((prev) => {
-                const next = Math.max(prev, newSeq);
-                // Send ACK
+              const next = Math.max(lastAckedSeqRef.current, envelope.seq);
+              if (next !== lastAckedSeqRef.current) {
+                lastAckedSeqRef.current = next;
                 sendRaw(
                   createEnvelope({
                     type: "session.ack",
@@ -256,8 +361,7 @@ export function useSession({
                     payload: { seq: next },
                   }),
                 );
-                return next;
-              });
+              }
             }
             break;
           }
@@ -311,19 +415,40 @@ export function useSession({
             const p = parseTypedPayload("screen.frame", envelope.payload);
             // Reassemble chunks if needed
             if (p.chunkTotal <= 1) {
-              setScreenFrame({ data: p.data, width: p.width, height: p.height, frameId: p.frameId });
+              setScreenFrame({
+                data: p.data,
+                width: p.width,
+                height: p.height,
+                frameId: p.frameId,
+              });
             } else {
               // Simple chunk reassembly via ref
-              if (!chunkBufRef.current || chunkBufRef.current.frameId !== p.frameId) {
-                chunkBufRef.current = { frameId: p.frameId, chunks: new Map(), total: p.chunkTotal, width: p.width, height: p.height };
+              if (
+                !chunkBufRef.current ||
+                chunkBufRef.current.frameId !== p.frameId
+              ) {
+                chunkBufRef.current = {
+                  frameId: p.frameId,
+                  chunks: new Map(),
+                  total: p.chunkTotal,
+                  width: p.width,
+                  height: p.height,
+                };
               }
               chunkBufRef.current.chunks.set(p.chunkIndex, p.data);
-              if (chunkBufRef.current.chunks.size === chunkBufRef.current.total) {
+              if (
+                chunkBufRef.current.chunks.size === chunkBufRef.current.total
+              ) {
                 let fullData = "";
                 for (let i = 0; i < chunkBufRef.current.total; i++) {
                   fullData += chunkBufRef.current.chunks.get(i) ?? "";
                 }
-                setScreenFrame({ data: fullData, width: chunkBufRef.current.width, height: chunkBufRef.current.height, frameId: p.frameId });
+                setScreenFrame({
+                  data: fullData,
+                  width: chunkBufRef.current.width,
+                  height: chunkBufRef.current.height,
+                  frameId: p.frameId,
+                });
                 chunkBufRef.current = null;
               }
             }
@@ -413,8 +538,8 @@ export function useSession({
         setConnectionDetail(null);
         setSessionId(body.sessionId);
         setControllerId(null);
-        setTerminalLines([]);
-        setLastAckedSeq(-1);
+        lastAckedSeqRef.current = -1;
+        resetTerminalStream(body.sessionId);
         connectSocket(body.sessionId);
         return body.sessionId;
       } catch (error) {
@@ -436,11 +561,11 @@ export function useSession({
       setConnectionDetail(null);
       setSessionId(sid);
       setControllerId(null);
-      setTerminalLines([]);
-      setLastAckedSeq(-1);
+      lastAckedSeqRef.current = -1;
+      resetTerminalStream(sid);
       connectSocket(sid, false, gatewayBaseUrlOverride);
     },
-    [connectSocket],
+    [connectSocket, resetTerminalStream],
   );
 
   const sendInput = useCallback(
@@ -485,15 +610,18 @@ export function useSession({
     );
   }, [sendRaw]);
 
-  const startScreen = useCallback((fps: number, quality: number, scale: number) => {
-    sendRaw(
-      createEnvelope({
-        type: "screen.start",
-        sessionId: sessionIdRef.current,
-        payload: { fps, quality, scale },
-      }),
-    );
-  }, [sendRaw]);
+  const startScreen = useCallback(
+    (fps: number, quality: number, scale: number) => {
+      sendRaw(
+        createEnvelope({
+          type: "screen.start",
+          sessionId: sessionIdRef.current,
+          payload: { fps, quality, scale },
+        }),
+      );
+    },
+    [sendRaw],
+  );
 
   const stopScreen = useCallback(() => {
     sendRaw(
@@ -543,11 +671,11 @@ export function useSession({
     reconnectAttempts.current = 0;
     setConnectionDetail(null);
     setSessionId("");
-    setTerminalLines([]);
-    setLastAckedSeq(-1);
+    lastAckedSeqRef.current = -1;
+    resetTerminalStream("");
     setControllerId(null);
     setStatus("disconnected");
-  }, [stopHeartbeat]);
+  }, [resetTerminalStream, stopHeartbeat]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -564,8 +692,7 @@ export function useSession({
     sessionId,
     deviceId: deviceIdRef.current,
     controllerId,
-    terminalLines,
-    lastAckedSeq,
+    terminalStream: terminalStreamRef.current,
     connectionDetail,
     screenStatus,
     screenFrame,

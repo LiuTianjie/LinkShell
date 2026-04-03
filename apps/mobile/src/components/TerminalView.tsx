@@ -1,14 +1,14 @@
-import React, { useCallback, useImperativeHandle, useMemo, useRef, forwardRef } from "react";
+import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, forwardRef } from "react";
 import { Clipboard, StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { TERMINAL_HTML } from "../generated/terminal-html";
+import type { TerminalStream } from "../hooks/useSession";
 import { useTheme } from "../theme";
 
 export interface TerminalViewHandle {
-  write: (data: string) => void;
   clear: () => void;
   resize: (cols: number, rows: number) => void;
-  refit: () => void;
+  refit: (stickToBottom?: boolean) => void;
   scrollToBottom: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
@@ -21,14 +21,16 @@ export interface TerminalViewHandle {
 }
 
 interface TerminalViewProps {
+  stream: TerminalStream;
   onInput?: (data: string) => void;
   onResize?: (cols: number, rows: number) => void;
 }
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  function TerminalView({ onInput, onResize }, ref) {
+  function TerminalView({ stream, onInput, onResize }, ref) {
     const { theme } = useTheme();
     const webViewRef = useRef<WebView>(null);
+    const readyRef = useRef(false);
 
     const terminalHtml = useMemo(() => {
       const isDark = theme.mode === "dark";
@@ -38,66 +40,16 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         cursor: theme.accent,
         selectionBackground: isDark ? "#334155" : "#cbd5e1",
       };
-      const kbtnBg = isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.78)";
-      const kbtnBorder = isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)";
-      const kbtnColor = isDark ? "#e2e8f0" : "#1e293b";
-      const kbtnActive = isDark ? "rgba(255,255,255,0.16)" : "rgba(226,232,240,0.95)";
-      const kdoneColor = theme.accent;
-
-      // Resize observer + orientation + delayed fits
+      // Keep the terminal responsive to orientation changes without continuously refitting on DOM mutations.
       const resizeBridgeScript = `
 <script>
 (function(){
   var sched=false;
   function run(){sched=false;try{if(window.fitAddon&&window.term){if(typeof safeFit==='function')safeFit();else window.fitAddon.fit();if(typeof sendSize==='function')sendSize();}}catch(e){}}
   function schedule(){if(sched)return;sched=true;requestAnimationFrame(run);}
-  if(typeof ResizeObserver!=='undefined'){
-    var o=new ResizeObserver(schedule);o.observe(document.body);
-    var r=document.getElementById('terminal');if(r)o.observe(r);
-  }
   window.addEventListener('orientationchange',schedule);
+  window.addEventListener('resize',schedule);
   setTimeout(schedule,0);setTimeout(schedule,80);setTimeout(schedule,220);
-})();
-</script>`;
-
-      const accessoryBarScript = `
-<style>
-#kbar{position:fixed;left:0;right:0;bottom:0;z-index:999;display:none;flex-direction:row;align-items:center;padding:6px 6px;gap:4px;background:transparent;}
-#kbar .ks{display:flex;gap:4px;flex-direction:row;align-items:center;flex:1;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
-#kbar .ks::-webkit-scrollbar{display:none;}
-#kbar .kb{font-size:12px;font-weight:600;color:${kbtnColor};background:${kbtnBg};border:0.5px solid ${kbtnBorder};border-radius:8px;padding:6px 8px;text-align:center;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation;flex-shrink:0;}
-#kbar .kb:active{background:${kbtnActive};}
-#kbar .kd{font-size:14px;font-weight:600;color:${kdoneColor};background:transparent;border:none;padding:6px 8px;white-space:nowrap;flex-shrink:0;}
-</style>
-<div id="kbar">
-  <div class="ks">
-    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b')">Esc</button>
-    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\t')">Tab</button>
-    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x03')">Ctrl+C</button>
-    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x04')">Ctrl+D</button>
-    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x0c')">Ctrl+L</button>
-    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b[A')">↑</button>
-    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b[B')">↓</button>
-    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b[C')">→</button>
-    <button class="kb" onmousedown="event.preventDefault()" onclick="sendKey('\\x1b[D')">←</button>
-  </div>
-  <button class="kd" ontouchend="dismissKb()" onclick="dismissKb()">完成</button>
-</div>
-<script>
-function sendKey(d){try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:d}));if(window.term)window.term.focus();}catch(e){}}
-function dismissKb(){try{if(window.term&&window.term.textarea)window.term.textarea.blur();document.activeElement&&document.activeElement.blur();}catch(e){}}
-(function(){
-  var bar=document.getElementById('kbar');
-  var hideTimer=null;
-  function showBar(){if(hideTimer){clearTimeout(hideTimer);hideTimer=null;}bar.style.display='flex';}
-  function hideBar(){if(hideTimer)return;hideTimer=setTimeout(function(){bar.style.display='none';hideTimer=null;},150);}
-  function watchTextarea(){
-    if(!window.term||!window.term.textarea){setTimeout(watchTextarea,200);return;}
-    var ta=window.term.textarea;
-    ta.addEventListener('focus',showBar);
-    ta.addEventListener('blur',hideBar);
-  }
-  watchTextarea();
 })();
 </script>`;
 
@@ -107,16 +59,21 @@ function dismissKb(){try{if(window.term&&window.term.textarea)window.term.textar
         .replace(/background:#020617;display:flex;flex-direction:column/g, `background:${theme.bgTerminal};display:flex;flex-direction:column`)
         .replace(/background-color: #000;/g, `background-color: ${theme.bgTerminal};`)
         .replace(
+          /\.xterm-viewport\{scroll-behavior:auto !important;-webkit-overflow-scrolling:auto !important;\}/,
+          ".xterm-viewport{-webkit-overflow-scrolling:touch !important;touch-action:pan-y !important;overscroll-behavior:contain !important;}"
+        )
+        .replace(
           /\.xterm \.xterm-viewport \{\n    \/\* On OS X this is required in order for the scroll bar to appear fully opaque \*\/\n    background-color: #000;\n    overflow-y: scroll;\n    cursor: default;\n    position: absolute;\n    right: 0;\n    left: 0;\n    top: 0;\n    bottom: 0;\n\}/,
-          `.xterm .xterm-viewport {\n    /* On OS X this is required in order for the scroll bar to appear fully opaque */\n    background-color: ${theme.bgTerminal};\n    overflow-y: scroll;\n    cursor: default;\n    position: absolute;\n    right: 0;\n    left: 0;\n    top: 0;\n    bottom: 0;\n    -webkit-overflow-scrolling: touch;\n    overscroll-behavior: contain;\n    touch-action: pan-y;\n  }`
+          `.xterm .xterm-viewport {\n    background-color: ${theme.bgTerminal};\n    overflow-y: scroll;\n    cursor: default;\n    position: absolute;\n    right: 0;\n    left: 0;\n    top: 0;\n    bottom: 0;\n    -webkit-overflow-scrolling: touch;\n  }`
         )
         // Let xterm own keyboard input so IME composition and candidate selection work natively.
         .replace(
           /if \(term\.textarea\) \{\n  term\.textarea\.readOnly = true;\n  term\.textarea\.tabIndex = -1;\n  term\.textarea\.setAttribute\('inputmode', 'none'\);\n  term\.textarea\.blur\(\);\n\}/,
           `if (term.textarea) {\n  term.textarea.readOnly = false;\n  term.textarea.tabIndex = 0;\n  term.textarea.style.colorScheme = '${theme.mode}';\n  term.textarea.setAttribute('autocapitalize', 'off');\n  term.textarea.setAttribute('autocorrect', 'off');\n  term.textarea.setAttribute('spellcheck', 'false');\n}`
         )
+        .replace("window.addEventListener('resize',function(){fitAddon.fit();});", "window.addEventListener('resize',function(){safeFit();sendSize();});")
         .replace(/theme:\{background:'#020617',foreground:'#e2e8f0',cursor:'#3b82f6',selectionBackground:'#334155'\}/, `theme:${JSON.stringify(termTheme)}`)
-        .replace("</body>", `${accessoryBarScript}${resizeBridgeScript}</body>`);
+        .replace("</body>", `${resizeBridgeScript}<script>\n(function(){\n  var _snapRaf = 0;\n  function viewport(){\n    return document.querySelector('.xterm-viewport');\n  }\n  function isNearBottom(){\n    var vp = viewport();\n    return !vp || vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 32;\n  }\n  function deferSnap(){\n    if(_snapRaf) return;\n    _snapRaf = requestAnimationFrame(function(){ _snapRaf = 0; snapBottom(); });\n  }\n  function restoreChunks(chunks){\n    term.reset();\n    if(Array.isArray(chunks)){\n      for(var i = 0; i < chunks.length; i++){\n        term.write(chunks[i]);\n      }\n    }\n    safeFit();\n    snapBottom();\n    sendSize();\n  }\n  var prevHandle = window.handleRNMessage;\n  window.handleRNMessage = function(msg){\n    try{\n      var p = JSON.parse(msg);\n      if(p.type==='restore'){\n        restoreChunks(p.chunks);\n        return;\n      }\n      if(p.type==='refit'){\n        safeFit();\n        if(p.stickToBottom || isNearBottom()){\n          deferSnap();\n        }\n        sendSize();\n        return;\n      }\n      if(p.type==='scroll_bottom'){\n        deferSnap();\n        return;\n      }\n      if(p.type==='write'){\n        var wasNear = isNearBottom();\n        term.write(p.data || '');\n        if(wasNear) deferSnap();\n        return;\n      }\n      if(p.type==='focus_cursor'){\n        deferSnap();\n        focusCursor();\n        return;\n      }\n    } catch(e) {}\n    if(prevHandle){\n      prevHandle(msg);\n    }\n  };\n})();\n</script></body>`);
     }, [theme.accent, theme.bgTerminal, theme.mode]);
 
     const postToWebView = useCallback((msg: object) => {
@@ -124,21 +81,37 @@ function dismissKb(){try{if(window.term&&window.term.textarea)window.term.textar
       webViewRef.current?.injectJavaScript(js);
     }, []);
 
+    const restoreSnapshot = useCallback(() => {
+      const snapshot = stream.getSnapshot();
+      if (!readyRef.current) return;
+      postToWebView({ type: "restore", chunks: snapshot.chunks });
+    }, [postToWebView, stream]);
+
+    useEffect(() => {
+      const unsubscribe = stream.subscribe((event) => {
+        if (!readyRef.current) return;
+        if (event.type === "reset") {
+          postToWebView({ type: "restore", chunks: event.snapshot.chunks });
+          return;
+        }
+        postToWebView({ type: "write", data: event.chunk });
+      });
+
+      return unsubscribe;
+    }, [postToWebView, stream]);
+
     useImperativeHandle(ref, () => ({
-      write(data: string) {
-        postToWebView({ type: "write", data });
-      },
       clear() {
         postToWebView({ type: "clear" });
       },
       resize(cols: number, rows: number) {
         postToWebView({ type: "resize", cols, rows });
       },
-      refit() {
-        webViewRef.current?.injectJavaScript("try{fitAddon.fit();sendSize();}catch(e){}true;");
+      refit(stickToBottom = false) {
+        postToWebView({ type: "refit", stickToBottom });
       },
       scrollToBottom() {
-        webViewRef.current?.injectJavaScript("try{if(typeof snapBottom==='function')snapBottom();else{var vp=document.querySelector('.xterm-viewport');if(vp)vp.scrollTop=vp.scrollHeight;}}catch(e){}true;");
+        postToWebView({ type: "scroll_bottom" });
       },
       zoomIn() {
         postToWebView({ type: "zoom_in" });
@@ -150,7 +123,9 @@ function dismissKb(){try{if(window.term&&window.term.textarea)window.term.textar
         postToWebView({ type: "zoom_reset" });
       },
       focusCursor() {
-        webViewRef.current?.injectJavaScript("try{window.term&&window.term.focus();}catch(e){}true;");
+        webViewRef.current?.injectJavaScript(
+          `try{if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "focus_cursor" }))});}}catch(e){}true;`
+        );
       },
       blurCursor() {
         webViewRef.current?.injectJavaScript("try{window.term.blur();document.activeElement&&document.activeElement.blur();}catch(e){}true;");
@@ -202,8 +177,9 @@ function dismissKb(){try{if(window.term&&window.term.textarea)window.term.textar
           mixedContentMode="always"
           injectedJavaScript={`document.documentElement.style.colorScheme='${theme.mode}';true;`}
           onLoadEnd={() => {
+            readyRef.current = true;
             requestAnimationFrame(() => {
-              webViewRef.current?.injectJavaScript("try{fitAddon.fit();sendSize();}catch(e){}true;");
+              restoreSnapshot();
             });
           }}
         />
