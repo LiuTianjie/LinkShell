@@ -36,8 +36,8 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@linkshell/protocol": "^0.1.0",
-    "@linkshell/gateway": "^0.1.7",
+    "@linkshell/protocol": "^0.2.0",
+    "@linkshell/gateway": "^0.2.0",
     "commander": "^13.1.0",
     "node-pty": "^1.0.0",
     "qrcode-terminal": "^0.12.0",
