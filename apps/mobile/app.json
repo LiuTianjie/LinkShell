@@ -27,14 +27,15 @@
         {
           "cameraPermission": "Allow LinkShell to scan pairing QR codes from your terminal."
         }
-      ]
+      ],
+      "./plugins/with-live-activity"
     ],
     "web": {
       "bundler": "metro"
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
-      "buildNumber": "46",
+      "buildNumber": "51",
       "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {

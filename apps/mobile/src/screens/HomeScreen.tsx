@@ -171,7 +171,9 @@ export function HomeScreen({
           >
             <AppSymbol name="arrow.counterclockwise.circle.fill" size={24} color={theme.success} />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.text, fontSize: 15, fontWeight: "600" }}>继续上次会话</Text>
+              <Text style={{ color: theme.text, fontSize: 15, fontWeight: "600" }}>
+                {latest.projectName ? `继续 ${latest.projectName}` : "继续上次会话"}
+              </Text>
               <Text style={{ color: theme.textTertiary, fontSize: 13, marginTop: 1 }}>
                 {latest.sessionId.slice(0, 8)} · {timeAgo(latest.connectedAt)}
               </Text>
@@ -303,7 +305,9 @@ function SwipeableRow({
       >
         <AppSymbol name="terminal.fill" size={18} color={theme.accent} />
         <View style={{ flex: 1, gap: 2 }}>
-          <Text style={{ color: theme.text, fontSize: 15 }} numberOfLines={1}>{item.sessionId.slice(0, 8)}</Text>
+          <Text style={{ color: theme.text, fontSize: 15 }} numberOfLines={1}>
+            {item.projectName || item.sessionId.slice(0, 8)}
+          </Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             <AppSymbol name={platformIcon(item.platform)} size={12} color={theme.textTertiary} />
             <Text style={{ color: theme.textTertiary, fontSize: 13 }} numberOfLines={1}>{item.hostname ?? safeHost(item.serverUrl)}</Text>

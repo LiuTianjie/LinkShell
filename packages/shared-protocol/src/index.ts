@@ -37,6 +37,7 @@ export const envelopeSchema = z.object({
   id: z.string().min(1),
   type: z.string().min(1),
   sessionId: z.string().min(1),
+  terminalId: z.string().min(1).optional(),
   deviceId: z.string().min(1).optional(),
   timestamp: z.string().datetime(),
   traceId: z.string().min(1).optional(),
@@ -73,6 +74,8 @@ export const sessionConnectPayloadSchema = z.object({
   protocolVersion: z.number().int().optional(),
   hostname: z.string().optional(),
   platform: z.string().optional(),
+  cwd: z.string().optional(),
+  projectName: z.string().optional(),
 });
 
 export const terminalExitPayloadSchema = z.object({
@@ -168,6 +171,31 @@ export const screenIcePayloadSchema = z.object({
   sdpMLineIndex: z.number().nullable().optional(),
 });
 
+// ── Terminal spawn/list payloads ───────────────────────────────────
+
+export const terminalSpawnPayloadSchema = z.object({
+  cwd: z.string().min(1),
+  provider: z.enum(["claude", "codex", "custom"]).optional(),
+});
+
+export const terminalInfoSchema = z.object({
+  terminalId: z.string().min(1),
+  cwd: z.string(),
+  projectName: z.string(),
+  provider: z.string(),
+  status: z.enum(["running", "exited"]),
+});
+
+export const terminalListPayloadSchema = z.object({
+  terminals: z.array(terminalInfoSchema),
+});
+
+export const terminalSpawnedPayloadSchema = z.object({
+  terminalId: z.string().min(1),
+  cwd: z.string(),
+  projectName: z.string(),
+});
+
 // ── File upload payloads ────────────────────────────────────────────
 
 export const fileUploadPayloadSchema = z.object({
@@ -209,6 +237,9 @@ export const protocolMessageSchemas = {
   "screen.answer": screenAnswerPayloadSchema,
   "screen.ice": screenIcePayloadSchema,
   "file.upload": fileUploadPayloadSchema,
+  "terminal.spawn": terminalSpawnPayloadSchema,
+  "terminal.spawned": terminalSpawnedPayloadSchema,
+  "terminal.list": terminalListPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;
@@ -236,12 +267,14 @@ export function createEnvelope<T>(input: {
   seq?: number;
   ack?: number;
   deviceId?: string;
+  terminalId?: string;
   traceId?: string;
 }): Envelope {
   return {
     id: input.id ?? generateId(),
     type: input.type,
     sessionId: input.sessionId,
+    terminalId: input.terminalId,
     deviceId: input.deviceId,
     timestamp: new Date().toISOString(),
     traceId: input.traceId,

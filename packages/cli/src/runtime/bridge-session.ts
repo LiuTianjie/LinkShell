@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import { hostname, platform } from "node:os";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import {
   createEnvelope,
   parseEnvelope,
@@ -36,6 +36,18 @@ const HEARTBEAT_INTERVAL = 15_000;
 const RECONNECT_BASE_DELAY = 1_000;
 const RECONNECT_MAX_DELAY = 30_000;
 const RECONNECT_MAX_ATTEMPTS = 20;
+const DEFAULT_TERMINAL_ID = "default";
+
+interface TerminalInstance {
+  id: string;
+  pty: pty.IPty;
+  cwd: string;
+  projectName: string;
+  provider: string;
+  scrollback: ScrollbackBuffer;
+  outputSeq: number;
+  status: "running" | "exited";
+}
 
 function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
   try {
@@ -96,10 +108,7 @@ function resolvePairingGateway(
 export class BridgeSession {
   private readonly options: BridgeSessionOptions;
   private socket: WebSocket | undefined;
-  private terminal: pty.IPty | undefined;
-  private outputSeq = 0;
-  private lastAckedSeq = -1;
-  private scrollback = new ScrollbackBuffer(1000);
+  private terminals = new Map<string, TerminalInstance>();
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempts = 0;
@@ -128,7 +137,7 @@ export class BridgeSession {
     if (!this.sessionId) {
       await this.createPairing();
     }
-    this.spawnTerminal();
+    this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
     this.connectGateway();
   }
 
@@ -219,6 +228,8 @@ export class BridgeSession {
             protocolVersion: PROTOCOL_VERSION,
             hostname: this.options.hostname || hostname(),
             platform: platform(),
+            cwd: process.cwd(),
+            projectName: basename(process.cwd()),
           },
         }),
       );
@@ -251,26 +262,55 @@ export class BridgeSession {
   }
 
   private handleMessage(envelope: Envelope): void {
+    const tid = envelope.terminalId ?? DEFAULT_TERMINAL_ID;
     switch (envelope.type) {
       case "terminal.input": {
         const p = parseTypedPayload("terminal.input", envelope.payload);
-        this.terminal?.write(p.data);
+        const term = this.terminals.get(tid);
+        if (term && term.status === "running") term.pty.write(p.data);
         break;
       }
       case "terminal.resize": {
         const p = parseTypedPayload("terminal.resize", envelope.payload);
-        this.terminal?.resize(p.cols, p.rows);
+        const term = this.terminals.get(tid);
+        if (term && term.status === "running") term.pty.resize(p.cols, p.rows);
+        break;
+      }
+      case "terminal.spawn": {
+        const p = parseTypedPayload("terminal.spawn", envelope.payload);
+        const newId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        this.spawnTerminal(newId, p.cwd, p.provider);
+        // Notify client
+        this.send(createEnvelope({
+          type: "terminal.spawned",
+          sessionId: this.sessionId,
+          terminalId: newId,
+          payload: { terminalId: newId, cwd: p.cwd, projectName: basename(p.cwd) },
+        }));
+        // Send updated list
+        this.sendTerminalList();
+        break;
+      }
+      case "terminal.list": {
+        this.sendTerminalList();
         break;
       }
       case "session.ack": {
         const p = parseTypedPayload("session.ack", envelope.payload);
-        this.lastAckedSeq = Math.max(this.lastAckedSeq, p.seq);
-        this.scrollback.trimUpTo(this.lastAckedSeq);
+        const term = this.terminals.get(tid);
+        if (term) {
+          term.scrollback.trimUpTo(p.seq);
+        }
         break;
       }
       case "session.resume": {
         const p = parseTypedPayload("session.resume", envelope.payload);
-        this.replayFrom(p.lastAckedSeq);
+        // Replay all terminals
+        for (const [termId, term] of this.terminals) {
+          this.replayFrom(termId, term, p.lastAckedSeq);
+        }
+        // Also send terminal list so client knows what's available
+        this.sendTerminalList();
         break;
       }
       case "session.heartbeat":
@@ -300,9 +340,10 @@ export class BridgeSession {
         const tempPath = join(tmpdir(), `linkshell-image-${Date.now()}.${ext}`);
         writeFileSync(tempPath, Buffer.from(p.data, "base64"));
         this.log(`image saved to ${tempPath}`);
-        // Send path via bracketed paste so Claude Code's paste handler detects the
-        // image extension (.png/.jpg/etc) and reads the file as an image attachment.
-        this.terminal?.write(`\x1b[200~${tempPath}\x1b[201~`);
+        const term = this.terminals.get(tid);
+        if (term && term.status === "running") {
+          term.pty.write(`\x1b[200~${tempPath}\x1b[201~`);
+        }
         break;
       }
       default:
@@ -310,8 +351,23 @@ export class BridgeSession {
     }
   }
 
-  private replayFrom(seq: number): void {
-    const messages = this.scrollback.replayFrom(seq);
+  private sendTerminalList(): void {
+    const terminals = [...this.terminals.values()].map((t) => ({
+      terminalId: t.id,
+      cwd: t.cwd,
+      projectName: t.projectName,
+      provider: t.provider,
+      status: t.status,
+    }));
+    this.send(createEnvelope({
+      type: "terminal.list",
+      sessionId: this.sessionId,
+      payload: { terminals },
+    }));
+  }
+
+  private replayFrom(terminalId: string, term: TerminalInstance, afterSeq: number): void {
+    const messages = term.scrollback.replayFrom(afterSeq);
     for (const msg of messages) {
       const payload = msg.payload as {
         stream: string;
@@ -324,6 +380,7 @@ export class BridgeSession {
         createEnvelope({
           type: "terminal.output",
           sessionId: this.sessionId,
+          terminalId,
           seq: msg.seq,
           payload: { ...payload, isReplay: true },
         }),
@@ -331,30 +388,39 @@ export class BridgeSession {
     }
   }
 
-  private spawnTerminal(): void {
-    // Filter out undefined env values — node-pty's native posix_spawnp chokes on them
+  private spawnTerminal(terminalId: string, cwd: string, providerOverride?: string): void {
     const cleanEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(this.options.providerConfig.env)) {
       if (v !== undefined) cleanEnv[k] = v;
     }
 
-    this.terminal = pty.spawn(
-      this.options.providerConfig.command,
-      this.options.providerConfig.args,
-      {
-        name: "xterm-256color",
-        cols: this.options.cols,
-        rows: this.options.rows,
-        cwd: process.cwd(),
-        env: cleanEnv,
-      },
-    );
+    const term: TerminalInstance = {
+      id: terminalId,
+      pty: pty.spawn(
+        this.options.providerConfig.command,
+        this.options.providerConfig.args,
+        {
+          name: "xterm-256color",
+          cols: this.options.cols,
+          rows: this.options.rows,
+          cwd,
+          env: cleanEnv,
+        },
+      ),
+      cwd,
+      projectName: basename(cwd),
+      provider: providerOverride ?? this.options.providerConfig.provider,
+      scrollback: new ScrollbackBuffer(1000),
+      outputSeq: 0,
+      status: "running",
+    };
 
-    this.terminal.onData((data) => {
-      const seq = this.outputSeq++;
+    term.pty.onData((data) => {
+      const seq = term.outputSeq++;
       const envelope = createEnvelope({
         type: "terminal.output",
         sessionId: this.sessionId,
+        terminalId,
         seq,
         payload: {
           stream: "stdout" as const,
@@ -364,24 +430,34 @@ export class BridgeSession {
           isFinal: false,
         },
       });
-      this.scrollback.push(envelope);
+      term.scrollback.push(envelope);
       this.send(envelope);
     });
 
-    this.terminal.onExit(({ exitCode, signal }) => {
-      this.exited = true;
-      const envelope = createEnvelope({
+    term.pty.onExit(({ exitCode, signal }) => {
+      term.status = "exited";
+      this.send(createEnvelope({
         type: "terminal.exit",
         sessionId: this.sessionId,
+        terminalId,
         payload: { exitCode, signal },
-      });
-      this.send(envelope);
-      setTimeout(() => {
-        this.stopHeartbeat();
-        this.socket?.close();
-      }, 500);
-      process.exitCode = exitCode ?? 0;
+      }));
+      this.sendTerminalList();
+
+      // If all terminals exited, close the session
+      const allExited = [...this.terminals.values()].every((t) => t.status === "exited");
+      if (allExited) {
+        this.exited = true;
+        setTimeout(() => {
+          this.stopHeartbeat();
+          this.socket?.close();
+        }, 500);
+        process.exitCode = exitCode ?? 0;
+      }
     });
+
+    this.terminals.set(terminalId, term);
+    this.log(`spawned terminal ${terminalId} in ${cwd}`);
   }
 
   private send(message: Envelope): void {
@@ -515,7 +591,10 @@ export class BridgeSession {
     }
     this.socket?.close();
     this.socket = undefined;
-    this.terminal?.kill();
+    for (const term of this.terminals.values()) {
+      if (term.status === "running") term.pty.kill();
+    }
+    this.terminals.clear();
     process.exitCode = exitCode;
   }
 }

@@ -36,6 +36,8 @@ interface SessionInfo {
   provider: string | null;
   hostname: string | null;
   platform: string | null;
+  projectName: string | null;
+  cwd: string | null;
 }
 
 interface GatewayGroup {
@@ -345,7 +347,7 @@ function GatewaySection({
                         numberOfLines={1}
                         style={{ color: theme.text, fontSize: 15, flexShrink: 1 }}
                       >
-                        {session.hostname ?? session.id.slice(0, 8)}
+                        {session.projectName ?? session.hostname ?? session.id.slice(0, 8)}
                       </Text>
                       {session.platform ? (
                         <AppSymbol
@@ -359,6 +361,7 @@ function GatewaySection({
                       numberOfLines={1}
                       style={{ color: theme.textTertiary, fontSize: 13 }}
                     >
+                      {session.hostname && session.projectName ? `${session.hostname} · ` : ""}
                       {session.hasHost ? "主机在线" : "主机离线"}
                       {session.clientCount > 0
                         ? ` · ${session.clientCount} 个客户端`

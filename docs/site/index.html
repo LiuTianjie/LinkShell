@@ -126,6 +126,164 @@
         opacity: 0;
       }
     }
+
+    /* Dynamic Island Animations */
+    @keyframes di-expand {
+      0% { width: 120px; height: 36px; border-radius: 20px; }
+      50% { width: 340px; height: 36px; border-radius: 20px; }
+      100% { width: 340px; height: 80px; border-radius: 24px; }
+    }
+    @keyframes di-collapse {
+      0% { width: 340px; height: 80px; border-radius: 24px; }
+      50% { width: 340px; height: 36px; border-radius: 20px; }
+      100% { width: 120px; height: 36px; border-radius: 20px; }
+    }
+    @keyframes di-pulse-ring {
+      0% { transform: scale(1); opacity: 0.6; }
+      50% { transform: scale(1.15); opacity: 0; }
+      100% { transform: scale(1); opacity: 0; }
+    }
+    @keyframes di-thinking-dot {
+      0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
+      40% { transform: scale(1); opacity: 1; }
+    }
+    @keyframes di-slide-up {
+      0% { opacity: 0; transform: translateY(8px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes di-action-glow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(106, 176, 76, 0.4); }
+      50% { box-shadow: 0 0 12px 4px rgba(106, 176, 76, 0.15); }
+    }
+
+    .di-phone-frame {
+      width: 280px;
+      height: 560px;
+      background: #000;
+      border-radius: 44px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 25px 60px -12px rgba(0,0,0,0.4), inset 0 0 0 2px rgba(255,255,255,0.1);
+    }
+    .di-phone-screen {
+      position: absolute;
+      inset: 4px;
+      border-radius: 40px;
+      overflow: hidden;
+      background: linear-gradient(180deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    }
+    .di-island-container {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+    }
+
+    /* Dynamic Island States */
+    .di-island {
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+      transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+      cursor: pointer;
+    }
+    .di-island.compact {
+      width: 120px;
+      height: 36px;
+      border-radius: 20px;
+    }
+    .di-island.expanded {
+      width: 340px;
+      height: 80px;
+      border-radius: 24px;
+    }
+    .di-island.action {
+      width: 340px;
+      height: 140px;
+      border-radius: 28px;
+    }
+
+    .di-thinking-dots {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+    .di-thinking-dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #a78bfa;
+      animation: di-thinking-dot 1.4s ease-in-out infinite;
+    }
+    .di-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .di-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    /* Project Workspace Animations */
+    @keyframes folder-pop {
+      0% { transform: scale(0.8) translateY(10px); opacity: 0; }
+      60% { transform: scale(1.05) translateY(-2px); opacity: 1; }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    }
+    @keyframes progress-fill {
+      0% { width: 0%; }
+      100% { width: var(--progress); }
+    }
+    @keyframes terminal-type {
+      0% { width: 0; }
+      100% { width: 100%; }
+    }
+    @keyframes project-card-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+    @keyframes parallel-pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
+    }
+    @keyframes status-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .project-phone-frame {
+      width: 260px;
+      height: 520px;
+      background: #000;
+      border-radius: 40px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 25px 60px -12px rgba(0,0,0,0.35), inset 0 0 0 2px rgba(255,255,255,0.1);
+    }
+    .project-phone-screen {
+      position: absolute;
+      inset: 4px;
+      border-radius: 36px;
+      overflow: hidden;
+      background: #111;
+    }
+
+    .folder-item {
+      animation: folder-pop 0.5s ease-out both;
+    }
+    .folder-item:nth-child(1) { animation-delay: 0.1s; }
+    .folder-item:nth-child(2) { animation-delay: 0.2s; }
+    .folder-item:nth-child(3) { animation-delay: 0.3s; }
+    .folder-item:nth-child(4) { animation-delay: 0.4s; }
+
+    .progress-bar-fill {
+      animation: progress-fill 2s ease-out both;
+      animation-delay: 0.8s;
+    }
+
+    /* Animated connection lines for parallel sessions */
+    @keyframes dash-flow {
+      0% { stroke-dashoffset: 20; }
+      100% { stroke-dashoffset: 0; }
+    }
   </style>
 </head>
 
@@ -349,6 +507,234 @@
       </div>
     </section>
 
+    <!-- Dynamic Island Section -->
+    <section class="max-w-7xl mx-auto px-6 mb-32">
+      <div class="flex flex-col md:flex-row items-center gap-12 md:gap-20">
+        <!-- Left: Text -->
+        <div class="flex-1 order-2 md:order-1">
+          <h2 class="text-3xl md:text-5xl font-bold tracking-tight mb-6" data-i18n="diSectionTitle">灵动岛，让 AI 触手可及</h2>
+          <p class="text-muted text-lg leading-relaxed mb-8" data-i18n="diSectionDesc">iPhone 灵动岛实时展示 Claude 工作状态。识别到需要操作时，一键快速响应，无需切回 App。</p>
+          <ul class="space-y-4">
+            <li class="flex items-start gap-3">
+              <span class="mt-1 w-8 h-8 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="1.5"/><path stroke-linecap="round" stroke-width="1.5" d="M12 6v6l4 2"/></svg>
+              </span>
+              <span class="text-sm leading-relaxed" data-i18n="diFeature1">实时状态 — 思考中、编码中、等待确认，一目了然</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 w-8 h-8 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              </span>
+              <span class="text-sm leading-relaxed" data-i18n="diFeature2">快捷操作 — Claude 请求执行命令时，灵动岛直接审批</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 w-8 h-8 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              </span>
+              <span class="text-sm leading-relaxed" data-i18n="diFeature3">智能摘要 — 长对话自动提炼关键信息到灵动岛</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 w-8 h-8 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"/></svg>
+              </span>
+              <span class="text-sm leading-relaxed" data-i18n="diFeature4">无感切换 — 从灵动岛一键跳转到完整会话</span>
+            </li>
+          </ul>
+        </div>
+        <!-- Right: Phone Mockup -->
+        <div class="flex-shrink-0 order-1 md:order-2">
+          <div class="di-phone-frame">
+            <div class="di-phone-screen">
+              <!-- Fake iOS status bar -->
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 24px 0;color:rgba(255,255,255,0.6);font-size:12px;font-weight:600;">
+                <span>9:41</span>
+                <div style="display:flex;gap:4px;align-items:center;">
+                  <svg width="16" height="12" fill="rgba(255,255,255,0.6)" viewBox="0 0 16 12"><rect x="0" y="5" width="3" height="7" rx="0.5"/><rect x="4.5" y="3" width="3" height="9" rx="0.5"/><rect x="9" y="1" width="3" height="11" rx="0.5"/><rect x="13" y="0" width="3" height="12" rx="0.5"/></svg>
+                  <svg width="16" height="12" fill="rgba(255,255,255,0.6)" viewBox="0 0 24 12"><rect x="0" y="0" width="22" height="12" rx="2" stroke="rgba(255,255,255,0.3)" stroke-width="1" fill="none"/><rect x="1.5" y="1.5" width="16" height="9" rx="1" fill="rgba(255,255,255,0.6)"/><rect x="23" y="3.5" width="1.5" height="5" rx="0.5"/></svg>
+                </div>
+              </div>
+              <!-- Dynamic Island -->
+              <div class="di-island-container">
+                <div class="di-island compact" id="di-island-demo">
+                  <!-- Compact: thinking dots -->
+                  <div class="di-thinking-dots" id="di-compact">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <!-- Expanded: status text -->
+                  <div id="di-expanded" style="display:none;width:100%;padding:8px 16px;color:#fff;">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#fff" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                      </div>
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:2px;">Claude Code</div>
+                        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">正在修改 App.tsx...</div>
+                      </div>
+                      <div style="width:6px;height:6px;border-radius:50%;background:#a78bfa;animation:di-pulse-ring 2s infinite;"></div>
+                    </div>
+                  </div>
+                  <!-- Action: approve button -->
+                  <div id="di-action" style="display:none;width:100%;padding:12px 16px;color:#fff;">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                      <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#fff" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                      </div>
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:2px;">Claude 请求执行</div>
+                        <div style="font-size:12px;font-weight:600;">npm test</div>
+                      </div>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                      <button style="flex:1;padding:6px 0;border-radius:12px;background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;border:none;cursor:pointer;">拒绝</button>
+                      <button style="flex:1;padding:6px 0;border-radius:12px;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-size:11px;font-weight:600;border:none;cursor:pointer;animation:di-action-glow 2s infinite;">批准</button>
+                    </div>
+                  </div>
+                </div>
+                <!-- Pulse ring behind island -->
+                <div style="position:absolute;inset:-4px;border-radius:inherit;border:2px solid rgba(167,139,250,0.3);animation:di-pulse-ring 3s infinite;pointer-events:none;z-index:-1;border-radius:24px;"></div>
+              </div>
+              <!-- Blurred app background -->
+              <div style="position:absolute;inset:0;z-index:0;padding:80px 16px 20px;">
+                <div style="background:rgba(255,255,255,0.06);border-radius:16px;height:60px;margin-bottom:12px;backdrop-filter:blur(4px);"></div>
+                <div style="background:rgba(255,255,255,0.04);border-radius:16px;height:100px;margin-bottom:12px;"></div>
+                <div style="background:rgba(255,255,255,0.03);border-radius:16px;height:80px;margin-bottom:12px;"></div>
+                <div style="display:flex;gap:10px;">
+                  <div style="flex:1;background:rgba(255,255,255,0.04);border-radius:12px;height:60px;"></div>
+                  <div style="flex:1;background:rgba(255,255,255,0.04);border-radius:12px;height:60px;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Project Workspaces Section -->
+    <section class="max-w-7xl mx-auto px-6 mb-32">
+      <div class="flex flex-col md:flex-row items-center gap-12 md:gap-20">
+        <!-- Left: Phone Mockup -->
+        <div class="flex-shrink-0">
+          <div class="project-phone-frame">
+            <div class="project-phone-screen">
+              <!-- Session header -->
+              <div style="padding:16px 16px 12px;border-bottom:1px solid rgba(255,255,255,0.08);">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                  <div style="width:8px;height:8px;border-radius:50%;background:#6ab04c;animation:status-blink 2s infinite;"></div>
+                  <span style="color:#fff;font-size:13px;font-weight:600;">Session #3</span>
+                </div>
+                <span style="color:rgba(255,255,255,0.4);font-size:11px;">2 projects active</span>
+              </div>
+              <!-- Recent Projects -->
+              <div style="padding:12px 14px 8px;">
+                <div style="color:rgba(255,255,255,0.4);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">最近项目</div>
+                <!-- Folder 1 -->
+                <div class="folder-item" style="background:rgba(255,255,255,0.06);border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;animation:project-card-float 4s ease-in-out infinite;">
+                  <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#6ab04c,#4a8035);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <svg width="16" height="16" fill="#fff" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="color:#fff;font-size:12px;font-weight:600;">linkshell-app</div>
+                    <div style="color:rgba(255,255,255,0.35);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">~/projects/linkshell-app</div>
+                  </div>
+                  <div style="width:32px;height:4px;border-radius:2px;background:rgba(255,255,255,0.1);overflow:hidden;">
+                    <div class="progress-bar-fill" style="height:100%;background:#6ab04c;border-radius:2px;--progress:85%;"></div>
+                  </div>
+                </div>
+                <!-- Folder 2 -->
+                <div class="folder-item" style="background:rgba(255,255,255,0.06);border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;animation:project-card-float 4s ease-in-out infinite 0.5s;">
+                  <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#e17055,#d35400);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <svg width="16" height="16" fill="#fff" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="color:#fff;font-size:12px;font-weight:600;">api-server</div>
+                    <div style="color:rgba(255,255,255,0.35);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">~/projects/api-server</div>
+                  </div>
+                  <div style="width:32px;height:4px;border-radius:2px;background:rgba(255,255,255,0.1);overflow:hidden;">
+                    <div class="progress-bar-fill" style="height:100%;background:#e17055;border-radius:2px;--progress:60%;"></div>
+                  </div>
+                </div>
+                <!-- Folder 3 -->
+                <div class="folder-item" style="background:rgba(255,255,255,0.06);border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;animation:project-card-float 4s ease-in-out infinite 1s;">
+                  <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#74b9ff,#0984e3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <svg width="16" height="16" fill="#fff" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="color:#fff;font-size:12px;font-weight:600;">ml-pipeline</div>
+                    <div style="color:rgba(255,255,255,0.35);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">~/projects/ml-pipeline</div>
+                  </div>
+                  <div style="width:32px;height:4px;border-radius:2px;background:rgba(255,255,255,0.1);overflow:hidden;">
+                    <div class="progress-bar-fill" style="height:100%;background:#74b9ff;border-radius:2px;--progress:40%;"></div>
+                  </div>
+                </div>
+              </div>
+              <!-- Parallel terminals -->
+              <div style="padding:0 14px;">
+                <div style="color:rgba(255,255,255,0.4);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                  <div style="width:4px;height:4px;border-radius:50%;background:#6ab04c;animation:parallel-pulse 1.5s infinite;"></div>
+                  并行终端
+                </div>
+                <div style="display:flex;gap:6px;">
+                  <!-- Terminal 1 -->
+                  <div style="flex:1;background:rgba(0,0,0,0.4);border-radius:8px;padding:8px;font-family:'JetBrains Mono',monospace;font-size:9px;line-height:1.5;border:1px solid rgba(255,255,255,0.06);">
+                    <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">
+                      <div style="width:5px;height:5px;border-radius:50%;background:#6ab04c;"></div>
+                      <span style="color:rgba(255,255,255,0.5);font-size:8px;">linkshell-app</span>
+                    </div>
+                    <div style="color:#6ab04c;">$ npm test</div>
+                    <div style="color:rgba(255,255,255,0.5);">PASS src/app.test.ts</div>
+                    <div style="color:rgba(255,255,255,0.5);">Tests: <span style="color:#6ab04c;">12 passed</span></div>
+                    <div style="color:rgba(255,255,255,0.3);animation:status-blink 1.5s infinite;">Running...</div>
+                  </div>
+                  <!-- Terminal 2 -->
+                  <div style="flex:1;background:rgba(0,0,0,0.4);border-radius:8px;padding:8px;font-family:'JetBrains Mono',monospace;font-size:9px;line-height:1.5;border:1px solid rgba(255,255,255,0.06);">
+                    <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">
+                      <div style="width:5px;height:5px;border-radius:50%;background:#e17055;"></div>
+                      <span style="color:rgba(255,255,255,0.5);font-size:8px;">api-server</span>
+                    </div>
+                    <div style="color:#e17055;">$ cargo build</div>
+                    <div style="color:rgba(255,255,255,0.5);">Compiling api v0.3</div>
+                    <div style="color:rgba(255,255,255,0.5);">Built <span style="color:#e17055;">42</span> crates</div>
+                    <div style="color:rgba(255,255,255,0.3);animation:status-blink 1.5s infinite 0.3s;">Linking...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Right: Text -->
+        <div class="flex-1">
+          <h2 class="text-3xl md:text-5xl font-bold tracking-tight mb-6" data-i18n="projSectionTitle">项目空间，并行掌控</h2>
+          <p class="text-muted text-lg leading-relaxed mb-8" data-i18n="projSectionDesc">每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。</p>
+          <ul class="space-y-4">
+            <li class="flex items-start gap-3">
+              <span class="mt-1 w-8 h-8 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6a2 2 0 012-2h2l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/></svg>
+              </span>
+              <span class="text-sm leading-relaxed" data-i18n="projFeature1">多项目并行 — 同一会话内切换不同项目目录</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 w-8 h-8 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              </span>
+              <span class="text-sm leading-relaxed" data-i18n="projFeature2">独立终端 — 每个项目拥有独立的命令执行环境</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 w-8 h-8 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              </span>
+              <span class="text-sm leading-relaxed" data-i18n="projFeature3">最近项目 — 智能记忆常用项目，一键直达</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 w-8 h-8 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+              </span>
+              <span class="text-sm leading-relaxed" data-i18n="projFeature4">实时状态 — 并行任务进度一览无余</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
     <!-- Lifestyle Section -->
     <section class="max-w-7xl mx-auto px-6 mb-32 group">
       <div class="mb-16 text-center">
@@ -476,6 +862,18 @@
         step3Desc: "打开 LinkShell App（iOS / Android），对准终端二维码扫一扫，立刻接管会话。",
         ctaTitle: "准备好你的第一次漫游了吗？",
         ctaDesc: "放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。",
+        diSectionTitle: "灵动岛，让 AI 触手可及",
+        diSectionDesc: "iPhone 灵动岛实时展示 Claude 工作状态。识别到需要操作时，一键快速响应，无需切回 App。",
+        diFeature1: "实时状态 — 思考中、编码中、等待确认，一目了然",
+        diFeature2: "快捷操作 — Claude 请求执行命令时，灵动岛直接审批",
+        diFeature3: "智能摘要 — 长对话自动提炼关键信息到灵动岛",
+        diFeature4: "无感切换 — 从灵动岛一键跳转到完整会话",
+        projSectionTitle: "项目空间，并行掌控",
+        projSectionDesc: "每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。",
+        projFeature1: "多项目并行 — 同一会话内切换不同项目目录",
+        projFeature2: "独立终端 — 每个项目拥有独立的命令执行环境",
+        projFeature3: "最近项目 — 智能记忆常用项目，一键直达",
+        projFeature4: "实时状态 — 并行任务进度一览无余",
         footerText: "出于对 Vibe Coding 的热爱。© 2026 基于 MIT 协议开源。探索自由编程边界。"
       },
       en: {
@@ -515,6 +913,18 @@
         step3Desc: "Open the LinkShell App (iOS / Android), scan the terminal QR code, and instantly take over the session.",
         ctaTitle: "Ready for your first roam?",
         ctaDesc: "Skip the heavy cloud VM migrations. Set up the relay in seconds and put your whole dev environment in your pocket.",
+        diSectionTitle: "Dynamic Island, AI at Your Fingertips",
+        diSectionDesc: "iPhone Dynamic Island shows Claude's live status. One-tap quick actions when Claude needs your input — no need to switch back to the app.",
+        diFeature1: "Live Status — thinking, coding, awaiting confirmation at a glance",
+        diFeature2: "Quick Actions — approve Claude's commands right from the island",
+        diFeature3: "Smart Summary — long conversations distilled to key info",
+        diFeature4: "Seamless Jump — one tap from island to full session",
+        projSectionTitle: "Project Spaces, Parallel Control",
+        projSectionDesc: "Multi-project parallel sessions. Pick a project folder, run commands independently, just like working locally.",
+        projFeature1: "Parallel Projects — switch between project directories in one session",
+        projFeature2: "Isolated Terminals — each project gets its own execution environment",
+        projFeature3: "Recent Projects — smart memory of frequently used projects",
+        projFeature4: "Live Status — parallel task progress at a glance",
         footerText: "Crafted for Vibe Coding. © 2026 Open Source / MIT. Pushing the boundaries of freedom."
       }
     };
@@ -543,6 +953,30 @@
 
     // Initialize
     applyLanguage('zh');
+
+    // Dynamic Island state cycling
+    (function() {
+      const island = document.getElementById('di-island-demo');
+      const compact = document.getElementById('di-compact');
+      const expanded = document.getElementById('di-expanded');
+      const action = document.getElementById('di-action');
+      if (!island) return;
+
+      const states = ['compact', 'expanded', 'action'];
+      let idx = 0;
+
+      function showState(state) {
+        compact.style.display = state === 'compact' ? 'flex' : 'none';
+        expanded.style.display = state === 'expanded' ? 'block' : 'none';
+        action.style.display = state === 'action' ? 'block' : 'none';
+        island.className = 'di-island ' + state;
+      }
+
+      setInterval(function() {
+        idx = (idx + 1) % states.length;
+        showState(states[idx]);
+      }, 3000);
+    })();
   </script>
 </body>
 

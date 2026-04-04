@@ -65,12 +65,14 @@ function handleHostMessage(
     case "session.connect": {
       // Extract metadata from host's connect message
       const p = parseTypedPayload("session.connect", envelope.payload);
-      if (p.provider || p.hostname || p.platform) {
+      if (p.provider || p.hostname || p.platform || p.cwd || p.projectName) {
         sessions.setMetadata(
           session.id,
           p.provider ?? undefined,
           p.hostname ?? undefined,
           p.platform ?? undefined,
+          p.cwd ?? undefined,
+          p.projectName ?? undefined,
         );
       }
       break;
@@ -81,7 +83,7 @@ function handleHostMessage(
       break;
     }
     case "terminal.exit": {
-      sessions.terminate(session.id);
+      // Don't terminate session — other terminals may still be running
       broadcastToClients(session, envelope);
       break;
     }
@@ -96,6 +98,9 @@ function handleHostMessage(
     case "screen.status":
     case "screen.offer":
     case "screen.ice":
+    // Multi-terminal: host → clients
+    case "terminal.spawned":
+    case "terminal.list":
       broadcastToClients(session, envelope);
       break;
     default:
@@ -193,6 +198,9 @@ function handleClientMessage(
     case "screen.stop":
     case "screen.answer":
     case "screen.ice":
+    // Multi-terminal: client → host
+    case "terminal.spawn":
+    case "terminal.list":
       sendToHost(session, envelope);
       break;
     default:

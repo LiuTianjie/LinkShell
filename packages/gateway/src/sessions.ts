@@ -18,12 +18,14 @@ export interface Session {
   controllerId: string | undefined;
   lastActivity: number;
   createdAt: number;
-  outputBuffer: Envelope[];
+  outputBuffers: Map<string, Envelope[]>; // keyed by terminalId
   hostDisconnectedAt: number | undefined;
   // Metadata from host's session.connect
   provider: string | undefined;
   hostname: string | undefined;
   platform: string | undefined;
+  cwd: string | undefined;
+  projectName: string | undefined;
 }
 
 const OUTPUT_BUFFER_CAPACITY = 200;
@@ -49,11 +51,13 @@ export class SessionManager {
         controllerId: undefined,
         lastActivity: Date.now(),
         createdAt: Date.now(),
-        outputBuffer: [],
+        outputBuffers: new Map(),
         hostDisconnectedAt: undefined,
         provider: undefined,
         hostname: undefined,
         platform: undefined,
+        cwd: undefined,
+        projectName: undefined,
       };
       this.sessions.set(sessionId, session);
     }
@@ -104,9 +108,15 @@ export class SessionManager {
   bufferOutput(sessionId: string, envelope: Envelope): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    session.outputBuffer.push(envelope);
-    if (session.outputBuffer.length > OUTPUT_BUFFER_CAPACITY) {
-      session.outputBuffer.shift();
+    const tid = (envelope as any).terminalId ?? "default";
+    let buf = session.outputBuffers.get(tid);
+    if (!buf) {
+      buf = [];
+      session.outputBuffers.set(tid, buf);
+    }
+    buf.push(envelope);
+    if (buf.length > OUTPUT_BUFFER_CAPACITY) {
+      buf.shift();
     }
     session.lastActivity = Date.now();
   }
@@ -114,9 +124,13 @@ export class SessionManager {
   getReplayFrom(sessionId: string, afterSeq: number): Envelope[] {
     const session = this.sessions.get(sessionId);
     if (!session) return [];
-    return session.outputBuffer.filter(
-      (e) => e.seq !== undefined && e.seq > afterSeq,
-    );
+    const result: Envelope[] = [];
+    for (const buf of session.outputBuffers.values()) {
+      for (const e of buf) {
+        if (e.seq !== undefined && e.seq > afterSeq) result.push(e);
+      }
+    }
+    return result.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
   }
 
   claimControl(sessionId: string, deviceId: string): boolean {
@@ -158,10 +172,12 @@ export class SessionManager {
       controllerId: session.controllerId ?? null,
       lastActivity: session.lastActivity,
       createdAt: session.createdAt,
-      bufferSize: session.outputBuffer.length,
+      bufferSize: [...session.outputBuffers.values()].reduce((sum, buf) => sum + buf.length, 0),
       provider: session.provider ?? null,
       hostname: session.hostname ?? null,
       platform: session.platform ?? null,
+      cwd: session.cwd ?? null,
+      projectName: session.projectName ?? null,
     };
   }
 
@@ -170,12 +186,16 @@ export class SessionManager {
     provider?: string,
     hostname?: string,
     platform?: string,
+    cwd?: string,
+    projectName?: string,
   ): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     if (provider) session.provider = provider;
     if (hostname) session.hostname = hostname;
     if (platform) session.platform = platform;
+    if (cwd) session.cwd = cwd;
+    if (projectName) session.projectName = projectName;
   }
 
   private maybeDelete(sessionId: string): void {

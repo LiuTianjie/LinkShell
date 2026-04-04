@@ -40,6 +40,18 @@ const SHORTCUTS = [
   { label: "\u2190", value: "\u001b[D" },
 ];
 
+export interface SessionTab {
+  sessionId: string;
+  label: string;
+  status: ConnectionStatus;
+}
+
+export interface TerminalTab {
+  terminalId: string;
+  label: string;
+  status: "running" | "exited";
+}
+
 interface SessionScreenProps {
   sessionId: string;
   status: ConnectionStatus;
@@ -61,6 +73,16 @@ interface SessionScreenProps {
   onScreenSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
   onReconnect: () => void;
   onDisconnect: () => void;
+  // Multi-session tabs
+  sessionTabs?: SessionTab[];
+  activeTabId?: string | null;
+  onSwitchSession?: (sessionId: string) => void;
+  onCloseSession?: (sessionId: string) => void;
+  // Multi-terminal tabs within session
+  terminalTabs?: TerminalTab[];
+  activeTerminalId?: string | null;
+  onSwitchTerminal?: (terminalId: string) => void;
+  onAddTerminal?: () => void;
 }
 
 export function SessionScreen({
@@ -84,6 +106,14 @@ export function SessionScreen({
   onScreenSignal,
   onReconnect,
   onDisconnect,
+  sessionTabs,
+  activeTabId,
+  onSwitchSession,
+  onCloseSession,
+  terminalTabs,
+  activeTerminalId,
+  onSwitchTerminal,
+  onAddTerminal,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -302,6 +332,26 @@ export function SessionScreen({
   return (
     <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
       <View style={{ height: insets.top, backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated }} />
+
+      {sessionTabs && sessionTabs.length > 1 ? (
+        <SessionTabBar
+          tabs={sessionTabs}
+          activeTabId={activeTabId ?? sessionId}
+          onSwitch={onSwitchSession}
+          onClose={onCloseSession}
+          theme={theme}
+        />
+      ) : null}
+
+      {terminalTabs && terminalTabs.length > 0 ? (
+        <TerminalTabBar
+          tabs={terminalTabs}
+          activeTabId={activeTerminalId ?? terminalTabs[0]?.terminalId ?? ""}
+          onSwitch={onSwitchTerminal}
+          onAdd={onAddTerminal}
+          theme={theme}
+        />
+      ) : null}
 
       <SessionHeader
         activeTab={activeTab}
@@ -967,6 +1017,184 @@ const SessionOverlay = memo(function SessionOverlay({
           </View>
         </>
       )}
+    </View>
+  );
+});
+
+const SessionTabBar = memo(function SessionTabBar({
+  tabs,
+  activeTabId,
+  onSwitch,
+  onClose,
+  theme,
+}: {
+  tabs: SessionTab[];
+  activeTabId: string;
+  onSwitch?: (sessionId: string) => void;
+  onClose?: (sessionId: string) => void;
+  theme: Theme;
+}) {
+  const statusDot = (status: ConnectionStatus) => {
+    if (status === "connected") return "#4ade80";
+    if (status === "connecting" || status === "claiming" || status === "reconnecting") return "#fbbf24";
+    return "#ef4444";
+  };
+
+  return (
+    <View style={{
+      backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.separator,
+    }}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 8, gap: 2, alignItems: "center" }}
+        style={{ height: 36 }}
+      >
+        {tabs.map((tab) => {
+          const isActive = tab.sessionId === activeTabId;
+          return (
+            <Pressable
+              key={tab.sessionId}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 8,
+                borderCurve: "continuous" as const,
+                backgroundColor: isActive
+                  ? (theme.mode === "light" ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.08)")
+                  : (pressed ? "rgba(128,128,128,0.1)" : "transparent"),
+              })}
+              onPress={() => onSwitch?.(tab.sessionId)}
+            >
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusDot(tab.status) }} />
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontSize: 12,
+                  fontWeight: isActive ? "600" : "400",
+                  color: isActive ? theme.text : theme.textSecondary,
+                  maxWidth: 120,
+                }}
+              >
+                {tab.label}
+              </Text>
+              {onClose ? (
+                <Pressable
+                  hitSlop={8}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    onClose(tab.sessionId);
+                  }}
+                  style={({ pressed }) => ({
+                    width: 16,
+                    height: 16,
+                    borderRadius: 8,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: pressed ? "rgba(128,128,128,0.3)" : "transparent",
+                  })}
+                >
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: theme.textTertiary, lineHeight: 12 }}>✕</Text>
+                </Pressable>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+});
+
+const TerminalTabBar = memo(function TerminalTabBar({
+  tabs,
+  activeTabId,
+  onSwitch,
+  onAdd,
+  theme,
+}: {
+  tabs: TerminalTab[];
+  activeTabId: string;
+  onSwitch?: (terminalId: string) => void;
+  onAdd?: () => void;
+  theme: Theme;
+}) {
+  return (
+    <View style={{
+      backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.separator,
+    }}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 8, gap: 2, alignItems: "center" }}
+        style={{ height: 34 }}
+      >
+        {tabs.map((tab) => {
+          const isActive = tab.terminalId === activeTabId;
+          const isExited = tab.status === "exited";
+          return (
+            <Pressable
+              key={tab.terminalId}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                borderRadius: 7,
+                borderCurve: "continuous" as const,
+                backgroundColor: isActive
+                  ? (theme.mode === "light" ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.08)")
+                  : (pressed ? "rgba(128,128,128,0.1)" : "transparent"),
+              })}
+              onPress={() => onSwitch?.(tab.terminalId)}
+            >
+              <AppSymbol
+                name={isExited ? "xmark.circle" : "terminal.fill"}
+                size={12}
+                color={isActive ? theme.accent : (isExited ? theme.textTertiary : theme.textSecondary)}
+              />
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontSize: 12,
+                  fontWeight: isActive ? "600" : "400",
+                  color: isActive ? theme.text : (isExited ? theme.textTertiary : theme.textSecondary),
+                  maxWidth: 100,
+                }}
+              >
+                {tab.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+        {onAdd ? (
+          <Pressable
+            style={({ pressed }) => ({
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              borderCurve: "continuous" as const,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? "rgba(128,128,128,0.15)" : "transparent",
+            })}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onAdd();
+            }}
+          >
+            <AppSymbol name="plus" size={13} color={theme.textTertiary} />
+          </Pressable>
+        ) : null}
+      </ScrollView>
     </View>
   );
 });

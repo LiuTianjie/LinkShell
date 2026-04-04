@@ -7,6 +7,8 @@ export interface ConnectionRecord {
   provider?: string;
   hostname?: string;
   platform?: string;
+  projectName?: string;
+  cwd?: string;
   connectedAt: number;
 }
 
@@ -78,7 +80,7 @@ export async function getLastSession(): Promise<ConnectionRecord | undefined> {
 /** Update the most recent history entry for a session with metadata from the gateway API. */
 export async function enrichHistory(
   sessionId: string,
-  meta: { hostname?: string; provider?: string; platform?: string },
+  meta: { hostname?: string; provider?: string; platform?: string; projectName?: string; cwd?: string },
 ): Promise<void> {
   const history = await loadHistory();
   const record = history.find((r) => r.sessionId === sessionId);
@@ -94,6 +96,14 @@ export async function enrichHistory(
   }
   if (meta.platform && !record.platform) {
     record.platform = meta.platform;
+    changed = true;
+  }
+  if (meta.projectName && !record.projectName) {
+    record.projectName = meta.projectName;
+    changed = true;
+  }
+  if (meta.cwd && !record.cwd) {
+    record.cwd = meta.cwd;
     changed = true;
   }
   if (changed) {
