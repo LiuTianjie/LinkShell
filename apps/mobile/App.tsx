@@ -220,8 +220,9 @@ function AppInner() {
           screenStatus={session.screenStatus}
           screenFrame={session.screenFrame}
           pendingOffer={session.pendingOffer}
-          pendingIce={session.pendingIce}
+          pendingIceCandidates={session.pendingIceCandidates}
           onSendInput={session.sendInput}
+          onSendImage={session.sendImage}
           onSendResize={session.sendResize}
           onClaimControl={session.claimControl}
           onReleaseControl={session.releaseControl}

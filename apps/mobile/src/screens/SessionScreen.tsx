@@ -1,6 +1,9 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActionSheetIOS,
   ActivityIndicator,
+  Alert,
+  Clipboard,
   Keyboard,
   KeyboardEvent,
   LayoutChangeEvent,
@@ -13,6 +16,7 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { TerminalView } from "../components/TerminalView";
@@ -22,7 +26,19 @@ import type { ConnectionStatus, TerminalStream } from "../hooks/useSession";
 import { useTheme } from "../theme";
 import type { Theme } from "../theme";
 
-const TERMINAL_ACCESSORY_HEIGHT = 48;
+const SHORTCUT_BAR_HEIGHT = 44;
+
+const SHORTCUTS = [
+  { label: "Esc", value: "\u001b" },
+  { label: "Tab", value: "\t" },
+  { label: "Ctrl+C", value: "\u0003" },
+  { label: "Ctrl+D", value: "\u0004" },
+  { label: "Ctrl+L", value: "\u000c" },
+  { label: "\u2191", value: "\u001b[A" },
+  { label: "\u2193", value: "\u001b[B" },
+  { label: "\u2192", value: "\u001b[C" },
+  { label: "\u2190", value: "\u001b[D" },
+];
 
 interface SessionScreenProps {
   sessionId: string;
@@ -34,8 +50,9 @@ interface SessionScreenProps {
   screenStatus: { active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string };
   screenFrame: { data: string; width: number; height: number; frameId: number } | null;
   pendingOffer: { sdp: string } | null;
-  pendingIce: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null;
+  pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
   onSendInput: (data: string) => void;
+  onSendImage: (base64Data: string, filename: string) => void;
   onSendResize: (cols: number, rows: number) => void;
   onClaimControl: () => void;
   onReleaseControl: () => void;
@@ -56,8 +73,9 @@ export function SessionScreen({
   screenStatus,
   screenFrame,
   pendingOffer,
-  pendingIce,
+  pendingIceCandidates,
   onSendInput,
+  onSendImage,
   onSendResize,
   onClaimControl,
   onReleaseControl,
@@ -107,6 +125,44 @@ export function SessionScreen({
   const handleTerminalInput = useCallback((data: string) => {
     onSendInput(data);
   }, [onSendInput]);
+
+  const handlePickImage = useCallback(async (source: "library" | "camera") => {
+    const picker = source === "camera"
+      ? ImagePicker.launchCameraAsync
+      : ImagePicker.launchImageLibraryAsync;
+    try {
+      const result = await picker({
+        mediaTypes: ["images"],
+        base64: true,
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+      const asset = result.assets[0]!;
+      const ext = asset.uri.split(".").pop() || "png";
+      onSendImage(asset.base64!, `image.${ext}`);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  }, [onSendImage]);
+
+  const showImagePicker = useCallback(() => {
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: ["取消", "相册", "拍照"], cancelButtonIndex: 0 },
+        (index) => {
+          if (index === 1) handlePickImage("library");
+          else if (index === 2) handlePickImage("camera");
+        },
+      );
+    } else {
+      Alert.alert("发送图片", undefined, [
+        { text: "取消", style: "cancel" },
+        { text: "相册", onPress: () => handlePickImage("library") },
+        { text: "拍照", onPress: () => handlePickImage("camera") },
+      ]);
+    }
+  }, [handlePickImage]);
 
   const handleTerminalResize = useCallback((cols: number, rows: number) => {
     if (
@@ -322,6 +378,7 @@ export function SessionScreen({
               onLayout={handleTerminalLayout}
               onResize={handleTerminalResize}
               onRequestFocus={focusTerminalInput}
+              onImagePicker={showImagePicker}
               stream={terminalStream}
               termRef={termRef}
               theme={theme}
@@ -340,7 +397,7 @@ export function SessionScreen({
               onSignal={onScreenSignal}
               screenFrame={screenFrame}
               pendingOffer={pendingOffer}
-              pendingIce={pendingIce}
+              pendingIceCandidates={pendingIceCandidates}
               sessionId={sessionId}
               theme={theme}
               active={screenStatus.active}
@@ -587,6 +644,7 @@ const TerminalStage = memo(function TerminalStage({
   onLayout,
   onResize,
   onRequestFocus,
+  onImagePicker,
   stream,
   termRef,
   theme,
@@ -598,16 +656,18 @@ const TerminalStage = memo(function TerminalStage({
   onLayout: (event: LayoutChangeEvent) => void;
   onResize: (cols: number, rows: number) => void;
   onRequestFocus: () => void;
+  onImagePicker: () => void;
   stream: TerminalStream;
   termRef: React.RefObject<TerminalViewHandle | null>;
   theme: Theme;
 }) {
-  const showShortcutBar = bottomInset > 0 && !inputDisabled;
-  const terminalBottomInset = bottomInset + (showShortcutBar ? TERMINAL_ACCESSORY_HEIGHT : 0);
+  const keyboardUp = bottomInset > 0;
+  const showShortcutBar = keyboardUp && !inputDisabled;
+  const terminalPadding = bottomInset + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bgTerminal }} onLayout={onLayout}>
-      <View style={{ flex: 1, paddingBottom: terminalBottomInset }}>
+      <View style={{ flex: 1, paddingBottom: terminalPadding }}>
         <TerminalView
           ref={termRef}
           stream={stream}
@@ -622,9 +682,9 @@ const TerminalStage = memo(function TerminalStage({
             left: 0,
             right: 0,
             bottom: bottomInset,
-            height: TERMINAL_ACCESSORY_HEIGHT,
+            height: SHORTCUT_BAR_HEIGHT,
             paddingHorizontal: 6,
-            paddingVertical: 6,
+            paddingVertical: 5,
             flexDirection: "row",
             alignItems: "center",
             gap: 4,
@@ -636,20 +696,11 @@ const TerminalStage = memo(function TerminalStage({
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="always"
             contentContainerStyle={{ alignItems: "center", gap: 4, paddingRight: 8 }}
             style={{ flex: 1 }}
           >
-            {[
-              { label: "Esc", value: "\u001b" },
-              { label: "Tab", value: "\t" },
-              { label: "Ctrl+C", value: "\u0003" },
-              { label: "Ctrl+D", value: "\u0004" },
-              { label: "Ctrl+L", value: "\u000c" },
-              { label: "↑", value: "\u001b[A" },
-              { label: "↓", value: "\u001b[B" },
-              { label: "→", value: "\u001b[C" },
-              { label: "←", value: "\u001b[D" },
-            ].map((item) => (
+            {SHORTCUTS.map((item) => (
               <Pressable
                 key={item.label}
                 style={({ pressed }) => ({
@@ -666,6 +717,39 @@ const TerminalStage = memo(function TerminalStage({
                 <Text style={{ fontSize: 12, fontWeight: "600", color: theme.text }}>{item.label}</Text>
               </Pressable>
             ))}
+            <Pressable
+              key="paste"
+              style={({ pressed }) => ({
+                paddingHorizontal: 8,
+                paddingVertical: 6,
+                borderRadius: 8,
+                borderCurve: "continuous",
+                backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.separator,
+              })}
+              onPress={async () => {
+                const text = await Clipboard.getString();
+                if (text) onInput(text);
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}>Paste</Text>
+            </Pressable>
+            <Pressable
+              key="image"
+              style={({ pressed }) => ({
+                paddingHorizontal: 8,
+                paddingVertical: 6,
+                borderRadius: 8,
+                borderCurve: "continuous",
+                backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.separator,
+              })}
+              onPress={onImagePicker}
+            >
+              <Text style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}>Image</Text>
+            </Pressable>
           </ScrollView>
           <Pressable
             style={({ pressed }) => ({
@@ -684,8 +768,8 @@ const TerminalStage = memo(function TerminalStage({
           </Pressable>
         </View>
       ) : null}
-      <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", alignItems: "center" }}>
-        {keyboardHintVisible && !inputDisabled ? (
+      {keyboardHintVisible && !inputDisabled && bottomInset === 0 ? (
+        <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", alignItems: "center" }}>
           <Pressable
             style={{
               position: "absolute",
@@ -705,8 +789,8 @@ const TerminalStage = memo(function TerminalStage({
             <AppSymbol name="keyboard" size={16} color={theme.accent} />
             <Text style={{ fontSize: 13, fontWeight: "500", color: theme.text }}>点按开始输入</Text>
           </Pressable>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
     </View>
   );
 });
@@ -720,7 +804,7 @@ const DesktopStage = memo(function DesktopStage({
   onSignal,
   screenFrame,
   pendingOffer,
-  pendingIce,
+  pendingIceCandidates,
   sessionId,
   theme,
 }: {
@@ -732,7 +816,7 @@ const DesktopStage = memo(function DesktopStage({
   onSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
   screenFrame: { data: string; width: number; height: number; frameId: number } | null;
   pendingOffer: { sdp: string } | null;
-  pendingIce: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null;
+  pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
   sessionId: string;
   theme: Theme;
 }) {
@@ -745,7 +829,7 @@ const DesktopStage = memo(function DesktopStage({
         error={error}
         screenFrame={screenFrame}
         pendingOffer={pendingOffer}
-        pendingIce={pendingIce}
+        pendingIceCandidates={pendingIceCandidates}
         onStart={onStart}
         onStop={onStop}
         onSignal={onSignal}

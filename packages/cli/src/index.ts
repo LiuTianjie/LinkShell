@@ -7,6 +7,11 @@ import { runDoctor } from "./commands/doctor.js";
 import { runSetup } from "./commands/setup.js";
 import { getLanIp } from "./utils/lan-ip.js";
 
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../../../package.json") as { version: string };
+
 const config = loadConfig();
 const program = new Command();
 
@@ -15,7 +20,7 @@ program
   .description(
     "Bridge a local Claude/Codex terminal session to a remote gateway",
   )
-  .version("0.2.0");
+  .version(pkg.version);
 
 // ── start ───────────────────────────────────────────────────────────
 

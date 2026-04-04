@@ -168,6 +168,13 @@ export const screenIcePayloadSchema = z.object({
   sdpMLineIndex: z.number().nullable().optional(),
 });
 
+// ── File upload payloads ────────────────────────────────────────────
+
+export const fileUploadPayloadSchema = z.object({
+  data: z.string(),           // base64 encoded
+  filename: z.string().min(1),
+});
+
 export const errorPayloadSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
@@ -201,6 +208,7 @@ export const protocolMessageSchemas = {
   "screen.offer": screenOfferPayloadSchema,
   "screen.answer": screenAnswerPayloadSchema,
   "screen.ice": screenIcePayloadSchema,
+  "file.upload": fileUploadPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

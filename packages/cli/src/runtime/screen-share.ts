@@ -1,8 +1,11 @@
 import { spawn, execSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { createRequire } from "node:module";
 import { platform } from "node:os";
 import { createEnvelope } from "@linkshell/protocol";
 import type { Envelope } from "@linkshell/protocol";
+
+const RTP_MTU = 1200; // Max payload size before FU-A fragmentation
 
 export interface ScreenShareOptions {
   sessionId: string;
@@ -42,9 +45,14 @@ export class ScreenShare {
     } catch {
       return false;
     }
-    // Check werift can be imported (try dynamic import synchronously via a child process)
+    // Check werift can be resolved from this package's context
     try {
-      execSync('node -e "require(\'werift\')"', { stdio: "pipe", timeout: 5000 });
+      const require = createRequire(import.meta.url);
+      require.resolve("werift");
+      const werift = require("werift") as any;
+      if (!werift.RTCPeerConnection || !werift.MediaStreamTrack) {
+        return false;
+      }
       return true;
     } catch {
       return false;
@@ -56,7 +64,7 @@ export class ScreenShare {
     this.active = true;
 
     try {
-      const werift = await import("werift");
+      const werift = await import("werift") as any;
 
       // ICE servers
       const iceServers: any[] = [
@@ -73,11 +81,15 @@ export class ScreenShare {
       this.pc = new werift.RTCPeerConnection({
         iceServers,
         bundlePolicy: "max-bundle",
+        codecs: { video: [werift.useH264()] },
       });
 
-      // Create video track
+      // Create video track — werift defaults to H264, no need to set codecs explicitly
+      // (setting transceiver.codecs crashes createOffer in werift 0.22.x)
       const videoTrack = new werift.MediaStreamTrack({ kind: "video" });
-      this.pc.addTrack(videoTrack);
+      this.pc.addTransceiver(videoTrack, {
+        direction: "sendonly",
+      });
 
       // ICE candidate → send to remote
       this.pc.onIceCandidate.subscribe((candidate: any) => {
@@ -130,7 +142,7 @@ export class ScreenShare {
       );
 
       // Start ffmpeg capture (will begin sending once ICE connects)
-      this.startFfmpeg(videoTrack);
+      this.startFfmpeg(videoTrack, werift);
 
     } catch (err) {
       this.options.onStatus(
@@ -151,7 +163,7 @@ export class ScreenShare {
   async handleAnswer(sdp: string): Promise<void> {
     if (!this.pc) return;
     try {
-      const werift = await import("werift");
+      const werift = await import("werift") as any;
       await this.pc.setRemoteDescription(
         new werift.RTCSessionDescription(sdp, "answer"),
       );
@@ -163,7 +175,7 @@ export class ScreenShare {
   async handleIceCandidate(candidate: string, sdpMid?: string | null, sdpMLineIndex?: number | null): Promise<void> {
     if (!this.pc) return;
     try {
-      const werift = await import("werift");
+      const werift = await import("werift") as any;
       await this.pc.addIceCandidate(
         new werift.RTCIceCandidate({ candidate, sdpMid: sdpMid ?? undefined, sdpMLineIndex: sdpMLineIndex ?? undefined }),
       );
@@ -191,20 +203,17 @@ export class ScreenShare {
     );
   }
 
-  private startFfmpeg(videoTrack: any): void {
+  private startFfmpeg(videoTrack: any, werift: any): void {
     const os = platform();
     const fps = this.options.fps;
     const scale = this.options.scale;
 
     let inputArgs: string[];
     if (os === "darwin") {
-      // macOS: AVFoundation screen capture
       inputArgs = ["-f", "avfoundation", "-framerate", String(fps), "-i", "1:none"];
     } else if (os === "linux") {
-      // Linux: X11 screen grab
       inputArgs = ["-f", "x11grab", "-framerate", String(fps), "-i", ":0"];
     } else {
-      // Windows: GDI screen grab
       inputArgs = ["-f", "gdigrab", "-framerate", String(fps), "-i", "desktop"];
     }
 
@@ -219,55 +228,143 @@ export class ScreenShare {
       "-profile:v", "baseline",
       "-level", "3.1",
       "-pix_fmt", "yuv420p",
-      "-g", String(fps * 2), // keyframe every 2 seconds
+      "-g", String(fps * 2),
       "-b:v", "1500k",
       "-maxrate", "2000k",
       "-bufsize", "4000k",
       "-f", "h264",
-      "-an", // no audio
+      "-an",
       "pipe:1",
     ], {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    // Read H.264 NAL units from stdout and push to video track
+    // RTP state
+    let seqNum = 0;
+    let timestamp = 0;
+    const clockRate = 90000;
+    const frameDuration = Math.floor(clockRate / fps);
+    const ssrc = (Math.random() * 0xffffffff) >>> 0;
+
+    // Parse NAL units from annexb stream and packetize as RTP
     let nalBuffer = Buffer.alloc(0);
+
+    const sendNalUnit = (nal: Buffer) => {
+      if (nal.length === 0) return;
+
+      // Strip start code
+      let offset = 0;
+      if (nal[0] === 0 && nal[1] === 0 && nal[2] === 0 && nal[3] === 1) {
+        offset = 4;
+      } else if (nal[0] === 0 && nal[1] === 0 && nal[2] === 1) {
+        offset = 3;
+      }
+      const nalData = nal.subarray(offset);
+      if (nalData.length === 0) return;
+
+      const nalType = nalData[0]! & 0x1f;
+      // Update timestamp on each new access unit (SPS/IDR/non-IDR slice)
+      if (nalType === 7 || nalType === 5 || nalType === 1) {
+        // Only bump timestamp for actual picture NALs (not SPS/PPS)
+        if (nalType === 5 || nalType === 1) {
+          timestamp += frameDuration;
+        }
+      }
+
+      if (nalData.length <= RTP_MTU) {
+        // Single NAL unit packet
+        const header = new werift.RtpHeader({
+          sequenceNumber: seqNum++ & 0xffff,
+          timestamp: timestamp >>> 0,
+          payloadType: 96,
+          ssrc,
+          marker: nalType === 1 || nalType === 5, // marker on last NAL of frame
+        });
+        try {
+          videoTrack.writeRtp(new werift.RtpPacket(header, nalData));
+        } catch {}
+      } else {
+        // FU-A fragmentation (RFC 6184)
+        const fnri = nalData[0]! & 0xe0; // F + NRI bits
+        const nalTypeVal = nalData[0]! & 0x1f;
+        const fuIndicator = fnri | 28; // FU-A type = 28
+        let pos = 1; // skip NAL header byte
+        let isFirst = true;
+
+        while (pos < nalData.length) {
+          const end = Math.min(pos + RTP_MTU - 2, nalData.length); // -2 for FU indicator + FU header
+          const isLast = end >= nalData.length;
+
+          let fuHeader = nalTypeVal;
+          if (isFirst) fuHeader |= 0x80; // Start bit
+          if (isLast) fuHeader |= 0x40;  // End bit
+
+          const payload = Buffer.concat([
+            Buffer.from([fuIndicator, fuHeader]),
+            nalData.subarray(pos, end),
+          ]);
+
+          const header = new werift.RtpHeader({
+            sequenceNumber: seqNum++ & 0xffff,
+            timestamp: timestamp >>> 0,
+            payloadType: 96,
+            ssrc,
+            marker: isLast && (nalType === 1 || nalType === 5),
+          });
+          try {
+            videoTrack.writeRtp(new werift.RtpPacket(header, payload));
+          } catch {}
+
+          isFirst = false;
+          pos = end;
+        }
+      }
+    };
+
+    const extractNalUnits = () => {
+      // Find NAL unit boundaries (0x00000001 or 0x000001)
+      const units: Buffer[] = [];
+      let start = -1;
+
+      for (let i = 0; i < nalBuffer.length - 3; i++) {
+        if (nalBuffer[i] === 0 && nalBuffer[i + 1] === 0) {
+          let scLen = 0;
+          if (nalBuffer[i + 2] === 0 && i + 3 < nalBuffer.length && nalBuffer[i + 3] === 1) {
+            scLen = 4;
+          } else if (nalBuffer[i + 2] === 1) {
+            scLen = 3;
+          }
+          if (scLen > 0) {
+            if (start >= 0) {
+              units.push(nalBuffer.subarray(start, i));
+            }
+            start = i;
+            i += scLen - 1; // skip past start code
+          }
+        }
+      }
+
+      if (start >= 0 && units.length > 0) {
+        // Keep remaining data from last start code onward
+        nalBuffer = nalBuffer.subarray(start);
+      } else if (start < 0) {
+        // No start code found yet, keep accumulating
+      }
+
+      return units;
+    };
 
     this.ffmpeg.stdout?.on("data", (chunk: Buffer) => {
       if (!this.active) return;
-
       nalBuffer = Buffer.concat([nalBuffer, chunk]);
 
-      // Split on NAL unit start codes (0x00000001 or 0x000001)
-      let offset = 0;
-      while (offset < nalBuffer.length - 4) {
-        let startCodeLen = 0;
-        if (nalBuffer[offset] === 0 && nalBuffer[offset + 1] === 0) {
-          if (nalBuffer[offset + 2] === 0 && nalBuffer[offset + 3] === 1) {
-            startCodeLen = 4;
-          } else if (nalBuffer[offset + 2] === 1) {
-            startCodeLen = 3;
-          }
-        }
-
-        if (startCodeLen > 0 && offset > 0) {
-          // Found a NAL unit boundary
-          const nalUnit = nalBuffer.subarray(0, offset);
-          try {
-            videoTrack.writeRtp(nalUnit);
-          } catch {
-            // Track might not be ready yet
-          }
-          nalBuffer = nalBuffer.subarray(offset);
-          offset = 0;
-          continue;
-        }
-        offset++;
+      const units = extractNalUnits();
+      for (const unit of units) {
+        sendNalUnit(unit);
       }
     });
 
     this.ffmpeg.stderr?.on("data", (data: Buffer) => {
-      // ffmpeg logs to stderr, ignore unless debugging
       const msg = data.toString();
       if (msg.includes("Error") || msg.includes("error")) {
         process.stderr.write(`[screen-share:ffmpeg] ${msg}\n`);

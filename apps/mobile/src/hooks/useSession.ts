@@ -52,7 +52,7 @@ export interface TerminalStream {
   subscribe: (listener: (event: TerminalStreamEvent) => void) => () => void;
 }
 
-const TERMINAL_REPLAY_LIMIT = 400;
+const TERMINAL_REPLAY_LIMIT = 100;
 
 export interface SessionHandle {
   status: ConnectionStatus;
@@ -73,13 +73,14 @@ export interface SessionHandle {
     frameId: number;
   } | null;
   pendingOffer: { sdp: string } | null;
-  pendingIce: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null;
+  pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
   claim: (pairingCode: string) => Promise<string | null>;
   connectToSession: (
     sessionId: string,
     gatewayBaseUrlOverride?: string,
   ) => void;
   sendInput: (data: string) => void;
+  sendImage: (base64Data: string, filename: string) => void;
   sendResize: (cols: number, rows: number) => void;
   claimControl: () => void;
   releaseControl: () => void;
@@ -119,7 +120,7 @@ export function useSession({
     frameId: number;
   } | null>(null);
   const [pendingOffer, setPendingOffer] = useState<{ sdp: string } | null>(null);
-  const [pendingIce, setPendingIce] = useState<{ candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null>(null);
+  const [pendingIceCandidates, setPendingIceCandidates] = useState<{ candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[]>([]);
 
   const socketRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -471,7 +472,7 @@ export function useSession({
           }
           case "screen.ice": {
             const p = parseTypedPayload("screen.ice", envelope.payload);
-            setPendingIce({ candidate: p.candidate, sdpMid: p.sdpMid, sdpMLineIndex: p.sdpMLineIndex });
+            setPendingIceCandidates((prev) => [...prev, { candidate: p.candidate, sdpMid: p.sdpMid, sdpMLineIndex: p.sdpMLineIndex }]);
             break;
           }
           default:
@@ -644,7 +645,7 @@ export function useSession({
     );
     setScreenStatus({ active: false, mode: "off" });
     setPendingOffer(null);
-    setPendingIce(null);
+    setPendingIceCandidates([]);
   }, [sendRaw]);
 
   const sendScreenSignal = useCallback((type: "screen.answer" | "screen.ice", payload: any) => {
@@ -656,6 +657,20 @@ export function useSession({
       }),
     );
   }, [sendRaw]);
+
+  const sendImage = useCallback(
+    (base64Data: string, filename: string) => {
+      sendRaw(
+        createEnvelope({
+          type: "file.upload",
+          sessionId: sessionIdRef.current,
+          deviceId: deviceIdRef.current,
+          payload: { data: base64Data, filename },
+        }),
+      );
+    },
+    [sendRaw],
+  );
 
   const reconnect = useCallback(() => {
     const sid = sessionIdRef.current;
@@ -720,10 +735,11 @@ export function useSession({
     screenStatus,
     screenFrame,
     pendingOffer,
-    pendingIce,
+    pendingIceCandidates,
     claim,
     connectToSession,
     sendInput,
+    sendImage,
     sendResize,
     claimControl,
     releaseControl,

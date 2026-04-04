@@ -29,7 +29,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#020617;display:flex
 .xterm{padding:2px}
 .xterm-viewport::-webkit-scrollbar{width:4px}
 .xterm-viewport::-webkit-scrollbar-thumb{background:#334155;border-radius:2px}
-.xterm-viewport{scroll-behavior:auto !important;-webkit-overflow-scrolling:auto !important;}
+.xterm-viewport{-webkit-overflow-scrolling:touch !important;overscroll-behavior:contain !important;}
 </style>
 </head>
 <body>
@@ -118,7 +118,86 @@ function setFontSize(nextSize){
   sendSize();
 }
 
+// IME composition guard + iOS voice dictation fix
+var _composing = false;
+var _lastComposed = '';
+var _inputSeq = 0;
+var _ackedSeq = -1;
+// Voice dictation tracking: iOS dictation progressively replaces text in textarea,
+// but xterm.js clears textarea after each input, breaking the replacement.
+// We track what we've sent and emit backspaces + new text on replacement.
+var _dictationText = '';  // cumulative text sent during current dictation session
+var _dictationActive = false;
+var _dictationTimer = null;
+
+function endDictation() {
+  _dictationText = '';
+  _dictationActive = false;
+  if (_dictationTimer) { clearTimeout(_dictationTimer); _dictationTimer = null; }
+}
+
+if (term.textarea) {
+  term.textarea.addEventListener('compositionstart', function(){ _composing = true; });
+  term.textarea.addEventListener('compositionend', function(e){
+    _composing = false;
+    if (e.data) {
+      _lastComposed = e.data;
+      window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:e.data}));
+    }
+  });
+
+  // Intercept beforeinput to detect dictation replacements
+  term.textarea.addEventListener('beforeinput', function(e){
+    if (e.inputType === 'insertReplacementText' || e.inputType === 'insertFromDictation') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      var newText = '';
+      if (e.dataTransfer) {
+        newText = e.dataTransfer.getData('text/plain') || e.data || '';
+      } else {
+        newText = e.data || '';
+      }
+      if (!newText) return;
+
+      _dictationActive = true;
+      // Send backspaces to erase previously sent dictation text
+      var bs = '';
+      for (var i = 0; i < _dictationText.length; i++) bs += '\\b';
+      if (bs) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:bs}));
+      }
+      // Send the full new text
+      window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:newText}));
+      _dictationText = newText;
+
+      // Auto-end dictation session after 2s of inactivity
+      if (_dictationTimer) clearTimeout(_dictationTimer);
+      _dictationTimer = setTimeout(endDictation, 2000);
+    }
+  });
+
+  // iOS Chinese punctuation workaround
+  term.textarea.addEventListener('input', function(e){
+    if (_composing || _dictationActive) return;
+    if (e.inputType === 'insertText' && e.data && e.data.length === 1 && !e.isComposing) {
+      var mySeq = ++_inputSeq;
+      setTimeout(function(){
+        if (_ackedSeq < mySeq) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:e.data}));
+        }
+      }, 30);
+    }
+  });
+}
 term.onData(function(data){
+  if (_composing) return;
+  if (_dictationActive) return;  // suppress xterm echo during dictation
+  _ackedSeq = _inputSeq;
+  if (_lastComposed && data === _lastComposed) {
+    _lastComposed = '';
+    return;
+  }
+  _lastComposed = '';
   window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:data}));
 });
 term.onResize(function(){sendSize();});
@@ -135,7 +214,7 @@ term.onSelectionChange(function(){
 window.handleRNMessage = function(msg){
   try{
     var p = JSON.parse(msg);
-    if(p.type==='write'){term.write(p.data);snapBottom();}
+    if(p.type==='write'){term.write(p.data);}
     else if(p.type==='clear') term.clear();
     else if(p.type==='resize'){term.resize(p.cols,p.rows);safeFit();}
     else if(p.type==='zoom_in'){setFontSize((term.options.fontSize || DEFAULT_FONT_SIZE) + 1);}

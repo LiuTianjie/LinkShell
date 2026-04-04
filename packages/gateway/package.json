@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/gateway",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "type": "module",
   "main": "dist/gateway/src/index.js",
   "exports": {

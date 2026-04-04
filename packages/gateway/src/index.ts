@@ -32,7 +32,7 @@ const pairingManager = new PairingManager();
 
 const PING_INTERVAL = 20_000;
 const MAX_BODY_SIZE = 4096;
-const MAX_WS_MESSAGE_SIZE = 64 * 1024; // 64KB
+const MAX_WS_MESSAGE_SIZE = 50 * 1024 * 1024; // 50MB (supports base64 image uploads)
 const PAIRING_RATE_LIMIT_MAX = Number(process.env.PAIRING_RATE_LIMIT_MAX ?? 30);
 const PAIRING_RATE_LIMIT_WINDOW_MS = Number(
   process.env.PAIRING_RATE_LIMIT_WINDOW_MS ?? 60_000,

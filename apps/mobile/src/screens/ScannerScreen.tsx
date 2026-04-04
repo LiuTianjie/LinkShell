@@ -7,8 +7,9 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView, useCameraPermissions, scanFromURLAsync } from "expo-camera";
 import type { BarcodeScanningResult } from "expo-camera";
+import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { parsePairingLink } from "../utils/pairing-link";
@@ -50,6 +51,42 @@ export function ScannerScreen({ onClose, onScan }: ScannerScreenProps) {
     setError(null);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onScan(parsed);
+  }, [onScan]);
+
+  const handlePickImage = useCallback(async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 1,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const scannedResults = await scanFromURLAsync(result.assets[0].uri, ["qr"]);
+      if (!scannedResults || scannedResults.length === 0) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setError("未在图片中检测到二维码。");
+        setScanned(true);
+        return;
+      }
+
+      const data = scannedResults[0]!.data;
+      const parsed = parsePairingLink(data);
+      if (!parsed) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setError("当前二维码不是 LinkShell 配对二维码。");
+        setScanned(true);
+        return;
+      }
+
+      setScanned(true);
+      setError(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onScan(parsed);
+    } catch {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError("读取图片失败，请重试。");
+      setScanned(true);
+    }
   }, [onScan]);
 
   const handleTryAgain = useCallback(() => {
@@ -150,7 +187,17 @@ export function ScannerScreen({ onClose, onScan }: ScannerScreenProps) {
             <AppSymbol name="xmark" size={12} color="#ffffff" />
           </Pressable>
           <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>扫码连接</Text>
-          <View style={{ width: 32 }} />
+          <Pressable
+            style={({ pressed }) => ({
+              width: 32, height: 32, borderRadius: 16,
+              backgroundColor: pressed ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.18)",
+              alignItems: "center", justifyContent: "center",
+            })}
+            onPress={handlePickImage}
+            hitSlop={8}
+          >
+            <AppSymbol name="photo" size={14} color="#ffffff" />
+          </Pressable>
         </View>
 
         {/* Scan frame */}

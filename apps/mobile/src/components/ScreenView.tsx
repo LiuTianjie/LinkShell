@@ -27,7 +27,7 @@ interface ScreenViewProps {
   screenFrame: ScreenFrame | null;
   // WebRTC signaling from host
   pendingOffer: { sdp: string } | null;
-  pendingIce: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null } | null;
+  pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
   onStart: (fps: number, quality: number, scale: number) => void;
   onStop: () => void;
   onSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
@@ -122,7 +122,7 @@ export function ScreenView({
   error,
   screenFrame,
   pendingOffer,
-  pendingIce,
+  pendingIceCandidates,
   onStart,
   onStop,
   onSignal,
@@ -168,11 +168,13 @@ export function ScreenView({
 
   // Forward ICE candidates to WebView
   useEffect(() => {
-    if (pendingIce && mode === "webrtc") {
-      const js = `window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "ice", ...pendingIce }))});true;`;
-      webViewRef.current?.injectJavaScript(js);
+    if (pendingIceCandidates.length > 0 && mode === "webrtc") {
+      for (const ice of pendingIceCandidates) {
+        const js = `window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "ice", ...ice }))});true;`;
+        webViewRef.current?.injectJavaScript(js);
+      }
     }
-  }, [pendingIce, mode]);
+  }, [pendingIceCandidates, mode]);
 
   const handleWebViewMessage = useCallback((event: { nativeEvent: { data: string } }) => {
     try {
@@ -213,6 +215,8 @@ export function ScreenView({
     setFullscreen((f) => !f);
   }, []);
 
+  const isOff = mode === "off" || !active;
+
   // Auto-fullscreen in landscape when active
   useEffect(() => {
     if (isLandscape && active && !isOff) {
@@ -220,7 +224,7 @@ export function ScreenView({
     } else if (!isLandscape) {
       setFullscreen(false);
     }
-  }, [isLandscape, active]);
+  }, [isLandscape, active, isOff]);
 
   const cycleFps = useCallback(() => {
     const options = [2, 5, 10, 15, 30];
@@ -236,7 +240,6 @@ export function ScreenView({
     if (active) onStart(fps, next, scale);
   }, [fps, quality, scale, active, onStart]);
 
-  const isOff = mode === "off" || !active;
   const hasError = Boolean(error);
   const showFallbackFrame = screenFrame && mode === "fallback" && !paused;
   const showWebRTC = mode === "webrtc" && !isOff;

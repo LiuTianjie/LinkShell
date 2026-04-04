@@ -1,6 +1,9 @@
 import * as pty from "node-pty";
 import WebSocket from "ws";
 import { hostname, platform } from "node:os";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createEnvelope,
   parseEnvelope,
@@ -289,6 +292,17 @@ export class BridgeSession {
       case "screen.ice": {
         const p = parseTypedPayload("screen.ice", envelope.payload);
         this.screenShare?.handleIceCandidate(p.candidate, p.sdpMid, p.sdpMLineIndex);
+        break;
+      }
+      case "file.upload": {
+        const p = parseTypedPayload("file.upload", envelope.payload);
+        const ext = p.filename.split(".").pop() || "png";
+        const tempPath = join(tmpdir(), `linkshell-image-${Date.now()}.${ext}`);
+        writeFileSync(tempPath, Buffer.from(p.data, "base64"));
+        this.log(`image saved to ${tempPath}`);
+        // Send path via bracketed paste so Claude Code's paste handler detects the
+        // image extension (.png/.jpg/etc) and reads the file as an image attachment.
+        this.terminal?.write(`\x1b[200~${tempPath}\x1b[201~`);
         break;
       }
       default:
