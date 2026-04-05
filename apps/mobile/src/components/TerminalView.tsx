@@ -55,7 +55,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 
       return TERMINAL_HTML
         .replace('<html>', `<html style="color-scheme:${theme.mode}">`)
-        .replace('<meta charset="utf-8"/>', `<meta charset="utf-8"/><meta name="color-scheme" content="${theme.mode}">`)
+        .replace('<meta charset="utf-8"/>', `<meta charset="utf-8"/><meta name="color-scheme" content="${theme.mode}"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">`)
         .replace(/background:#020617;display:flex;flex-direction:column/g, `background:${theme.bgTerminal};display:flex;flex-direction:column`)
         .replace(/background-color: #000;/g, `background-color: ${theme.bgTerminal};`)
         .replace(
@@ -73,7 +73,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         )
         .replace("window.addEventListener('resize',function(){fitAddon.fit();});", "window.addEventListener('resize',function(){safeFit();sendSize();});")
         .replace(/theme:\{background:'#020617',foreground:'#e2e8f0',cursor:'#3b82f6',selectionBackground:'#334155'\}/, `theme:${JSON.stringify(termTheme)}`)
-        .replace("</body>", `${resizeBridgeScript}<script>\n(function(){\n  function viewport(){\n    return document.querySelector('.xterm-viewport');\n  }\n  function isNearBottom(){\n    var vp = viewport();\n    return !vp || vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 32;\n  }\n  function restoreChunks(chunks){\n    term.reset();\n    if(Array.isArray(chunks) && chunks.length > 0){\n      term.write(chunks.join(''));\n    }\n    safeFit();\n    snapBottom();\n    sendSize();\n  }\n  var prevHandle = window.handleRNMessage;\n  window.handleRNMessage = function(msg){\n    try{\n      var p = JSON.parse(msg);\n      if(p.type==='restore'){\n        restoreChunks(p.chunks);\n        return;\n      }\n      if(p.type==='refit'){\n        safeFit();\n        sendSize();\n        return;\n      }\n      if(p.type==='scroll_bottom'){\n        snapBottom();\n        return;\n      }\n      if(p.type==='write'){\n        var wasNear = isNearBottom();\n        term.write(p.data || '');\n        if(wasNear) snapBottom();\n        return;\n      }\n      if(p.type==='focus_cursor'){\n        focusCursor();\n        return;\n      }\n    } catch(e) {}\n    if(prevHandle){\n      prevHandle(msg);\n    }\n  };\n})();\n</script></body>`);
+        .replace("</body>", `${resizeBridgeScript}<script>\n(function(){\n  // Disable xterm.js scroll, let WebView native scroll handle it\n  if(window.term) term.options.mouseWheelScrolling = false;\n  // Make xterm viewport not clip — let body scroll naturally\n  var vp = document.querySelector('.xterm-viewport');\n  if(vp){ vp.style.overflow='visible'; vp.style.position='relative'; }\n  var screen = document.querySelector('.xterm-screen');\n  if(screen){ screen.style.position='relative'; }\n  // Body scroll styles\n  document.body.style.cssText += '-webkit-overflow-scrolling:touch;overscroll-behavior:contain;overflow-y:auto;height:auto;';\n  document.documentElement.style.cssText += 'overflow-y:auto;height:auto;';\n  function viewport(){\n    return document.querySelector('.xterm-viewport');\n  }\n  function isNearBottom(){\n    return (document.documentElement.scrollTop + window.innerHeight) >= (document.documentElement.scrollHeight - 32);\n  }\n  function snapBottom(){\n    window.scrollTo(0, document.documentElement.scrollHeight);\n  }\n  function restoreChunks(chunks){\n    term.reset();\n    if(Array.isArray(chunks) && chunks.length > 0){\n      term.write(chunks.join(''));\n    }\n    safeFit();\n    setTimeout(function(){ snapBottom(); }, 50);\n    sendSize();\n  }\n  var prevHandle = window.handleRNMessage;\n  window.handleRNMessage = function(msg){\n    try{\n      var p = JSON.parse(msg);\n      if(p.type==='restore'){\n        restoreChunks(p.chunks);\n        return;\n      }\n      if(p.type==='refit'){\n        safeFit();\n        sendSize();\n        return;\n      }\n      if(p.type==='scroll_bottom'){\n        snapBottom();\n        return;\n      }\n      if(p.type==='write'){\n        var wasNear = isNearBottom();\n        term.write(p.data || '');\n        if(wasNear) setTimeout(function(){ snapBottom(); }, 10);\n        return;\n      }\n      if(p.type==='focus_cursor'){\n        focusCursor();\n        return;\n      }\n    } catch(e) {}\n    if(prevHandle){\n      prevHandle(msg);\n    }\n  };\n})();\n</script></body>`);
     }, [theme.accent, theme.bgTerminal, theme.mode]);
 
     const postToWebView = useCallback((msg: object) => {
@@ -168,9 +168,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           javaScriptEnabled
           domStorageEnabled
           onMessage={handleMessage}
-          scrollEnabled={false}
+          scrollEnabled
           bounces={false}
           overScrollMode="never"
+          decelerationRate="normal"
           keyboardDisplayRequiresUserAction={false}
           hideKeyboardAccessoryView
           allowsInlineMediaPlayback

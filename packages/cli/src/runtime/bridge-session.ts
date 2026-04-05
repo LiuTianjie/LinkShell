@@ -1,9 +1,9 @@
 import * as pty from "node-pty";
 import WebSocket from "ws";
-import { hostname, platform } from "node:os";
-import { writeFileSync } from "node:fs";
+import { hostname, platform, homedir } from "node:os";
+import { writeFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, basename } from "node:path";
+import { join, basename, resolve } from "node:path";
 import {
   createEnvelope,
   parseEnvelope,
@@ -278,17 +278,57 @@ export class BridgeSession {
       }
       case "terminal.spawn": {
         const p = parseTypedPayload("terminal.spawn", envelope.payload);
-        const newId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        this.spawnTerminal(newId, p.cwd, p.provider);
-        // Notify client
-        this.send(createEnvelope({
-          type: "terminal.spawned",
-          sessionId: this.sessionId,
-          terminalId: newId,
-          payload: { terminalId: newId, cwd: p.cwd, projectName: basename(p.cwd) },
-        }));
-        // Send updated list
+        const normalizedCwd = resolve(p.cwd);
+        // Dedup: if a running terminal already exists for this cwd, return it
+        const existing = [...this.terminals.values()].find(
+          (t) => t.status === "running" && resolve(t.cwd) === normalizedCwd,
+        );
+        if (existing) {
+          this.send(createEnvelope({
+            type: "terminal.spawned",
+            sessionId: this.sessionId,
+            terminalId: existing.id,
+            payload: { terminalId: existing.id, cwd: existing.cwd, projectName: existing.projectName },
+          }));
+        } else {
+          const newId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          this.spawnTerminal(newId, normalizedCwd, p.provider);
+          this.send(createEnvelope({
+            type: "terminal.spawned",
+            sessionId: this.sessionId,
+            terminalId: newId,
+            payload: { terminalId: newId, cwd: normalizedCwd, projectName: basename(normalizedCwd) },
+          }));
+        }
         this.sendTerminalList();
+        break;
+      }
+      case "terminal.browse": {
+        const p = parseTypedPayload("terminal.browse", envelope.payload);
+        // Expand ~ to home directory
+        const rawPath = p.path.startsWith("~") ? p.path.replace(/^~/, homedir()) : p.path;
+        const browsePath = resolve(rawPath);
+        try {
+          const entries = readdirSync(browsePath, { withFileTypes: true })
+            .filter((d) => d.isDirectory() && !d.name.startsWith("."))
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((d) => ({
+              name: d.name,
+              path: join(browsePath, d.name),
+              isDirectory: true,
+            }));
+          this.send(createEnvelope({
+            type: "terminal.browse.result",
+            sessionId: this.sessionId,
+            payload: { path: browsePath, entries },
+          }));
+        } catch (err: unknown) {
+          this.send(createEnvelope({
+            type: "terminal.browse.result",
+            sessionId: this.sessionId,
+            payload: { path: browsePath, entries: [], error: (err as Error).message },
+          }));
+        }
         break;
       }
       case "terminal.list": {

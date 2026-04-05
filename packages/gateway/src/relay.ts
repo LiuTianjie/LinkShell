@@ -101,6 +101,7 @@ function handleHostMessage(
     // Multi-terminal: host → clients
     case "terminal.spawned":
     case "terminal.list":
+    case "terminal.browse.result":
       broadcastToClients(session, envelope);
       break;
     default:
@@ -201,6 +202,7 @@ function handleClientMessage(
     // Multi-terminal: client → host
     case "terminal.spawn":
     case "terminal.list":
+    case "terminal.browse":
       sendToHost(session, envelope);
       break;
     default:

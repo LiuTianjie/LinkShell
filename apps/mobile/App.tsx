@@ -3,7 +3,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Dimensions, Linking, StyleSheet, View } from "react-native";
+import { Alert, Animated, Dimensions, FlatList, Linking, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppSymbol } from "./src/components/AppSymbol";
@@ -11,6 +11,7 @@ import { ConnectionSheet } from "./src/components/ConnectionSheet";
 import { useAppState } from "./src/hooks/useAppState";
 import { useSessionManager } from "./src/hooks/useSessionManager";
 import type { SessionInfo } from "./src/hooks/useSessionManager";
+import type { BrowseEntry } from "./src/hooks/useSessionManager";
 import { GatewayListScreen } from "./src/screens/GatewayListScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { ScannerScreen } from "./src/screens/ScannerScreen";
@@ -40,6 +41,161 @@ function SFIcon({ name, color, size = 22 }: { name: string; color: string; size?
   return <AppSymbol name={name} size={size} color={color} />;
 }
 
+// ── Folder Picker Modal ─────────────────────────────────────────────
+
+function FolderPickerModal({
+  visible,
+  browseResult,
+  terminals,
+  onBrowse,
+  onSelect,
+  onClose,
+  theme,
+}: {
+  visible: boolean;
+  browseResult: { path: string; entries: BrowseEntry[]; error?: string } | null;
+  terminals: Map<string, { cwd: string; status: string }>;
+  onBrowse: (path: string) => void;
+  onSelect: (path: string) => void;
+  onClose: () => void;
+  theme: any;
+}) {
+  const [manualPath, setManualPath] = useState("");
+  const currentPath = browseResult?.path ?? "~";
+
+  // Browse home on first open
+  useEffect(() => {
+    if (visible && !browseResult) onBrowse("~");
+  }, [visible]);
+
+  // Check if a path already has a running terminal
+  const getRunningTerminalId = (path: string): string | null => {
+    for (const [tid, t] of terminals) {
+      if (t.cwd === path && t.status === "running") return tid;
+    }
+    return null;
+  };
+
+  const pathParts = currentPath.split("/").filter(Boolean);
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+        <View style={{ height: "80%", backgroundColor: theme.bg, borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: "hidden" }}>
+          {/* Header */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border }}>
+            <Text style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>选择文件夹</Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Text style={{ color: theme.accent, fontSize: 15 }}>关闭</Text>
+            </Pressable>
+          </View>
+
+          {/* Breadcrumb */}
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, flexWrap: "wrap" }}>
+            <Pressable onPress={() => onBrowse("/")} hitSlop={4}>
+              <Text style={{ color: theme.accent, fontSize: 13 }}>/</Text>
+            </Pressable>
+            {pathParts.map((part, i) => {
+              const fullPath = "/" + pathParts.slice(0, i + 1).join("/");
+              const isLast = i === pathParts.length - 1;
+              return (
+                <View key={fullPath} style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Text style={{ color: theme.textTertiary, fontSize: 13, marginHorizontal: 2 }}>/</Text>
+                  <Pressable onPress={() => !isLast && onBrowse(fullPath)} hitSlop={4}>
+                    <Text style={{ color: isLast ? theme.text : theme.accent, fontSize: 13, fontWeight: isLast ? "600" : "400" }}>{part}</Text>
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Open here button */}
+          <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+            {getRunningTerminalId(currentPath) ? (
+              <Pressable
+                onPress={() => { onSelect(currentPath); onClose(); }}
+                style={{ backgroundColor: theme.success + "30", borderRadius: 8, paddingVertical: 10, alignItems: "center" }}
+              >
+                <Text style={{ color: theme.success, fontWeight: "600", fontSize: 14 }}>切换到此终端 (运行中)</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => { onSelect(currentPath); onClose(); }}
+                style={{ backgroundColor: theme.accentLight, borderRadius: 8, paddingVertical: 10, alignItems: "center" }}
+              >
+                <Text style={{ color: theme.accent, fontWeight: "600", fontSize: 14 }}>在此打开终端</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Error */}
+          {browseResult?.error && (
+            <Text style={{ color: theme.error, fontSize: 12, paddingHorizontal: 16, paddingBottom: 4 }}>{browseResult.error}</Text>
+          )}
+
+          {/* Directory list */}
+          <FlatList
+            data={browseResult?.entries ?? []}
+            keyExtractor={(item) => item.path}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingHorizontal: 12 }}
+            ListEmptyComponent={
+              <Text style={{ color: theme.textTertiary, fontSize: 13, textAlign: "center", paddingTop: 24 }}>
+                {browseResult ? "空目录" : "加载中..."}
+              </Text>
+            }
+            renderItem={({ item }) => {
+              const running = getRunningTerminalId(item.path);
+              return (
+                <Pressable
+                  onPress={() => onBrowse(item.path)}
+                  style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.borderLight }}
+                >
+                  <AppSymbol name="folder.fill" size={18} color={running ? theme.success : theme.accent} />
+                  <Text style={{ color: theme.text, fontSize: 15, marginLeft: 10, flex: 1 }} numberOfLines={1}>{item.name}</Text>
+                  {running && (
+                    <View style={{ backgroundColor: theme.success + "25", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                      <Text style={{ color: theme.success, fontSize: 10, fontWeight: "600" }}>运行中</Text>
+                    </View>
+                  )}
+                  <AppSymbol name="chevron.right" size={12} color={theme.textTertiary} />
+                </Pressable>
+              );
+            }}
+          />
+
+          {/* Manual path input */}
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border }}>
+            <TextInput
+              value={manualPath}
+              onChangeText={setManualPath}
+              placeholder="手动输入路径..."
+              placeholderTextColor={theme.textTertiary}
+              style={{ flex: 1, color: theme.text, fontSize: 14, backgroundColor: theme.bgInput, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 }}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="go"
+              onSubmitEditing={() => {
+                const p = manualPath.trim();
+                if (p) { onSelect(p); onClose(); setManualPath(""); }
+              }}
+            />
+            <Pressable
+              onPress={() => {
+                const p = manualPath.trim();
+                if (p) { onSelect(p); onClose(); setManualPath(""); }
+              }}
+              style={{ marginLeft: 8, backgroundColor: theme.accentLight, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 }}
+            >
+              <Text style={{ color: theme.accent, fontWeight: "600", fontSize: 14 }}>打开</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function AppInner() {
   const { theme } = useTheme();
   const [gatewayBaseUrl, setGatewayBaseUrl] = useState(DEFAULT_GATEWAY);
@@ -48,6 +204,7 @@ function AppInner() {
   const [connectionSheetVisible, setConnectionSheetVisible] = useState(false);
   const [gatewayListVisible, setGatewayListVisible] = useState(false);
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
+  const [folderPickerVisible, setFolderPickerVisible] = useState(false);
   const gatewaySlideAnim = useRef(new Animated.Value(Dimensions.get("window").width)).current;
   const lastSavedSessionsRef = useRef(new Set<string>());
 
@@ -424,9 +581,20 @@ function AppInner() {
           activeTerminalId={activeSession.activeTerminalId}
           onSwitchTerminal={manager.switchTerminal}
           onAddTerminal={() => {
-            // TODO: navigate to ProjectPickerScreen
-            // For now, prompt is handled via deep link or future UI
+            setFolderPickerVisible(true);
+            // Browse the host's cwd or home
+            manager.browseDirectory(activeSession.cwd ?? "~");
           }}
+          terminals={activeSession.terminals}
+        />
+        <FolderPickerModal
+          visible={folderPickerVisible}
+          browseResult={activeSession.browseResult}
+          terminals={activeSession.terminals}
+          onBrowse={manager.browseDirectory}
+          onSelect={(path) => manager.spawnTerminal(path)}
+          onClose={() => setFolderPickerVisible(false)}
+          theme={theme}
         />
       </>
     );

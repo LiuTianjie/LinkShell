@@ -24,6 +24,18 @@ export interface TerminalInfo {
   terminalStream: TerminalStream;
 }
 
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+}
+
+export interface BrowseResult {
+  path: string;
+  entries: BrowseEntry[];
+  error?: string;
+}
+
 export interface SessionInfo {
   sessionId: string;
   gatewayUrl: string;
@@ -42,6 +54,7 @@ export interface SessionInfo {
   screenFrame: { data: string; width: number; height: number; frameId: number } | null;
   pendingOffer: { sdp: string } | null;
   pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
+  browseResult: BrowseResult | null;
 }
 
 export interface SessionManagerHandle {
@@ -67,6 +80,8 @@ export interface SessionManagerHandle {
   switchTerminal: (terminalId: string) => void;
   /** Request terminal list from host */
   requestTerminalList: () => void;
+  /** Browse a directory on the host */
+  browseDirectory: (path: string) => void;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -137,6 +152,7 @@ interface InternalSession {
     width: number;
     height: number;
   } | null;
+  browseResult: BrowseResult | null;
 }
 
 function createInternalTerminal(terminalId: string, cwd: string, projectName: string, provider: string): InternalTerminal {
@@ -197,6 +213,7 @@ function createInternalSession(sessionId: string, gatewayUrl: string, deviceId: 
     pendingOffer: null,
     pendingIceCandidates: [],
     chunkBuf: null,
+    browseResult: null,
   };
 }
 
@@ -232,6 +249,7 @@ function toSessionInfo(s: InternalSession): SessionInfo {
     screenFrame: s.screenFrame,
     pendingOffer: s.pendingOffer,
     pendingIceCandidates: s.pendingIceCandidates,
+    browseResult: s.browseResult,
   };
 }
 
@@ -339,6 +357,13 @@ export function useSessionManager(): SessionManagerHandle {
       startHeartbeat(s);
       requestControl(s);
 
+      // Always request terminal list so we discover all running terminals
+      sendRaw(s, createEnvelope({
+        type: "terminal.list",
+        sessionId: s.sessionId,
+        payload: { terminals: [] },
+      }));
+
       // Health probe
       (async () => {
         try {
@@ -377,6 +402,11 @@ export function useSessionManager(): SessionManagerHandle {
       })();
 
       if (isReconnect) {
+        // Clear terminals — host will resend terminal.list + replay all output
+        s.terminals.clear();
+        s.activeTerminalId = null;
+        s.terminalSnapshot = { sessionId: s.sessionId, chunks: [] };
+        emitTerminal(s, { type: "reset", snapshot: { sessionId: s.sessionId, chunks: [] } });
         sendRaw(s, createEnvelope({
           type: "session.resume",
           sessionId: s.sessionId,
@@ -421,12 +451,19 @@ export function useSessionManager(): SessionManagerHandle {
         }
         case "terminal.spawned": {
           const p = parseTypedPayload("terminal.spawned", envelope.payload);
-          const t = createInternalTerminal(p.terminalId, p.cwd, p.projectName, s.provider ?? "claude");
-          s.terminals.set(p.terminalId, t);
-          s.activeTerminalId = p.terminalId;
-          // Reset legacy stream for new active terminal
-          s.terminalSnapshot = { sessionId: s.sessionId, chunks: [] };
-          emitTerminal(s, { type: "reset", snapshot: { sessionId: s.sessionId, chunks: [] } });
+          // If terminal already exists (dedup from host), just switch to it
+          if (s.terminals.has(p.terminalId)) {
+            s.activeTerminalId = p.terminalId;
+            const term = s.terminals.get(p.terminalId)!;
+            s.terminalSnapshot = { sessionId: s.sessionId, chunks: [...term.snapshot.chunks] };
+            emitTerminal(s, { type: "reset", snapshot: { sessionId: s.sessionId, chunks: [...term.snapshot.chunks] } });
+          } else {
+            const t = createInternalTerminal(p.terminalId, p.cwd, p.projectName, s.provider ?? "claude");
+            s.terminals.set(p.terminalId, t);
+            s.activeTerminalId = p.terminalId;
+            s.terminalSnapshot = { sessionId: s.sessionId, chunks: [] };
+            emitTerminal(s, { type: "reset", snapshot: { sessionId: s.sessionId, chunks: [] } });
+          }
           tick();
           break;
         }
@@ -530,6 +567,12 @@ export function useSessionManager(): SessionManagerHandle {
         case "screen.ice": {
           const p = parseTypedPayload("screen.ice", envelope.payload);
           s.pendingIceCandidates = [...s.pendingIceCandidates, { candidate: p.candidate, sdpMid: p.sdpMid, sdpMLineIndex: p.sdpMLineIndex }];
+          tick();
+          break;
+        }
+        case "terminal.browse.result": {
+          const p = envelope.payload as { path: string; entries: BrowseEntry[]; error?: string };
+          s.browseResult = { path: p.path, entries: p.entries, error: p.error };
           tick();
           break;
         }
@@ -721,6 +764,13 @@ export function useSessionManager(): SessionManagerHandle {
   const spawnTerminalFn = useCallback((cwd: string) => {
     const s = getActive();
     if (!s) return;
+    // Client-side dedup: if a running terminal already exists for this cwd, just switch to it
+    for (const [tid, t] of s.terminals) {
+      if (t.cwd === cwd && t.status === "running") {
+        switchTerminalFn(tid);
+        return;
+      }
+    }
     sendRaw(s, createEnvelope({
       type: "terminal.spawn",
       sessionId: s.sessionId,
@@ -751,6 +801,18 @@ export function useSessionManager(): SessionManagerHandle {
       payload: { terminals: [] },
     }));
   }, [getActive]);
+
+  const browseDirectoryFn = useCallback((path: string) => {
+    const s = getActive();
+    if (!s) return;
+    s.browseResult = null; // clear previous result
+    sendRaw(s, createEnvelope({
+      type: "terminal.browse" as any,
+      sessionId: s.sessionId,
+      payload: { path },
+    }));
+    tick();
+  }, [getActive, tick]);
 
   // Build sessions map for consumers
   const sessions = new Map<string, SessionInfo>();
@@ -785,5 +847,6 @@ export function useSessionManager(): SessionManagerHandle {
     spawnTerminal: spawnTerminalFn,
     switchTerminal: switchTerminalFn,
     requestTerminalList: requestTerminalListFn,
+    browseDirectory: browseDirectoryFn,
   };
 }

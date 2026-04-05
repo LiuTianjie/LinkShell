@@ -283,6 +283,8 @@ func statusColor(_ status: String) -> Color {
     case "thinking": return .yellow
     case "outputting": return .green
     case "waiting": return .orange
+    case "tool_use": return .cyan
+    case "error": return .red
     default: return .gray
     }
 }
@@ -292,6 +294,8 @@ func statusEmoji(_ status: String) -> String {
     case "thinking": return "🧠"
     case "outputting": return "📝"
     case "waiting": return "⏳"
+    case "tool_use": return "🔧"
+    case "error": return "❗"
     default: return "💤"
     }
 }
@@ -310,6 +314,8 @@ func statusPill(_ status: String) -> some View {
         case "thinking": return ("思考中", .yellow)
         case "outputting": return ("输出中", .green)
         case "waiting": return ("等待输入", .orange)
+        case "tool_use": return ("执行工具", .cyan)
+        case "error": return ("出错", .red)
         default: return ("空闲", .gray)
         }
     }()

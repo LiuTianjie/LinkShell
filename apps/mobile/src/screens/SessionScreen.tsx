@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Clipboard,
+  FlatList,
   Keyboard,
   KeyboardEvent,
   LayoutChangeEvent,
@@ -23,12 +24,14 @@ import { TerminalView } from "../components/TerminalView";
 import type { TerminalViewHandle } from "../components/TerminalView";
 import { ScreenView } from "../components/ScreenView";
 import type { ConnectionStatus, TerminalStream } from "../hooks/useSession";
+import type { TerminalInfo } from "../hooks/useSessionManager";
 import { useTheme } from "../theme";
 import type { Theme } from "../theme";
 
 const SHORTCUT_BAR_HEIGHT = 44;
 
 const SHORTCUTS = [
+  { label: "⇧Tab", value: "\u001b[Z" },
   { label: "Esc", value: "\u001b" },
   { label: "Tab", value: "\t" },
   { label: "Ctrl+C", value: "\u0003" },
@@ -83,6 +86,7 @@ interface SessionScreenProps {
   activeTerminalId?: string | null;
   onSwitchTerminal?: (terminalId: string) => void;
   onAddTerminal?: () => void;
+  terminals?: Map<string, TerminalInfo>;
 }
 
 export function SessionScreen({
@@ -114,16 +118,35 @@ export function SessionScreen({
   activeTerminalId,
   onSwitchTerminal,
   onAddTerminal,
+  terminals,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { theme } = useTheme();
   const termRef = useRef<TerminalViewHandle>(null);
+  const termRefsMap = useRef(new Map<string, React.RefObject<TerminalViewHandle | null>>());
+
+  // Helper: get or create a ref for a terminal
+  const getTermRef = useCallback((terminalId: string) => {
+    let r = termRefsMap.current.get(terminalId);
+    if (!r) {
+      r = React.createRef<TerminalViewHandle | null>();
+      termRefsMap.current.set(terminalId, r);
+    }
+    return r;
+  }, []);
+
+  // Keep termRef synced to active terminal's ref (so existing zoom/refit/focus code works)
+  const activeTermRef = activeTerminalId ? termRefsMap.current.get(activeTerminalId) : null;
+  if (activeTermRef) {
+    (termRef as any).current = activeTermRef.current;
+  }
   const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const [keyboardHintVisible, setKeyboardHintVisible] = useState(true);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [activeTab, setActiveTab] = useState<"terminal" | "desktop">("terminal");
+  const [showTerminalGrid, setShowTerminalGrid] = useState(false);
 
   const keyboardVisible = keyboardInset > 0;
   const stageBottomInset = keyboardVisible ? keyboardInset : insets.bottom;
@@ -343,15 +366,7 @@ export function SessionScreen({
         />
       ) : null}
 
-      {terminalTabs && terminalTabs.length > 0 ? (
-        <TerminalTabBar
-          tabs={terminalTabs}
-          activeTabId={activeTerminalId ?? terminalTabs[0]?.terminalId ?? ""}
-          onSwitch={onSwitchTerminal}
-          onAdd={onAddTerminal}
-          theme={theme}
-        />
-      ) : null}
+      {terminalTabs && terminalTabs.length > 0 ? null : null}
 
       <SessionHeader
         activeTab={activeTab}
@@ -376,6 +391,9 @@ export function SessionScreen({
         theme={theme}
         toolbarBg={toolbarBg}
         zoomPercent={zoomPercent}
+        terminalCount={terminalTabs?.length ?? 0}
+        activeTerminalLabel={terminalTabs?.find((t) => t.terminalId === activeTerminalId)?.label}
+        onShowTerminalGrid={() => setShowTerminalGrid(true)}
       />
 
       {banner ? (
@@ -432,6 +450,9 @@ export function SessionScreen({
               stream={terminalStream}
               termRef={termRef}
               theme={theme}
+              terminals={terminals}
+              activeTerminalId={activeTerminalId}
+              getTermRef={getTermRef}
             />
           </View>
 
@@ -468,6 +489,19 @@ export function SessionScreen({
           ) : null}
         </View>
       </View>
+
+      {showTerminalGrid ? (
+        <TerminalGridOverlay
+          terminalTabs={terminalTabs ?? []}
+          activeTerminalId={activeTerminalId}
+          terminals={terminals}
+          onSwitch={(tid) => { onSwitchTerminal?.(tid); setShowTerminalGrid(false); }}
+          onAdd={() => { setShowTerminalGrid(false); onAddTerminal?.(); }}
+          onClose={() => setShowTerminalGrid(false)}
+          theme={theme}
+          insetTop={insets.top}
+        />
+      ) : null}
     </View>
   );
 }
@@ -495,6 +529,9 @@ const SessionHeader = memo(function SessionHeader({
   theme,
   toolbarBg,
   zoomPercent,
+  terminalCount,
+  activeTerminalLabel,
+  onShowTerminalGrid,
 }: {
   activeTab: "terminal" | "desktop";
   hasControl: boolean;
@@ -518,6 +555,9 @@ const SessionHeader = memo(function SessionHeader({
   theme: Theme;
   toolbarBg: string;
   zoomPercent: number;
+  terminalCount?: number;
+  activeTerminalLabel?: string;
+  onShowTerminalGrid?: () => void;
 }) {
   return (
     <View style={{
@@ -540,10 +580,29 @@ const SessionHeader = memo(function SessionHeader({
             <Text style={{ fontSize: 10, fontWeight: "600", color: sessionTagColor }}>{sessionTagText}</Text>
           </View>
           <Text style={{ fontSize: 10, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", color: theme.textTertiary }} numberOfLines={1}>
-            {sessionId.slice(0, 8)}
+            {activeTerminalLabel || sessionId.slice(0, 8)}
           </Text>
         </View>
-        <Pressable
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {(terminalCount ?? 0) > 0 && onShowTerminalGrid ? (
+            <Pressable
+              style={({ pressed }) => ({
+                width: 28,
+                height: 28,
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 7,
+                borderWidth: 1.5,
+                borderColor: pressed ? theme.accent : theme.textSecondary,
+                backgroundColor: pressed ? theme.accentLight : "transparent",
+              })}
+              onPress={onShowTerminalGrid}
+              hitSlop={6}
+            >
+              <Text style={{ fontSize: 12, fontWeight: "700", color: theme.textSecondary, fontVariant: ["tabular-nums"] }}>{terminalCount}</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
           style={({ pressed }) => ({
             flexDirection: "row",
             alignItems: "center",
@@ -560,6 +619,7 @@ const SessionHeader = memo(function SessionHeader({
           <AppSymbol name="xmark.circle.fill" size={14} color={theme.error} />
           <Text style={{ fontSize: 12, fontWeight: "600", color: theme.error }}>退出</Text>
         </Pressable>
+        </View>
       </View>
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -698,6 +758,9 @@ const TerminalStage = memo(function TerminalStage({
   stream,
   termRef,
   theme,
+  terminals,
+  activeTerminalId,
+  getTermRef,
 }: {
   bottomInset: number;
   inputDisabled: boolean;
@@ -710,20 +773,46 @@ const TerminalStage = memo(function TerminalStage({
   stream: TerminalStream;
   termRef: React.RefObject<TerminalViewHandle | null>;
   theme: Theme;
+  terminals?: Map<string, TerminalInfo>;
+  activeTerminalId?: string | null;
+  getTermRef?: (terminalId: string) => React.RefObject<TerminalViewHandle | null>;
 }) {
   const keyboardUp = bottomInset > 0;
   const showShortcutBar = keyboardUp && !inputDisabled;
   const terminalPadding = bottomInset + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0);
 
+  // If we have multiple terminals, render each with its own TerminalView
+  const hasMultipleTerminals = terminals && terminals.size > 0 && getTermRef;
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.bgTerminal }} onLayout={onLayout}>
       <View style={{ flex: 1, paddingBottom: terminalPadding }}>
-        <TerminalView
-          ref={termRef}
-          stream={stream}
-          onInput={onInput}
-          onResize={onResize}
-        />
+        {hasMultipleTerminals ? (
+          Array.from(terminals.entries()).map(([tid, tInfo]) => {
+            const isActive = tid === activeTerminalId;
+            return (
+              <View
+                key={tid}
+                style={{ flex: isActive ? 1 : 0, display: isActive ? "flex" : "none" }}
+                pointerEvents={isActive ? "auto" : "none"}
+              >
+                <TerminalView
+                  ref={getTermRef(tid)}
+                  stream={tInfo.terminalStream}
+                  onInput={isActive ? onInput : undefined}
+                  onResize={isActive ? onResize : undefined}
+                />
+              </View>
+            );
+          })
+        ) : (
+          <TerminalView
+            ref={termRef}
+            stream={stream}
+            onInput={onInput}
+            onResize={onResize}
+          />
+        )}
       </View>
       {showShortcutBar ? (
         <View
@@ -1107,6 +1196,94 @@ const SessionTabBar = memo(function SessionTabBar({
           );
         })}
       </ScrollView>
+    </View>
+  );
+});
+
+const TerminalGridOverlay = memo(function TerminalGridOverlay({
+  terminalTabs,
+  activeTerminalId,
+  terminals,
+  onSwitch,
+  onAdd,
+  onClose,
+  theme,
+  insetTop,
+}: {
+  terminalTabs: TerminalTab[];
+  activeTerminalId?: string | null;
+  terminals?: Map<string, TerminalInfo>;
+  onSwitch: (terminalId: string) => void;
+  onAdd: () => void;
+  onClose: () => void;
+  theme: Theme;
+  insetTop: number;
+}) {
+  return (
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.85)", zIndex: 100 }]}>
+      <View style={{ paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>终端</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <Pressable onPress={onAdd} hitSlop={8}>
+            <AppSymbol name="plus" size={20} color={theme.accent} />
+          </Pressable>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Text style={{ color: theme.accent, fontSize: 15, fontWeight: "500" }}>完成</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <FlatList
+        data={terminalTabs}
+        numColumns={2}
+        keyExtractor={(item) => item.terminalId}
+        contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40 }}
+        columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
+        renderItem={({ item }) => {
+          const isActive = item.terminalId === activeTerminalId;
+          const tInfo = terminals?.get(item.terminalId);
+          const isRunning = item.status === "running";
+          return (
+            <Pressable
+              onPress={() => onSwitch(item.terminalId)}
+              style={({ pressed }) => ({
+                flex: 1,
+                borderRadius: 14,
+                borderCurve: "continuous" as const,
+                overflow: "hidden",
+                borderWidth: isActive ? 2 : 1,
+                borderColor: isActive ? theme.accent : "rgba(255,255,255,0.1)",
+                backgroundColor: pressed ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+              })}
+            >
+              <View style={{ height: 120, backgroundColor: theme.bgTerminal, justifyContent: "center", alignItems: "center" }}>
+                <AppSymbol name="terminal.fill" size={32} color={isRunning ? theme.accent : theme.textTertiary} />
+              </View>
+              <View style={{ paddingHorizontal: 10, paddingVertical: 8, gap: 2 }}>
+                <Text style={{ color: theme.text, fontSize: 13, fontWeight: "600" }} numberOfLines={1}>
+                  {item.label}
+                </Text>
+                {tInfo?.cwd ? (
+                  <Text style={{ color: theme.textTertiary, fontSize: 10 }} numberOfLines={1}>
+                    {tInfo.cwd}
+                  </Text>
+                ) : null}
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
+                  <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isRunning ? "#4ade80" : "#6b7280" }} />
+                  <Text style={{ fontSize: 9, color: isRunning ? "#4ade80" : "#6b7280", fontWeight: "500" }}>
+                    {isRunning ? "运行中" : "已退出"}
+                  </Text>
+                </View>
+              </View>
+            </Pressable>
+          );
+        }}
+        ListEmptyComponent={
+          <View style={{ alignItems: "center", paddingTop: 60 }}>
+            <Text style={{ color: theme.textTertiary, fontSize: 14 }}>暂无终端</Text>
+          </View>
+        }
+      />
     </View>
   );
 });

@@ -196,6 +196,24 @@ export const terminalSpawnedPayloadSchema = z.object({
   projectName: z.string(),
 });
 
+// ── Terminal browse payloads ──────────────────────────────────────
+
+export const terminalBrowsePayloadSchema = z.object({
+  path: z.string().min(1),
+});
+
+export const terminalBrowseEntrySchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  isDirectory: z.boolean(),
+});
+
+export const terminalBrowseResultPayloadSchema = z.object({
+  path: z.string(),
+  entries: z.array(terminalBrowseEntrySchema),
+  error: z.string().optional(),
+});
+
 // ── File upload payloads ────────────────────────────────────────────
 
 export const fileUploadPayloadSchema = z.object({
@@ -240,6 +258,8 @@ export const protocolMessageSchemas = {
   "terminal.spawn": terminalSpawnPayloadSchema,
   "terminal.spawned": terminalSpawnedPayloadSchema,
   "terminal.list": terminalListPayloadSchema,
+  "terminal.browse": terminalBrowsePayloadSchema,
+  "terminal.browse.result": terminalBrowseResultPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;
