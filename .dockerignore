@@ -1,0 +1,39 @@
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+.cache/
+tmp/
+temp/
+*.tsbuildinfo
+
+# Mobile app (not needed for gateway)
+apps/
+
+# Expo / RN
+.expo/
+.expo-shared/
+
+# Generated
+apps/mobile/src/generated/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Git
+.git/
+.github/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*

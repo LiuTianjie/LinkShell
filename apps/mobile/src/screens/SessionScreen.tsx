@@ -3,6 +3,7 @@ import {
   ActionSheetIOS,
   ActivityIndicator,
   Alert,
+  Animated,
   Clipboard,
   FlatList,
   Keyboard,
@@ -18,6 +19,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import { BlurView } from "expo-blur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { TerminalView } from "../components/TerminalView";
@@ -175,7 +177,20 @@ export function SessionScreen({
     lastResizeRef.current = null;
   }, [sessionId]);
 
+  const ctrlDRef = useRef<{ count: number; timer: ReturnType<typeof setTimeout> | null }>({ count: 0, timer: null });
+
   const handleTerminalInput = useCallback((data: string) => {
+    // Ctrl+D safety: block if pressed more than 2 times within 1s
+    if (data === "\u0004") {
+      const cd = ctrlDRef.current;
+      cd.count++;
+      if (cd.timer) clearTimeout(cd.timer);
+      cd.timer = setTimeout(() => { cd.count = 0; }, 1000);
+      if (cd.count > 2) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return;
+      }
+    }
     onSendInput(data);
   }, [onSendInput]);
 
@@ -337,19 +352,6 @@ export function SessionScreen({
   const isErrorState = status === "disconnected" || status.startsWith("error:");
   const showFullOverlay = isConnecting || isHostOffline || isErrorState;
 
-  // Host status tag
-  const hostOnline = status === "connected" || status === "session_exited";
-  const hostTagColor = isConnecting ? "#fbbf24" : hostOnline ? "#4ade80" : "#ef4444";
-  const hostTagText = isConnecting ? "连接中" : hostOnline ? "主机在线" : isHostOffline ? "主机离线" : status === "reconnecting" ? "重连中" : "已断开";
-  const hostTagBg = isConnecting ? "rgba(251,191,36,0.12)" : hostOnline ? "rgba(74,222,128,0.12)" : "rgba(239,68,68,0.10)";
-
-  // Session status tag
-  const sessionExited = status === "session_exited";
-  const sessionUnknown = !hostOnline && !sessionExited && !isConnecting;
-  const sessionTagColor = sessionExited ? "#6b7280" : isConnecting || sessionUnknown ? theme.textTertiary : "#4ade80";
-  const sessionTagText = sessionExited ? "进程已退出" : isConnecting ? "等待中" : sessionUnknown ? "状态未知" : "进程运行中";
-  const sessionTagBg = sessionExited ? "rgba(107,114,128,0.12)" : isConnecting || sessionUnknown ? "rgba(107,114,128,0.08)" : "rgba(74,222,128,0.12)";
-
   const toolbarBg = theme.mode === "light" ? "#e5e5ea" : "rgba(255,255,255,0.1)";
 
   return (
@@ -371,9 +373,6 @@ export function SessionScreen({
       <SessionHeader
         activeTab={activeTab}
         hasControl={hasControl}
-        hostTagBg={hostTagBg}
-        hostTagColor={hostTagColor}
-        hostTagText={hostTagText}
         isControlledByOther={isControlledByOther}
         onClaimControl={onClaimControl}
         onLeave={handleLeave}
@@ -384,9 +383,6 @@ export function SessionScreen({
         onZoomOut={handleZoomOut}
         onZoomReset={handleZoomReset}
         sessionId={sessionId}
-        sessionTagBg={sessionTagBg}
-        sessionTagColor={sessionTagColor}
-        sessionTagText={sessionTagText}
         status={status}
         theme={theme}
         toolbarBg={toolbarBg}
@@ -509,9 +505,6 @@ export function SessionScreen({
 const SessionHeader = memo(function SessionHeader({
   activeTab,
   hasControl,
-  hostTagBg,
-  hostTagColor,
-  hostTagText,
   isControlledByOther,
   onClaimControl,
   onLeave,
@@ -522,9 +515,6 @@ const SessionHeader = memo(function SessionHeader({
   onZoomOut,
   onZoomReset,
   sessionId,
-  sessionTagBg,
-  sessionTagColor,
-  sessionTagText,
   status,
   theme,
   toolbarBg,
@@ -535,9 +525,6 @@ const SessionHeader = memo(function SessionHeader({
 }: {
   activeTab: "terminal" | "desktop";
   hasControl: boolean;
-  hostTagBg: string;
-  hostTagColor: string;
-  hostTagText: string;
   isControlledByOther: boolean;
   onClaimControl: () => void;
   onLeave: () => void;
@@ -548,9 +535,6 @@ const SessionHeader = memo(function SessionHeader({
   onZoomOut: () => void;
   onZoomReset: () => void;
   sessionId: string;
-  sessionTagBg: string;
-  sessionTagColor: string;
-  sessionTagText: string;
   status: ConnectionStatus;
   theme: Theme;
   toolbarBg: string;
@@ -559,78 +543,120 @@ const SessionHeader = memo(function SessionHeader({
   activeTerminalLabel?: string;
   onShowTerminalGrid?: () => void;
 }) {
+  // Extract folder name from activeTerminalLabel (last path segment)
+  const folderName = activeTerminalLabel
+    ? activeTerminalLabel.split("/").filter(Boolean).pop() || activeTerminalLabel
+    : sessionId.slice(0, 8);
+
   return (
     <View style={{
       backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: theme.separator,
       paddingHorizontal: 12,
-      paddingTop: 6,
-      paddingBottom: 6,
-      gap: 6,
+      paddingTop: 4,
+      paddingBottom: 4,
+      gap: 4,
     }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: hostTagBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderCurve: "continuous" as const }}>
-            <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: hostTagColor }} />
-            <Text style={{ fontSize: 10, fontWeight: "600", color: hostTagColor }}>{hostTagText}</Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: sessionTagBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderCurve: "continuous" as const }}>
-            <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: sessionTagColor }} />
-            <Text style={{ fontSize: 10, fontWeight: "600", color: sessionTagColor }}>{sessionTagText}</Text>
-          </View>
-          <Text style={{ fontSize: 10, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", color: theme.textTertiary }} numberOfLines={1}>
-            {activeTerminalLabel || sessionId.slice(0, 8)}
+      {/* Row 1: folder name ... Terminal/Desktop switcher + terminal count + exit */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <AppSymbol name="folder.fill" size={13} color={theme.accent} />
+          <Text style={{ fontSize: 13, fontWeight: "600", color: theme.text }} numberOfLines={1}>
+            {folderName}
           </Text>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          {(terminalCount ?? 0) > 0 && onShowTerminalGrid ? (
-            <Pressable
-              style={({ pressed }) => ({
-                width: 28,
-                height: 28,
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: 7,
-                borderWidth: 1.5,
-                borderColor: pressed ? theme.accent : theme.textSecondary,
-                backgroundColor: pressed ? theme.accentLight : "transparent",
-              })}
-              onPress={onShowTerminalGrid}
-              hitSlop={6}
-            >
-              <Text style={{ fontSize: 12, fontWeight: "700", color: theme.textSecondary, fontVariant: ["tabular-nums"] }}>{terminalCount}</Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-          style={({ pressed }) => ({
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 4,
-            paddingHorizontal: 10,
-            paddingVertical: 5,
-            borderRadius: 12,
-            borderCurve: "continuous" as const,
-            backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
-          })}
-          onPress={onLeave}
-          hitSlop={10}
-        >
-          <AppSymbol name="xmark.circle.fill" size={14} color={theme.error} />
-          <Text style={{ fontSize: 12, fontWeight: "600", color: theme.error }}>退出</Text>
-        </Pressable>
-        </View>
-      </View>
 
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={{
+          flexDirection: "row",
+          alignItems: "center",
+          borderRadius: 8,
+          borderCurve: "continuous",
+          backgroundColor: toolbarBg,
+          overflow: "hidden",
+        }}>
+          <Pressable
+            style={({ pressed }) => ({
+              paddingHorizontal: 10,
+              height: 26,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: activeTab === "terminal"
+                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
+                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
+            })}
+            onPress={onSwitchTerminal}
+          >
+            <Text style={{ fontSize: 11, fontWeight: "600", color: activeTab === "terminal" ? theme.accent : theme.textTertiary }}>
+              Terminal
+            </Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => ({
+              paddingHorizontal: 10,
+              height: 26,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: activeTab === "desktop"
+                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
+                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
+            })}
+            onPress={onSwitchDesktop}
+          >
+            <Text style={{ fontSize: 11, fontWeight: "600", color: activeTab === "desktop" ? theme.accent : theme.textTertiary }}>
+              Desktop
+            </Text>
+          </Pressable>
+        </View>
+
+        {(terminalCount ?? 0) > 0 && onShowTerminalGrid ? (
+          <Pressable
+            style={({ pressed }) => ({
+              width: 26,
+              height: 26,
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 6,
+              borderWidth: 1.5,
+              borderColor: pressed ? theme.accent : theme.textSecondary,
+              backgroundColor: pressed ? theme.accentLight : "transparent",
+            })}
+            onPress={onShowTerminalGrid}
+            hitSlop={6}
+          >
+            <Text style={{ fontSize: 11, fontWeight: "700", color: theme.textSecondary, fontVariant: ["tabular-nums"] }}>{terminalCount}</Text>
+          </Pressable>
+        ) : null}
+
         <Pressable
           style={({ pressed }) => ({
             flexDirection: "row",
             alignItems: "center",
-            gap: 5,
-            paddingHorizontal: 10,
-            paddingVertical: 5,
-            borderRadius: 12,
+            gap: 3,
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            borderRadius: 10,
+            borderCurve: "continuous" as const,
+            backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
+          })}
+          onPress={onLeave}
+          hitSlop={8}
+        >
+          <AppSymbol name="xmark.circle.fill" size={12} color={theme.error} />
+          <Text style={{ fontSize: 11, fontWeight: "600", color: theme.error }}>退出</Text>
+        </Pressable>
+      </View>
+
+      {/* Row 2: control + zoom */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Pressable
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            borderRadius: 10,
             borderCurve: "continuous" as const,
             backgroundColor: hasControl
               ? (pressed ? theme.accent : theme.accentLight)
@@ -644,103 +670,62 @@ const SessionHeader = memo(function SessionHeader({
         >
           <AppSymbol
             name={hasControl ? "hand.raised.fill" : "hand.raised"}
-            size={13}
+            size={12}
             color={hasControl ? theme.accent : theme.textSecondary}
           />
-          <Text style={{ fontSize: 12, fontWeight: "500", color: hasControl ? theme.accent : theme.textSecondary }}>
-            {hasControl ? "已接管 · 释放" : isControlledByOther ? "只读 · 接管" : "接管控制"}
+          <Text style={{ fontSize: 11, fontWeight: "500", color: hasControl ? theme.accent : theme.textSecondary }}>
+            {hasControl ? "释放" : isControlledByOther ? "接管" : "接管"}
           </Text>
         </Pressable>
 
-        <View style={{
-          flex: 1,
-          flexDirection: "row",
-          alignItems: "center",
-          borderRadius: 10,
-          borderCurve: "continuous",
-          backgroundColor: toolbarBg,
-          overflow: "hidden",
-        }}>
-          <Pressable
-            style={({ pressed }) => ({
-              flex: 1,
-              height: 30,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: activeTab === "terminal"
-                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
-                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
-            })}
-            onPress={onSwitchTerminal}
-          >
-            <Text style={{ fontSize: 12, fontWeight: "600", color: activeTab === "terminal" ? theme.accent : theme.textTertiary }}>
-              Terminal
-            </Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => ({
-              flex: 1,
-              height: 30,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: activeTab === "desktop"
-                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
-                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
-            })}
-            onPress={onSwitchDesktop}
-          >
-            <Text style={{ fontSize: 12, fontWeight: "600", color: activeTab === "desktop" ? theme.accent : theme.textTertiary }}>
-              Desktop
-            </Text>
-          </Pressable>
-        </View>
+        <View style={{ flex: 1 }} />
 
         <View style={{
           flexDirection: "row",
           alignItems: "center",
-          borderRadius: 8,
+          borderRadius: 7,
           borderCurve: "continuous" as const,
           backgroundColor: toolbarBg,
           overflow: "hidden",
         }}>
-        <Pressable
-          style={({ pressed }) => ({
-            width: 30,
-            height: 28,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
-          })}
-          onPress={onZoomOut}
-        >
-          <AppSymbol name="textformat.size.smaller" size={13} color={theme.textSecondary} />
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => ({
-            minWidth: 42,
-            height: 28,
-            alignItems: "center",
-            justifyContent: "center",
-            paddingHorizontal: 4,
-            backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
-          })}
-          onPress={onZoomReset}
-        >
-          <Text style={{ fontSize: 11, fontWeight: "600", color: theme.accent, fontVariant: ["tabular-nums"] }}>{zoomPercent}%</Text>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => ({
-            width: 30,
-            height: 28,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
-          })}
-          onPress={onZoomIn}
-        >
-          <AppSymbol name="textformat.size.larger" size={13} color={theme.textSecondary} />
-        </Pressable>
-      </View>
+          <Pressable
+            style={({ pressed }) => ({
+              width: 28,
+              height: 26,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
+            })}
+            onPress={onZoomOut}
+          >
+            <AppSymbol name="textformat.size.smaller" size={12} color={theme.textSecondary} />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => ({
+              minWidth: 38,
+              height: 26,
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 3,
+              backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
+            })}
+            onPress={onZoomReset}
+          >
+            <Text style={{ fontSize: 10, fontWeight: "600", color: theme.accent, fontVariant: ["tabular-nums"] }}>{zoomPercent}%</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => ({
+              width: 28,
+              height: 26,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
+            })}
+            onPress={onZoomIn}
+          >
+            <AppSymbol name="textformat.size.larger" size={12} color={theme.textSecondary} />
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -1219,72 +1204,104 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
   theme: Theme;
   insetTop: number;
 }) {
-  return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.85)", zIndex: 100 }]}>
-      <View style={{ paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>终端</Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Pressable onPress={onAdd} hitSlop={8}>
-            <AppSymbol name="plus" size={20} color={theme.accent} />
-          </Pressable>
-          <Pressable onPress={onClose} hitSlop={8}>
-            <Text style={{ color: theme.accent, fontSize: 15, fontWeight: "500" }}>完成</Text>
-          </Pressable>
-        </View>
-      </View>
+  const opacity = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.92)).current;
 
-      <FlatList
-        data={terminalTabs}
-        numColumns={2}
-        keyExtractor={(item) => item.terminalId}
-        contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40 }}
-        columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
-        renderItem={({ item }) => {
-          const isActive = item.terminalId === activeTerminalId;
-          const tInfo = terminals?.get(item.terminalId);
-          const isRunning = item.status === "running";
-          return (
-            <Pressable
-              onPress={() => onSwitch(item.terminalId)}
-              style={({ pressed }) => ({
-                flex: 1,
-                borderRadius: 14,
-                borderCurve: "continuous" as const,
-                overflow: "hidden",
-                borderWidth: isActive ? 2 : 1,
-                borderColor: isActive ? theme.accent : "rgba(255,255,255,0.1)",
-                backgroundColor: pressed ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
-              })}
-            >
-              <View style={{ height: 120, backgroundColor: theme.bgTerminal, justifyContent: "center", alignItems: "center" }}>
-                <AppSymbol name="terminal.fill" size={32} color={isRunning ? theme.accent : theme.textTertiary} />
-              </View>
-              <View style={{ paddingHorizontal: 10, paddingVertical: 8, gap: 2 }}>
-                <Text style={{ color: theme.text, fontSize: 13, fontWeight: "600" }} numberOfLines={1}>
-                  {item.label}
-                </Text>
-                {tInfo?.cwd ? (
-                  <Text style={{ color: theme.textTertiary, fontSize: 10 }} numberOfLines={1}>
-                    {tInfo.cwd}
-                  </Text>
-                ) : null}
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
-                  <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isRunning ? "#4ade80" : "#6b7280" }} />
-                  <Text style={{ fontSize: 9, color: isRunning ? "#4ade80" : "#6b7280", fontWeight: "500" }}>
-                    {isRunning ? "运行中" : "已退出"}
-                  </Text>
-                </View>
-              </View>
-            </Pressable>
-          );
-        }}
-        ListEmptyComponent={
-          <View style={{ alignItems: "center", paddingTop: 60 }}>
-            <Text style={{ color: theme.textTertiary, fontSize: 14 }}>暂无终端</Text>
-          </View>
-        }
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 1, tension: 80, friction: 12, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const handleClose = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 0.92, duration: 200, useNativeDriver: true }),
+    ]).start(() => onClose());
+  }, [onClose, opacity, scale]);
+
+  const handleSwitch = useCallback((tid: string) => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 1.05, duration: 180, useNativeDriver: true }),
+    ]).start(() => onSwitch(tid));
+  }, [onSwitch, opacity, scale]);
+
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, { zIndex: 100, opacity }]}>
+      <BlurView
+        intensity={80}
+        tint={theme.mode === "dark" ? "dark" : "light"}
+        style={StyleSheet.absoluteFill}
       />
-    </View>
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.mode === "dark" ? "rgba(0,0,0,0.4)" : "rgba(255,255,255,0.3)" }]} />
+      <Animated.View style={{ flex: 1, transform: [{ scale }] }}>
+        <View style={{ paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>终端</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Pressable onPress={onAdd} hitSlop={8}>
+              <AppSymbol name="plus" size={20} color={theme.accent} />
+            </Pressable>
+            <Pressable onPress={handleClose} hitSlop={8}>
+              <Text style={{ color: theme.accent, fontSize: 15, fontWeight: "500" }}>完成</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <FlatList
+          data={terminalTabs}
+          numColumns={2}
+          keyExtractor={(item) => item.terminalId}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40 }}
+          columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
+          renderItem={({ item }) => {
+            const isActive = item.terminalId === activeTerminalId;
+            const tInfo = terminals?.get(item.terminalId);
+            const isRunning = item.status === "running";
+            return (
+              <Pressable
+                onPress={() => handleSwitch(item.terminalId)}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  borderRadius: 14,
+                  borderCurve: "continuous" as const,
+                  overflow: "hidden",
+                  borderWidth: isActive ? 2 : 1,
+                  borderColor: isActive ? theme.accent : "rgba(255,255,255,0.1)",
+                  backgroundColor: pressed ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+                })}
+              >
+                <View style={{ height: 120, backgroundColor: theme.bgTerminal, justifyContent: "center", alignItems: "center" }}>
+                  <AppSymbol name="terminal.fill" size={32} color={isRunning ? theme.accent : theme.textTertiary} />
+                </View>
+                <View style={{ paddingHorizontal: 10, paddingVertical: 8, gap: 2 }}>
+                  <Text style={{ color: theme.text, fontSize: 13, fontWeight: "600" }} numberOfLines={1}>
+                    {item.label}
+                  </Text>
+                  {tInfo?.cwd ? (
+                    <Text style={{ color: theme.textTertiary, fontSize: 10 }} numberOfLines={1}>
+                      {tInfo.cwd}
+                    </Text>
+                  ) : null}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
+                    <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isRunning ? "#4ade80" : "#6b7280" }} />
+                    <Text style={{ fontSize: 9, color: isRunning ? "#4ade80" : "#6b7280", fontWeight: "500" }}>
+                      {isRunning ? "运行中" : "已退出"}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
+            );
+          }}
+          ListEmptyComponent={
+            <View style={{ alignItems: "center", paddingTop: 60 }}>
+              <Text style={{ color: theme.textTertiary, fontSize: 14 }}>暂无终端</Text>
+            </View>
+          }
+        />
+      </Animated.View>
+    </Animated.View>
   );
 });
 
