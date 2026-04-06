@@ -22,6 +22,7 @@ import * as ImagePicker from "expo-image-picker";
 import { BlurView } from "expo-blur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
+import { VoiceInputPanel, VOICE_PANEL_HEIGHT } from "../components/VoiceInputPanel";
 import { TerminalView } from "../components/TerminalView";
 import type { TerminalViewHandle } from "../components/TerminalView";
 import { ScreenView } from "../components/ScreenView";
@@ -89,6 +90,8 @@ interface SessionScreenProps {
   onSwitchTerminal?: (terminalId: string) => void;
   onAddTerminal?: () => void;
   terminals?: Map<string, TerminalInfo>;
+  onKillTerminal?: (terminalId: string) => void;
+  onRemoveTerminal?: (terminalId: string) => void;
 }
 
 export function SessionScreen({
@@ -121,6 +124,8 @@ export function SessionScreen({
   onSwitchTerminal,
   onAddTerminal,
   terminals,
+  onKillTerminal,
+  onRemoveTerminal,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -149,6 +154,7 @@ export function SessionScreen({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [activeTab, setActiveTab] = useState<"terminal" | "desktop">("terminal");
   const [showTerminalGrid, setShowTerminalGrid] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
 
   const keyboardVisible = keyboardInset > 0;
   const stageBottomInset = keyboardVisible ? keyboardInset : insets.bottom;
@@ -344,6 +350,15 @@ export function SessionScreen({
     });
   }, [activeTab, keyboardVisible, keyboardInset]);
 
+  // Refit when switching terminals
+  useEffect(() => {
+    if (!activeTerminalId) return;
+    requestAnimationFrame(() => {
+      termRef.current?.refit(false);
+      termRef.current?.scrollToBottom();
+    });
+  }, [activeTerminalId]);
+
   const banner = getSessionBanner(status);
   const showReconnectButton = status === "disconnected" || (status.startsWith("error:") && Boolean(sessionId));
 
@@ -387,7 +402,7 @@ export function SessionScreen({
         theme={theme}
         toolbarBg={toolbarBg}
         zoomPercent={zoomPercent}
-        terminalCount={terminalTabs?.length ?? 0}
+        terminalCount={terminalTabs?.filter((t) => t.status === "running").length ?? 0}
         activeTerminalLabel={terminalTabs?.find((t) => t.terminalId === activeTerminalId)?.label}
         onShowTerminalGrid={() => setShowTerminalGrid(true)}
       />
@@ -449,6 +464,8 @@ export function SessionScreen({
               terminals={terminals}
               activeTerminalId={activeTerminalId}
               getTermRef={getTermRef}
+              voiceMode={voiceMode}
+              setVoiceMode={setVoiceMode}
             />
           </View>
 
@@ -494,6 +511,8 @@ export function SessionScreen({
           onSwitch={(tid) => { onSwitchTerminal?.(tid); setShowTerminalGrid(false); }}
           onAdd={() => { setShowTerminalGrid(false); onAddTerminal?.(); }}
           onClose={() => setShowTerminalGrid(false)}
+          onKillTerminal={onKillTerminal}
+          onRemoveTerminal={onRemoveTerminal}
           theme={theme}
           insetTop={insets.top}
         />
@@ -548,6 +567,14 @@ const SessionHeader = memo(function SessionHeader({
     ? activeTerminalLabel.split("/").filter(Boolean).pop() || activeTerminalLabel
     : sessionId.slice(0, 8);
 
+  // Derive status display
+  const statusConfig = (() => {
+    if (status === "connected") return { color: "#4ade80", bg: "rgba(74,222,128,0.12)", text: "已连接" };
+    if (status === "reconnecting" || status === "connecting" || status === "claiming") return { color: "#facc15", bg: "rgba(250,204,21,0.12)", text: "连接中" };
+    if (status === "host_disconnected") return { color: "#facc15", bg: "rgba(250,204,21,0.12)", text: "主机离线" };
+    return { color: "#f87171", bg: "rgba(248,113,113,0.12)", text: "已断开" };
+  })();
+
   return (
     <View style={{
       backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated,
@@ -558,76 +585,29 @@ const SessionHeader = memo(function SessionHeader({
       paddingBottom: 4,
       gap: 4,
     }}>
-      {/* Row 1: folder name ... Terminal/Desktop switcher + terminal count + exit */}
+      {/* Row 1: status pill + folder name + exit */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <AppSymbol name="folder.fill" size={13} color={theme.accent} />
-          <Text style={{ fontSize: 13, fontWeight: "600", color: theme.text }} numberOfLines={1}>
-            {folderName}
-          </Text>
-        </View>
-
+        {/* Status pill */}
         <View style={{
           flexDirection: "row",
           alignItems: "center",
-          borderRadius: 8,
-          borderCurve: "continuous",
-          backgroundColor: toolbarBg,
-          overflow: "hidden",
+          gap: 4,
+          paddingHorizontal: 7,
+          paddingVertical: 3,
+          borderRadius: 10,
+          borderCurve: "continuous" as const,
+          backgroundColor: statusConfig.bg,
         }}>
-          <Pressable
-            style={({ pressed }) => ({
-              paddingHorizontal: 10,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: activeTab === "terminal"
-                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
-                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
-            })}
-            onPress={onSwitchTerminal}
-          >
-            <Text style={{ fontSize: 11, fontWeight: "600", color: activeTab === "terminal" ? theme.accent : theme.textTertiary }}>
-              Terminal
-            </Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => ({
-              paddingHorizontal: 10,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: activeTab === "desktop"
-                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
-                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
-            })}
-            onPress={onSwitchDesktop}
-          >
-            <Text style={{ fontSize: 11, fontWeight: "600", color: activeTab === "desktop" ? theme.accent : theme.textTertiary }}>
-              Desktop
-            </Text>
-          </Pressable>
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusConfig.color }} />
+          <Text style={{ fontSize: 10, fontWeight: "600", color: statusConfig.color }}>{statusConfig.text}</Text>
         </View>
 
-        {(terminalCount ?? 0) > 0 && onShowTerminalGrid ? (
-          <Pressable
-            style={({ pressed }) => ({
-              width: 26,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 6,
-              borderWidth: 1.5,
-              borderColor: pressed ? theme.accent : theme.textSecondary,
-              backgroundColor: pressed ? theme.accentLight : "transparent",
-            })}
-            onPress={onShowTerminalGrid}
-            hitSlop={6}
-          >
-            <Text style={{ fontSize: 11, fontWeight: "700", color: theme.textSecondary, fontVariant: ["tabular-nums"] }}>{terminalCount}</Text>
-          </Pressable>
-        ) : null}
+        {/* Folder name */}
+        <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: theme.text }} numberOfLines={1} ellipsizeMode="middle">
+          {folderName}
+        </Text>
 
+        {/* Exit button */}
         <Pressable
           style={({ pressed }) => ({
             flexDirection: "row",
@@ -647,8 +627,9 @@ const SessionHeader = memo(function SessionHeader({
         </Pressable>
       </View>
 
-      {/* Row 2: control + zoom */}
+      {/* Row 2: control + terminal/desktop switcher + spacer + zoom + terminal count */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        {/* Release/Takeover */}
         <Pressable
           style={({ pressed }) => ({
             flexDirection: "row",
@@ -674,12 +655,52 @@ const SessionHeader = memo(function SessionHeader({
             color={hasControl ? theme.accent : theme.textSecondary}
           />
           <Text style={{ fontSize: 11, fontWeight: "500", color: hasControl ? theme.accent : theme.textSecondary }}>
-            {hasControl ? "释放" : isControlledByOther ? "接管" : "接管"}
+            {hasControl ? "释放" : "接管"}
           </Text>
         </Pressable>
 
+        {/* Terminal/Desktop icon switcher */}
+        <View style={{
+          flexDirection: "row",
+          alignItems: "center",
+          borderRadius: 8,
+          borderCurve: "continuous" as const,
+          backgroundColor: toolbarBg,
+          overflow: "hidden",
+        }}>
+          <Pressable
+            style={({ pressed }) => ({
+              width: 34,
+              height: 26,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: activeTab === "terminal"
+                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
+                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
+            })}
+            onPress={onSwitchTerminal}
+          >
+            <AppSymbol name="terminal.fill" size={14} color={activeTab === "terminal" ? theme.accent : theme.textTertiary} />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => ({
+              width: 34,
+              height: 26,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: activeTab === "desktop"
+                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
+                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
+            })}
+            onPress={onSwitchDesktop}
+          >
+            <AppSymbol name="rectangle.on.rectangle" size={14} color={activeTab === "desktop" ? theme.accent : theme.textTertiary} />
+          </Pressable>
+        </View>
+
         <View style={{ flex: 1 }} />
 
+        {/* Zoom controls */}
         <View style={{
           flexDirection: "row",
           alignItems: "center",
@@ -726,6 +747,28 @@ const SessionHeader = memo(function SessionHeader({
             <AppSymbol name="textformat.size.larger" size={12} color={theme.textSecondary} />
           </Pressable>
         </View>
+
+        {/* Terminal count + grid button pill */}
+        {(terminalCount ?? 0) > 0 && onShowTerminalGrid ? (
+          <Pressable
+            onPress={onShowTerminalGrid}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              flexDirection: "row",
+              alignItems: "center",
+              borderRadius: 7,
+              borderCurve: "continuous" as const,
+              backgroundColor: pressed ? "rgba(128,128,128,0.2)" : toolbarBg,
+              overflow: "hidden",
+              paddingHorizontal: 8,
+              height: 26,
+              gap: 5,
+            })}
+          >
+            <Text style={{ fontSize: 11, fontWeight: "700", color: theme.textSecondary, fontVariant: ["tabular-nums"] }}>{terminalCount}</Text>
+            <AppSymbol name="square.grid.2x2" size={12} color={theme.textSecondary} />
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -746,6 +789,8 @@ const TerminalStage = memo(function TerminalStage({
   terminals,
   activeTerminalId,
   getTermRef,
+  voiceMode,
+  setVoiceMode,
 }: {
   bottomInset: number;
   inputDisabled: boolean;
@@ -761,10 +806,15 @@ const TerminalStage = memo(function TerminalStage({
   terminals?: Map<string, TerminalInfo>;
   activeTerminalId?: string | null;
   getTermRef?: (terminalId: string) => React.RefObject<TerminalViewHandle | null>;
+  voiceMode: boolean;
+  setVoiceMode: (v: boolean) => void;
 }) {
   const keyboardUp = bottomInset > 0;
-  const showShortcutBar = keyboardUp && !inputDisabled;
-  const terminalPadding = bottomInset + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0);
+  const showShortcutBar = keyboardUp && !inputDisabled && !voiceMode;
+  const showVoicePanel = voiceMode && !inputDisabled;
+  const terminalPadding = bottomInset
+    + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)
+    + (showVoicePanel && !keyboardUp ? VOICE_PANEL_HEIGHT : 0);
 
   // If we have multiple terminals, render each with its own TerminalView
   const hasMultipleTerminals = terminals && terminals.size > 0 && getTermRef;
@@ -778,7 +828,10 @@ const TerminalStage = memo(function TerminalStage({
             return (
               <View
                 key={tid}
-                style={{ flex: isActive ? 1 : 0, display: isActive ? "flex" : "none" }}
+                style={isActive
+                  ? { flex: 1 }
+                  : { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: 0 }
+                }
                 pointerEvents={isActive ? "auto" : "none"}
               >
                 <TerminalView
@@ -874,6 +927,26 @@ const TerminalStage = memo(function TerminalStage({
             >
               <Text style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}>Image</Text>
             </Pressable>
+            <Pressable
+              key="mic"
+              style={({ pressed }) => ({
+                paddingHorizontal: 8,
+                paddingVertical: 6,
+                borderRadius: 8,
+                borderCurve: "continuous",
+                backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.separator,
+              })}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setVoiceMode(true);
+                Keyboard.dismiss();
+                termRef.current?.blurCursor();
+              }}
+            >
+              <AppSymbol name="mic.fill" size={14} color={theme.accent} />
+            </Pressable>
           </ScrollView>
           <Pressable
             style={({ pressed }) => ({
@@ -892,7 +965,15 @@ const TerminalStage = memo(function TerminalStage({
           </Pressable>
         </View>
       ) : null}
-      {keyboardHintVisible && !inputDisabled && bottomInset === 0 ? (
+      {showVoicePanel ? (
+        <VoiceInputPanel
+          bottomInset={keyboardUp ? bottomInset : 0}
+          theme={theme}
+          onSend={(text) => onInput(text + "\r")}
+          onCancel={() => setVoiceMode(false)}
+        />
+      ) : null}
+      {keyboardHintVisible && !inputDisabled && bottomInset === 0 && !voiceMode ? (
         <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", alignItems: "center" }}>
           <Pressable
             style={{
@@ -1192,6 +1273,8 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
   onSwitch,
   onAdd,
   onClose,
+  onKillTerminal,
+  onRemoveTerminal,
   theme,
   insetTop,
 }: {
@@ -1201,6 +1284,8 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
   onSwitch: (terminalId: string) => void;
   onAdd: () => void;
   onClose: () => void;
+  onKillTerminal?: (terminalId: string) => void;
+  onRemoveTerminal?: (terminalId: string) => void;
   theme: Theme;
   insetTop: number;
 }) {
@@ -1228,6 +1313,17 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
     ]).start(() => onSwitch(tid));
   }, [onSwitch, opacity, scale]);
 
+  const handleKillTerminal = useCallback((tid: string, isRunning: boolean) => {
+    if (isRunning) {
+      Alert.alert("关闭终端", "确定关闭此终端？进程将被终止。", [
+        { text: "取消", style: "cancel" },
+        { text: "关闭", style: "destructive", onPress: () => onKillTerminal?.(tid) },
+      ]);
+    } else {
+      onRemoveTerminal?.(tid);
+    }
+  }, [onKillTerminal, onRemoveTerminal]);
+
   return (
     <Animated.View style={[StyleSheet.absoluteFill, { zIndex: 100, opacity }]}>
       <BlurView
@@ -1250,7 +1346,7 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
         </View>
 
         <FlatList
-          data={terminalTabs}
+          data={terminalTabs.filter((t) => t.status === "running")}
           numColumns={2}
           keyExtractor={(item) => item.terminalId}
           contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40 }}
@@ -1274,6 +1370,24 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
               >
                 <View style={{ height: 120, backgroundColor: theme.bgTerminal, justifyContent: "center", alignItems: "center" }}>
                   <AppSymbol name="terminal.fill" size={32} color={isRunning ? theme.accent : theme.textTertiary} />
+                  {/* Close button */}
+                  <Pressable
+                    onPress={(e) => { e.stopPropagation(); handleKillTerminal(item.terminalId, isRunning); }}
+                    hitSlop={6}
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      top: 6,
+                      right: 6,
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      backgroundColor: pressed ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.1)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    })}
+                  >
+                    <AppSymbol name="xmark" size={10} color={theme.textTertiary} />
+                  </Pressable>
                 </View>
                 <View style={{ paddingHorizontal: 10, paddingVertical: 8, gap: 2 }}>
                   <Text style={{ color: theme.text, fontSize: 13, fontWeight: "600" }} numberOfLines={1}>

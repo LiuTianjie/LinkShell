@@ -35,7 +35,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
-      "buildNumber": "5",
+      "buildNumber": "22",
       "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {
@@ -57,7 +57,9 @@
             }
           }
         },
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSSpeechRecognitionUsageDescription": "LinkShell uses speech recognition for voice input.",
+        "NSMicrophoneUsageDescription": "LinkShell needs microphone access for voice input."
       }
     },
     "android": {
