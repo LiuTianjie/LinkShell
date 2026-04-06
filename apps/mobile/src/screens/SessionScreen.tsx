@@ -1060,7 +1060,7 @@ const TerminalStage = memo(function TerminalStage({
   getTermRef?: (terminalId: string) => React.RefObject<TerminalViewHandle | null>;
 }) {
   const showShortcutBar = keyboardUp && !inputDisabled;
-  const showVoiceBar = !keyboardUp && !inputDisabled;
+  const showVoiceBar = !inputDisabled;
   const terminalPadding = bottomInset
     + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)
     + (showVoiceBar ? VOICE_BAR_HEIGHT : 0);
@@ -1196,12 +1196,12 @@ const TerminalStage = memo(function TerminalStage({
       ) : null}
       {showVoiceBar ? (
         <VoiceBar
-          bottomInset={bottomInset}
+          bottomInset={bottomInset + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)}
           theme={theme}
           onSend={(text) => onInput(text)}
         />
       ) : null}
-      {keyboardHintVisible && !inputDisabled && bottomInset === 0 ? (
+      {keyboardHintVisible && !inputDisabled && !keyboardUp ? (
         <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", alignItems: "center" }}>
           <Pressable
             style={{
