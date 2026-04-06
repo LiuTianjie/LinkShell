@@ -30,6 +30,9 @@ const FALLBACK_ICONS: Record<string, React.ComponentProps<typeof MaterialCommuni
   "mic.slash.fill": "microphone-off",
   "rectangle.on.rectangle": "picture-in-picture-bottom-right-outline",
   "square.grid.2x2": "view-grid-outline",
+  "keyboard.chevron.compact.down": "keyboard-close",
+  "photo": "image-outline",
+  plus: "plus",
 };
 
 interface AppSymbolProps {

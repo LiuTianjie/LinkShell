@@ -41,9 +41,6 @@ const SHORTCUTS = [
   { label: "⇧Tab", value: "\u001b[Z" },
   { label: "Esc", value: "\u001b" },
   { label: "Tab", value: "\t" },
-  { label: "Ctrl+C", value: "\u0003" },
-  { label: "Ctrl+D", value: "\u0004" },
-  { label: "Ctrl+L", value: "\u000c" },
   { label: "\u2191", value: "\u001b[A" },
   { label: "\u2193", value: "\u001b[B" },
   { label: "\u2192", value: "\u001b[C" },
@@ -578,15 +575,16 @@ const SessionHeader = memo(function SessionHeader({
   })();
 
   return (
-    <View style={{
-      backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.separator,
-      paddingHorizontal: 12,
-      paddingTop: 4,
-      paddingBottom: 4,
-      gap: 4,
-    }}>
+    <GlassBar
+      blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+      fallbackColor={theme.mode === "light" ? theme.bgCard : theme.bgElevated}
+      style={{
+        paddingHorizontal: 12,
+        paddingTop: 4,
+        paddingBottom: 4,
+        gap: 4,
+      }}
+    >
       {/* Row 1: status pill + folder name + exit */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         {/* Status pill */}
@@ -772,7 +770,7 @@ const SessionHeader = memo(function SessionHeader({
           </Pressable>
         ) : null}
       </View>
-    </View>
+    </GlassBar>
   );
 });
 
@@ -892,11 +890,11 @@ const VoiceBar = memo(function VoiceBar({
             <>
               <TextInput
                 style={{
-                  fontSize: 15,
+                  fontSize: 17,
                   color: theme.text,
                   fontFamily: "Menlo",
-                  minHeight: 36,
-                  maxHeight: 80,
+                  minHeight: 60,
+                  maxHeight: 120,
                   padding: 0,
                 }}
                 value={editText}
@@ -972,9 +970,7 @@ const VoiceBar = memo(function VoiceBar({
       ) : null}
 
       {/* Bottom bar */}
-      <GlassBar
-        blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
-        fallbackColor={theme.bgTerminal}
+      <View
         style={{
           position: "absolute",
           left: 0,
@@ -985,6 +981,7 @@ const VoiceBar = memo(function VoiceBar({
           alignItems: "center",
           paddingHorizontal: 12,
           gap: 8,
+          backgroundColor: theme.bgTerminal,
         }}
       >
         <View
@@ -1018,7 +1015,7 @@ const VoiceBar = memo(function VoiceBar({
             {pressing ? (inCancelZone ? "松开取消" : "松开结束") : "按住说话"}
           </Text>
         </View>
-      </GlassBar>
+      </View>
     </>
   );
 });
@@ -1058,6 +1055,22 @@ const TerminalStage = memo(function TerminalStage({
 }) {
   const showShortcutBar = !inputDisabled;
   const showVoiceBar = !inputDisabled;
+  const [ctrlActive, setCtrlActive] = useState(false);
+  const ctrlRef = useRef(false);
+  ctrlRef.current = ctrlActive;
+
+  const handleInput = useCallback((data: string) => {
+    if (ctrlRef.current && data.length === 1) {
+      const ch = data.toUpperCase();
+      if (ch >= "A" && ch <= "Z") {
+        onInput(String.fromCharCode(ch.charCodeAt(0) - 64));
+        setCtrlActive(false);
+        return;
+      }
+    }
+    onInput(data);
+  }, [onInput]);
+
   const terminalPadding = bottomInset
     + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)
     + (showVoiceBar ? VOICE_BAR_HEIGHT : 0);
@@ -1083,7 +1096,7 @@ const TerminalStage = memo(function TerminalStage({
                 <TerminalView
                   ref={getTermRef(tid)}
                   stream={tInfo.terminalStream}
-                  onInput={isActive ? onInput : undefined}
+                  onInput={isActive ? handleInput : undefined}
                   onResize={isActive ? onResize : undefined}
                 />
               </View>
@@ -1093,15 +1106,13 @@ const TerminalStage = memo(function TerminalStage({
           <TerminalView
             ref={termRef}
             stream={stream}
-            onInput={onInput}
+            onInput={handleInput}
             onResize={onResize}
           />
         )}
       </View>
       {showShortcutBar ? (
-        <GlassBar
-          blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
-          fallbackColor={theme.bgTerminal}
+        <View
           style={{
             position: "absolute",
             left: 0,
@@ -1113,8 +1124,24 @@ const TerminalStage = memo(function TerminalStage({
             flexDirection: "row",
             alignItems: "center",
             gap: 4,
+            backgroundColor: theme.bgTerminal,
           }}
         >
+          {/* Ctrl toggle */}
+          <Pressable
+            style={({ pressed }) => ({
+              paddingHorizontal: 8,
+              paddingVertical: 6,
+              borderRadius: 8,
+              borderCurve: "continuous" as const,
+              backgroundColor: ctrlActive
+                ? theme.accent
+                : pressed ? theme.bgCard : theme.bgElevated,
+            })}
+            onPress={() => setCtrlActive((v) => !v)}
+          >
+            <Text style={{ fontSize: 12, fontWeight: "700", color: ctrlActive ? theme.textInverse : theme.text }}>Ctrl</Text>
+          </Pressable>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1129,10 +1156,10 @@ const TerminalStage = memo(function TerminalStage({
                   paddingHorizontal: 8,
                   paddingVertical: 6,
                   borderRadius: 8,
-                  borderCurve: "continuous",
+                  borderCurve: "continuous" as const,
                   backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
                 })}
-                onPress={() => onInput(item.value)}
+                onPress={() => handleInput(item.value)}
               >
                 <Text style={{ fontSize: 12, fontWeight: "600", color: theme.text }}>{item.label}</Text>
               </Pressable>
@@ -1143,52 +1170,61 @@ const TerminalStage = memo(function TerminalStage({
                 paddingHorizontal: 8,
                 paddingVertical: 6,
                 borderRadius: 8,
-                borderCurve: "continuous",
+                borderCurve: "continuous" as const,
                 backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
               })}
               onPress={async () => {
                 const text = await Clipboard.getString();
-                if (text) onInput(text);
+                if (text) handleInput(text);
               }}
             >
               <Text style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}>Paste</Text>
             </Pressable>
-            <Pressable
-              key="image"
-              style={({ pressed }) => ({
-                paddingHorizontal: 8,
-                paddingVertical: 6,
-                borderRadius: 8,
-                borderCurve: "continuous",
-                backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
-              })}
-              onPress={onImagePicker}
-            >
-              <Text style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}>Image</Text>
-            </Pressable>
           </ScrollView>
+          {/* Image picker */}
           <Pressable
             style={({ pressed }) => ({
-              paddingHorizontal: 8,
+              paddingHorizontal: 6,
               paddingVertical: 6,
               borderRadius: 8,
-              borderCurve: "continuous",
+              borderCurve: "continuous" as const,
+              backgroundColor: pressed ? theme.bgCard : "transparent",
+            })}
+            onPress={onImagePicker}
+          >
+            <AppSymbol name="photo" size={18} color={theme.accent} />
+          </Pressable>
+          {/* Keyboard toggle */}
+          <Pressable
+            style={({ pressed }) => ({
+              paddingHorizontal: 6,
+              paddingVertical: 6,
+              borderRadius: 8,
+              borderCurve: "continuous" as const,
               backgroundColor: pressed ? theme.bgCard : "transparent",
             })}
             onPress={() => {
-              Keyboard.dismiss();
-              termRef.current?.blurCursor();
+              if (keyboardUp) {
+                Keyboard.dismiss();
+                termRef.current?.blurCursor();
+              } else {
+                onRequestFocus();
+              }
             }}
           >
-            <Text style={{ fontSize: 14, fontWeight: "600", color: theme.accent }}>完成</Text>
+            <AppSymbol
+              name={keyboardUp ? "keyboard.chevron.compact.down" : "keyboard"}
+              size={20}
+              color={theme.accent}
+            />
           </Pressable>
-        </GlassBar>
+        </View>
       ) : null}
       {showVoiceBar ? (
         <VoiceBar
           bottomInset={bottomInset + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)}
           theme={theme}
-          onSend={(text) => onInput(text + "\r")}
+          onSend={(text) => handleInput(text + "\r")}
         />
       ) : null}
       {keyboardHintVisible && !inputDisabled && !keyboardUp ? (
@@ -1568,8 +1604,9 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
           data={terminalTabs.filter((t) => t.status === "running")}
           numColumns={2}
           keyExtractor={(item) => item.terminalId}
-          contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40, flexGrow: 1 }}
           columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
+          ListFooterComponent={<Pressable style={{ flex: 1 }} onPress={handleClose} />}
           renderItem={({ item }) => {
             const isActive = item.terminalId === activeTerminalId;
             const tInfo = terminals?.get(item.terminalId);
@@ -1632,9 +1669,9 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
             );
           }}
           ListEmptyComponent={
-            <View style={{ alignItems: "center", paddingTop: 60 }}>
+            <Pressable style={{ alignItems: "center", paddingTop: 60, flex: 1 }} onPress={handleClose}>
               <Text style={{ color: theme.textTertiary, fontSize: 14 }}>暂无终端</Text>
-            </View>
+            </Pressable>
           }
         />
       </Animated.View>
