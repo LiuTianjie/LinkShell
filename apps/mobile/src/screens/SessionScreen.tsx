@@ -818,7 +818,7 @@ const VoiceBar = memo(function VoiceBar({
         position: "absolute",
         left: 0,
         right: 0,
-        bottom: bottomInset + SHORTCUT_BAR_HEIGHT,
+        bottom: bottomInset,
         height: VOICE_BAR_HEIGHT,
         backgroundColor: theme.bgTerminal,
         borderTopWidth: StyleSheet.hairlineWidth,
@@ -909,8 +909,10 @@ const TerminalStage = memo(function TerminalStage({
 }) {
   const keyboardUp = bottomInset > 0;
   const showShortcutBar = keyboardUp && !inputDisabled;
+  const showVoiceBar = !keyboardUp && !inputDisabled;
   const terminalPadding = bottomInset
-    + (showShortcutBar ? SHORTCUT_BAR_HEIGHT + VOICE_BAR_HEIGHT : 0);
+    + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)
+    + (showVoiceBar ? VOICE_BAR_HEIGHT : 0);
 
   // If we have multiple terminals, render each with its own TerminalView
   const hasMultipleTerminals = terminals && terminals.size > 0 && getTermRef;
@@ -1041,11 +1043,11 @@ const TerminalStage = memo(function TerminalStage({
           </Pressable>
         </View>
       ) : null}
-      {showShortcutBar ? (
+      {showVoiceBar ? (
         <VoiceBar
           bottomInset={bottomInset}
           theme={theme}
-          onSend={(text) => onInput(text + "\r")}
+          onSend={(text) => onInput(text)}
         />
       ) : null}
       {keyboardHintVisible && !inputDisabled && bottomInset === 0 ? (
@@ -1053,7 +1055,7 @@ const TerminalStage = memo(function TerminalStage({
           <Pressable
             style={{
               position: "absolute",
-              bottom: 16,
+              bottom: VOICE_BAR_HEIGHT + 16,
               borderRadius: 20,
               borderCurve: "continuous",
               backgroundColor: theme.bgElevated,
