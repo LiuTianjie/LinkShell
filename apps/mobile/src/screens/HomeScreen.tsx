@@ -23,6 +23,7 @@ import * as Haptics from "expo-haptics";
 import { Swipeable } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
+import { GlassBar } from "../components/GlassBar";
 import { useTheme, type Theme } from "../theme";
 import type { ConnectionRecord } from "../storage/history";
 import { loadHistory, removeBySessionId } from "../storage/history";
@@ -128,7 +129,6 @@ export function HomeScreen({
 
         <Pressable
           style={({ pressed }) => ({
-            backgroundColor: pressed ? (theme.mode === "dark" ? "rgba(173,198,255,0.12)" : "rgba(58,95,200,0.10)") : theme.bgCard,
             borderRadius: 14,
             borderCurve: "continuous" as const,
             borderWidth: 1,
@@ -138,10 +138,16 @@ export function HomeScreen({
             flexDirection: "row",
             alignItems: "center",
             gap: 12,
+            opacity: pressed ? 0.8 : 1,
           })}
           onPress={handleNewConnection}
           disabled={isLoading}
         >
+          <GlassBar
+            blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+            fallbackColor={theme.bgCard}
+            style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+          />
           {isLoading ? (
             <ActivityIndicator size="small" color={theme.accent} />
           ) : (
@@ -157,7 +163,6 @@ export function HomeScreen({
         {latest ? (
           <Pressable
             style={({ pressed }) => ({
-              backgroundColor: theme.bgCard,
               borderRadius: 14,
               borderCurve: "continuous" as const,
               paddingVertical: 14,
@@ -169,6 +174,11 @@ export function HomeScreen({
             })}
             onPress={() => handleResumeSession(latest.sessionId, latest.serverUrl)}
           >
+            <GlassBar
+              blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+              fallbackColor={theme.bgCard}
+              style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+            />
             <AppSymbol name="arrow.counterclockwise.circle.fill" size={24} color={theme.success} />
             <View style={{ flex: 1 }}>
               <Text style={{ color: theme.text, fontSize: 15, fontWeight: "600" }}>
@@ -192,30 +202,36 @@ export function HomeScreen({
       {/* Recent Sessions */}
       <Text style={{ fontSize: 13, fontWeight: "400", color: theme.textTertiary, textTransform: "uppercase", paddingHorizontal: 36, paddingTop: 28, paddingBottom: 6 }}>最近会话</Text>
       {history.length === 0 ? (
-        <View style={{
-          marginHorizontal: 20,
-          backgroundColor: theme.bgCard,
-          borderRadius: 12,
-          borderCurve: "continuous" as const,
-          paddingVertical: 40,
-          paddingHorizontal: 20,
-          alignItems: "center",
-          gap: 8,
-        }}>
+        <GlassBar
+          blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+          fallbackColor={theme.bgCard}
+          style={{
+            marginHorizontal: 20,
+            borderRadius: 12,
+            borderCurve: "continuous" as const,
+            paddingVertical: 40,
+            paddingHorizontal: 20,
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
           <AppSymbol name="terminal.fill" size={36} color={theme.textTertiary} style={{ marginBottom: 4 }} />
           <Text style={{ color: theme.textSecondary, fontSize: 17, fontWeight: "600" }}>还没有会话记录</Text>
           <Text style={{ color: theme.textTertiary, fontSize: 14, textAlign: "center", lineHeight: 20 }}>
             点击上方「新建连接」扫码或手动配对{"\n"}连接后的记录会出现在这里
           </Text>
-        </View>
+        </GlassBar>
       ) : (
-        <View style={{
-          marginHorizontal: 20,
-          backgroundColor: theme.bgCard,
-          borderRadius: 12,
-          borderCurve: "continuous" as const,
-          overflow: "hidden",
-        }}>
+        <GlassBar
+          blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+          fallbackColor={theme.bgCard}
+          style={{
+            marginHorizontal: 20,
+            borderRadius: 12,
+            borderCurve: "continuous" as const,
+            overflow: "hidden",
+          }}
+        >
           {history.map((item, index) => (
             <SwipeableRow
               key={item.sessionId}
@@ -227,7 +243,7 @@ export function HomeScreen({
               onDelete={() => handleDeleteSession(item.sessionId)}
             />
           ))}
-        </View>
+        </GlassBar>
       )}
     </ScrollView>
   );
@@ -297,7 +313,7 @@ function SwipeableRow({
           paddingVertical: 12,
           paddingHorizontal: 16,
           gap: 12,
-          backgroundColor: pressed ? theme.bgInput : theme.bgCard,
+          backgroundColor: pressed ? theme.bgInput : "transparent",
           borderTopWidth: index > 0 ? StyleSheet.hairlineWidth : 0,
           borderTopColor: theme.separator,
         })}

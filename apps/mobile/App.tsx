@@ -7,6 +7,7 @@ import { Alert, Animated, Dimensions, FlatList, Linking, Modal, Pressable, Style
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppSymbol } from "./src/components/AppSymbol";
+import { GlassBar } from "./src/components/GlassBar";
 import { ConnectionSheet } from "./src/components/ConnectionSheet";
 import { useAppState } from "./src/hooks/useAppState";
 import { useSessionManager } from "./src/hooks/useSessionManager";
@@ -698,11 +699,18 @@ function AppInner() {
             headerShown: false,
             tabBarHideOnKeyboard: true,
             tabBarStyle: {
-              backgroundColor: theme.tabBg,
-              borderTopColor: theme.tabBorder,
-              borderTopWidth: StyleSheet.hairlineWidth,
+              backgroundColor: "transparent",
+              borderTopWidth: 0,
               elevation: 0,
+              position: "absolute",
             },
+            tabBarBackground: () => (
+              <GlassBar
+                blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+                fallbackColor={theme.tabBg}
+                style={StyleSheet.absoluteFill}
+              />
+            ),
             tabBarActiveTintColor: theme.tabActive,
             tabBarInactiveTintColor: theme.tabInactive,
             tabBarLabelStyle: { fontSize: 10, fontWeight: "500" },

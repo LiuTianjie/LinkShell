@@ -2,7 +2,7 @@
   "expo": {
     "name": "LinkShell",
     "slug": "linkshell",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "scheme": "linkshell",
     "icon": "./assets/adaptive-icon.png",
     "splash": {
@@ -28,14 +28,21 @@
           "cameraPermission": "Allow LinkShell to scan pairing QR codes from your terminal."
         }
       ],
-      "./plugins/with-live-activity"
+      "./plugins/with-live-activity",
+      [
+        "expo-router",
+        {
+          "root": "./src/app"
+        }
+      ],
+      "expo-speech-recognition"
     ],
     "web": {
       "bundler": "metro"
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
-      "buildNumber": "29",
+      "buildNumber": "38",
       "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {

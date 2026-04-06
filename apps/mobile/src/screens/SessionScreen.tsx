@@ -21,9 +21,9 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
-import { BlurView } from "expo-blur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
+import { GlassBar } from "../components/GlassBar";
 import { TerminalView } from "../components/TerminalView";
 import type { TerminalViewHandle } from "../components/TerminalView";
 import { ScreenView } from "../components/ScreenView";
@@ -796,9 +796,16 @@ const VoiceBar = memo(function VoiceBar({
   // Refs to access latest recognized text inside PanResponder closure
   const partialRef = useRef("");
   const finalRef = useRef("");
+  const editTextRef = useRef("");
+  const selectionRef = useRef(0); // cursor position
 
   useEffect(() => { partialRef.current = partialText; }, [partialText]);
   useEffect(() => { finalRef.current = finalText; }, [finalText]);
+
+  const updateEditText = (text: string) => {
+    editTextRef.current = text;
+    setEditText(text);
+  };
 
   const panResponder = useRef(
     PanResponder.create({
@@ -806,8 +813,6 @@ const VoiceBar = memo(function VoiceBar({
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
         setPressing(true);
-        setEditing(false);
-        setEditText("");
         setInCancelZone(false);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         start(localeRef.current).catch(() => {});
@@ -820,7 +825,7 @@ const VoiceBar = memo(function VoiceBar({
         setPressing(false);
         setInCancelZone(false);
         if (gestureState.dy < CANCEL_THRESHOLD) {
-          // Dragged into cancel zone — discard everything
+          // Dragged into cancel zone — discard this round only
           cancel();
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         } else {
@@ -828,7 +833,15 @@ const VoiceBar = memo(function VoiceBar({
           const captured = finalRef.current || partialRef.current;
           cancel(); // immediately release mic
           if (captured.trim()) {
-            setEditText(captured);
+            const prev = editTextRef.current;
+            const pos = selectionRef.current;
+            const before = prev.slice(0, pos);
+            const after = prev.slice(pos);
+            const insert = captured.trim();
+            const combined = before + (before && !before.endsWith(" ") ? " " : "") + insert + (after && !after.startsWith(" ") ? " " : "") + after;
+            const newPos = (before + (before && !before.endsWith(" ") ? " " : "") + insert).length;
+            updateEditText(combined);
+            selectionRef.current = newPos;
             setEditing(true);
           }
         }
@@ -846,12 +859,12 @@ const VoiceBar = memo(function VoiceBar({
       onSend(editText.trim());
     }
     setEditing(false);
-    setEditText("");
+    updateEditText("");
   };
 
   const handleCancel = () => {
     setEditing(false);
-    setEditText("");
+    updateEditText("");
     cancel();
   };
 
@@ -861,19 +874,18 @@ const VoiceBar = memo(function VoiceBar({
     <>
       {/* Floating overlay — shown while pressing or editing */}
       {(pressing || editing) ? (
-        <View
+        <GlassBar
+          blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+          fallbackColor={theme.bgElevated}
           style={{
             position: "absolute",
             left: 12,
             right: 12,
             bottom: bottomInset + VOICE_BAR_HEIGHT + 8,
-            backgroundColor: theme.bgElevated,
             borderRadius: 12,
             borderCurve: "continuous",
             padding: 12,
             boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
-            borderWidth: StyleSheet.hairlineWidth,
-            borderColor: theme.separator,
           }}
         >
           {editing ? (
@@ -888,7 +900,8 @@ const VoiceBar = memo(function VoiceBar({
                   padding: 0,
                 }}
                 value={editText}
-                onChangeText={setEditText}
+                onChangeText={updateEditText}
+                onSelectionChange={(e) => { selectionRef.current = e.nativeEvent.selection.end; }}
                 multiline
                 autoFocus
                 placeholderTextColor={theme.textTertiary}
@@ -901,8 +914,6 @@ const VoiceBar = memo(function VoiceBar({
                     borderRadius: 8,
                     borderCurve: "continuous",
                     backgroundColor: pressed ? theme.bgCard : theme.bgTerminal,
-                    borderWidth: StyleSheet.hairlineWidth,
-                    borderColor: theme.separator,
                   })}
                   onPress={handleCancel}
                 >
@@ -917,8 +928,6 @@ const VoiceBar = memo(function VoiceBar({
                     backgroundColor: editText.trim()
                       ? pressed ? theme.accentLight : theme.accent
                       : theme.bgCard,
-                    borderWidth: StyleSheet.hairlineWidth,
-                    borderColor: editText.trim() ? theme.accent : theme.separator,
                   })}
                   onPress={handleConfirm}
                   disabled={!editText.trim()}
@@ -959,20 +968,19 @@ const VoiceBar = memo(function VoiceBar({
               </View>
             </>
           )}
-        </View>
+        </GlassBar>
       ) : null}
 
       {/* Bottom bar */}
-      <View
+      <GlassBar
+        blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+        fallbackColor={theme.bgTerminal}
         style={{
           position: "absolute",
           left: 0,
           right: 0,
           bottom: bottomInset,
           height: VOICE_BAR_HEIGHT,
-          backgroundColor: theme.bgTerminal,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: theme.separator,
           flexDirection: "row",
           alignItems: "center",
           paddingHorizontal: 12,
@@ -988,10 +996,6 @@ const VoiceBar = memo(function VoiceBar({
             backgroundColor: pressing
               ? inCancelZone ? theme.errorLight : theme.accent
               : theme.bgElevated,
-            borderWidth: StyleSheet.hairlineWidth,
-            borderColor: pressing
-              ? inCancelZone ? theme.error : theme.accent
-              : theme.separator,
             alignItems: "center",
             justifyContent: "center",
             flexDirection: "row",
@@ -1014,7 +1018,7 @@ const VoiceBar = memo(function VoiceBar({
             {pressing ? (inCancelZone ? "松开取消" : "松开结束") : "按住说话"}
           </Text>
         </View>
-      </View>
+      </GlassBar>
     </>
   );
 });
@@ -1095,7 +1099,9 @@ const TerminalStage = memo(function TerminalStage({
         )}
       </View>
       {showShortcutBar ? (
-        <View
+        <GlassBar
+          blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+          fallbackColor={theme.bgTerminal}
           style={{
             position: "absolute",
             left: 0,
@@ -1107,9 +1113,6 @@ const TerminalStage = memo(function TerminalStage({
             flexDirection: "row",
             alignItems: "center",
             gap: 4,
-            backgroundColor: theme.bgTerminal,
-            borderTopWidth: StyleSheet.hairlineWidth,
-            borderTopColor: theme.separator,
           }}
         >
           <ScrollView
@@ -1128,8 +1131,6 @@ const TerminalStage = memo(function TerminalStage({
                   borderRadius: 8,
                   borderCurve: "continuous",
                   backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
-                  borderWidth: StyleSheet.hairlineWidth,
-                  borderColor: theme.separator,
                 })}
                 onPress={() => onInput(item.value)}
               >
@@ -1144,8 +1145,6 @@ const TerminalStage = memo(function TerminalStage({
                 borderRadius: 8,
                 borderCurve: "continuous",
                 backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: theme.separator,
               })}
               onPress={async () => {
                 const text = await Clipboard.getString();
@@ -1162,8 +1161,6 @@ const TerminalStage = memo(function TerminalStage({
                 borderRadius: 8,
                 borderCurve: "continuous",
                 backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: theme.separator,
               })}
               onPress={onImagePicker}
             >
@@ -1185,7 +1182,7 @@ const TerminalStage = memo(function TerminalStage({
           >
             <Text style={{ fontSize: 14, fontWeight: "600", color: theme.accent }}>完成</Text>
           </Pressable>
-        </View>
+        </GlassBar>
       ) : null}
       {showVoiceBar ? (
         <VoiceBar
@@ -1197,23 +1194,26 @@ const TerminalStage = memo(function TerminalStage({
       {keyboardHintVisible && !inputDisabled && !keyboardUp ? (
         <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", alignItems: "center" }}>
           <Pressable
-            style={{
-              position: "absolute",
-              bottom: VOICE_BAR_HEIGHT + 16,
-              borderRadius: 20,
-              borderCurve: "continuous",
-              backgroundColor: theme.bgElevated,
-              paddingHorizontal: 16,
-              paddingVertical: 8,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 6,
-              boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
-            }}
             onPress={onRequestFocus}
+            style={{ position: "absolute", bottom: VOICE_BAR_HEIGHT + 16 }}
           >
-            <AppSymbol name="keyboard" size={16} color={theme.accent} />
-            <Text style={{ fontSize: 13, fontWeight: "500", color: theme.text }}>点按开始输入</Text>
+            <GlassBar
+              blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+              fallbackColor={theme.bgElevated}
+              style={{
+                borderRadius: 20,
+                borderCurve: "continuous",
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
+              }}
+            >
+              <AppSymbol name="keyboard" size={16} color={theme.accent} />
+              <Text style={{ fontSize: 13, fontWeight: "500", color: theme.text }}>点按开始输入</Text>
+            </GlassBar>
           </Pressable>
         </View>
       ) : null}
@@ -1417,11 +1417,14 @@ const SessionTabBar = memo(function SessionTabBar({
   };
 
   return (
-    <View style={{
-      backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.separator,
-    }}>
+    <GlassBar
+      blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+      fallbackColor={theme.mode === "light" ? theme.bgCard : theme.bgElevated}
+      style={{
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: theme.separator,
+      }}
+    >
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -1483,7 +1486,7 @@ const SessionTabBar = memo(function SessionTabBar({
           );
         })}
       </ScrollView>
-    </View>
+    </GlassBar>
   );
 });
 
@@ -1547,12 +1550,7 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
 
   return (
     <Animated.View style={[StyleSheet.absoluteFill, { zIndex: 100, opacity }]}>
-      <BlurView
-        intensity={80}
-        tint={theme.mode === "dark" ? "dark" : "light"}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.mode === "dark" ? "rgba(0,0,0,0.4)" : "rgba(255,255,255,0.3)" }]} />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.mode === "dark" ? "rgba(0,0,0,0.92)" : "rgba(245,245,247,0.95)" }]} />
       <Animated.View style={{ flex: 1, transform: [{ scale }] }}>
         <View style={{ paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>终端</Text>
@@ -1584,8 +1582,8 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
                   borderRadius: 14,
                   borderCurve: "continuous" as const,
                   overflow: "hidden",
-                  borderWidth: isActive ? 2 : 1,
-                  borderColor: isActive ? theme.accent : "rgba(255,255,255,0.1)",
+                  borderWidth: isActive ? 2 : 0,
+                  borderColor: isActive ? theme.accent : "transparent",
                   backgroundColor: pressed ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
                 })}
               >
@@ -1654,11 +1652,14 @@ const TerminalTabBar = memo(function TerminalTabBar({
   theme: Theme;
 }) {
   return (
-    <View style={{
-      backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.separator,
-    }}>
+    <GlassBar
+      blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+      fallbackColor={theme.mode === "light" ? theme.bgCard : theme.bgElevated}
+      style={{
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: theme.separator,
+      }}
+    >
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -1724,7 +1725,7 @@ const TerminalTabBar = memo(function TerminalTabBar({
           </Pressable>
         ) : null}
       </ScrollView>
-    </View>
+    </GlassBar>
   );
 });
 
