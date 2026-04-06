@@ -218,6 +218,16 @@ export const terminalBrowseResultPayloadSchema = z.object({
   error: z.string().optional(),
 });
 
+// ── Terminal status payloads (from Claude Code hooks) ────────────────
+
+export const terminalStatusPayloadSchema = z.object({
+  phase: z.enum(["thinking", "tool_use", "outputting", "waiting", "idle", "error"]),
+  toolName: z.string().optional(),
+  toolInput: z.string().optional(),
+  permissionRequest: z.string().optional(),
+  summary: z.string().optional(),
+});
+
 // ── File upload payloads ────────────────────────────────────────────
 
 export const fileUploadPayloadSchema = z.object({
@@ -265,6 +275,7 @@ export const protocolMessageSchemas = {
   "terminal.browse": terminalBrowsePayloadSchema,
   "terminal.browse.result": terminalBrowseResultPayloadSchema,
   "terminal.kill": terminalKillPayloadSchema,
+  "terminal.status": terminalStatusPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

@@ -9,6 +9,7 @@ RCT_EXTERN_METHOD(startActivity:(NSString *)sessionsJson
 
 RCT_EXTERN_METHOD(updateActivity:(NSString *)sessionsJson
                   activeSessionId:(NSString *)activeSessionId
+                  alert:(BOOL)alert
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 

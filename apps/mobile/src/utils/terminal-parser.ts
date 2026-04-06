@@ -5,6 +5,7 @@ export type TerminalStatus = "thinking" | "outputting" | "waiting" | "idle" | "t
 interface ParseResult {
   status: TerminalStatus;
   lastLine: string;
+  contextLines: string;
   quickActions: QuickAction[];
   provider: "claude" | "codex" | "unknown";
 }
@@ -106,9 +107,10 @@ const GENERAL_INPUT_PATTERNS = [
 // ── Helpers ───────────────────────────────────────────────────────
 
 function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+  return str.replace(/\x1b\[[\x20-\x3f]*[0-9;]*[a-zA-Z]/g, "")
     .replace(/\x1b\][^\x07]*\x07/g, "")
-    .replace(/\x1b\(B/g, "");
+    .replace(/\x1b\(B/g, "")
+    .replace(/\x1b[=>]/g, "");
 }
 
 function truncate(str: string, maxLen: number): string {
@@ -137,60 +139,66 @@ export function parseTerminalOutput(rawChunks: string[]): ParseResult {
 
   const quickActions: QuickAction[] = [];
   let status: TerminalStatus = "idle";
+  let contextLines = "";
+
+  // Helper: extract context lines for waiting states
+  const buildContext = () => lines.slice(-5).filter((l) => l.length > 2 && !/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\s]+$/.test(l)).map((l) => truncate(l, 80)).join("\n");
 
   // 1. Claude permission requests (highest priority — needs user action)
   if (testAny(CLAUDE_PERMISSION_PATTERNS, lastFewLines)) {
     status = "waiting";
-    // Detect specific permission button patterns
+    contextLines = buildContext();
     if (/Allow once/i.test(lastFewLines) || /bypass permissions/i.test(lastFewLines)) {
       quickActions.push(
-        { label: "Allow", input: "y" },
-        { label: "Deny", input: "n" },
+        { label: "Allow", input: "y", needsInput: false },
+        { label: "Deny", input: "n", needsInput: false },
       );
     } else {
       quickActions.push(
-        { label: "Yes", input: "y\n" },
-        { label: "No", input: "n\n" },
+        { label: "Yes", input: "y\n", needsInput: false },
+        { label: "No", input: "n\n", needsInput: false },
       );
     }
-    return { status, lastLine: truncate(lastLine, 120), quickActions, provider };
+    return { status, lastLine: truncate(lastLine, 120), contextLines, quickActions, provider };
   }
 
   // 2. Codex approval requests
   if (testAny(CODEX_APPROVAL_PATTERNS, lastFewLines)) {
     status = "waiting";
+    contextLines = buildContext();
     quickActions.push(
-      { label: "Approve", input: "a" },
-      { label: "Deny", input: "d" },
-      { label: "Skip", input: "s" },
+      { label: "Approve", input: "a", needsInput: false },
+      { label: "Deny", input: "d", needsInput: false },
+      { label: "Skip", input: "s", needsInput: false },
     );
-    return { status, lastLine: truncate(lastLine, 120), quickActions, provider };
+    return { status, lastLine: truncate(lastLine, 120), contextLines, quickActions, provider };
   }
 
   // 3. General Y/N prompts
   if (testAny(GENERAL_YN_PATTERNS, lastFewLines)) {
     status = "waiting";
+    contextLines = buildContext();
     quickActions.push(
-      { label: "Yes", input: "y\n" },
-      { label: "No", input: "n\n" },
+      { label: "Yes", input: "y\n", needsInput: false },
+      { label: "No", input: "n\n", needsInput: false },
     );
-    return { status, lastLine: truncate(lastLine, 120), quickActions, provider };
+    return { status, lastLine: truncate(lastLine, 120), contextLines, quickActions, provider };
   }
 
   // 4. Error detection
   if (testAny(CLAUDE_ERROR_PATTERNS, lastFewLines)) {
     status = "error";
-    // Offer retry via Ctrl+C + re-run
+    contextLines = buildContext();
     quickActions.push(
-      { label: "Ctrl+C", input: "\x03" },
+      { label: "Ctrl+C", input: "\x03", needsInput: false },
     );
-    return { status, lastLine: truncate(lastLine, 120), quickActions, provider };
+    return { status, lastLine: truncate(lastLine, 120), contextLines, quickActions, provider };
   }
 
   // 5. Tool use detection (Claude running tools)
   if (testAny(CLAUDE_TOOL_USE_PATTERNS, lastFewLines)) {
     status = "tool_use";
-    return { status, lastLine: truncate(lastLine, 120), quickActions, provider };
+    return { status, lastLine: truncate(lastLine, 120), contextLines: "", quickActions, provider };
   }
 
   // 6. Thinking/processing
@@ -199,13 +207,13 @@ export function parseTerminalOutput(rawChunks: string[]): ParseResult {
     : CLAUDE_THINKING_PATTERNS;
   if (testAny(thinkingPatterns, lastFewLines)) {
     status = "thinking";
-    return { status, lastLine: truncate(lastLine, 120), quickActions, provider };
+    return { status, lastLine: truncate(lastLine, 120), contextLines: "", quickActions, provider };
   }
 
   // 7. Waiting for input (shell prompt visible)
   if (testAny(GENERAL_INPUT_PATTERNS, lastLine) || testAny(CLAUDE_WAITING_PATTERNS, lastLine)) {
     status = "waiting";
-    return { status, lastLine: truncate(lastLine, 120), quickActions, provider };
+    return { status, lastLine: truncate(lastLine, 120), contextLines: "", quickActions, provider };
   }
 
   // 8. Active output
@@ -213,7 +221,7 @@ export function parseTerminalOutput(rawChunks: string[]): ParseResult {
     status = "outputting";
   }
 
-  return { status, lastLine: truncate(lastLine, 120), quickActions, provider };
+  return { status, lastLine: truncate(lastLine, 120), contextLines: "", quickActions, provider };
 }
 
 // ── Throttled parser ──────────────────────────────────────────────

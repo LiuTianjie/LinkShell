@@ -451,8 +451,11 @@ function addMainAppNativeModuleFiles(pbx, uuids) {
     mainAttrBuildFile: "W1000000000000000000015",
   };
 
-  // Find the main app's Sources build phase (the one with AppDelegate.swift)
-  if (pbx.includes("LiveActivityModule.swift in Sources")) return pbx;
+  // Check if already added to main app Sources build phase (not PBXBuildFile section)
+  // Match the specific Sources phase that contains AppDelegate.swift
+  const mainSourcesRegex = /files = \(\s*\n[^)]*AppDelegate\.swift in Sources[^)]*\)/;
+  const mainSourcesMatch = pbx.match(mainSourcesRegex);
+  if (mainSourcesMatch && mainSourcesMatch[0].includes("LiveActivityModule.swift")) return pbx;
 
   pbx = pbx.replace(
     /(AppDelegate\.swift in Sources \*\/,)/,

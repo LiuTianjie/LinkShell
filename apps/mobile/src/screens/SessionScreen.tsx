@@ -787,20 +787,24 @@ const VoiceBar = memo(function VoiceBar({
   theme: Theme;
   onSend: (text: string) => void;
 }) {
-  const { isListening, partialText, finalText, start, stop, cancel } = useVoiceInput();
+  const { partialText, finalText, start, cancel } = useVoiceInput();
   const [pressing, setPressing] = useState(false);
   const [editText, setEditText] = useState("");
   const [editing, setEditing] = useState(false);
   const [inCancelZone, setInCancelZone] = useState(false);
   const localeRef = useRef<"en-US" | "zh-CN">("zh-CN");
-  const cancelledRef = useRef(false);
+  // Refs to access latest recognized text inside PanResponder closure
+  const partialRef = useRef("");
+  const finalRef = useRef("");
+
+  useEffect(() => { partialRef.current = partialText; }, [partialText]);
+  useEffect(() => { finalRef.current = finalText; }, [finalText]);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
-        cancelledRef.current = false;
         setPressing(true);
         setEditing(false);
         setEditText("");
@@ -816,12 +820,17 @@ const VoiceBar = memo(function VoiceBar({
         setPressing(false);
         setInCancelZone(false);
         if (gestureState.dy < CANCEL_THRESHOLD) {
-          // Dragged into cancel zone
-          cancelledRef.current = true;
+          // Dragged into cancel zone — discard everything
           cancel();
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         } else {
-          stop();
+          // Capture whatever text we have before killing the mic
+          const captured = finalRef.current || partialRef.current;
+          cancel(); // immediately release mic
+          if (captured.trim()) {
+            setEditText(captured);
+            setEditing(true);
+          }
         }
       },
       onPanResponderTerminate: () => {
@@ -831,22 +840,6 @@ const VoiceBar = memo(function VoiceBar({
       },
     })
   ).current;
-
-  // When finalText arrives after release, enter edit mode
-  useEffect(() => {
-    if (!pressing && finalText && !cancelledRef.current) {
-      setEditText(finalText);
-      setEditing(true);
-    }
-  }, [finalText, pressing]);
-
-  // Also catch partial text if stop() resolves before finalText
-  useEffect(() => {
-    if (!pressing && !isListening && partialText && !editing && !finalText && !cancelledRef.current) {
-      setEditText(partialText);
-      setEditing(true);
-    }
-  }, [pressing, isListening, partialText, editing, finalText]);
 
   const handleConfirm = () => {
     if (editText.trim()) {
@@ -1059,7 +1052,7 @@ const TerminalStage = memo(function TerminalStage({
   activeTerminalId?: string | null;
   getTermRef?: (terminalId: string) => React.RefObject<TerminalViewHandle | null>;
 }) {
-  const showShortcutBar = keyboardUp && !inputDisabled;
+  const showShortcutBar = !inputDisabled;
   const showVoiceBar = !inputDisabled;
   const terminalPadding = bottomInset
     + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)
@@ -1198,7 +1191,7 @@ const TerminalStage = memo(function TerminalStage({
         <VoiceBar
           bottomInset={bottomInset + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)}
           theme={theme}
-          onSend={(text) => onInput(text)}
+          onSend={(text) => onInput(text + "\r")}
         />
       ) : null}
       {keyboardHintVisible && !inputDisabled && !keyboardUp ? (

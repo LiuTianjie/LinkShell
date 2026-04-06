@@ -102,6 +102,8 @@ function handleHostMessage(
     case "terminal.spawned":
     case "terminal.list":
     case "terminal.browse.result":
+    // Structured status from hooks
+    case "terminal.status":
       broadcastToClients(session, envelope);
       break;
     default:

@@ -1,7 +1,8 @@
 import * as pty from "node-pty";
+import * as http from "node:http";
 import WebSocket from "ws";
 import { hostname, platform, homedir } from "node:os";
-import { writeFileSync, readdirSync, statSync } from "node:fs";
+import { writeFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename, resolve } from "node:path";
 import {
@@ -47,6 +48,9 @@ interface TerminalInstance {
   scrollback: ScrollbackBuffer;
   outputSeq: number;
   status: "running" | "exited";
+  hookServer?: http.Server;
+  hookPort?: number;
+  hookConfigPath?: string;
 }
 
 function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
@@ -137,7 +141,7 @@ export class BridgeSession {
     if (!this.sessionId) {
       await this.createPairing();
     }
-    this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
+    await this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
     this.connectGateway();
   }
 
@@ -241,7 +245,9 @@ export class BridgeSession {
       this.log(
         `recv ${envelope.type}${envelope.seq !== undefined ? ` seq=${envelope.seq}` : ""}`,
       );
-      this.handleMessage(envelope);
+      this.handleMessage(envelope).catch((err) => {
+        this.log(`handleMessage error: ${err}`);
+      });
     });
 
     this.socket.on("close", (code, reasonBuffer) => {
@@ -261,7 +267,7 @@ export class BridgeSession {
     });
   }
 
-  private handleMessage(envelope: Envelope): void {
+  private async handleMessage(envelope: Envelope): Promise<void> {
     const tid = envelope.terminalId ?? DEFAULT_TERMINAL_ID;
     switch (envelope.type) {
       case "terminal.input": {
@@ -292,13 +298,23 @@ export class BridgeSession {
           }));
         } else {
           const newId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-          this.spawnTerminal(newId, normalizedCwd, p.provider);
-          this.send(createEnvelope({
-            type: "terminal.spawned",
-            sessionId: this.sessionId,
-            terminalId: newId,
-            payload: { terminalId: newId, cwd: normalizedCwd, projectName: basename(normalizedCwd) },
-          }));
+          try {
+            await this.spawnTerminal(newId, normalizedCwd, p.provider);
+            this.send(createEnvelope({
+              type: "terminal.spawned",
+              sessionId: this.sessionId,
+              terminalId: newId,
+              payload: { terminalId: newId, cwd: normalizedCwd, projectName: basename(normalizedCwd) },
+            }));
+          } catch (err) {
+            this.log(`failed to spawn terminal ${newId}: ${err}`);
+            this.send(createEnvelope({
+              type: "terminal.exit",
+              sessionId: this.sessionId,
+              terminalId: newId,
+              payload: { exitCode: 1, signal: 0 },
+            }));
+          }
         }
         this.sendTerminalList();
         break;
@@ -436,17 +452,32 @@ export class BridgeSession {
     }
   }
 
-  private spawnTerminal(terminalId: string, cwd: string, providerOverride?: string): void {
+  private async spawnTerminal(terminalId: string, cwd: string, providerOverride?: string): Promise<void> {
     const cleanEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(this.options.providerConfig.env)) {
       if (v !== undefined) cleanEnv[k] = v;
+    }
+
+    const provider = providerOverride ?? this.options.providerConfig.provider;
+    const args = [...this.options.providerConfig.args];
+
+    // For Claude provider: set up hook server for structured status
+    let hookServer: http.Server | undefined;
+    let hookPort: number | undefined;
+    let hookConfigPath: string | undefined;
+
+    if (provider === "claude") {
+      const { server, port, configPath } = await this.setupHookServer(terminalId, args);
+      hookServer = server;
+      hookPort = port;
+      hookConfigPath = configPath;
     }
 
     const term: TerminalInstance = {
       id: terminalId,
       pty: pty.spawn(
         this.options.providerConfig.command,
-        this.options.providerConfig.args,
+        args,
         {
           name: "xterm-256color",
           cols: this.options.cols,
@@ -457,10 +488,13 @@ export class BridgeSession {
       ),
       cwd,
       projectName: basename(cwd),
-      provider: providerOverride ?? this.options.providerConfig.provider,
+      provider,
       scrollback: new ScrollbackBuffer(1000),
       outputSeq: 0,
       status: "running",
+      hookServer,
+      hookPort,
+      hookConfigPath,
     };
 
     term.pty.onData((data) => {
@@ -484,6 +518,7 @@ export class BridgeSession {
 
     term.pty.onExit(({ exitCode, signal }) => {
       term.status = "exited";
+      this.cleanupHookServer(term);
       this.send(createEnvelope({
         type: "terminal.exit",
         sessionId: this.sessionId,
@@ -506,6 +541,134 @@ export class BridgeSession {
 
     this.terminals.set(terminalId, term);
     this.log(`spawned terminal ${terminalId} in ${cwd}`);
+  }
+
+  private async setupHookServer(terminalId: string, args: string[]): Promise<{
+    server: http.Server;
+    port: number;
+    configPath: string;
+  }> {
+    const server = http.createServer((req, res) => {
+      if (req.method !== "POST" || req.url !== "/hook") {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      let body = "";
+      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      req.on("end", () => {
+        res.writeHead(200);
+        res.end("ok");
+        try {
+          const event = JSON.parse(body);
+          this.handleHookEvent(terminalId, event);
+        } catch (e) {
+          this.log(`hook parse error: ${e}`);
+        }
+      });
+    });
+
+    // Listen on random port — await binding before reading address
+    const port = await new Promise<number>((resolve, reject) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address() as { port: number };
+        resolve(addr.port);
+      });
+      server.on("error", reject);
+    });
+    this.log(`hook server for ${terminalId} listening on port ${port}`);
+
+    // Write temporary hook config
+    const configPath = join(tmpdir(), `linkshell-hooks-${terminalId}.json`);
+    const curlCmd = `curl -s -X POST http://127.0.0.1:${port}/hook -H 'Content-Type: application/json' -d "$(cat)"`;
+    const hookEntry = { hooks: [{ type: "command", command: curlCmd }] };
+    const config = {
+      hooks: {
+        PreToolUse: [hookEntry],
+        PostToolUse: [hookEntry],
+        PostToolUseFailure: [hookEntry],
+        Stop: [hookEntry],
+        PermissionRequest: [hookEntry],
+      },
+    };
+    writeFileSync(configPath, JSON.stringify(config));
+    this.log(`hook config written to ${configPath}`);
+
+    // Inject --settings into Claude CLI args
+    args.push("--settings", configPath);
+
+    return { server, port, configPath };
+  }
+
+  private handleHookEvent(terminalId: string, event: Record<string, unknown>): void {
+    const hookName = event.hook_event_name as string | undefined;
+    if (!hookName) return;
+
+    let phase: string;
+    let toolName: string | undefined;
+    let toolInput: string | undefined;
+    let permissionRequest: string | undefined;
+    let summary: string | undefined;
+
+    switch (hookName) {
+      case "PreToolUse":
+        phase = "tool_use";
+        toolName = event.tool_name as string | undefined;
+        if (event.tool_input && typeof event.tool_input === "object") {
+          const input = event.tool_input as Record<string, unknown>;
+          toolInput = JSON.stringify(input).slice(0, 200);
+        }
+        break;
+      case "PostToolUse":
+        phase = "thinking";
+        toolName = event.tool_name as string | undefined;
+        break;
+      case "PostToolUseFailure":
+        phase = "error";
+        toolName = event.tool_name as string | undefined;
+        break;
+      case "Stop":
+        phase = "idle";
+        if (event.stop_reason) summary = String(event.stop_reason);
+        break;
+      case "PermissionRequest":
+        phase = "waiting";
+        toolName = event.tool_name as string | undefined;
+        if (event.tool_input && typeof event.tool_input === "object") {
+          const input = event.tool_input as Record<string, unknown>;
+          permissionRequest = JSON.stringify(input).slice(0, 300);
+        }
+        break;
+      default:
+        return;
+    }
+
+    this.log(`hook event: ${hookName} → phase=${phase} tool=${toolName ?? "none"}`);
+
+    this.send(createEnvelope({
+      type: "terminal.status",
+      sessionId: this.sessionId,
+      terminalId,
+      payload: {
+        phase,
+        ...(toolName && { toolName }),
+        ...(toolInput && { toolInput }),
+        ...(permissionRequest && { permissionRequest }),
+        ...(summary && { summary }),
+      },
+    }));
+  }
+
+  private cleanupHookServer(term: TerminalInstance): void {
+    if (term.hookServer) {
+      term.hookServer.close();
+      term.hookServer = undefined;
+      this.log(`hook server closed for ${term.id}`);
+    }
+    if (term.hookConfigPath) {
+      try { unlinkSync(term.hookConfigPath); } catch { /* ignore */ }
+      term.hookConfigPath = undefined;
+    }
   }
 
   private send(message: Envelope): void {
@@ -640,6 +803,7 @@ export class BridgeSession {
     this.socket?.close();
     this.socket = undefined;
     for (const term of this.terminals.values()) {
+      this.cleanupHookServer(term);
       if (term.status === "running") term.pty.kill();
     }
     this.terminals.clear();

@@ -79,9 +79,8 @@ function FolderPickerModal({
   const pathParts = currentPath.split("/").filter(Boolean);
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-        <View style={{ height: "80%", backgroundColor: theme.bg, borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: "hidden" }}>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: theme.bg }}>
           {/* Header */}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border }}>
             <Text style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>选择文件夹</Text>
@@ -191,7 +190,6 @@ function FolderPickerModal({
             </Pressable>
           </View>
         </View>
-      </View>
     </Modal>
   );
 }
@@ -237,20 +235,33 @@ function AppInner() {
     const applyLink = (rawUrl: string | null) => {
       if (!rawUrl) return;
 
-      // Handle live activity quick action: linkshell://input?session=X&data=Y
+      // Handle live activity quick action: linkshell://input?session=X&terminal=T&data=Y&bg=1
       try {
         const url = new URL(rawUrl);
         if (url.host === "input" || url.pathname === "//input") {
           const sessionId = url.searchParams.get("session");
+          const terminalId = url.searchParams.get("terminal");
           const data = url.searchParams.get("data");
+          const bg = url.searchParams.get("bg") === "1";
           if (sessionId && data) {
-            // Switch to the session and send input
             const info = manager.sessions.get(sessionId);
             if (info) {
-              manager.setActiveSessionId(sessionId);
-              setActiveScreen("terminal");
-              // Small delay to ensure session is active before sending
-              setTimeout(() => manager.sendInput(data), 100);
+              if (bg) {
+                // Background send — don't switch screen or bring app to front
+                manager.setActiveSessionId(sessionId);
+                if (terminalId && terminalId !== "default") {
+                  manager.switchTerminal(terminalId);
+                }
+                setTimeout(() => manager.sendInput(data), 50);
+              } else {
+                // Foreground — switch to session + terminal
+                manager.setActiveSessionId(sessionId);
+                if (terminalId && terminalId !== "default") {
+                  manager.switchTerminal(terminalId);
+                }
+                setActiveScreen("terminal");
+                setTimeout(() => manager.sendInput(data), 100);
+              }
             }
             return;
           }
@@ -326,11 +337,58 @@ function AppInner() {
 
   // Live Activity: track ALL sessions, not just active one
   const liveActivityActiveRef = useRef(false);
-  const parsersRef = useRef(new Map<string, { parser: ThrottledTerminalParser; unsub: () => void; status: string; lastLine: string; quickActions: { label: string; input: string }[]; connectedAt: number }>());
+  const parsersRef = useRef(new Map<string, { parser: ThrottledTerminalParser; unsub: () => void; status: string; lastLine: string; contextLines: string; quickActions: { label: string; input: string; needsInput: boolean }[]; provider: string; connectedAt: number }>());
+  const sessionsRef = useRef(manager.sessions);
+  const activeSidRef = useRef(manager.activeSessionId);
+  sessionsRef.current = manager.sessions;
+  activeSidRef.current = manager.activeSessionId;
+
+  const pushLiveActivityUpdate = useCallback(() => {
+    if (!liveActivityActiveRef.current) return;
+    const currentSessions = sessionsRef.current;
+    const activeSid = activeSidRef.current;
+    const now = Date.now();
+    const states: SessionActivityState[] = [];
+
+    for (const [sid, info] of currentSessions) {
+      if (info.status !== "connected") continue;
+      const entry = parsersRef.current.get(sid);
+
+      // Prefer structured status from hooks if fresh (< 30s)
+      const activeTerm = info.activeTerminalId ? info.terminals.get(info.activeTerminalId) : undefined;
+      const ss = activeTerm?.structuredStatus;
+      const useStructured = ss && (now - ss.updatedAt) < 30_000;
+
+      states.push({
+        sessionId: sid,
+        terminalId: info.activeTerminalId || "default",
+        status: useStructured ? ss.phase : (entry?.status ?? "idle"),
+        lastLine: entry?.lastLine ?? "",
+        contextLines: useStructured && ss.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? ""),
+        projectName: info.projectName || info.hostname || sid.slice(0, 8),
+        provider: entry?.provider ?? info.provider ?? "claude",
+        quickActions: entry?.quickActions ?? [],
+        tokensUsed: 0,
+        elapsedSeconds: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
+      });
+    }
+
+    if (states.length === 0) return;
+
+    // Sort: error > waiting > tool_use > thinking > outputting > idle
+    const priority: Record<string, number> = { error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5 };
+    states.sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9));
+
+    const aid = activeSid ?? states[0]?.sessionId ?? "";
+
+    // Alert when any session has quickActions (needs user input)
+    const needsAlert = states.some((s) => s.quickActions.length > 0);
+
+    updateLiveActivity(states, aid, needsAlert);
+  }, []);
 
   useEffect(() => {
     const currentSessions = manager.sessions;
-    const activeSid = manager.activeSessionId;
 
     // Remove parsers for sessions that no longer exist
     for (const [sid, entry] of parsersRef.current) {
@@ -351,15 +409,18 @@ function AppInner() {
         unsub: null as unknown as () => void,
         status: "idle",
         lastLine: "",
-        quickActions: [] as { label: string; input: string }[],
+        contextLines: "",
+        quickActions: [] as { label: string; input: string; needsInput: boolean }[],
+        provider: info.provider || "claude",
         connectedAt: Date.now(),
       };
 
       entry.parser = new ThrottledTerminalParser((result) => {
         entry.status = result.status;
         entry.lastLine = result.lastLine;
+        entry.contextLines = result.contextLines;
         entry.quickActions = result.quickActions;
-        // Trigger live activity update
+        if (result.provider !== "unknown") entry.provider = result.provider;
         pushLiveActivityUpdate();
       }, 1000);
 
@@ -376,8 +437,32 @@ function AppInner() {
     if (hasConnected && !liveActivityActiveRef.current) {
       isLiveActivityAvailable().then((ok) => {
         if (!ok) return;
-        liveActivityActiveRef.current = true;
-        pushLiveActivityUpdate();
+        const now = Date.now();
+        const states: SessionActivityState[] = [];
+        for (const [sid, info] of sessionsRef.current) {
+          if (info.status !== "connected") continue;
+          const e = parsersRef.current.get(sid);
+          const activeTerm = info.activeTerminalId ? info.terminals.get(info.activeTerminalId) : undefined;
+          const ss = activeTerm?.structuredStatus;
+          const useStructured = ss && (now - ss.updatedAt) < 30_000;
+          states.push({
+            sessionId: sid,
+            terminalId: info.activeTerminalId || "default",
+            status: useStructured ? ss.phase : (e?.status ?? "idle"),
+            lastLine: e?.lastLine ?? "",
+            contextLines: useStructured && ss.permissionRequest ? ss.permissionRequest : (e?.contextLines ?? ""),
+            projectName: info.projectName || info.hostname || sid.slice(0, 8),
+            provider: e?.provider ?? info.provider ?? "claude",
+            quickActions: e?.quickActions ?? [],
+            tokensUsed: 0,
+            elapsedSeconds: Math.floor((now - (e?.connectedAt ?? now)) / 1000),
+          });
+        }
+        if (states.length === 0) return;
+        const aid = activeSidRef.current ?? states[0]?.sessionId ?? "";
+        startLiveActivity(states, aid).then((id) => {
+          if (id) liveActivityActiveRef.current = true;
+        });
       });
     } else if (!hasConnected && liveActivityActiveRef.current) {
       liveActivityActiveRef.current = false;
@@ -387,43 +472,23 @@ function AppInner() {
         entry.unsub();
       }
       parsersRef.current.clear();
+    } else if (hasConnected && liveActivityActiveRef.current) {
+      // Sessions changed (added/removed/switched) — push update
+      pushLiveActivityUpdate();
     }
+  }, [manager.activeSessionId, manager.sessions, pushLiveActivityUpdate]);
 
-    function pushLiveActivityUpdate() {
-      if (!liveActivityActiveRef.current) return;
-      const now = Date.now();
-      const states: SessionActivityState[] = [];
+  // Periodic Live Activity refresh — ensures structured status updates
+  // (from hooks) are pushed even when there's no terminal output
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (liveActivityActiveRef.current) pushLiveActivityUpdate();
+    }, 2000);
+    return () => clearInterval(id);
+  }, [pushLiveActivityUpdate]);
 
-      for (const [sid, info] of currentSessions) {
-        if (info.status !== "connected") continue;
-        const entry = parsersRef.current.get(sid);
-        states.push({
-          sessionId: sid,
-          status: entry?.status ?? "idle",
-          lastLine: entry?.lastLine ?? "",
-          projectName: info.projectName || info.hostname || sid.slice(0, 8),
-          provider: info.provider || "claude",
-          quickActions: entry?.quickActions ?? [],
-          tokensUsed: 0,
-          elapsedSeconds: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
-        });
-      }
-
-      // Sort: waiting > thinking > outputting > idle
-      const priority: Record<string, number> = { waiting: 0, thinking: 1, outputting: 2, idle: 3 };
-      states.sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9));
-
-      const aid = activeSid ?? states[0]?.sessionId ?? "";
-
-      if (states.length === 0) return;
-
-      if (!liveActivityActiveRef.current) return;
-      // Start or update
-      startLiveActivity(states, aid).catch(() => {
-        updateLiveActivity(states, aid);
-      });
-    }
-
+  // Cleanup on unmount only
+  useEffect(() => {
     return () => {
       if (liveActivityActiveRef.current) {
         endLiveActivity();
@@ -435,7 +500,7 @@ function AppInner() {
       }
       parsersRef.current.clear();
     };
-  }, [manager.activeSessionId, manager.sessions]);
+  }, []);
 
   // App state: foreground/background
   const handleForeground = useCallback(async () => {
@@ -489,17 +554,24 @@ function AppInner() {
   );
 
   const handleDisconnectSession = useCallback((sessionId: string) => {
-    endLiveActivity();
     manager.disconnectSession(sessionId);
     if (manager.sessions.size <= 1) {
-      // Last session being removed
+      // Last session being removed — effect will end live activity
+      liveActivityActiveRef.current = false;
+      endLiveActivity();
       AsyncStorage.removeItem(LAST_SESSION_KEY);
       setActiveScreen("tabs");
     }
   }, [manager]);
 
   const handleDisconnectAll = useCallback(() => {
+    liveActivityActiveRef.current = false;
     endLiveActivity();
+    for (const entry of parsersRef.current.values()) {
+      entry.parser.destroy();
+      entry.unsub();
+    }
+    parsersRef.current.clear();
     manager.disconnectAll();
     AsyncStorage.removeItem(LAST_SESSION_KEY);
     setActiveScreen("tabs");
@@ -586,6 +658,8 @@ function AppInner() {
             manager.browseDirectory(activeSession.cwd ?? "~");
           }}
           terminals={activeSession.terminals}
+          onKillTerminal={manager.killTerminal}
+          onRemoveTerminal={manager.removeTerminal}
         />
         <FolderPickerModal
           visible={folderPickerVisible}

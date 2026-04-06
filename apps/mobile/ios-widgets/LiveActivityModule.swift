@@ -48,6 +48,7 @@ class LiveActivityModule: NSObject {
     @objc
     func updateActivity(_ sessionsJson: String,
                         activeSessionId: String,
+                        alert: Bool,
                         resolver resolve: @escaping RCTPromiseResolveBlock,
                         rejecter reject: @escaping RCTPromiseRejectBlock) {
         guard let aid = activityId else {
@@ -69,7 +70,11 @@ class LiveActivityModule: NSObject {
             for activity in Activity<LinkShellAttributes>.activities {
                 if activity.id == aid {
                     let content = ActivityContent(state: state, staleDate: nil)
-                    await activity.update(content)
+                    if alert {
+                        await activity.update(content, alertConfiguration: AlertConfiguration(title: "需要操作", body: "终端等待输入", sound: .default))
+                    } else {
+                        await activity.update(content)
+                    }
                     resolve(true)
                     return
                 }

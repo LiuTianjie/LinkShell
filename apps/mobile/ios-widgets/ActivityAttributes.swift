@@ -13,8 +13,10 @@ struct LinkShellAttributes: ActivityAttributes {
 
 struct SessionState: Codable, Hashable {
     var sessionId: String
+    var terminalId: String
     var status: String        // "thinking", "waiting", "outputting", "idle"
     var lastLine: String      // last line of terminal output (truncated)
+    var contextLines: String  // multi-line context for decision making
     var projectName: String
     var provider: String      // "claude", "codex", "custom"
     var quickActions: [QuickAction]
@@ -25,4 +27,5 @@ struct SessionState: Codable, Hashable {
 struct QuickAction: Codable, Hashable {
     var label: String   // display text: "Yes", "No", "Continue"
     var input: String   // actual terminal input to send
+    var needsInput: Bool // true = jump to app for user input, false = send in background
 }

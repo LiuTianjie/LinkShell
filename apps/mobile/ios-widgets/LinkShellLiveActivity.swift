@@ -17,9 +17,7 @@ struct LinkShellLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     if let s = active {
                         HStack(spacing: 5) {
-                            providerIcon(s.provider)
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(providerColor(s.provider))
+                            ProviderLogoView(provider: s.provider, status: s.status, size: 16)
                             Text(s.projectName)
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(.white)
@@ -50,7 +48,6 @@ struct LinkShellLiveActivity: Widget {
 
                 // ── Expanded: Center (below notch) ──
                 DynamicIslandExpandedRegion(.center) {
-                    // Show elapsed time
                     if let s = active {
                         Text(formatElapsed(s.elapsedSeconds))
                             .font(.system(size: 10, design: .monospaced))
@@ -60,89 +57,96 @@ struct LinkShellLiveActivity: Widget {
 
                 // ── Expanded: Bottom ──
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 8) {
-                        // Last output line
-                        if let s = active, !s.lastLine.isEmpty {
-                            Text(s.lastLine)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.7))
-                                .lineLimit(2)
+                    if let s = active {
+                        VStack(spacing: 6) {
+                            // Context lines (what Claude is asking)
+                            if !s.contextLines.isEmpty {
+                                Text(s.contextLines)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .lineLimit(4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(.white.opacity(0.05))
+                                    )
+                            } else if !s.lastLine.isEmpty {
+                                Text(s.lastLine)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 4)
+                            }
+
+                            // Quick action list
+                            if !s.quickActions.isEmpty {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(s.quickActions.enumerated()), id: \.offset) { idx, action in
+                                        Link(destination: actionURL(context.state.activeSessionId, s.terminalId, action)) {
+                                            HStack {
+                                                Text(action.label)
+                                                    .font(.system(size: 13, weight: .medium))
+                                                    .foregroundColor(.white)
+                                                Spacer()
+                                                Image(systemName: action.needsInput ? "arrow.right.circle.fill" : "checkmark.circle.fill")
+                                                    .font(.system(size: 16))
+                                                    .foregroundColor(action.needsInput ? .orange : providerColor(s.provider))
+                                            }
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 8)
+                                        }
+                                        if idx < s.quickActions.count - 1 {
+                                            Divider().background(.white.opacity(0.1))
+                                        }
+                                    }
+                                }
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(.white.opacity(0.08))
+                                )
+                            }
+
+                            // Other sessions summary
+                            if otherCount > 0 {
+                                HStack(spacing: 6) {
+                                    ForEach(sessions.filter { $0.sessionId != context.state.activeSessionId }.prefix(3), id: \.self) { s in
+                                        HStack(spacing: 3) {
+                                            statusDot(s.status)
+                                            Text(s.projectName)
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.white.opacity(0.5))
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 4)
-                        }
-
-                        // Quick actions
-                        if let s = active, !s.quickActions.isEmpty {
-                            HStack(spacing: 8) {
-                                ForEach(s.quickActions, id: \.self) { action in
-                                    Link(destination: inputURL(context.state.activeSessionId, action.input)) {
-                                        Text(action.label)
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 6)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                                    .fill(providerColor(active?.provider ?? "claude").opacity(0.3))
-                                            )
-                                    }
-                                }
                             }
-                        }
-
-                        // Other sessions summary (if multiple)
-                        if otherCount > 0 {
-                            HStack(spacing: 6) {
-                                ForEach(sessions.filter { $0.sessionId != context.state.activeSessionId }.prefix(3), id: \.self) { s in
-                                    HStack(spacing: 3) {
-                                        statusDot(s.status)
-                                        Text(s.projectName)
-                                            .font(.system(size: 10))
-                                            .foregroundColor(.white.opacity(0.5))
-                                            .lineLimit(1)
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 4)
                         }
                     }
                 }
             } compactLeading: {
-                // Provider icon with status ring
                 if let s = active {
-                    ZStack {
-                        Circle()
-                            .stroke(statusColor(s.status), lineWidth: 1.5)
-                            .frame(width: 18, height: 18)
-                        providerIcon(s.provider)
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(providerColor(s.provider))
-                    }
+                    ProviderLogoView(provider: s.provider, status: s.status, size: 18)
                 }
             } compactTrailing: {
-                // Status text + session count
                 if let s = active {
                     HStack(spacing: 3) {
-                        Text(statusEmoji(s.status))
-                            .font(.system(size: 10))
-                        if otherCount > 0 {
-                            Text("·\(sessions.count)")
-                                .font(.system(size: 10, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.5))
-                        }
+                        Circle()
+                            .fill(statusColor(s.status))
+                            .frame(width: 6, height: 6)
+                        Text("\(sessions.count)")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .contentTransition(.numericText())
                     }
                 }
             } minimal: {
                 if let s = active {
-                    ZStack {
-                        Circle()
-                            .stroke(statusColor(s.status), lineWidth: 1.5)
-                            .frame(width: 16, height: 16)
-                        providerIcon(s.provider)
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(providerColor(s.provider))
-                    }
+                    ProviderLogoView(provider: s.provider, status: s.status, size: 14)
                 }
             }
         }
@@ -159,91 +163,158 @@ struct LockScreenView: View {
         let active = context.state.activeSession
         let sessions = context.state.sessions
 
-        HStack(spacing: 12) {
-            // Provider icon badge
-            if let s = active {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(providerColor(s.provider).opacity(0.15))
-                        .frame(width: 40, height: 40)
-                    providerIcon(s.provider)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(providerColor(s.provider))
-                    // Session count badge
-                    if sessions.count > 1 {
-                        Text("\(sessions.count)")
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.blue))
-                            .offset(x: 14, y: -14)
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                // Project name + status
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                // Provider icon badge
                 if let s = active {
-                    HStack(spacing: 6) {
-                        Text(s.projectName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        statusPill(s.status)
-                        Spacer()
-                        Text(formatElapsed(s.elapsedSeconds))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.4))
-                    }
-
-                    // Last line
-                    if !s.lastLine.isEmpty {
-                        Text(s.lastLine)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.6))
-                            .lineLimit(1)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(providerColor(s.provider).opacity(0.15))
+                            .frame(width: 40, height: 40)
+                        ProviderLogoView(provider: s.provider, status: s.status, size: 24)
+                        if sessions.count > 1 {
+                            Text("\(sessions.count)")
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.blue))
+                                .offset(x: 14, y: -14)
+                        }
                     }
                 }
 
-                // Other sessions
-                if sessions.count > 1 {
-                    HStack(spacing: 8) {
-                        ForEach(sessions.filter { $0.sessionId != context.state.activeSessionId }.prefix(3), id: \.self) { s in
-                            HStack(spacing: 3) {
-                                statusDot(s.status)
-                                Text(s.projectName)
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.white.opacity(0.5))
-                                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 3) {
+                    if let s = active {
+                        HStack(spacing: 6) {
+                            Text(s.projectName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            statusPill(s.status)
+                            Spacer()
+                            Text(formatElapsed(s.elapsedSeconds))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.4))
+                        }
+
+                        // Context or last line
+                        if !s.contextLines.isEmpty {
+                            Text(s.contextLines)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.6))
+                                .lineLimit(2)
+                        } else if !s.lastLine.isEmpty {
+                            Text(s.lastLine)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.6))
+                                .lineLimit(1)
+                        }
+                    }
+
+                    // Other sessions
+                    if sessions.count > 1 {
+                        HStack(spacing: 8) {
+                            ForEach(sessions.filter { $0.sessionId != context.state.activeSessionId }.prefix(3), id: \.self) { s in
+                                HStack(spacing: 3) {
+                                    statusDot(s.status)
+                                    Text(s.projectName)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.white.opacity(0.5))
+                                        .lineLimit(1)
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Quick actions
+            // Quick actions as list
             if let s = active, !s.quickActions.isEmpty {
-                VStack(spacing: 4) {
-                    ForEach(s.quickActions.prefix(2), id: \.self) { action in
-                        Link(destination: inputURL(context.state.activeSessionId, action.input)) {
-                            Text(action.label)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(providerColor(s.provider).opacity(0.3))
-                                )
+                VStack(spacing: 0) {
+                    ForEach(Array(s.quickActions.enumerated()), id: \.offset) { idx, action in
+                        Link(destination: actionURL(context.state.activeSessionId, s.terminalId, action)) {
+                            HStack {
+                                Text(action.label)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Image(systemName: action.needsInput ? "arrow.right.circle.fill" : "checkmark.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(action.needsInput ? .orange : providerColor(s.provider))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                        }
+                        if idx < s.quickActions.count - 1 {
+                            Divider().background(.white.opacity(0.1))
                         }
                     }
                 }
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.white.opacity(0.08))
+                )
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.black.opacity(0.85))
+    }
+}
+
+// MARK: - Claude Sparkle Logo (SwiftUI Path)
+
+@available(iOS 16.1, *)
+struct ClaudeSparkleShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        // Claude's sparkle/star logo: a 4-pointed star with rounded tips
+        let cx = rect.midX
+        let cy = rect.midY
+        let outer = min(rect.width, rect.height) / 2
+        let inner = outer * 0.28
+
+        var path = Path()
+        let points = 4
+        for i in 0..<(points * 2) {
+            let angle = (Double(i) * .pi / Double(points)) - .pi / 2
+            let r = i % 2 == 0 ? outer : inner
+            let x = cx + CGFloat(cos(angle)) * r
+            let y = cy + CGFloat(sin(angle)) * r
+            if i == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
+@available(iOS 16.1, *)
+struct ProviderLogoView: View {
+    let provider: String
+    let status: String
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            if provider == "claude" {
+                ClaudeSparkleShape()
+                    .fill(providerColor("claude"))
+                    .frame(width: size, height: size)
+            } else if provider == "codex" {
+                Text("</>")
+                    .font(.system(size: size * 0.45, weight: .bold, design: .monospaced))
+                    .foregroundColor(providerColor("codex"))
+            } else {
+                Image(systemName: "terminal.fill")
+                    .font(.system(size: size * 0.5, weight: .bold))
+                    .foregroundColor(providerColor("custom"))
+            }
+        }
+        .contentTransition(.interpolate)
     }
 }
 
@@ -256,14 +327,15 @@ extension LinkShellAttributes.ContentState {
     }
 }
 
-func inputURL(_ sessionId: String, _ data: String) -> URL {
-    URL(string: "linkshell://input?session=\(sessionId)&data=\(data.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")")!
+func actionURL(_ sessionId: String, _ terminalId: String, _ action: QuickAction) -> URL {
+    let bg = action.needsInput ? "" : "&bg=1"
+    return URL(string: "linkshell://input?session=\(sessionId)&terminal=\(terminalId)&data=\(action.input.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")\(bg)")!
 }
 
 @available(iOS 16.1, *)
 func providerIcon(_ provider: String) -> Image {
     switch provider {
-    case "claude": return Image(systemName: "sparkle")
+    case "claude": return Image(systemName: "brain.head.profile.fill")
     case "codex": return Image(systemName: "chevron.left.forwardslash.chevron.right")
     default: return Image(systemName: "terminal.fill")
     }
@@ -291,12 +363,12 @@ func statusColor(_ status: String) -> Color {
 
 func statusEmoji(_ status: String) -> String {
     switch status {
-    case "thinking": return "🧠"
-    case "outputting": return "📝"
-    case "waiting": return "⏳"
-    case "tool_use": return "🔧"
-    case "error": return "❗"
-    default: return "💤"
+    case "thinking": return "◐"
+    case "outputting": return "▸"
+    case "waiting": return "◉"
+    case "tool_use": return "⚙"
+    case "error": return "✕"
+    default: return "○"
     }
 }
 

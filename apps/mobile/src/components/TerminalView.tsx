@@ -1,9 +1,15 @@
 import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, forwardRef } from "react";
-import { Clipboard, StyleSheet, View } from "react-native";
+import { Animated, Clipboard, PanResponder, StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { TERMINAL_HTML } from "../generated/terminal-html";
 import type { TerminalStream } from "../hooks/useSession";
 import { useTheme } from "../theme";
+
+const SCROLLBAR_WIDTH = 6;
+const SCROLLBAR_MARGIN = 2;
+const MIN_THUMB_HEIGHT = 30;
+const SCROLLBAR_HIDE_DELAY = 1500;
+const SCROLLBAR_HIT_WIDTH = 30;
 
 export interface TerminalViewHandle {
   clear: () => void;
@@ -32,6 +38,75 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const webViewRef = useRef<WebView>(null);
     const readyRef = useRef(false);
 
+    // Scrollbar state (refs to avoid re-renders)
+    const scrollInfoRef = useRef({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
+    const trackHeightRef = useRef(0);
+    const thumbTopAnim = useRef(new Animated.Value(0)).current;
+    const thumbHeightRef = useRef(0);
+    const scrollbarOpacity = useRef(new Animated.Value(0)).current;
+    const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isDraggingRef = useRef(false);
+    const dragStartThumbTop = useRef(0);
+    const showScrollbarRef = useRef(false);
+
+    const flashScrollbar = useCallback(() => {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      Animated.timing(scrollbarOpacity, { toValue: 1, duration: 120, useNativeDriver: true }).start();
+      hideTimerRef.current = setTimeout(() => {
+        if (!isDraggingRef.current) {
+          Animated.timing(scrollbarOpacity, { toValue: 0, duration: 400, useNativeDriver: true }).start();
+        }
+      }, SCROLLBAR_HIDE_DELAY);
+    }, [scrollbarOpacity]);
+
+    const updateThumbPosition = useCallback((info: { scrollTop: number; scrollHeight: number; clientHeight: number }) => {
+      const trackH = trackHeightRef.current;
+      if (trackH <= 0 || info.scrollHeight <= info.clientHeight) {
+        showScrollbarRef.current = false;
+        return;
+      }
+      showScrollbarRef.current = true;
+      const thumbH = Math.max(MIN_THUMB_HEIGHT, (info.clientHeight / info.scrollHeight) * trackH);
+      thumbHeightRef.current = thumbH;
+      const maxThumbTop = trackH - thumbH;
+      const ratio = info.scrollTop / (info.scrollHeight - info.clientHeight);
+      const top = Math.max(0, Math.min(maxThumbTop, ratio * maxThumbTop));
+      thumbTopAnim.setValue(top);
+    }, [thumbTopAnim]);
+
+    const panResponder = useRef(PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        isDraggingRef.current = true;
+        dragStartThumbTop.current = (thumbTopAnim as any)._value ?? 0;
+        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+        Animated.timing(scrollbarOpacity, { toValue: 1, duration: 80, useNativeDriver: true }).start();
+      },
+      onPanResponderMove: (_, gs) => {
+        const info = scrollInfoRef.current;
+        const trackH = trackHeightRef.current;
+        if (trackH <= 0 || info.scrollHeight <= info.clientHeight) return;
+        const thumbH = thumbHeightRef.current;
+        const maxThumbTop = trackH - thumbH;
+        const newTop = Math.max(0, Math.min(maxThumbTop, dragStartThumbTop.current + gs.dy));
+        thumbTopAnim.setValue(newTop);
+        const scrollRatio = maxThumbTop > 0 ? newTop / maxThumbTop : 0;
+        const newScrollTop = scrollRatio * (info.scrollHeight - info.clientHeight);
+        scrollInfoRef.current.scrollTop = newScrollTop;
+        const js = `(function(){var vp=document.querySelector('.xterm-viewport');if(vp)vp.scrollTop=${newScrollTop};})();true;`;
+        webViewRef.current?.injectJavaScript(js);
+      },
+      onPanResponderRelease: () => {
+        isDraggingRef.current = false;
+        flashScrollbar();
+      },
+      onPanResponderTerminate: () => {
+        isDraggingRef.current = false;
+        flashScrollbar();
+      },
+    })).current;
+
     const terminalHtml = useMemo(() => {
       const isDark = theme.mode === "dark";
       const termTheme = {
@@ -40,7 +115,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         cursor: theme.accent,
         selectionBackground: isDark ? "#334155" : "#cbd5e1",
       };
-      // Keep the terminal responsive to orientation changes without continuously refitting on DOM mutations.
+
+      // Resize bridge: refit on orientation/resize
       const resizeBridgeScript = `
 <script>
 (function(){
@@ -53,27 +129,139 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 })();
 </script>`;
 
+      // Enhance handleRNMessage with restore/refit/scroll_bottom/write/focus_cursor/set_scroll
+      const enhancedHandlerScript = `
+<script>
+(function(){
+  function restoreChunks(chunks){
+    term.reset();
+    if(Array.isArray(chunks) && chunks.length > 0){
+      term.write(chunks.join(''));
+    }
+    safeFit();
+    setTimeout(function(){ snapBottom(); }, 50);
+    sendSize();
+  }
+  var prevHandle = window.handleRNMessage;
+  window.handleRNMessage = function(msg){
+    try{
+      var p = JSON.parse(msg);
+      if(p.type==='restore'){
+        restoreChunks(p.chunks);
+        return;
+      }
+      if(p.type==='refit'){
+        safeFit();
+        sendSize();
+        return;
+      }
+      if(p.type==='scroll_bottom'){
+        snapBottom();
+        return;
+      }
+      if(p.type==='write'){
+        var vp = document.querySelector('.xterm-viewport');
+        var wasNear = vp ? (vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 16) : true;
+        term.write(p.data || '');
+        if(wasNear) setTimeout(function(){ snapBottom(); }, 10);
+        return;
+      }
+      if(p.type==='focus_cursor'){
+        focusCursor();
+        return;
+      }
+      if(p.type==='set_scroll'){
+        var vp = document.querySelector('.xterm-viewport');
+        if(vp) vp.scrollTop = p.scrollTop;
+        return;
+      }
+    } catch(e) {}
+    if(prevHandle){
+      prevHandle(msg);
+    }
+  };
+})();
+</script>`;
+
+      // Scroll bridge: send scroll position to RN
+      const scrollBridgeScript = `
+<script>
+(function(){
+  var vp=null,raf=false;
+  function send(){
+    raf=false;
+    if(!vp)vp=document.querySelector('.xterm-viewport');
+    if(!vp)return;
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type:'scroll_update',
+      scrollTop:vp.scrollTop,
+      scrollHeight:vp.scrollHeight,
+      clientHeight:vp.clientHeight
+    }));
+  }
+  function schedule(){if(raf)return;raf=true;requestAnimationFrame(send);}
+  setTimeout(function(){
+    vp=document.querySelector('.xterm-viewport');
+    if(vp)vp.addEventListener('scroll',schedule,{passive:true});
+  },200);
+  var mo=new MutationObserver(schedule);
+  setTimeout(function(){
+    if(!vp)vp=document.querySelector('.xterm-viewport');
+    if(vp)mo.observe(vp,{childList:true,subtree:true});
+  },300);
+})();
+</script>`;
+
       return TERMINAL_HTML
         .replace('<html>', `<html style="color-scheme:${theme.mode}">`)
-        .replace('<meta charset="utf-8"/>', `<meta charset="utf-8"/><meta name="color-scheme" content="${theme.mode}"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">`)
-        .replace(/background:#020617;display:flex;flex-direction:column/g, `background:${theme.bgTerminal};display:flex;flex-direction:column`)
-        .replace(/background-color: #000;/g, `background-color: ${theme.bgTerminal};`)
+        .replace(
+          '<meta charset="utf-8"/>',
+          `<meta charset="utf-8"/><meta name="color-scheme" content="${theme.mode}"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">`
+        )
+        // Theme: body background
+        .replace(
+          /background:#020617;display:flex;flex-direction:column/g,
+          `background:${theme.bgTerminal};display:flex;flex-direction:column`
+        )
+        .replace(
+          /background-color: #000;/g,
+          `background-color: ${theme.bgTerminal};`
+        )
+        // Hide xterm native scrollbar (we use our own)
+        .replace(
+          '.xterm-viewport::-webkit-scrollbar{width:4px}',
+          '.xterm-viewport::-webkit-scrollbar{display:none;width:0}'
+        )
+        .replace(
+          '.xterm-viewport::-webkit-scrollbar-thumb{background:#334155;border-radius:2px}',
+          '.xterm-viewport::-webkit-scrollbar-thumb{display:none}'
+        )
+        // xterm viewport: smooth iOS touch scrolling
         .replace(
           /\.xterm-viewport\{-webkit-overflow-scrolling:touch !important;overscroll-behavior:contain !important;\}/,
-          ".xterm-viewport{-webkit-overflow-scrolling:touch !important;touch-action:pan-y !important;overscroll-behavior:contain !important;}"
+          `.xterm-viewport{-webkit-overflow-scrolling:touch !important;touch-action:pan-y !important;overscroll-behavior:contain !important;}`
         )
+        // xterm viewport: theme background + smooth scroll
         .replace(
           /\.xterm \.xterm-viewport \{\n    \/\* On OS X this is required in order for the scroll bar to appear fully opaque \*\/\n    background-color: #000;\n    overflow-y: scroll;\n    cursor: default;\n    position: absolute;\n    right: 0;\n    left: 0;\n    top: 0;\n    bottom: 0;\n\}/,
           `.xterm .xterm-viewport {\n    background-color: ${theme.bgTerminal};\n    overflow-y: scroll;\n    cursor: default;\n    position: absolute;\n    right: 0;\n    left: 0;\n    top: 0;\n    bottom: 0;\n    -webkit-overflow-scrolling: touch;\n  }`
         )
-        // Let xterm own keyboard input so IME composition and candidate selection work natively.
+        // Let xterm own keyboard input for IME
         .replace(
           /if \(term\.textarea\) \{\n  term\.textarea\.readOnly = true;\n  term\.textarea\.tabIndex = -1;\n  term\.textarea\.setAttribute\('inputmode', 'none'\);\n  term\.textarea\.blur\(\);\n\}/,
           `if (term.textarea) {\n  term.textarea.readOnly = false;\n  term.textarea.tabIndex = 0;\n  term.textarea.style.colorScheme = '${theme.mode}';\n  term.textarea.setAttribute('autocapitalize', 'off');\n  term.textarea.setAttribute('autocorrect', 'off');\n  term.textarea.setAttribute('spellcheck', 'false');\n  term.textarea.setAttribute('autocomplete', 'off');\n}`
         )
-        .replace("window.addEventListener('resize',function(){fitAddon.fit();});", "window.addEventListener('resize',function(){safeFit();sendSize();});")
-        .replace(/theme:\{background:'#020617',foreground:'#e2e8f0',cursor:'#3b82f6',selectionBackground:'#334155'\}/, `theme:${JSON.stringify(termTheme)}`)
-        .replace("</body>", `${resizeBridgeScript}<script>\n(function(){\n  // Disable xterm.js scroll, let WebView native scroll handle it\n  if(window.term) term.options.mouseWheelScrolling = false;\n  // Make xterm viewport not clip — let body scroll naturally\n  var vp = document.querySelector('.xterm-viewport');\n  if(vp){ vp.style.overflow='visible'; vp.style.position='relative'; }\n  var screen = document.querySelector('.xterm-screen');\n  if(screen){ screen.style.position='relative'; }\n  // Body scroll styles\n  document.body.style.cssText += '-webkit-overflow-scrolling:touch;overscroll-behavior:contain;overflow-y:auto;height:auto;';\n  document.documentElement.style.cssText += 'overflow-y:auto;height:auto;';\n  function viewport(){\n    return document.querySelector('.xterm-viewport');\n  }\n  function isNearBottom(){\n    return (document.documentElement.scrollTop + window.innerHeight) >= (document.documentElement.scrollHeight - 32);\n  }\n  function snapBottom(){\n    window.scrollTo(0, document.documentElement.scrollHeight);\n  }\n  function restoreChunks(chunks){\n    term.reset();\n    if(Array.isArray(chunks) && chunks.length > 0){\n      term.write(chunks.join(''));\n    }\n    safeFit();\n    setTimeout(function(){ snapBottom(); }, 50);\n    sendSize();\n  }\n  var prevHandle = window.handleRNMessage;\n  window.handleRNMessage = function(msg){\n    try{\n      var p = JSON.parse(msg);\n      if(p.type==='restore'){\n        restoreChunks(p.chunks);\n        return;\n      }\n      if(p.type==='refit'){\n        safeFit();\n        sendSize();\n        return;\n      }\n      if(p.type==='scroll_bottom'){\n        snapBottom();\n        return;\n      }\n      if(p.type==='write'){\n        var wasNear = isNearBottom();\n        term.write(p.data || '');\n        if(wasNear) setTimeout(function(){ snapBottom(); }, 10);\n        return;\n      }\n      if(p.type==='focus_cursor'){\n        focusCursor();\n        return;\n      }\n    } catch(e) {}\n    if(prevHandle){\n      prevHandle(msg);\n    }\n  };\n})();\n</script></body>`);
+        .replace(
+          "window.addEventListener('resize',function(){fitAddon.fit();});",
+          "window.addEventListener('resize',function(){safeFit();sendSize();});"
+        )
+        // Theme colors
+        .replace(
+          /theme:\{background:'#020617',foreground:'#e2e8f0',cursor:'#3b82f6',selectionBackground:'#334155'\}/,
+          `theme:${JSON.stringify(termTheme)}`
+        )
+        // Inject enhanced handler + resize bridge + scroll bridge before </body>
+        .replace("</body>", `${resizeBridgeScript}${enhancedHandlerScript}${scrollBridgeScript}</body>`);
     }, [theme.accent, theme.bgTerminal, theme.mode]);
 
     const postToWebView = useCallback((msg: object) => {
@@ -144,19 +332,23 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 
     const handleMessage = useCallback((event: { nativeEvent: { data: string } }) => {
       try {
-        const msg = JSON.parse(event.nativeEvent.data) as { type: string; data?: string; cols?: number; rows?: number };
+        const msg = JSON.parse(event.nativeEvent.data) as { type: string; data?: string; cols?: number; rows?: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number };
         if (msg.type === "input" && msg.data && onInput) {
           onInput(msg.data);
         } else if (msg.type === "resize" && msg.cols && msg.rows && onResize) {
           onResize(msg.cols, msg.rows);
         } else if (msg.type === "selection" && msg.data) {
-          // Auto-copy selection to clipboard
           Clipboard.setString(msg.data);
         } else if (msg.type === "clipboard_copy" && msg.data) {
           Clipboard.setString(msg.data);
+        } else if (msg.type === "scroll_update" && msg.scrollTop != null && msg.scrollHeight != null && msg.clientHeight != null) {
+          const info = { scrollTop: msg.scrollTop, scrollHeight: msg.scrollHeight, clientHeight: msg.clientHeight };
+          scrollInfoRef.current = info;
+          updateThumbPosition(info);
+          if (!isDraggingRef.current) flashScrollbar();
         }
       } catch {}
-    }, [onInput, onResize]);
+    }, [onInput, onResize, updateThumbPosition, flashScrollbar]);
 
     return (
       <View style={styles.container}>
@@ -171,7 +363,6 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           scrollEnabled
           bounces={false}
           overScrollMode="never"
-          decelerationRate="normal"
           keyboardDisplayRequiresUserAction={false}
           hideKeyboardAccessoryView
           allowsInlineMediaPlayback
@@ -184,6 +375,36 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             });
           }}
         />
+        {/* Native scrollbar overlay */}
+        <View
+          style={styles.scrollbarTrack}
+          onLayout={(e) => { trackHeightRef.current = e.nativeEvent.layout.height; }}
+          pointerEvents="box-none"
+        >
+          <Animated.View
+            {...panResponder.panHandlers}
+            pointerEvents="auto"
+            style={{
+              position: "absolute",
+              right: 0,
+              width: SCROLLBAR_HIT_WIDTH,
+              opacity: scrollbarOpacity,
+              height: Math.max(MIN_THUMB_HEIGHT, thumbHeightRef.current || MIN_THUMB_HEIGHT),
+              transform: [{ translateY: thumbTopAnim }],
+              alignItems: "flex-end",
+              paddingRight: SCROLLBAR_MARGIN,
+            }}
+          >
+            <View
+              style={{
+                width: SCROLLBAR_WIDTH,
+                height: "100%",
+                borderRadius: SCROLLBAR_WIDTH / 2,
+                backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.3)",
+              }}
+            />
+          </Animated.View>
+        </View>
       </View>
     );
   },
@@ -195,5 +416,12 @@ const styles = StyleSheet.create({
   },
   webview: {
     flex: 1,
+  },
+  scrollbarTrack: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: SCROLLBAR_HIT_WIDTH,
   },
 });

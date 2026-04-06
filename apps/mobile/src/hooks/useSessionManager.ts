@@ -22,6 +22,14 @@ export interface TerminalInfo {
   provider: string;
   status: "running" | "exited";
   terminalStream: TerminalStream;
+  structuredStatus?: {
+    phase: string;
+    toolName?: string;
+    toolInput?: string;
+    permissionRequest?: string;
+    summary?: string;
+    updatedAt: number;
+  };
 }
 
 export interface BrowseEntry {
@@ -82,6 +90,10 @@ export interface SessionManagerHandle {
   requestTerminalList: () => void;
   /** Browse a directory on the host */
   browseDirectory: (path: string) => void;
+  /** Kill a terminal in the active session */
+  killTerminal: (terminalId: string) => void;
+  /** Remove an exited terminal from the local map */
+  removeTerminal: (terminalId: string) => void;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -113,6 +125,14 @@ interface InternalTerminal {
   snapshot: TerminalStreamSnapshot;
   listeners: Set<(event: TerminalStreamEvent) => void>;
   stream: TerminalStream;
+  structuredStatus?: {
+    phase: string;
+    toolName?: string;
+    toolInput?: string;
+    permissionRequest?: string;
+    summary?: string;
+    updatedAt: number;
+  };
 }
 
 interface InternalSession {
@@ -227,6 +247,7 @@ function toSessionInfo(s: InternalSession): SessionInfo {
       provider: t.provider,
       status: t.status,
       terminalStream: t.stream,
+      structuredStatus: t.structuredStatus,
     });
   }
   // Use active terminal's stream if available, otherwise legacy stream
@@ -492,12 +513,26 @@ export function useSessionManager(): SessionManagerHandle {
           const tid = (envelope as any).terminalId ?? "default";
           const term = s.terminals.get(tid);
           if (term) term.status = "exited";
+          // Auto-switch if the exited terminal was active
+          if (s.activeTerminalId === tid) {
+            const next = [...s.terminals.values()].find((t) => t.status === "running");
+            if (next) {
+              s.activeTerminalId = next.terminalId;
+              s.terminalSnapshot = { sessionId: s.sessionId, chunks: [...next.snapshot.chunks] };
+              for (const listener of s.terminalListeners) {
+                listener({ type: "reset", snapshot: { sessionId: s.sessionId, chunks: [...next.snapshot.chunks] } });
+              }
+            }
+          }
           // Only mark session exited if all terminals exited
           const allExited = s.terminals.size > 0 && [...s.terminals.values()].every((t) => t.status === "exited");
           if (allExited) {
             s.status = "session_exited";
             s.connectionDetail = "All terminals exited.";
             stopHeartbeat(s);
+          } else {
+            // Auto-remove exited terminal if there are still running ones
+            s.terminals.delete(tid);
           }
           tick();
           break;
@@ -573,6 +608,22 @@ export function useSessionManager(): SessionManagerHandle {
         case "terminal.browse.result": {
           const p = envelope.payload as { path: string; entries: BrowseEntry[]; error?: string };
           s.browseResult = { path: p.path, entries: p.entries, error: p.error };
+          tick();
+          break;
+        }
+        case "terminal.status": {
+          const tid = (envelope as any).terminalId ?? "default";
+          const p = envelope.payload as {
+            phase: string;
+            toolName?: string;
+            toolInput?: string;
+            permissionRequest?: string;
+            summary?: string;
+          };
+          const term = s.terminals.get(tid);
+          if (term) {
+            term.structuredStatus = { ...p, updatedAt: Date.now() };
+          }
           tick();
           break;
         }
@@ -814,6 +865,38 @@ export function useSessionManager(): SessionManagerHandle {
     tick();
   }, [getActive, tick]);
 
+  const killTerminalFn = useCallback((terminalId: string) => {
+    const s = getActive();
+    if (!s) return;
+    const term = s.terminals.get(terminalId);
+    if (!term || term.status !== "running") return;
+    sendRaw(s, createEnvelope({
+      type: "terminal.kill" as any,
+      sessionId: s.sessionId,
+      payload: { terminalId },
+    }));
+  }, [getActive]);
+
+  const removeTerminalFn = useCallback((terminalId: string) => {
+    const s = getActive();
+    if (!s) return;
+    s.terminals.delete(terminalId);
+    // If we removed the active terminal, switch to another
+    if (s.activeTerminalId === terminalId) {
+      const next = [...s.terminals.values()].find((t) => t.status === "running") ?? [...s.terminals.values()][0];
+      if (next) {
+        s.activeTerminalId = next.terminalId;
+        s.terminalSnapshot = { sessionId: s.sessionId, chunks: [...next.snapshot.chunks] };
+        for (const listener of s.terminalListeners) {
+          listener({ type: "reset", snapshot: { sessionId: s.sessionId, chunks: [...next.snapshot.chunks] } });
+        }
+      } else {
+        s.activeTerminalId = null;
+      }
+    }
+    tick();
+  }, [getActive, tick]);
+
   // Build sessions map for consumers
   const sessions = new Map<string, SessionInfo>();
   for (const [id, s] of sessionsRef.current) {
@@ -848,5 +931,7 @@ export function useSessionManager(): SessionManagerHandle {
     switchTerminal: switchTerminalFn,
     requestTerminalList: requestTerminalListFn,
     browseDirectory: browseDirectoryFn,
+    killTerminal: killTerminalFn,
+    removeTerminal: removeTerminalFn,
   };
 }

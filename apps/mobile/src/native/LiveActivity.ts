@@ -4,8 +4,10 @@ const { LiveActivityModule } = NativeModules;
 
 export interface SessionActivityState {
   sessionId: string;
+  terminalId: string;
   status: string;
   lastLine: string;
+  contextLines: string;
   projectName: string;
   provider: string;
   quickActions: QuickAction[];
@@ -16,6 +18,7 @@ export interface SessionActivityState {
 export interface QuickAction {
   label: string;
   input: string;
+  needsInput: boolean;
 }
 
 const isIOS = Platform.OS === "ios";
@@ -46,11 +49,12 @@ export async function startLiveActivity(
 export async function updateLiveActivity(
   sessions: SessionActivityState[],
   activeSessionId: string,
+  alert?: boolean,
 ): Promise<void> {
   if (!isIOS || !LiveActivityModule) return;
   try {
     const json = JSON.stringify(sessions);
-    await LiveActivityModule.updateActivity(json, activeSessionId);
+    await LiveActivityModule.updateActivity(json, activeSessionId, alert ?? false);
   } catch {
     // Silently ignore update failures
   }
