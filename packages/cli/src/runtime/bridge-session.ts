@@ -303,6 +303,14 @@ export class BridgeSession {
         this.sendTerminalList();
         break;
       }
+      case "terminal.kill": {
+        const p = parseTypedPayload("terminal.kill", envelope.payload);
+        const term = this.terminals.get(p.terminalId);
+        if (term && term.status === "running") {
+          term.pty.kill();
+        }
+        break;
+      }
       case "terminal.browse": {
         const p = parseTypedPayload("terminal.browse", envelope.payload);
         // Expand ~ to home directory

@@ -196,6 +196,10 @@ export const terminalSpawnedPayloadSchema = z.object({
   projectName: z.string(),
 });
 
+export const terminalKillPayloadSchema = z.object({
+  terminalId: z.string().min(1),
+});
+
 // ── Terminal browse payloads ──────────────────────────────────────
 
 export const terminalBrowsePayloadSchema = z.object({
@@ -260,6 +264,7 @@ export const protocolMessageSchemas = {
   "terminal.list": terminalListPayloadSchema,
   "terminal.browse": terminalBrowsePayloadSchema,
   "terminal.browse.result": terminalBrowseResultPayloadSchema,
+  "terminal.kill": terminalKillPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

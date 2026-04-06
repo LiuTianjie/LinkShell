@@ -16,7 +16,7 @@ COPY tsconfig.base.json ./
 RUN pnpm --filter @linkshell/protocol build && pnpm --filter @linkshell/gateway build
 
 # Prune to production deps only
-RUN pnpm --filter @linkshell/gateway deploy --prod /app/pruned
+RUN pnpm --filter @linkshell/gateway deploy --legacy --prod /app/pruned
 
 # ── Runtime ──────────────────────────────────────────────────────────
 

@@ -201,6 +201,7 @@ function handleClientMessage(
     case "screen.ice":
     // Multi-terminal: client → host
     case "terminal.spawn":
+    case "terminal.kill":
     case "terminal.list":
     case "terminal.browse":
       sendToHost(session, envelope);
