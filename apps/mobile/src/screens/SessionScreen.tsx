@@ -1550,7 +1550,7 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
 
   return (
     <Animated.View style={[StyleSheet.absoluteFill, { zIndex: 100, opacity }]}>
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.mode === "dark" ? "rgba(0,0,0,0.92)" : "rgba(245,245,247,0.95)" }]} />
+      <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: theme.mode === "dark" ? "rgba(0,0,0,0.92)" : "rgba(245,245,247,0.95)" }]} onPress={handleClose} />
       <Animated.View style={{ flex: 1, transform: [{ scale }] }}>
         <View style={{ paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>终端</Text>
