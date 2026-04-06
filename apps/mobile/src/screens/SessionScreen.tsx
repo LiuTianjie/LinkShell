@@ -22,7 +22,6 @@ import * as ImagePicker from "expo-image-picker";
 import { BlurView } from "expo-blur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
-import { VoiceInputPanel, VOICE_PANEL_HEIGHT } from "../components/VoiceInputPanel";
 import { TerminalView } from "../components/TerminalView";
 import type { TerminalViewHandle } from "../components/TerminalView";
 import { ScreenView } from "../components/ScreenView";
@@ -31,7 +30,10 @@ import type { TerminalInfo } from "../hooks/useSessionManager";
 import { useTheme } from "../theme";
 import type { Theme } from "../theme";
 
+import { useVoiceInput } from "../hooks/useVoiceInput";
+
 const SHORTCUT_BAR_HEIGHT = 44;
+const VOICE_BAR_HEIGHT = 40;
 
 const SHORTCUTS = [
   { label: "⇧Tab", value: "\u001b[Z" },
@@ -154,7 +156,6 @@ export function SessionScreen({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [activeTab, setActiveTab] = useState<"terminal" | "desktop">("terminal");
   const [showTerminalGrid, setShowTerminalGrid] = useState(false);
-  const [voiceMode, setVoiceMode] = useState(false);
 
   const keyboardVisible = keyboardInset > 0;
   const stageBottomInset = keyboardVisible ? keyboardInset : insets.bottom;
@@ -464,8 +465,6 @@ export function SessionScreen({
               terminals={terminals}
               activeTerminalId={activeTerminalId}
               getTermRef={getTermRef}
-              voiceMode={voiceMode}
-              setVoiceMode={setVoiceMode}
             />
           </View>
 
@@ -774,6 +773,109 @@ const SessionHeader = memo(function SessionHeader({
   );
 });
 
+const VoiceBar = memo(function VoiceBar({
+  bottomInset,
+  theme,
+  onSend,
+}: {
+  bottomInset: number;
+  theme: Theme;
+  onSend: (text: string) => void;
+}) {
+  const { isListening, partialText, finalText, start, stop, cancel } = useVoiceInput();
+  const [pressing, setPressing] = useState(false);
+  const localeRef = useRef<"en-US" | "zh-CN">("zh-CN");
+
+  const handlePressIn = async () => {
+    setPressing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      await start(localeRef.current);
+    } catch {}
+  };
+
+  const handlePressOut = async () => {
+    setPressing(false);
+    if (!isListening) return;
+    await stop();
+    // finalText may not be ready yet — use a small delay
+    setTimeout(() => {}, 0);
+  };
+
+  // Send finalText when it arrives after release
+  const pendingSend = useRef(false);
+  useEffect(() => {
+    if (!pressing && finalText) {
+      onSend(finalText);
+    }
+  }, [finalText, pressing, onSend]);
+
+  const displayText = pressing ? (partialText || "正在听...") : "";
+
+  return (
+    <View
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: bottomInset + SHORTCUT_BAR_HEIGHT,
+        height: VOICE_BAR_HEIGHT,
+        backgroundColor: theme.bgTerminal,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: theme.separator,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 12,
+        gap: 8,
+      }}
+    >
+      {displayText ? (
+        <Text
+          style={{ flex: 1, fontSize: 13, color: theme.text, fontFamily: "Menlo" }}
+          numberOfLines={1}
+        >
+          {displayText}
+        </Text>
+      ) : (
+        <Pressable
+          style={({ pressed }) => ({
+            flex: 1,
+            height: 30,
+            borderRadius: 6,
+            borderCurve: "continuous",
+            backgroundColor: pressing
+              ? theme.accent
+              : pressed ? theme.bgCard : theme.bgElevated,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: pressing ? theme.accent : theme.separator,
+            alignItems: "center",
+            justifyContent: "center",
+            flexDirection: "row",
+            gap: 6,
+          })}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+        >
+          <AppSymbol
+            name="mic.fill"
+            size={14}
+            color={pressing ? theme.textInverse : theme.textSecondary}
+          />
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: "500",
+              color: pressing ? theme.textInverse : theme.textSecondary,
+            }}
+          >
+            按住说话
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
+});
+
 const TerminalStage = memo(function TerminalStage({
   bottomInset,
   inputDisabled,
@@ -789,8 +891,6 @@ const TerminalStage = memo(function TerminalStage({
   terminals,
   activeTerminalId,
   getTermRef,
-  voiceMode,
-  setVoiceMode,
 }: {
   bottomInset: number;
   inputDisabled: boolean;
@@ -806,15 +906,11 @@ const TerminalStage = memo(function TerminalStage({
   terminals?: Map<string, TerminalInfo>;
   activeTerminalId?: string | null;
   getTermRef?: (terminalId: string) => React.RefObject<TerminalViewHandle | null>;
-  voiceMode: boolean;
-  setVoiceMode: (v: boolean) => void;
 }) {
   const keyboardUp = bottomInset > 0;
-  const showShortcutBar = keyboardUp && !inputDisabled && !voiceMode;
-  const showVoicePanel = voiceMode && !inputDisabled;
+  const showShortcutBar = keyboardUp && !inputDisabled;
   const terminalPadding = bottomInset
-    + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)
-    + (showVoicePanel && !keyboardUp ? VOICE_PANEL_HEIGHT : 0);
+    + (showShortcutBar ? SHORTCUT_BAR_HEIGHT + VOICE_BAR_HEIGHT : 0);
 
   // If we have multiple terminals, render each with its own TerminalView
   const hasMultipleTerminals = terminals && terminals.size > 0 && getTermRef;
@@ -945,37 +1041,15 @@ const TerminalStage = memo(function TerminalStage({
           </Pressable>
         </View>
       ) : null}
-      {showVoicePanel ? (
-        <VoiceInputPanel
-          bottomInset={keyboardUp ? bottomInset : 0}
+      {showShortcutBar ? (
+        <VoiceBar
+          bottomInset={bottomInset}
           theme={theme}
           onSend={(text) => onInput(text + "\r")}
-          onCancel={() => setVoiceMode(false)}
         />
       ) : null}
-      {keyboardHintVisible && !inputDisabled && bottomInset === 0 && !voiceMode ? (
+      {keyboardHintVisible && !inputDisabled && bottomInset === 0 ? (
         <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", alignItems: "center" }}>
-          {/* Voice mic button — large, prominent */}
-          <Pressable
-            style={({ pressed }) => ({
-              position: "absolute",
-              bottom: 70,
-              width: 56,
-              height: 56,
-              borderRadius: 28,
-              backgroundColor: pressed ? theme.accentLight : theme.accent,
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
-            })}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              setVoiceMode(true);
-            }}
-          >
-            <AppSymbol name="mic.fill" size={24} color={theme.textInverse} />
-          </Pressable>
-          {/* Keyboard hint */}
           <Pressable
             style={{
               position: "absolute",
