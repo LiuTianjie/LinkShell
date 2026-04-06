@@ -14,6 +14,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -784,10 +785,14 @@ const VoiceBar = memo(function VoiceBar({
 }) {
   const { isListening, partialText, finalText, start, stop, cancel } = useVoiceInput();
   const [pressing, setPressing] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [editing, setEditing] = useState(false);
   const localeRef = useRef<"en-US" | "zh-CN">("zh-CN");
 
   const handlePressIn = async () => {
     setPressing(true);
+    setEditing(false);
+    setEditText("");
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       await start(localeRef.current);
@@ -796,47 +801,151 @@ const VoiceBar = memo(function VoiceBar({
 
   const handlePressOut = async () => {
     setPressing(false);
-    if (!isListening) return;
     await stop();
-    // finalText may not be ready yet — use a small delay
-    setTimeout(() => {}, 0);
   };
 
-  // Send finalText when it arrives after release
-  const pendingSend = useRef(false);
+  // When finalText arrives after release, enter edit mode
   useEffect(() => {
     if (!pressing && finalText) {
-      onSend(finalText);
+      setEditText(finalText);
+      setEditing(true);
     }
-  }, [finalText, pressing, onSend]);
+  }, [finalText, pressing]);
 
-  const displayText = pressing ? (partialText || "正在听...") : "";
+  // Also catch partial text if stop() resolves before finalText
+  useEffect(() => {
+    if (!pressing && !isListening && partialText && !editing && !finalText) {
+      setEditText(partialText);
+      setEditing(true);
+    }
+  }, [pressing, isListening, partialText, editing, finalText]);
+
+  const handleConfirm = () => {
+    if (editText.trim()) {
+      onSend(editText.trim());
+    }
+    setEditing(false);
+    setEditText("");
+  };
+
+  const handleCancel = () => {
+    setEditing(false);
+    setEditText("");
+    cancel();
+  };
+
+  const liveText = pressing ? (partialText || "正在听...") : "";
 
   return (
-    <View
-      style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        bottom: bottomInset,
-        height: VOICE_BAR_HEIGHT,
-        backgroundColor: theme.bgTerminal,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: theme.separator,
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: 12,
-        gap: 8,
-      }}
-    >
-      {displayText ? (
-        <Text
-          style={{ flex: 1, fontSize: 13, color: theme.text, fontFamily: "Menlo" }}
-          numberOfLines={1}
+    <>
+      {/* Floating overlay — shown while pressing or editing */}
+      {(pressing || editing) ? (
+        <View
+          style={{
+            position: "absolute",
+            left: 12,
+            right: 12,
+            bottom: bottomInset + VOICE_BAR_HEIGHT + 8,
+            backgroundColor: theme.bgElevated,
+            borderRadius: 12,
+            borderCurve: "continuous",
+            padding: 12,
+            boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: theme.separator,
+          }}
         >
-          {displayText}
-        </Text>
-      ) : (
+          {editing ? (
+            <>
+              <TextInput
+                style={{
+                  fontSize: 15,
+                  color: theme.text,
+                  fontFamily: "Menlo",
+                  minHeight: 36,
+                  maxHeight: 80,
+                  padding: 0,
+                }}
+                value={editText}
+                onChangeText={setEditText}
+                multiline
+                autoFocus
+                placeholderTextColor={theme.textTertiary}
+              />
+              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+                <Pressable
+                  style={({ pressed }) => ({
+                    paddingHorizontal: 14,
+                    paddingVertical: 6,
+                    borderRadius: 8,
+                    borderCurve: "continuous",
+                    backgroundColor: pressed ? theme.bgCard : theme.bgTerminal,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: theme.separator,
+                  })}
+                  onPress={handleCancel}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: theme.textSecondary }}>取消</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => ({
+                    paddingHorizontal: 14,
+                    paddingVertical: 6,
+                    borderRadius: 8,
+                    borderCurve: "continuous",
+                    backgroundColor: editText.trim()
+                      ? pressed ? theme.accentLight : theme.accent
+                      : theme.bgCard,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: editText.trim() ? theme.accent : theme.separator,
+                  })}
+                  onPress={handleConfirm}
+                  disabled={!editText.trim()}
+                >
+                  <Text style={{
+                    fontSize: 13,
+                    fontWeight: "600",
+                    color: editText.trim() ? theme.textInverse : theme.textTertiary,
+                  }}>确认</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: theme.error,
+              }} />
+              <Text
+                style={{ flex: 1, fontSize: 15, color: theme.text, fontFamily: "Menlo" }}
+                numberOfLines={3}
+              >
+                {liveText}
+              </Text>
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {/* Bottom bar */}
+      <View
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: bottomInset,
+          height: VOICE_BAR_HEIGHT,
+          backgroundColor: theme.bgTerminal,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.separator,
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 12,
+          gap: 8,
+        }}
+      >
         <Pressable
           style={({ pressed }) => ({
             flex: 1,
@@ -855,6 +964,7 @@ const VoiceBar = memo(function VoiceBar({
           })}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
+          disabled={editing}
         >
           <AppSymbol
             name="mic.fill"
@@ -871,8 +981,8 @@ const VoiceBar = memo(function VoiceBar({
             按住说话
           </Text>
         </Pressable>
-      )}
-    </View>
+      </View>
+    </>
   );
 });
 
