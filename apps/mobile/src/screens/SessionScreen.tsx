@@ -927,26 +927,6 @@ const TerminalStage = memo(function TerminalStage({
             >
               <Text style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}>Image</Text>
             </Pressable>
-            <Pressable
-              key="mic"
-              style={({ pressed }) => ({
-                paddingHorizontal: 8,
-                paddingVertical: 6,
-                borderRadius: 8,
-                borderCurve: "continuous",
-                backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: theme.separator,
-              })}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                setVoiceMode(true);
-                Keyboard.dismiss();
-                termRef.current?.blurCursor();
-              }}
-            >
-              <AppSymbol name="mic.fill" size={14} color={theme.accent} />
-            </Pressable>
           </ScrollView>
           <Pressable
             style={({ pressed }) => ({
@@ -975,6 +955,27 @@ const TerminalStage = memo(function TerminalStage({
       ) : null}
       {keyboardHintVisible && !inputDisabled && bottomInset === 0 && !voiceMode ? (
         <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", alignItems: "center" }}>
+          {/* Voice mic button — large, prominent */}
+          <Pressable
+            style={({ pressed }) => ({
+              position: "absolute",
+              bottom: 70,
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: pressed ? theme.accentLight : theme.accent,
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+            })}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              setVoiceMode(true);
+            }}
+          >
+            <AppSymbol name="mic.fill" size={24} color={theme.textInverse} />
+          </Pressable>
+          {/* Keyboard hint */}
           <Pressable
             style={{
               position: "absolute",
