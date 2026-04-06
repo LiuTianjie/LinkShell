@@ -1584,7 +1584,9 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
                   overflow: "hidden",
                   borderWidth: isActive ? 2 : 0,
                   borderColor: isActive ? theme.accent : "transparent",
-                  backgroundColor: pressed ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+                  backgroundColor: pressed
+                    ? (theme.mode === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)")
+                    : (theme.mode === "light" ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.04)"),
                 })}
               >
                 <View style={{ height: 120, backgroundColor: theme.bgTerminal, justifyContent: "center", alignItems: "center" }}>
@@ -1600,7 +1602,9 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
                       width: 22,
                       height: 22,
                       borderRadius: 11,
-                      backgroundColor: pressed ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.1)",
+                      backgroundColor: pressed
+                        ? (theme.mode === "light" ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.2)")
+                        : (theme.mode === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.1)"),
                       alignItems: "center",
                       justifyContent: "center",
                     })}
