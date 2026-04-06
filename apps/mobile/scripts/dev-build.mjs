@@ -15,7 +15,8 @@ if (args.includes("--help") || args.includes("-h")) {
   process.exit(0);
 }
 
-const requestedPlatform = args[0] && !args[0].startsWith("-") ? args[0] : defaultPlatform();
+const requestedPlatform =
+  args[0] && !args[0].startsWith("-") ? args[0] : defaultPlatform();
 const passthroughArgs = args[0] === requestedPlatform ? args.slice(1) : args;
 const installOnly = passthroughArgs.includes("--install-only");
 const runArgs = passthroughArgs.filter((arg) => arg !== "--install-only");
@@ -32,8 +33,14 @@ if (requestedPlatform === "ios" && hostPlatform() !== "darwin") {
 }
 
 await runStep("Generate terminal HTML", ["pnpm", ["prebuild-terminal"]]);
-await runStep(`Prebuild native ${requestedPlatform} project`, ["pnpm", ["exec", "expo", "prebuild", "-p", requestedPlatform]]);
-await runStep(`Install ${requestedPlatform} development build`, ["pnpm", ["exec", "expo", `run:${requestedPlatform}`, "--no-bundler", ...runArgs]]);
+await runStep(`Prebuild native ${requestedPlatform} project`, [
+  "pnpm",
+  ["exec", "expo", "prebuild", "-p", requestedPlatform],
+]);
+await runStep(`Install ${requestedPlatform} development build`, [
+  "pnpm",
+  ["exec", "expo", `run:${requestedPlatform}`, "--no-bundler", ...runArgs],
+]);
 
 if (!installOnly) {
   await runStep("Start Metro for Expo dev client", ["pnpm", ["start"]]);

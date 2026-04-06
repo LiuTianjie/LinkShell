@@ -5,8 +5,8 @@
   "packageManager": "pnpm@10.18.3",
   "pnpm": {
     "onlyBuiltDependencies": [
-      "node-pty",
-      "esbuild"
+      "esbuild",
+      "node-pty"
     ]
   },
   "scripts": {

@@ -12,7 +12,7 @@ import { AppSymbol } from "./AppSymbol";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import type { Theme } from "../theme";
 
-const VOICE_PANEL_HEIGHT = 120;
+const VOICE_PANEL_HEIGHT = 180;
 const LOCALES = ["en-US", "zh-CN"] as const;
 const LOCALE_LABELS: Record<string, string> = {
   "en-US": "EN",
@@ -113,9 +113,13 @@ export function VoiceInputPanel({
         paddingVertical: 10,
       }}
     >
-      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <View
+        style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 12 }}
+      >
         {/* Pulse indicator */}
-        <View style={{ alignItems: "center", justifyContent: "center", width: 40 }}>
+        <View
+          style={{ alignItems: "center", justifyContent: "center", width: 40 }}
+        >
           <Animated.View
             style={{
               width: 24,
@@ -135,22 +139,35 @@ export function VoiceInputPanel({
         </View>
 
         {/* Text display */}
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minHeight: 160 }}>
           <Text
             style={{
               fontSize: 15,
               color: displayText ? theme.text : theme.textTertiary,
               fontFamily: "Menlo",
+              lineHeight: 22,
             }}
             numberOfLines={3}
           >
-            {displayText || (error ? `Error: ${error}` : isListening ? "正在听..." : "准备中...")}
+            {displayText ||
+              (error
+                ? `Error: ${error}`
+                : isListening
+                  ? "正在听..."
+                  : "准备中...")}
           </Text>
         </View>
       </View>
 
       {/* Bottom buttons */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 6 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          paddingTop: 6,
+        }}
+      >
         {/* Locale toggle */}
         <Pressable
           style={({ pressed }) => ({
@@ -164,7 +181,9 @@ export function VoiceInputPanel({
           })}
           onPress={handleLocaleToggle}
         >
-          <Text style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}>
+          <Text
+            style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}
+          >
             {LOCALE_LABELS[locale]}
           </Text>
         </Pressable>
@@ -184,7 +203,13 @@ export function VoiceInputPanel({
           })}
           onPress={handleCancel}
         >
-          <Text style={{ fontSize: 13, fontWeight: "600", color: theme.textSecondary }}>
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: "600",
+              color: theme.textSecondary,
+            }}
+          >
             取消
           </Text>
         </Pressable>
@@ -197,7 +222,9 @@ export function VoiceInputPanel({
             borderRadius: 8,
             borderCurve: "continuous",
             backgroundColor: sendableText
-              ? pressed ? theme.accentLight : theme.accent
+              ? pressed
+                ? theme.accentLight
+                : theme.accent
               : theme.bgCard,
             borderWidth: StyleSheet.hairlineWidth,
             borderColor: sendableText ? theme.accent : theme.separator,

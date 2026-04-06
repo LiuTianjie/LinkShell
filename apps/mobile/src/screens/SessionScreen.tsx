@@ -66,10 +66,23 @@ interface SessionScreenProps {
   controllerId: string | null;
   connectionDetail: string | null;
   terminalStream: TerminalStream;
-  screenStatus: { active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string };
-  screenFrame: { data: string; width: number; height: number; frameId: number } | null;
+  screenStatus: {
+    active: boolean;
+    mode: "webrtc" | "fallback" | "off";
+    error?: string;
+  };
+  screenFrame: {
+    data: string;
+    width: number;
+    height: number;
+    frameId: number;
+  } | null;
   pendingOffer: { sdp: string } | null;
-  pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
+  pendingIceCandidates: {
+    candidate: string;
+    sdpMid?: string | null;
+    sdpMLineIndex?: number | null;
+  }[];
   onSendInput: (data: string) => void;
   onSendImage: (base64Data: string, filename: string) => void;
   onSendResize: (cols: number, rows: number) => void;
@@ -132,7 +145,9 @@ export function SessionScreen({
   const { height: windowHeight } = useWindowDimensions();
   const { theme } = useTheme();
   const termRef = useRef<TerminalViewHandle>(null);
-  const termRefsMap = useRef(new Map<string, React.RefObject<TerminalViewHandle | null>>());
+  const termRefsMap = useRef(
+    new Map<string, React.RefObject<TerminalViewHandle | null>>(),
+  );
 
   // Helper: get or create a ref for a terminal
   const getTermRef = useCallback((terminalId: string) => {
@@ -145,7 +160,9 @@ export function SessionScreen({
   }, []);
 
   // Keep termRef synced to active terminal's ref (so existing zoom/refit/focus code works)
-  const activeTermRef = activeTerminalId ? termRefsMap.current.get(activeTerminalId) : null;
+  const activeTermRef = activeTerminalId
+    ? termRefsMap.current.get(activeTerminalId)
+    : null;
   if (activeTermRef) {
     (termRef as any).current = activeTermRef.current;
   }
@@ -153,7 +170,9 @@ export function SessionScreen({
   const [keyboardHintVisible, setKeyboardHintVisible] = useState(true);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [keyboardInset, setKeyboardInset] = useState(0);
-  const [activeTab, setActiveTab] = useState<"terminal" | "desktop">("terminal");
+  const [activeTab, setActiveTab] = useState<"terminal" | "desktop">(
+    "terminal",
+  );
   const [showTerminalGrid, setShowTerminalGrid] = useState(false);
 
   const keyboardVisible = keyboardInset > 0;
@@ -171,7 +190,9 @@ export function SessionScreen({
   }, [onStopScreen]);
 
   const hasControl = controllerId === deviceId;
-  const isControlledByOther = Boolean(controllerId && controllerId !== deviceId);
+  const isControlledByOther = Boolean(
+    controllerId && controllerId !== deviceId,
+  );
   const inputDisabled =
     !hasControl ||
     status === "reconnecting" ||
@@ -183,42 +204,54 @@ export function SessionScreen({
     lastResizeRef.current = null;
   }, [sessionId]);
 
-  const ctrlDRef = useRef<{ count: number; timer: ReturnType<typeof setTimeout> | null }>({ count: 0, timer: null });
+  const ctrlDRef = useRef<{
+    count: number;
+    timer: ReturnType<typeof setTimeout> | null;
+  }>({ count: 0, timer: null });
 
-  const handleTerminalInput = useCallback((data: string) => {
-    // Ctrl+D safety: block if pressed more than 2 times within 1s
-    if (data === "\u0004") {
-      const cd = ctrlDRef.current;
-      cd.count++;
-      if (cd.timer) clearTimeout(cd.timer);
-      cd.timer = setTimeout(() => { cd.count = 0; }, 1000);
-      if (cd.count > 2) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        return;
+  const handleTerminalInput = useCallback(
+    (data: string) => {
+      // Ctrl+D safety: block if pressed more than 2 times within 1s
+      if (data === "\u0004") {
+        const cd = ctrlDRef.current;
+        cd.count++;
+        if (cd.timer) clearTimeout(cd.timer);
+        cd.timer = setTimeout(() => {
+          cd.count = 0;
+        }, 1000);
+        if (cd.count > 2) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          return;
+        }
       }
-    }
-    onSendInput(data);
-  }, [onSendInput]);
+      onSendInput(data);
+    },
+    [onSendInput],
+  );
 
-  const handlePickImage = useCallback(async (source: "library" | "camera") => {
-    const picker = source === "camera"
-      ? ImagePicker.launchCameraAsync
-      : ImagePicker.launchImageLibraryAsync;
-    try {
-      const result = await picker({
-        mediaTypes: ["images"],
-        base64: true,
-        quality: 0.8,
-      });
-      if (result.canceled || !result.assets?.[0]?.base64) return;
-      const asset = result.assets[0]!;
-      const ext = asset.uri.split(".").pop() || "png";
-      onSendImage(asset.base64!, `image.${ext}`);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    }
-  }, [onSendImage]);
+  const handlePickImage = useCallback(
+    async (source: "library" | "camera") => {
+      const picker =
+        source === "camera"
+          ? ImagePicker.launchCameraAsync
+          : ImagePicker.launchImageLibraryAsync;
+      try {
+        const result = await picker({
+          mediaTypes: ["images"],
+          base64: true,
+          quality: 0.8,
+        });
+        if (result.canceled || !result.assets?.[0]?.base64) return;
+        const asset = result.assets[0]!;
+        const ext = asset.uri.split(".").pop() || "png";
+        onSendImage(asset.base64!, `image.${ext}`);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
+    },
+    [onSendImage],
+  );
 
   const showImagePicker = useCallback(() => {
     if (Platform.OS === "ios") {
@@ -238,24 +271,34 @@ export function SessionScreen({
     }
   }, [handlePickImage]);
 
-  const handleTerminalResize = useCallback((cols: number, rows: number) => {
-    if (
-      lastResizeRef.current &&
-      lastResizeRef.current.cols === cols &&
-      lastResizeRef.current.rows === rows
-    ) {
-      return;
-    }
-    lastResizeRef.current = { cols, rows };
-    onSendResize(cols, rows);
-  }, [onSendResize]);
+  const handleTerminalResize = useCallback(
+    (cols: number, rows: number) => {
+      if (
+        lastResizeRef.current &&
+        lastResizeRef.current.cols === cols &&
+        lastResizeRef.current.rows === rows
+      ) {
+        return;
+      }
+      lastResizeRef.current = { cols, rows };
+      onSendResize(cols, rows);
+    },
+    [onSendResize],
+  );
 
-  const handleTerminalLayout = useCallback((event: LayoutChangeEvent) => {
-    if (event.nativeEvent.layout.height <= 0 || event.nativeEvent.layout.width <= 0) return;
-    requestAnimationFrame(() => {
-      termRef.current?.refit(keyboardVisible);
-    });
-  }, [keyboardVisible]);
+  const handleTerminalLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      if (
+        event.nativeEvent.layout.height <= 0 ||
+        event.nativeEvent.layout.width <= 0
+      )
+        return;
+      requestAnimationFrame(() => {
+        termRef.current?.refit(keyboardVisible);
+      });
+    },
+    [keyboardVisible],
+  );
 
   const focusTerminalInput = useCallback(() => {
     if (inputDisabled) return;
@@ -304,9 +347,10 @@ export function SessionScreen({
         Keyboard.scheduleLayoutAnimation(event);
       }
 
-      const nextInset = Platform.OS === "ios"
-        ? Math.max(0, windowHeight - event.endCoordinates.screenY)
-        : Math.max(0, event.endCoordinates.height);
+      const nextInset =
+        Platform.OS === "ios"
+          ? Math.max(0, windowHeight - event.endCoordinates.screenY)
+          : Math.max(0, event.endCoordinates.height);
 
       setKeyboardInset(nextInset);
     };
@@ -319,8 +363,14 @@ export function SessionScreen({
     };
 
     if (Platform.OS === "ios") {
-      const frameSub = Keyboard.addListener("keyboardWillChangeFrame", applyKeyboardFrame);
-      const hideSub = Keyboard.addListener("keyboardWillHide", clearKeyboardFrame);
+      const frameSub = Keyboard.addListener(
+        "keyboardWillChangeFrame",
+        applyKeyboardFrame,
+      );
+      const hideSub = Keyboard.addListener(
+        "keyboardWillHide",
+        clearKeyboardFrame,
+      );
 
       return () => {
         frameSub.remove();
@@ -360,97 +410,39 @@ export function SessionScreen({
   }, [activeTerminalId]);
 
   const banner = getSessionBanner(status);
-  const showReconnectButton = status === "disconnected" || (status.startsWith("error:") && Boolean(sessionId));
+  const showReconnectButton =
+    status === "disconnected" ||
+    (status.startsWith("error:") && Boolean(sessionId));
 
   const isConnecting = status === "connecting" || status === "claiming";
   const isHostOffline = status === "host_disconnected";
   const isErrorState = status === "disconnected" || status.startsWith("error:");
   const showFullOverlay = isConnecting || isHostOffline || isErrorState;
 
-  const toolbarBg = theme.mode === "light" ? "#e5e5ea" : "rgba(255,255,255,0.1)";
+  const toolbarBg =
+    theme.mode === "light" ? "#e5e5ea" : "rgba(255,255,255,0.1)";
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
-      <View style={{ height: insets.top, backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated }} />
-
-      {sessionTabs && sessionTabs.length > 1 ? (
-        <SessionTabBar
-          tabs={sessionTabs}
-          activeTabId={activeTabId ?? sessionId}
-          onSwitch={onSwitchSession}
-          onClose={onCloseSession}
-          theme={theme}
-        />
-      ) : null}
-
-      {terminalTabs && terminalTabs.length > 0 ? null : null}
-
-      <SessionHeader
-        activeTab={activeTab}
-        hasControl={hasControl}
-        isControlledByOther={isControlledByOther}
-        onClaimControl={onClaimControl}
-        onLeave={handleLeave}
-        onReleaseControl={onReleaseControl}
-        onSwitchDesktop={switchToDesktop}
-        onSwitchTerminal={switchToTerminal}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onZoomReset={handleZoomReset}
-        sessionId={sessionId}
-        status={status}
-        theme={theme}
-        toolbarBg={toolbarBg}
-        zoomPercent={zoomPercent}
-        terminalCount={terminalTabs?.filter((t) => t.status === "running").length ?? 0}
-        activeTerminalLabel={terminalTabs?.find((t) => t.terminalId === activeTerminalId)?.label}
-        onShowTerminalGrid={() => { Keyboard.dismiss(); setShowTerminalGrid(true); }}
-      />
-
-      {banner ? (
-        <View style={{
-          paddingHorizontal: 16,
-          paddingVertical: 8,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          backgroundColor: banner.tone === "error" ? theme.errorLight : theme.accentLight,
-        }}>
-          <Text style={{ fontSize: 13, fontWeight: "500", color: banner.tone === "error" ? theme.error : theme.accent, flex: 1 }}>
-            {banner.text}
-          </Text>
-          {showReconnectButton ? (
-            <Pressable
-              style={({ pressed }) => ({
-                borderRadius: 6,
-                borderCurve: "continuous" as const,
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                marginLeft: 8,
-                backgroundColor: pressed ? "rgba(128,128,128,0.2)" : theme.bgCard,
-              })}
-              onPress={onReconnect}
-            >
-              <Text style={{ fontSize: 13, fontWeight: "600", color: theme.accent }}>重试</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
-
-      {connectionDetail && !banner ? (
-        <View style={{ backgroundColor: theme.mode === "light" ? theme.bgCard : theme.bgElevated, paddingHorizontal: 16, paddingVertical: 4 }}>
-          <Text style={{ fontSize: 11, color: theme.textTertiary }}>{connectionDetail}</Text>
-        </View>
-      ) : null}
-
+      {/* Terminal content — fills entire area, scrolls behind header */}
       <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
-        <View style={{ flex: 1, position: "relative", backgroundColor: theme.bgTerminal }}>
+        <View
+          style={{
+            flex: 1,
+            position: "relative",
+            backgroundColor: theme.bgTerminal,
+          }}
+        >
           <View
             pointerEvents={activeTab === "terminal" ? "auto" : "none"}
-            style={[StyleSheet.absoluteFillObject, { opacity: activeTab === "terminal" ? 1 : 0 }]}
+            style={[
+              StyleSheet.absoluteFillObject,
+              { opacity: activeTab === "terminal" ? 1 : 0 },
+            ]}
           >
             <TerminalStage
               bottomInset={stageBottomInset}
+              headerPadding={insets.top + 70}
               keyboardUp={keyboardVisible}
               inputDisabled={inputDisabled}
               keyboardHintVisible={keyboardHintVisible && !keyboardVisible}
@@ -470,7 +462,13 @@ export function SessionScreen({
 
           <View
             pointerEvents={activeTab === "desktop" ? "auto" : "none"}
-            style={[StyleSheet.absoluteFillObject, { bottom: stageBottomInset, opacity: activeTab === "desktop" ? 1 : 0 }]}
+            style={[
+              StyleSheet.absoluteFillObject,
+              {
+                bottom: stageBottomInset,
+                opacity: activeTab === "desktop" ? 1 : 0,
+              },
+            ]}
           >
             <DesktopStage
               error={screenStatus.error}
@@ -502,13 +500,143 @@ export function SessionScreen({
         </View>
       </View>
 
+      {/* Top overlay — over scrolling content */}
+      <View
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+        }}
+      >
+        <View
+          style={{
+            height: insets.top,
+            backgroundColor:
+              theme.mode === "light" ? theme.bgCard : theme.bgElevated,
+          }}
+        />
+
+        {sessionTabs && sessionTabs.length > 1 ? (
+          <SessionTabBar
+            tabs={sessionTabs}
+            activeTabId={activeTabId ?? sessionId}
+            onSwitch={onSwitchSession}
+            onClose={onCloseSession}
+            theme={theme}
+          />
+        ) : null}
+
+        {terminalTabs && terminalTabs.length > 0 ? null : null}
+
+        <SessionHeader
+          activeTab={activeTab}
+          hasControl={hasControl}
+          isControlledByOther={isControlledByOther}
+          onClaimControl={onClaimControl}
+          onLeave={handleLeave}
+          onReleaseControl={onReleaseControl}
+          onSwitchDesktop={switchToDesktop}
+          onSwitchTerminal={switchToTerminal}
+          onZoomIn={handleZoomIn}
+          onZoomOut={handleZoomOut}
+          onZoomReset={handleZoomReset}
+          sessionId={sessionId}
+          status={status}
+          theme={theme}
+          toolbarBg={toolbarBg}
+          zoomPercent={zoomPercent}
+          terminalCount={
+            terminalTabs?.filter((t) => t.status === "running").length ?? 0
+          }
+          activeTerminalLabel={
+            terminalTabs?.find((t) => t.terminalId === activeTerminalId)?.label
+          }
+          onShowTerminalGrid={() => {
+            Keyboard.dismiss();
+            setShowTerminalGrid(true);
+          }}
+        />
+
+        {banner ? (
+          <View
+            style={{
+              paddingHorizontal: 16,
+              paddingVertical: 8,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              backgroundColor:
+                banner.tone === "error" ? theme.errorLight : theme.accentLight,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: "500",
+                color: banner.tone === "error" ? theme.error : theme.accent,
+                flex: 1,
+              }}
+            >
+              {banner.text}
+            </Text>
+            {showReconnectButton ? (
+              <Pressable
+                style={({ pressed }) => ({
+                  borderRadius: 6,
+                  borderCurve: "continuous" as const,
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  marginLeft: 8,
+                  backgroundColor: pressed
+                    ? "rgba(128,128,128,0.2)"
+                    : theme.bgCard,
+                })}
+                onPress={onReconnect}
+              >
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontWeight: "600",
+                    color: theme.accent,
+                  }}
+                >
+                  重试
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        {connectionDetail && !banner ? (
+          <View
+            style={{
+              backgroundColor:
+                theme.mode === "light" ? theme.bgCard : theme.bgElevated,
+              paddingHorizontal: 16,
+              paddingVertical: 4,
+            }}
+          >
+            <Text style={{ fontSize: 11, color: theme.textTertiary }}>
+              {connectionDetail}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
       {showTerminalGrid ? (
         <TerminalGridOverlay
           terminalTabs={terminalTabs ?? []}
           activeTerminalId={activeTerminalId}
           terminals={terminals}
-          onSwitch={(tid) => { onSwitchTerminal?.(tid); setShowTerminalGrid(false); }}
-          onAdd={() => { setShowTerminalGrid(false); onAddTerminal?.(); }}
+          onSwitch={(tid) => {
+            onSwitchTerminal?.(tid);
+            setShowTerminalGrid(false);
+          }}
+          onAdd={() => {
+            setShowTerminalGrid(false);
+            onAddTerminal?.();
+          }}
           onClose={() => setShowTerminalGrid(false)}
           onKillTerminal={onKillTerminal}
           onRemoveTerminal={onRemoveTerminal}
@@ -563,47 +691,84 @@ const SessionHeader = memo(function SessionHeader({
 }) {
   // Extract folder name from activeTerminalLabel (last path segment)
   const folderName = activeTerminalLabel
-    ? activeTerminalLabel.split("/").filter(Boolean).pop() || activeTerminalLabel
+    ? activeTerminalLabel.split("/").filter(Boolean).pop() ||
+      activeTerminalLabel
     : sessionId.slice(0, 8);
 
   // Derive status display
   const statusConfig = (() => {
-    if (status === "connected") return { color: "#4ade80", bg: "rgba(74,222,128,0.12)", text: "已连接" };
-    if (status === "reconnecting" || status === "connecting" || status === "claiming") return { color: "#facc15", bg: "rgba(250,204,21,0.12)", text: "连接中" };
-    if (status === "host_disconnected") return { color: "#facc15", bg: "rgba(250,204,21,0.12)", text: "主机离线" };
+    if (status === "connected")
+      return { color: "#4ade80", bg: "rgba(74,222,128,0.12)", text: "已连接" };
+    if (
+      status === "reconnecting" ||
+      status === "connecting" ||
+      status === "claiming"
+    )
+      return { color: "#facc15", bg: "rgba(250,204,21,0.12)", text: "连接中" };
+    if (status === "host_disconnected")
+      return {
+        color: "#facc15",
+        bg: "rgba(250,204,21,0.12)",
+        text: "主机离线",
+      };
     return { color: "#f87171", bg: "rgba(248,113,113,0.12)", text: "已断开" };
   })();
 
   return (
-    <GlassBar
-      blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
-      fallbackColor={theme.mode === "light" ? theme.bgCard : theme.bgElevated}
+    <View
       style={{
         paddingHorizontal: 12,
-        paddingTop: 4,
-        paddingBottom: 4,
+        paddingBottom: 12,
         gap: 4,
+        backgroundColor:
+          theme.mode === "light" ? theme.bgCard : theme.bgElevated,
       }}
     >
       {/* Row 1: status pill + folder name + exit */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         {/* Status pill */}
-        <View style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 4,
-          paddingHorizontal: 7,
-          paddingVertical: 3,
-          borderRadius: 10,
-          borderCurve: "continuous" as const,
-          backgroundColor: statusConfig.bg,
-        }}>
-          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusConfig.color }} />
-          <Text style={{ fontSize: 10, fontWeight: "600", color: statusConfig.color }}>{statusConfig.text}</Text>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            paddingHorizontal: 7,
+            paddingVertical: 3,
+            borderRadius: 10,
+            borderCurve: "continuous" as const,
+            backgroundColor: statusConfig.bg,
+          }}
+        >
+          <View
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 3,
+              backgroundColor: statusConfig.color,
+            }}
+          />
+          <Text
+            style={{
+              fontSize: 10,
+              fontWeight: "600",
+              color: statusConfig.color,
+            }}
+          >
+            {statusConfig.text}
+          </Text>
         </View>
 
         {/* Folder name */}
-        <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: theme.text }} numberOfLines={1} ellipsizeMode="middle">
+        <Text
+          style={{
+            flex: 1,
+            fontSize: 13,
+            fontWeight: "600",
+            color: theme.text,
+          }}
+          numberOfLines={1}
+          ellipsizeMode="middle"
+        >
           {folderName}
         </Text>
 
@@ -617,13 +782,17 @@ const SessionHeader = memo(function SessionHeader({
             paddingVertical: 4,
             borderRadius: 10,
             borderCurve: "continuous" as const,
-            backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
+            backgroundColor: pressed
+              ? "rgba(255,59,48,0.2)"
+              : "rgba(255,59,48,0.12)",
           })}
           onPress={onLeave}
           hitSlop={8}
         >
           <AppSymbol name="xmark.circle.fill" size={12} color={theme.error} />
-          <Text style={{ fontSize: 11, fontWeight: "600", color: theme.error }}>退出</Text>
+          <Text style={{ fontSize: 11, fontWeight: "600", color: theme.error }}>
+            退出
+          </Text>
         </Pressable>
       </View>
 
@@ -640,8 +809,12 @@ const SessionHeader = memo(function SessionHeader({
             borderRadius: 10,
             borderCurve: "continuous" as const,
             backgroundColor: hasControl
-              ? (pressed ? theme.accent : theme.accentLight)
-              : (pressed ? toolbarBg : "transparent"),
+              ? pressed
+                ? theme.accent
+                : theme.accentLight
+              : pressed
+                ? toolbarBg
+                : "transparent",
           })}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -654,33 +827,52 @@ const SessionHeader = memo(function SessionHeader({
             size={12}
             color={hasControl ? theme.accent : theme.textSecondary}
           />
-          <Text style={{ fontSize: 11, fontWeight: "500", color: hasControl ? theme.accent : theme.textSecondary }}>
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: "500",
+              color: hasControl ? theme.accent : theme.textSecondary,
+            }}
+          >
             {hasControl ? "释放" : "接管"}
           </Text>
         </Pressable>
 
         {/* Terminal/Desktop icon switcher */}
-        <View style={{
-          flexDirection: "row",
-          alignItems: "center",
-          borderRadius: 8,
-          borderCurve: "continuous" as const,
-          backgroundColor: toolbarBg,
-          overflow: "hidden",
-        }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            borderRadius: 8,
+            borderCurve: "continuous" as const,
+            backgroundColor: toolbarBg,
+            overflow: "hidden",
+          }}
+        >
           <Pressable
             style={({ pressed }) => ({
               width: 34,
               height: 26,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: activeTab === "terminal"
-                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
-                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
+              backgroundColor:
+                activeTab === "terminal"
+                  ? theme.mode === "light"
+                    ? "rgba(255,255,255,0.9)"
+                    : "rgba(255,255,255,0.08)"
+                  : pressed
+                    ? "rgba(128,128,128,0.2)"
+                    : "transparent",
             })}
             onPress={onSwitchTerminal}
           >
-            <AppSymbol name="terminal.fill" size={14} color={activeTab === "terminal" ? theme.accent : theme.textTertiary} />
+            <AppSymbol
+              name="terminal.fill"
+              size={14}
+              color={
+                activeTab === "terminal" ? theme.accent : theme.textTertiary
+              }
+            />
           </Pressable>
           <Pressable
             style={({ pressed }) => ({
@@ -688,38 +880,57 @@ const SessionHeader = memo(function SessionHeader({
               height: 26,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: activeTab === "desktop"
-                ? theme.mode === "light" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.08)"
-                : (pressed ? "rgba(128,128,128,0.2)" : "transparent"),
+              backgroundColor:
+                activeTab === "desktop"
+                  ? theme.mode === "light"
+                    ? "rgba(255,255,255,0.9)"
+                    : "rgba(255,255,255,0.08)"
+                  : pressed
+                    ? "rgba(128,128,128,0.2)"
+                    : "transparent",
             })}
             onPress={onSwitchDesktop}
           >
-            <AppSymbol name="rectangle.on.rectangle" size={14} color={activeTab === "desktop" ? theme.accent : theme.textTertiary} />
+            <AppSymbol
+              name="rectangle.on.rectangle"
+              size={14}
+              color={
+                activeTab === "desktop" ? theme.accent : theme.textTertiary
+              }
+            />
           </Pressable>
         </View>
 
         <View style={{ flex: 1 }} />
 
         {/* Zoom controls */}
-        <View style={{
-          flexDirection: "row",
-          alignItems: "center",
-          borderRadius: 7,
-          borderCurve: "continuous" as const,
-          backgroundColor: toolbarBg,
-          overflow: "hidden",
-        }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            borderRadius: 7,
+            borderCurve: "continuous" as const,
+            backgroundColor: toolbarBg,
+            overflow: "hidden",
+          }}
+        >
           <Pressable
             style={({ pressed }) => ({
               width: 28,
               height: 26,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
+              backgroundColor: pressed
+                ? "rgba(128,128,128,0.2)"
+                : "transparent",
             })}
             onPress={onZoomOut}
           >
-            <AppSymbol name="textformat.size.smaller" size={12} color={theme.textSecondary} />
+            <AppSymbol
+              name="textformat.size.smaller"
+              size={12}
+              color={theme.textSecondary}
+            />
           </Pressable>
           <Pressable
             style={({ pressed }) => ({
@@ -728,11 +939,22 @@ const SessionHeader = memo(function SessionHeader({
               alignItems: "center",
               justifyContent: "center",
               paddingHorizontal: 3,
-              backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
+              backgroundColor: pressed
+                ? "rgba(128,128,128,0.2)"
+                : "transparent",
             })}
             onPress={onZoomReset}
           >
-            <Text style={{ fontSize: 10, fontWeight: "600", color: theme.accent, fontVariant: ["tabular-nums"] }}>{zoomPercent}%</Text>
+            <Text
+              style={{
+                fontSize: 10,
+                fontWeight: "600",
+                color: theme.accent,
+                fontVariant: ["tabular-nums"],
+              }}
+            >
+              {zoomPercent}%
+            </Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => ({
@@ -740,11 +962,17 @@ const SessionHeader = memo(function SessionHeader({
               height: 26,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: pressed ? "rgba(128,128,128,0.2)" : "transparent",
+              backgroundColor: pressed
+                ? "rgba(128,128,128,0.2)"
+                : "transparent",
             })}
             onPress={onZoomIn}
           >
-            <AppSymbol name="textformat.size.larger" size={12} color={theme.textSecondary} />
+            <AppSymbol
+              name="textformat.size.larger"
+              size={12}
+              color={theme.textSecondary}
+            />
           </Pressable>
         </View>
 
@@ -765,12 +993,25 @@ const SessionHeader = memo(function SessionHeader({
               gap: 5,
             })}
           >
-            <Text style={{ fontSize: 11, fontWeight: "700", color: theme.textSecondary, fontVariant: ["tabular-nums"] }}>{terminalCount}</Text>
-            <AppSymbol name="square.grid.2x2" size={12} color={theme.textSecondary} />
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: "700",
+                color: theme.textSecondary,
+                fontVariant: ["tabular-nums"],
+              }}
+            >
+              {terminalCount}
+            </Text>
+            <AppSymbol
+              name="square.grid.2x2"
+              size={12}
+              color={theme.textSecondary}
+            />
           </Pressable>
         ) : null}
       </View>
-    </GlassBar>
+    </View>
   );
 });
 
@@ -797,8 +1038,12 @@ const VoiceBar = memo(function VoiceBar({
   const editTextRef = useRef("");
   const selectionRef = useRef(0); // cursor position
 
-  useEffect(() => { partialRef.current = partialText; }, [partialText]);
-  useEffect(() => { finalRef.current = finalText; }, [finalText]);
+  useEffect(() => {
+    partialRef.current = partialText;
+  }, [partialText]);
+  useEffect(() => {
+    finalRef.current = finalText;
+  }, [finalText]);
 
   const updateEditText = (text: string) => {
     editTextRef.current = text;
@@ -836,8 +1081,17 @@ const VoiceBar = memo(function VoiceBar({
             const before = prev.slice(0, pos);
             const after = prev.slice(pos);
             const insert = captured.trim();
-            const combined = before + (before && !before.endsWith(" ") ? " " : "") + insert + (after && !after.startsWith(" ") ? " " : "") + after;
-            const newPos = (before + (before && !before.endsWith(" ") ? " " : "") + insert).length;
+            const combined =
+              before +
+              (before && !before.endsWith(" ") ? " " : "") +
+              insert +
+              (after && !after.startsWith(" ") ? " " : "") +
+              after;
+            const newPos = (
+              before +
+              (before && !before.endsWith(" ") ? " " : "") +
+              insert
+            ).length;
             updateEditText(combined);
             selectionRef.current = newPos;
             setEditing(true);
@@ -849,7 +1103,7 @@ const VoiceBar = memo(function VoiceBar({
         setInCancelZone(false);
         cancel();
       },
-    })
+    }),
   ).current;
 
   const handleConfirm = () => {
@@ -866,14 +1120,18 @@ const VoiceBar = memo(function VoiceBar({
     cancel();
   };
 
-  const liveText = pressing ? (partialText || "正在听...") : "";
+  const liveText = pressing ? partialText || "正在听..." : "";
 
   return (
     <>
       {/* Floating overlay — shown while pressing or editing */}
-      {(pressing || editing) ? (
+      {pressing || editing ? (
         <GlassBar
-          blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+          blurTint={
+            theme.mode === "dark"
+              ? "systemThinMaterialDark"
+              : "systemThinMaterialLight"
+          }
           fallbackColor={theme.bgElevated}
           style={{
             position: "absolute",
@@ -899,12 +1157,21 @@ const VoiceBar = memo(function VoiceBar({
                 }}
                 value={editText}
                 onChangeText={updateEditText}
-                onSelectionChange={(e) => { selectionRef.current = e.nativeEvent.selection.end; }}
+                onSelectionChange={(e) => {
+                  selectionRef.current = e.nativeEvent.selection.end;
+                }}
                 multiline
                 autoFocus
                 placeholderTextColor={theme.textTertiary}
               />
-              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                  marginTop: 8,
+                }}
+              >
                 <Pressable
                   style={({ pressed }) => ({
                     paddingHorizontal: 14,
@@ -915,7 +1182,15 @@ const VoiceBar = memo(function VoiceBar({
                   })}
                   onPress={handleCancel}
                 >
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: theme.textSecondary }}>取消</Text>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "600",
+                      color: theme.textSecondary,
+                    }}
+                  >
+                    取消
+                  </Text>
                 </Pressable>
                 <Pressable
                   style={({ pressed }) => ({
@@ -924,43 +1199,72 @@ const VoiceBar = memo(function VoiceBar({
                     borderRadius: 8,
                     borderCurve: "continuous",
                     backgroundColor: editText.trim()
-                      ? pressed ? theme.accentLight : theme.accent
+                      ? pressed
+                        ? theme.accentLight
+                        : theme.accent
                       : theme.bgCard,
                   })}
                   onPress={handleConfirm}
                   disabled={!editText.trim()}
                 >
-                  <Text style={{
-                    fontSize: 13,
-                    fontWeight: "600",
-                    color: editText.trim() ? theme.textInverse : theme.textTertiary,
-                  }}>确认</Text>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "600",
+                      color: editText.trim()
+                        ? theme.textInverse
+                        : theme.textTertiary,
+                    }}
+                  >
+                    确认
+                  </Text>
                 </Pressable>
               </View>
             </>
           ) : (
             <>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: theme.error,
-                }} />
-                <Text
-                  style={{ flex: 1, fontSize: 15, color: theme.text, fontFamily: "Menlo" }}
-                  numberOfLines={3}
+              <View
+                style={{
+                  minHeight: 64,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
                 >
-                  {liveText}
-                </Text>
+                  <View
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: theme.error,
+                    }}
+                  />
+                  <Text
+                    style={{
+                      flex: 1,
+                      fontSize: 15,
+                      color: theme.text,
+                      fontFamily: "Menlo",
+                    }}
+                    numberOfLines={3}
+                  >
+                    {liveText}
+                  </Text>
+                </View>
               </View>
               {/* Cancel hint */}
               <View style={{ alignItems: "center", marginTop: 8 }}>
-                <Text style={{
-                  fontSize: 12,
-                  color: inCancelZone ? theme.error : theme.textTertiary,
-                  fontWeight: inCancelZone ? "600" : "400",
-                }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: inCancelZone ? theme.error : theme.textTertiary,
+                    fontWeight: inCancelZone ? "600" : "400",
+                  }}
+                >
                   {inCancelZone ? "松开取消" : "↑ 上滑取消"}
                 </Text>
               </View>
@@ -991,7 +1295,9 @@ const VoiceBar = memo(function VoiceBar({
             borderRadius: 6,
             borderCurve: "continuous",
             backgroundColor: pressing
-              ? inCancelZone ? theme.errorLight : theme.accent
+              ? inCancelZone
+                ? theme.errorLight
+                : theme.accent
               : theme.bgElevated,
             alignItems: "center",
             justifyContent: "center",
@@ -1022,6 +1328,7 @@ const VoiceBar = memo(function VoiceBar({
 
 const TerminalStage = memo(function TerminalStage({
   bottomInset,
+  headerPadding,
   keyboardUp,
   inputDisabled,
   keyboardHintVisible,
@@ -1038,6 +1345,7 @@ const TerminalStage = memo(function TerminalStage({
   getTermRef,
 }: {
   bottomInset: number;
+  headerPadding?: number;
   keyboardUp: boolean;
   inputDisabled: boolean;
   keyboardHintVisible: boolean;
@@ -1051,7 +1359,9 @@ const TerminalStage = memo(function TerminalStage({
   theme: Theme;
   terminals?: Map<string, TerminalInfo>;
   activeTerminalId?: string | null;
-  getTermRef?: (terminalId: string) => React.RefObject<TerminalViewHandle | null>;
+  getTermRef?: (
+    terminalId: string,
+  ) => React.RefObject<TerminalViewHandle | null>;
 }) {
   const showShortcutBar = !inputDisabled;
   const showVoiceBar = !inputDisabled;
@@ -1059,37 +1369,58 @@ const TerminalStage = memo(function TerminalStage({
   const ctrlRef = useRef(false);
   ctrlRef.current = ctrlActive;
 
-  const handleInput = useCallback((data: string) => {
-    if (ctrlRef.current && data.length === 1) {
-      const ch = data.toUpperCase();
-      if (ch >= "A" && ch <= "Z") {
-        onInput(String.fromCharCode(ch.charCodeAt(0) - 64));
-        setCtrlActive(false);
-        return;
+  const handleInput = useCallback(
+    (data: string) => {
+      if (ctrlRef.current && data.length === 1) {
+        const ch = data.toUpperCase();
+        if (ch >= "A" && ch <= "Z") {
+          onInput(String.fromCharCode(ch.charCodeAt(0) - 64));
+          setCtrlActive(false);
+          return;
+        }
       }
-    }
-    onInput(data);
-  }, [onInput]);
+      onInput(data);
+    },
+    [onInput],
+  );
 
-  const terminalPadding = bottomInset
-    + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)
-    + (showVoiceBar ? VOICE_BAR_HEIGHT : 0);
+  const terminalPadding =
+    bottomInset +
+    (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0) +
+    (showVoiceBar ? VOICE_BAR_HEIGHT : 0);
 
   // If we have multiple terminals, render each with its own TerminalView
   const hasMultipleTerminals = terminals && terminals.size > 0 && getTermRef;
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bgTerminal }} onLayout={onLayout}>
-      <View style={{ flex: 1, paddingBottom: terminalPadding }}>
+    <View
+      style={{ flex: 1, backgroundColor: theme.bgTerminal }}
+      onLayout={onLayout}
+    >
+      <View
+        style={{
+          flex: 1,
+          paddingBottom: terminalPadding,
+          paddingTop: headerPadding ?? 0,
+        }}
+      >
         {hasMultipleTerminals ? (
           Array.from(terminals.entries()).map(([tid, tInfo]) => {
             const isActive = tid === activeTerminalId;
             return (
               <View
                 key={tid}
-                style={isActive
-                  ? { flex: 1 }
-                  : { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: 0 }
+                style={
+                  isActive
+                    ? { flex: 1 }
+                    : {
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        opacity: 0,
+                      }
                 }
                 pointerEvents={isActive ? "auto" : "none"}
               >
@@ -1119,36 +1450,49 @@ const TerminalStage = memo(function TerminalStage({
             right: 0,
             bottom: bottomInset,
             height: SHORTCUT_BAR_HEIGHT,
-            paddingHorizontal: 6,
             paddingVertical: 5,
             flexDirection: "row",
             alignItems: "center",
             gap: 4,
+            paddingHorizontal: 12,
             backgroundColor: theme.bgTerminal,
           }}
         >
-          {/* Ctrl toggle */}
-          <Pressable
-            style={({ pressed }) => ({
-              paddingHorizontal: 8,
-              paddingVertical: 6,
-              borderRadius: 8,
-              borderCurve: "continuous" as const,
-              backgroundColor: ctrlActive
-                ? theme.accent
-                : pressed ? theme.bgCard : theme.bgElevated,
-            })}
-            onPress={() => setCtrlActive((v) => !v)}
-          >
-            <Text style={{ fontSize: 12, fontWeight: "700", color: ctrlActive ? theme.textInverse : theme.text }}>Ctrl</Text>
-          </Pressable>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             keyboardShouldPersistTaps="always"
-            contentContainerStyle={{ alignItems: "center", gap: 4, paddingRight: 8 }}
+            contentContainerStyle={{
+              alignItems: "center",
+              gap: 4,
+            }}
             style={{ flex: 1 }}
           >
+            {/* Ctrl toggle */}
+            <Pressable
+              style={({ pressed }) => ({
+                paddingHorizontal: 8,
+                paddingVertical: 6,
+                borderRadius: 8,
+                borderCurve: "continuous" as const,
+                backgroundColor: ctrlActive
+                  ? theme.accent
+                  : pressed
+                    ? theme.bgCard
+                    : theme.bgElevated,
+              })}
+              onPress={() => setCtrlActive((v) => !v)}
+            >
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "700",
+                  color: ctrlActive ? theme.textInverse : theme.text,
+                }}
+              >
+                Ctrl
+              </Text>
+            </Pressable>
             {SHORTCUTS.map((item) => (
               <Pressable
                 key={item.label}
@@ -1161,7 +1505,11 @@ const TerminalStage = memo(function TerminalStage({
                 })}
                 onPress={() => handleInput(item.value)}
               >
-                <Text style={{ fontSize: 12, fontWeight: "600", color: theme.text }}>{item.label}</Text>
+                <Text
+                  style={{ fontSize: 12, fontWeight: "600", color: theme.text }}
+                >
+                  {item.label}
+                </Text>
               </Pressable>
             ))}
             <Pressable
@@ -1178,30 +1526,38 @@ const TerminalStage = memo(function TerminalStage({
                 if (text) handleInput(text);
               }}
             >
-              <Text style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}>Paste</Text>
+              <Text
+                style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}
+              >
+                Paste
+              </Text>
             </Pressable>
           </ScrollView>
           {/* Image picker */}
           <Pressable
             style={({ pressed }) => ({
-              paddingHorizontal: 6,
-              paddingVertical: 6,
+              width: 34,
+              height: 26,
               borderRadius: 8,
               borderCurve: "continuous" as const,
-              backgroundColor: pressed ? theme.bgCard : "transparent",
+              backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
+              alignItems: "center",
+              justifyContent: "center",
             })}
             onPress={onImagePicker}
           >
-            <AppSymbol name="photo" size={18} color={theme.accent} />
+            <AppSymbol name="photo" size={17} color={theme.accent} />
           </Pressable>
           {/* Keyboard toggle */}
           <Pressable
             style={({ pressed }) => ({
-              paddingHorizontal: 6,
-              paddingVertical: 6,
+              width: 34,
+              height: 26,
               borderRadius: 8,
               borderCurve: "continuous" as const,
-              backgroundColor: pressed ? theme.bgCard : "transparent",
+              backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
+              alignItems: "center",
+              justifyContent: "center",
             })}
             onPress={() => {
               if (keyboardUp) {
@@ -1214,7 +1570,7 @@ const TerminalStage = memo(function TerminalStage({
           >
             <AppSymbol
               name={keyboardUp ? "keyboard.chevron.compact.down" : "keyboard"}
-              size={20}
+              size={17}
               color={theme.accent}
             />
           </Pressable>
@@ -1222,19 +1578,32 @@ const TerminalStage = memo(function TerminalStage({
       ) : null}
       {showVoiceBar ? (
         <VoiceBar
-          bottomInset={bottomInset + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)}
+          bottomInset={
+            bottomInset + (showShortcutBar ? SHORTCUT_BAR_HEIGHT : 0)
+          }
           theme={theme}
           onSend={(text) => handleInput(text + "\r")}
         />
       ) : null}
       {keyboardHintVisible && !inputDisabled && !keyboardUp ? (
-        <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", alignItems: "center" }}>
+        <View
+          pointerEvents="box-none"
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            justifyContent: "flex-end",
+            alignItems: "center",
+          }}
+        >
           <Pressable
             onPress={onRequestFocus}
             style={{ position: "absolute", bottom: VOICE_BAR_HEIGHT + 16 }}
           >
             <GlassBar
-              blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+              blurTint={
+                theme.mode === "dark"
+                  ? "systemThinMaterialDark"
+                  : "systemThinMaterialLight"
+              }
               fallbackColor={theme.bgElevated}
               style={{
                 borderRadius: 20,
@@ -1248,7 +1617,11 @@ const TerminalStage = memo(function TerminalStage({
               }}
             >
               <AppSymbol name="keyboard" size={16} color={theme.accent} />
-              <Text style={{ fontSize: 13, fontWeight: "500", color: theme.text }}>点按开始输入</Text>
+              <Text
+                style={{ fontSize: 13, fontWeight: "500", color: theme.text }}
+              >
+                点按开始输入
+              </Text>
             </GlassBar>
           </Pressable>
         </View>
@@ -1276,9 +1649,18 @@ const DesktopStage = memo(function DesktopStage({
   onStart: (fps: number, quality: number, scale: number) => void;
   onStop: () => void;
   onSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
-  screenFrame: { data: string; width: number; height: number; frameId: number } | null;
+  screenFrame: {
+    data: string;
+    width: number;
+    height: number;
+    frameId: number;
+  } | null;
   pendingOffer: { sdp: string } | null;
-  pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
+  pendingIceCandidates: {
+    candidate: string;
+    sdpMid?: string | null;
+    sdpMLineIndex?: number | null;
+  }[];
   sessionId: string;
   theme: Theme;
 }) {
@@ -1320,22 +1702,40 @@ const SessionOverlay = memo(function SessionOverlay({
   theme: Theme;
 }) {
   return (
-    <View style={{
-      ...StyleSheet.absoluteFillObject,
-      bottom: bottomInset,
-      backgroundColor: theme.mode === "dark" ? "rgba(14,14,15,0.92)" : "rgba(255,255,255,0.92)",
-      alignItems: "center",
-      justifyContent: "center",
-      paddingHorizontal: 40,
-      gap: 16,
-    }}>
+    <View
+      style={{
+        ...StyleSheet.absoluteFillObject,
+        bottom: bottomInset,
+        backgroundColor:
+          theme.mode === "dark"
+            ? "rgba(14,14,15,0.92)"
+            : "rgba(255,255,255,0.92)",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 40,
+        gap: 16,
+      }}
+    >
       {isConnecting ? (
         <>
           <ActivityIndicator size="large" color={theme.accent} />
-          <Text style={{ fontSize: 17, fontWeight: "600", color: theme.text, textAlign: "center" }}>
+          <Text
+            style={{
+              fontSize: 17,
+              fontWeight: "600",
+              color: theme.text,
+              textAlign: "center",
+            }}
+          >
             {status === "claiming" ? "正在配对…" : "正在连接…"}
           </Text>
-          <Text style={{ fontSize: 14, color: theme.textTertiary, textAlign: "center" }}>
+          <Text
+            style={{
+              fontSize: 14,
+              color: theme.textTertiary,
+              textAlign: "center",
+            }}
+          >
             {connectionDetail ?? "正在建立与主机的连接"}
           </Text>
           <Pressable
@@ -1345,22 +1745,51 @@ const SessionOverlay = memo(function SessionOverlay({
               paddingVertical: 10,
               borderRadius: 10,
               borderCurve: "continuous" as const,
-              backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
+              backgroundColor: pressed
+                ? "rgba(255,59,48,0.2)"
+                : "rgba(255,59,48,0.12)",
             })}
             onPress={onLeave}
           >
-            <Text style={{ fontSize: 15, fontWeight: "600", color: theme.error }}>取消</Text>
+            <Text
+              style={{ fontSize: 15, fontWeight: "600", color: theme.error }}
+            >
+              取消
+            </Text>
           </Pressable>
         </>
       ) : isHostOffline ? (
         <>
-          <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(251,191,36,0.15)", alignItems: "center", justifyContent: "center" }}>
+          <View
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: "rgba(251,191,36,0.15)",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
             <AppSymbol name="wifi.slash" size={26} color="#fbbf24" />
           </View>
-          <Text style={{ fontSize: 17, fontWeight: "600", color: theme.text, textAlign: "center" }}>
+          <Text
+            style={{
+              fontSize: 17,
+              fontWeight: "600",
+              color: theme.text,
+              textAlign: "center",
+            }}
+          >
             主机离线
           </Text>
-          <Text style={{ fontSize: 14, color: theme.textTertiary, textAlign: "center", lineHeight: 20 }}>
+          <Text
+            style={{
+              fontSize: 14,
+              color: theme.textTertiary,
+              textAlign: "center",
+              lineHeight: 20,
+            }}
+          >
             主机当前不可用，可以等待主机恢复后重试，{"\n"}或退出返回会话列表。
           </Text>
           <View style={{ flexDirection: "row", gap: 12, marginTop: 4 }}>
@@ -1370,11 +1799,17 @@ const SessionOverlay = memo(function SessionOverlay({
                 paddingVertical: 10,
                 borderRadius: 10,
                 borderCurve: "continuous" as const,
-                backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
+                backgroundColor: pressed
+                  ? "rgba(255,59,48,0.2)"
+                  : "rgba(255,59,48,0.12)",
               })}
               onPress={onLeave}
             >
-              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.error }}>退出</Text>
+              <Text
+                style={{ fontSize: 15, fontWeight: "600", color: theme.error }}
+              >
+                退出
+              </Text>
             </Pressable>
             <Pressable
               style={({ pressed }) => ({
@@ -1386,19 +1821,50 @@ const SessionOverlay = memo(function SessionOverlay({
               })}
               onPress={onReconnect}
             >
-              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.accent }}>重试</Text>
+              <Text
+                style={{ fontSize: 15, fontWeight: "600", color: theme.accent }}
+              >
+                重试
+              </Text>
             </Pressable>
           </View>
         </>
       ) : (
         <>
-          <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(239,68,68,0.12)", alignItems: "center", justifyContent: "center" }}>
-            <AppSymbol name="exclamationmark.triangle.fill" size={26} color={theme.error} />
+          <View
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: "rgba(239,68,68,0.12)",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <AppSymbol
+              name="exclamationmark.triangle.fill"
+              size={26}
+              color={theme.error}
+            />
           </View>
-          <Text style={{ fontSize: 17, fontWeight: "600", color: theme.text, textAlign: "center" }}>
+          <Text
+            style={{
+              fontSize: 17,
+              fontWeight: "600",
+              color: theme.text,
+              textAlign: "center",
+            }}
+          >
             连接失败
           </Text>
-          <Text style={{ fontSize: 14, color: theme.textTertiary, textAlign: "center", lineHeight: 20 }}>
+          <Text
+            style={{
+              fontSize: 14,
+              color: theme.textTertiary,
+              textAlign: "center",
+              lineHeight: 20,
+            }}
+          >
             {connectionDetail ?? "无法连接到主机"}
           </Text>
           <View style={{ flexDirection: "row", gap: 12, marginTop: 4 }}>
@@ -1408,11 +1874,17 @@ const SessionOverlay = memo(function SessionOverlay({
                 paddingVertical: 10,
                 borderRadius: 10,
                 borderCurve: "continuous" as const,
-                backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "rgba(255,59,48,0.12)",
+                backgroundColor: pressed
+                  ? "rgba(255,59,48,0.2)"
+                  : "rgba(255,59,48,0.12)",
               })}
               onPress={onLeave}
             >
-              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.error }}>退出</Text>
+              <Text
+                style={{ fontSize: 15, fontWeight: "600", color: theme.error }}
+              >
+                退出
+              </Text>
             </Pressable>
             <Pressable
               style={({ pressed }) => ({
@@ -1424,7 +1896,11 @@ const SessionOverlay = memo(function SessionOverlay({
               })}
               onPress={onReconnect}
             >
-              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.accent }}>重试</Text>
+              <Text
+                style={{ fontSize: 15, fontWeight: "600", color: theme.accent }}
+              >
+                重试
+              </Text>
             </Pressable>
           </View>
         </>
@@ -1448,23 +1924,33 @@ const SessionTabBar = memo(function SessionTabBar({
 }) {
   const statusDot = (status: ConnectionStatus) => {
     if (status === "connected") return "#4ade80";
-    if (status === "connecting" || status === "claiming" || status === "reconnecting") return "#fbbf24";
+    if (
+      status === "connecting" ||
+      status === "claiming" ||
+      status === "reconnecting"
+    )
+      return "#fbbf24";
     return "#ef4444";
   };
 
   return (
     <GlassBar
-      blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+      blurTint={
+        theme.mode === "dark"
+          ? "systemThinMaterialDark"
+          : "systemThinMaterialLight"
+      }
       fallbackColor={theme.mode === "light" ? theme.bgCard : theme.bgElevated}
-      style={{
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: theme.separator,
-      }}
+      style={{}}
     >
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 8, gap: 2, alignItems: "center" }}
+        contentContainerStyle={{
+          paddingHorizontal: 8,
+          gap: 2,
+          alignItems: "center",
+        }}
         style={{ height: 36 }}
       >
         {tabs.map((tab) => {
@@ -1481,12 +1967,23 @@ const SessionTabBar = memo(function SessionTabBar({
                 borderRadius: 8,
                 borderCurve: "continuous" as const,
                 backgroundColor: isActive
-                  ? (theme.mode === "light" ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.08)")
-                  : (pressed ? "rgba(128,128,128,0.1)" : "transparent"),
+                  ? theme.mode === "light"
+                    ? "rgba(0,0,0,0.06)"
+                    : "rgba(255,255,255,0.08)"
+                  : pressed
+                    ? "rgba(128,128,128,0.1)"
+                    : "transparent",
               })}
               onPress={() => onSwitch?.(tab.sessionId)}
             >
-              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusDot(tab.status) }} />
+              <View
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: statusDot(tab.status),
+                }}
+              />
               <Text
                 numberOfLines={1}
                 style={{
@@ -1512,10 +2009,21 @@ const SessionTabBar = memo(function SessionTabBar({
                     borderRadius: 8,
                     alignItems: "center",
                     justifyContent: "center",
-                    backgroundColor: pressed ? "rgba(128,128,128,0.3)" : "transparent",
+                    backgroundColor: pressed
+                      ? "rgba(128,128,128,0.3)"
+                      : "transparent",
                   })}
                 >
-                  <Text style={{ fontSize: 10, fontWeight: "700", color: theme.textTertiary, lineHeight: 12 }}>✕</Text>
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      fontWeight: "700",
+                      color: theme.textTertiary,
+                      lineHeight: 12,
+                    }}
+                  >
+                    ✕
+                  </Text>
                 </Pressable>
               ) : null}
             </Pressable>
@@ -1554,48 +2062,112 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 250, useNativeDriver: true }),
-      Animated.spring(scale, { toValue: 1, tension: 80, friction: 12, useNativeDriver: true }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scale, {
+        toValue: 1,
+        tension: 80,
+        friction: 12,
+        useNativeDriver: true,
+      }),
     ]).start();
   }, []);
 
   const handleClose = useCallback(() => {
     Animated.parallel([
-      Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 0.92, duration: 200, useNativeDriver: true }),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scale, {
+        toValue: 0.92,
+        duration: 200,
+        useNativeDriver: true,
+      }),
     ]).start(() => onClose());
   }, [onClose, opacity, scale]);
 
-  const handleSwitch = useCallback((tid: string) => {
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 0, duration: 180, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 1.05, duration: 180, useNativeDriver: true }),
-    ]).start(() => onSwitch(tid));
-  }, [onSwitch, opacity, scale]);
+  const handleSwitch = useCallback(
+    (tid: string) => {
+      Animated.parallel([
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 1.05,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ]).start(() => onSwitch(tid));
+    },
+    [onSwitch, opacity, scale],
+  );
 
-  const handleKillTerminal = useCallback((tid: string, isRunning: boolean) => {
-    if (isRunning) {
-      Alert.alert("关闭终端", "确定关闭此终端？进程将被终止。", [
-        { text: "取消", style: "cancel" },
-        { text: "关闭", style: "destructive", onPress: () => onKillTerminal?.(tid) },
-      ]);
-    } else {
-      onRemoveTerminal?.(tid);
-    }
-  }, [onKillTerminal, onRemoveTerminal]);
+  const handleKillTerminal = useCallback(
+    (tid: string, isRunning: boolean) => {
+      if (isRunning) {
+        Alert.alert("关闭终端", "确定关闭此终端？进程将被终止。", [
+          { text: "取消", style: "cancel" },
+          {
+            text: "关闭",
+            style: "destructive",
+            onPress: () => onKillTerminal?.(tid),
+          },
+        ]);
+      } else {
+        onRemoveTerminal?.(tid);
+      }
+    },
+    [onKillTerminal, onRemoveTerminal],
+  );
 
   return (
     <Animated.View style={[StyleSheet.absoluteFill, { zIndex: 100, opacity }]}>
-      <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: theme.mode === "dark" ? "rgba(0,0,0,0.92)" : "rgba(245,245,247,0.95)" }]} onPress={handleClose} />
-      <Animated.View style={{ flex: 1, transform: [{ scale }] }} pointerEvents="box-none">
-        <View style={{ paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>终端</Text>
+      <Pressable
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundColor:
+              theme.mode === "dark"
+                ? "rgba(0,0,0,0.92)"
+                : "rgba(245,245,247,0.95)",
+          },
+        ]}
+        onPress={handleClose}
+      />
+      <Animated.View
+        style={{ flex: 1, transform: [{ scale }] }}
+        pointerEvents="box-none"
+      >
+        <View
+          style={{
+            paddingTop: insetTop + 8,
+            paddingHorizontal: 16,
+            paddingBottom: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>
+            终端
+          </Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <Pressable onPress={onAdd} hitSlop={8}>
               <AppSymbol name="plus" size={20} color={theme.accent} />
             </Pressable>
             <Pressable onPress={handleClose} hitSlop={8}>
-              <Text style={{ color: theme.accent, fontSize: 15, fontWeight: "500" }}>完成</Text>
+              <Text
+                style={{ color: theme.accent, fontSize: 15, fontWeight: "500" }}
+              >
+                完成
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -1604,9 +2176,15 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
           data={terminalTabs.filter((t) => t.status === "running")}
           numColumns={2}
           keyExtractor={(item) => item.terminalId}
-          contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40, flexGrow: 1 }}
+          contentContainerStyle={{
+            paddingHorizontal: 12,
+            paddingBottom: 40,
+            flexGrow: 1,
+          }}
           columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
-          ListFooterComponent={<Pressable style={{ flex: 1 }} onPress={handleClose} />}
+          ListFooterComponent={
+            <Pressable style={{ flex: 1 }} onPress={handleClose} />
+          }
           renderItem={({ item }) => {
             const isActive = item.terminalId === activeTerminalId;
             const tInfo = terminals?.get(item.terminalId);
@@ -1622,15 +2200,33 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
                   borderWidth: isActive ? 2 : 0,
                   borderColor: isActive ? theme.accent : "transparent",
                   backgroundColor: pressed
-                    ? (theme.mode === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)")
-                    : (theme.mode === "light" ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.04)"),
+                    ? theme.mode === "light"
+                      ? "rgba(0,0,0,0.08)"
+                      : "rgba(255,255,255,0.08)"
+                    : theme.mode === "light"
+                      ? "rgba(0,0,0,0.04)"
+                      : "rgba(255,255,255,0.04)",
                 })}
               >
-                <View style={{ height: 120, backgroundColor: theme.bgTerminal, justifyContent: "center", alignItems: "center" }}>
-                  <AppSymbol name="terminal.fill" size={32} color={isRunning ? theme.accent : theme.textTertiary} />
+                <View
+                  style={{
+                    height: 120,
+                    backgroundColor: theme.bgTerminal,
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
+                  <AppSymbol
+                    name="terminal.fill"
+                    size={32}
+                    color={isRunning ? theme.accent : theme.textTertiary}
+                  />
                   {/* Close button */}
                   <Pressable
-                    onPress={(e) => { e.stopPropagation(); handleKillTerminal(item.terminalId, isRunning); }}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleKillTerminal(item.terminalId, isRunning);
+                    }}
                     hitSlop={6}
                     style={({ pressed }) => ({
                       position: "absolute",
@@ -1640,27 +2236,67 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
                       height: 22,
                       borderRadius: 11,
                       backgroundColor: pressed
-                        ? (theme.mode === "light" ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.2)")
-                        : (theme.mode === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.1)"),
+                        ? theme.mode === "light"
+                          ? "rgba(0,0,0,0.15)"
+                          : "rgba(255,255,255,0.2)"
+                        : theme.mode === "light"
+                          ? "rgba(0,0,0,0.08)"
+                          : "rgba(255,255,255,0.1)",
                       alignItems: "center",
                       justifyContent: "center",
                     })}
                   >
-                    <AppSymbol name="xmark" size={10} color={theme.textTertiary} />
+                    <AppSymbol
+                      name="xmark"
+                      size={10}
+                      color={theme.textTertiary}
+                    />
                   </Pressable>
                 </View>
-                <View style={{ paddingHorizontal: 10, paddingVertical: 8, gap: 2 }}>
-                  <Text style={{ color: theme.text, fontSize: 13, fontWeight: "600" }} numberOfLines={1}>
+                <View
+                  style={{ paddingHorizontal: 10, paddingVertical: 8, gap: 2 }}
+                >
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontSize: 13,
+                      fontWeight: "600",
+                    }}
+                    numberOfLines={1}
+                  >
                     {item.label}
                   </Text>
                   {tInfo?.cwd ? (
-                    <Text style={{ color: theme.textTertiary, fontSize: 10 }} numberOfLines={1}>
+                    <Text
+                      style={{ color: theme.textTertiary, fontSize: 10 }}
+                      numberOfLines={1}
+                    >
                       {tInfo.cwd}
                     </Text>
                   ) : null}
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
-                    <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isRunning ? "#4ade80" : "#6b7280" }} />
-                    <Text style={{ fontSize: 9, color: isRunning ? "#4ade80" : "#6b7280", fontWeight: "500" }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                      marginTop: 2,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: 3,
+                        backgroundColor: isRunning ? "#4ade80" : "#6b7280",
+                      }}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 9,
+                        color: isRunning ? "#4ade80" : "#6b7280",
+                        fontWeight: "500",
+                      }}
+                    >
                       {isRunning ? "运行中" : "已退出"}
                     </Text>
                   </View>
@@ -1669,8 +2305,13 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
             );
           }}
           ListEmptyComponent={
-            <Pressable style={{ alignItems: "center", paddingTop: 60, flex: 1 }} onPress={handleClose}>
-              <Text style={{ color: theme.textTertiary, fontSize: 14 }}>暂无终端</Text>
+            <Pressable
+              style={{ alignItems: "center", paddingTop: 60, flex: 1 }}
+              onPress={handleClose}
+            >
+              <Text style={{ color: theme.textTertiary, fontSize: 14 }}>
+                暂无终端
+              </Text>
             </Pressable>
           }
         />
@@ -1694,17 +2335,22 @@ const TerminalTabBar = memo(function TerminalTabBar({
 }) {
   return (
     <GlassBar
-      blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+      blurTint={
+        theme.mode === "dark"
+          ? "systemThinMaterialDark"
+          : "systemThinMaterialLight"
+      }
       fallbackColor={theme.mode === "light" ? theme.bgCard : theme.bgElevated}
-      style={{
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: theme.separator,
-      }}
+      style={{}}
     >
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 8, gap: 2, alignItems: "center" }}
+        contentContainerStyle={{
+          paddingHorizontal: 8,
+          gap: 2,
+          alignItems: "center",
+        }}
         style={{ height: 34 }}
       >
         {tabs.map((tab) => {
@@ -1722,22 +2368,36 @@ const TerminalTabBar = memo(function TerminalTabBar({
                 borderRadius: 7,
                 borderCurve: "continuous" as const,
                 backgroundColor: isActive
-                  ? (theme.mode === "light" ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.08)")
-                  : (pressed ? "rgba(128,128,128,0.1)" : "transparent"),
+                  ? theme.mode === "light"
+                    ? "rgba(0,0,0,0.06)"
+                    : "rgba(255,255,255,0.08)"
+                  : pressed
+                    ? "rgba(128,128,128,0.1)"
+                    : "transparent",
               })}
               onPress={() => onSwitch?.(tab.terminalId)}
             >
               <AppSymbol
                 name={isExited ? "xmark.circle" : "terminal.fill"}
                 size={12}
-                color={isActive ? theme.accent : (isExited ? theme.textTertiary : theme.textSecondary)}
+                color={
+                  isActive
+                    ? theme.accent
+                    : isExited
+                      ? theme.textTertiary
+                      : theme.textSecondary
+                }
               />
               <Text
                 numberOfLines={1}
                 style={{
                   fontSize: 12,
                   fontWeight: isActive ? "600" : "400",
-                  color: isActive ? theme.text : (isExited ? theme.textTertiary : theme.textSecondary),
+                  color: isActive
+                    ? theme.text
+                    : isExited
+                      ? theme.textTertiary
+                      : theme.textSecondary,
                   maxWidth: 100,
                 }}
               >
@@ -1755,7 +2415,9 @@ const TerminalTabBar = memo(function TerminalTabBar({
               borderCurve: "continuous" as const,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: pressed ? "rgba(128,128,128,0.15)" : "transparent",
+              backgroundColor: pressed
+                ? "rgba(128,128,128,0.15)"
+                : "transparent",
             })}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1770,12 +2432,19 @@ const TerminalTabBar = memo(function TerminalTabBar({
   );
 });
 
-function getSessionBanner(status: ConnectionStatus): { text: string; tone: "warn" | "error" } | null {
+function getSessionBanner(
+  status: ConnectionStatus,
+): { text: string; tone: "warn" | "error" } | null {
   switch (status) {
-    case "reconnecting": return { text: "连接暂时中断，正在自动重连…", tone: "warn" };
-    case "disconnected": return { text: "连接已断开。", tone: "error" };
-    case "host_disconnected": return { text: "主机当前离线，恢复后会继续同步。", tone: "warn" };
-    case "session_exited": return { text: "当前会话已结束。", tone: "error" };
-    default: return null;
+    case "reconnecting":
+      return { text: "连接暂时中断，正在自动重连…", tone: "warn" };
+    case "disconnected":
+      return { text: "连接已断开。", tone: "error" };
+    case "host_disconnected":
+      return { text: "主机当前离线，恢复后会继续同步。", tone: "warn" };
+    case "session_exited":
+      return { text: "当前会话已结束。", tone: "error" };
+    default:
+      return null;
   }
 }
