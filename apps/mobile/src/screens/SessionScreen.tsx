@@ -9,6 +9,7 @@ import {
   Keyboard,
   KeyboardEvent,
   LayoutChangeEvent,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -774,6 +775,8 @@ const SessionHeader = memo(function SessionHeader({
   );
 });
 
+const CANCEL_THRESHOLD = -80; // drag up 80pt to cancel
+
 const VoiceBar = memo(function VoiceBar({
   bottomInset,
   theme,
@@ -787,26 +790,50 @@ const VoiceBar = memo(function VoiceBar({
   const [pressing, setPressing] = useState(false);
   const [editText, setEditText] = useState("");
   const [editing, setEditing] = useState(false);
+  const [inCancelZone, setInCancelZone] = useState(false);
   const localeRef = useRef<"en-US" | "zh-CN">("zh-CN");
+  const cancelledRef = useRef(false);
 
-  const handlePressIn = async () => {
-    setPressing(true);
-    setEditing(false);
-    setEditText("");
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    try {
-      await start(localeRef.current);
-    } catch {}
-  };
-
-  const handlePressOut = async () => {
-    setPressing(false);
-    await stop();
-  };
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        cancelledRef.current = false;
+        setPressing(true);
+        setEditing(false);
+        setEditText("");
+        setInCancelZone(false);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        start(localeRef.current).catch(() => {});
+      },
+      onPanResponderMove: (_evt, gestureState) => {
+        const inZone = gestureState.dy < CANCEL_THRESHOLD;
+        setInCancelZone(inZone);
+      },
+      onPanResponderRelease: (_evt, gestureState) => {
+        setPressing(false);
+        setInCancelZone(false);
+        if (gestureState.dy < CANCEL_THRESHOLD) {
+          // Dragged into cancel zone
+          cancelledRef.current = true;
+          cancel();
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        } else {
+          stop();
+        }
+      },
+      onPanResponderTerminate: () => {
+        setPressing(false);
+        setInCancelZone(false);
+        cancel();
+      },
+    })
+  ).current;
 
   // When finalText arrives after release, enter edit mode
   useEffect(() => {
-    if (!pressing && finalText) {
+    if (!pressing && finalText && !cancelledRef.current) {
       setEditText(finalText);
       setEditing(true);
     }
@@ -814,7 +841,7 @@ const VoiceBar = memo(function VoiceBar({
 
   // Also catch partial text if stop() resolves before finalText
   useEffect(() => {
-    if (!pressing && !isListening && partialText && !editing && !finalText) {
+    if (!pressing && !isListening && partialText && !editing && !finalText && !cancelledRef.current) {
       setEditText(partialText);
       setEditing(true);
     }
@@ -911,20 +938,32 @@ const VoiceBar = memo(function VoiceBar({
               </View>
             </>
           ) : (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <View style={{
-                width: 8,
-                height: 8,
-                borderRadius: 4,
-                backgroundColor: theme.error,
-              }} />
-              <Text
-                style={{ flex: 1, fontSize: 15, color: theme.text, fontFamily: "Menlo" }}
-                numberOfLines={3}
-              >
-                {liveText}
-              </Text>
-            </View>
+            <>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: theme.error,
+                }} />
+                <Text
+                  style={{ flex: 1, fontSize: 15, color: theme.text, fontFamily: "Menlo" }}
+                  numberOfLines={3}
+                >
+                  {liveText}
+                </Text>
+              </View>
+              {/* Cancel hint */}
+              <View style={{ alignItems: "center", marginTop: 8 }}>
+                <Text style={{
+                  fontSize: 12,
+                  color: inCancelZone ? theme.error : theme.textTertiary,
+                  fontWeight: inCancelZone ? "600" : "400",
+                }}>
+                  {inCancelZone ? "松开取消" : "↑ 上滑取消"}
+                </Text>
+              </View>
+            </>
           )}
         </View>
       ) : null}
@@ -946,25 +985,25 @@ const VoiceBar = memo(function VoiceBar({
           gap: 8,
         }}
       >
-        <Pressable
-          style={({ pressed }) => ({
+        <View
+          style={{
             flex: 1,
             height: 30,
             borderRadius: 6,
             borderCurve: "continuous",
             backgroundColor: pressing
-              ? theme.accent
-              : pressed ? theme.bgCard : theme.bgElevated,
+              ? inCancelZone ? theme.errorLight : theme.accent
+              : theme.bgElevated,
             borderWidth: StyleSheet.hairlineWidth,
-            borderColor: pressing ? theme.accent : theme.separator,
+            borderColor: pressing
+              ? inCancelZone ? theme.error : theme.accent
+              : theme.separator,
             alignItems: "center",
             justifyContent: "center",
             flexDirection: "row",
             gap: 6,
-          })}
-          onPressIn={handlePressIn}
-          onPressOut={handlePressOut}
-          disabled={editing}
+          }}
+          {...(editing ? {} : panResponder.panHandlers)}
         >
           <AppSymbol
             name="mic.fill"
@@ -978,9 +1017,9 @@ const VoiceBar = memo(function VoiceBar({
               color: pressing ? theme.textInverse : theme.textSecondary,
             }}
           >
-            按住说话
+            {pressing ? (inCancelZone ? "松开取消" : "松开结束") : "按住说话"}
           </Text>
-        </Pressable>
+        </View>
       </View>
     </>
   );
