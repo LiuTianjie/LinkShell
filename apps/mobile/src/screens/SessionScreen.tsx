@@ -454,6 +454,7 @@ export function SessionScreen({
           >
             <TerminalStage
               bottomInset={stageBottomInset}
+              keyboardUp={keyboardVisible}
               inputDisabled={inputDisabled}
               keyboardHintVisible={keyboardHintVisible && !keyboardVisible}
               onInput={handleTerminalInput}
@@ -1027,6 +1028,7 @@ const VoiceBar = memo(function VoiceBar({
 
 const TerminalStage = memo(function TerminalStage({
   bottomInset,
+  keyboardUp,
   inputDisabled,
   keyboardHintVisible,
   onInput,
@@ -1042,6 +1044,7 @@ const TerminalStage = memo(function TerminalStage({
   getTermRef,
 }: {
   bottomInset: number;
+  keyboardUp: boolean;
   inputDisabled: boolean;
   keyboardHintVisible: boolean;
   onInput: (data: string) => void;
@@ -1056,7 +1059,6 @@ const TerminalStage = memo(function TerminalStage({
   activeTerminalId?: string | null;
   getTermRef?: (terminalId: string) => React.RefObject<TerminalViewHandle | null>;
 }) {
-  const keyboardUp = bottomInset > 0;
   const showShortcutBar = keyboardUp && !inputDisabled;
   const showVoiceBar = !keyboardUp && !inputDisabled;
   const terminalPadding = bottomInset
