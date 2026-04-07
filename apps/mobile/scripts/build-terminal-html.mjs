@@ -11,10 +11,22 @@ import { createRequire } from "node:module";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
-const xtermJs = readFileSync(require.resolve("@xterm/xterm/lib/xterm.js"), "utf8");
-const xtermCss = readFileSync(require.resolve("@xterm/xterm/css/xterm.css"), "utf8");
-const fitJs = readFileSync(require.resolve("@xterm/addon-fit/lib/addon-fit.js"), "utf8");
-const webLinksJs = readFileSync(require.resolve("@xterm/addon-web-links/lib/addon-web-links.js"), "utf8");
+const xtermJs = readFileSync(
+  require.resolve("@xterm/xterm/lib/xterm.js"),
+  "utf8",
+);
+const xtermCss = readFileSync(
+  require.resolve("@xterm/xterm/css/xterm.css"),
+  "utf8",
+);
+const fitJs = readFileSync(
+  require.resolve("@xterm/addon-fit/lib/addon-fit.js"),
+  "utf8",
+);
+const webLinksJs = readFileSync(
+  require.resolve("@xterm/addon-web-links/lib/addon-web-links.js"),
+  "utf8",
+);
 
 const html = `<!DOCTYPE html>
 <html>
@@ -30,6 +42,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#020617;display:flex
 .xterm-viewport::-webkit-scrollbar{width:4px}
 .xterm-viewport::-webkit-scrollbar-thumb{background:#334155;border-radius:2px}
 .xterm-viewport{-webkit-overflow-scrolling:touch !important;overscroll-behavior:contain !important;}
+.xterm .xterm-helper-textarea{left:0 !important;top:0 !important;width:1px !important;height:1px !important;}
 </style>
 </head>
 <body>
@@ -52,6 +65,7 @@ var term = new Terminal({
   allowProposedApi:true,
   scrollback:5000,
   convertEol:false,
+  scrollbar:{showScrollbar:false},
 });
 
 var fitAddon = new FitAddon.FitAddon();
@@ -68,6 +82,31 @@ if (term.textarea) {
 
 setTimeout(function(){fitAddon.fit();sendSize();},150);
 
+// xterm 6.x gesture system calls preventDefault on touchstart, blocking native focus.
+// Re-implement tap-to-focus manually.
+(function(){
+  var el = document.getElementById('terminal');
+  if (!el) return;
+  var startY = 0, startX = 0, startTime = 0;
+  el.addEventListener('touchstart', function(e){
+    if (e.touches.length === 1) {
+      startX = e.touches[0].pageX;
+      startY = e.touches[0].pageY;
+      startTime = Date.now();
+    }
+  }, {passive: true});
+  el.addEventListener('touchend', function(e){
+    var dt = Date.now() - startTime;
+    if (dt < 400 && e.changedTouches.length === 1) {
+      var dx = Math.abs(e.changedTouches[0].pageX - startX);
+      var dy = Math.abs(e.changedTouches[0].pageY - startY);
+      if (dx < 20 && dy < 20) {
+        term.focus();
+      }
+    }
+  }, {passive: true});
+})();
+
 function focusCursor(){
   try {
     term.focus();
@@ -80,27 +119,20 @@ function blurCursor(){
   } catch (e) {}
 }
 
-// Instant snap to bottom — no animation, no visible scroll
+// Instant snap to bottom — use xterm API instead of DOM
 function snapBottom(){
   try {
-    var vp = document.querySelector('.xterm-viewport');
-    if (vp) vp.scrollTop = vp.scrollHeight;
+    term.scrollToBottom();
   } catch(e) {}
 }
 
-// Fit terminal without scroll jump — save/restore scroll position
+// Fit terminal without scroll jump — use xterm API for scroll state
 function safeFit(){
   try {
-    var vp = document.querySelector('.xterm-viewport');
-    var wasAtBottom = vp ? (vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 5) : true;
-    var savedTop = vp ? vp.scrollTop : 0;
+    var wasAtBottom = term.buffer.active.viewportY >= term.buffer.active.baseY;
     fitAddon.fit();
-    if (vp) {
-      if (wasAtBottom) {
-        vp.scrollTop = vp.scrollHeight;
-      } else {
-        vp.scrollTop = savedTop;
-      }
+    if (wasAtBottom) {
+      term.scrollToBottom();
     }
   } catch(e) {
     try { fitAddon.fit(); } catch(e2) {}

@@ -23,7 +23,6 @@ import * as Haptics from "expo-haptics";
 import { Swipeable } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
-import { GlassBar } from "../components/GlassBar";
 import { useTheme, type Theme } from "../theme";
 import type { ConnectionRecord } from "../storage/history";
 import { loadHistory, removeBySessionId } from "../storage/history";
@@ -53,7 +52,10 @@ export function HomeScreen({
   const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
 
   const refresh = useCallback(async () => {
-    const [recent, server] = await Promise.all([loadHistory(), getDefaultServer()]);
+    const [recent, server] = await Promise.all([
+      loadHistory(),
+      getDefaultServer(),
+    ]);
     const seen = new Set<string>();
     const deduped = recent.filter((r) => {
       if (seen.has(r.sessionId)) return false;
@@ -77,10 +79,13 @@ export function HomeScreen({
     onOpenConnectionSheet();
   }, [onOpenConnectionSheet]);
 
-  const handleResumeSession = useCallback((sessionId: string, serverUrl?: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onConnectSession(sessionId, serverUrl);
-  }, [onConnectSession]);
+  const handleResumeSession = useCallback(
+    (sessionId: string, serverUrl?: string) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onConnectSession(sessionId, serverUrl);
+    },
+    [onConnectSession],
+  );
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -90,25 +95,52 @@ export function HomeScreen({
   }, []);
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: theme.bg }}
-      contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 20) }}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Header */}
-      <View style={{ paddingHorizontal: 20, paddingTop: insets.top + 2, paddingBottom: 8 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <Image source={require("../../assets/adaptive-icon.png")} style={{ width: 40, height: 40, borderRadius: 10 }} />
-          <Text style={{ fontSize: 34, fontWeight: "700", color: theme.text, letterSpacing: 0.37 }}>LinkShell</Text>
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 20) }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingTop: insets.top + 2,
+            paddingBottom: 8,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Image
+              source={require("../../assets/adaptive-icon.png")}
+              style={{ width: 32, height: 32, borderRadius: 8 }}
+            />
+            <Text
+              style={{
+                fontSize: 34,
+                fontWeight: "700",
+                color: theme.text,
+                letterSpacing: 0.37,
+              }}
+            >
+              LinkShell
+            </Text>
+          </View>
+          <Text
+            style={{
+              fontSize: 13,
+              color: theme.textTertiary,
+              marginTop: 2,
+            }}
+          >
+            远程终端，触手可及
+          </Text>
         </View>
-        <Text style={{ fontSize: 15, color: theme.textTertiary, marginTop: 2 }}>远程终端，触手可及</Text>
-      </View>
 
-      {/* Quick Actions */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 8, gap: 12 }}>
+        {/* Error Banner */}
         {status.startsWith("error:") && connectionDetail ? (
           <View
             style={{
+              marginHorizontal: 20,
+              marginTop: 8,
               backgroundColor: theme.errorLight,
               borderRadius: 12,
               borderCurve: "continuous" as const,
@@ -119,133 +151,262 @@ export function HomeScreen({
               gap: 10,
             }}
           >
-            <AppSymbol name="exclamationmark.triangle.fill" size={18} color={theme.error} style={{ marginTop: 1 }} />
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={{ color: theme.error, fontSize: 15, fontWeight: "600" }}>连接失败</Text>
-              <Text style={{ color: theme.error, fontSize: 13, lineHeight: 18 }}>{connectionDetail}</Text>
-            </View>
-          </View>
-        ) : null}
-
-        <Pressable
-          style={({ pressed }) => ({
-            borderRadius: 14,
-            borderCurve: "continuous" as const,
-            borderWidth: 1,
-            borderColor: theme.mode === "dark" ? "rgba(173,198,255,0.25)" : "rgba(58,95,200,0.2)",
-            paddingVertical: 16,
-            paddingHorizontal: 20,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 12,
-            opacity: pressed ? 0.8 : 1,
-          })}
-          onPress={handleNewConnection}
-          disabled={isLoading}
-        >
-          <GlassBar
-            blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
-            fallbackColor={theme.bgCard}
-            style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
-          />
-          {isLoading ? (
-            <ActivityIndicator size="small" color={theme.accent} />
-          ) : (
-            <AppSymbol name="plus.circle.fill" size={24} color={theme.accent} />
-          )}
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>{isLoading ? "连接中…" : "新建连接"}</Text>
-            <Text style={{ color: theme.textTertiary, fontSize: 13, marginTop: 2 }}>{isLoading ? "正在建立终端连接" : "扫码、配对码或选择网关"}</Text>
-          </View>
-          {isLoading ? null : <AppSymbol name="chevron.right" size={12} color={theme.textTertiary} />}
-        </Pressable>
-
-        {latest ? (
-          <Pressable
-            style={({ pressed }) => ({
-              borderRadius: 14,
-              borderCurve: "continuous" as const,
-              paddingVertical: 14,
-              paddingHorizontal: 20,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 12,
-              opacity: pressed ? 0.7 : 1,
-            })}
-            onPress={() => handleResumeSession(latest.sessionId, latest.serverUrl)}
-          >
-            <GlassBar
-              blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
-              fallbackColor={theme.bgCard}
-              style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+            <AppSymbol
+              name="exclamationmark.triangle.fill"
+              size={18}
+              color={theme.error}
+              style={{ marginTop: 1 }}
             />
-            <AppSymbol name="arrow.counterclockwise.circle.fill" size={24} color={theme.success} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.text, fontSize: 15, fontWeight: "600" }}>
-                {latest.projectName ? `继续 ${latest.projectName}` : "继续上次会话"}
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text
+                style={{
+                  color: theme.error,
+                  fontSize: 15,
+                  fontWeight: "600",
+                }}
+              >
+                连接失败
               </Text>
-              <Text style={{ color: theme.textTertiary, fontSize: 13, marginTop: 1 }}>
-                {latest.sessionId.slice(0, 8)} · {timeAgo(latest.connectedAt)}
+              <Text
+                style={{ color: theme.error, fontSize: 13, lineHeight: 18 }}
+              >
+                {connectionDetail}
               </Text>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 }}>
-                <AppSymbol name={platformIcon(latest.platform)} size={12} color={theme.textTertiary} />
-                <Text style={{ color: theme.textTertiary, fontSize: 12 }} numberOfLines={1}>
-                  {latest.hostname ?? safeHost(latest.serverUrl)}
-                </Text>
-              </View>
             </View>
-            <AppSymbol name="chevron.right" size={10} color={theme.textTertiary} />
-          </Pressable>
+          </View>
         ) : null}
-      </View>
 
-      {/* Recent Sessions */}
-      <Text style={{ fontSize: 13, fontWeight: "400", color: theme.textTertiary, textTransform: "uppercase", paddingHorizontal: 36, paddingTop: 28, paddingBottom: 6 }}>最近会话</Text>
-      {history.length === 0 ? (
-        <GlassBar
-          blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
-          fallbackColor={theme.bgCard}
+        {/* Quick Actions */}
+        <Text
           style={{
-            marginHorizontal: 20,
-            borderRadius: 12,
-            borderCurve: "continuous" as const,
-            paddingVertical: 40,
-            paddingHorizontal: 20,
-            alignItems: "center",
-            gap: 8,
+            fontSize: 13,
+            fontWeight: "400",
+            color: theme.textTertiary,
+            textTransform: "uppercase",
+            paddingHorizontal: 36,
+            paddingTop: 28,
+            paddingBottom: 6,
           }}
         >
-          <AppSymbol name="terminal.fill" size={36} color={theme.textTertiary} style={{ marginBottom: 4 }} />
-          <Text style={{ color: theme.textSecondary, fontSize: 17, fontWeight: "600" }}>还没有会话记录</Text>
-          <Text style={{ color: theme.textTertiary, fontSize: 14, textAlign: "center", lineHeight: 20 }}>
-            点击上方「新建连接」扫码或手动配对{"\n"}连接后的记录会出现在这里
-          </Text>
-        </GlassBar>
-      ) : (
-        <GlassBar
-          blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
-          fallbackColor={theme.bgCard}
+          快捷操作
+        </Text>
+        <View
           style={{
             marginHorizontal: 20,
+            backgroundColor: theme.bgCard,
             borderRadius: 12,
             borderCurve: "continuous" as const,
             overflow: "hidden",
           }}
         >
-          {history.map((item, index) => (
-            <SwipeableRow
-              key={item.sessionId}
-              item={item}
-              index={index}
-              theme={theme}
-              swipeableRefs={swipeableRefs}
-              onPress={() => handleResumeSession(item.sessionId, item.serverUrl)}
-              onDelete={() => handleDeleteSession(item.sessionId)}
+          <Pressable
+            onPress={handleNewConnection}
+            disabled={isLoading}
+            style={({ pressed }) => ({
+              flexDirection: "row",
+              alignItems: "center",
+              paddingVertical: 11,
+              paddingHorizontal: 16,
+              gap: 12,
+              opacity: pressed ? 0.6 : 1,
+            })}
+          >
+            <View
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 7,
+                borderCurve: "continuous",
+                backgroundColor: theme.accent,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {isLoading ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <AppSymbol name="plus.circle.fill" size={16} color="#ffffff" />
+              )}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 17, color: theme.text }}>
+                {isLoading ? "连接中…" : "新建连接"}
+              </Text>
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: theme.textTertiary,
+                  marginTop: 1,
+                }}
+              >
+                {isLoading ? "正在建立终端连接" : "扫码、配对码或选择网关"}
+              </Text>
+            </View>
+            {!isLoading ? (
+              <AppSymbol
+                name="chevron.right"
+                size={13}
+                color={theme.textTertiary}
+              />
+            ) : null}
+          </Pressable>
+
+          {latest ? (
+            <>
+              <View
+                style={{
+                  height: StyleSheet.hairlineWidth,
+                  backgroundColor: theme.separator,
+                  marginLeft: 58,
+                }}
+              />
+              <Pressable
+                onPress={() =>
+                  handleResumeSession(latest.sessionId, latest.serverUrl)
+                }
+                style={({ pressed }) => ({
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 11,
+                  paddingHorizontal: 16,
+                  gap: 12,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <View
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 7,
+                    borderCurve: "continuous",
+                    backgroundColor: theme.success,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <AppSymbol
+                    name="arrow.counterclockwise.circle.fill"
+                    size={16}
+                    color="#ffffff"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 17, color: theme.text }}>
+                    {latest.projectName
+                      ? `继续 ${latest.projectName}`
+                      : "继续上次会话"}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      color: theme.textTertiary,
+                      marginTop: 1,
+                    }}
+                  >
+                    {latest.sessionId.slice(0, 8)} ·{" "}
+                    {timeAgo(latest.connectedAt)}
+                  </Text>
+                </View>
+                <AppSymbol
+                  name="chevron.right"
+                  size={13}
+                  color={theme.textTertiary}
+                />
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+        <Text
+          style={{
+            fontSize: 13,
+            color: theme.textTertiary,
+            paddingHorizontal: 36,
+            paddingTop: 6,
+          }}
+        >
+          创建新连接或恢复最近的终端会话。
+        </Text>
+
+        {/* Recent Sessions */}
+        <Text
+          style={{
+            fontSize: 13,
+            fontWeight: "400",
+            color: theme.textTertiary,
+            textTransform: "uppercase",
+            paddingHorizontal: 36,
+            paddingTop: 28,
+            paddingBottom: 6,
+          }}
+        >
+          最近会话
+        </Text>
+        {history.length === 0 ? (
+          <View
+            style={{
+              marginHorizontal: 20,
+              backgroundColor: theme.bgCard,
+              borderRadius: 12,
+              borderCurve: "continuous" as const,
+              paddingVertical: 40,
+              paddingHorizontal: 20,
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <AppSymbol
+              name="terminal.fill"
+              size={36}
+              color={theme.textTertiary}
+              style={{ marginBottom: 4 }}
             />
-          ))}
-        </GlassBar>
-      )}
-    </ScrollView>
+            <Text
+              style={{
+                color: theme.textSecondary,
+                fontSize: 17,
+                fontWeight: "600",
+              }}
+            >
+              还没有会话记录
+            </Text>
+            <Text
+              style={{
+                color: theme.textTertiary,
+                fontSize: 14,
+                textAlign: "center",
+                lineHeight: 20,
+              }}
+            >
+              点击上方「新建连接」扫码或手动配对{"\n"}连接后的记录会出现在这里
+            </Text>
+          </View>
+        ) : (
+          <View
+            style={{
+              marginHorizontal: 20,
+              backgroundColor: theme.bgCard,
+              borderRadius: 12,
+              borderCurve: "continuous" as const,
+              overflow: "hidden",
+            }}
+          >
+            {history.map((item, index) => (
+              <SwipeableRow
+                key={item.sessionId}
+                item={item}
+                index={index}
+                theme={theme}
+                swipeableRefs={swipeableRefs}
+                onPress={() =>
+                  handleResumeSession(item.sessionId, item.serverUrl)
+                }
+                onDelete={() => handleDeleteSession(item.sessionId)}
+              />
+            ))}
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -265,7 +426,10 @@ function SwipeableRow({
   onDelete: () => void;
 }) {
   const renderRightActions = useCallback(
-    (_progress: Animated.AnimatedInterpolation<number>, dragX: Animated.AnimatedInterpolation<number>) => {
+    (
+      _progress: Animated.AnimatedInterpolation<number>,
+      dragX: Animated.AnimatedInterpolation<number>,
+    ) => {
       const scale = dragX.interpolate({
         inputRange: [-80, 0],
         outputRange: [1, 0.5],
@@ -283,7 +447,16 @@ function SwipeableRow({
         >
           <Animated.View style={{ transform: [{ scale }] }}>
             <AppSymbol name="trash.fill" size={20} color="#ffffff" />
-            <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "500", marginTop: 2 }}>删除</Text>
+            <Text
+              style={{
+                color: "#ffffff",
+                fontSize: 12,
+                fontWeight: "500",
+                marginTop: 2,
+              }}
+            >
+              删除
+            </Text>
           </Animated.View>
         </Pressable>
       );
@@ -325,9 +498,21 @@ function SwipeableRow({
             {item.projectName || item.sessionId.slice(0, 8)}
           </Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <AppSymbol name={platformIcon(item.platform)} size={12} color={theme.textTertiary} />
-            <Text style={{ color: theme.textTertiary, fontSize: 13 }} numberOfLines={1}>{item.hostname ?? safeHost(item.serverUrl)}</Text>
-            <Text style={{ color: theme.textTertiary, fontSize: 13 }}> · {timeAgo(item.connectedAt)}</Text>
+            <AppSymbol
+              name={platformIcon(item.platform)}
+              size={12}
+              color={theme.textTertiary}
+            />
+            <Text
+              style={{ color: theme.textTertiary, fontSize: 13 }}
+              numberOfLines={1}
+            >
+              {item.hostname ?? safeHost(item.serverUrl)}
+            </Text>
+            <Text style={{ color: theme.textTertiary, fontSize: 13 }}>
+              {" "}
+              · {timeAgo(item.connectedAt)}
+            </Text>
           </View>
         </View>
         <AppSymbol name="chevron.right" size={10} color={theme.textTertiary} />
@@ -346,10 +531,14 @@ function safeHost(url: string): string {
 
 function platformIcon(platform: string | undefined): string {
   switch (platform) {
-    case "darwin": return "apple.logo";
-    case "linux": return "server.rack";
-    case "win32": return "pc";
-    default: return "desktopcomputer";
+    case "darwin":
+      return "apple.logo";
+    case "linux":
+      return "server.rack";
+    case "win32":
+      return "pc";
+    default:
+      return "desktopcomputer";
   }
 }
 

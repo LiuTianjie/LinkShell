@@ -39,6 +39,7 @@ const VOICE_BAR_HEIGHT = 40;
 
 const SHORTCUTS = [
   { label: "⇧Tab", value: "\u001b[Z" },
+  { label: "Ctrl+V", value: "\x10paste\x10" },
   { label: "Esc", value: "\u001b" },
   { label: "Tab", value: "\t" },
   { label: "\u2191", value: "\u001b[A" },
@@ -392,11 +393,6 @@ export function SessionScreen({
 
     requestAnimationFrame(() => {
       termRef.current?.refit(keyboardVisible);
-      if (keyboardVisible) {
-        setTimeout(() => {
-          termRef.current?.scrollToBottom();
-        }, 250);
-      }
     });
   }, [activeTab, keyboardVisible, keyboardInset]);
 
@@ -420,7 +416,9 @@ export function SessionScreen({
   const showFullOverlay = isConnecting || isHostOffline || isErrorState;
 
   const toolbarBg =
-    theme.mode === "light" ? "#e5e5ea" : "rgba(255,255,255,0.1)";
+    theme.mode === "light" ? "#efeff4" : "rgba(255,255,255,0.1)";
+
+  const chromeBg = theme.mode === "light" ? "#fafafa" : theme.bgElevated;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
@@ -442,7 +440,7 @@ export function SessionScreen({
           >
             <TerminalStage
               bottomInset={stageBottomInset}
-              headerPadding={insets.top + 70}
+              headerPadding={insets.top + 46}
               keyboardUp={keyboardVisible}
               inputDisabled={inputDisabled}
               keyboardHintVisible={keyboardHintVisible && !keyboardVisible}
@@ -512,8 +510,7 @@ export function SessionScreen({
         <View
           style={{
             height: insets.top,
-            backgroundColor:
-              theme.mode === "light" ? theme.bgCard : theme.bgElevated,
+            backgroundColor: chromeBg,
           }}
         />
 
@@ -545,6 +542,7 @@ export function SessionScreen({
           status={status}
           theme={theme}
           toolbarBg={toolbarBg}
+          chromeBg={chromeBg}
           zoomPercent={zoomPercent}
           terminalCount={
             terminalTabs?.filter((t) => t.status === "running").length ?? 0
@@ -611,8 +609,7 @@ export function SessionScreen({
         {connectionDetail && !banner ? (
           <View
             style={{
-              backgroundColor:
-                theme.mode === "light" ? theme.bgCard : theme.bgElevated,
+              backgroundColor: chromeBg,
               paddingHorizontal: 16,
               paddingVertical: 4,
             }}
@@ -664,6 +661,7 @@ const SessionHeader = memo(function SessionHeader({
   status,
   theme,
   toolbarBg,
+  chromeBg,
   zoomPercent,
   terminalCount,
   activeTerminalLabel,
@@ -684,6 +682,7 @@ const SessionHeader = memo(function SessionHeader({
   status: ConnectionStatus;
   theme: Theme;
   toolbarBg: string;
+  chromeBg: string;
   zoomPercent: number;
   terminalCount?: number;
   activeTerminalLabel?: string;
@@ -720,43 +719,20 @@ const SessionHeader = memo(function SessionHeader({
         paddingHorizontal: 12,
         paddingBottom: 12,
         gap: 4,
-        backgroundColor:
-          theme.mode === "light" ? theme.bgCard : theme.bgElevated,
+        backgroundColor: chromeBg,
       }}
     >
       {/* Row 1: status pill + folder name + exit */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        {/* Status pill */}
+        {/* Status dot */}
         <View
           style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 4,
-            paddingHorizontal: 7,
-            paddingVertical: 3,
-            borderRadius: 10,
-            borderCurve: "continuous" as const,
-            backgroundColor: statusConfig.bg,
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: statusConfig.color,
           }}
-        >
-          <View
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 3,
-              backgroundColor: statusConfig.color,
-            }}
-          />
-          <Text
-            style={{
-              fontSize: 10,
-              fontWeight: "600",
-              color: statusConfig.color,
-            }}
-          >
-            {statusConfig.text}
-          </Text>
-        </View>
+        />
 
         {/* Folder name */}
         <Text
@@ -772,42 +748,15 @@ const SessionHeader = memo(function SessionHeader({
           {folderName}
         </Text>
 
-        {/* Exit button */}
+        {/* Control - icon only */}
         <Pressable
           style={({ pressed }) => ({
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 3,
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            borderRadius: 10,
+            width: 32,
+            height: 28,
+            borderRadius: 8,
             borderCurve: "continuous" as const,
-            backgroundColor: pressed
-              ? "rgba(255,59,48,0.2)"
-              : "rgba(255,59,48,0.12)",
-          })}
-          onPress={onLeave}
-          hitSlop={8}
-        >
-          <AppSymbol name="xmark.circle.fill" size={12} color={theme.error} />
-          <Text style={{ fontSize: 11, fontWeight: "600", color: theme.error }}>
-            退出
-          </Text>
-        </Pressable>
-      </View>
-
-      {/* Row 2: control + terminal/desktop switcher + spacer + zoom + terminal count */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        {/* Release/Takeover */}
-        <Pressable
-          style={({ pressed }) => ({
-            flexDirection: "row",
             alignItems: "center",
-            gap: 4,
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            borderRadius: 10,
-            borderCurve: "continuous" as const,
+            justifyContent: "center",
             backgroundColor: hasControl
               ? pressed
                 ? theme.accent
@@ -824,18 +773,9 @@ const SessionHeader = memo(function SessionHeader({
         >
           <AppSymbol
             name={hasControl ? "hand.raised.fill" : "hand.raised"}
-            size={12}
+            size={15}
             color={hasControl ? theme.accent : theme.textSecondary}
           />
-          <Text
-            style={{
-              fontSize: 11,
-              fontWeight: "500",
-              color: hasControl ? theme.accent : theme.textSecondary,
-            }}
-          >
-            {hasControl ? "释放" : "接管"}
-          </Text>
         </Pressable>
 
         {/* Terminal/Desktop icon switcher */}
@@ -900,8 +840,6 @@ const SessionHeader = memo(function SessionHeader({
             />
           </Pressable>
         </View>
-
-        <View style={{ flex: 1 }} />
 
         {/* Zoom controls */}
         <View
@@ -1010,6 +948,22 @@ const SessionHeader = memo(function SessionHeader({
             />
           </Pressable>
         ) : null}
+
+        <Pressable
+          onPress={onLeave}
+          hitSlop={6}
+          style={({ pressed }) => ({
+            width: 32,
+            height: 26,
+            borderRadius: 7,
+            borderCurve: "continuous" as const,
+            backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "transparent",
+            alignItems: "center",
+            justifyContent: "center",
+          })}
+        >
+          <AppSymbol name="power" size={14} color={theme.error} />
+        </Pressable>
       </View>
     </View>
   );
@@ -1279,13 +1233,14 @@ const VoiceBar = memo(function VoiceBar({
           position: "absolute",
           left: 0,
           right: 0,
-          bottom: bottomInset,
+          bottom: bottomInset - 6,
           height: VOICE_BAR_HEIGHT,
           flexDirection: "row",
           alignItems: "center",
           paddingHorizontal: 12,
           gap: 8,
-          backgroundColor: theme.bgTerminal,
+          backgroundColor:
+            theme.mode === "light" ? "#fafafa" : theme.bgTerminal,
         }}
       >
         <View
@@ -1370,12 +1325,16 @@ const TerminalStage = memo(function TerminalStage({
   ctrlRef.current = ctrlActive;
 
   const handleInput = useCallback(
-    (data: string) => {
+    async (data: string) => {
+      if (data === "\x10paste\x10") {
+        const text = await Clipboard.getString();
+        if (text) onInput(text);
+        return;
+      }
       if (ctrlRef.current && data.length === 1) {
         const ch = data.toUpperCase();
         if (ch >= "A" && ch <= "Z") {
           onInput(String.fromCharCode(ch.charCodeAt(0) - 64));
-          setCtrlActive(false);
           return;
         }
       }
@@ -1394,7 +1353,10 @@ const TerminalStage = memo(function TerminalStage({
 
   return (
     <View
-      style={{ flex: 1, backgroundColor: theme.bgTerminal }}
+      style={{
+        flex: 1,
+        backgroundColor: theme.mode === "light" ? "#fafafa" : theme.bgTerminal,
+      }}
       onLayout={onLayout}
     >
       <View
@@ -1455,7 +1417,8 @@ const TerminalStage = memo(function TerminalStage({
             alignItems: "center",
             gap: 4,
             paddingHorizontal: 12,
-            backgroundColor: theme.bgTerminal,
+            backgroundColor:
+              theme.mode === "light" ? "#fafafa" : theme.bgTerminal,
           }}
         >
           <ScrollView
@@ -1506,32 +1469,16 @@ const TerminalStage = memo(function TerminalStage({
                 onPress={() => handleInput(item.value)}
               >
                 <Text
-                  style={{ fontSize: 12, fontWeight: "600", color: theme.text }}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "600",
+                    color: theme.text,
+                  }}
                 >
                   {item.label}
                 </Text>
               </Pressable>
             ))}
-            <Pressable
-              key="paste"
-              style={({ pressed }) => ({
-                paddingHorizontal: 8,
-                paddingVertical: 6,
-                borderRadius: 8,
-                borderCurve: "continuous" as const,
-                backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
-              })}
-              onPress={async () => {
-                const text = await Clipboard.getString();
-                if (text) handleInput(text);
-              }}
-            >
-              <Text
-                style={{ fontSize: 12, fontWeight: "600", color: theme.accent }}
-              >
-                Paste
-              </Text>
-            </Pressable>
           </ScrollView>
           {/* Image picker */}
           <Pressable
@@ -1546,7 +1493,7 @@ const TerminalStage = memo(function TerminalStage({
             })}
             onPress={onImagePicker}
           >
-            <AppSymbol name="photo" size={17} color={theme.accent} />
+            <AppSymbol name="photo" size={17} color={theme.text} />
           </Pressable>
           {/* Keyboard toggle */}
           <Pressable
@@ -1571,7 +1518,7 @@ const TerminalStage = memo(function TerminalStage({
             <AppSymbol
               name={keyboardUp ? "keyboard.chevron.compact.down" : "keyboard"}
               size={17}
-              color={theme.accent}
+              color={theme.text}
             />
           </Pressable>
         </View>
@@ -1604,7 +1551,9 @@ const TerminalStage = memo(function TerminalStage({
                   ? "systemThinMaterialDark"
                   : "systemThinMaterialLight"
               }
-              fallbackColor={theme.bgElevated}
+              fallbackColor={
+                theme.mode === "light" ? "#fafafa" : theme.bgElevated
+              }
               style={{
                 borderRadius: 20,
                 borderCurve: "continuous",
@@ -1940,8 +1889,7 @@ const SessionTabBar = memo(function SessionTabBar({
           ? "systemThinMaterialDark"
           : "systemThinMaterialLight"
       }
-      fallbackColor={theme.mode === "light" ? theme.bgCard : theme.bgElevated}
-      style={{}}
+      fallbackColor={theme.mode === "light" ? "#fafafa" : theme.bgElevated}
     >
       <ScrollView
         horizontal
@@ -2340,7 +2288,7 @@ const TerminalTabBar = memo(function TerminalTabBar({
           ? "systemThinMaterialDark"
           : "systemThinMaterialLight"
       }
-      fallbackColor={theme.mode === "light" ? theme.bgCard : theme.bgElevated}
+      fallbackColor={theme.mode === "light" ? "#fafafa" : theme.bgElevated}
       style={{}}
     >
       <ScrollView

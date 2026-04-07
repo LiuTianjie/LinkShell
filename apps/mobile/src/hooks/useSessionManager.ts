@@ -539,8 +539,11 @@ export function useSessionManager(): SessionManagerHandle {
         }
         case "session.error": {
           const p = parseTypedPayload("session.error", envelope.payload);
+          if (p.code === "control_conflict") {
+            s.connectionDetail = null;
+            break;
+          }
           s.connectionDetail = p.message;
-          if (p.code === "control_conflict") break;
           if (p.code === "session_terminated") { s.status = "session_exited"; tick(); break; }
           s.status = `error:${p.code}` as ConnectionStatus;
           tick();

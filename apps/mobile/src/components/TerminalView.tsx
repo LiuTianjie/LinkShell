@@ -138,7 +138,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           const newScrollTop =
             scrollRatio * (info.scrollHeight - info.clientHeight);
           scrollInfoRef.current.scrollTop = newScrollTop;
-          const js = `(function(){var vp=document.querySelector('.xterm-viewport');if(vp)vp.scrollTop=${newScrollTop};})();true;`;
+          const line = Math.round(scrollRatio * (term.buffer.active.baseY || 0));
+          const js = `(function(){try{term.scrollToLine(${line});}catch(e){}})();true;`;
           webViewRef.current?.injectJavaScript(js);
         },
         onPanResponderRelease: () => {
@@ -205,8 +206,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         return;
       }
       if(p.type==='write'){
-        var vp = document.querySelector('.xterm-viewport');
-        var wasNear = vp ? (vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 16) : true;
+        var wasNear = term.buffer.active.viewportY >= term.buffer.active.baseY;
         term.write(p.data || '');
         if(wasNear) setTimeout(function(){ snapBottom(); }, 10);
         return;
@@ -216,8 +216,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         return;
       }
       if(p.type==='set_scroll'){
-        var vp = document.querySelector('.xterm-viewport');
-        if(vp) vp.scrollTop = p.scrollTop;
+        if(typeof p.line==='number') term.scrollToLine(p.line);
         return;
       }
     } catch(e) {}
@@ -232,28 +231,28 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       const scrollBridgeScript = `
 <script>
 (function(){
-  var vp=null,raf=false;
+  var raf=false;
   function send(){
     raf=false;
-    if(!vp)vp=document.querySelector('.xterm-viewport');
-    if(!vp)return;
+    if(!window.term)return;
+    var buf=term.buffer.active;
+    var baseY=buf.baseY||0;
+    var viewportY=buf.viewportY||0;
+    var rows=term.rows||24;
+    var totalLines=baseY+rows;
     window.ReactNativeWebView.postMessage(JSON.stringify({
       type:'scroll_update',
-      scrollTop:vp.scrollTop,
-      scrollHeight:vp.scrollHeight,
-      clientHeight:vp.clientHeight
+      scrollTop:viewportY,
+      scrollHeight:totalLines,
+      clientHeight:rows
     }));
   }
   function schedule(){if(raf)return;raf=true;requestAnimationFrame(send);}
   setTimeout(function(){
-    vp=document.querySelector('.xterm-viewport');
+    var vp=document.querySelector('.xterm-viewport');
     if(vp)vp.addEventListener('scroll',schedule,{passive:true});
+    schedule();
   },200);
-  var mo=new MutationObserver(schedule);
-  setTimeout(function(){
-    if(!vp)vp=document.querySelector('.xterm-viewport');
-    if(vp)mo.observe(vp,{childList:true,subtree:true});
-  },300);
 })();
 </script>`;
 
@@ -289,10 +288,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             /\.xterm-viewport\{-webkit-overflow-scrolling:touch !important;overscroll-behavior:contain !important;\}/,
             `.xterm-viewport{-webkit-overflow-scrolling:touch !important;touch-action:pan-y !important;overscroll-behavior:contain !important;}`,
           )
-          // xterm viewport: theme background + smooth scroll
+          // Hide xterm 6.x scrollable-element scrollbar
           .replace(
-            /\.xterm \.xterm-viewport \{\n    \/\* On OS X this is required in order for the scroll bar to appear fully opaque \*\/\n    background-color: #000;\n    overflow-y: scroll;\n    cursor: default;\n    position: absolute;\n    right: 0;\n    left: 0;\n    top: 0;\n    bottom: 0;\n\}/,
-            `.xterm .xterm-viewport {\n    background-color: ${theme.bgTerminal};\n    overflow-y: scroll;\n    cursor: default;\n    position: absolute;\n    right: 0;\n    left: 0;\n    top: 0;\n    bottom: 0;\n    -webkit-overflow-scrolling: touch;\n  }`,
+            "</style>",
+            `.xterm .xterm-scrollable-element>.xterm-scrollbar{display:none !important;width:0 !important;}\n</style>`,
           )
           // Let xterm own keyboard input for IME
           .replace(
