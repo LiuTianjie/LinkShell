@@ -1,382 +1,2071 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN" class="scroll-smooth">
-
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title data-i18n="pageTitle">LinkShell | 始于桌面，随处接管</title>
-  <meta name="description" content="LinkShell 终端桥接方案，始于桌面，续于任何地方" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Arial', 'Helvetica', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title data-i18n="pageTitle">LinkShell | 始于桌面，随处接管</title>
+    <meta
+      name="description"
+      content="LinkShell 终端桥接方案，始于桌面，续于任何地方"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Inter", "system-ui", "sans-serif"],
+              mono: ["JetBrains Mono", "monospace"],
+            },
+            colors: {
+              brand: "#0a0a0a",
+              muted: "#666666",
+              surface: "#f9f9f9",
+              card: "#ffffff",
+              border: "#eaeaea",
+            },
+            boxShadow: {
+              bento:
+                "0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 0 3px rgba(0,0,0,0.02)",
+              "bento-hover":
+                "0 12px 30px -4px rgba(0, 0, 0, 0.08), 0 0 4px rgba(0,0,0,0.03)",
+            },
           },
-          colors: {
-            ferrari: '#DA291C',
-            nearblack: '#181818',
-            darksurf: '#303030',
-            midgray: '#8F8F8F',
-            darkgray: '#666666',
-          }
+        },
+      };
+    </script>
+    <style>
+      body {
+        background-color: #fafafa;
+        color: #0a0a0a;
+      }
+
+      .glass-nav {
+        background: rgba(255, 255, 255, 0.75);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+      }
+
+      .gradient-text {
+        background-clip: text;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-image: linear-gradient(135deg, #111111 0%, #6ab04c 100%);
+      }
+
+      .terminal-mockup {
+        background: #111;
+        border-radius: 8px;
+        padding: 16px;
+        color: #fff;
+        font-size: 13px;
+        line-height: 1.6;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .terminal-cursor {
+        display: inline-block;
+        width: 8px;
+        height: 16px;
+        background: #fff;
+        vertical-align: middle;
+        animation: blink 1s step-end infinite;
+      }
+
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+
+        50% {
+          opacity: 0;
         }
       }
-    }
-  </script>
-  <style>
-    body { background-color: #000; color: #fff; }
 
-    .nav-ferrari {
-      background: rgba(0,0,0,0.92);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-    }
+      .bento-grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 1.5rem;
+      }
 
-    .terminal-mockup {
-      background: #111;
-      border-radius: 2px;
-      padding: 16px;
-      color: #fff;
-      font-size: 13px;
-      line-height: 1.6;
-      border: 1px solid rgba(255,255,255,0.1);
-      font-family: 'JetBrains Mono', monospace;
-    }
+      .bento-card {
+        background: var(--card, #ffffff);
+        border: 1px solid var(--border, #eaeaea);
+        border-radius: 1.5rem;
+        padding: 2rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
 
-    .terminal-cursor {
-      display: inline-block;
-      width: 8px;
-      height: 16px;
-      background: #fff;
-      vertical-align: middle;
-      animation: blink 1s step-end infinite;
-    }
+      .bento-card:hover {
+        transform: translateY(-2px);
+        box-shadow:
+          0 12px 30px -4px rgba(0, 0, 0, 0.08),
+          0 0 4px rgba(0, 0, 0, 0.03);
+      }
 
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0; }
-    }
+      @keyframes scan {
+        0% {
+          top: -5%;
+          opacity: 0;
+        }
 
-    @keyframes scan {
-      0% { top: -5%; opacity: 0; }
-      10% { opacity: 1; }
-      90% { opacity: 1; }
-      100% { top: 105%; opacity: 0; }
-    }
+        10% {
+          opacity: 1;
+        }
 
-    /* Dynamic Island Animations */
-    @keyframes di-expand {
-      0% { width: 120px; height: 36px; border-radius: 20px; }
-      50% { width: 340px; height: 36px; border-radius: 20px; }
-      100% { width: 340px; height: 80px; border-radius: 24px; }
-    }
-    @keyframes di-collapse {
-      0% { width: 340px; height: 80px; border-radius: 24px; }
-      50% { width: 340px; height: 36px; border-radius: 20px; }
-      100% { width: 120px; height: 36px; border-radius: 20px; }
-    }
-    @keyframes di-pulse-ring {
-      0% { transform: scale(1); opacity: 0.6; }
-      50% { transform: scale(1.15); opacity: 0; }
-      100% { transform: scale(1); opacity: 0; }
-    }
-    @keyframes di-thinking-dot {
-      0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
-      40% { transform: scale(1); opacity: 1; }
-    }
-    @keyframes di-slide-up {
-      0% { opacity: 0; transform: translateY(8px); }
-      100% { opacity: 1; transform: translateY(0); }
-    }
-    @keyframes di-action-glow {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(218,41,28,0.4); }
-      50% { box-shadow: 0 0 12px 4px rgba(218,41,28,0.15); }
-    }
+        90% {
+          opacity: 1;
+        }
 
-    .di-phone-frame {
-      width: 280px;
-      height: 560px;
-      background: #000;
-      border-radius: 44px;
-      position: relative;
-      overflow: hidden;
-      box-shadow: 0 0 0 2px rgba(255,255,255,0.12);
-    }
-    .di-phone-screen {
-      position: absolute;
-      inset: 4px;
-      border-radius: 40px;
-      overflow: hidden;
-      background: #0a0a0a;
-    }
-    .di-island-container {
-      position: absolute;
-      top: 12px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-    }
+        100% {
+          top: 105%;
+          opacity: 0;
+        }
+      }
 
-    .di-island {
-      background: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      position: relative;
-      transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-      cursor: pointer;
-    }
-    .di-island.compact {
-      width: 120px;
-      height: 36px;
-      border-radius: 20px;
-    }
-    .di-island.expanded {
-      width: 340px;
-      height: 80px;
-      border-radius: 24px;
-    }
-    .di-island.action {
-      width: 340px;
-      height: 140px;
-      border-radius: 28px;
-    }
+      /* Dynamic Island Animations */
+      @keyframes di-expand {
+        0% {
+          width: 120px;
+          height: 36px;
+          border-radius: 20px;
+        }
+        50% {
+          width: 340px;
+          height: 36px;
+          border-radius: 20px;
+        }
+        100% {
+          width: 340px;
+          height: 80px;
+          border-radius: 24px;
+        }
+      }
+      @keyframes di-collapse {
+        0% {
+          width: 340px;
+          height: 80px;
+          border-radius: 24px;
+        }
+        50% {
+          width: 340px;
+          height: 36px;
+          border-radius: 20px;
+        }
+        100% {
+          width: 120px;
+          height: 36px;
+          border-radius: 20px;
+        }
+      }
+      @keyframes di-pulse-ring {
+        0% {
+          transform: scale(1);
+          opacity: 0.6;
+        }
+        50% {
+          transform: scale(1.15);
+          opacity: 0;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 0;
+        }
+      }
+      @keyframes di-thinking-dot {
+        0%,
+        80%,
+        100% {
+          transform: scale(0.6);
+          opacity: 0.3;
+        }
+        40% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      @keyframes di-slide-up {
+        0% {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        100% {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes di-action-glow {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(106, 176, 76, 0.4);
+        }
+        50% {
+          box-shadow: 0 0 12px 4px rgba(106, 176, 76, 0.15);
+        }
+      }
 
-    .di-thinking-dots {
-      display: flex;
-      gap: 5px;
-      align-items: center;
-    }
-    .di-thinking-dots span {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #DA291C;
-      animation: di-thinking-dot 1.4s ease-in-out infinite;
-    }
-    .di-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
-    .di-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+      .di-phone-frame {
+        width: 280px;
+        height: 560px;
+        background: #000;
+        border-radius: 44px;
+        position: relative;
+        overflow: hidden;
+        box-shadow:
+          0 25px 60px -12px rgba(0, 0, 0, 0.4),
+          inset 0 0 0 2px rgba(255, 255, 255, 0.1);
+      }
+      .di-phone-screen {
+        position: absolute;
+        inset: 4px;
+        border-radius: 40px;
+        overflow: hidden;
+        background: linear-gradient(
+          180deg,
+          #1a1a2e 0%,
+          #16213e 50%,
+          #0f3460 100%
+        );
+      }
+      .di-island-container {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+      }
 
-    /* Project Workspace Animations */
-    @keyframes folder-pop {
-      0% { transform: scale(0.8) translateY(10px); opacity: 0; }
-      60% { transform: scale(1.05) translateY(-2px); opacity: 1; }
-      100% { transform: scale(1) translateY(0); opacity: 1; }
-    }
-    @keyframes progress-fill {
-      0% { width: 0%; }
-      100% { width: var(--progress); }
-    }
-    @keyframes terminal-type {
-      0% { width: 0; }
-      100% { width: 100%; }
-    }
-    @keyframes project-card-float {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-4px); }
-    }
-    @keyframes parallel-pulse {
-      0%, 100% { opacity: 0.4; }
-      50% { opacity: 1; }
-    }
-    @keyframes status-blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
+      /* Dynamic Island States */
+      .di-island {
+        background: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        position: relative;
+        transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        cursor: pointer;
+      }
+      .di-island.compact {
+        width: 120px;
+        height: 36px;
+        border-radius: 20px;
+      }
+      .di-island.expanded {
+        width: 340px;
+        height: 80px;
+        border-radius: 24px;
+      }
+      .di-island.action {
+        width: 340px;
+        height: 140px;
+        border-radius: 28px;
+      }
 
-    .project-phone-frame {
-      width: 260px;
-      height: 520px;
-      background: #000;
-      border-radius: 40px;
-      position: relative;
-      overflow: hidden;
-      box-shadow: 0 0 0 2px rgba(255,255,255,0.12);
-    }
-    .project-phone-screen {
-      position: absolute;
-      inset: 4px;
-      border-radius: 36px;
-      overflow: hidden;
-      background: #0a0a0a;
-    }
+      .di-thinking-dots {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+      .di-thinking-dots span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #a78bfa;
+        animation: di-thinking-dot 1.4s ease-in-out infinite;
+      }
+      .di-thinking-dots span:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+      .di-thinking-dots span:nth-child(3) {
+        animation-delay: 0.4s;
+      }
 
-    .folder-item {
-      animation: folder-pop 0.5s ease-out both;
-    }
-    .folder-item:nth-child(1) { animation-delay: 0.1s; }
-    .folder-item:nth-child(2) { animation-delay: 0.2s; }
-    .folder-item:nth-child(3) { animation-delay: 0.3s; }
-    .folder-item:nth-child(4) { animation-delay: 0.4s; }
+      /* Project Workspace Animations */
+      @keyframes folder-pop {
+        0% {
+          transform: scale(0.8) translateY(10px);
+          opacity: 0;
+        }
+        60% {
+          transform: scale(1.05) translateY(-2px);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(1) translateY(0);
+          opacity: 1;
+        }
+      }
+      @keyframes progress-fill {
+        0% {
+          width: 0%;
+        }
+        100% {
+          width: var(--progress);
+        }
+      }
+      @keyframes terminal-type {
+        0% {
+          width: 0;
+        }
+        100% {
+          width: 100%;
+        }
+      }
+      @keyframes project-card-float {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-4px);
+        }
+      }
+      @keyframes parallel-pulse {
+        0%,
+        100% {
+          opacity: 0.4;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+      @keyframes status-blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
 
-    .progress-bar-fill {
-      animation: progress-fill 2s ease-out both;
-      animation-delay: 0.8s;
-    }
+      .project-phone-frame {
+        width: 260px;
+        height: 520px;
+        background: #000;
+        border-radius: 40px;
+        position: relative;
+        overflow: hidden;
+        box-shadow:
+          0 25px 60px -12px rgba(0, 0, 0, 0.35),
+          inset 0 0 0 2px rgba(255, 255, 255, 0.1);
+      }
+      .project-phone-screen {
+        position: absolute;
+        inset: 4px;
+        border-radius: 36px;
+        overflow: hidden;
+        background: #111;
+      }
 
-    @keyframes dash-flow {
-      0% { stroke-dashoffset: 20; }
-      100% { stroke-dashoffset: 0; }
-    }
+      .folder-item {
+        animation: folder-pop 0.5s ease-out both;
+      }
+      .folder-item:nth-child(1) {
+        animation-delay: 0.1s;
+      }
+      .folder-item:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+      .folder-item:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+      .folder-item:nth-child(4) {
+        animation-delay: 0.4s;
+      }
 
-    /* Ferrari section transitions */
-    .section-dark { background: #000; color: #fff; }
-    .section-light { background: #fff; color: #181818; }
-  </style>
-</head>
+      .progress-bar-fill {
+        animation: progress-fill 2s ease-out both;
+        animation-delay: 0.8s;
+      }
 
-<body class="antialiased">
+      /* Animated connection lines for parallel sessions */
+      @keyframes dash-flow {
+        0% {
+          stroke-dashoffset: 20;
+        }
+        100% {
+          stroke-dashoffset: 0;
+        }
+      }
+    </style>
+  </head>
 
-  <!-- Navbar -->
-  <nav class="fixed top-0 inset-x-0 z-50 nav-ferrari">
-    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 bg-ferrari flex items-center justify-center text-white font-bold text-sm tracking-tighter" style="border-radius:2px;">LS</div>
-        <span class="font-semibold tracking-tight text-lg text-white">LinkShell</span>
+  <body class="antialiased selection:bg-brand selection:text-white">
+    <!-- Navbar -->
+    <nav class="fixed top-0 inset-x-0 z-50 glass-nav">
+      <div
+        class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between"
+      >
+        <div class="flex items-center gap-3">
+          <div
+            class="w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white font-bold text-sm tracking-tighter"
+          >
+            LS
+          </div>
+          <span class="font-semibold tracking-tight text-lg">LinkShell</span>
+        </div>
+        <div class="flex items-center gap-6 text-sm font-medium text-muted">
+          <a
+            href="#how"
+            class="hover:text-brand transition-colors"
+            data-i18n="navDocs"
+            >工作原理</a
+          >
+          <a
+            href="https://github.com/LiuTianjie/LinkShell"
+            class="hover:text-brand transition-colors"
+            data-i18n="navGithub"
+            >GitHub</a
+          >
+          <div class="w-px h-4 bg-border"></div>
+          <button
+            id="lang-toggle"
+            class="hover:text-brand transition-colors uppercase tracking-wider"
+          >
+            EN
+          </button>
+        </div>
       </div>
-      <div class="flex items-center gap-6 text-sm font-medium text-midgray">
-        <a href="#how" class="hover:text-white transition-colors uppercase tracking-widest text-xs" data-i18n="navDocs">工作原理</a>
-        <a href="https://github.com/LiuTianjie/LinkShell" class="hover:text-white transition-colors uppercase tracking-widest text-xs" data-i18n="navGithub">GitHub</a>
-        <div class="w-px h-4 bg-white/10"></div>
-        <button id="lang-toggle" class="hover:text-white transition-colors uppercase tracking-widest text-xs">EN</button>
-      </div>
-    </div>
-  </nav>
+    </nav>
 
-  <main>
-    <!-- Hero Section — Black cinematic -->
-    <section class="section-dark min-h-screen flex items-center justify-center relative">
-      <div class="max-w-5xl mx-auto px-6 text-center pt-24 pb-32">
+    <main class="pt-32 pb-24">
+      <!-- Hero Section -->
+      <section class="max-w-5xl mx-auto px-6 text-center mt-12 mb-24 relative">
         <!-- Minimal top badge -->
-        <div class="inline-flex items-center gap-2 px-4 py-2 border border-white/15 text-xs font-medium tracking-widest uppercase mb-12" style="border-radius:2px;">
-          <span class="w-2 h-2 bg-ferrari animate-pulse"></span>
-          <span data-i18n="heroBadge" class="text-midgray">LinkShell v1.0 现已发布</span>
+        <div
+          class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-border text-xs font-semibold tracking-wide mb-8 shadow-sm"
+        >
+          <span
+            class="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"
+          ></span>
+          <span data-i18n="heroBadge">LinkShell v1.0 现已发布</span>
         </div>
 
-        <h1 class="text-5xl md:text-8xl font-bold tracking-tight mb-8" style="line-height:1.05;">
-          <span data-i18n="heroTitle1" class="block text-white">终端漫游</span>
-          <span data-i18n="heroTitle2" class="block text-midgray" style="font-weight:500;">随时随地，自由接管</span>
+        <h1
+          class="text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6"
+        >
+          <span data-i18n="heroTitle1">终端漫游</span><br />
+          <span class="gradient-text" data-i18n="heroTitle2"
+            >随时随地，自由接管</span
+          >
         </h1>
 
-        <p class="text-lg md:text-xl text-darkgray max-w-2xl mx-auto mb-14 leading-relaxed" style="font-weight:400;" data-i18n="heroLead">
+        <p
+          class="text-lg md:text-xl text-muted max-w-2xl mx-auto mb-10 leading-relaxed font-medium"
+          data-i18n="heroLead"
+        >
           始于桌面，续于任何地方，随时切回。会话完全驻留在你的电脑上，手机只是一个窗口。
         </p>
 
-        <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <a href="#quickstart"
-            class="px-10 py-4 bg-ferrari text-white font-medium text-base hover:bg-red-700 transition-colors uppercase tracking-widest"
-            style="border-radius:2px;letter-spacing:1.28px;"
-            data-i18n="btnStart">
+        <div
+          class="flex flex-col sm:flex-row items-center justify-center gap-4"
+        >
+          <a
+            href="#quickstart"
+            class="px-8 py-3.5 rounded-full bg-brand text-white font-semibold text-sm hover:bg-gray-800 transition-colors shadow-lg hover:shadow-xl hover:-translate-y-0.5"
+            data-i18n="btnStart"
+          >
             立即开始
           </a>
-          <a href="https://github.com/LiuTianjie/LinkShell"
-            class="px-10 py-4 bg-transparent border border-white/30 text-white font-medium text-base hover:border-white transition-all uppercase tracking-widest"
-            style="border-radius:2px;letter-spacing:1.28px;"
-            data-i18n="btnGithub">
+          <a
+            href="https://github.com/LiuTianjie/LinkShell"
+            class="px-8 py-3.5 rounded-full bg-surface border border-border text-brand font-semibold text-sm hover:bg-gray-50 transition-all"
+            data-i18n="btnGithub"
+          >
             查看工作流
           </a>
         </div>
-      </div>
-      <!-- Bottom edge line -->
-      <div class="absolute bottom-0 left-0 right-0 h-px bg-white/8"></div>
-    </section>
+      </section>
 
-    <!-- Quickstart — White editorial panel -->
-    <section class="section-light py-32" id="quickstart">
-      <div class="max-w-7xl mx-auto px-6">
-        <div class="text-center mb-20">
-          <p class="text-xs font-medium tracking-widest uppercase text-midgray mb-4" style="letter-spacing:1px;">QUICKSTART</p>
-          <h2 class="text-3xl md:text-5xl font-bold tracking-tight text-nearblack" style="line-height:1.1;" data-i18n="howItWorksTitle">只需三步，连接你的终端</h2>
-        </div>
+      <!-- Quickstart -->
+      <section class="max-w-7xl mx-auto px-6 mb-32" id="quickstart">
+        <h2
+          class="text-3xl md:text-4xl font-bold tracking-tight mb-16 text-center"
+          data-i18n="howItWorksTitle"
+        >
+          只需三步，连接你的终端
+        </h2>
 
         <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
           <!-- Step 1 -->
-          <div class="border border-nearblack/10 p-8 relative" style="border-radius:2px;">
-            <div class="absolute -top-5 left-6 w-10 h-10 bg-nearblack text-white flex items-center justify-center font-bold text-lg" style="border-radius:2px;">1</div>
-            <h3 class="font-bold text-lg mb-3 mt-2 text-nearblack" data-i18n="step1Title">安装 CLI</h3>
-            <p class="text-sm text-darkgray mb-4" data-i18n="step1Desc">一条命令全局安装。内置网关开箱即用，无需额外部署服务器。</p>
-            <div class="bg-nearblack text-white font-mono text-xs p-4 space-y-2 overflow-x-auto h-[280px] flex flex-col justify-center" style="border-radius:2px;">
-              <div class="text-gray-500"># 全局安装 CLI</div>
-              <div class="text-midgray">$ <span class="text-white">npm i -g linkshell-cli</span></div>
-              <div class="text-gray-500 mt-3"># 初始化配置</div>
-              <div class="text-midgray">$ <span class="text-white">linkshell setup</span></div>
-              <div class="text-gray-500 mt-3"># 检查环境</div>
-              <div class="text-midgray">$ <span class="text-white">linkshell doctor</span></div>
-              <div class="text-ferrari mt-1">&#10003; All checks passed</div>
+          <div class="bento-card relative">
+            <div
+              class="absolute -top-5 left-6 w-10 h-10 rounded-xl bg-brand text-white flex items-center justify-center font-bold text-lg shadow-lg"
+            >
+              1
+            </div>
+            <h3 class="font-bold text-lg mb-3 mt-2" data-i18n="step1Title">
+              安装 CLI
+            </h3>
+            <p class="text-sm text-muted mb-4" data-i18n="step1Desc">
+              一条命令全局安装。内置网关开箱即用，无需额外部署服务器。
+            </p>
+            <div
+              class="bg-brand text-white font-mono text-xs p-4 rounded-xl space-y-2 overflow-x-auto shadow-inner h-[280px] flex flex-col justify-center"
+            >
+              <div class="text-gray-400"># 全局安装 CLI</div>
+              <div class="text-green-400">
+                $ <span class="text-white">npm i -g linkshell-cli</span>
+              </div>
+              <div class="text-gray-400 mt-3"># 初始化配置</div>
+              <div class="text-green-400">
+                $ <span class="text-white">linkshell setup</span>
+              </div>
+              <div class="text-gray-400 mt-3"># 检查环境</div>
+              <div class="text-green-400">
+                $ <span class="text-white">linkshell doctor</span>
+              </div>
+              <div class="text-emerald-300 mt-1">✓ All checks passed</div>
             </div>
           </div>
 
           <!-- Step 2 -->
-          <div class="border border-nearblack/10 p-8 relative" style="border-radius:2px;">
-            <div class="absolute -top-5 left-6 w-10 h-10 bg-nearblack text-white flex items-center justify-center font-bold text-lg" style="border-radius:2px;">2</div>
-            <h3 class="font-bold text-lg mb-3 mt-2 text-nearblack" data-i18n="step2Title">启动桥接</h3>
-            <p class="text-sm text-darkgray mb-4" data-i18n="step2Desc">一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。</p>
-            <div class="bg-nearblack text-white font-mono text-xs p-4 space-y-1.5 overflow-x-auto h-[280px]" style="border-radius:2px;">
-              <div class="text-gray-500"># 启动桥接（自动启动内置网关）</div>
-              <div class="text-midgray">$ <span class="text-white">linkshell start</span></div>
-              <div class="text-gray-400 mt-1 text-[10px]"> Built-in gateway started on port 8787</div>
-              <div class="text-gray-400 text-[10px]"> LAN address: http://192.168.1.10:8787</div>
-              <div class="text-gray-400 mt-2 leading-[8px] text-[8px] sm:text-[10px] sm:leading-[10px] font-black">
-                ██████████████████████████████<br>
-                ██ ▄▄▄▄▄ ██▄▄▀▄ ▄█▄█ ▄▄▄▄▄ ██<br>
-                ██ █ █ ████▀█▀▄ ▀█ █ █ ██<br>
-                ██ █▄▄▄█ ██ █▄█▀▄█ █▄▄▄█ ██<br>
-                ██▄▄▄▄▄▄▄█▄█▄█▄▀▄▀▄█▄▄▄▄▄▄▄██<br>
-                ██▄█▄▀ ▄▄▄█▄ █▀ ▀█ █▀ ▀ ██<br>
-                ██ █▀█▀▄▄ ▄▄ ▀███▄▄██▀▀▄██<br>
-                ██▄▄▄▄▄▄▄█ ▄█▄██ ██▄ ▀▄ ▄▄██<br>
-                ██ ▄▄▄▄▄ █▄█ ▀ █▀█ █ ▀█ █▀ ██<br>
-                ██ █ █ █ ▀ ▄██▄█▄█▀█▄▀█████<br>
-                ██ █▄▄▄█ █ ▄▀█ ██▄▄ ▀▄▀▄███<br>
-                ██▄▄▄▄▄▄▄█▄████▄█▄▄██████▄███<br>
+          <div class="bento-card relative">
+            <div
+              class="absolute -top-5 left-6 w-10 h-10 rounded-xl bg-brand text-white flex items-center justify-center font-bold text-lg shadow-lg"
+            >
+              2
+            </div>
+            <h3 class="font-bold text-lg mb-3 mt-2" data-i18n="step2Title">
+              启动桥接
+            </h3>
+            <p class="text-sm text-muted mb-4" data-i18n="step2Desc">
+              一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。
+            </p>
+            <div
+              class="bg-brand text-white font-mono text-xs p-4 rounded-xl space-y-1.5 overflow-x-auto shadow-inner h-[280px]"
+            >
+              <div class="text-gray-400"># 启动桥接（自动启动内置网关）</div>
+              <div class="text-green-400">
+                $ <span class="text-white">linkshell start</span>
+              </div>
+              <div class="text-gray-300 mt-1 text-[10px]">
+                Built-in gateway started on port 8787
+              </div>
+              <div class="text-gray-300 text-[10px]">
+                LAN address: http://192.168.1.10:8787
+              </div>
+              <div
+                class="text-gray-300 mt-2 leading-[8px] text-[8px] sm:text-[10px] sm:leading-[10px] font-black"
+              >
+                ██████████████████████████████<br />
+                ██ ▄▄▄▄▄ ██▄▄▀▄ ▄█▄█ ▄▄▄▄▄ ██<br />
+                ██ █ █ ████▀█▀▄ ▀█ █ █ ██<br />
+                ██ █▄▄▄█ ██ █▄█▀▄█ █▄▄▄█ ██<br />
+                ██▄▄▄▄▄▄▄█▄█▄█▄▀▄▀▄█▄▄▄▄▄▄▄██<br />
+                ██▄█▄▀ ▄▄▄█▄ █▀ ▀█ █▀ ▀ ██<br />
+                ██ █▀█▀▄▄ ▄▄ ▀███▄▄██▀▀▄██<br />
+                ██▄▄▄▄▄▄▄█ ▄█▄██ ██▄ ▀▄ ▄▄██<br />
+                ██ ▄▄▄▄▄ █▄█ ▀ █▀█ █ ▀█ █▀ ██<br />
+                ██ █ █ █ ▀ ▄██▄█▄█▀█▄▀█████<br />
+                ██ █▄▄▄█ █ ▄▀█ ██▄▄ ▀▄▀▄███<br />
+                ██▄▄▄▄▄▄▄█▄████▄█▄▄██████▄███<br />
                 ██████████████████████████████
               </div>
-              <div class="text-ferrari mt-1 font-semibold text-[10px]">&#10140; Code: <span class="bg-red-900/40 px-1 text-white tracking-widest" style="border-radius:2px;">847293</span></div>
+              <div class="text-emerald-300 mt-1 font-semibold text-[10px]">
+                ➜ Code:
+                <span
+                  class="bg-emerald-900 px-1 rounded text-white tracking-widest"
+                  >847293</span
+                >
+              </div>
             </div>
           </div>
 
           <!-- Step 3 -->
-          <div class="border-2 border-ferrari p-8 relative" style="border-radius:2px;">
-            <div class="absolute -top-5 left-6 w-10 h-10 bg-ferrari text-white flex items-center justify-center font-bold text-lg" style="border-radius:2px;">3</div>
-            <h3 class="font-bold text-lg mb-3 mt-2 text-ferrari" data-i18n="step3Title">手机扫码，即刻接管</h3>
-            <p class="text-sm text-darkgray mb-4" data-i18n="step3Desc">打开 LinkShell App（iOS / Android），对准终端二维码扫一扫，立刻接管会话。</p>
-            <div class="bg-white border border-nearblack/10 font-mono text-sm p-4 flex flex-col items-center justify-center h-[280px] overflow-hidden relative" style="border-radius:2px;">
+          <div class="bento-card relative border-2 border-brand shadow-xl">
+            <div
+              class="absolute -top-5 left-6 w-10 h-10 rounded-xl border-2 border-brand bg-white text-brand flex items-center justify-center font-bold text-lg shadow-lg"
+            >
+              3
+            </div>
+            <h3
+              class="font-bold text-lg mb-3 mt-2 text-brand"
+              data-i18n="step3Title"
+            >
+              手机扫码，即刻接管
+            </h3>
+            <p class="text-sm text-muted mb-4" data-i18n="step3Desc">
+              打开 LinkShell App（iOS /
+              Android），对准终端二维码扫一扫，立刻接管会话。
+            </p>
+            <div
+              class="bg-surface border-2 border-brand/20 font-mono text-sm p-4 rounded-xl flex flex-col items-center justify-center h-[280px] overflow-hidden relative"
+            >
+              <div class="absolute inset-0 bg-brand/5"></div>
+
               <!-- 扫码动效演示 -->
               <div class="relative w-28 h-28 mb-4">
-                <div class="absolute inset-0 bg-white border border-nearblack/15 p-3 flex items-center justify-center" style="border-radius:2px;">
-                  <svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full text-nearblack opacity-90">
-                    <path d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm13-2h-3v2h3zm-3 2h-2v2h2zm2 2h3v-2h-3zm-2 2h-2v2h2zm2 0v2h3v-2h-3z" />
+                <div
+                  class="absolute inset-0 bg-white border-2 border-gray-200 rounded-xl p-3 shadow-sm flex items-center justify-center"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    class="w-full h-full text-brand opacity-90"
+                  >
+                    <path
+                      d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm13-2h-3v2h3zm-3 2h-2v2h2zm2 2h3v-2h-3zm-2 2h-2v2h2zm2 0v2h3v-2h-3z"
+                    />
                   </svg>
                 </div>
-                <div class="absolute inset-0 border-2 border-ferrari scale-105 pointer-events-none opacity-50" style="border-radius:2px;"></div>
+                <div
+                  class="absolute inset-0 border-[3px] border-brand rounded-xl scale-105 pointer-events-none opacity-50"
+                ></div>
+
                 <!-- 扫描线 -->
-                <div class="absolute top-0 left-0 w-full h-[2px] bg-ferrari shadow-[0_0_12px_3px_rgba(218,41,28,0.4)] animate-[scan_2.5s_ease-in-out_infinite]"></div>
+                <div
+                  class="absolute top-0 left-0 w-full h-[2px] bg-brand shadow-[0_0_12px_3px_rgba(0,0,0,0.4)] animate-[scan_2.5s_ease-in-out_infinite] shadow-brand"
+                ></div>
               </div>
-              <div class="text-ferrari mb-2 text-xs uppercase font-bold tracking-widest text-center relative z-10">正在扫描终端终端码...</div>
-              <div class="flex gap-1.5 text-xl font-bold tracking-widest text-nearblack bg-white px-3 py-2 border border-nearblack/15 relative z-10" style="border-radius:2px;">
-                <span class="px-1 border-b-2 border-ferrari opacity-100">8</span>
-                <span class="px-1 border-b-2 border-ferrari opacity-100">4</span>
-                <span class="px-1 border-b-2 border-ferrari opacity-40">7</span>
-                <span class="text-midgray">-</span>
-                <span class="px-1 border-b-2 border-ferrari opacity-20">2</span>
-                <span class="px-1 border-b-2 border-ferrari opacity-20">9</span>
-                <span class="px-1 border-b-2 border-ferrari opacity-20">3</span>
+
+              <div
+                class="text-brand mb-2 text-xs uppercase font-bold tracking-widest text-center relative z-10 bg-white/80 px-2 py-0.5 rounded"
+              >
+                正在扫描终端终端码...
+              </div>
+              <div
+                class="flex gap-1.5 text-xl font-bold tracking-widest text-brand bg-white px-3 py-2 rounded-lg shadow-sm border border-brand/30 relative z-10"
+              >
+                <span class="px-1 border-b-2 border-brand opacity-100">8</span>
+                <span class="px-1 border-b-2 border-brand opacity-100">4</span>
+                <span class="px-1 border-b-2 border-brand opacity-40">7</span>
+                <span class="text-gray-300">-</span>
+                <span class="px-1 border-b-2 border-brand opacity-20">2</span>
+                <span class="px-1 border-b-2 border-brand opacity-20">9</span>
+                <span class="px-1 border-b-2 border-brand opacity-20">3</span>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- PLACEHOLDER_CONTINUE -->
-  </main>
-</body>
+      <!-- Core Philosophy: Bento Grid -->
+      <section class="max-w-7xl mx-auto px-6 mb-32" id="how">
+        <h2
+          class="text-3xl md:text-4xl font-bold tracking-tight mb-12 text-center"
+          data-i18n="featureSectionTitle"
+        >
+          始于桌面，续于任何地方，随时切回。
+        </h2>
+
+        <div class="bento-grid">
+          <!-- Feature 1 -->
+          <div
+            class="col-span-12 md:col-span-4 bento-card flex flex-col items-center text-center"
+          >
+            <div
+              class="w-16 h-16 rounded-2xl bg-surface border border-border flex items-center justify-center mb-6"
+            >
+              <svg
+                class="w-8 h-8 text-brand"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                  d="M5 12h14M12 5l7 7-7 7"
+                />
+              </svg>
+            </div>
+            <h3 class="text-xl font-bold mb-3" data-i18n="f1Title">本地核心</h3>
+            <p class="text-muted leading-relaxed" data-i18n="f1Desc">
+              繁重的计算和环境依赖都在你高性能的桌面上完成。没有云端限制，不搬家，不中断。
+            </p>
+          </div>
+
+          <!-- Feature 2 -->
+          <div
+            class="col-span-12 md:col-span-4 bento-card flex flex-col items-center text-center group bg-brand text-white border-transparent"
+          >
+            <div
+              class="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center mb-6"
+            >
+              <svg
+                class="w-8 h-8"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                  d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
+                />
+              </svg>
+            </div>
+            <h3 class="text-xl font-bold mb-3" data-i18n="f2Title">远程接管</h3>
+            <p class="text-gray-300 leading-relaxed" data-i18n="f2Desc">
+              通过 iOS / Android 原生 App 接管一切。零延迟体验，立刻掌控终端。
+            </p>
+          </div>
+
+          <!-- Feature 3 -->
+          <div
+            class="col-span-12 md:col-span-4 bento-card flex flex-col items-center text-center"
+          >
+            <div
+              class="w-16 h-16 rounded-2xl bg-surface border border-border flex items-center justify-center mb-6"
+            >
+              <svg
+                class="w-8 h-8 text-brand"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                  d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                />
+              </svg>
+            </div>
+            <h3 class="text-xl font-bold mb-3" data-i18n="f3Title">无缝切换</h3>
+            <p class="text-muted leading-relaxed" data-i18n="f3Desc">
+              在多个视图间无缝流转。手机随时接管，回到电脑敲双空格切回本地，会话同步不丢失。
+            </p>
+          </div>
+
+          <!-- Feature 4: Remote Desktop -->
+          <div
+            class="col-span-12 bento-card flex flex-col items-center text-center bg-gradient-to-br from-emerald-50 to-white border-emerald-100"
+          >
+            <div
+              class="w-16 h-16 rounded-2xl bg-emerald-100 border border-emerald-200 flex items-center justify-center mb-6"
+            >
+              <svg
+                class="w-8 h-8 text-emerald-700"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                  d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                />
+              </svg>
+            </div>
+            <h3 class="text-xl font-bold mb-3" data-i18n="f4Title">远程桌面</h3>
+            <p class="text-muted leading-relaxed max-w-xl" data-i18n="f4Desc">
+              不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC
+              30fps 丝滑体验，自动降级到截图流兜底。看 Claude
+              操作浏览器、编辑器，尽在掌握。
+            </p>
+            <div
+              class="mt-4 bg-brand text-white font-mono text-xs px-4 py-2 rounded-lg"
+            >
+              linkshell start --daemon --provider claude --screen
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Dynamic Island Section -->
+      <section class="max-w-7xl mx-auto px-6 mb-32">
+        <div class="flex flex-col md:flex-row items-center gap-12 md:gap-20">
+          <!-- Left: Text -->
+          <div class="flex-1 order-2 md:order-1">
+            <h2
+              class="text-3xl md:text-5xl font-bold tracking-tight mb-6"
+              data-i18n="diSectionTitle"
+            >
+              灵动岛，让 AI 触手可及
+            </h2>
+            <p
+              class="text-muted text-lg leading-relaxed mb-8"
+              data-i18n="diSectionDesc"
+            >
+              iPhone 灵动岛实时展示 Claude
+              工作状态。识别到需要操作时，一键快速响应，无需切回 App。
+            </p>
+            <ul class="space-y-4">
+              <li class="flex items-start gap-3">
+                <span
+                  class="mt-1 w-8 h-8 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center flex-shrink-0"
+                >
+                  <svg
+                    class="w-4 h-4 text-purple-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <circle cx="12" cy="12" r="10" stroke-width="1.5" />
+                    <path
+                      stroke-linecap="round"
+                      stroke-width="1.5"
+                      d="M12 6v6l4 2"
+                    />
+                  </svg>
+                </span>
+                <span class="text-sm leading-relaxed" data-i18n="diFeature1"
+                  >实时状态 — 思考中、编码中、等待确认，一目了然</span
+                >
+              </li>
+              <li class="flex items-start gap-3">
+                <span
+                  class="mt-1 w-8 h-8 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center flex-shrink-0"
+                >
+                  <svg
+                    class="w-4 h-4 text-purple-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                  </svg>
+                </span>
+                <span class="text-sm leading-relaxed" data-i18n="diFeature2"
+                  >快捷操作 — Claude 请求执行命令时，灵动岛直接审批</span
+                >
+              </li>
+              <li class="flex items-start gap-3">
+                <span
+                  class="mt-1 w-8 h-8 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center flex-shrink-0"
+                >
+                  <svg
+                    class="w-4 h-4 text-purple-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                </span>
+                <span class="text-sm leading-relaxed" data-i18n="diFeature3"
+                  >智能摘要 — 长对话自动提炼关键信息到灵动岛</span
+                >
+              </li>
+              <li class="flex items-start gap-3">
+                <span
+                  class="mt-1 w-8 h-8 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center flex-shrink-0"
+                >
+                  <svg
+                    class="w-4 h-4 text-purple-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"
+                    />
+                  </svg>
+                </span>
+                <span class="text-sm leading-relaxed" data-i18n="diFeature4"
+                  >无感切换 — 从灵动岛一键跳转到完整会话</span
+                >
+              </li>
+            </ul>
+          </div>
+          <!-- Right: Phone Mockup -->
+          <div class="flex-shrink-0 order-1 md:order-2">
+            <div class="di-phone-frame">
+              <div class="di-phone-screen">
+                <!-- Fake iOS status bar -->
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 14px 24px 0;
+                    color: rgba(255, 255, 255, 0.6);
+                    font-size: 12px;
+                    font-weight: 600;
+                  "
+                >
+                  <span>9:41</span>
+                  <div style="display: flex; gap: 4px; align-items: center">
+                    <svg
+                      width="16"
+                      height="12"
+                      fill="rgba(255,255,255,0.6)"
+                      viewBox="0 0 16 12"
+                    >
+                      <rect x="0" y="5" width="3" height="7" rx="0.5" />
+                      <rect x="4.5" y="3" width="3" height="9" rx="0.5" />
+                      <rect x="9" y="1" width="3" height="11" rx="0.5" />
+                      <rect x="13" y="0" width="3" height="12" rx="0.5" />
+                    </svg>
+                    <svg
+                      width="16"
+                      height="12"
+                      fill="rgba(255,255,255,0.6)"
+                      viewBox="0 0 24 12"
+                    >
+                      <rect
+                        x="0"
+                        y="0"
+                        width="22"
+                        height="12"
+                        rx="2"
+                        stroke="rgba(255,255,255,0.3)"
+                        stroke-width="1"
+                        fill="none"
+                      />
+                      <rect
+                        x="1.5"
+                        y="1.5"
+                        width="16"
+                        height="9"
+                        rx="1"
+                        fill="rgba(255,255,255,0.6)"
+                      />
+                      <rect x="23" y="3.5" width="1.5" height="5" rx="0.5" />
+                    </svg>
+                  </div>
+                </div>
+                <!-- Dynamic Island -->
+                <div class="di-island-container">
+                  <div class="di-island compact" id="di-island-demo">
+                    <!-- Compact: thinking dots -->
+                    <div class="di-thinking-dots" id="di-compact">
+                      <span></span><span></span><span></span>
+                    </div>
+                    <!-- Expanded: status text -->
+                    <div
+                      id="di-expanded"
+                      style="
+                        display: none;
+                        width: 100%;
+                        padding: 8px 16px;
+                        color: #fff;
+                      "
+                    >
+                      <div
+                        style="display: flex; align-items: center; gap: 10px"
+                      >
+                        <div
+                          style="
+                            width: 28px;
+                            height: 28px;
+                            border-radius: 50%;
+                            background: linear-gradient(
+                              135deg,
+                              #a78bfa,
+                              #7c3aed
+                            );
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            flex-shrink: 0;
+                          "
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="#fff"
+                            stroke-width="2"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                            />
+                          </svg>
+                        </div>
+                        <div style="flex: 1; min-width: 0">
+                          <div
+                            style="
+                              font-size: 10px;
+                              color: rgba(255, 255, 255, 0.5);
+                              margin-bottom: 2px;
+                            "
+                          >
+                            Claude Code
+                          </div>
+                          <div
+                            style="
+                              font-size: 12px;
+                              font-weight: 600;
+                              white-space: nowrap;
+                              overflow: hidden;
+                              text-overflow: ellipsis;
+                            "
+                          >
+                            正在修改 App.tsx...
+                          </div>
+                        </div>
+                        <div
+                          style="
+                            width: 6px;
+                            height: 6px;
+                            border-radius: 50%;
+                            background: #a78bfa;
+                            animation: di-pulse-ring 2s infinite;
+                          "
+                        ></div>
+                      </div>
+                    </div>
+                    <!-- Action: approve button -->
+                    <div
+                      id="di-action"
+                      style="
+                        display: none;
+                        width: 100%;
+                        padding: 12px 16px;
+                        color: #fff;
+                      "
+                    >
+                      <div
+                        style="
+                          display: flex;
+                          align-items: center;
+                          gap: 10px;
+                          margin-bottom: 10px;
+                        "
+                      >
+                        <div
+                          style="
+                            width: 28px;
+                            height: 28px;
+                            border-radius: 50%;
+                            background: linear-gradient(
+                              135deg,
+                              #a78bfa,
+                              #7c3aed
+                            );
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            flex-shrink: 0;
+                          "
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="#fff"
+                            stroke-width="2"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                        </div>
+                        <div style="flex: 1; min-width: 0">
+                          <div
+                            style="
+                              font-size: 10px;
+                              color: rgba(255, 255, 255, 0.5);
+                              margin-bottom: 2px;
+                            "
+                          >
+                            Claude 请求执行
+                          </div>
+                          <div style="font-size: 12px; font-weight: 600">
+                            npm test
+                          </div>
+                        </div>
+                      </div>
+                      <div style="display: flex; gap: 8px">
+                        <button
+                          style="
+                            flex: 1;
+                            padding: 6px 0;
+                            border-radius: 12px;
+                            background: rgba(255, 255, 255, 0.1);
+                            color: rgba(255, 255, 255, 0.7);
+                            font-size: 11px;
+                            font-weight: 600;
+                            border: none;
+                            cursor: pointer;
+                          "
+                        >
+                          拒绝
+                        </button>
+                        <button
+                          style="
+                            flex: 1;
+                            padding: 6px 0;
+                            border-radius: 12px;
+                            background: linear-gradient(
+                              135deg,
+                              #a78bfa,
+                              #7c3aed
+                            );
+                            color: #fff;
+                            font-size: 11px;
+                            font-weight: 600;
+                            border: none;
+                            cursor: pointer;
+                            animation: di-action-glow 2s infinite;
+                          "
+                        >
+                          批准
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Pulse ring behind island -->
+                  <div
+                    style="
+                      position: absolute;
+                      inset: -4px;
+                      border-radius: inherit;
+                      border: 2px solid rgba(167, 139, 250, 0.3);
+                      animation: di-pulse-ring 3s infinite;
+                      pointer-events: none;
+                      z-index: -1;
+                      border-radius: 24px;
+                    "
+                  ></div>
+                </div>
+                <!-- Blurred app background -->
+                <div
+                  style="
+                    position: absolute;
+                    inset: 0;
+                    z-index: 0;
+                    padding: 80px 16px 20px;
+                  "
+                >
+                  <div
+                    style="
+                      background: rgba(255, 255, 255, 0.06);
+                      border-radius: 16px;
+                      height: 60px;
+                      margin-bottom: 12px;
+                      backdrop-filter: blur(4px);
+                    "
+                  ></div>
+                  <div
+                    style="
+                      background: rgba(255, 255, 255, 0.04);
+                      border-radius: 16px;
+                      height: 100px;
+                      margin-bottom: 12px;
+                    "
+                  ></div>
+                  <div
+                    style="
+                      background: rgba(255, 255, 255, 0.03);
+                      border-radius: 16px;
+                      height: 80px;
+                      margin-bottom: 12px;
+                    "
+                  ></div>
+                  <div style="display: flex; gap: 10px">
+                    <div
+                      style="
+                        flex: 1;
+                        background: rgba(255, 255, 255, 0.04);
+                        border-radius: 12px;
+                        height: 60px;
+                      "
+                    ></div>
+                    <div
+                      style="
+                        flex: 1;
+                        background: rgba(255, 255, 255, 0.04);
+                        border-radius: 12px;
+                        height: 60px;
+                      "
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Project Workspaces Section -->
+      <section class="max-w-7xl mx-auto px-6 mb-32">
+        <div class="flex flex-col md:flex-row items-center gap-12 md:gap-20">
+          <!-- Left: Phone Mockup -->
+          <div class="flex-shrink-0">
+            <div class="project-phone-frame">
+              <div class="project-phone-screen">
+                <!-- Session header -->
+                <div
+                  style="
+                    padding: 16px 16px 12px;
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                  "
+                >
+                  <div
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      margin-bottom: 4px;
+                    "
+                  >
+                    <div
+                      style="
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 50%;
+                        background: #6ab04c;
+                        animation: status-blink 2s infinite;
+                      "
+                    ></div>
+                    <span style="color: #fff; font-size: 13px; font-weight: 600"
+                      >Session #3</span
+                    >
+                  </div>
+                  <span style="color: rgba(255, 255, 255, 0.4); font-size: 11px"
+                    >2 projects active</span
+                  >
+                </div>
+                <!-- Recent Projects -->
+                <div style="padding: 12px 14px 8px">
+                  <div
+                    style="
+                      color: rgba(255, 255, 255, 0.4);
+                      font-size: 10px;
+                      font-weight: 600;
+                      text-transform: uppercase;
+                      letter-spacing: 0.5px;
+                      margin-bottom: 8px;
+                    "
+                  >
+                    最近项目
+                  </div>
+                  <!-- Folder 1 -->
+                  <div
+                    class="folder-item"
+                    style="
+                      background: rgba(255, 255, 255, 0.06);
+                      border-radius: 12px;
+                      padding: 10px 12px;
+                      margin-bottom: 8px;
+                      display: flex;
+                      align-items: center;
+                      gap: 10px;
+                      animation: project-card-float 4s ease-in-out infinite;
+                    "
+                  >
+                    <div
+                      style="
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 8px;
+                        background: linear-gradient(135deg, #6ab04c, #4a8035);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        flex-shrink: 0;
+                      "
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        fill="#fff"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"
+                        />
+                      </svg>
+                    </div>
+                    <div style="flex: 1; min-width: 0">
+                      <div
+                        style="color: #fff; font-size: 12px; font-weight: 600"
+                      >
+                        linkshell-app
+                      </div>
+                      <div
+                        style="
+                          color: rgba(255, 255, 255, 0.35);
+                          font-size: 10px;
+                          white-space: nowrap;
+                          overflow: hidden;
+                          text-overflow: ellipsis;
+                        "
+                      >
+                        ~/projects/linkshell-app
+                      </div>
+                    </div>
+                    <div
+                      style="
+                        width: 32px;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: rgba(255, 255, 255, 0.1);
+                        overflow: hidden;
+                      "
+                    >
+                      <div
+                        class="progress-bar-fill"
+                        style="
+                          height: 100%;
+                          background: #6ab04c;
+                          border-radius: 2px;
+                          --progress: 85%;
+                        "
+                      ></div>
+                    </div>
+                  </div>
+                  <!-- Folder 2 -->
+                  <div
+                    class="folder-item"
+                    style="
+                      background: rgba(255, 255, 255, 0.06);
+                      border-radius: 12px;
+                      padding: 10px 12px;
+                      margin-bottom: 8px;
+                      display: flex;
+                      align-items: center;
+                      gap: 10px;
+                      animation: project-card-float 4s ease-in-out infinite 0.5s;
+                    "
+                  >
+                    <div
+                      style="
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 8px;
+                        background: linear-gradient(135deg, #e17055, #d35400);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        flex-shrink: 0;
+                      "
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        fill="#fff"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"
+                        />
+                      </svg>
+                    </div>
+                    <div style="flex: 1; min-width: 0">
+                      <div
+                        style="color: #fff; font-size: 12px; font-weight: 600"
+                      >
+                        api-server
+                      </div>
+                      <div
+                        style="
+                          color: rgba(255, 255, 255, 0.35);
+                          font-size: 10px;
+                          white-space: nowrap;
+                          overflow: hidden;
+                          text-overflow: ellipsis;
+                        "
+                      >
+                        ~/projects/api-server
+                      </div>
+                    </div>
+                    <div
+                      style="
+                        width: 32px;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: rgba(255, 255, 255, 0.1);
+                        overflow: hidden;
+                      "
+                    >
+                      <div
+                        class="progress-bar-fill"
+                        style="
+                          height: 100%;
+                          background: #e17055;
+                          border-radius: 2px;
+                          --progress: 60%;
+                        "
+                      ></div>
+                    </div>
+                  </div>
+                  <!-- Folder 3 -->
+                  <div
+                    class="folder-item"
+                    style="
+                      background: rgba(255, 255, 255, 0.06);
+                      border-radius: 12px;
+                      padding: 10px 12px;
+                      margin-bottom: 8px;
+                      display: flex;
+                      align-items: center;
+                      gap: 10px;
+                      animation: project-card-float 4s ease-in-out infinite 1s;
+                    "
+                  >
+                    <div
+                      style="
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 8px;
+                        background: linear-gradient(135deg, #74b9ff, #0984e3);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        flex-shrink: 0;
+                      "
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        fill="#fff"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"
+                        />
+                      </svg>
+                    </div>
+                    <div style="flex: 1; min-width: 0">
+                      <div
+                        style="color: #fff; font-size: 12px; font-weight: 600"
+                      >
+                        ml-pipeline
+                      </div>
+                      <div
+                        style="
+                          color: rgba(255, 255, 255, 0.35);
+                          font-size: 10px;
+                          white-space: nowrap;
+                          overflow: hidden;
+                          text-overflow: ellipsis;
+                        "
+                      >
+                        ~/projects/ml-pipeline
+                      </div>
+                    </div>
+                    <div
+                      style="
+                        width: 32px;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: rgba(255, 255, 255, 0.1);
+                        overflow: hidden;
+                      "
+                    >
+                      <div
+                        class="progress-bar-fill"
+                        style="
+                          height: 100%;
+                          background: #74b9ff;
+                          border-radius: 2px;
+                          --progress: 40%;
+                        "
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+                <!-- Parallel terminals -->
+                <div style="padding: 0 14px">
+                  <div
+                    style="
+                      color: rgba(255, 255, 255, 0.4);
+                      font-size: 10px;
+                      font-weight: 600;
+                      text-transform: uppercase;
+                      letter-spacing: 0.5px;
+                      margin-bottom: 8px;
+                      display: flex;
+                      align-items: center;
+                      gap: 6px;
+                    "
+                  >
+                    <div
+                      style="
+                        width: 4px;
+                        height: 4px;
+                        border-radius: 50%;
+                        background: #6ab04c;
+                        animation: parallel-pulse 1.5s infinite;
+                      "
+                    ></div>
+                    并行终端
+                  </div>
+                  <div style="display: flex; gap: 6px">
+                    <!-- Terminal 1 -->
+                    <div
+                      style="
+                        flex: 1;
+                        background: rgba(0, 0, 0, 0.4);
+                        border-radius: 8px;
+                        padding: 8px;
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 9px;
+                        line-height: 1.5;
+                        border: 1px solid rgba(255, 255, 255, 0.06);
+                      "
+                    >
+                      <div
+                        style="
+                          display: flex;
+                          align-items: center;
+                          gap: 4px;
+                          margin-bottom: 4px;
+                        "
+                      >
+                        <div
+                          style="
+                            width: 5px;
+                            height: 5px;
+                            border-radius: 50%;
+                            background: #6ab04c;
+                          "
+                        ></div>
+                        <span
+                          style="
+                            color: rgba(255, 255, 255, 0.5);
+                            font-size: 8px;
+                          "
+                          >linkshell-app</span
+                        >
+                      </div>
+                      <div style="color: #6ab04c">$ npm test</div>
+                      <div style="color: rgba(255, 255, 255, 0.5)">
+                        PASS src/app.test.ts
+                      </div>
+                      <div style="color: rgba(255, 255, 255, 0.5)">
+                        Tests: <span style="color: #6ab04c">12 passed</span>
+                      </div>
+                      <div
+                        style="
+                          color: rgba(255, 255, 255, 0.3);
+                          animation: status-blink 1.5s infinite;
+                        "
+                      >
+                        Running...
+                      </div>
+                    </div>
+                    <!-- Terminal 2 -->
+                    <div
+                      style="
+                        flex: 1;
+                        background: rgba(0, 0, 0, 0.4);
+                        border-radius: 8px;
+                        padding: 8px;
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 9px;
+                        line-height: 1.5;
+                        border: 1px solid rgba(255, 255, 255, 0.06);
+                      "
+                    >
+                      <div
+                        style="
+                          display: flex;
+                          align-items: center;
+                          gap: 4px;
+                          margin-bottom: 4px;
+                        "
+                      >
+                        <div
+                          style="
+                            width: 5px;
+                            height: 5px;
+                            border-radius: 50%;
+                            background: #e17055;
+                          "
+                        ></div>
+                        <span
+                          style="
+                            color: rgba(255, 255, 255, 0.5);
+                            font-size: 8px;
+                          "
+                          >api-server</span
+                        >
+                      </div>
+                      <div style="color: #e17055">$ cargo build</div>
+                      <div style="color: rgba(255, 255, 255, 0.5)">
+                        Compiling api v0.3
+                      </div>
+                      <div style="color: rgba(255, 255, 255, 0.5)">
+                        Built <span style="color: #e17055">42</span> crates
+                      </div>
+                      <div
+                        style="
+                          color: rgba(255, 255, 255, 0.3);
+                          animation: status-blink 1.5s infinite 0.3s;
+                        "
+                      >
+                        Linking...
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Right: Text -->
+          <div class="flex-1">
+            <h2
+              class="text-3xl md:text-5xl font-bold tracking-tight mb-6"
+              data-i18n="projSectionTitle"
+            >
+              项目空间，并行掌控
+            </h2>
+            <p
+              class="text-muted text-lg leading-relaxed mb-8"
+              data-i18n="projSectionDesc"
+            >
+              每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。
+            </p>
+            <ul class="space-y-4">
+              <li class="flex items-start gap-3">
+                <span
+                  class="mt-1 w-8 h-8 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center flex-shrink-0"
+                >
+                  <svg
+                    class="w-4 h-4 text-emerald-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M4 6a2 2 0 012-2h2l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"
+                    />
+                  </svg>
+                </span>
+                <span class="text-sm leading-relaxed" data-i18n="projFeature1"
+                  >多项目并行 — 同一会话内切换不同项目目录</span
+                >
+              </li>
+              <li class="flex items-start gap-3">
+                <span
+                  class="mt-1 w-8 h-8 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center flex-shrink-0"
+                >
+                  <svg
+                    class="w-4 h-4 text-emerald-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                    />
+                  </svg>
+                </span>
+                <span class="text-sm leading-relaxed" data-i18n="projFeature2"
+                  >独立终端 — 每个项目拥有独立的命令执行环境</span
+                >
+              </li>
+              <li class="flex items-start gap-3">
+                <span
+                  class="mt-1 w-8 h-8 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center flex-shrink-0"
+                >
+                  <svg
+                    class="w-4 h-4 text-emerald-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                </span>
+                <span class="text-sm leading-relaxed" data-i18n="projFeature3"
+                  >最近项目 — 智能记忆常用项目，一键直达</span
+                >
+              </li>
+              <li class="flex items-start gap-3">
+                <span
+                  class="mt-1 w-8 h-8 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center flex-shrink-0"
+                >
+                  <svg
+                    class="w-4 h-4 text-emerald-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                    />
+                  </svg>
+                </span>
+                <span class="text-sm leading-relaxed" data-i18n="projFeature4"
+                  >实时状态 — 并行任务进度一览无余</span
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Lifestyle Section -->
+      <section class="max-w-7xl mx-auto px-6 mb-32 group">
+        <div class="mb-16 text-center">
+          <h2
+            class="text-3xl md:text-5xl font-bold tracking-tight mb-6"
+            data-i18n="lifestyleSectionTitle"
+          >
+            LinkShell 工作流
+          </h2>
+          <p
+            class="text-muted text-lg md:text-xl max-w-2xl mx-auto font-medium"
+            data-i18n="lifestyleLead"
+          >
+            不仅是远程命令行桥接；更是打破工位束缚的极客探索。
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 relative">
+          <!-- 装饰性背景光晕 -->
+          <div
+            class="absolute -inset-4 bg-brand/5 blur-3xl -z-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-1000"
+          ></div>
+
+          <!-- Card 1 -->
+          <div
+            class="bg-surface border border-border rounded-[2rem] p-10 hover:shadow-2xl hover:shadow-brand/5 transition-all duration-500 hover:-translate-y-2"
+          >
+            <div
+              class="w-16 h-16 rounded-2xl bg-brand/5 border border-border flex items-center justify-center mb-8 text-3xl group-hover:scale-110 transition-transform duration-500"
+            >
+              🏔️
+            </div>
+            <h3 class="text-2xl font-bold mb-4" data-i18n="l1Title">
+              挂起并离开
+            </h3>
+            <p class="text-muted leading-relaxed" data-i18n="l1Desc">
+              编译、构建、拉镜像...
+              常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell
+              默默守护当前状态。
+            </p>
+          </div>
+
+          <!-- Card 2 -->
+          <div
+            class="bg-brand text-white border border-transparent rounded-[2rem] p-10 shadow-[0_0_40px_-10px_rgba(0,0,0,0.5)] hover:shadow-brand/20 transition-all duration-500 hover:-translate-y-2 md:translate-y-6 relative overflow-hidden group"
+          >
+            <!-- 内部点束光 -->
+            <div
+              class="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"
+            ></div>
+            <div
+              class="absolute -right-10 -top-10 w-40 h-40 bg-white/10 blur-3xl rounded-full group-hover:scale-150 transition-transform duration-700"
+            ></div>
+
+            <div
+              class="relative z-10 w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center mb-8 text-3xl shadow-inner group-hover:scale-110 transition-transform duration-500"
+            >
+              ☕
+            </div>
+            <h3
+              class="text-2xl font-bold mb-4 relative z-10"
+              data-i18n="l2Title"
+            >
+              随时审查
+            </h3>
+            <p
+              class="text-gray-300 leading-relaxed relative z-10"
+              data-i18n="l2Desc"
+            >
+              随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。
+            </p>
+          </div>
+
+          <!-- Card 3 -->
+          <div
+            class="bg-surface border border-border rounded-[2rem] p-10 hover:shadow-2xl hover:shadow-brand/5 transition-all duration-500 hover:-translate-y-2"
+          >
+            <div
+              class="w-16 h-16 rounded-2xl bg-brand/5 border border-border flex items-center justify-center mb-8 text-3xl group-hover:scale-110 transition-transform duration-500"
+            >
+              🚶
+            </div>
+            <h3 class="text-2xl font-bold mb-4" data-i18n="l3Title">
+              直接修正
+            </h3>
+            <p class="text-muted leading-relaxed" data-i18n="l3Desc">
+              发现报错？内置 xterm.js
+              拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Final CTA -->
+      <section class="max-w-4xl mx-auto px-6 text-center mb-12">
+        <div class="bg-surface border border-border rounded-[2rem] p-12">
+          <h2
+            class="text-2xl font-bold tracking-tight mb-4"
+            data-i18n="ctaTitle"
+          >
+            准备好漫游了吗？
+          </h2>
+          <p class="text-muted mb-8" data-i18n="ctaDesc">
+            加入这场革命。停止死盯屏幕上的进度条，开始享受你的自由生活。
+          </p>
+          <a
+            href="#quickstart"
+            class="inline-block px-8 py-3.5 rounded-full bg-brand text-white font-semibold text-sm hover:bg-gray-800 transition-colors shadow-lg"
+            data-i18n="btnStart"
+            >立刻开始</a
+          >
+        </div>
+      </section>
+    </main>
+
+    <footer class="border-t border-border py-12">
+      <div
+        class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6"
+      >
+        <div class="flex items-center gap-2">
+          <div
+            class="w-6 h-6 bg-brand rounded flex items-center justify-center text-white font-bold text-[10px]"
+          >
+            LS
+          </div>
+          <span class="font-semibold text-sm">LinkShell</span>
+        </div>
+        <p class="text-muted text-sm text-center" data-i18n="footerText">
+          出于对漫游体验的热爱。© 2026 基于 MIT 协议开源。为终端自由漫游而生。
+        </p>
+        <div class="flex gap-6 text-sm font-medium">
+          <a
+            href="https://github.com/LiuTianjie/LinkShell"
+            class="text-muted hover:text-brand transition-colors"
+            >GitHub</a
+          >
+          <a
+            href="#how"
+            class="text-muted hover:text-brand transition-colors"
+            data-i18n="navDocs"
+            >原理</a
+          >
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      const translations = {
+        zh: {
+          pageTitle: "LinkShell | 始于桌面，随处接管",
+          navDocs: "工作原理",
+          navGithub: "GitHub",
+          heroBadge: "LinkShell v1.0 直连就绪",
+          heroTitle1: "终端漫游",
+          heroTitle2: "随时随地，接管本地",
+          heroLead:
+            "纯粹的终端桥接（Terminal Bridge）方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。",
+          btnStart: "立即部署",
+          btnGithub: "查看仓库",
+          featureSectionTitle: "原生的终端体感，去中心化的控制。",
+          f1Title: "本地 PTY 驱动",
+          f1Desc:
+            "繁重的计算过程完全依赖本地机器。保留颜色、光标、 readline 输出及信号等完整终端语义。",
+          f2Title: "全平台客户端",
+          f2Desc:
+            "支持 React Native / Expo 移动端与 Web 页面调试端。纯粹的单一协议，跨平台劫持终端流。",
+          f3Title: "强一致性同步",
+          f3Desc:
+            "独有的单控制者防冲突模型（Single Controller）。避免多端并抢焦点，画面精准对齐不串流。",
+          f4Title: "远程桌面",
+          f4Desc:
+            "不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC 30fps 丝滑体验，自动降级到截图流兜底。",
+          lifestyleSectionTitle: "LinkShell 工作流",
+          lifestyleLead: "不仅是远程命令行桥接；更是打破工位束缚的极客探索。",
+          l1Title: "挂起并离开",
+          l1Desc:
+            "编译、构建、拉镜像... 常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell 默默守护当前状态。",
+          l2Title: "随时审查",
+          l2Desc:
+            "随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。",
+          l3Title: "直接修正",
+          l3Desc:
+            "发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。",
+
+          howItWorksTitle: "只需三步，建立你的终端链路",
+          step1Title: "安装 CLI",
+          step1Desc: "一条命令全局安装。内置网关开箱即用，无需额外部署服务器。",
+          step2Title: "启动桥接",
+          step2Desc:
+            "一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。",
+          step3Title: "手机扫码，即刻接管",
+          step3Desc:
+            "打开 LinkShell App（iOS / Android），对准终端二维码扫一扫，立刻接管会话。",
+          ctaTitle: "准备好你的第一次漫游了吗？",
+          ctaDesc:
+            "放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。",
+          diSectionTitle: "灵动岛，让 AI 触手可及",
+          diSectionDesc:
+            "iPhone 灵动岛实时展示 Claude 工作状态。识别到需要操作时，一键快速响应，无需切回 App。",
+          diFeature1: "实时状态 — 思考中、编码中、等待确认，一目了然",
+          diFeature2: "快捷操作 — Claude 请求执行命令时，灵动岛直接审批",
+          diFeature3: "智能摘要 — 长对话自动提炼关键信息到灵动岛",
+          diFeature4: "无感切换 — 从灵动岛一键跳转到完整会话",
+          projSectionTitle: "项目空间，并行掌控",
+          projSectionDesc:
+            "每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。",
+          projFeature1: "多项目并行 — 同一会话内切换不同项目目录",
+          projFeature2: "独立终端 — 每个项目拥有独立的命令执行环境",
+          projFeature3: "最近项目 — 智能记忆常用项目，一键直达",
+          projFeature4: "实时状态 — 并行任务进度一览无余",
+          footerText:
+            "出于对 Vibe Coding 的热爱。© 2026 基于 MIT 协议开源。探索自由编程边界。",
+        },
+        en: {
+          pageTitle: "LinkShell | Desktop First, Roam Anywhere",
+          navDocs: "How It Works",
+          navGithub: "GitHub",
+          heroBadge: "LinkShell v1.0 is Live",
+          heroTitle1: "Terminal Bridge",
+          heroTitle2: "Take over anywhere.",
+          heroLead:
+            "A pure Terminal Bridge architecture. Keep heavy workloads on your desktop, and claim the PTY session from your phone anywhere.",
+          btnStart: "Deploy Now",
+          btnGithub: "View Repo",
+          featureSectionTitle: "Native terminal feel. Decentralized control.",
+          f1Title: "Local PTY Driver",
+          f1Desc:
+            "Everything runs locally. We preserve full terminal semantics: ANSI colors, cursor movements, and raw readline signals.",
+          f2Title: "Universal Connect",
+          f2Desc:
+            "Supports React Native, Expo, and Web clients natively via a unified protocol. Instantly hijack the I/O stream.",
+          f3Title: "Strict State Sync",
+          f3Desc:
+            "Features a Single Controller locking model. Prevent multi-device input races and keep screens meticulously synchronized.",
+          f4Title: "Remote Desktop",
+          f4Desc:
+            "Not just terminal. Add --screen to view your desktop in real-time. WebRTC at 30fps with automatic screenshot fallback.",
+          lifestyleSectionTitle: "The LinkShell Workflow",
+          lifestyleLead:
+            "It's not just a remote bridge. It's your declaration of independence from the desk.",
+          l1Title: "Suspend & Walk",
+          l1Desc:
+            "Compiling, training, building... your desktop handles it. Step away for coffee; LinkShell keeps your PTY session perfectly alive.",
+          l2Title: "Review Anytime",
+          l2Desc:
+            "Pull out your phone and jump back in. Check build limits and scroll through colorful logs with zero cloud decay.",
+          l3Title: "Quick Hotfix",
+          l3Desc:
+            "Spot an error? The mobile xterm.js instance takes focus. Type the fix, hit enter, and drop your phone back in your pocket.",
+
+          howItWorksTitle: "Establish your link in 3 steps",
+          step1Title: "Install CLI",
+          step1Desc:
+            "One command to install globally. Built-in gateway works out of the box — no extra server needed.",
+          step2Title: "Start Bridge",
+          step2Desc:
+            "One command to start the built-in gateway and bridge your AI agent process. QR code prints right in the terminal.",
+          step3Title: "Scan & Take Over",
+          step3Desc:
+            "Open the LinkShell App (iOS / Android), scan the terminal QR code, and instantly take over the session.",
+          ctaTitle: "Ready for your first roam?",
+          ctaDesc:
+            "Skip the heavy cloud VM migrations. Set up the relay in seconds and put your whole dev environment in your pocket.",
+          diSectionTitle: "Dynamic Island, AI at Your Fingertips",
+          diSectionDesc:
+            "iPhone Dynamic Island shows Claude's live status. One-tap quick actions when Claude needs your input — no need to switch back to the app.",
+          diFeature1:
+            "Live Status — thinking, coding, awaiting confirmation at a glance",
+          diFeature2:
+            "Quick Actions — approve Claude's commands right from the island",
+          diFeature3:
+            "Smart Summary — long conversations distilled to key info",
+          diFeature4: "Seamless Jump — one tap from island to full session",
+          projSectionTitle: "Project Spaces, Parallel Control",
+          projSectionDesc:
+            "Multi-project parallel sessions. Pick a project folder, run commands independently, just like working locally.",
+          projFeature1:
+            "Parallel Projects — switch between project directories in one session",
+          projFeature2:
+            "Isolated Terminals — each project gets its own execution environment",
+          projFeature3:
+            "Recent Projects — smart memory of frequently used projects",
+          projFeature4: "Live Status — parallel task progress at a glance",
+          footerText:
+            "Crafted for Vibe Coding. © 2026 Open Source / MIT. Pushing the boundaries of freedom.",
+        },
+      };
+
+      const textNodes = Array.from(document.querySelectorAll("[data-i18n]"));
+      const langBtn = document.getElementById("lang-toggle");
+      let currentLang = "zh";
+
+      function applyLanguage(lang) {
+        const dict = translations[lang];
+        document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+
+        textNodes.forEach((node) => {
+          const key = node.getAttribute("data-i18n");
+          if (dict[key]) {
+            node.textContent = dict[key];
+          }
+        });
+        langBtn.textContent = lang === "zh" ? "EN" : "中文";
+      }
+
+      langBtn.addEventListener("click", () => {
+        currentLang = currentLang === "zh" ? "en" : "zh";
+        applyLanguage(currentLang);
+      });
+
+      // Initialize
+      applyLanguage("zh");
+
+      // Dynamic Island state cycling
+      (function () {
+        const island = document.getElementById("di-island-demo");
+        const compact = document.getElementById("di-compact");
+        const expanded = document.getElementById("di-expanded");
+        const action = document.getElementById("di-action");
+        if (!island) return;
+
+        const states = ["compact", "expanded", "action"];
+        let idx = 0;
+
+        function showState(state) {
+          compact.style.display = state === "compact" ? "flex" : "none";
+          expanded.style.display = state === "expanded" ? "block" : "none";
+          action.style.display = state === "action" ? "block" : "none";
+          island.className = "di-island " + state;
+        }
+
+        setInterval(function () {
+          idx = (idx + 1) % states.length;
+          showState(states[idx]);
+        }, 3000);
+      })();
+    </script>
+  </body>
 </html>
