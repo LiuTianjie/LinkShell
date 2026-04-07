@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Dimensions, Linking, StyleSheet } from "react-native";
+import { Linking } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Slot } from "expo-router";
+import { Stack } from "expo-router/stack";
+import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -10,12 +11,9 @@ import { AppProvider, type AppContextValue } from "../contexts/AppContext";
 import { useAppState } from "../hooks/useAppState";
 import { useSessionManager } from "../hooks/useSessionManager";
 import type { SessionInfo } from "../hooks/useSessionManager";
-import { ScannerScreen } from "../screens/ScannerScreen";
-import { SessionScreen } from "../screens/SessionScreen";
 import { addToHistory, enrichHistory } from "../storage/history";
 import { addServer } from "../storage/servers";
 import { ThemeProvider, useTheme } from "../theme";
-import type { Theme } from "../theme";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 import { parsePairingLink } from "../utils/pairing-link";
 import {
@@ -26,7 +24,6 @@ import {
 } from "../native/LiveActivity";
 import type { SessionActivityState } from "../native/LiveActivity";
 import { ThrottledTerminalParser } from "../utils/terminal-parser";
-import { FolderPickerModal } from "../components/FolderPickerModal";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
 const LAST_SESSION_KEY = "@linkshell/last_session";
@@ -45,8 +42,8 @@ export default function RootLayout() {
 
 function AppInner() {
   const { theme } = useTheme();
+  const router = useRouter();
   const [gatewayBaseUrl, setGatewayBaseUrl] = useState(DEFAULT_GATEWAY);
-  const [activeScreen, setActiveScreen] = useState<"tabs" | "scanner" | "terminal">("tabs");
   const [pendingPairing, setPendingPairing] = useState<{ code: string; gateway?: string } | null>(null);
   const [connectionSheetVisible, setConnectionSheetVisible] = useState(false);
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
@@ -59,23 +56,17 @@ function AppInner() {
     ? manager.sessions.get(manager.activeSessionId)
     : undefined;
 
-  const hasAnySessions = manager.sessions.size > 0;
-
-  const isInSession = hasAnySessions && (
-    activeScreen === "terminal" ||
-    (activeSession && (
-      activeSession.status === "connected" ||
-      activeSession.status === "connecting" ||
-      activeSession.status === "claiming" ||
-      activeSession.status === "reconnecting" ||
-      activeSession.status === "session_exited" ||
-      activeSession.status === "host_disconnected" ||
-      activeSession.status.startsWith("error:")
-    ))
-  );
-
-  const currentScreen = isInSession ? "terminal" : activeScreen;
   const displayStatus = activeSession?.status ?? "idle";
+
+  const navigateTo = useCallback((screen: "tabs" | "scanner" | "terminal") => {
+    if (screen === "terminal") router.push("/session");
+    else if (screen === "scanner") router.push("/scanner");
+    else router.back();
+  }, [router]);
+
+  const handlePairingScanned = useCallback((payload: { code: string; gateway?: string }) => {
+    setPendingPairing(payload);
+  }, []);
 
   // Deep link handling
   useEffect(() => {
@@ -98,7 +89,7 @@ function AppInner() {
               } else {
                 manager.setActiveSessionId(sessionId);
                 if (terminalId && terminalId !== "default") manager.switchTerminal(terminalId);
-                setActiveScreen("terminal");
+                router.push("/session");
                 setTimeout(() => manager.sendInput(data), 100);
               }
             }
@@ -108,14 +99,14 @@ function AppInner() {
       } catch {}
       const parsed = parsePairingLink(rawUrl);
       if (!parsed) return;
-      setActiveScreen("tabs");
+      router.dismiss();
       setPendingPairing(parsed);
       setConnectionSheetVisible(false);
     };
     Linking.getInitialURL().then(applyLink).catch(() => {});
     const sub = Linking.addEventListener("url", ({ url }) => applyLink(url));
     return () => sub.remove();
-  }, [manager]);
+  }, [manager, router]);
 
   // Process pending pairing
   useEffect(() => {
@@ -130,14 +121,14 @@ function AppInner() {
     let active = true;
     manager.claim(pairing.code, gateway).then((sid) => {
       if (!active) return;
-      if (sid) { setConnectionSheetVisible(false); setActiveScreen("terminal"); }
-      else { setActiveScreen("tabs"); setConnectionSheetVisible(true); }
+      if (sid) { setConnectionSheetVisible(false); router.push("/session"); }
+      else { router.dismiss(); setConnectionSheetVisible(true); }
     }).catch(() => {
       if (!active) return;
-      setActiveScreen("tabs"); setConnectionSheetVisible(true);
+      router.dismiss(); setConnectionSheetVisible(true);
     });
     return () => { active = false; };
-  }, [gatewayBaseUrl, pendingPairing, manager]);
+  }, [gatewayBaseUrl, pendingPairing, manager, router]);
 
   // Save to history
   useEffect(() => {
@@ -181,6 +172,24 @@ function AppInner() {
       const activeTerm = info.activeTerminalId ? info.terminals.get(info.activeTerminalId) : undefined;
       const ss = activeTerm?.structuredStatus;
       const useStructured = ss && (now - ss.updatedAt) < 30_000;
+
+      // Build permission request from structured status stack
+      let permissionRequest: SessionActivityState["permissionRequest"];
+      let pendingRequestCount = 0;
+      if (useStructured && ss.topPermission) {
+        const tp = ss.topPermission;
+        permissionRequest = {
+          requestId: tp.requestId,
+          toolName: tp.toolName,
+          contextLines: (tp.permissionRequest || tp.toolInput || "").slice(0, 200),
+          quickActions: [
+            { label: "Allow", input: "y", needsInput: false },
+            { label: "Deny", input: "n", needsInput: false },
+          ],
+        };
+        pendingRequestCount = ss.pendingPermissionCount ?? 1;
+      }
+
       states.push({
         sessionId: sid,
         terminalId: info.activeTerminalId || "default",
@@ -190,6 +199,8 @@ function AppInner() {
         projectName: info.projectName || info.hostname || sid.slice(0, 8),
         provider: entry?.provider ?? info.provider ?? "claude",
         quickActions: entry?.quickActions ?? [],
+        permissionRequest,
+        pendingRequestCount,
         tokensUsed: 0,
         elapsedSeconds: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
       });
@@ -198,7 +209,7 @@ function AppInner() {
     const priority: Record<string, number> = { error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5 };
     states.sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9));
     const aid = activeSid ?? states[0]?.sessionId ?? "";
-    const hasQuickActions = states.some((s) => s.quickActions.length > 0);
+    const hasQuickActions = states.some((s) => s.quickActions.length > 0 || s.permissionRequest);
     const needsAlert = hasQuickActions && !lastAlertedRef.current;
     lastAlertedRef.current = hasQuickActions;
     updateLiveActivity(states, aid, needsAlert);
@@ -251,6 +262,23 @@ function AppInner() {
           const activeTerm = info2.activeTerminalId ? info2.terminals.get(info2.activeTerminalId) : undefined;
           const ss = activeTerm?.structuredStatus;
           const useStructured = ss && (now - ss.updatedAt) < 30_000;
+
+          let permissionRequest: SessionActivityState["permissionRequest"];
+          let pendingRequestCount = 0;
+          if (useStructured && ss.topPermission) {
+            const tp = ss.topPermission;
+            permissionRequest = {
+              requestId: tp.requestId,
+              toolName: tp.toolName,
+              contextLines: (tp.permissionRequest || tp.toolInput || "").slice(0, 200),
+              quickActions: [
+                { label: "Allow", input: "y", needsInput: false },
+                { label: "Deny", input: "n", needsInput: false },
+              ],
+            };
+            pendingRequestCount = ss.pendingPermissionCount ?? 1;
+          }
+
           states.push({
             sessionId: sid2,
             terminalId: info2.activeTerminalId || "default",
@@ -260,6 +288,8 @@ function AppInner() {
             projectName: info2.projectName || info2.hostname || sid2.slice(0, 8),
             provider: e?.provider ?? info2.provider ?? "claude",
             quickActions: e?.quickActions ?? [],
+            permissionRequest,
+            pendingRequestCount,
             tokensUsed: 0,
             elapsedSeconds: Math.floor((now - (e?.connectedAt ?? now)) / 1000),
           });
@@ -295,6 +325,21 @@ function AppInner() {
     parsersRef.current.clear();
   }; }, []);
 
+  // ActionBridge: receive quick actions from Live Activity AppIntent
+  useEffect(() => {
+    const { NativeModules, NativeEventEmitter, Platform } = require("react-native");
+    if (Platform.OS !== "ios" || !NativeModules.ActionBridgeModule) return;
+    const emitter = new NativeEventEmitter(NativeModules.ActionBridgeModule);
+    const sub = emitter.addListener("onQuickAction", (event: { sessionId: string; terminalId: string; input: string; requestId: string }) => {
+      const info = manager.sessions.get(event.sessionId);
+      if (!info) return;
+      manager.setActiveSessionId(event.sessionId);
+      if (event.terminalId && event.terminalId !== "default") manager.switchTerminal(event.terminalId);
+      setTimeout(() => manager.sendInput(event.input), 50);
+    });
+    return () => sub.remove();
+  }, [manager]);
+
   // App state
   const handleForeground = useCallback(async () => {
     if (manager.sessions.size === 0) {
@@ -303,12 +348,12 @@ function AppInner() {
         if (raw) {
           const last = JSON.parse(raw) as { gateway: string; sessionId: string };
           setGatewayBaseUrl(last.gateway);
-          setActiveScreen("terminal");
           manager.connectToSession(last.sessionId, last.gateway);
+          router.push("/session");
         }
       } catch {}
     }
-  }, [manager]);
+  }, [manager, router]);
 
   const handleBackground = useCallback(async () => {
     if (manager.activeSessionId) {
@@ -323,16 +368,16 @@ function AppInner() {
 
   const handleClaim = useCallback(async (code: string) => {
     const sid = await manager.claim(code, gatewayBaseUrl);
-    if (sid) { setConnectionSheetVisible(false); setActiveScreen("terminal"); }
-  }, [manager, gatewayBaseUrl]);
+    if (sid) { setConnectionSheetVisible(false); router.push("/session"); }
+  }, [manager, gatewayBaseUrl, router]);
 
   const handleConnectSession = useCallback((sessionId: string, serverUrl?: string) => {
     const target = serverUrl ?? gatewayBaseUrl;
     if (target !== gatewayBaseUrl) setGatewayBaseUrl(target);
     setConnectionSheetVisible(false);
-    setActiveScreen("terminal");
     manager.connectToSession(sessionId, target);
-  }, [gatewayBaseUrl, manager]);
+    router.push("/session");
+  }, [gatewayBaseUrl, manager, router]);
 
   const handleDisconnectSession = useCallback((sessionId: string) => {
     manager.disconnectSession(sessionId);
@@ -340,9 +385,9 @@ function AppInner() {
       liveActivityActiveRef.current = false;
       endLiveActivity();
       AsyncStorage.removeItem(LAST_SESSION_KEY);
-      setActiveScreen("tabs");
+      router.back();
     }
-  }, [manager]);
+  }, [manager, router]);
 
   // Session/terminal tabs
   const sessionTabs = Array.from(manager.sessions.entries()).map(([sid, info]) => ({
@@ -366,87 +411,28 @@ function AppInner() {
     activeSession,
     displayStatus,
     sessionRefreshKey,
+    sessionTabs,
+    terminalTabs,
     handleClaim,
     handleConnectSession,
     handleDisconnectSession,
+    handlePairingScanned,
+    navigateTo,
     setConnectionSheetVisible,
-    setGatewayListVisible: () => {},
-    setActiveScreen,
     setSessionRefreshKey,
+    folderPickerVisible,
+    setFolderPickerVisible,
   };
 
-  // Terminal screen (full overlay)
-  if (currentScreen === "terminal" && activeSession) {
-    return (
-      <AppProvider value={ctxValue}>
-        <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
-        <SessionScreen
-          sessionId={activeSession.sessionId}
-          status={activeSession.status}
-          deviceId={activeSession.deviceId}
-          controllerId={activeSession.controllerId}
-          connectionDetail={activeSession.connectionDetail}
-          terminalStream={activeSession.terminalStream}
-          screenStatus={activeSession.screenStatus}
-          screenFrame={activeSession.screenFrame}
-          pendingOffer={activeSession.pendingOffer}
-          pendingIceCandidates={activeSession.pendingIceCandidates}
-          onSendInput={manager.sendInput}
-          onSendImage={manager.sendImage}
-          onSendResize={manager.sendResize}
-          onClaimControl={manager.claimControl}
-          onReleaseControl={manager.releaseControl}
-          onStartScreen={manager.startScreen}
-          onStopScreen={manager.stopScreen}
-          onScreenSignal={manager.sendScreenSignal}
-          onReconnect={manager.reconnect}
-          onDisconnect={() => handleDisconnectSession(activeSession.sessionId)}
-          sessionTabs={sessionTabs}
-          activeTabId={manager.activeSessionId}
-          onSwitchSession={manager.setActiveSessionId}
-          onCloseSession={handleDisconnectSession}
-          terminalTabs={terminalTabs}
-          activeTerminalId={activeSession.activeTerminalId}
-          onSwitchTerminal={manager.switchTerminal}
-          onAddTerminal={() => {
-            setFolderPickerVisible(true);
-            manager.browseDirectory(activeSession.cwd ?? "~");
-          }}
-          terminals={activeSession.terminals}
-          onKillTerminal={manager.killTerminal}
-          onRemoveTerminal={manager.removeTerminal}
-        />
-        <FolderPickerModal
-          visible={folderPickerVisible}
-          browseResult={activeSession.browseResult}
-          terminals={activeSession.terminals}
-          onBrowse={manager.browseDirectory}
-          onSelect={(path: string) => manager.spawnTerminal(path)}
-          onClose={() => setFolderPickerVisible(false)}
-          theme={theme}
-        />
-      </AppProvider>
-    );
-  }
-
-  // Scanner screen (full overlay)
-  if (currentScreen === "scanner") {
-    return (
-      <AppProvider value={ctxValue}>
-        <StatusBar style="light" />
-        <ScannerScreen
-          onClose={() => setActiveScreen("tabs")}
-          onScan={(payload) => { setActiveScreen("tabs"); setPendingPairing(payload); }}
-        />
-      </AppProvider>
-    );
-  }
-
-  // Tabs (expo-router Slot renders NativeTabs)
   return (
     <AppProvider value={ctxValue}>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
-      <Slot />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="session" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="scanner" options={{ presentation: "modal" }} />
+        <Stack.Screen name="gateway-list" />
+      </Stack>
       <ConnectionSheet
         visible={connectionSheetVisible}
         gatewayBaseUrl={gatewayBaseUrl}
@@ -455,7 +441,10 @@ function AppInner() {
         onClose={() => setConnectionSheetVisible(false)}
         onGatewayChange={setGatewayBaseUrl}
         onClaim={handleClaim}
-        onOpenScanner={() => { setConnectionSheetVisible(false); setActiveScreen("scanner"); }}
+        onOpenScanner={() => {
+          setConnectionSheetVisible(false);
+          router.push("/scanner");
+        }}
       />
     </AppProvider>
   );

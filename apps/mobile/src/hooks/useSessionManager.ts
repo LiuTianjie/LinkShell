@@ -28,6 +28,14 @@ export interface TerminalInfo {
     toolInput?: string;
     permissionRequest?: string;
     summary?: string;
+    topPermission?: {
+      requestId: string;
+      toolName: string;
+      toolInput: string;
+      permissionRequest: string;
+      timestamp: number;
+    };
+    pendingPermissionCount?: number;
     updatedAt: number;
   };
 }
@@ -131,6 +139,14 @@ interface InternalTerminal {
     toolInput?: string;
     permissionRequest?: string;
     summary?: string;
+    topPermission?: {
+      requestId: string;
+      toolName: string;
+      toolInput: string;
+      permissionRequest: string;
+      timestamp: number;
+    };
+    pendingPermissionCount?: number;
     updatedAt: number;
   };
 }
@@ -622,6 +638,14 @@ export function useSessionManager(): SessionManagerHandle {
             toolInput?: string;
             permissionRequest?: string;
             summary?: string;
+            topPermission?: {
+              requestId: string;
+              toolName: string;
+              toolInput: string;
+              permissionRequest: string;
+              timestamp: number;
+            };
+            pendingPermissionCount?: number;
           };
           const term = s.terminals.get(tid);
           if (term) {

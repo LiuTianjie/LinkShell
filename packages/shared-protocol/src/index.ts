@@ -226,6 +226,14 @@ export const terminalStatusPayloadSchema = z.object({
   toolInput: z.string().optional(),
   permissionRequest: z.string().optional(),
   summary: z.string().optional(),
+  topPermission: z.object({
+    requestId: z.string(),
+    toolName: z.string(),
+    toolInput: z.string(),
+    permissionRequest: z.string(),
+    timestamp: z.number(),
+  }).optional(),
+  pendingPermissionCount: z.number().optional(),
 });
 
 // ── File upload payloads ────────────────────────────────────────────

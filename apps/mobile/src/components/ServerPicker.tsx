@@ -125,6 +125,14 @@ export function ServerPicker({ selectedUrl, onSelect, visible, onDismiss }: Serv
         transparent={Platform.OS !== "ios"}
         presentationStyle={Platform.OS === "ios" ? "pageSheet" : "fullScreen"}
         onRequestClose={closeModal}
+        {...Platform.select({
+          ios: {
+            sheetAllowedDetents: [0.7, "large"],
+            sheetCornerRadius: 20,
+            sheetGrabberVisible: true,
+          },
+          default: {},
+        })}
       >
         <View style={{ flex: 1, backgroundColor: theme.bgElevated }}>
           <KeyboardAvoidingView

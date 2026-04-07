@@ -1,6 +1,7 @@
 import React, { createContext, useContext } from "react";
 import type { SessionInfo } from "../hooks/useSessionManager";
 import type { SessionManagerHandle } from "../hooks/useSessionManager";
+import type { SessionTab, TerminalTab } from "../screens/SessionScreen";
 
 export interface AppContextValue {
   // Gateway
@@ -12,15 +13,20 @@ export interface AppContextValue {
   // Display
   displayStatus: string;
   sessionRefreshKey: number;
+  // Computed tabs
+  sessionTabs: SessionTab[];
+  terminalTabs: TerminalTab[];
   // Actions
   handleClaim: (code: string, gateway?: string) => void;
   handleConnectSession: (sessionId: string, serverUrl?: string) => void;
   handleDisconnectSession: (sessionId: string) => void;
+  handlePairingScanned: (payload: { code: string; gateway?: string }) => void;
+  navigateTo: (s: "tabs" | "scanner" | "terminal") => void;
   // UI state
   setConnectionSheetVisible: (v: boolean) => void;
-  setGatewayListVisible: (v: boolean) => void;
-  setActiveScreen: (s: "tabs" | "scanner" | "terminal") => void;
   setSessionRefreshKey: React.Dispatch<React.SetStateAction<number>>;
+  folderPickerVisible: boolean;
+  setFolderPickerVisible: (v: boolean) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);

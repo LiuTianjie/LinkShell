@@ -2,6 +2,13 @@ import { NativeModules, Platform } from "react-native";
 
 const { LiveActivityModule } = NativeModules;
 
+export interface PermissionRequestActivityState {
+  requestId: string;
+  toolName: string;
+  contextLines: string;
+  quickActions: QuickAction[];
+}
+
 export interface SessionActivityState {
   sessionId: string;
   terminalId: string;
@@ -11,6 +18,8 @@ export interface SessionActivityState {
   projectName: string;
   provider: string;
   quickActions: QuickAction[];
+  permissionRequest?: PermissionRequestActivityState;
+  pendingRequestCount: number;
   tokensUsed: number;
   elapsedSeconds: number;
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppSymbol } from "./AppSymbol";
 import type { BrowseEntry } from "../hooks/useSessionManager";
 
@@ -37,7 +37,20 @@ export function FolderPickerModal({
   const pathParts = currentPath.split("/").filter(Boolean);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+      {...Platform.select({
+        ios: {
+          sheetAllowedDetents: [0.7, "large"],
+          sheetCornerRadius: 20,
+          sheetGrabberVisible: true,
+        },
+        default: {},
+      })}
+    >
       <View style={{ flex: 1, backgroundColor: theme.bg }}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border }}>
           <Text style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>选择文件夹</Text>

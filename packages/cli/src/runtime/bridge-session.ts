@@ -120,6 +120,13 @@ export class BridgeSession {
   private sessionId = "";
   private exited = false;
   private stopped = false;
+  private permissionStacks = new Map<string, Array<{
+    requestId: string;
+    toolName: string;
+    toolInput: string;
+    permissionRequest: string;
+    timestamp: number;
+  }>>();
   private screenCapture: ScreenFallback | undefined;
   private screenShare: ScreenShare | undefined;
 
@@ -622,14 +629,34 @@ export class BridgeSession {
       case "PostToolUse":
         phase = "thinking";
         toolName = event.tool_name as string | undefined;
+        // Pop permission stack: tool completed, remove matching request
+        {
+          const stack = this.permissionStacks.get(terminalId);
+          if (stack && stack.length > 0) {
+            const idx = stack.findIndex((r) => r.toolName === toolName);
+            if (idx >= 0) stack.splice(idx, 1);
+            if (stack.length === 0) this.permissionStacks.delete(terminalId);
+          }
+        }
         break;
       case "PostToolUseFailure":
         phase = "error";
         toolName = event.tool_name as string | undefined;
+        // Pop permission stack on failure too
+        {
+          const stack = this.permissionStacks.get(terminalId);
+          if (stack && stack.length > 0) {
+            const idx = stack.findIndex((r) => r.toolName === toolName);
+            if (idx >= 0) stack.splice(idx, 1);
+            if (stack.length === 0) this.permissionStacks.delete(terminalId);
+          }
+        }
         break;
       case "Stop":
         phase = "idle";
         if (event.stop_reason) summary = String(event.stop_reason);
+        // Clear all pending permissions on stop
+        this.permissionStacks.delete(terminalId);
         break;
       case "PermissionRequest":
         phase = "waiting";
@@ -638,12 +665,31 @@ export class BridgeSession {
           const input = event.tool_input as Record<string, unknown>;
           permissionRequest = JSON.stringify(input).slice(0, 300);
         }
+        // Push to permission stack
+        {
+          const requestId = `pr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          if (!this.permissionStacks.has(terminalId)) {
+            this.permissionStacks.set(terminalId, []);
+          }
+          this.permissionStacks.get(terminalId)!.push({
+            requestId,
+            toolName: toolName ?? "unknown",
+            toolInput: toolInput ?? (permissionRequest ?? ""),
+            permissionRequest: permissionRequest ?? "",
+            timestamp: Date.now(),
+          });
+        }
         break;
       default:
         return;
     }
 
     this.log(`hook event: ${hookName} → phase=${phase} tool=${toolName ?? "none"}`);
+
+    // Build topPermission from stack
+    const stack = this.permissionStacks.get(terminalId);
+    const topPermission = stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
+    const pendingPermissionCount = stack?.length ?? 0;
 
     this.send(createEnvelope({
       type: "terminal.status",
@@ -655,6 +701,8 @@ export class BridgeSession {
         ...(toolInput && { toolInput }),
         ...(permissionRequest && { permissionRequest }),
         ...(summary && { summary }),
+        ...(topPermission && { topPermission }),
+        ...(pendingPermissionCount > 0 && { pendingPermissionCount }),
       },
     }));
   }

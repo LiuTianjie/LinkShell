@@ -138,8 +138,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           const newScrollTop =
             scrollRatio * (info.scrollHeight - info.clientHeight);
           scrollInfoRef.current.scrollTop = newScrollTop;
-          const line = Math.round(scrollRatio * (term.buffer.active.baseY || 0));
-          const js = `(function(){try{term.scrollToLine(${line});}catch(e){}})();true;`;
+          const js = `(function(){try{var line=Math.round(${scrollRatio}*(term.buffer.active.baseY||0));term.scrollToLine(line);}catch(e){}})();true;`;
           webViewRef.current?.injectJavaScript(js);
         },
         onPanResponderRelease: () => {

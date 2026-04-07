@@ -89,23 +89,6 @@ importers:
       babel-preset-expo: 54.0.10_expo@54.0.33
       typescript: 5.9.3
 
-  apps/web-debug:
-    specifiers:
-      '@linkshell/protocol': workspace:*
-      '@xterm/addon-fit': ^0.10.0
-      '@xterm/addon-web-links': ^0.11.0
-      '@xterm/xterm': ^5.5.0
-      typescript: ^5.8.3
-      vite: ^6.3.5
-    dependencies:
-      '@linkshell/protocol': link:../../packages/shared-protocol
-      '@xterm/addon-fit': 0.10.0_@xterm+xterm@5.5.0
-      '@xterm/addon-web-links': 0.11.0_@xterm+xterm@5.5.0
-      '@xterm/xterm': 5.5.0
-    devDependencies:
-      typescript: 5.9.3
-      vite: 6.4.2
-
   packages/cli:
     specifiers:
       '@linkshell/gateway': ^0.2.0
@@ -3711,14 +3694,6 @@ packages:
     resolution: {integrity: sha512-9k/gHF6n/pAi/9tqr3m3aqkuiNosYTurLLUtc7xQ9sxB/wm7WPygCv8GYa6mS0fLJEHhqMC1ATYhz++U/lRHqg==}
     engines: {node: '>=10.0.0'}
 
-  /@xterm/addon-fit/0.10.0_@xterm+xterm@5.5.0:
-    resolution: {integrity: sha512-UFYkDm4HUahf2lnEyHvio51TNGiLK66mqP2JoATy7hRZeXaGMRDr00JiSF7m63vR5WKATF605yEggJKsw0JpMQ==}
-    peerDependencies:
-      '@xterm/xterm': ^5.0.0
-    dependencies:
-      '@xterm/xterm': 5.5.0
-    dev: false
-
   /@xterm/addon-fit/0.12.0-beta.197_emkrc2gqjensphbi7ywalren5m:
     resolution: {integrity: sha512-EoYQVIWp90XmNXBfrEocz5tk44JLMdHL9+Asd57Bj9DuERLLszA8pkF3wbuR5C7555g3sRTMTHlzYQ3gv9xbOw==}
     peerDependencies:
@@ -3727,24 +3702,12 @@ packages:
       '@xterm/xterm': 6.1.0-beta.197
     dev: false
 
-  /@xterm/addon-web-links/0.11.0_@xterm+xterm@5.5.0:
-    resolution: {integrity: sha512-nIHQ38pQI+a5kXnRaTgwqSHnX7KE6+4SVoceompgHL26unAxdfP6IPqUTSYPQgSwM56hsElfoNrrW5V7BUED/Q==}
-    peerDependencies:
-      '@xterm/xterm': ^5.0.0
-    dependencies:
-      '@xterm/xterm': 5.5.0
-    dev: false
-
   /@xterm/addon-web-links/0.13.0-beta.197_emkrc2gqjensphbi7ywalren5m:
     resolution: {integrity: sha512-8MgssTKGYJIgZpemu34KBIsmB0qh/XsQxugOhaYym8qSjn8KAMn9FN0j15W6XwEFQDAu1vtBh1jiKjQfyvHoqQ==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.197
     dependencies:
       '@xterm/xterm': 6.1.0-beta.197
-    dev: false
-
-  /@xterm/xterm/5.5.0:
-    resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
     dev: false
 
   /@xterm/xterm/6.1.0-beta.197:
@@ -7671,56 +7634,6 @@ packages:
       - terser
       - tsx
       - yaml
-    dev: true
-
-  /vite/6.4.2:
-    resolution: {integrity: sha512-2N/55r4JDJ4gdrCvGgINMy+HH3iRpNIz8K6SFwVsA+JbQScLiC+clmAxBgwiSPgcG9U15QmvqCGWzMbqda5zGQ==}
-    engines: {node: ^18.0.0 || ^20.0.0 || >=22.0.0}
-    hasBin: true
-    peerDependencies:
-      '@types/node': ^18.0.0 || ^20.0.0 || >=22.0.0
-      jiti: '>=1.21.0'
-      less: '*'
-      lightningcss: ^1.21.0
-      sass: '*'
-      sass-embedded: '*'
-      stylus: '*'
-      sugarss: '*'
-      terser: ^5.16.0
-      tsx: ^4.8.1
-      yaml: ^2.4.2
-    peerDependenciesMeta:
-      '@types/node':
-        optional: true
-      jiti:
-        optional: true
-      less:
-        optional: true
-      lightningcss:
-        optional: true
-      sass:
-        optional: true
-      sass-embedded:
-        optional: true
-      stylus:
-        optional: true
-      sugarss:
-        optional: true
-      terser:
-        optional: true
-      tsx:
-        optional: true
-      yaml:
-        optional: true
-    dependencies:
-      esbuild: 0.25.12
-      fdir: 6.5.0_picomatch@4.0.4
-      picomatch: 4.0.4
-      postcss: 8.5.8
-      rollup: 4.60.1
-      tinyglobby: 0.2.15
-    optionalDependencies:
-      fsevents: 2.3.3
     dev: true
 
   /vite/6.4.2_tsx@4.21.0:

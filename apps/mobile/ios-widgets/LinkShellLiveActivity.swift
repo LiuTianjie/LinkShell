@@ -57,9 +57,22 @@ struct LinkShellLiveActivity: Widget {
 
                 // ── Expanded: Bottom ──
                 DynamicIslandExpandedRegion(.bottom) {
-                    if let s = active {
+                    let sessionsWithPerms = sessions.filter { $0.permissionRequest != nil }
+
+                    if !sessionsWithPerms.isEmpty {
+                        VStack(spacing: 4) {
+                            ForEach(Array(sessionsWithPerms.prefix(2).enumerated()), id: \.offset) { _, s in
+                                PermissionCardView(session: s, compact: true)
+                            }
+                            if sessionsWithPerms.count > 2 {
+                                Text("+\(sessionsWithPerms.count - 2) 个终端待处理")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.white.opacity(0.4))
+                            }
+                        }
+                    } else if let s = active {
                         VStack(spacing: 6) {
-                            // Context lines (what Claude is asking)
+                            // Context lines
                             if !s.contextLines.isEmpty {
                                 Text(s.contextLines)
                                     .font(.system(size: 10, design: .monospaced))
@@ -81,31 +94,16 @@ struct LinkShellLiveActivity: Widget {
                                     .padding(.horizontal, 4)
                             }
 
-                            // Quick action list
+                            // Quick action list (non-permission)
                             if !s.quickActions.isEmpty {
-                                VStack(spacing: 0) {
-                                    ForEach(Array(s.quickActions.enumerated()), id: \.offset) { idx, action in
-                                        Link(destination: actionURL(context.state.activeSessionId, s.terminalId, action)) {
-                                            HStack {
-                                                Text(action.label)
-                                                    .font(.system(size: 13, weight: .medium))
-                                                    .foregroundColor(.white)
-                                                Spacer()
-                                                Image(systemName: action.needsInput ? "arrow.right.circle.fill" : "checkmark.circle.fill")
-                                                    .font(.system(size: 16))
-                                                    .foregroundColor(action.needsInput ? .orange : providerColor(s.provider))
-                                            }
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 8)
-                                        }
-                                        if idx < s.quickActions.count - 1 {
-                                            Divider().background(.white.opacity(0.1))
-                                        }
-                                    }
-                                }
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(.white.opacity(0.08))
+                                QuickActionListView(
+                                    actions: s.quickActions,
+                                    sessionId: context.state.activeSessionId,
+                                    terminalId: s.terminalId,
+                                    provider: s.provider,
+                                    fontSize: 13,
+                                    iconSize: 16,
+                                    vPadding: 8
                                 )
                             }
 
@@ -153,6 +151,157 @@ struct LinkShellLiveActivity: Widget {
     }
 }
 
+// MARK: - Permission Card View
+
+@available(iOS 16.2, *)
+struct PermissionCardView: View {
+    let session: SessionState
+    let compact: Bool  // true = Dynamic Island (smaller), false = Lock Screen (larger)
+
+    var body: some View {
+        guard let pr = session.permissionRequest else { return AnyView(EmptyView()) }
+        let contextLimit = compact ? 3 : 4
+        let fontSize: CGFloat = compact ? 10 : 11
+        let btnFontSize: CGFloat = compact ? 11 : 12
+
+        return AnyView(
+            VStack(spacing: 3) {
+                // Header: tool name + project name
+                HStack {
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: fontSize))
+                        .foregroundColor(.cyan)
+                    Text(pr.toolName)
+                        .font(.system(size: fontSize, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.cyan)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(session.projectName)
+                        .font(.system(size: fontSize - 1))
+                        .foregroundColor(.white.opacity(0.4))
+                        .lineLimit(1)
+                }
+
+                // Context
+                if !pr.contextLines.isEmpty {
+                    Text(pr.contextLines)
+                        .font(.system(size: fontSize - 1, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(contextLimit)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Action buttons + pending count
+                HStack(spacing: 6) {
+                    ForEach(Array(pr.quickActions.enumerated()), id: \.offset) { _, action in
+                        actionButton(action: action, pr: pr, fontSize: btnFontSize)
+                    }
+                    Spacer()
+                    if (session.pendingRequestCount ?? 0) > 1 {
+                        Text("+\(session.pendingRequestCount! - 1) pending")
+                            .font(.system(size: fontSize - 2))
+                            .foregroundColor(.white.opacity(0.35))
+                    }
+                }
+            }
+            .padding(6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.white.opacity(0.06))
+            )
+        )
+    }
+
+    @ViewBuilder
+    private func actionButton(action: QuickAction, pr: PermissionRequestState, fontSize: CGFloat) -> some View {
+        let isAllow = action.label.lowercased().contains("allow") || action.label.lowercased().contains("yes") || action.label.lowercased().contains("approve")
+        let color: Color = isAllow ? .green : .red.opacity(0.8)
+        let icon = isAllow ? "checkmark.circle.fill" : "xmark.circle.fill"
+
+        if #available(iOS 17.0, *) {
+            Button(intent: QuickActionIntent(
+                sessionId: session.sessionId,
+                terminalId: session.terminalId,
+                inputData: action.input,
+                requestId: pr.requestId
+            )) {
+                HStack(spacing: 4) {
+                    Image(systemName: icon)
+                        .font(.system(size: fontSize))
+                        .foregroundColor(color)
+                    Text(action.label)
+                        .font(.system(size: fontSize, weight: .medium))
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(color.opacity(0.15))
+            )
+        } else {
+            Link(destination: actionURL(session.sessionId, session.terminalId, action)) {
+                HStack(spacing: 4) {
+                    Image(systemName: icon)
+                        .font(.system(size: fontSize))
+                        .foregroundColor(color)
+                    Text(action.label)
+                        .font(.system(size: fontSize, weight: .medium))
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(color.opacity(0.15))
+            )
+        }
+    }
+}
+
+// MARK: - Quick Action List (non-permission)
+
+@available(iOS 16.2, *)
+struct QuickActionListView: View {
+    let actions: [QuickAction]
+    let sessionId: String
+    let terminalId: String
+    let provider: String
+    let fontSize: CGFloat
+    let iconSize: CGFloat
+    let vPadding: CGFloat
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(actions.enumerated()), id: \.offset) { idx, action in
+                Link(destination: actionURL(sessionId, terminalId, action)) {
+                    HStack {
+                        Text(action.label)
+                            .font(.system(size: fontSize, weight: .medium))
+                            .foregroundColor(.white)
+                        Spacer()
+                        Image(systemName: action.needsInput ? "arrow.right.circle.fill" : "checkmark.circle.fill")
+                            .font(.system(size: iconSize))
+                            .foregroundColor(action.needsInput ? .orange : providerColor(provider))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, vPadding)
+                }
+                if idx < actions.count - 1 {
+                    Divider().background(.white.opacity(0.1))
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.white.opacity(0.08))
+        )
+    }
+}
+
 // MARK: - Lock Screen View
 
 @available(iOS 16.2, *)
@@ -162,6 +311,7 @@ struct LockScreenView: View {
     var body: some View {
         let active = context.state.activeSession
         let sessions = context.state.sessions
+        let sessionsWithPerms = sessions.filter { $0.permissionRequest != nil }
 
         VStack(spacing: 8) {
             HStack(spacing: 12) {
@@ -198,22 +348,24 @@ struct LockScreenView: View {
                                 .foregroundColor(.white.opacity(0.4))
                         }
 
-                        // Context or last line
-                        if !s.contextLines.isEmpty {
-                            Text(s.contextLines)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.6))
-                                .lineLimit(2)
-                        } else if !s.lastLine.isEmpty {
-                            Text(s.lastLine)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.6))
-                                .lineLimit(1)
+                        // Context or last line (only when no permission cards)
+                        if sessionsWithPerms.isEmpty {
+                            if !s.contextLines.isEmpty {
+                                Text(s.contextLines)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .lineLimit(2)
+                            } else if !s.lastLine.isEmpty {
+                                Text(s.lastLine)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .lineLimit(1)
+                            }
                         }
                     }
 
                     // Other sessions
-                    if sessions.count > 1 {
+                    if sessions.count > 1 && sessionsWithPerms.isEmpty {
                         HStack(spacing: 8) {
                             ForEach(sessions.filter { $0.sessionId != context.state.activeSessionId }.prefix(3), id: \.self) { s in
                                 HStack(spacing: 3) {
@@ -229,31 +381,28 @@ struct LockScreenView: View {
                 }
             }
 
-            // Quick actions as list
-            if let s = active, !s.quickActions.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(Array(s.quickActions.enumerated()), id: \.offset) { idx, action in
-                        Link(destination: actionURL(context.state.activeSessionId, s.terminalId, action)) {
-                            HStack {
-                                Text(action.label)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white)
-                                Spacer()
-                                Image(systemName: action.needsInput ? "arrow.right.circle.fill" : "checkmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(action.needsInput ? .orange : providerColor(s.provider))
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                        }
-                        if idx < s.quickActions.count - 1 {
-                            Divider().background(.white.opacity(0.1))
-                        }
+            // Permission request cards
+            if !sessionsWithPerms.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(Array(sessionsWithPerms.prefix(3).enumerated()), id: \.offset) { _, s in
+                        PermissionCardView(session: s, compact: false)
+                    }
+                    if sessionsWithPerms.count > 3 {
+                        Text("打开 App 查看其余 \(sessionsWithPerms.count - 3) 个")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.4))
                     }
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(.white.opacity(0.08))
+            } else if let s = active, !s.quickActions.isEmpty {
+                // Non-permission quick actions
+                QuickActionListView(
+                    actions: s.quickActions,
+                    sessionId: context.state.activeSessionId,
+                    terminalId: s.terminalId,
+                    provider: s.provider,
+                    fontSize: 12,
+                    iconSize: 14,
+                    vPadding: 6
                 )
             }
         }
@@ -268,7 +417,6 @@ struct LockScreenView: View {
 @available(iOS 16.1, *)
 struct ClaudeSparkleShape: Shape {
     func path(in rect: CGRect) -> Path {
-        // Claude's sparkle/star logo: a 4-pointed star with rounded tips
         let cx = rect.midX
         let cy = rect.midY
         let outer = min(rect.width, rect.height) / 2
@@ -333,15 +481,6 @@ func actionURL(_ sessionId: String, _ terminalId: String, _ action: QuickAction)
 }
 
 @available(iOS 16.1, *)
-func providerIcon(_ provider: String) -> Image {
-    switch provider {
-    case "claude": return Image(systemName: "brain.head.profile.fill")
-    case "codex": return Image(systemName: "chevron.left.forwardslash.chevron.right")
-    default: return Image(systemName: "terminal.fill")
-    }
-}
-
-@available(iOS 16.1, *)
 func providerColor(_ provider: String) -> Color {
     switch provider {
     case "claude": return Color(red: 0.82, green: 0.58, blue: 0.35)
@@ -358,17 +497,6 @@ func statusColor(_ status: String) -> Color {
     case "tool_use": return .cyan
     case "error": return .red
     default: return .gray
-    }
-}
-
-func statusEmoji(_ status: String) -> String {
-    switch status {
-    case "thinking": return "◐"
-    case "outputting": return "▸"
-    case "waiting": return "◉"
-    case "tool_use": return "⚙"
-    case "error": return "✕"
-    default: return "○"
     }
 }
 

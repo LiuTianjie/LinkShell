@@ -20,8 +20,17 @@ struct SessionState: Codable, Hashable {
     var projectName: String
     var provider: String      // "claude", "codex", "custom"
     var quickActions: [QuickAction]
+    var permissionRequest: PermissionRequestState?  // top of permission stack
+    var pendingRequestCount: Int?  // total pending permissions in stack (incl. top)
     var tokensUsed: Int       // estimated tokens (from output length)
     var elapsedSeconds: Int   // seconds since session connected
+}
+
+struct PermissionRequestState: Codable, Hashable {
+    var requestId: String       // unique ID for AppIntent
+    var toolName: String        // "Bash", "Write", "Edit", etc.
+    var contextLines: String    // permission request description
+    var quickActions: [QuickAction]
 }
 
 struct QuickAction: Codable, Hashable {
