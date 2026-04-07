@@ -162,6 +162,7 @@ function AppInner() {
 
   // Live Activity
   const liveActivityActiveRef = useRef(false);
+  const lastAlertedRef = useRef(false);
   const parsersRef = useRef(new Map<string, { parser: ThrottledTerminalParser; unsub: () => void; status: string; lastLine: string; contextLines: string; quickActions: { label: string; input: string; needsInput: boolean }[]; provider: string; connectedAt: number }>());
   const sessionsRef = useRef(manager.sessions);
   const activeSidRef = useRef(manager.activeSessionId);
@@ -197,7 +198,9 @@ function AppInner() {
     const priority: Record<string, number> = { error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5 };
     states.sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9));
     const aid = activeSid ?? states[0]?.sessionId ?? "";
-    const needsAlert = states.some((s) => s.quickActions.length > 0);
+    const hasQuickActions = states.some((s) => s.quickActions.length > 0);
+    const needsAlert = hasQuickActions && !lastAlertedRef.current;
+    lastAlertedRef.current = hasQuickActions;
     updateLiveActivity(states, aid, needsAlert);
   }, []);
 
@@ -269,6 +272,7 @@ function AppInner() {
       });
     } else if (!hasConnected && liveActivityActiveRef.current) {
       liveActivityActiveRef.current = false;
+      lastAlertedRef.current = false;
       endLiveActivity();
       for (const e2 of parsersRef.current.values()) { e2.parser.destroy(); e2.unsub(); }
       parsersRef.current.clear();
