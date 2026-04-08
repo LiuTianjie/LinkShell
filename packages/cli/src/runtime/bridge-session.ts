@@ -618,11 +618,10 @@ export class BridgeSession {
   }
 
   private setupClaudeHooks(terminalId: string, curlCmd: string, args: string[]): string {
-    // Write hooks to ~/.claude/settings.local.json so Claude picks them up
-    // regardless of how it's launched (direct or inside a custom shell)
+    // Write hooks to ~/.claude/settings.json — Claude Code reads hooks from here
     const claudeDir = join(homedir(), ".claude");
     if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
-    const settingsPath = join(claudeDir, "settings.local.json");
+    const settingsPath = join(claudeDir, "settings.json");
 
     // Backup existing settings
     let existing: Record<string, unknown> = {};
@@ -940,13 +939,13 @@ export class BridgeSession {
       const configPath = term.hookConfigPath;
       try {
         if (term.provider === "claude") {
-          // configPath is the backup file — restore settings.local.json from it
-          const settingsPath = join(homedir(), ".claude", "settings.local.json");
+          // configPath is the backup file — restore settings.json from it
+          const settingsPath = join(homedir(), ".claude", "settings.json");
           if (existsSync(configPath)) {
             const backup = readFileSync(configPath, "utf8");
             writeFileSync(settingsPath, backup);
             unlinkSync(configPath);
-            this.log(`restored claude settings.local.json from backup`);
+            this.log(`restored claude settings.json from backup`);
           }
         } else {
           // Codex/Gemini/Copilot use home dir configs — restore backup if exists
