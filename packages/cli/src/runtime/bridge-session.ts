@@ -810,6 +810,10 @@ export class BridgeSession {
         phase = "idle";
         summary = "session started";
         break;
+      case "UserPromptSubmit":
+        phase = "thinking";
+        this.permissionStacks.delete(terminalId);
+        break;
       default:
         return;
     }
