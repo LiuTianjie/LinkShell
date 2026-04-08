@@ -470,11 +470,22 @@ export class BridgeSession {
     const args = [...this.options.providerConfig.args];
 
     // Set up hook server for structured status (all supported providers)
+    // For "custom" shell, set up hooks for all providers since user may launch any of them
     let hookServer: http.Server | undefined;
     let hookPort: number | undefined;
     let hookConfigPath: string | undefined;
 
-    if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "copilot") {
+    if (provider === "custom") {
+      const result = await this.setupHookServer(terminalId, args, "claude");
+      hookServer = result.server;
+      hookPort = result.port;
+      hookConfigPath = result.configPath;
+      // Also set up hooks for other providers
+      const curlCmd = `curl -s -X POST http://127.0.0.1:${result.port}/hook -H 'Content-Type: application/json' -d "$(cat)"`;
+      this.setupCodexHooks(terminalId, curlCmd);
+      this.setupGeminiHooks(terminalId, curlCmd);
+      this.setupCopilotHooks(terminalId, curlCmd);
+    } else if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "copilot") {
       const result = await this.setupHookServer(terminalId, args, provider);
       hookServer = result.server;
       hookPort = result.port;
@@ -909,8 +920,14 @@ export class BridgeSession {
       }
     }
 
-    // Unknown provider — try to pass through
-    return rawName;
+    // Unknown provider — try all known formats
+    // This handles "custom" shell where any provider might be launched
+    const allProviders = ["claude", "codex", "gemini", "copilot"];
+    for (const p of allProviders) {
+      const result = this.normalizeHookName(rawName, p);
+      if (result) return result;
+    }
+    return undefined;
   }
 
   private cleanupHookServer(term: TerminalInstance): void {
