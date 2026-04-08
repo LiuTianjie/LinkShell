@@ -2,7 +2,7 @@ import * as pty from "node-pty";
 import * as http from "node:http";
 import WebSocket from "ws";
 import { hostname, platform, homedir } from "node:os";
-import { writeFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { writeFileSync, readFileSync, readdirSync, statSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename, resolve } from "node:path";
 import {
@@ -469,16 +469,16 @@ export class BridgeSession {
     const provider = providerOverride ?? this.options.providerConfig.provider;
     const args = [...this.options.providerConfig.args];
 
-    // For Claude provider: set up hook server for structured status
+    // Set up hook server for structured status (all supported providers)
     let hookServer: http.Server | undefined;
     let hookPort: number | undefined;
     let hookConfigPath: string | undefined;
 
-    if (provider === "claude") {
-      const { server, port, configPath } = await this.setupHookServer(terminalId, args);
-      hookServer = server;
-      hookPort = port;
-      hookConfigPath = configPath;
+    if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "copilot") {
+      const result = await this.setupHookServer(terminalId, args, provider);
+      hookServer = result.server;
+      hookPort = result.port;
+      hookConfigPath = result.configPath;
     }
 
     const term: TerminalInstance = {
@@ -552,7 +552,7 @@ export class BridgeSession {
     this.log(`spawned terminal ${terminalId} in ${cwd}`);
   }
 
-  private async setupHookServer(terminalId: string, args: string[]): Promise<{
+  private async setupHookServer(terminalId: string, args: string[], provider: string): Promise<{
     server: http.Server;
     port: number;
     configPath: string;
@@ -570,7 +570,7 @@ export class BridgeSession {
         res.end("ok");
         try {
           const event = JSON.parse(body);
-          this.handleHookEvent(terminalId, event);
+          this.handleHookEvent(terminalId, event, provider);
         } catch (e) {
           this.log(`hook parse error: ${e}`);
         }
@@ -585,12 +585,28 @@ export class BridgeSession {
       });
       server.on("error", reject);
     });
-    this.log(`hook server for ${terminalId} listening on port ${port}`);
+    this.log(`hook server for ${terminalId} (${provider}) listening on port ${port}`);
 
-    // Write temporary hook config
-    const configPath = join(tmpdir(), `linkshell-hooks-${terminalId}.json`);
     const curlCmd = `curl -s -X POST http://127.0.0.1:${port}/hook -H 'Content-Type: application/json' -d "$(cat)"`;
-    const hookEntry = { hooks: [{ type: "command", command: curlCmd }] };
+    let configPath: string;
+
+    if (provider === "codex") {
+      configPath = this.setupCodexHooks(terminalId, curlCmd);
+    } else if (provider === "gemini") {
+      configPath = this.setupGeminiHooks(terminalId, curlCmd);
+    } else if (provider === "copilot") {
+      configPath = this.setupCopilotHooks(terminalId, curlCmd);
+    } else {
+      // Claude (default)
+      configPath = this.setupClaudeHooks(terminalId, curlCmd, args);
+    }
+
+    return { server, port, configPath };
+  }
+
+  private setupClaudeHooks(terminalId: string, curlCmd: string, args: string[]): string {
+    const configPath = join(tmpdir(), `linkshell-hooks-${terminalId}.json`);
+    const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
     const config = {
       hooks: {
         PreToolUse: [hookEntry],
@@ -598,19 +614,125 @@ export class BridgeSession {
         PostToolUseFailure: [hookEntry],
         Stop: [hookEntry],
         PermissionRequest: [hookEntry],
+        UserPromptSubmit: [hookEntry],
+        SessionStart: [hookEntry],
       },
     };
     writeFileSync(configPath, JSON.stringify(config));
-    this.log(`hook config written to ${configPath}`);
+    this.log(`claude hook config written to ${configPath}`);
 
     // Inject --settings into Claude CLI args
     args.push("--settings", configPath);
-
-    return { server, port, configPath };
+    return configPath;
   }
 
-  private handleHookEvent(terminalId: string, event: Record<string, unknown>): void {
-    const hookName = event.hook_event_name as string | undefined;
+  private setupCodexHooks(terminalId: string, curlCmd: string): string {
+    // Codex uses ~/.codex/hooks.json — nested format (no matcher)
+    const codexDir = join(homedir(), ".codex");
+    if (!existsSync(codexDir)) mkdirSync(codexDir, { recursive: true });
+
+    // Ensure codex_hooks = true in config.toml
+    const tomlPath = join(codexDir, "config.toml");
+    let tomlContent = "";
+    try { tomlContent = readFileSync(tomlPath, "utf8"); } catch { /* doesn't exist yet */ }
+    if (!tomlContent.includes("codex_hooks")) {
+      tomlContent += `\ncodex_hooks = true\n`;
+      writeFileSync(tomlPath, tomlContent);
+      this.log(`enabled codex_hooks in ${tomlPath}`);
+    }
+
+    const hooksPath = join(codexDir, "hooks.json");
+    const hookEntry = { hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
+    const config = {
+      hooks: {
+        SessionStart: [hookEntry],
+        PreToolUse: [hookEntry],
+        PostToolUse: [hookEntry],
+      },
+    };
+
+    // Backup existing hooks.json if present and not ours
+    if (existsSync(hooksPath)) {
+      try {
+        const existing = readFileSync(hooksPath, "utf8");
+        if (!existing.includes(`127.0.0.1:`) || !existing.includes("/hook")) {
+          writeFileSync(`${hooksPath}.linkshell-backup`, existing);
+          this.log(`backed up existing codex hooks`);
+        }
+      } catch { /* ignore */ }
+    }
+
+    writeFileSync(hooksPath, JSON.stringify(config, null, 2));
+    this.log(`codex hook config written to ${hooksPath}`);
+    return hooksPath;
+  }
+
+  private setupGeminiHooks(terminalId: string, curlCmd: string): string {
+    // Gemini uses ~/.gemini/settings.json — nested format, timeout in milliseconds
+    const geminiDir = join(homedir(), ".gemini");
+    if (!existsSync(geminiDir)) mkdirSync(geminiDir, { recursive: true });
+
+    const settingsPath = join(geminiDir, "settings.json");
+    const hookEntry = { hooks: [{ type: "command", command: curlCmd, timeout: 5000 }] };
+    const hookConfig = {
+      SessionStart: [hookEntry],
+      BeforeTool: [hookEntry],
+      AfterTool: [hookEntry],
+      BeforeSubmitPrompt: [hookEntry],
+      AfterSubmitPrompt: [hookEntry],
+      SessionEnd: [hookEntry],
+    };
+
+    // Merge with existing settings if present
+    let existing: Record<string, unknown> = {};
+    try {
+      existing = JSON.parse(readFileSync(settingsPath, "utf8"));
+    } catch { /* doesn't exist yet */ }
+
+    // Backup existing hooks if present and not ours
+    if (existing.hooks && JSON.stringify(existing.hooks).indexOf("127.0.0.1:") === -1) {
+      writeFileSync(`${settingsPath}.linkshell-backup`, JSON.stringify(existing, null, 2));
+      this.log(`backed up existing gemini settings`);
+    }
+
+    existing.hooks = hookConfig;
+    writeFileSync(settingsPath, JSON.stringify(existing, null, 2));
+    this.log(`gemini hook config written to ${settingsPath}`);
+    return settingsPath;
+  }
+
+  private setupCopilotHooks(terminalId: string, curlCmd: string): string {
+    // Copilot uses ~/.copilot/hooks/<name>.json — flat format with `bash` key
+    const copilotDir = join(homedir(), ".copilot", "hooks");
+    if (!existsSync(copilotDir)) mkdirSync(copilotDir, { recursive: true });
+
+    const hooksPath = join(copilotDir, "linkshell.json");
+    const mkHook = (eventName: string) => ({
+      type: "command",
+      bash: `${curlCmd.replace('"$(cat)"', `'{"hook_event_name":"${eventName}"}'`)}`,
+      timeoutSec: 5,
+    });
+    const config = {
+      version: 1,
+      hooks: {
+        sessionStart: [mkHook("sessionStart")],
+        preToolUse: [mkHook("preToolUse")],
+        postToolUse: [mkHook("postToolUse")],
+        sessionEnd: [mkHook("sessionEnd")],
+      },
+    };
+
+    writeFileSync(hooksPath, JSON.stringify(config, null, 2));
+    this.log(`copilot hook config written to ${hooksPath}`);
+    return hooksPath;
+  }
+
+  private handleHookEvent(terminalId: string, event: Record<string, unknown>, provider: string): void {
+    const rawHookName = (event.hook_event_name ?? event.event_name) as string | undefined;
+    if (!rawHookName) return;
+
+    // Normalize hook event names from different providers to unified names
+    const hookName = this.normalizeHookName(rawHookName, provider);
     if (!hookName) return;
 
     let phase: string;
@@ -622,20 +744,21 @@ export class BridgeSession {
     switch (hookName) {
       case "PreToolUse":
         phase = "tool_use";
-        toolName = event.tool_name as string | undefined;
+        toolName = (event.tool_name ?? event.toolName) as string | undefined;
         if (event.tool_input && typeof event.tool_input === "object") {
           const input = event.tool_input as Record<string, unknown>;
           toolInput = JSON.stringify(input).slice(0, 200);
+        } else if (event.toolInput && typeof event.toolInput === "object") {
+          toolInput = JSON.stringify(event.toolInput).slice(0, 200);
         }
         break;
       case "PostToolUse":
         phase = "thinking";
-        toolName = event.tool_name as string | undefined;
-        // Pop permission stack: tool completed, remove most recent matching request
+        toolName = (event.tool_name ?? event.toolName) as string | undefined;
+        // Pop permission stack: tool completed
         {
           const stack = this.permissionStacks.get(terminalId);
           if (stack && stack.length > 0) {
-            // Pop from the end (most recent) — avoids wrong match when tool names collide
             stack.pop();
             if (stack.length === 0) this.permissionStacks.delete(terminalId);
           }
@@ -643,8 +766,7 @@ export class BridgeSession {
         break;
       case "PostToolUseFailure":
         phase = "error";
-        toolName = event.tool_name as string | undefined;
-        // Pop permission stack on failure too
+        toolName = (event.tool_name ?? event.toolName) as string | undefined;
         {
           const stack = this.permissionStacks.get(terminalId);
           if (stack && stack.length > 0) {
@@ -656,15 +778,16 @@ export class BridgeSession {
       case "Stop":
         phase = "idle";
         if (event.stop_reason) summary = String(event.stop_reason);
-        // Clear all pending permissions on stop
         this.permissionStacks.delete(terminalId);
         break;
       case "PermissionRequest":
         phase = "waiting";
-        toolName = event.tool_name as string | undefined;
+        toolName = (event.tool_name ?? event.toolName) as string | undefined;
         if (event.tool_input && typeof event.tool_input === "object") {
           const input = event.tool_input as Record<string, unknown>;
           permissionRequest = JSON.stringify(input).slice(0, 300);
+        } else if (event.toolInput && typeof event.toolInput === "object") {
+          permissionRequest = JSON.stringify(event.toolInput).slice(0, 300);
         }
         // Push to permission stack
         {
@@ -681,11 +804,15 @@ export class BridgeSession {
           });
         }
         break;
+      case "SessionStart":
+        phase = "idle";
+        summary = "session started";
+        break;
       default:
         return;
     }
 
-    this.log(`hook event: ${hookName} → phase=${phase} tool=${toolName ?? "none"}`);
+    this.log(`hook event [${provider}]: ${rawHookName} → ${hookName} → phase=${phase} tool=${toolName ?? "none"}`);
 
     // Build topPermission from stack
     const stack = this.permissionStacks.get(terminalId);
@@ -713,6 +840,56 @@ export class BridgeSession {
     }));
   }
 
+  /**
+   * Normalize hook event names from different CLI providers to unified internal names.
+   * Claude: PascalCase (PreToolUse, PostToolUse, Stop, PermissionRequest)
+   * Codex: camelCase (preToolUse, postToolUse, sessionStart)
+   * Gemini: PascalCase but different names (BeforeTool, AfterTool, BeforeSubmitPrompt)
+   */
+  private normalizeHookName(rawName: string, provider: string): string | undefined {
+    // Claude events — already in our canonical format
+    if (provider === "claude") {
+      return rawName;
+    }
+
+    // Codex events (PascalCase in nested format)
+    if (provider === "codex") {
+      switch (rawName) {
+        case "PreToolUse": case "preToolUse": return "PreToolUse";
+        case "PostToolUse": case "postToolUse": return "PostToolUse";
+        case "SessionStart": case "sessionStart": return "SessionStart";
+        default: return undefined;
+      }
+    }
+
+    // Gemini events
+    if (provider === "gemini") {
+      switch (rawName) {
+        case "BeforeTool": return "PreToolUse";
+        case "AfterTool": return "PostToolUse";
+        case "BeforeSubmitPrompt": return "SessionStart";
+        case "AfterSubmitPrompt": return "Stop";
+        case "SessionStart": return "SessionStart";
+        case "SessionEnd": return "Stop";
+        default: return undefined;
+      }
+    }
+
+    // Copilot events (camelCase)
+    if (provider === "copilot") {
+      switch (rawName) {
+        case "preToolUse": return "PreToolUse";
+        case "postToolUse": return "PostToolUse";
+        case "sessionStart": return "SessionStart";
+        case "sessionEnd": return "Stop";
+        default: return undefined;
+      }
+    }
+
+    // Unknown provider — try to pass through
+    return rawName;
+  }
+
   private cleanupHookServer(term: TerminalInstance): void {
     if (term.hookServer) {
       term.hookServer.close();
@@ -720,7 +897,20 @@ export class BridgeSession {
       this.log(`hook server closed for ${term.id}`);
     }
     if (term.hookConfigPath) {
-      try { unlinkSync(term.hookConfigPath); } catch { /* ignore */ }
+      const configPath = term.hookConfigPath;
+      // Claude uses tmp files — safe to delete
+      // Codex/Gemini/Copilot use home dir configs — restore backup if exists
+      const backupPath = `${configPath}.linkshell-backup`;
+      try {
+        if (existsSync(backupPath)) {
+          const backup = readFileSync(backupPath, "utf8");
+          writeFileSync(configPath, backup);
+          unlinkSync(backupPath);
+          this.log(`restored backup for ${configPath}`);
+        } else if (configPath.startsWith(tmpdir())) {
+          unlinkSync(configPath);
+        }
+      } catch { /* ignore */ }
       term.hookConfigPath = undefined;
     }
   }

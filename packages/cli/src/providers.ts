@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 
-export type ProviderName = "claude" | "codex" | "custom";
+export type ProviderName = "claude" | "codex" | "gemini" | "copilot" | "custom";
 
 export interface ProviderConfig {
   provider: ProviderName;
@@ -65,6 +65,52 @@ function resolveCodexProvider(input: {
   };
 }
 
+function resolveGeminiProvider(input: {
+  command?: string;
+  args: string[];
+}): ProviderConfig {
+  const command = input.command ?? "gemini";
+  const resolved = which(command);
+  if (!resolved) {
+    throw new Error(
+      `Gemini CLI not found ("${command}"). Install it with: npm install -g @anthropic-ai/gemini-cli or check https://github.com/anthropics/gemini-cli`,
+    );
+  }
+
+  if (!process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
+    process.stderr.write(
+      "[warn] GOOGLE_API_KEY / GEMINI_API_KEY not set — Gemini may fail to authenticate\n",
+    );
+  }
+
+  return {
+    provider: "gemini",
+    command: resolved,
+    args: input.args,
+    env: { ...process.env },
+  };
+}
+
+function resolveCopilotProvider(input: {
+  command?: string;
+  args: string[];
+}): ProviderConfig {
+  const command = input.command ?? "github-copilot";
+  const resolved = which(command);
+  if (!resolved) {
+    throw new Error(
+      `GitHub Copilot CLI not found ("${command}").`,
+    );
+  }
+
+  return {
+    provider: "copilot",
+    command: resolved,
+    args: input.args,
+    env: { ...process.env },
+  };
+}
+
 export function resolveProviderConfig(input: {
   provider: ProviderName;
   command?: string;
@@ -75,6 +121,10 @@ export function resolveProviderConfig(input: {
       return resolveClaudeProvider(input);
     case "codex":
       return resolveCodexProvider(input);
+    case "gemini":
+      return resolveGeminiProvider(input);
+    case "copilot":
+      return resolveCopilotProvider(input);
     case "custom": {
       if (!input.command) {
         throw new Error("custom provider requires --command");

@@ -52,8 +52,8 @@ export async function runSetup(): Promise<void> {
   const provider = (await choose(
     rl,
     "Default provider:",
-    ["claude", "codex", "custom"],
-    ["claude", "codex", "custom"].indexOf(existing.provider ?? "claude"),
+    ["claude", "codex", "gemini", "copilot", "custom"],
+    ["claude", "codex", "gemini", "copilot", "custom"].indexOf(existing.provider ?? "claude"),
   )) as LinkShellConfig["provider"];
 
   let command: string | undefined;

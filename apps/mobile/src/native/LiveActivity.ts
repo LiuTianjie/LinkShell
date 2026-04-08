@@ -2,26 +2,30 @@ import { NativeModules, Platform } from "react-native";
 
 const { LiveActivityModule } = NativeModules;
 
-export interface PermissionRequestActivityState {
-  requestId: string;
-  toolName: string;
-  contextLines: string;
-  quickActions: QuickAction[];
+// ── Compact snapshot (matches Swift SessionSnapshot) ──
+
+export interface SessionSnapshot {
+  sid: string;
+  tid: string;
+  phase: string;
+  project: string;
+  provider: string;
+  tool: string;
+  elapsed: number;
+  hasPermission: boolean;
+  permCount: number;
 }
 
-export interface SessionActivityState {
-  sessionId: string;
-  terminalId: string;
-  status: string;
-  lastLine: string;
+// ── Extended data (written to UserDefaults for widget) ──
+
+export interface ExtendedSessionData {
+  sid: string;
+  toolDescription: string;
   contextLines: string;
-  projectName: string;
-  provider: string;
+  permissionTool: string;
+  permissionContext: string;
+  permissionRequestId: string;
   quickActions: QuickAction[];
-  permissionRequest?: PermissionRequestActivityState;
-  pendingRequestCount: number;
-  tokensUsed: number;
-  elapsedSeconds: number;
 }
 
 export interface QuickAction {
@@ -29,6 +33,8 @@ export interface QuickAction {
   input: string;
   needsInput: boolean;
 }
+
+// ── Native bridge ──
 
 const isIOS = Platform.OS === "ios";
 
@@ -42,13 +48,17 @@ export async function isLiveActivityAvailable(): Promise<boolean> {
 }
 
 export async function startLiveActivity(
-  sessions: SessionActivityState[],
+  snapshots: SessionSnapshot[],
+  extendedData: ExtendedSessionData[],
   activeSessionId: string,
 ): Promise<string | null> {
   if (!isIOS || !LiveActivityModule) return null;
   try {
-    const json = JSON.stringify(sessions);
-    return await LiveActivityModule.startActivity(json, activeSessionId);
+    return await LiveActivityModule.startActivity(
+      JSON.stringify(snapshots),
+      JSON.stringify(extendedData),
+      activeSessionId,
+    );
   } catch (e) {
     console.warn("[LiveActivity] start failed:", e);
     return null;
@@ -56,14 +66,19 @@ export async function startLiveActivity(
 }
 
 export async function updateLiveActivity(
-  sessions: SessionActivityState[],
+  snapshots: SessionSnapshot[],
+  extendedData: ExtendedSessionData[],
   activeSessionId: string,
   alert?: boolean,
 ): Promise<void> {
   if (!isIOS || !LiveActivityModule) return;
   try {
-    const json = JSON.stringify(sessions);
-    await LiveActivityModule.updateActivity(json, activeSessionId, alert ?? false);
+    await LiveActivityModule.updateActivity(
+      JSON.stringify(snapshots),
+      JSON.stringify(extendedData),
+      activeSessionId,
+      alert ?? false,
+    );
   } catch {
     // Silently ignore update failures
   }
@@ -73,6 +88,15 @@ export async function endLiveActivity(): Promise<void> {
   if (!isIOS || !LiveActivityModule) return;
   try {
     await LiveActivityModule.endActivity();
+  } catch {
+    // Silently ignore
+  }
+}
+
+export async function confirmAction(requestId: string): Promise<void> {
+  if (!isIOS || !LiveActivityModule) return;
+  try {
+    await LiveActivityModule.confirmAction(requestId);
   } catch {
     // Silently ignore
   }

@@ -20,7 +20,6 @@ class ActionBridgeModule: RCTEventEmitter {
 
     override func startObserving() {
         hasListeners = true
-        // Check for queued actions on start
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.processPendingActions()
         }
@@ -64,20 +63,28 @@ class ActionBridgeModule: RCTEventEmitter {
 
     private func processPendingActions() {
         guard hasListeners else { return }
+        guard let defaults = LiveActivityStore.defaults else { return }
 
-        let defaults = UserDefaults(suiteName: "group.com.bd.linkshell")
-        guard let queue = defaults?.array(forKey: "pendingActions") as? [[String: String]], !queue.isEmpty else {
+        guard let queue = defaults.array(forKey: LiveActivityStore.pendingActionsKey) as? [[String: String]],
+              !queue.isEmpty else {
             return
         }
 
         // Clear queue first to avoid double-processing
-        defaults?.removeObject(forKey: "pendingActions")
-        defaults?.synchronize()
+        defaults.removeObject(forKey: LiveActivityStore.pendingActionsKey)
+        defaults.synchronize()
+
+        let now = Date().timeIntervalSince1970
 
         for action in queue {
             guard let sessionId = action["sessionId"],
                   let terminalId = action["terminalId"],
                   let input = action["input"] else { continue }
+
+            // Skip stale actions (> 30 seconds old)
+            if let ts = action["timestamp"], let timestamp = Double(ts), now - timestamp > 30 {
+                continue
+            }
 
             sendEvent(withName: "onQuickAction", body: [
                 "sessionId": sessionId,

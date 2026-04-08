@@ -29,16 +29,34 @@ struct QuickActionIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult {
-        let defaults = UserDefaults(suiteName: "group.com.bd.linkshell")!
-        var queue = defaults.array(forKey: "pendingActions") as? [[String: String]] ?? []
+        guard let defaults = LiveActivityStore.defaults else {
+            return .result()
+        }
+
+        let actionId = UUID().uuidString
+
+        // Dedup: check if this requestId was already processed
+        var processed = defaults.array(forKey: LiveActivityStore.processedActionsKey) as? [String] ?? []
+        if processed.contains(requestId) {
+            return .result()
+        }
+
+        // Mark as processed (keep last 50)
+        processed.append(requestId)
+        if processed.count > 50 { processed = Array(processed.suffix(50)) }
+        defaults.set(processed, forKey: LiveActivityStore.processedActionsKey)
+
+        // Enqueue action
+        var queue = defaults.array(forKey: LiveActivityStore.pendingActionsKey) as? [[String: String]] ?? []
         queue.append([
+            "actionId": actionId,
             "sessionId": sessionId,
             "terminalId": terminalId,
             "input": inputData,
             "requestId": requestId,
             "timestamp": "\(Date().timeIntervalSince1970)",
         ])
-        defaults.set(queue, forKey: "pendingActions")
+        defaults.set(queue, forKey: LiveActivityStore.pendingActionsKey)
         defaults.synchronize()
 
         // Darwin notification to wake main app
