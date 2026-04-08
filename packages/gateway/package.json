@@ -1,16 +1,16 @@
 {
   "name": "@linkshell/gateway",
-  "version": "0.2.8",
+  "version": "0.2.10",
   "type": "module",
   "main": "dist/gateway/src/index.js",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/gateway/src/index.d.ts",
       "import": "./dist/gateway/src/index.js",
       "default": "./dist/gateway/src/index.js"
     },
     "./embedded": {
-      "types": "./src/embedded.ts",
+      "types": "./dist/gateway/src/embedded.d.ts",
       "import": "./dist/gateway/src/embedded.js",
       "default": "./dist/gateway/src/embedded.js"
     }

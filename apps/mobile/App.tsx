@@ -369,6 +369,7 @@ function AppInner() {
         projectName: info.projectName || info.hostname || sid.slice(0, 8),
         provider: entry?.provider ?? info.provider ?? "claude",
         quickActions: entry?.quickActions ?? [],
+        pendingRequestCount: 0,
         tokensUsed: 0,
         elapsedSeconds: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
       });
@@ -455,6 +456,7 @@ function AppInner() {
             projectName: info.projectName || info.hostname || sid.slice(0, 8),
             provider: e?.provider ?? info.provider ?? "claude",
             quickActions: e?.quickActions ?? [],
+            pendingRequestCount: 0,
             tokensUsed: 0,
             elapsedSeconds: Math.floor((now - (e?.connectedAt ?? now)) / 1000),
           });

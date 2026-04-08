@@ -117,6 +117,8 @@ const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
     <string>app-store-connect</string>
     <key>destination</key>
     <string>upload</string>
+    <key>teamID</key>
+    <string>L95PYLFT86</string>
     <key>signingStyle</key>
     <string>automatic</string>
     <key>uploadSymbols</key>
