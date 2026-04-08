@@ -600,7 +600,7 @@ export class BridgeSession {
     });
     this.log(`hook server for ${terminalId} (${provider}) listening on port ${port}`);
 
-    const curlCmd = `curl -s -X POST http://127.0.0.1:${port}/hook -H 'Content-Type: application/json' -d "$(cat)"`;
+    const curlCmd = `curl -s -X POST http://127.0.0.1:${port}/hook -H 'Content-Type: application/json' --data-binary @-`;
     let configPath: string;
 
     if (provider === "codex") {
