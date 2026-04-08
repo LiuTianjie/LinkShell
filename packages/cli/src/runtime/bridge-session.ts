@@ -47,6 +47,7 @@ interface TerminalInstance {
   provider: string;
   scrollback: ScrollbackBuffer;
   outputSeq: number;
+  statusSeq: number;
   status: "running" | "exited";
   hookServer?: http.Server;
   hookPort?: number;
@@ -498,6 +499,7 @@ export class BridgeSession {
       provider,
       scrollback: new ScrollbackBuffer(1000),
       outputSeq: 0,
+      statusSeq: 0,
       status: "running",
       hookServer,
       hookPort,
@@ -629,12 +631,12 @@ export class BridgeSession {
       case "PostToolUse":
         phase = "thinking";
         toolName = event.tool_name as string | undefined;
-        // Pop permission stack: tool completed, remove matching request
+        // Pop permission stack: tool completed, remove most recent matching request
         {
           const stack = this.permissionStacks.get(terminalId);
           if (stack && stack.length > 0) {
-            const idx = stack.findIndex((r) => r.toolName === toolName);
-            if (idx >= 0) stack.splice(idx, 1);
+            // Pop from the end (most recent) — avoids wrong match when tool names collide
+            stack.pop();
             if (stack.length === 0) this.permissionStacks.delete(terminalId);
           }
         }
@@ -646,8 +648,7 @@ export class BridgeSession {
         {
           const stack = this.permissionStacks.get(terminalId);
           if (stack && stack.length > 0) {
-            const idx = stack.findIndex((r) => r.toolName === toolName);
-            if (idx >= 0) stack.splice(idx, 1);
+            stack.pop();
             if (stack.length === 0) this.permissionStacks.delete(terminalId);
           }
         }
@@ -691,12 +692,17 @@ export class BridgeSession {
     const topPermission = stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
     const pendingPermissionCount = stack?.length ?? 0;
 
+    // Increment statusSeq for ordering
+    const term = this.terminals.get(terminalId);
+    const seq = term ? term.statusSeq++ : 0;
+
     this.send(createEnvelope({
       type: "terminal.status",
       sessionId: this.sessionId,
       terminalId,
       payload: {
         phase,
+        seq,
         ...(toolName && { toolName }),
         ...(toolInput && { toolInput }),
         ...(permissionRequest && { permissionRequest }),

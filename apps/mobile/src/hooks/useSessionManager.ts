@@ -102,6 +102,8 @@ export interface SessionManagerHandle {
   killTerminal: (terminalId: string) => void;
   /** Remove an exited terminal from the local map */
   removeTerminal: (terminalId: string) => void;
+  /** Register callback for terminal.status changes (for Live Activity fast path) */
+  onStatusChange: (cb: ((sessionId: string, terminalId: string, status: TerminalInfo["structuredStatus"]) => void) | null) => void;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -181,6 +183,8 @@ interface InternalSession {
   screenFrame: { data: string; width: number; height: number; frameId: number } | null;
   pendingOffer: { sdp: string } | null;
   pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
+  // Pending status for terminals not yet recreated (during reconnect)
+  pendingStatusByTerminal: Map<string, InternalTerminal["structuredStatus"]>;
   chunkBuf: {
     frameId: number;
     chunks: Map<number, string>;
@@ -248,6 +252,7 @@ function createInternalSession(sessionId: string, gatewayUrl: string, deviceId: 
     screenFrame: null,
     pendingOffer: null,
     pendingIceCandidates: [],
+    pendingStatusByTerminal: new Map(),
     chunkBuf: null,
     browseResult: null,
   };
@@ -300,6 +305,7 @@ export function useSessionManager(): SessionManagerHandle {
   const tick = useCallback(() => setTick((t) => t + 1), []);
 
   const deviceIdRef = useRef(generateId());
+  const statusChangeCbRef = useRef<((sessionId: string, terminalId: string, status: TerminalInfo["structuredStatus"]) => void) | null>(null);
 
   // ── Helpers ────────────────────────────────────────────────────
 
@@ -496,6 +502,13 @@ export function useSessionManager(): SessionManagerHandle {
             emitTerminal(s, { type: "reset", snapshot: { sessionId: s.sessionId, chunks: [...term.snapshot.chunks] } });
           } else {
             const t = createInternalTerminal(p.terminalId, p.cwd, p.projectName, s.provider ?? "claude");
+            // Apply any pending status from reconnect replay
+            const pendingStatus = s.pendingStatusByTerminal.get(p.terminalId);
+            if (pendingStatus) {
+              t.structuredStatus = pendingStatus;
+              s.pendingStatusByTerminal.delete(p.terminalId);
+              statusChangeCbRef.current?.(s.sessionId, p.terminalId, pendingStatus);
+            }
             s.terminals.set(p.terminalId, t);
             s.activeTerminalId = p.terminalId;
             s.terminalSnapshot = { sessionId: s.sessionId, chunks: [] };
@@ -510,6 +523,13 @@ export function useSessionManager(): SessionManagerHandle {
             if (!s.terminals.has(info.terminalId)) {
               const t = createInternalTerminal(info.terminalId, info.cwd, info.projectName, info.provider);
               t.status = info.status;
+              // Apply any pending status from reconnect replay
+              const pendingStatus = s.pendingStatusByTerminal.get(info.terminalId);
+              if (pendingStatus) {
+                t.structuredStatus = pendingStatus;
+                s.pendingStatusByTerminal.delete(info.terminalId);
+                statusChangeCbRef.current?.(s.sessionId, info.terminalId, pendingStatus);
+              }
               s.terminals.set(info.terminalId, t);
             } else {
               const existing = s.terminals.get(info.terminalId)!;
@@ -634,6 +654,7 @@ export function useSessionManager(): SessionManagerHandle {
           const tid = (envelope as any).terminalId ?? "default";
           const p = envelope.payload as {
             phase: string;
+            seq?: number;
             toolName?: string;
             toolInput?: string;
             permissionRequest?: string;
@@ -648,8 +669,13 @@ export function useSessionManager(): SessionManagerHandle {
             pendingPermissionCount?: number;
           };
           const term = s.terminals.get(tid);
+          const statusData = { ...p, updatedAt: Date.now() };
           if (term) {
-            term.structuredStatus = { ...p, updatedAt: Date.now() };
+            term.structuredStatus = statusData;
+            statusChangeCbRef.current?.(s.sessionId, tid, term.structuredStatus);
+          } else {
+            // Terminal not yet recreated (reconnect) — buffer for later
+            s.pendingStatusByTerminal.set(tid, statusData);
           }
           tick();
           break;
@@ -960,5 +986,6 @@ export function useSessionManager(): SessionManagerHandle {
     browseDirectory: browseDirectoryFn,
     killTerminal: killTerminalFn,
     removeTerminal: removeTerminalFn,
+    onStatusChange: (cb) => { statusChangeCbRef.current = cb; },
   };
 }

@@ -222,6 +222,7 @@ export const terminalBrowseResultPayloadSchema = z.object({
 
 export const terminalStatusPayloadSchema = z.object({
   phase: z.enum(["thinking", "tool_use", "outputting", "waiting", "idle", "error"]),
+  seq: z.number().optional(),
   toolName: z.string().optional(),
   toolInput: z.string().optional(),
   permissionRequest: z.string().optional(),

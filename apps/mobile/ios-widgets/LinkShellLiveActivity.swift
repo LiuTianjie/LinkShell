@@ -412,34 +412,6 @@ struct LockScreenView: View {
     }
 }
 
-// MARK: - Claude Sparkle Logo (SwiftUI Path)
-
-@available(iOS 16.1, *)
-struct ClaudeSparkleShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let cx = rect.midX
-        let cy = rect.midY
-        let outer = min(rect.width, rect.height) / 2
-        let inner = outer * 0.28
-
-        var path = Path()
-        let points = 4
-        for i in 0..<(points * 2) {
-            let angle = (Double(i) * .pi / Double(points)) - .pi / 2
-            let r = i % 2 == 0 ? outer : inner
-            let x = cx + CGFloat(cos(angle)) * r
-            let y = cy + CGFloat(sin(angle)) * r
-            if i == 0 {
-                path.move(to: CGPoint(x: x, y: y))
-            } else {
-                path.addLine(to: CGPoint(x: x, y: y))
-            }
-        }
-        path.closeSubpath()
-        return path
-    }
-}
-
 @available(iOS 16.1, *)
 struct ProviderLogoView: View {
     let provider: String
@@ -449,13 +421,19 @@ struct ProviderLogoView: View {
     var body: some View {
         ZStack {
             if provider == "claude" {
-                ClaudeSparkleShape()
-                    .fill(providerColor("claude"))
+                Image("claudecode-logo")
+                    .resizable()
+                    .renderingMode(.original)
+                    .aspectRatio(contentMode: .fit)
                     .frame(width: size, height: size)
+                    .clipShape(Circle())
             } else if provider == "codex" {
-                Text("</>")
-                    .font(.system(size: size * 0.45, weight: .bold, design: .monospaced))
-                    .foregroundColor(providerColor("codex"))
+                Image("codex-logo")
+                    .resizable()
+                    .renderingMode(.original)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
             } else {
                 Image(systemName: "terminal.fill")
                     .font(.system(size: size * 0.5, weight: .bold))

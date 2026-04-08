@@ -171,31 +171,48 @@ function AppInner() {
       const entry = parsersRef.current.get(sid);
       const activeTerm = info.activeTerminalId ? info.terminals.get(info.activeTerminalId) : undefined;
       const ss = activeTerm?.structuredStatus;
-      const useStructured = ss && (now - ss.updatedAt) < 30_000;
 
-      // Build permission request from structured status stack
+      // Build permission request
       let permissionRequest: SessionActivityState["permissionRequest"];
       let pendingRequestCount = 0;
-      if (useStructured && ss.topPermission) {
-        const tp = ss.topPermission;
-        permissionRequest = {
-          requestId: tp.requestId,
-          toolName: tp.toolName,
-          contextLines: (tp.permissionRequest || tp.toolInput || "").slice(0, 200),
-          quickActions: [
-            { label: "Allow", input: "y", needsInput: false },
-            { label: "Deny", input: "n", needsInput: false },
-          ],
-        };
-        pendingRequestCount = ss.pendingPermissionCount ?? 1;
+
+      if (ss) {
+        // Structured status is authoritative when present (no freshness window)
+        if (ss.topPermission) {
+          const tp = ss.topPermission;
+          permissionRequest = {
+            requestId: tp.requestId,
+            toolName: tp.toolName,
+            contextLines: (tp.permissionRequest || tp.toolInput || "").slice(0, 200),
+            quickActions: [
+              { label: "Allow", input: "y", needsInput: false },
+              { label: "Deny", input: "n", needsInput: false },
+            ],
+          };
+          pendingRequestCount = ss.pendingPermissionCount ?? 1;
+        }
+      } else if (entry && entry.status === "waiting" && entry.quickActions.length > 0) {
+        // Fallback: parser-based detection (only when no structured status)
+        const isPermission = entry.quickActions.some(
+          (a) => /^(Allow|Deny|Yes|No|Approve)$/i.test(a.label),
+        );
+        if (isPermission) {
+          permissionRequest = {
+            requestId: `parsed-${sid}-${now}`,
+            toolName: "Permission",
+            contextLines: (entry.contextLines || entry.lastLine || "").slice(0, 200),
+            quickActions: entry.quickActions,
+          };
+          pendingRequestCount = 1;
+        }
       }
 
       states.push({
         sessionId: sid,
         terminalId: info.activeTerminalId || "default",
-        status: useStructured ? ss.phase : (entry?.status ?? "idle"),
+        status: ss ? ss.phase : (entry?.status ?? "idle"),
         lastLine: entry?.lastLine ?? "",
-        contextLines: useStructured && ss.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? ""),
+        contextLines: ss?.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? ""),
         projectName: info.projectName || info.hostname || sid.slice(0, 8),
         provider: entry?.provider ?? info.provider ?? "claude",
         quickActions: entry?.quickActions ?? [],
@@ -261,11 +278,10 @@ function AppInner() {
           const e = parsersRef.current.get(sid2);
           const activeTerm = info2.activeTerminalId ? info2.terminals.get(info2.activeTerminalId) : undefined;
           const ss = activeTerm?.structuredStatus;
-          const useStructured = ss && (now - ss.updatedAt) < 30_000;
 
           let permissionRequest: SessionActivityState["permissionRequest"];
           let pendingRequestCount = 0;
-          if (useStructured && ss.topPermission) {
+          if (ss && ss.topPermission) {
             const tp = ss.topPermission;
             permissionRequest = {
               requestId: tp.requestId,
@@ -277,14 +293,27 @@ function AppInner() {
               ],
             };
             pendingRequestCount = ss.pendingPermissionCount ?? 1;
+          } else if (!ss && e && e.status === "waiting" && e.quickActions.length > 0) {
+            const isPermission = e.quickActions.some(
+              (a) => /^(Allow|Deny|Yes|No|Approve)$/i.test(a.label),
+            );
+            if (isPermission) {
+              permissionRequest = {
+                requestId: `parsed-${sid2}-${now}`,
+                toolName: "Permission",
+                contextLines: (e.contextLines || e.lastLine || "").slice(0, 200),
+                quickActions: e.quickActions,
+              };
+              pendingRequestCount = 1;
+            }
           }
 
           states.push({
             sessionId: sid2,
             terminalId: info2.activeTerminalId || "default",
-            status: useStructured ? ss.phase : (e?.status ?? "idle"),
+            status: ss ? ss.phase : (e?.status ?? "idle"),
             lastLine: e?.lastLine ?? "",
-            contextLines: useStructured && ss.permissionRequest ? ss.permissionRequest : (e?.contextLines ?? ""),
+            contextLines: ss?.permissionRequest ? ss.permissionRequest : (e?.contextLines ?? ""),
             projectName: info2.projectName || info2.hostname || sid2.slice(0, 8),
             provider: e?.provider ?? info2.provider ?? "claude",
             quickActions: e?.quickActions ?? [],
@@ -315,9 +344,21 @@ function AppInner() {
   useEffect(() => {
     const id = setInterval(() => {
       if (liveActivityActiveRef.current) pushLiveActivityUpdate();
-    }, 2000);
+    }, 1500);
     return () => clearInterval(id);
   }, [pushLiveActivityUpdate]);
+
+  // Fast path: structured status changes trigger immediate Live Activity update
+  useEffect(() => {
+    manager.onStatusChange((_sessionId, _terminalId, status) => {
+      if (!liveActivityActiveRef.current) return;
+      // Immediate update for permission events
+      if (status?.topPermission || status?.phase === "waiting") {
+        pushLiveActivityUpdate();
+      }
+    });
+    return () => manager.onStatusChange(null);
+  }, [manager, pushLiveActivityUpdate]);
 
   useEffect(() => { return () => {
     if (liveActivityActiveRef.current) { endLiveActivity(); liveActivityActiveRef.current = false; }

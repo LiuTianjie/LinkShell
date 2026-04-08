@@ -46,6 +46,13 @@ function withLiveActivity(config) {
         if (fs.existsSync(src)) fs.copyFileSync(src, path.join(widgetDir, file));
       }
 
+      // Copy Assets.xcassets for widget logos
+      const srcAssets = path.join(sourceDir, "Assets.xcassets");
+      const dstAssets = path.join(widgetDir, "Assets.xcassets");
+      if (fs.existsSync(srcAssets)) {
+        copyDirSync(srcAssets, dstAssets);
+      }
+
       // Native module files → main app
       const mainAppFiles = ["LiveActivityModule.swift", "LiveActivityModuleBridge.m", "ActivityAttributes.swift", "ActionBridgeModule.swift", "ActionBridgeModuleBridge.m"];
       for (const file of mainAppFiles) {
@@ -149,6 +156,9 @@ function withLiveActivity(config) {
         actionBridgeBridgeFileRef: "W100000000000000000001D",
         actionBridgeBuildFile: "W100000000000000000001E",
         actionBridgeBridgeBuildFile: "W100000000000000000001F",
+        // Widget Assets.xcassets
+        widgetAssetsFileRef: "W1000000000000000000020",
+        widgetAssetsBuildFile: "W1000000000000000000021",
       };
 
       const bundleId = config.ios?.bundleIdentifier ?? "com.bd.linkshell";
@@ -166,7 +176,8 @@ function withLiveActivity(config) {
 		${uuids.mainAttrBuildFile} /* ActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = ${uuids.mainAttrFileRef} /* ActivityAttributes.swift */; };
 		${uuids.actionBridgeBuildFile} /* ActionBridgeModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = ${uuids.actionBridgeFileRef} /* ActionBridgeModule.swift */; };
 		${uuids.actionBridgeBridgeBuildFile} /* ActionBridgeModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = ${uuids.actionBridgeBridgeFileRef} /* ActionBridgeModuleBridge.m */; };
-		${uuids.embedBuildFile} /* ${WIDGET_TARGET_NAME}.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = ${uuids.widgetProduct} /* ${WIDGET_TARGET_NAME}.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };`;
+		${uuids.embedBuildFile} /* ${WIDGET_TARGET_NAME}.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = ${uuids.widgetProduct} /* ${WIDGET_TARGET_NAME}.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		${uuids.widgetAssetsBuildFile} /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ${uuids.widgetAssetsFileRef} /* Assets.xcassets */; };`;
 
       pbx = pbx.replace(
         "/* End PBXBuildFile section */",
@@ -184,7 +195,8 @@ function withLiveActivity(config) {
 		${uuids.moduleBridgeFileRef} /* LiveActivityModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = LiveActivityModuleBridge.m; path = LinkShell/LiveActivityModuleBridge.m; sourceTree = "<group>"; };
 		${uuids.mainAttrFileRef} /* ActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ActivityAttributes.swift; path = LinkShell/ActivityAttributes.swift; sourceTree = "<group>"; };
 		${uuids.actionBridgeFileRef} /* ActionBridgeModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ActionBridgeModule.swift; path = LinkShell/ActionBridgeModule.swift; sourceTree = "<group>"; };
-		${uuids.actionBridgeBridgeFileRef} /* ActionBridgeModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = ActionBridgeModuleBridge.m; path = LinkShell/ActionBridgeModuleBridge.m; sourceTree = "<group>"; };`;
+		${uuids.actionBridgeBridgeFileRef} /* ActionBridgeModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = ActionBridgeModuleBridge.m; path = LinkShell/ActionBridgeModuleBridge.m; sourceTree = "<group>"; };
+		${uuids.widgetAssetsFileRef} /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };`;
 
       pbx = pbx.replace(
         "/* End PBXFileReference section */",
@@ -200,6 +212,7 @@ function withLiveActivity(config) {
 				${uuids.liveActFileRef} /* LinkShellLiveActivity.swift */,
 				${uuids.bundleFileRef} /* LinkShellWidgetBundle.swift */,
 				${uuids.intentFileRef} /* QuickActionIntent.swift */,
+				${uuids.widgetAssetsFileRef} /* Assets.xcassets */,
 			);
 			name = ${WIDGET_TARGET_NAME};
 			path = ${WIDGET_TARGET_NAME};
@@ -268,6 +281,7 @@ function withLiveActivity(config) {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				${uuids.widgetAssetsBuildFile} /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};`;
@@ -481,6 +495,19 @@ function addMainAppNativeModuleFiles(pbx, uuids) {
   );
 
   return pbx;
+}
+
+function copyDirSync(src, dst) {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name);
+    const dstPath = path.join(dst, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(srcPath, dstPath);
+    } else {
+      fs.copyFileSync(srcPath, dstPath);
+    }
+  }
 }
 
 module.exports = withLiveActivity;

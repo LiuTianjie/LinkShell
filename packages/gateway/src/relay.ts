@@ -104,6 +104,7 @@ function handleHostMessage(
     case "terminal.browse.result":
     // Structured status from hooks
     case "terminal.status":
+      sessions.cacheStatus(session.id, envelope);
       broadcastToClients(session, envelope);
       break;
     default:
@@ -166,6 +167,11 @@ function handleClientMessage(
             }),
           ),
         );
+      }
+      // Replay last terminal.status for each terminal
+      const statusReplay = sessions.getStatusReplay(session.id);
+      for (const statusMsg of statusReplay) {
+        socket.send(serializeEnvelope(statusMsg));
       }
       // Also forward resume to host so it can fill gaps beyond gateway buffer
       sendToHost(session, envelope);

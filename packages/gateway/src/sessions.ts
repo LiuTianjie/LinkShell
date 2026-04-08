@@ -19,6 +19,7 @@ export interface Session {
   lastActivity: number;
   createdAt: number;
   outputBuffers: Map<string, Envelope[]>; // keyed by terminalId
+  lastStatusByTerminal: Map<string, Envelope>; // last terminal.status per terminal
   hostDisconnectedAt: number | undefined;
   // Metadata from host's session.connect
   provider: string | undefined;
@@ -52,6 +53,7 @@ export class SessionManager {
         lastActivity: Date.now(),
         createdAt: Date.now(),
         outputBuffers: new Map(),
+        lastStatusByTerminal: new Map(),
         hostDisconnectedAt: undefined,
         provider: undefined,
         hostname: undefined,
@@ -119,6 +121,20 @@ export class SessionManager {
       buf.shift();
     }
     session.lastActivity = Date.now();
+  }
+
+  cacheStatus(sessionId: string, envelope: Envelope): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    const tid = (envelope as any).terminalId ?? "default";
+    session.lastStatusByTerminal.set(tid, envelope);
+    session.lastActivity = Date.now();
+  }
+
+  getStatusReplay(sessionId: string): Envelope[] {
+    const session = this.sessions.get(sessionId);
+    if (!session) return [];
+    return [...session.lastStatusByTerminal.values()];
   }
 
   getReplayFrom(sessionId: string, afterSeq: number): Envelope[] {
