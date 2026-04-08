@@ -558,6 +558,7 @@ export class BridgeSession {
     configPath: string;
   }> {
     const server = http.createServer((req, res) => {
+      this.log(`hook server received: ${req.method} ${req.url}`);
       if (req.method !== "POST" || req.url !== "/hook") {
         res.writeHead(404);
         res.end();
@@ -568,6 +569,7 @@ export class BridgeSession {
       req.on("end", () => {
         res.writeHead(200);
         res.end("ok");
+        this.log(`hook body (${body.length} bytes): ${body.slice(0, 200)}`);
         try {
           const event = JSON.parse(body);
           this.handleHookEvent(terminalId, event, provider);
@@ -605,11 +607,28 @@ export class BridgeSession {
   }
 
   private setupClaudeHooks(terminalId: string, curlCmd: string, args: string[]): string {
-    const configPath = join(tmpdir(), `linkshell-hooks-${terminalId}.json`);
+    // Write hooks to ~/.claude/settings.local.json so Claude picks them up
+    // regardless of how it's launched (direct or inside a custom shell)
+    const claudeDir = join(homedir(), ".claude");
+    if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
+    const settingsPath = join(claudeDir, "settings.local.json");
+
+    // Backup existing settings
+    let existing: Record<string, unknown> = {};
+    try {
+      existing = JSON.parse(readFileSync(settingsPath, "utf8"));
+    } catch { /* doesn't exist yet */ }
+
+    // Save backup for restore
+    const backupPath = join(tmpdir(), `linkshell-claude-settings-backup-${terminalId}.json`);
+    writeFileSync(backupPath, JSON.stringify(existing));
+
     const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
     const hookEntryWithMatcher = { matcher: "*", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
     const permissionEntry = { matcher: "*", hooks: [{ type: "command", command: curlCmd, timeout: 86400 }] };
-    const config = {
+
+    const merged = {
+      ...existing,
       hooks: {
         PreToolUse: [hookEntryWithMatcher],
         PostToolUse: [hookEntryWithMatcher],
@@ -620,12 +639,10 @@ export class BridgeSession {
         SessionStart: [hookEntry],
       },
     };
-    writeFileSync(configPath, JSON.stringify(config));
-    this.log(`claude hook config written to ${configPath}`);
+    writeFileSync(settingsPath, JSON.stringify(merged, null, 2));
+    this.log(`claude hooks written to ${settingsPath} (backup at ${backupPath})`);
 
-    // Inject --settings into Claude CLI args
-    args.push("--settings", configPath);
-    return configPath;
+    return backupPath;
   }
 
   private setupCodexHooks(terminalId: string, curlCmd: string): string {
@@ -904,17 +921,27 @@ export class BridgeSession {
     }
     if (term.hookConfigPath) {
       const configPath = term.hookConfigPath;
-      // Claude uses tmp files — safe to delete
-      // Codex/Gemini/Copilot use home dir configs — restore backup if exists
-      const backupPath = `${configPath}.linkshell-backup`;
       try {
-        if (existsSync(backupPath)) {
-          const backup = readFileSync(backupPath, "utf8");
-          writeFileSync(configPath, backup);
-          unlinkSync(backupPath);
-          this.log(`restored backup for ${configPath}`);
-        } else if (configPath.startsWith(tmpdir())) {
-          unlinkSync(configPath);
+        if (term.provider === "claude") {
+          // configPath is the backup file — restore settings.local.json from it
+          const settingsPath = join(homedir(), ".claude", "settings.local.json");
+          if (existsSync(configPath)) {
+            const backup = readFileSync(configPath, "utf8");
+            writeFileSync(settingsPath, backup);
+            unlinkSync(configPath);
+            this.log(`restored claude settings.local.json from backup`);
+          }
+        } else {
+          // Codex/Gemini/Copilot use home dir configs — restore backup if exists
+          const backupPath = `${configPath}.linkshell-backup`;
+          if (existsSync(backupPath)) {
+            const backup = readFileSync(backupPath, "utf8");
+            writeFileSync(configPath, backup);
+            unlinkSync(backupPath);
+            this.log(`restored backup for ${configPath}`);
+          } else if (configPath.startsWith(tmpdir())) {
+            unlinkSync(configPath);
+          }
         }
       } catch { /* ignore */ }
       term.hookConfigPath = undefined;
