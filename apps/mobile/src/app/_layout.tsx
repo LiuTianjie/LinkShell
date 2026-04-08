@@ -189,8 +189,6 @@ function AppInner() {
   const handleDisconnectSession = useCallback((sessionId: string) => {
     manager.disconnectSession(sessionId);
     if (manager.sessions.size <= 1) {
-      liveActivityActiveRef.current = false;
-      endLiveActivity();
       AsyncStorage.removeItem(LAST_SESSION_KEY);
       router.back();
     }

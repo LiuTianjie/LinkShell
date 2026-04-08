@@ -29,8 +29,9 @@ import {
   startLiveActivity,
   updateLiveActivity,
   endLiveActivity,
+  type SessionSnapshot,
+  type ExtendedSessionData,
 } from "./src/native/LiveActivity";
-import type { SessionActivityState } from "./src/native/LiveActivity";
 import { ThrottledTerminalParser } from "./src/utils/terminal-parser";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
@@ -349,7 +350,8 @@ function AppInner() {
     const currentSessions = sessionsRef.current;
     const activeSid = activeSidRef.current;
     const now = Date.now();
-    const states: SessionActivityState[] = [];
+    const snapshots: SessionSnapshot[] = [];
+    const extended: ExtendedSessionData[] = [];
 
     for (const [sid, info] of currentSessions) {
       if (info.status !== "connected") continue;
@@ -360,33 +362,46 @@ function AppInner() {
       const ss = activeTerm?.structuredStatus;
       const useStructured = ss && (now - ss.updatedAt) < 30_000;
 
-      states.push({
-        sessionId: sid,
-        terminalId: info.activeTerminalId || "default",
-        status: useStructured ? ss.phase : (entry?.status ?? "idle"),
-        lastLine: entry?.lastLine ?? "",
-        contextLines: useStructured && ss.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? ""),
-        projectName: info.projectName || info.hostname || sid.slice(0, 8),
+      snapshots.push({
+        sid,
+        tid: info.activeTerminalId || "default",
+        phase: useStructured ? ss.phase : (entry?.status ?? "idle"),
+        project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 20),
         provider: entry?.provider ?? info.provider ?? "claude",
+        tool: ss?.toolName || "",
+        elapsed: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
+        hasPermission: !!(ss?.topPermission),
+        permCount: ss?.pendingPermissionCount ?? 0,
+      });
+
+      extended.push({
+        sid,
+        toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
+        contextLines: useStructured && ss.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? ""),
+        permissionTool: ss?.topPermission?.toolName || "",
+        permissionContext: (ss?.topPermission?.permissionRequest || ss?.topPermission?.toolInput || "").slice(0, 200),
+        permissionRequestId: ss?.topPermission?.requestId || "",
         quickActions: entry?.quickActions ?? [],
-        pendingRequestCount: 0,
-        tokensUsed: 0,
-        elapsedSeconds: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
       });
     }
 
-    if (states.length === 0) return;
+    if (snapshots.length === 0) return;
 
     // Sort: error > waiting > tool_use > thinking > outputting > idle
     const priority: Record<string, number> = { error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5 };
-    states.sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9));
+    snapshots.sort((a, b) => (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9));
+    extended.sort((a, b) => {
+      const ai = snapshots.findIndex((s) => s.sid === a.sid);
+      const bi = snapshots.findIndex((s) => s.sid === b.sid);
+      return ai - bi;
+    });
 
-    const aid = activeSid ?? states[0]?.sessionId ?? "";
+    const aid = activeSid ?? snapshots[0]?.sid ?? "";
 
-    // Alert when any session has quickActions (needs user input)
-    const needsAlert = states.some((s) => s.quickActions.length > 0);
+    // Alert when any session has permission requests
+    const needsAlert = snapshots.some((s) => s.hasPermission);
 
-    updateLiveActivity(states, aid, needsAlert);
+    updateLiveActivity(snapshots, extended, aid, needsAlert);
   }, []);
 
   useEffect(() => {
@@ -440,30 +455,39 @@ function AppInner() {
       isLiveActivityAvailable().then((ok) => {
         if (!ok) return;
         const now = Date.now();
-        const states: SessionActivityState[] = [];
+        const snapshots: SessionSnapshot[] = [];
+        const extended: ExtendedSessionData[] = [];
         for (const [sid, info] of sessionsRef.current) {
           if (info.status !== "connected") continue;
           const e = parsersRef.current.get(sid);
           const activeTerm = info.activeTerminalId ? info.terminals.get(info.activeTerminalId) : undefined;
           const ss = activeTerm?.structuredStatus;
-          const useStructured = ss && (now - ss.updatedAt) < 30_000;
-          states.push({
-            sessionId: sid,
-            terminalId: info.activeTerminalId || "default",
-            status: useStructured ? ss.phase : (e?.status ?? "idle"),
-            lastLine: e?.lastLine ?? "",
-            contextLines: useStructured && ss.permissionRequest ? ss.permissionRequest : (e?.contextLines ?? ""),
-            projectName: info.projectName || info.hostname || sid.slice(0, 8),
+
+          snapshots.push({
+            sid,
+            tid: info.activeTerminalId || "default",
+            phase: ss?.phase || (e?.status ?? "idle"),
+            project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 20),
             provider: e?.provider ?? info.provider ?? "claude",
+            tool: ss?.toolName || "",
+            elapsed: Math.floor((now - (e?.connectedAt ?? now)) / 1000),
+            hasPermission: !!(ss?.topPermission),
+            permCount: ss?.pendingPermissionCount ?? 0,
+          });
+
+          extended.push({
+            sid,
+            toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
+            contextLines: (e?.contextLines ?? ""),
+            permissionTool: ss?.topPermission?.toolName || "",
+            permissionContext: (ss?.topPermission?.permissionRequest || ss?.topPermission?.toolInput || "").slice(0, 200),
+            permissionRequestId: ss?.topPermission?.requestId || "",
             quickActions: e?.quickActions ?? [],
-            pendingRequestCount: 0,
-            tokensUsed: 0,
-            elapsedSeconds: Math.floor((now - (e?.connectedAt ?? now)) / 1000),
           });
         }
-        if (states.length === 0) return;
-        const aid = activeSidRef.current ?? states[0]?.sessionId ?? "";
-        startLiveActivity(states, aid).then((id) => {
+        if (snapshots.length === 0) return;
+        const aid = activeSidRef.current ?? snapshots[0]?.sid ?? "";
+        startLiveActivity(snapshots, extended, aid).then((id) => {
           if (id) liveActivityActiveRef.current = true;
         });
       });

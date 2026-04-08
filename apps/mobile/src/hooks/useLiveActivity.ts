@@ -40,6 +40,7 @@ function buildState(sessions: Map<string, SessionInfo>, activeSessionId: string 
       hasPermission,
       permCount: ss?.pendingPermissionCount ?? (hasPermission ? 1 : 0),
     };
+    console.log(`[LiveActivity] sid=${sid} provider="${snapshot.provider}" activeTerm?.provider="${activeTerm?.provider}" info.provider="${info.provider}" hasPermission=${hasPermission} phase=${snapshot.phase} topPermission=${JSON.stringify(tp)}`);
 
     const ext: ExtendedSessionData = {
       sid,

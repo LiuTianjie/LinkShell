@@ -607,13 +607,15 @@ export class BridgeSession {
   private setupClaudeHooks(terminalId: string, curlCmd: string, args: string[]): string {
     const configPath = join(tmpdir(), `linkshell-hooks-${terminalId}.json`);
     const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
+    const hookEntryWithMatcher = { matcher: "*", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
+    const permissionEntry = { matcher: "*", hooks: [{ type: "command", command: curlCmd, timeout: 86400 }] };
     const config = {
       hooks: {
-        PreToolUse: [hookEntry],
-        PostToolUse: [hookEntry],
-        PostToolUseFailure: [hookEntry],
+        PreToolUse: [hookEntryWithMatcher],
+        PostToolUse: [hookEntryWithMatcher],
+        PostToolUseFailure: [hookEntryWithMatcher],
         Stop: [hookEntry],
-        PermissionRequest: [hookEntry],
+        PermissionRequest: [permissionEntry],
         UserPromptSubmit: [hookEntry],
         SessionStart: [hookEntry],
       },
