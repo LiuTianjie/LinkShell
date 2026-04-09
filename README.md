@@ -66,6 +66,21 @@ linkshell start --daemon --provider claude --screen
 
 加 `--screen` 后，App 端可以切换到 Desktop 标签查看电脑桌面。支持 WebRTC（30fps）和截图流（fallback）两种模式，自动选择最优方案。
 
+> **前置依赖：** 需要安装 [ffmpeg](https://ffmpeg.org/)。
+>
+> ```bash
+> # macOS
+> brew install ffmpeg
+>
+> # Ubuntu / Debian
+> sudo apt install ffmpeg
+>
+> # Windows (Chocolatey)
+> choco install ffmpeg
+> ```
+>
+> 安装后 CLI 会自动检测屏幕设备并启动 H.264 编码流。如果同时安装了 [werift](https://github.com/nicktomlin/werift)（`npm i -g werift`），会优先使用 WebRTC 低延迟传输；否则回退到截图流模式。
+
 ### 远程模式（独立 Gateway，跨网络）
 
 在服务器上：

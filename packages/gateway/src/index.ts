@@ -204,14 +204,9 @@ async function handleRequest(
   // Session list
   if (method === "GET" && url.pathname === "/sessions") {
     const token = extractBearerToken(req);
-    if (!token || !tokenManager.validate(token)) {
-      json(res, 401, {
-        error: "unauthorized",
-        message: "Valid device token required",
-      });
-      return;
-    }
-    const allowedIds = tokenManager.getSessionIds(token);
+    const allowedIds = token && tokenManager.validate(token)
+      ? tokenManager.getSessionIds(token)
+      : new Set<string>();
     const sessions = sessionManager
       .listActive()
       .filter((s) => allowedIds.has(s.id))

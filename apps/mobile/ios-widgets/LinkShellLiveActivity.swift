@@ -214,6 +214,101 @@ struct ActionChip: View {
     }
 }
 
+// MARK: - Terminal Card (per-terminal)
+
+@available(iOS 16.2, *)
+struct TerminalCard: View {
+    let terminal: TerminalSnapshot
+    let ext: ExtendedTerminalData?
+    let isFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            // Header: logo + project + phase + elapsed
+            HStack(spacing: 6) {
+                ProviderLogo(provider: terminal.provider, size: 16)
+                Text(terminal.project)
+                    .font(.system(size: 12, weight: isFocused ? .semibold : .medium))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                PhasePill(phase: terminal.phase)
+                Spacer()
+                Text(formatElapsed(terminal.elapsed))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+
+            // Tool info (when not waiting for permission)
+            if !terminal.hasPermission {
+                if !terminal.tool.isEmpty {
+                    HStack(spacing: 4) {
+                        ToolBadge(name: terminal.tool, fontSize: 9)
+                        if let e = ext, !e.toolDescription.isEmpty {
+                            Text(e.toolDescription)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.45))
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                } else if let e = ext, !e.contextLines.isEmpty {
+                    Text(e.contextLines)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.4))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            // Permission actions (inline)
+            if terminal.hasPermission, let e = ext, !e.permissionTool.isEmpty {
+                VStack(spacing: 2) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.shield")
+                            .font(.system(size: 9))
+                            .foregroundColor(.cyan)
+                        Text(e.permissionTool)
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.cyan)
+                            .lineLimit(1)
+                        if !e.permissionContext.isEmpty {
+                            Text(e.permissionContext)
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.4))
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        if terminal.permCount > 1 {
+                            Text("+\(terminal.permCount - 1)")
+                                .font(.system(size: 8))
+                                .foregroundColor(.white.opacity(0.3))
+                        }
+                    }
+                    HStack(spacing: 4) {
+                        ForEach(Array(e.quickActions.prefix(2).enumerated()), id: \.offset) { _, action in
+                            ActionChip(action: action, terminal: terminal, requestId: e.permissionRequestId)
+                        }
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isFocused ? .white.opacity(0.08) : .white.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(
+                    terminal.hasPermission ? .orange.opacity(0.4) : .clear,
+                    lineWidth: 0.5
+                )
+        )
+    }
+}
+
 // MARK: - Lock Screen View
 
 @available(iOS 16.2, *)
@@ -221,208 +316,26 @@ struct LockScreenView: View {
     let context: ActivityViewContext<LinkShellAttributes>
 
     var body: some View {
-        let focused = context.state.focusedTerminal
         let all = context.state.terminals
         let ext = LiveActivityStore.readExtendedData()
-        let focusedExt = focused.flatMap { ext["\($0.sid):\($0.tid)"] }
-        let permTerminals = all.filter { $0.hasPermission }
+        let focusedSid = context.state.focusedSid
+        let focusedTid = context.state.focusedTid
 
-        VStack(spacing: 6) {
-            // Header row
-            HStack(spacing: 10) {
-                if let t = focused {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(providerColor(t.provider).opacity(0.15))
-                            .frame(width: 36, height: 36)
-                        ProviderLogo(provider: t.provider, size: 22)
-                        if all.count > 1 {
-                            Text("\(all.count)")
-                                .font(.system(size: 8, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 1)
-                                .background(Capsule().fill(Color.blue))
-                                .offset(x: 12, y: -12)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 5) {
-                            Text(t.project)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                            PhasePill(phase: t.phase)
-                            Spacer()
-                            Text(formatElapsed(t.elapsed))
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.4))
-                        }
-
-                        if !t.tool.isEmpty {
-                            HStack(spacing: 4) {
-                                ToolBadge(name: t.tool, fontSize: 9)
-                                if let fe = focusedExt, !fe.toolDescription.isEmpty {
-                                    Text(fe.toolDescription)
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.white.opacity(0.5))
-                                        .lineLimit(1)
-                                }
-                            }
-                        } else if let fe = focusedExt, !fe.contextLines.isEmpty, permTerminals.isEmpty {
-                            Text(fe.contextLines)
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.5))
-                                .lineLimit(1)
-                        }
-                    }
-                }
+        VStack(spacing: 4) {
+            ForEach(Array(all.prefix(4).enumerated()), id: \.offset) { _, t in
+                let e = ext["\(t.sid):\(t.tid)"]
+                let isFocused = t.sid == focusedSid && t.tid == focusedTid
+                TerminalCard(terminal: t, ext: e, isFocused: isFocused)
             }
-
-            // Permission cards — only show first one on lock screen
-            if let firstPerm = permTerminals.first, let e = ext["\(firstPerm.sid):\(firstPerm.tid)"] {
-                PermissionCard(terminal: firstPerm, ext: e)
-                if permTerminals.count > 1 {
-                    Text("还有 \(permTerminals.count - 1) 个待处理")
-                        .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.4))
-                }
-            }
-
-            // Other terminals bar
-            if all.count > 1, permTerminals.isEmpty, let t = focused {
-                OtherTerminalsBar(terminals: all, focusedSid: t.sid, focusedTid: t.tid, maxShow: 3)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.black.opacity(0.85))
-    }
-}
-
-// MARK: - Permission Card (Lock Screen)
-
-@available(iOS 16.2, *)
-struct PermissionCard: View {
-    let terminal: TerminalSnapshot
-    let ext: ExtendedTerminalData
-
-    var body: some View {
-        VStack(spacing: 3) {
-            // Header
-            HStack(spacing: 4) {
-                Image(systemName: "lock.shield")
-                    .font(.system(size: 10))
-                    .foregroundColor(.cyan)
-                Text(ext.permissionTool)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.cyan)
-                    .lineLimit(1)
-                Spacer()
-                if terminal.permCount > 1 {
-                    Text("+\(terminal.permCount - 1)")
-                        .font(.system(size: 8))
-                        .foregroundColor(.white.opacity(0.35))
-                }
-            }
-
-            // Context (1 line max)
-            if !ext.permissionContext.isEmpty {
-                Text(ext.permissionContext)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.5))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // Action rows
-            VStack(spacing: 0) {
-                ForEach(Array(ext.quickActions.prefix(3).enumerated()), id: \.offset) { idx, action in
-                    ActionRow(action: action, terminal: terminal, requestId: ext.permissionRequestId)
-                    if idx < min(ext.quickActions.count, 3) - 1 {
-                        Divider().background(.white.opacity(0.08))
-                    }
-                }
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(.white.opacity(0.05))
-            )
-        }
-        .padding(5)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.white.opacity(0.05))
-        )
-    }
-}
-
-// MARK: - Action Row
-
-@available(iOS 16.2, *)
-struct ActionRow: View {
-    let action: QuickAction
-    let terminal: TerminalSnapshot
-    let requestId: String
-
-    private var isAllow: Bool {
-        let l = action.label.lowercased()
-        return l.contains("允许") || l.contains("allow") || l.contains("yes")
-    }
-    private var isDeny: Bool {
-        let l = action.label.lowercased()
-        return l.contains("拒绝") || l.contains("deny") || l.contains("no")
-    }
-    private var color: Color {
-        if isDeny { return .red.opacity(0.8) }
-        if isAllow { return .green }
-        return .blue
-    }
-    private var icon: String {
-        if isDeny { return "xmark.circle.fill" }
-        if isAllow { return "checkmark.circle.fill" }
-        return "arrow.right.circle.fill"
-    }
-
-    var body: some View {
-        if #available(iOS 17.0, *) {
-            Button(intent: QuickActionIntent(
-                sessionId: terminal.sid,
-                terminalId: terminal.tid,
-                inputData: action.input,
-                requestId: requestId
-            )) {
-                rowContent
-            }
-            .buttonStyle(.plain)
-        } else {
-            Link(destination: actionURL(terminal.sid, terminal.tid, action)) {
-                rowContent
-            }
-        }
-    }
-
-    private var rowContent: some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 11))
-                .foregroundColor(color)
-            Text(action.label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.white)
-            if let desc = action.desc, !desc.isEmpty {
-                Text(desc)
+            if all.count > 4 {
+                Text("还有 \(all.count - 4) 个终端")
                     .font(.system(size: 9))
                     .foregroundColor(.white.opacity(0.35))
             }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.system(size: 8))
-                .foregroundColor(.white.opacity(0.2))
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.85))
     }
 }
 
@@ -513,36 +426,6 @@ struct ToolBadge: View {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .fill(.cyan.opacity(0.12))
             )
-    }
-}
-
-@available(iOS 16.2, *)
-struct OtherTerminalsBar: View {
-    let terminals: [TerminalSnapshot]
-    let focusedSid: String
-    let focusedTid: String
-    let maxShow: Int
-
-    var body: some View {
-        let others = terminals.filter { !($0.sid == focusedSid && $0.tid == focusedTid) }
-        HStack(spacing: 6) {
-            ForEach(Array(others.prefix(maxShow).enumerated()), id: \.offset) { _, t in
-                HStack(spacing: 3) {
-                    PhaseDot(phase: t.phase, size: 4)
-                    ProviderLogo(provider: t.provider, size: 10)
-                    Text(t.project)
-                        .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.5))
-                        .lineLimit(1)
-                }
-            }
-            if others.count > maxShow {
-                Text("+\(others.count - maxShow)")
-                    .font(.system(size: 8))
-                    .foregroundColor(.white.opacity(0.35))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

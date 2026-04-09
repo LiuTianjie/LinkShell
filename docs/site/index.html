@@ -1,121 +1,474 @@
 <!doctype html>
 <html lang="zh-CN">
+
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title data-i18n="pageTitle">LinkShell | 始于桌面，随处接管</title>
-<meta name="description" content="LinkShell terminal bridge" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-<style>
-:root {
-  --bg: #201d1d;
-  --surface: #302c2c;
-  --text: #fdfcfc;
-  --text-sec: #9a9898;
-  --text-muted: #6e6e73;
-  --accent: #007aff;
-  --accent-hover: #0056b3;
-  --success: #30d158;
-  --warning: #ff9f0a;
-  --danger: #ff3b30;
-  --border: rgba(15, 0, 0, 0.12);
-  --border-solid: #646262;
-  --radius: 4px;
-  --font: 'Berkeley Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  --max-w: 860px;
-}
-*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 16px; font-weight: 400; line-height: 1.50; -webkit-font-smoothing: antialiased; }
-::selection { background: var(--accent); color: var(--text); }
-.c { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
-h1 { font-size: 38px; font-weight: 700; line-height: 1.50; }
-h2 { font-size: 28px; font-weight: 700; line-height: 1.50; margin-bottom: 16px; }
-h3 { font-size: 20px; font-weight: 700; line-height: 1.50; margin-bottom: 12px; }
-a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
-a:hover { color: var(--accent); }
-.btn { display: inline-block; font-family: var(--font); font-size: 16px; font-weight: 500; line-height: 2.00; padding: 4px 20px; border-radius: var(--radius); border: 1px solid var(--border-solid); cursor: pointer; text-decoration: none; transition: color .15s, background .15s, border-color .15s; }
-.btn-p { background: var(--text); color: var(--bg); border-color: var(--text); }
-.btn-p:hover { background: var(--text-sec); color: var(--bg); border-color: var(--text-sec); }
-.btn-s { background: transparent; color: var(--text); }
-.btn-s:hover { border-color: var(--text); }
-.term { background: var(--bg); border: 1px solid var(--border-solid); border-radius: var(--radius); padding: 16px 20px; font-size: 14px; line-height: 1.60; overflow-x: auto; white-space: pre; }
-.tp { color: var(--success); }
-.tc { color: var(--text); }
-.tm { color: var(--text-muted); }
-.to { color: var(--text-sec); }
-.ta { color: var(--accent); }
-.ts { color: var(--success); }
-.sec { padding: 80px 0; }
-.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: var(--bg); border-bottom: 1px solid var(--border-solid); height: 48px; }
-.nav-in { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; height: 100%; display: flex; align-items: center; justify-content: space-between; }
-.nav-b { font-weight: 700; font-size: 16px; text-decoration: none; color: var(--text); }
-.nav-b:hover { color: var(--text); }
-.nav-r { display: flex; align-items: center; gap: 16px; font-size: 14px; font-weight: 500; }
-.nav-r a { color: var(--text-sec); text-decoration: none; }
-.nav-r a:hover { color: var(--text); text-decoration: underline; }
-.sep { color: var(--text-muted); }
-.lang { background: none; border: 1px solid var(--border-solid); color: var(--text-sec); font-family: var(--font); font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: var(--radius); cursor: pointer; }
-.lang:hover { color: var(--text); border-color: var(--text); }
-.li { color: var(--text-sec); padding-left: 16px; position: relative; margin-bottom: 8px; }
-.li::before { content: '*'; position: absolute; left: 0; }
-.li.g::before { color: var(--success); }
-.li.b::before { color: var(--accent); }
-.stat-g { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
-.stat { border: 1px solid var(--border-solid); border-radius: var(--radius); padding: 16px; text-align: center; }
-.stat-v { font-size: 28px; font-weight: 700; }
-.stat-l { font-size: 14px; color: var(--text-sec); margin-top: 4px; }
-footer { border-top: 1px solid var(--border-solid); padding: 48px 0; }
-.ft { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-.ft a { color: var(--text-sec); font-size: 14px; }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-.cur { display: inline-block; width: 8px; height: 16px; background: var(--text); vertical-align: middle; animation: blink 1s step-end infinite; }
-@media (max-width: 640px) {
-  h1 { font-size: 28px; }
-  h2 { font-size: 22px; }
-  .stat-g { grid-template-columns: repeat(2, 1fr); }
-  .nav-r { gap: 10px; font-size: 12px; }
-  .ft { flex-direction: column; text-align: center; }
-  .sec { padding: 48px 0; }
-}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title data-i18n="pageTitle">LinkShell | 始于桌面，随处接管</title>
+  <meta name="description" content="LinkShell terminal bridge" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #201d1d;
+      --surface: #302c2c;
+      --text: #fdfcfc;
+      --text-sec: #9a9898;
+      --text-muted: #6e6e73;
+      --accent: #007aff;
+      --accent-hover: #0056b3;
+      --success: #30d158;
+      --warning: #ff9f0a;
+      --danger: #ff3b30;
+      --border: rgba(15, 0, 0, 0.12);
+      --border-solid: #646262;
+      --radius: 4px;
+      --font: 'Berkeley Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+      --max-w: 860px;
+    }
+
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 16px;
+      font-weight: 400;
+      line-height: 1.50;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::selection {
+      background: var(--accent);
+      color: var(--text);
+    }
+
+    .c {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    h1 {
+      font-size: 38px;
+      font-weight: 700;
+      line-height: 1.50;
+    }
+
+    h2 {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.50;
+      margin-bottom: 16px;
+    }
+
+    h3 {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.50;
+      margin-bottom: 12px;
+    }
+
+    a {
+      color: var(--text);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    a:hover {
+      color: var(--accent);
+    }
+
+    .btn {
+      display: inline-block;
+      font-family: var(--font);
+      font-size: 16px;
+      font-weight: 500;
+      line-height: 2.00;
+      padding: 4px 20px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-solid);
+      cursor: pointer;
+      text-decoration: none;
+      transition: color .15s, background .15s, border-color .15s;
+    }
+
+    .btn-p {
+      background: var(--text);
+      color: var(--bg);
+      border-color: var(--text);
+    }
+
+    .btn-p:hover {
+      background: var(--text-sec);
+      color: var(--bg);
+      border-color: var(--text-sec);
+    }
+
+    .btn-s {
+      background: transparent;
+      color: var(--text);
+    }
+
+    .btn-s:hover {
+      border-color: var(--text);
+    }
+
+    .term {
+      background: var(--bg);
+      border: 1px solid var(--border-solid);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      font-size: 14px;
+      line-height: 1.60;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    .tp {
+      color: var(--success);
+    }
+
+    .tc {
+      color: var(--text);
+    }
+
+    .tm {
+      color: var(--text-muted);
+    }
+
+    .to {
+      color: var(--text-sec);
+    }
+
+    .qr {
+      display: block;
+      width: 160px;
+      height: 160px;
+      margin: 8px 0;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 0;
+    }
+
+    .tab {
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 8px 20px;
+      background: transparent;
+      color: var(--text-sec);
+      border: 1px solid var(--border-solid);
+      border-bottom: none;
+      border-radius: var(--radius) var(--radius) 0 0;
+      cursor: pointer;
+      transition: color .15s, background .15s;
+    }
+
+    .tab+.tab {
+      margin-left: -1px;
+    }
+
+    .tab.active {
+      background: var(--bg);
+      color: var(--text);
+      border-bottom: 1px solid var(--bg);
+      position: relative;
+      z-index: 1;
+    }
+
+    .tab-body {
+      border: 1px solid var(--border-solid);
+      border-radius: 0 var(--radius) var(--radius) var(--radius);
+      padding: 24px;
+      margin-top: -1px;
+      max-width: 640px;
+    }
+
+    .tab-pane {
+      display: none;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    .ta {
+      color: var(--accent);
+    }
+
+    .ts {
+      color: var(--success);
+    }
+
+    .sec {
+      padding: 80px 0;
+    }
+
+    .nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 50;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border-solid);
+      height: 48px;
+    }
+
+    .nav-in {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-b {
+      font-weight: 700;
+      font-size: 16px;
+      text-decoration: none;
+      color: var(--text);
+    }
+
+    .nav-b:hover {
+      color: var(--text);
+    }
+
+    .nav-r {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .nav-r a {
+      color: var(--text-sec);
+      text-decoration: none;
+    }
+
+    .nav-r a:hover {
+      color: var(--text);
+      text-decoration: underline;
+    }
+
+    .sep {
+      color: var(--text-muted);
+    }
+
+    .lang {
+      background: none;
+      border: 1px solid var(--border-solid);
+      color: var(--text-sec);
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+
+    .lang:hover {
+      color: var(--text);
+      border-color: var(--text);
+    }
+
+    .li {
+      color: var(--text-sec);
+      padding-left: 16px;
+      position: relative;
+      margin-bottom: 8px;
+    }
+
+    .li::before {
+      content: '*';
+      position: absolute;
+      left: 0;
+    }
+
+    .li.g::before {
+      color: var(--success);
+    }
+
+    .li.b::before {
+      color: var(--accent);
+    }
+
+    .stat-g {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .stat {
+      border: 1px solid var(--border-solid);
+      border-radius: var(--radius);
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-v {
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .stat-l {
+      font-size: 14px;
+      color: var(--text-sec);
+      margin-top: 4px;
+    }
+
+    .nav-link {
+      color: var(--text-sec);
+      text-decoration: none;
+    }
+
+    .nav-link:hover {
+      color: var(--text);
+      text-decoration: underline;
+    }
+
+    .nav-link.active {
+      color: var(--text);
+    }
+
+    section[data-page] {
+      display: none;
+    }
+
+    section[data-page].visible {
+      display: block;
+    }
+
+    footer {
+      border-top: 1px solid var(--border-solid);
+      padding: 48px 0;
+    }
+
+    .ft {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .ft a {
+      color: var(--text-sec);
+      font-size: 14px;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0
+      }
+    }
+
+    .cur {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: var(--text);
+      vertical-align: middle;
+      animation: blink 1s step-end infinite;
+    }
+
+    @media (max-width: 640px) {
+      h1 {
+        font-size: 28px;
+      }
+
+      h2 {
+        font-size: 22px;
+      }
+
+      .stat-g {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .nav-r {
+        gap: 10px;
+        font-size: 12px;
+      }
+
+      .ft {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .sec {
+        padding: 48px 0;
+      }
+    }
+  </style>
 </head>
+
 <body>
 
-<!-- NAV -->
-<nav class="nav"><div class="nav-in">
-  <a href="#" class="nav-b">[LS] LinkShell</a>
-  <div class="nav-r">
-    <a href="#how" data-i18n="navHow">工作原理</a><span class="sep">|</span>
-    <a href="#docs" data-i18n="navDocs">文档</a><span class="sep">|</span>
-    <a href="https://github.com/LiuTianjie/LinkShell" data-i18n="navGithub">GitHub</a><span class="sep">|</span>
-    <button class="lang" id="lang-toggle">EN</button>
-  </div>
-</div></nav>
+  <!-- NAV -->
+  <nav class="nav">
+    <div class="nav-in">
+      <a href="#" class="nav-b">[LS] LinkShell</a>
+      <div class="nav-r">
+        <a href="#how" data-i18n="navHow">工作原理</a><span class="sep">|</span>
+        <a href="#docs" class="nav-link" data-i18n="navDocs">文档</a><span class="sep">|</span>
+        <a href="https://github.com/LiuTianjie/LinkShell" data-i18n="navGithub">GitHub</a><span class="sep">|</span>
+        <button class="lang" id="lang-toggle">EN</button>
+      </div>
+    </div>
+  </nav>
 
-<!-- HERO -->
-<section class="sec" style="padding-top:120px">
-<div class="c">
-  <p style="color:var(--success);margin-bottom:24px;font-weight:500" data-i18n="heroBadge">&gt; LinkShell v1.0 现已发布</p>
-  <h1 style="margin-bottom:16px"><span data-i18n="heroTitle1">终端漫游</span><br><span data-i18n="heroTitle2">随时随地，自由接管</span></h1>
-  <p style="color:var(--text-sec);margin-bottom:32px;max-width:600px" data-i18n="heroLead">纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。</p>
-  <div style="display:flex;gap:12px;flex-wrap:wrap">
-    <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
-    <a href="https://github.com/LiuTianjie/LinkShell" class="btn btn-s" data-i18n="btnGithub">查看仓库</a>
-  </div>
-</div>
-</section>
+  <!-- HERO -->
+  <section class="sec" style="padding-top:120px" data-page="home">
+    <div class="c">
+      <p style="color:var(--success);margin-bottom:24px;font-weight:500" data-i18n="heroBadge">&gt; LinkShell v1.0 现已发布
+      </p>
+      <h1 style="margin-bottom:16px"><span data-i18n="heroTitle1">终端漫游</span><span
+          data-i18n="heroTitleSep">，</span><span data-i18n="heroTitle2">随时随地，自由接管</span></h1>
+      <p style="color:var(--text-sec);margin-bottom:12px;max-width:600px" data-i18n="heroLead">
+        纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。</p>
+      <p style="color:var(--warning);margin-bottom:32px;font-size:14px" data-i18n="heroGateway">🎁 限时免费体验公网 Gateway
+        地址：ws://115.191.50.117:8787/ws</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
+        <a href="https://github.com/LiuTianjie/LinkShell" class="btn btn-s" data-i18n="btnGithub">查看仓库</a>
+      </div>
+    </div>
+  </section>
 
-<!-- QUICKSTART -->
-<section class="sec" id="quickstart">
-<div class="c">
-  <h2 data-i18n="howItWorksTitle">只需三步，建立你的终端链路</h2>
+  <!-- QUICKSTART -->
+  <section class="sec" id="quickstart" data-page="home">
+    <div class="c">
+      <h2 data-i18n="howItWorksTitle">只需三步，建立你的终端链路</h2>
 
-  <div style="margin-bottom:48px">
-    <h3 data-i18n="step1Title">[1] 安装 CLI</h3>
-    <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step1Desc">一条命令全局安装。内置网关开箱即用，无需额外部署服务器。</p>
-    <div class="term"><span class="tm"># 全局安装 CLI</span>
+      <div style="margin-bottom:48px">
+        <h3 data-i18n="step1Title">[1] 安装 CLI</h3>
+        <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step1Desc">一条命令全局安装。内置网关开箱即用，无需额外部署服务器。</p>
+        <div class="term"><span class="tm"># 全局安装 CLI</span>
 <span class="tp">$</span> <span class="tc">npm i -g linkshell-cli</span>
 
 <span class="tm"># 初始化配置</span>
@@ -124,91 +477,121 @@ footer { border-top: 1px solid var(--border-solid); padding: 48px 0; }
 <span class="tm"># 检查环境</span>
 <span class="tp">$</span> <span class="tc">linkshell doctor</span>
 <span class="ts">✓ All checks passed</span></div>
-  </div>
+      </div>
 
-  <div style="margin-bottom:48px">
-    <h3 data-i18n="step2Title">[2] 启动桥接</h3>
-    <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step2Desc">一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。</p>
-    <div class="term"><span class="tp">$</span> <span class="tc">linkshell start</span>
+      <div style="margin-bottom:48px">
+        <h3 data-i18n="step2Title">[2] 启动桥接</h3>
+        <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step2Desc">一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。</p>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="qs-lan" data-i18n="tabLan">局域网</button>
+          <button class="tab" data-tab="qs-public" data-i18n="tabPublic">公网</button>
+        </div>
+        <div class="tab-body">
+          <div class="tab-pane active" id="tab-qs-lan">
+            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsLanDesc">同一局域网内，CLI 内置网关直连，零配置。</p>
+            <div class="term"><span class="tp">$</span> <span class="tc">linkshell start</span>
 
 <span class="to">Built-in gateway started on port 8787</span>
 <span class="to">LAN address: http://192.168.1.10:8787</span>
 
-<span class="to">██████████████████████████████</span>
-<span class="to">██ ▄▄▄▄▄ ██▄▄▀▄ ▄█▄█ ▄▄▄▄▄ ██</span>
-<span class="to">██ █   █ ████▀█▀▄ ▀█ █   █ ██</span>
-<span class="to">██ █▄▄▄█ ██ █▄█▀▄█ █▄▄▄█ ██</span>
-<span class="to">██▄▄▄▄▄▄▄█▄█▄█▄▀▄▀▄█▄▄▄▄▄▄▄██</span>
-<span class="to">██████████████████████████████</span>
+<svg class="qr" viewBox="0 0 25 25" shape-rendering="crispEdges"><rect width="25" height="25" fill="none"/><path fill="#9a9898" d="M0,0h7v1h-7zM9,0h1v1h-1zM11,0h2v1h-2zM14,0h1v1h-1zM16,0h2v1h-2zM18,0h7v1h-7zM0,1h1v1h-1zM6,1h1v1h-1zM8,1h1v1h-1zM10,1h1v1h-1zM12,1h2v1h-2zM15,1h1v1h-1zM17,1h1v1h-1zM18,1h1v1h-1zM24,1h1v1h-1zM0,2h1v1h-1zM2,2h3v1h-3zM6,2h1v1h-1zM9,2h1v1h-1zM11,2h1v1h-1zM13,2h1v1h-1zM15,2h2v1h-2zM18,2h1v1h-1zM20,2h3v1h-3zM24,2h1v1h-1zM0,3h1v1h-1zM2,3h3v1h-3zM6,3h1v1h-1zM8,3h1v1h-1zM10,3h2v1h-2zM14,3h1v1h-1zM16,3h1v1h-1zM18,3h1v1h-1zM20,3h3v1h-3zM24,3h1v1h-1zM0,4h1v1h-1zM2,4h3v1h-3zM6,4h1v1h-1zM9,4h2v1h-2zM12,4h1v1h-1zM15,4h1v1h-1zM18,4h1v1h-1zM20,4h3v1h-3zM24,4h1v1h-1zM0,5h1v1h-1zM6,5h1v1h-1zM8,5h1v1h-1zM10,5h1v1h-1zM13,5h1v1h-1zM15,5h1v1h-1zM17,5h1v1h-1zM18,5h1v1h-1zM24,5h1v1h-1zM0,6h7v1h-7zM8,6h1v1h-1zM10,6h1v1h-1zM12,6h1v1h-1zM14,6h1v1h-1zM16,6h1v1h-1zM18,6h7v1h-7zM9,7h1v1h-1zM11,7h2v1h-2zM14,7h2v1h-2zM0,8h2v1h-2zM3,8h1v1h-1zM5,8h2v1h-2zM8,8h1v1h-1zM10,8h1v1h-1zM12,8h2v1h-2zM15,8h1v1h-1zM17,8h1v1h-1zM19,8h1v1h-1zM21,8h1v1h-1zM23,8h2v1h-2zM1,9h2v1h-2zM4,9h1v1h-1zM7,9h1v1h-1zM9,9h2v1h-2zM12,9h1v1h-1zM14,9h2v1h-2zM17,9h1v1h-1zM19,9h2v1h-2zM22,9h1v1h-1zM24,9h1v1h-1zM0,10h1v1h-1zM2,10h2v1h-2zM5,10h1v1h-1zM8,10h2v1h-2zM11,10h1v1h-1zM13,10h1v1h-1zM15,10h2v1h-2zM18,10h1v1h-1zM20,10h2v1h-2zM23,10h1v1h-1zM1,11h1v1h-1zM3,11h2v1h-2zM6,11h1v1h-1zM8,11h1v1h-1zM10,11h2v1h-2zM13,11h2v1h-2zM16,11h1v1h-1zM19,11h1v1h-1zM21,11h1v1h-1zM23,11h2v1h-2zM0,12h2v1h-2zM3,12h1v1h-1zM5,12h2v1h-2zM9,12h1v1h-1zM11,12h1v1h-1zM14,12h1v1h-1zM16,12h2v1h-2zM20,12h1v1h-1zM22,12h2v1h-2zM1,13h1v1h-1zM4,13h1v1h-1zM6,13h2v1h-2zM10,13h2v1h-2zM13,13h1v1h-1zM15,13h1v1h-1zM17,13h2v1h-2zM21,13h1v1h-1zM24,13h1v1h-1zM0,14h1v1h-1zM2,14h2v1h-2zM5,14h1v1h-1zM7,14h1v1h-1zM9,14h2v1h-2zM12,14h1v1h-1zM14,14h2v1h-2zM18,14h1v1h-1zM20,14h1v1h-1zM22,14h1v1h-1zM24,14h1v1h-1zM1,15h2v1h-2zM4,15h1v1h-1zM8,15h1v1h-1zM10,15h1v1h-1zM13,15h1v1h-1zM16,15h1v1h-1zM19,15h2v1h-2zM23,15h1v1h-1zM0,16h1v1h-1zM3,16h2v1h-2zM6,16h1v1h-1zM9,16h2v1h-2zM12,16h2v1h-2zM15,16h1v1h-1zM17,16h1v1h-1zM20,16h1v1h-1zM22,16h2v1h-2zM8,17h2v1h-2zM11,17h1v1h-1zM13,17h2v1h-2zM16,17h1v1h-1zM19,17h1v1h-1zM21,17h1v1h-1zM24,17h1v1h-1zM0,18h7v1h-7zM8,18h1v1h-1zM10,18h2v1h-2zM13,18h1v1h-1zM15,18h2v1h-2zM18,18h1v1h-1zM20,18h2v1h-2zM23,18h1v1h-1zM0,19h1v1h-1zM6,19h1v1h-1zM9,19h1v1h-1zM11,19h1v1h-1zM14,19h1v1h-1zM17,19h1v1h-1zM18,19h1v1h-1zM24,19h1v1h-1zM0,20h1v1h-1zM2,20h3v1h-3zM6,20h1v1h-1zM8,20h2v1h-2zM11,20h2v1h-2zM14,20h1v1h-1zM16,20h2v1h-2zM18,20h1v1h-1zM20,20h3v1h-3zM24,20h1v1h-1zM0,21h1v1h-1zM2,21h3v1h-3zM6,21h1v1h-1zM10,21h1v1h-1zM12,21h2v1h-2zM15,21h1v1h-1zM18,21h1v1h-1zM20,21h3v1h-3zM24,21h1v1h-1zM0,22h1v1h-1zM2,22h3v1h-3zM6,22h1v1h-1zM9,22h1v1h-1zM11,22h1v1h-1zM14,22h1v1h-1zM16,22h1v1h-1zM18,22h1v1h-1zM20,22h3v1h-3zM24,22h1v1h-1zM0,23h1v1h-1zM6,23h1v1h-1zM8,23h2v1h-2zM12,23h1v1h-1zM15,23h1v1h-1zM17,23h2v1h-2zM18,23h1v1h-1zM24,23h1v1h-1zM0,24h7v1h-7zM9,24h1v1h-1zM11,24h2v1h-2zM14,24h1v1h-1zM16,24h1v1h-1zM18,24h7v1h-7z"/></svg>
 
 <span class="ts">➜ Code:</span> <span class="ta">847293</span></div>
-  </div>
+          </div>
+          <div class="tab-pane" id="tab-qs-public">
+            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsPubDesc">先在公网服务器部署网关，本地 CLI 连接远程网关。</p>
+            <div class="term"><span class="tm"># 服务器端：启动网关</span>
+<span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
+<span class="to">Gateway listening on 0.0.0.0:8787</span>
 
-  <div>
-    <h3 data-i18n="step3Title">[3] 手机扫码，即刻接管</h3>
-    <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step3Desc">打开 LinkShell App（iOS / Android），对准终端二维码扫一扫，立刻接管会话。</p>
-    <div class="term"><span class="to">&gt; scanning QR...</span>
+<span class="tm"># 本地：连接远程网关</span>
+<span class="tp">$</span> <span class="tc">linkshell start --gateway wss://gw.example.com</span>
+
+<span class="to">Connected to remote gateway</span>
+<span class="to">Public address: https://gw.example.com</span>
+
+<svg class="qr" viewBox="0 0 25 25" shape-rendering="crispEdges"><rect width="25" height="25" fill="none"/><path fill="#9a9898" d="M0,0h7v1h-7zM9,0h2v1h-2zM12,0h1v1h-1zM14,0h2v1h-2zM18,0h7v1h-7zM0,1h1v1h-1zM6,1h1v1h-1zM9,1h1v1h-1zM11,1h1v1h-1zM13,1h2v1h-2zM16,1h1v1h-1zM18,1h1v1h-1zM24,1h1v1h-1zM0,2h1v1h-1zM2,2h3v1h-3zM6,2h1v1h-1zM8,2h1v1h-1zM10,2h2v1h-2zM14,2h1v1h-1zM16,2h1v1h-1zM18,2h1v1h-1zM20,2h3v1h-3zM24,2h1v1h-1zM0,3h1v1h-1zM2,3h3v1h-3zM6,3h1v1h-1zM9,3h2v1h-2zM12,3h1v1h-1zM15,3h2v1h-2zM18,3h1v1h-1zM20,3h3v1h-3zM24,3h1v1h-1zM0,4h1v1h-1zM2,4h3v1h-3zM6,4h1v1h-1zM8,4h2v1h-2zM11,4h1v1h-1zM13,4h1v1h-1zM16,4h1v1h-1zM18,4h1v1h-1zM20,4h3v1h-3zM24,4h1v1h-1zM0,5h1v1h-1zM6,5h1v1h-1zM9,5h1v1h-1zM11,5h2v1h-2zM14,5h1v1h-1zM16,5h1v1h-1zM18,5h1v1h-1zM24,5h1v1h-1zM0,6h7v1h-7zM8,6h1v1h-1zM10,6h1v1h-1zM12,6h1v1h-1zM14,6h1v1h-1zM16,6h1v1h-1zM18,6h7v1h-7zM8,7h1v1h-1zM10,7h3v1h-3zM14,7h1v1h-1zM16,7h1v1h-1zM0,8h1v1h-1zM3,8h2v1h-2zM6,8h1v1h-1zM8,8h1v1h-1zM11,8h1v1h-1zM13,8h2v1h-2zM16,8h1v1h-1zM18,8h2v1h-2zM21,8h1v1h-1zM23,8h1v1h-1zM1,9h1v1h-1zM3,9h1v1h-1zM5,9h2v1h-2zM9,9h1v1h-1zM12,9h2v1h-2zM15,9h1v1h-1zM17,9h2v1h-2zM20,9h1v1h-1zM22,9h2v1h-2zM0,10h2v1h-2zM4,10h1v1h-1zM6,10h1v1h-1zM8,10h2v1h-2zM11,10h1v1h-1zM14,10h1v1h-1zM16,10h2v1h-2zM19,10h1v1h-1zM21,10h2v1h-2zM24,10h1v1h-1zM1,11h2v1h-2zM5,11h1v1h-1zM7,11h2v1h-2zM10,11h1v1h-1zM12,11h2v1h-2zM15,11h1v1h-1zM18,11h1v1h-1zM20,11h1v1h-1zM22,11h1v1h-1zM24,11h1v1h-1zM0,12h1v1h-1zM3,12h1v1h-1zM5,12h2v1h-2zM9,12h2v1h-2zM13,12h1v1h-1zM15,12h2v1h-2zM19,12h1v1h-1zM21,12h1v1h-1zM23,12h1v1h-1zM2,13h1v1h-1zM4,13h2v1h-2zM8,13h1v1h-1zM10,13h1v1h-1zM12,13h1v1h-1zM14,13h2v1h-2zM17,13h1v1h-1zM20,13h2v1h-2zM24,13h1v1h-1zM1,14h1v1h-1zM3,14h2v1h-2zM7,14h1v1h-1zM9,14h1v1h-1zM11,14h2v1h-2zM14,14h1v1h-1zM16,14h1v1h-1zM19,14h2v1h-2zM22,14h1v1h-1zM24,14h1v1h-1zM0,15h2v1h-2zM3,15h1v1h-1zM6,15h1v1h-1zM8,15h2v1h-2zM12,15h1v1h-1zM14,15h1v1h-1zM17,15h1v1h-1zM20,15h1v1h-1zM23,15h2v1h-2zM1,16h1v1h-1zM4,16h2v1h-2zM8,16h1v1h-1zM10,16h2v1h-2zM13,16h1v1h-1zM16,16h2v1h-2zM19,16h1v1h-1zM21,16h2v1h-2zM24,16h1v1h-1zM8,17h1v1h-1zM10,17h1v1h-1zM13,17h2v1h-2zM16,17h1v1h-1zM18,17h1v1h-1zM21,17h1v1h-1zM23,17h1v1h-1zM0,18h7v1h-7zM9,18h2v1h-2zM12,18h1v1h-1zM14,18h1v1h-1zM17,18h1v1h-1zM19,18h2v1h-2zM22,18h1v1h-1zM24,18h1v1h-1zM0,19h1v1h-1zM6,19h1v1h-1zM8,19h1v1h-1zM10,19h1v1h-1zM13,19h2v1h-2zM16,19h1v1h-1zM18,19h1v1h-1zM20,19h1v1h-1zM23,19h1v1h-1zM0,20h1v1h-1zM2,20h3v1h-3zM6,20h1v1h-1zM9,20h1v1h-1zM11,20h2v1h-2zM15,20h1v1h-1zM17,20h2v1h-2zM20,20h1v1h-1zM22,20h2v1h-2zM0,21h1v1h-1zM2,21h3v1h-3zM6,21h1v1h-1zM8,21h2v1h-2zM12,21h1v1h-1zM14,21h1v1h-1zM16,21h1v1h-1zM19,21h1v1h-1zM21,21h1v1h-1zM24,21h1v1h-1zM0,22h1v1h-1zM2,22h3v1h-3zM6,22h1v1h-1zM10,22h1v1h-1zM13,22h1v1h-1zM15,22h2v1h-2zM18,22h2v1h-2zM22,22h1v1h-1zM0,23h1v1h-1zM6,23h1v1h-1zM9,23h1v1h-1zM11,23h1v1h-1zM14,23h1v1h-1zM17,23h1v1h-1zM20,23h2v1h-2zM24,23h1v1h-1zM0,24h7v1h-7zM8,24h2v1h-2zM11,24h1v1h-1zM13,24h2v1h-2zM16,24h1v1h-1zM18,24h7v1h-7z"/></svg>
+
+<span class="ts">➜ Code:</span> <span class="ta">293847</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 data-i18n="step3Title">[3] 手机扫码，即刻接管</h3>
+        <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step3Desc">打开 LinkShell App（iOS /
+          Android），对准终端二维码扫一扫，立刻接管会话。</p>
+        <div class="term"><span class="to">&gt; scanning QR...</span>
 <span class="to">&gt; pairing code: </span><span class="ta">847293</span>
 <span class="ts">&gt; connected to session #1</span>
 <span class="ts">&gt; control acquired</span>
 <span class="cur"></span></div>
-  </div>
-</div>
-</section>
+      </div>
+    </div>
+  </section>
 
-<!-- FEATURES -->
-<section class="sec" id="how">
-<div class="c">
-  <h2 data-i18n="featureSectionTitle">原生的终端体感，去中心化的控制。</h2>
+  <!-- FEATURES -->
+  <section class="sec" id="how" data-page="home">
+    <div class="c">
+      <h2 data-i18n="featureSectionTitle">原生的终端体感，去中心化的控制。</h2>
 
-  <div style="margin-bottom:24px">
-    <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span data-i18n="f1Title">本地 PTY 驱动</span></p>
-    <p style="color:var(--text-sec)" data-i18n="f1Desc">繁重的计算过程完全依赖本地机器。保留颜色、光标、readline 输出及信号等完整终端语义。</p>
-  </div>
-  <div style="margin-bottom:24px">
-    <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span data-i18n="f2Title">全平台客户端</span></p>
-    <p style="color:var(--text-sec)" data-i18n="f2Desc">支持 React Native / Expo 移动端与 Web 页面调试端。纯粹的单一协议，跨平台劫持终端流。</p>
-  </div>
-  <div style="margin-bottom:24px">
-    <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span data-i18n="f3Title">强一致性同步</span></p>
-    <p style="color:var(--text-sec)" data-i18n="f3Desc">独有的单控制者防冲突模型。避免多端并抢焦点，画面精准对齐不串流。</p>
-  </div>
-  <div>
-    <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span data-i18n="f4Title">远程桌面</span></p>
-    <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="f4Desc">不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC 30fps 丝滑体验，自动降级到截图流兜底。</p>
-    <code class="term" style="display:block;padding:8px 16px">linkshell start --daemon --provider claude --screen</code>
-  </div>
-</div>
-</section>
+      <div style="margin-bottom:24px">
+        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span data-i18n="f1Title">本地 PTY
+            驱动</span></p>
+        <p style="color:var(--text-sec)" data-i18n="f1Desc">繁重的计算过程完全依赖本地机器。保留颜色、光标、readline 输出及信号等完整终端语义。</p>
+      </div>
+      <div style="margin-bottom:24px">
+        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span
+            data-i18n="f2Title">全平台客户端</span></p>
+        <p style="color:var(--text-sec)" data-i18n="f2Desc">支持 React Native / Expo 移动端与 Web 页面调试端。纯粹的单一协议，跨平台劫持终端流。</p>
+      </div>
+      <div style="margin-bottom:24px">
+        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span
+            data-i18n="f3Title">强一致性同步</span></p>
+        <p style="color:var(--text-sec)" data-i18n="f3Desc">独有的单控制者防冲突模型。避免多端并抢焦点，画面精准对齐不串流。</p>
+      </div>
+      <div>
+        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span data-i18n="f4Title">远程桌面</span>
+        </p>
+        <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="f4Desc">不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC
+          30fps 丝滑体验，自动降级到截图流兜底。</p>
+        <code class="term"
+          style="display:block;padding:8px 16px">linkshell start --daemon --provider claude --screen</code>
+      </div>
+    </div>
+  </section>
 
-<!-- DYNAMIC ISLAND -->
-<section class="sec">
-<div class="c">
-  <h2 data-i18n="diSectionTitle">灵动岛，让 AI 触手可及</h2>
-  <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="diSectionDesc">iPhone 灵动岛实时展示 Claude 工作状态。识别到需要操作时，一键快速响应，无需切回 App。</p>
+  <!-- DYNAMIC ISLAND -->
+  <section class="sec" data-page="home">
+    <div class="c">
+      <h2 data-i18n="diSectionTitle">灵动岛，让 AI 触手可及</h2>
+      <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="diSectionDesc">iPhone 灵动岛实时展示 Claude
+        工作状态。识别到需要操作时，一键快速响应，无需切回 App。</p>
 
-  <div class="term" style="margin-bottom:24px">┌─ compact ──────────────────────────────┐
-│  · · ·                                 │
+      <div class="term" style="margin-bottom:24px">┌─ compact ──────────────────────────────┐
+│                 · · ·                 │
 ├─ expanded ─────────────────────────────┤
-│  <span class="ta">Claude Code</span> — Editing App.tsx...      │
+│ <span class="ta">Claude Code</span> — Editing App.tsx...       │
 ├─ action ───────────────────────────────┤
-│  Run <span class="tc">`npm test`</span>?   <span class="to">[deny]</span> <span class="ts">[approve]</span>  │
+│ Run <span class="tc">`npm test`</span>? <span class="to">[deny]</span> <span class="ts">[approve]</span>       │
 └────────────────────────────────────────┘</div>
 
-  <div class="li g" data-i18n="diFeature1">实时状态 — 思考中、编码中、等待确认，一目了然</div>
-  <div class="li g" data-i18n="diFeature2">快捷操作 — Claude 请求执行命令时，灵动岛直接审批</div>
-  <div class="li g" data-i18n="diFeature3">智能摘要 — 长对话自动提炼关键信息到灵动岛</div>
-  <div class="li g" data-i18n="diFeature4">无感切换 — 从灵动岛一键跳转到完整会话</div>
-</div>
-</section>
+      <div class="li g" data-i18n="diFeature1">实时状态 — 思考中、编码中、等待确认，一目了然</div>
+      <div class="li g" data-i18n="diFeature2">快捷操作 — Claude 请求执行命令时，灵动岛直接审批</div>
+      <div class="li g" data-i18n="diFeature3">智能摘要 — 长对话自动提炼关键信息到灵动岛</div>
+      <div class="li g" data-i18n="diFeature4">无感切换 — 从灵动岛一键跳转到完整会话</div>
+    </div>
+  </section>
 
-<!-- PROJECT WORKSPACES -->
-<section class="sec">
-<div class="c">
-  <h2 data-i18n="projSectionTitle">项目空间，并行掌控</h2>
-  <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="projSectionDesc">每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。</p>
+  <!-- PROJECT WORKSPACES -->
+  <section class="sec" data-page="home">
+    <div class="c">
+      <h2 data-i18n="projSectionTitle">项目空间，并行掌控</h2>
+      <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="projSectionDesc">
+        每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。</p>
 
-  <div class="term" style="margin-bottom:24px"><span class="tp">$</span> <span class="tc">linkshell status</span>
+      <div class="term" style="margin-bottom:24px"><span class="tp">$</span> <span class="tc">linkshell status</span>
 <span class="to">Session #3 | 2 projects active</span>
 
 <span class="tm">PROJECTS</span>
@@ -220,420 +603,563 @@ footer { border-top: 1px solid var(--border-solid); padding: 48px 0; }
   <span class="to">[1] linkshell-app</span>  <span class="tp">$</span> npm test     <span class="ts">PASS 12/12</span>
   <span class="to">[2] api-server</span>     <span class="tp">$</span> cargo build  <span class="ta">Compiling...</span></div>
 
-  <div class="li b" data-i18n="projFeature1">多项目并行 — 同一会话内切换不同项目目录</div>
-  <div class="li b" data-i18n="projFeature2">独立终端 — 每个项目拥有独立的命令执行环境</div>
-  <div class="li b" data-i18n="projFeature3">最近项目 — 智能记忆常用项目，一键直达</div>
-  <div class="li b" data-i18n="projFeature4">实时状态 — 并行任务进度一览无余</div>
-</div>
-</section>
+      <div class="li b" data-i18n="projFeature1">多项目并行 — 同一会话内切换不同项目目录</div>
+      <div class="li b" data-i18n="projFeature2">独立终端 — 每个项目拥有独立的命令执行环境</div>
+      <div class="li b" data-i18n="projFeature3">最近项目 — 智能记忆常用项目，一键直达</div>
+      <div class="li b" data-i18n="projFeature4">实时状态 — 并行任务进度一览无余</div>
+    </div>
+  </section>
 
-<!-- WORKFLOW -->
-<section class="sec">
-<div class="c">
-  <h2 data-i18n="lifestyleSectionTitle">LinkShell 工作流</h2>
-  <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="lifestyleLead">不仅是远程命令行桥接；更是打破工位束缚的极客探索。</p>
+  <!-- WORKFLOW -->
+  <section class="sec" data-page="home">
+    <div class="c">
+      <h2 data-i18n="lifestyleSectionTitle">LinkShell 工作流</h2>
+      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="lifestyleLead">不仅是远程命令行桥接；更是打破工位束缚的极客探索。</p>
 
-  <div style="margin-bottom:32px">
-    <h3><span class="tm">01.</span> <span data-i18n="l1Title">挂起并离开</span></h3>
-    <p style="color:var(--text-sec)" data-i18n="l1Desc">编译、构建、拉镜像... 常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell 默默守护当前状态。</p>
-  </div>
-  <div style="margin-bottom:32px">
-    <h3><span class="tm">02.</span> <span data-i18n="l2Title">随时审查</span></h3>
-    <p style="color:var(--text-sec)" data-i18n="l2Desc">随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。</p>
-  </div>
-  <div>
-    <h3><span class="tm">03.</span> <span data-i18n="l3Title">直接修正</span></h3>
-    <p style="color:var(--text-sec)" data-i18n="l3Desc">发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。</p>
-  </div>
-</div>
-</section>
+      <div style="margin-bottom:32px">
+        <h3><span class="tm">01.</span> <span data-i18n="l1Title">挂起并离开</span></h3>
+        <p style="color:var(--text-sec)" data-i18n="l1Desc">编译、构建、拉镜像... 常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell 默默守护当前状态。</p>
+      </div>
+      <div style="margin-bottom:32px">
+        <h3><span class="tm">02.</span> <span data-i18n="l2Title">随时审查</span></h3>
+        <p style="color:var(--text-sec)" data-i18n="l2Desc">随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。</p>
+      </div>
+      <div>
+        <h3><span class="tm">03.</span> <span data-i18n="l3Title">直接修正</span></h3>
+        <p style="color:var(--text-sec)" data-i18n="l3Desc">发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。</p>
+      </div>
+    </div>
+  </section>
 
-<!-- DOCS -->
-<section class="sec" id="docs">
-<div class="c">
-  <h2 data-i18n="docsSectionTitle">文档</h2>
-  <p style="color:var(--text-sec);margin-bottom:48px" data-i18n="docsSectionDesc">从安装到部署，你需要知道的一切。</p>
+  <!-- DOCS -->
+  <section class="sec" id="docs" data-page="docs">
+    <div class="c">
+      <h2 data-i18n="docsSectionTitle">文档</h2>
+      <p style="color:var(--text-sec);margin-bottom:48px" data-i18n="docsSectionDesc">从安装到部署，你需要知道的一切。</p>
 
-  <!-- Architecture -->
-  <div style="margin-bottom:64px">
-    <h3><span class="tm">01</span> <span data-i18n="docsArchTitle">架构概览</span></h3>
-    <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsArchDesc">LinkShell 采用三层架构：本地 CLI 捕获 PTY 输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。</p>
-    <div class="term">┌──────────────────┐              ┌──────────────────┐              ┌──────────────────┐
+      <!-- Architecture -->
+      <div style="margin-bottom:64px">
+        <h3><span class="tm">01</span> <span data-i18n="docsArchTitle">架构概览</span></h3>
+        <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsArchDesc">LinkShell 采用三层架构：本地 CLI 捕获 PTY
+          输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。</p>
+        <div class="term">┌──────────────────┐              ┌──────────────────┐              ┌──────────────────┐
 │   <span class="ts">CLI (Host)</span>     │  &lt;─ <span class="tm">WS</span> ─&gt;  │    <span class="ta">Gateway</span>       │  &lt;─ <span class="tm">WS</span> ─&gt;  │   <span style="color:var(--warning)">Mobile App</span>     │
 │                  │              │                  │              │                  │
 │  PTY Bridge      │              │  Session Relay   │              │  xterm.js Render │
 │  Screen Share    │              │  Pairing Service │              │  QR Pairing      │
 │  Scrollback Buf  │              │  Control Rights  │              │  Multi-Gateway   │
 └──────────────────┘              └──────────────────┘              └──────────────────┘</div>
-  </div>
+      </div>
 
-  <!-- CLI Reference -->
-  <div style="margin-bottom:64px">
-    <h3><span class="tm">02</span> <span data-i18n="docsCliTitle">CLI 命令参考</span></h3>
+      <!-- CLI Reference -->
+      <div style="margin-bottom:64px">
+        <h3><span class="tm">02</span> <span data-i18n="docsCliTitle">CLI 命令参考</span></h3>
 
-    <div style="margin-bottom:32px">
-      <p style="font-weight:700;margin-bottom:4px">linkshell start</p>
-      <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdStart">启动桥接会话。自动启动内置网关，桥接 AI 代理进程并生成配对二维码。</p>
-      <div class="term"><span class="tm">FLAGS</span>
+        <div style="margin-bottom:32px">
+          <p style="font-weight:700;margin-bottom:4px">linkshell start</p>
+          <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdStart">启动桥接会话。自动启动内置网关，桥接 AI
+            代理进程并生成配对二维码。</p>
+          <div class="term"><span class="tm">FLAGS</span>
   --daemon      <span class="to">后台守护模式运行</span>
   --provider    <span class="to">指定 AI 提供者 (claude / codex / custom)</span>
   --screen      <span class="to">启用远程桌面共享</span>
   --port        <span class="to">指定网关端口 (默认 8787)</span></div>
-    </div>
+        </div>
 
-    <div style="margin-bottom:32px">
-      <p style="font-weight:700;margin-bottom:4px">linkshell gateway</p>
-      <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdGateway">单独启动网关服务器。适用于独立部署网关到远程服务器的场景。</p>
-      <div class="term"><span class="tm">FLAGS</span>
+        <div style="margin-bottom:32px">
+          <p style="font-weight:700;margin-bottom:4px">linkshell gateway</p>
+          <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdGateway">单独启动网关服务器。适用于独立部署网关到远程服务器的场景。
+          </p>
+          <div class="term"><span class="tm">FLAGS</span>
   --port        <span class="to">指定监听端口</span>
   --host        <span class="to">指定绑定地址</span>
   --daemon      <span class="to">后台守护模式运行</span></div>
-    </div>
+        </div>
 
-    <div style="margin-bottom:32px">
-      <p style="font-weight:700;margin-bottom:4px">linkshell setup</p>
-      <p style="color:var(--text-sec)" data-i18n="docsCmdSetup">交互式初始化配置。引导你完成网关地址、AI 提供者等基础设置。</p>
-    </div>
+        <div style="margin-bottom:32px">
+          <p style="font-weight:700;margin-bottom:4px">linkshell setup</p>
+          <p style="color:var(--text-sec)" data-i18n="docsCmdSetup">交互式初始化配置。引导你完成网关地址、AI 提供者等基础设置。</p>
+        </div>
 
-    <div style="margin-bottom:32px">
-      <p style="font-weight:700;margin-bottom:4px">linkshell doctor</p>
-      <p style="color:var(--text-sec)" data-i18n="docsCmdDoctor">环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。</p>
-    </div>
+        <div style="margin-bottom:32px">
+          <p style="font-weight:700;margin-bottom:4px">linkshell doctor</p>
+          <p style="color:var(--text-sec)" data-i18n="docsCmdDoctor">环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。</p>
+        </div>
 
-    <div style="margin-bottom:32px">
-      <p style="font-weight:700;margin-bottom:4px">linkshell status</p>
-      <p style="color:var(--text-sec)" data-i18n="docsCmdStatus">查看当前运行状态。显示活跃会话、网关连接状态和守护进程信息。</p>
-    </div>
+        <div style="margin-bottom:32px">
+          <p style="font-weight:700;margin-bottom:4px">linkshell status</p>
+          <p style="color:var(--text-sec)" data-i18n="docsCmdStatus">查看当前运行状态。显示活跃会话、网关连接状态和守护进程信息。</p>
+        </div>
 
-    <div>
-      <p style="font-weight:700;margin-bottom:4px">linkshell stop</p>
-      <p style="color:var(--text-sec)" data-i18n="docsCmdStop">停止守护进程。优雅关闭桥接会话和内置网关。</p>
-    </div>
-  </div>
+        <div>
+          <p style="font-weight:700;margin-bottom:4px">linkshell stop</p>
+          <p style="color:var(--text-sec)" data-i18n="docsCmdStop">停止守护进程。优雅关闭桥接会话和内置网关。</p>
+        </div>
+      </div>
 
-  <!-- Deployment -->
-  <div style="margin-bottom:64px">
-    <h3><span class="tm">03</span> <span data-i18n="docsDeployTitle">部署方式</span></h3>
+      <!-- Deployment -->
+      <div style="margin-bottom:64px">
+        <h3><span class="tm">03</span> <span data-i18n="docsDeployTitle">部署方式</span></h3>
+        <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsDeployDesc">根据你的网络环境选择合适的部署方式。</p>
 
-    <div style="margin-bottom:40px">
-      <p style="font-weight:700;margin-bottom:4px" data-i18n="docsDeployLocal">本地直连（最简单）</p>
-      <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployLocalDesc">CLI 内置网关，同一局域网内手机直连电脑。零配置，开箱即用。</p>
-      <div class="term"><span class="tp">$</span> <span class="tc">npm i -g linkshell-cli</span>
+        <div class="tabs">
+          <button class="tab active" data-tab="lan" data-i18n="tabLan">局域网</button>
+          <button class="tab" data-tab="public" data-i18n="tabPublic">公网</button>
+        </div>
+        <div class="tab-body">
+          <div class="tab-pane active" id="tab-lan">
+            <p style="font-weight:700;margin-bottom:4px" data-i18n="docsDeployLocal">本地直连（最简单）</p>
+            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployLocalDesc">CLI
+              内置网关，同一局域网内手机直连电脑。零配置，开箱即用。</p>
+            <div class="term" style="margin-bottom:16px"><span class="tp">$</span> <span class="tc">npm i -g linkshell-cli</span>
 <span class="tp">$</span> <span class="tc">linkshell start --daemon</span></div>
-    </div>
-
-    <div style="margin-bottom:40px">
-      <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployRemote">远程服务器</span> <span class="ta" data-i18n="docsDeployRemoteTag">[推荐]</span></p>
-      <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployRemoteDesc">将网关部署到公网服务器，配合 Nginx 反向代理 + HTTPS，跨网络访问。</p>
-      <div class="term"><span class="tm"># 服务器端</span>
+            <div class="li g" data-i18n="lanTip1">手机和电脑需在同一 Wi-Fi 下</div>
+            <div class="li g" data-i18n="lanTip2">无需任何服务器，开箱即用</div>
+            <div class="li g" data-i18n="lanTip3">延迟最低，数据不出局域网</div>
+          </div>
+          <div class="tab-pane" id="tab-public">
+            <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployRemote">远程服务器</span> <span
+                class="ta" data-i18n="docsDeployRemoteTag">[推荐]</span></p>
+            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployRemoteDesc">将网关部署到公网服务器，配合 Nginx
+              反向代理 + HTTPS，跨网络访问。</p>
+            <div class="term" style="margin-bottom:16px"><span class="tm"># 服务器端</span>
 <span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
 
 <span class="tm"># 本地</span>
 <span class="tp">$</span> <span class="tc">linkshell start --gateway wss://your.server</span></div>
-    </div>
+            <p style="font-weight:700;margin-bottom:4px;margin-top:20px" data-i18n="docsDeployDocker">Docker 部署</p>
+            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployDockerDesc">使用 Docker Compose
+              一键部署网关。最低要求 1 核 512MB 内存。</p>
+            <div class="term" style="margin-bottom:16px"><span class="tp">$</span> <span class="tc">docker compose up -d</span></div>
+            <div class="li b" data-i18n="pubTip1">支持跨网络、4G/5G 随时接入</div>
+            <div class="li b" data-i18n="pubTip2">推荐 Nginx 反代 + Let's Encrypt HTTPS</div>
+            <div class="li b" data-i18n="pubTip3">数据仅经过你自己的服务器中继</div>
+          </div>
+        </div>
+      </div>
 
-    <div>
-      <p style="font-weight:700;margin-bottom:4px" data-i18n="docsDeployDocker">Docker 部署</p>
-      <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployDockerDesc">使用 Docker Compose 一键部署网关。最低要求 1 核 512MB 内存。</p>
-      <div class="term"><span class="tp">$</span> <span class="tc">docker compose up -d</span></div>
-    </div>
-  </div>
+      <!-- Remote Desktop -->
+      <div style="margin-bottom:64px">
+        <h3><span class="tm">04</span> <span data-i18n="docsScreenTitle">远程桌面</span></h3>
+        <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsScreenDesc">启动时加上 --screen 参数，App 端会出现 Desktop 标签页，实时查看电脑桌面。</p>
+        <div class="term" style="margin-bottom:16px"><span class="tp">$</span> <span class="tc">linkshell start --daemon --provider claude --screen</span>
 
-  <!-- Protocol & Reliability -->
-  <div style="margin-bottom:64px">
-    <h3><span class="tm">04</span> <span data-i18n="docsProtocolTitle">协议与可靠性</span></h3>
+<span class="to">Screen sharing enabled</span>
+<span class="to">Mode: WebRTC (30fps) | Fallback: Screenshot stream</span></div>
+        <div class="li g" data-i18n="docsScreen1">WebRTC 模式 — 默认以 30fps 实时推流桌面画面，延迟极低</div>
+        <div class="li g" data-i18n="docsScreen2">截图流兜底 — 网络条件不佳时自动降级为截图流模式，保证可用性</div>
+        <div class="li g" data-i18n="docsScreen3">自动切换 — 无需手动配置，运行时根据网络质量自动选择最优方案</div>
+        <div class="li g" data-i18n="docsScreen4">App 端切换 — 在 App 内切换 Terminal / Desktop 标签，随时查看桌面</div>
+      </div>
 
-    <div class="stat-g">
-      <div class="stat"><div class="stat-v">16</div><div class="stat-l" data-i18n="docsProtoMsgTypes">消息类型 (Zod)</div></div>
-      <div class="stat"><div class="stat-v">ACK</div><div class="stat-l" data-i18n="docsProtoAck">双层缓冲确认</div></div>
-      <div class="stat"><div class="stat-v">1000</div><div class="stat-l" data-i18n="docsProtoScrollback">回滚缓冲区</div></div>
-      <div class="stat"><div class="stat-v">15s</div><div class="stat-l" data-i18n="docsProtoHeartbeat">心跳检测</div></div>
-    </div>
+      <!-- Protocol & Reliability -->
+      <div style="margin-bottom:64px">
+        <h3><span class="tm">05</span> <span data-i18n="docsProtocolTitle">协议与可靠性</span></h3>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+      <div class="stat-g">
+        <div class="stat">
+          <div class="stat-v">16</div>
+          <div class="stat-l" data-i18n="docsProtoMsgTypes">消息类型 (Zod)</div>
+        </div>
+        <div class="stat">
+          <div class="stat-v">ACK</div>
+          <div class="stat-l" data-i18n="docsProtoAck">双层缓冲确认</div>
+        </div>
+        <div class="stat">
+          <div class="stat-v">1000</div>
+          <div class="stat-l" data-i18n="docsProtoScrollback">回滚缓冲区</div>
+        </div>
+        <div class="stat">
+          <div class="stat-v">15s</div>
+          <div class="stat-l" data-i18n="docsProtoHeartbeat">心跳检测</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+          <div>
+            <p style="font-weight:700;margin-bottom:12px" data-i18n="docsReliabilityTitle">可靠性保障</p>
+            <div class="li g" data-i18n="docsRel1">指数退避自动重连（CLI 和 App 双端）</div>
+            <div class="li g" data-i18n="docsRel2">会话持久化（主机断连后保持 60 秒）</div>
+            <div class="li g" data-i18n="docsRel3">空闲会话 30 分钟自动清理</div>
+            <div class="li g" data-i18n="docsRel4">协议版本协商，向前兼容</div>
+          </div>
+          <div>
+            <p style="font-weight:700;margin-bottom:12px" data-i18n="docsControlTitle">控制模型</p>
+            <div class="li b" data-i18n="docsCtrl1">单控制者模型，防止多端输入冲突</div>
+            <div class="li b" data-i18n="docsCtrl2">控制权请求 / 释放 / 转移机制</div>
+            <div class="li b" data-i18n="docsCtrl3">6 位配对码 + QR 码安全配对</div>
+            <div class="li b" data-i18n="docsCtrl4">CORS 和速率限制保护</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FAQ -->
       <div>
-        <p style="font-weight:700;margin-bottom:12px" data-i18n="docsReliabilityTitle">可靠性保障</p>
-        <div class="li g" data-i18n="docsRel1">指数退避自动重连（CLI 和 App 双端）</div>
-        <div class="li g" data-i18n="docsRel2">会话持久化（主机断连后保持 60 秒）</div>
-        <div class="li g" data-i18n="docsRel3">空闲会话 30 分钟自动清理</div>
-        <div class="li g" data-i18n="docsRel4">协议版本协商，向前兼容</div>
+        <h3><span class="tm">06</span> <span data-i18n="docsFaqTitle">常见问题</span></h3>
+
+      <div style="margin-bottom:24px">
+        <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq1Q">Q: 需要公网服务器吗？</p>
+        <p style="color:var(--text-sec)" data-i18n="docsFaq1A">不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。</p>
+      </div>
+      <div style="margin-bottom:24px">
+        <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq2Q">Q: 支持哪些 AI 代理？</p>
+        <p style="color:var(--text-sec)" data-i18n="docsFaq2A">目前支持 Claude Code、OpenAI Codex，以及任意自定义 Shell 进程。通过
+          --provider 参数指定。</p>
+      </div>
+      <div style="margin-bottom:24px">
+        <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq3Q">Q: 手机 App 在哪里下载？</p>
+        <p style="color:var(--text-sec)" data-i18n="docsFaq3A">iOS 版本通过 TestFlight 分发，Android 版本可从 GitHub Releases 下载
+          APK。正式版本上架后会在此更新。</p>
+      </div>
+      <div style="margin-bottom:24px">
+        <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq4Q">Q: 数据安全吗？会经过第三方服务器吗？</p>
+        <p style="color:var(--text-sec)" data-i18n="docsFaq4A">本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。</p>
       </div>
       <div>
-        <p style="font-weight:700;margin-bottom:12px" data-i18n="docsControlTitle">控制模型</p>
-        <div class="li b" data-i18n="docsCtrl1">单控制者模型，防止多端输入冲突</div>
-        <div class="li b" data-i18n="docsCtrl2">控制权请求 / 释放 / 转移机制</div>
-        <div class="li b" data-i18n="docsCtrl3">6 位配对码 + QR 码安全配对</div>
-        <div class="li b" data-i18n="docsCtrl4">CORS 和速率限制保护</div>
+        <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq5Q">Q: 远程桌面功能如何工作？</p>
+        <p style="color:var(--text-sec)" data-i18n="docsFaq5A">使用 --screen 参数启动后，通过 WebRTC 以 30fps
+          实时传输桌面画面。网络条件不佳时自动降级为截图流模式。</p>
       </div>
     </div>
-  </div>
-
-  <!-- FAQ -->
-  <div>
-    <h3><span class="tm">05</span> <span data-i18n="docsFaqTitle">常见问题</span></h3>
-
-    <div style="margin-bottom:24px">
-      <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq1Q">Q: 需要公网服务器吗？</p>
-      <p style="color:var(--text-sec)" data-i18n="docsFaq1A">不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。</p>
     </div>
-    <div style="margin-bottom:24px">
-      <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq2Q">Q: 支持哪些 AI 代理？</p>
-      <p style="color:var(--text-sec)" data-i18n="docsFaq2A">目前支持 Claude Code、OpenAI Codex，以及任意自定义 Shell 进程。通过 --provider 参数指定。</p>
+  </section>
+
+  <!-- CTA -->
+  <section style="text-align:center;padding:96px 0 48px" data-page="home">
+    <div class="c">
+      <h2 data-i18n="ctaTitle">准备好你的第一次漫游了吗？</h2>
+      <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="ctaDesc">放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。</p>
+      <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
     </div>
-    <div style="margin-bottom:24px">
-      <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq3Q">Q: 手机 App 在哪里下载？</p>
-      <p style="color:var(--text-sec)" data-i18n="docsFaq3A">iOS 版本通过 TestFlight 分发，Android 版本可从 GitHub Releases 下载 APK。正式版本上架后会在此更新。</p>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="ft">
+      <span style="font-weight:700;font-size:14px">[LS] LinkShell</span>
+      <span style="color:var(--text-muted);font-size:14px" data-i18n="footerText">出于对 Vibe Coding 的热爱。© 2026 MIT
+        开源。</span>
+      <div style="display:flex;gap:16px">
+        <a href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
+        <a href="#how" data-i18n="navHow">工作原理</a>
+        <a href="#docs" class="nav-link" data-i18n="navDocs">文档</a>
+      </div>
     </div>
-    <div style="margin-bottom:24px">
-      <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq4Q">Q: 数据安全吗？会经过第三方服务器吗？</p>
-      <p style="color:var(--text-sec)" data-i18n="docsFaq4A">本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。</p>
-    </div>
-    <div>
-      <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq5Q">Q: 远程桌面功能如何工作？</p>
-      <p style="color:var(--text-sec)" data-i18n="docsFaq5A">使用 --screen 参数启动后，通过 WebRTC 以 30fps 实时传输桌面画面。网络条件不佳时自动降级为截图流模式。</p>
-    </div>
-  </div>
-</div>
-</section>
+  </footer>
 
-<!-- CTA -->
-<section style="text-align:center;padding:96px 0 48px">
-<div class="c">
-  <h2 data-i18n="ctaTitle">准备好你的第一次漫游了吗？</h2>
-  <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="ctaDesc">放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。</p>
-  <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
-</div>
-</section>
+  <!-- SCRIPT -->
+  <script>
+    const translations = {
+      zh: {
+        pageTitle: "LinkShell | 始于桌面，随处接管",
+        navHow: "工作原理",
+        navDocs: "文档",
+        navGithub: "GitHub",
+        heroBadge: "> LinkShell v1.0 现已发布",
+        heroTitle1: "终端漫游",
+        heroTitleSep: "，",
+        heroTitle2: "随时随地，自由接管",
+        heroLead: "纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。",
+        heroGateway: "🎁 限时免费体验公网 Gateway 地址：ws://115.191.50.117:8787/ws",
+        btnStart: "立即部署",
+        btnGithub: "查看仓库",
+        howItWorksTitle: "只需三步，建立你的终端链路",
+        step1Title: "[1] 安装 CLI",
+        step1Desc: "一条命令全局安装。内置网关开箱即用，无需额外部署服务器。",
+        step2Title: "[2] 启动桥接",
+        step2Desc: "一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。",
+        qsLanDesc: "同一局域网内，CLI 内置网关直连，零配置。",
+        qsPubDesc: "先在公网服务器部署网关，本地 CLI 连接远程网关。",
+        step3Title: "[3] 手机扫码，即刻接管",
+        step3Desc: "打开 LinkShell App（iOS / Android），对准终端二维码扫一扫，立刻接管会话。",
+        featureSectionTitle: "原生的终端体感，去中心化的控制。",
+        f1Title: "本地 PTY 驱动",
+        f1Desc: "繁重的计算过程完全依赖本地机器。保留颜色、光标、readline 输出及信号等完整终端语义。",
+        f2Title: "全平台客户端",
+        f2Desc: "支持 React Native / Expo 移动端与 Web 页面调试端。纯粹的单一协议，跨平台劫持终端流。",
+        f3Title: "强一致性同步",
+        f3Desc: "独有的单控制者防冲突模型。避免多端并抢焦点，画面精准对齐不串流。",
+        f4Title: "远程桌面",
+        f4Desc: "不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC 30fps 丝滑体验，自动降级到截图流兜底。",
+        diSectionTitle: "灵动岛，让 AI 触手可及",
+        diSectionDesc: "iPhone 灵动岛实时展示 Claude 工作状态。识别到需要操作时，一键快速响应，无需切回 App。",
+        diFeature1: "实时状态 — 思考中、编码中、等待确认，一目了然",
+        diFeature2: "快捷操作 — Claude 请求执行命令时，灵动岛直接审批",
+        diFeature3: "智能摘要 — 长对话自动提炼关键信息到灵动岛",
+        diFeature4: "无感切换 — 从灵动岛一键跳转到完整会话",
+        projSectionTitle: "项目空间，并行掌控",
+        projSectionDesc: "每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。",
+        projFeature1: "多项目并行 — 同一会话内切换不同项目目录",
+        projFeature2: "独立终端 — 每个项目拥有独立的命令执行环境",
+        projFeature3: "最近项目 — 智能记忆常用项目，一键直达",
+        projFeature4: "实时状态 — 并行任务进度一览无余",
+        lifestyleSectionTitle: "LinkShell 工作流",
+        lifestyleLead: "不仅是远程命令行桥接；更是打破工位束缚的极客探索。",
+        l1Title: "挂起并离开",
+        l1Desc: "编译、构建、拉镜像... 常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell 默默守护当前状态。",
+        l2Title: "随时审查",
+        l2Desc: "随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。",
+        l3Title: "直接修正",
+        l3Desc: "发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。",
+        docsSectionTitle: "文档",
+        docsSectionDesc: "从安装到部署，你需要知道的一切。",
+        docsArchTitle: "架构概览",
+        docsArchDesc: "LinkShell 采用三层架构：本地 CLI 捕获 PTY 输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。",
+        docsCliTitle: "CLI 命令参考",
+        docsCmdStart: "启动桥接会话。自动启动内置网关，桥接 AI 代理进程并生成配对二维码。",
+        docsCmdGateway: "单独启动网关服务器。适用于独立部署网关到远程服务器的场景。",
+        docsCmdSetup: "交互式初始化配置。引导你完成网关地址、AI 提供者等基础设置。",
+        docsCmdDoctor: "环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。",
+        docsCmdStatus: "查看当前运行状态。显示活跃会话、网关连接状态和守护进程信息。",
+        docsCmdStop: "停止守护进程。优雅关闭桥接会话和内置网关。",
+        docsDeployTitle: "部署方式",
+        docsDeployDesc: "根据你的网络环境选择合适的部署方式。",
+        tabLan: "局域网",
+        tabPublic: "公网",
+        docsDeployLocal: "本地直连（最简单）",
+        docsDeployLocalDesc: "CLI 内置网关，同一局域网内手机直连电脑。零配置，开箱即用。",
+        docsDeployRemote: "远程服务器",
+        docsDeployRemoteTag: "[推荐]",
+        docsDeployRemoteDesc: "将网关部署到公网服务器，配合 Nginx 反向代理 + HTTPS，跨网络访问。",
+        docsDeployDocker: "Docker 部署",
+        docsDeployDockerDesc: "使用 Docker Compose 一键部署网关。最低要求 1 核 512MB 内存。",
+        lanTip1: "手机和电脑需在同一 Wi-Fi 下",
+        lanTip2: "无需任何服务器，开箱即用",
+        lanTip3: "延迟最低，数据不出局域网",
+        pubTip1: "支持跨网络、4G/5G 随时接入",
+        pubTip2: "推荐 Nginx 反代 + Let's Encrypt HTTPS",
+        pubTip3: "数据仅经过你自己的服务器中继",
+        docsProtocolTitle: "协议与可靠性",
+        docsProtoMsgTypes: "消息类型 (Zod)",
+        docsProtoAck: "双层缓冲确认",
+        docsProtoScrollback: "回滚缓冲区",
+        docsProtoHeartbeat: "心跳检测",
+        docsReliabilityTitle: "可靠性保障",
+        docsRel1: "指数退避自动重连（CLI 和 App 双端）",
+        docsRel2: "会话持久化（主机断连后保持 60 秒）",
+        docsRel3: "空闲会话 30 分钟自动清理",
+        docsRel4: "协议版本协商，向前兼容",
+        docsControlTitle: "控制模型",
+        docsCtrl1: "单控制者模型，防止多端输入冲突",
+        docsCtrl2: "控制权请求 / 释放 / 转移机制",
+        docsCtrl3: "6 位配对码 + QR 码安全配对",
+        docsCtrl4: "CORS 和速率限制保护",
+        docsFaqTitle: "常见问题",
+        docsScreenTitle: "远程桌面",
+        docsScreenDesc: "启动时加上 --screen 参数，App 端会出现 Desktop 标签页，实时查看电脑桌面。",
+        docsScreen1: "WebRTC 模式 — 默认以 30fps 实时推流桌面画面，延迟极低",
+        docsScreen2: "截图流兜底 — 网络条件不佳时自动降级为截图流模式，保证可用性",
+        docsScreen3: "自动切换 — 无需手动配置，运行时根据网络质量自动选择最优方案",
+        docsScreen4: "App 端切换 — 在 App 内切换 Terminal / Desktop 标签，随时查看桌面",
+        docsFaq1Q: "Q: 需要公网服务器吗？",
+        docsFaq1A: "不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。",
+        docsFaq2Q: "Q: 支持哪些 AI 代理？",
+        docsFaq2A: "目前支持 Claude Code、OpenAI Codex，以及任意自定义 Shell 进程。通过 --provider 参数指定。",
+        docsFaq3Q: "Q: 手机 App 在哪里下载？",
+        docsFaq3A: "iOS 版本通过 TestFlight 分发，Android 版本可从 GitHub Releases 下载 APK。正式版本上架后会在此更新。",
+        docsFaq4Q: "Q: 数据安全吗？会经过第三方服务器吗？",
+        docsFaq4A: "本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。",
+        docsFaq5Q: "Q: 远程桌面功能如何工作？",
+        docsFaq5A: "使用 --screen 参数启动后，通过 WebRTC 以 30fps 实时传输桌面画面。网络条件不佳时自动降级为截图流模式。",
+        ctaTitle: "准备好你的第一次漫游了吗？",
+        ctaDesc: "放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。",
+        footerText: "出于对 Vibe Coding 的热爱。© 2026 MIT 开源。",
+      },
+      en: {
+        pageTitle: "LinkShell | Desktop First, Roam Anywhere",
+        navHow: "How It Works",
+        navDocs: "Docs",
+        navGithub: "GitHub",
+        heroBadge: "> LinkShell v1.0 is Live",
+        heroTitle1: "Terminal Bridge",
+        heroTitleSep: " — ",
+        heroTitle2: "Take over anywhere.",
+        heroLead: "A pure Terminal Bridge architecture. Keep heavy workloads on your desktop, and claim the PTY session from your phone anywhere.",
+        heroGateway: "🎁 Free trial Gateway: ws://115.191.50.117:8787/ws",
+        btnStart: "Deploy Now",
+        btnGithub: "View Repo",
+        howItWorksTitle: "Establish your link in 3 steps",
+        step1Title: "[1] Install CLI",
+        step1Desc: "One command to install globally. Built-in gateway works out of the box — no extra server needed.",
+        step2Title: "[2] Start Bridge",
+        step2Desc: "One command to start the built-in gateway and bridge your AI agent process. QR code prints right in the terminal.",
+        qsLanDesc: "Same LAN, built-in gateway, zero config.",
+        qsPubDesc: "Deploy gateway on a public server first, then connect your local CLI.",
+        step3Title: "[3] Scan & Take Over",
+        step3Desc: "Open the LinkShell App (iOS / Android), scan the terminal QR code, and instantly take over the session.",
+        featureSectionTitle: "Native terminal feel. Decentralized control.",
+        f1Title: "Local PTY Driver",
+        f1Desc: "Everything runs locally. We preserve full terminal semantics: ANSI colors, cursor movements, and raw readline signals.",
+        f2Title: "Universal Connect",
+        f2Desc: "Supports React Native, Expo, and Web clients natively via a unified protocol. Instantly hijack the I/O stream.",
+        f3Title: "Strict State Sync",
+        f3Desc: "Features a Single Controller locking model. Prevent multi-device input races and keep screens meticulously synchronized.",
+        f4Title: "Remote Desktop",
+        f4Desc: "Not just terminal. Add --screen to view your desktop in real-time. WebRTC at 30fps with automatic screenshot fallback.",
+        diSectionTitle: "Dynamic Island, AI at Your Fingertips",
+        diSectionDesc: "iPhone Dynamic Island shows Claude's live status. One-tap quick actions when Claude needs your input — no need to switch back to the app.",
+        diFeature1: "Live Status — thinking, coding, awaiting confirmation at a glance",
+        diFeature2: "Quick Actions — approve Claude's commands right from the island",
+        diFeature3: "Smart Summary — long conversations distilled to key info",
+        diFeature4: "Seamless Jump — one tap from island to full session",
+        projSectionTitle: "Project Spaces, Parallel Control",
+        projSectionDesc: "Multi-project parallel sessions. Pick a project folder, run commands independently, just like working locally.",
+        projFeature1: "Parallel Projects — switch between project directories in one session",
+        projFeature2: "Isolated Terminals — each project gets its own execution environment",
+        projFeature3: "Recent Projects — smart memory of frequently used projects",
+        projFeature4: "Live Status — parallel task progress at a glance",
+        lifestyleSectionTitle: "The LinkShell Workflow",
+        lifestyleLead: "It's not just a remote bridge. It's your declaration of independence from the desk.",
+        l1Title: "Suspend & Walk",
+        l1Desc: "Compiling, training, building... your desktop handles it. Step away for coffee; LinkShell keeps your PTY session perfectly alive.",
+        l2Title: "Review Anytime",
+        l2Desc: "Pull out your phone and jump back in. Check build progress and scroll through colorful logs with zero latency decay.",
+        l3Title: "Quick Hotfix",
+        l3Desc: "Spot an error? The mobile xterm.js instance takes focus. Type the fix, hit enter, and drop your phone back in your pocket.",
+        docsSectionTitle: "Documentation",
+        docsSectionDesc: "Everything you need to know, from installation to deployment.",
+        docsArchTitle: "Architecture Overview",
+        docsArchDesc: "LinkShell uses a three-tier architecture: the local CLI captures PTY output, relays it through a gateway, and renders a full terminal on mobile. All computation stays local — your phone is just a remote window.",
+        docsCliTitle: "CLI Command Reference",
+        docsCmdStart: "Start a bridge session. Auto-starts the built-in gateway, bridges the AI agent process, and generates a pairing QR code.",
+        docsCmdGateway: "Start the gateway server standalone. For deploying the gateway on a remote server independently.",
+        docsCmdSetup: "Interactive configuration wizard. Guides you through gateway address, AI provider, and other basic settings.",
+        docsCmdDoctor: "Environment diagnostic tool. Checks Node.js version, dependency integrity, network connectivity, and more.",
+        docsCmdStatus: "View current running status. Shows active sessions, gateway connection state, and daemon info.",
+        docsCmdStop: "Stop the daemon. Gracefully shuts down bridge sessions and the built-in gateway.",
+        docsDeployTitle: "Deployment Options",
+        docsDeployDesc: "Choose the right deployment for your network setup.",
+        tabLan: "LAN",
+        tabPublic: "Public",
+        docsDeployLocal: "Local Direct (Simplest)",
+        docsDeployLocalDesc: "CLI has a built-in gateway. Phone connects directly to your computer on the same LAN. Zero config.",
+        docsDeployRemote: "Remote Server",
+        docsDeployRemoteTag: "[recommended]",
+        docsDeployRemoteDesc: "Deploy the gateway to a public server with Nginx reverse proxy + HTTPS for cross-network access.",
+        docsDeployDocker: "Docker Deploy",
+        docsDeployDockerDesc: "One-command gateway deployment with Docker Compose. Minimum 1 core, 512MB RAM.",
+        lanTip1: "Phone and computer must be on the same Wi-Fi",
+        lanTip2: "No server needed, works out of the box",
+        lanTip3: "Lowest latency, data stays on your LAN",
+        pubTip1: "Cross-network access via 4G/5G anytime",
+        pubTip2: "Recommended: Nginx reverse proxy + Let's Encrypt HTTPS",
+        pubTip3: "Data only passes through your own server relay",
+        docsProtocolTitle: "Protocol & Reliability",
+        docsProtoMsgTypes: "Message Types (Zod)",
+        docsProtoAck: "Dual-layer ACK",
+        docsProtoScrollback: "Scrollback Buffer",
+        docsProtoHeartbeat: "Heartbeat",
+        docsReliabilityTitle: "Reliability Guarantees",
+        docsRel1: "Exponential backoff auto-reconnect (both CLI and App)",
+        docsRel2: "Session persistence (60s after host disconnect)",
+        docsRel3: "Idle session auto-cleanup after 30 minutes",
+        docsRel4: "Protocol version negotiation, forward compatible",
+        docsControlTitle: "Control Model",
+        docsCtrl1: "Single controller model prevents multi-device input conflicts",
+        docsCtrl2: "Control rights request / release / transfer mechanism",
+        docsCtrl3: "6-digit pairing code + QR code secure pairing",
+        docsCtrl4: "CORS and rate limiting protection",
+        docsFaqTitle: "FAQ",
+        docsScreenTitle: "Remote Desktop",
+        docsScreenDesc: "Add the --screen flag when starting, and a Desktop tab appears in the App for real-time desktop viewing.",
+        docsScreen1: "WebRTC Mode — streams your desktop at 30fps by default with minimal latency",
+        docsScreen2: "Screenshot Fallback — automatically degrades to screenshot streaming on poor networks",
+        docsScreen3: "Auto Switch — no manual config needed, picks the best mode based on network quality",
+        docsScreen4: "App Toggle — switch between Terminal / Desktop tabs in the App anytime",
+        docsFaq1Q: "Q: Do I need a public server?",
+        docsFaq1A: "No. The CLI has a built-in gateway — your phone connects directly to your computer on the same LAN. You only need a public server for cross-network access.",
+        docsFaq2Q: "Q: Which AI agents are supported?",
+        docsFaq2A: "Currently supports Claude Code, OpenAI Codex, and any custom shell process. Specify via the --provider flag.",
+        docsFaq3Q: "Q: Where can I download the mobile app?",
+        docsFaq3A: "iOS is distributed via TestFlight, Android APK is available from GitHub Releases. App Store and Google Play listings will be updated here once available.",
+        docsFaq4Q: "Q: Is my data secure? Does it pass through third-party servers?",
+        docsFaq4A: "In local mode, data stays entirely within your LAN. In remote mode, data passes through your own self-hosted gateway relay — never through any third-party server.",
+        docsFaq5Q: "Q: How does the remote desktop feature work?",
+        docsFaq5A: "With the --screen flag, your desktop is streamed at 30fps via WebRTC. On poor network conditions, it automatically falls back to screenshot streaming.",
+        ctaTitle: "Ready for your first roam?",
+        ctaDesc: "Skip the heavy cloud VM migrations. Set up the relay in seconds and put your whole dev environment in your pocket.",
+        footerText: "Crafted for Vibe Coding. © 2026 Open Source / MIT.",
+      },
+    };
 
-<!-- FOOTER -->
-<footer><div class="ft">
-  <span style="font-weight:700;font-size:14px">[LS] LinkShell</span>
-  <span style="color:var(--text-muted);font-size:14px" data-i18n="footerText">出于对 Vibe Coding 的热爱。© 2026 MIT 开源。</span>
-  <div style="display:flex;gap:16px">
-    <a href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
-    <a href="#how" data-i18n="navHow">工作原理</a>
-    <a href="#docs" data-i18n="navDocs">文档</a>
-  </div>
-</div></footer>
+    const textNodes = Array.from(document.querySelectorAll("[data-i18n]"));
+    const langBtn = document.getElementById("lang-toggle");
+    let currentLang = "zh";
 
-<!-- SCRIPT -->
-<script>
-const translations = {
-  zh: {
-    pageTitle: "LinkShell | 始于桌面，随处接管",
-    navHow: "工作原理",
-    navDocs: "文档",
-    navGithub: "GitHub",
-    heroBadge: "> LinkShell v1.0 现已发布",
-    heroTitle1: "终端漫游",
-    heroTitle2: "随时随地，自由接管",
-    heroLead: "纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。",
-    btnStart: "立即部署",
-    btnGithub: "查看仓库",
-    howItWorksTitle: "只需三步，建立你的终端链路",
-    step1Title: "[1] 安装 CLI",
-    step1Desc: "一条命令全局安装。内置网关开箱即用，无需额外部署服务器。",
-    step2Title: "[2] 启动桥接",
-    step2Desc: "一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。",
-    step3Title: "[3] 手机扫码，即刻接管",
-    step3Desc: "打开 LinkShell App（iOS / Android），对准终端二维码扫一扫，立刻接管会话。",
-    featureSectionTitle: "原生的终端体感，去中心化的控制。",
-    f1Title: "本地 PTY 驱动",
-    f1Desc: "繁重的计算过程完全依赖本地机器。保留颜色、光标、readline 输出及信号等完整终端语义。",
-    f2Title: "全平台客户端",
-    f2Desc: "支持 React Native / Expo 移动端与 Web 页面调试端。纯粹的单一协议，跨平台劫持终端流。",
-    f3Title: "强一致性同步",
-    f3Desc: "独有的单控制者防冲突模型。避免多端并抢焦点，画面精准对齐不串流。",
-    f4Title: "远程桌面",
-    f4Desc: "不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC 30fps 丝滑体验，自动降级到截图流兜底。",
-    diSectionTitle: "灵动岛，让 AI 触手可及",
-    diSectionDesc: "iPhone 灵动岛实时展示 Claude 工作状态。识别到需要操作时，一键快速响应，无需切回 App。",
-    diFeature1: "实时状态 — 思考中、编码中、等待确认，一目了然",
-    diFeature2: "快捷操作 — Claude 请求执行命令时，灵动岛直接审批",
-    diFeature3: "智能摘要 — 长对话自动提炼关键信息到灵动岛",
-    diFeature4: "无感切换 — 从灵动岛一键跳转到完整会话",
-    projSectionTitle: "项目空间，并行掌控",
-    projSectionDesc: "每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。",
-    projFeature1: "多项目并行 — 同一会话内切换不同项目目录",
-    projFeature2: "独立终端 — 每个项目拥有独立的命令执行环境",
-    projFeature3: "最近项目 — 智能记忆常用项目，一键直达",
-    projFeature4: "实时状态 — 并行任务进度一览无余",
-    lifestyleSectionTitle: "LinkShell 工作流",
-    lifestyleLead: "不仅是远程命令行桥接；更是打破工位束缚的极客探索。",
-    l1Title: "挂起并离开",
-    l1Desc: "编译、构建、拉镜像... 常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell 默默守护当前状态。",
-    l2Title: "随时审查",
-    l2Desc: "随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。",
-    l3Title: "直接修正",
-    l3Desc: "发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。",
-    docsSectionTitle: "文档",
-    docsSectionDesc: "从安装到部署，你需要知道的一切。",
-    docsArchTitle: "架构概览",
-    docsArchDesc: "LinkShell 采用三层架构：本地 CLI 捕获 PTY 输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。",
-    docsCliTitle: "CLI 命令参考",
-    docsCmdStart: "启动桥接会话。自动启动内置网关，桥接 AI 代理进程并生成配对二维码。",
-    docsCmdGateway: "单独启动网关服务器。适用于独立部署网关到远程服务器的场景。",
-    docsCmdSetup: "交互式初始化配置。引导你完成网关地址、AI 提供者等基础设置。",
-    docsCmdDoctor: "环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。",
-    docsCmdStatus: "查看当前运行状态。显示活跃会话、网关连接状态和守护进程信息。",
-    docsCmdStop: "停止守护进程。优雅关闭桥接会话和内置网关。",
-    docsDeployTitle: "部署方式",
-    docsDeployLocal: "本地直连（最简单）",
-    docsDeployLocalDesc: "CLI 内置网关，同一局域网内手机直连电脑。零配置，开箱即用。",
-    docsDeployRemote: "远程服务器",
-    docsDeployRemoteTag: "[推荐]",
-    docsDeployRemoteDesc: "将网关部署到公网服务器，配合 Nginx 反向代理 + HTTPS，跨网络访问。",
-    docsDeployDocker: "Docker 部署",
-    docsDeployDockerDesc: "使用 Docker Compose 一键部署网关。最低要求 1 核 512MB 内存。",
-    docsProtocolTitle: "协议与可靠性",
-    docsProtoMsgTypes: "消息类型 (Zod)",
-    docsProtoAck: "双层缓冲确认",
-    docsProtoScrollback: "回滚缓冲区",
-    docsProtoHeartbeat: "心跳检测",
-    docsReliabilityTitle: "可靠性保障",
-    docsRel1: "指数退避自动重连（CLI 和 App 双端）",
-    docsRel2: "会话持久化（主机断连后保持 60 秒）",
-    docsRel3: "空闲会话 30 分钟自动清理",
-    docsRel4: "协议版本协商，向前兼容",
-    docsControlTitle: "控制模型",
-    docsCtrl1: "单控制者模型，防止多端输入冲突",
-    docsCtrl2: "控制权请求 / 释放 / 转移机制",
-    docsCtrl3: "6 位配对码 + QR 码安全配对",
-    docsCtrl4: "CORS 和速率限制保护",
-    docsFaqTitle: "常见问题",
-    docsFaq1Q: "Q: 需要公网服务器吗？",
-    docsFaq1A: "不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。",
-    docsFaq2Q: "Q: 支持哪些 AI 代理？",
-    docsFaq2A: "目前支持 Claude Code、OpenAI Codex，以及任意自定义 Shell 进程。通过 --provider 参数指定。",
-    docsFaq3Q: "Q: 手机 App 在哪里下载？",
-    docsFaq3A: "iOS 版本通过 TestFlight 分发，Android 版本可从 GitHub Releases 下载 APK。正式版本上架后会在此更新。",
-    docsFaq4Q: "Q: 数据安全吗？会经过第三方服务器吗？",
-    docsFaq4A: "本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。",
-    docsFaq5Q: "Q: 远程桌面功能如何工作？",
-    docsFaq5A: "使用 --screen 参数启动后，通过 WebRTC 以 30fps 实时传输桌面画面。网络条件不佳时自动降级为截图流模式。",
-    ctaTitle: "准备好你的第一次漫游了吗？",
-    ctaDesc: "放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。",
-    footerText: "出于对 Vibe Coding 的热爱。© 2026 MIT 开源。",
-  },
-  en: {
-    pageTitle: "LinkShell | Desktop First, Roam Anywhere",
-    navHow: "How It Works",
-    navDocs: "Docs",
-    navGithub: "GitHub",
-    heroBadge: "> LinkShell v1.0 is Live",
-    heroTitle1: "Terminal Bridge",
-    heroTitle2: "Take over anywhere.",
-    heroLead: "A pure Terminal Bridge architecture. Keep heavy workloads on your desktop, and claim the PTY session from your phone anywhere.",
-    btnStart: "Deploy Now",
-    btnGithub: "View Repo",
-    howItWorksTitle: "Establish your link in 3 steps",
-    step1Title: "[1] Install CLI",
-    step1Desc: "One command to install globally. Built-in gateway works out of the box — no extra server needed.",
-    step2Title: "[2] Start Bridge",
-    step2Desc: "One command to start the built-in gateway and bridge your AI agent process. QR code prints right in the terminal.",
-    step3Title: "[3] Scan & Take Over",
-    step3Desc: "Open the LinkShell App (iOS / Android), scan the terminal QR code, and instantly take over the session.",
-    featureSectionTitle: "Native terminal feel. Decentralized control.",
-    f1Title: "Local PTY Driver",
-    f1Desc: "Everything runs locally. We preserve full terminal semantics: ANSI colors, cursor movements, and raw readline signals.",
-    f2Title: "Universal Connect",
-    f2Desc: "Supports React Native, Expo, and Web clients natively via a unified protocol. Instantly hijack the I/O stream.",
-    f3Title: "Strict State Sync",
-    f3Desc: "Features a Single Controller locking model. Prevent multi-device input races and keep screens meticulously synchronized.",
-    f4Title: "Remote Desktop",
-    f4Desc: "Not just terminal. Add --screen to view your desktop in real-time. WebRTC at 30fps with automatic screenshot fallback.",
-    diSectionTitle: "Dynamic Island, AI at Your Fingertips",
-    diSectionDesc: "iPhone Dynamic Island shows Claude's live status. One-tap quick actions when Claude needs your input — no need to switch back to the app.",
-    diFeature1: "Live Status — thinking, coding, awaiting confirmation at a glance",
-    diFeature2: "Quick Actions — approve Claude's commands right from the island",
-    diFeature3: "Smart Summary — long conversations distilled to key info",
-    diFeature4: "Seamless Jump — one tap from island to full session",
-    projSectionTitle: "Project Spaces, Parallel Control",
-    projSectionDesc: "Multi-project parallel sessions. Pick a project folder, run commands independently, just like working locally.",
-    projFeature1: "Parallel Projects — switch between project directories in one session",
-    projFeature2: "Isolated Terminals — each project gets its own execution environment",
-    projFeature3: "Recent Projects — smart memory of frequently used projects",
-    projFeature4: "Live Status — parallel task progress at a glance",
-    lifestyleSectionTitle: "The LinkShell Workflow",
-    lifestyleLead: "It's not just a remote bridge. It's your declaration of independence from the desk.",
-    l1Title: "Suspend & Walk",
-    l1Desc: "Compiling, training, building... your desktop handles it. Step away for coffee; LinkShell keeps your PTY session perfectly alive.",
-    l2Title: "Review Anytime",
-    l2Desc: "Pull out your phone and jump back in. Check build progress and scroll through colorful logs with zero latency decay.",
-    l3Title: "Quick Hotfix",
-    l3Desc: "Spot an error? The mobile xterm.js instance takes focus. Type the fix, hit enter, and drop your phone back in your pocket.",
-    docsSectionTitle: "Documentation",
-    docsSectionDesc: "Everything you need to know, from installation to deployment.",
-    docsArchTitle: "Architecture Overview",
-    docsArchDesc: "LinkShell uses a three-tier architecture: the local CLI captures PTY output, relays it through a gateway, and renders a full terminal on mobile. All computation stays local — your phone is just a remote window.",
-    docsCliTitle: "CLI Command Reference",
-    docsCmdStart: "Start a bridge session. Auto-starts the built-in gateway, bridges the AI agent process, and generates a pairing QR code.",
-    docsCmdGateway: "Start the gateway server standalone. For deploying the gateway on a remote server independently.",
-    docsCmdSetup: "Interactive configuration wizard. Guides you through gateway address, AI provider, and other basic settings.",
-    docsCmdDoctor: "Environment diagnostic tool. Checks Node.js version, dependency integrity, network connectivity, and more.",
-    docsCmdStatus: "View current running status. Shows active sessions, gateway connection state, and daemon info.",
-    docsCmdStop: "Stop the daemon. Gracefully shuts down bridge sessions and the built-in gateway.",
-    docsDeployTitle: "Deployment Options",
-    docsDeployLocal: "Local Direct (Simplest)",
-    docsDeployLocalDesc: "CLI has a built-in gateway. Phone connects directly to your computer on the same LAN. Zero config.",
-    docsDeployRemote: "Remote Server",
-    docsDeployRemoteTag: "[recommended]",
-    docsDeployRemoteDesc: "Deploy the gateway to a public server with Nginx reverse proxy + HTTPS for cross-network access.",
-    docsDeployDocker: "Docker Deploy",
-    docsDeployDockerDesc: "One-command gateway deployment with Docker Compose. Minimum 1 core, 512MB RAM.",
-    docsProtocolTitle: "Protocol & Reliability",
-    docsProtoMsgTypes: "Message Types (Zod)",
-    docsProtoAck: "Dual-layer ACK",
-    docsProtoScrollback: "Scrollback Buffer",
-    docsProtoHeartbeat: "Heartbeat",
-    docsReliabilityTitle: "Reliability Guarantees",
-    docsRel1: "Exponential backoff auto-reconnect (both CLI and App)",
-    docsRel2: "Session persistence (60s after host disconnect)",
-    docsRel3: "Idle session auto-cleanup after 30 minutes",
-    docsRel4: "Protocol version negotiation, forward compatible",
-    docsControlTitle: "Control Model",
-    docsCtrl1: "Single controller model prevents multi-device input conflicts",
-    docsCtrl2: "Control rights request / release / transfer mechanism",
-    docsCtrl3: "6-digit pairing code + QR code secure pairing",
-    docsCtrl4: "CORS and rate limiting protection",
-    docsFaqTitle: "FAQ",
-    docsFaq1Q: "Q: Do I need a public server?",
-    docsFaq1A: "No. The CLI has a built-in gateway — your phone connects directly to your computer on the same LAN. You only need a public server for cross-network access.",
-    docsFaq2Q: "Q: Which AI agents are supported?",
-    docsFaq2A: "Currently supports Claude Code, OpenAI Codex, and any custom shell process. Specify via the --provider flag.",
-    docsFaq3Q: "Q: Where can I download the mobile app?",
-    docsFaq3A: "iOS is distributed via TestFlight, Android APK is available from GitHub Releases. App Store and Google Play listings will be updated here once available.",
-    docsFaq4Q: "Q: Is my data secure? Does it pass through third-party servers?",
-    docsFaq4A: "In local mode, data stays entirely within your LAN. In remote mode, data passes through your own self-hosted gateway relay — never through any third-party server.",
-    docsFaq5Q: "Q: How does the remote desktop feature work?",
-    docsFaq5A: "With the --screen flag, your desktop is streamed at 30fps via WebRTC. On poor network conditions, it automatically falls back to screenshot streaming.",
-    ctaTitle: "Ready for your first roam?",
-    ctaDesc: "Skip the heavy cloud VM migrations. Set up the relay in seconds and put your whole dev environment in your pocket.",
-    footerText: "Crafted for Vibe Coding. © 2026 Open Source / MIT.",
-  },
-};
+    function applyLanguage(lang) {
+      const dict = translations[lang];
+      document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+      textNodes.forEach((node) => {
+        const key = node.getAttribute("data-i18n");
+        if (dict[key]) node.textContent = dict[key];
+      });
+      langBtn.textContent = lang === "zh" ? "EN" : "中文";
+    }
 
-const textNodes = Array.from(document.querySelectorAll("[data-i18n]"));
-const langBtn = document.getElementById("lang-toggle");
-let currentLang = "zh";
+    langBtn.addEventListener("click", () => {
+      currentLang = currentLang === "zh" ? "en" : "zh";
+      applyLanguage(currentLang);
+    });
 
-function applyLanguage(lang) {
-  const dict = translations[lang];
-  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
-  textNodes.forEach((node) => {
-    const key = node.getAttribute("data-i18n");
-    if (dict[key]) node.textContent = dict[key];
-  });
-  langBtn.textContent = lang === "zh" ? "EN" : "中文";
-}
+    applyLanguage("zh");
 
-langBtn.addEventListener("click", () => {
-  currentLang = currentLang === "zh" ? "en" : "zh";
-  applyLanguage(currentLang);
-});
+    // Deploy tabs
+    document.querySelectorAll('.tab[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const parent = btn.closest('.tabs');
+        const body = parent.nextElementSibling;
+        parent.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+        body.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        body.querySelector('#tab-' + btn.dataset.tab).classList.add('active');
+      });
+    });
 
-applyLanguage("zh");
-</script>
+    // Page routing
+    const navLinks = document.querySelectorAll('.nav-link');
+    const pageSections = document.querySelectorAll('section[data-page]');
+
+    function showPage(page) {
+      pageSections.forEach(s => {
+        s.classList.toggle('visible', s.dataset.page === page);
+      });
+      navLinks.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + page);
+      });
+      window.scrollTo(0, 0);
+    }
+
+    function route() {
+      const hash = location.hash.replace('#', '') || 'home';
+      if (hash === 'docs') {
+        showPage('docs');
+      } else {
+        showPage('home');
+        // scroll to anchor if needed
+        if (hash !== 'home') {
+          const el = document.getElementById(hash);
+          if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 50);
+        }
+      }
+    }
+
+    navLinks.forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        location.hash = a.getAttribute('href').replace('#', '');
+      });
+    });
+
+    document.querySelector('.nav-b').addEventListener('click', (e) => {
+      e.preventDefault();
+      location.hash = '';
+      showPage('home');
+    });
+
+    window.addEventListener('hashchange', route);
+    route();
+  </script>
 
 </body>
+
 </html>

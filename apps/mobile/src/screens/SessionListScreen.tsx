@@ -452,17 +452,14 @@ export function SessionListScreen({
         server,
         sessions: result.status === "fulfilled" ? result.value : [],
         loading: false,
-        error:
-          result.status === "rejected"
-            ? (result.reason as Error).message
-            : null,
+        error: null,
       };
     });
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setGroups(finalGroups);
     setInitialLoad(false);
-  }, [gatewayBaseUrl]);
+  }, [gatewayBaseUrl, deviceToken]);
 
   useEffect(() => {
     fetchAllGateways();

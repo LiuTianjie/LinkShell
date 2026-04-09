@@ -194,6 +194,7 @@ export const terminalSpawnedPayloadSchema = z.object({
   terminalId: z.string().min(1),
   cwd: z.string(),
   projectName: z.string(),
+  provider: z.string().optional(),
 });
 
 export const terminalKillPayloadSchema = z.object({

@@ -304,7 +304,7 @@ export class BridgeSession {
             type: "terminal.spawned",
             sessionId: this.sessionId,
             terminalId: existing.id,
-            payload: { terminalId: existing.id, cwd: existing.cwd, projectName: existing.projectName },
+            payload: { terminalId: existing.id, cwd: existing.cwd, projectName: existing.projectName, provider: existing.provider },
           }));
         } else {
           const newId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -314,7 +314,7 @@ export class BridgeSession {
               type: "terminal.spawned",
               sessionId: this.sessionId,
               terminalId: newId,
-              payload: { terminalId: newId, cwd: normalizedCwd, projectName: basename(normalizedCwd) },
+              payload: { terminalId: newId, cwd: normalizedCwd, projectName: basename(normalizedCwd), provider: p.provider },
             }));
           } catch (err) {
             this.log(`failed to spawn terminal ${newId}: ${err}`);

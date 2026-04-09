@@ -672,7 +672,7 @@ export function useSessionManager(): SessionManagerHandle {
               p.terminalId,
               p.cwd,
               p.projectName,
-              s.provider ?? "claude",
+              (p as any).provider ?? s.provider ?? "claude",
             );
             // Apply any pending status from reconnect replay
             const pendingStatus = s.pendingStatusByTerminal.get(p.terminalId);
@@ -1364,6 +1364,18 @@ export function useSessionManager(): SessionManagerHandle {
           payload: { requestId, decision },
         }),
       );
+      // Clear topPermission from structuredStatus so buildState
+      // doesn't re-add the permission to the Live Activity
+      const term = s.terminals.get(terminalId);
+      if (term?.structuredStatus) {
+        const ss = term.structuredStatus;
+        if (ss.topPermission?.requestId === requestId) {
+          ss.topPermission = undefined;
+          ss.pendingPermissionCount = Math.max(0, (ss.pendingPermissionCount ?? 1) - 1);
+          if (ss.phase === "waiting") ss.phase = "thinking";
+        }
+        tick();
+      }
     },
     deviceToken: deviceTokenRef.current,
   };

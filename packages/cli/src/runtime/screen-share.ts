@@ -7,6 +7,20 @@ import type { Envelope } from "@linkshell/protocol";
 
 const RTP_MTU = 1200; // Max payload size before FU-A fragmentation
 
+/** Detect the avfoundation device index for "Capture screen" on macOS. */
+function detectMacScreenIndex(): string {
+  try {
+    const out = execSync('ffmpeg -f avfoundation -list_devices true -i "" 2>&1 || true', {
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).toString();
+    // Look for lines like: [AVFoundation ...] [2] Capture screen 0
+    const match = out.match(/\[(\d+)]\s+Capture screen/);
+    if (match) return match[1]!;
+  } catch {}
+  return "1"; // legacy fallback
+}
+
 export interface ScreenShareOptions {
   sessionId: string;
   fps: number;
@@ -210,18 +224,23 @@ export class ScreenShare {
 
     let inputArgs: string[];
     if (os === "darwin") {
-      inputArgs = ["-f", "avfoundation", "-framerate", String(fps), "-i", "1:none"];
+      const screenIdx = detectMacScreenIndex();
+      inputArgs = ["-f", "avfoundation", "-framerate", String(fps), "-i", `${screenIdx}:none`];
     } else if (os === "linux") {
       inputArgs = ["-f", "x11grab", "-framerate", String(fps), "-i", ":0"];
     } else {
       inputArgs = ["-f", "gdigrab", "-framerate", String(fps), "-i", "desktop"];
     }
 
-    const scaleFilter = scale < 1 ? ["-vf", `scale=iw*${scale}:ih*${scale}`] : [];
+    // libx264 requires even width & height; crop 1px if needed
+    const evenFilter = "crop=trunc(iw/2)*2:trunc(ih/2)*2";
+    const vf = scale < 1
+      ? ["-vf", `scale=iw*${scale}:ih*${scale},${evenFilter}`]
+      : ["-vf", evenFilter];
 
     this.ffmpeg = spawn("ffmpeg", [
       ...inputArgs,
-      ...scaleFilter,
+      ...vf,
       "-c:v", "libx264",
       "-preset", "ultrafast",
       "-tune", "zerolatency",
