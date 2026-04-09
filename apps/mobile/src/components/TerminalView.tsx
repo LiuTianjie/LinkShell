@@ -10,6 +10,7 @@ import {
   Animated,
   Clipboard,
   PanResponder,
+  Platform,
   StyleSheet,
   View,
 } from "react-native";
@@ -290,7 +291,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           // Hide xterm 6.x scrollable-element scrollbar
           .replace(
             "</style>",
-            `.xterm .xterm-scrollable-element>.xterm-scrollbar{display:none !important;width:0 !important;}\n</style>`,
+            `.xterm .xterm-scrollable-element>.xterm-scrollbar{display:none !important;width:0 !important;}
+#terminal,.xterm,.xterm-screen{max-width:100vw !important;overflow:hidden !important;}
+.xterm-screen canvas{max-width:100% !important;}
+</style>`,
           )
           // Let xterm own keyboard input for IME
           .replace(
@@ -363,9 +367,27 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           postToWebView({ type: "zoom_reset" });
         },
         focusCursor() {
-          webViewRef.current?.injectJavaScript(
-            `try{if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "focus_cursor" }))});}}catch(e){}true;`,
-          );
+          if (!readyRef.current) {
+            // WebView not ready yet — retry after a short delay
+            setTimeout(() => {
+              if (readyRef.current) {
+                webViewRef.current?.injectJavaScript(
+                  `try{if(term&&term.textarea){term.textarea.focus();term.focus();}}catch(e){}true;`,
+                );
+              }
+            }, 300);
+            return;
+          }
+          if (Platform.OS === "android") {
+            // Android: directly focus the textarea element to trigger soft keyboard
+            webViewRef.current?.injectJavaScript(
+              `try{if(term&&term.textarea){term.textarea.focus();term.focus();}}catch(e){}true;`,
+            );
+          } else {
+            webViewRef.current?.injectJavaScript(
+              `try{if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "focus_cursor" }))});}}catch(e){}true;`,
+            );
+          }
         },
         blurCursor() {
           webViewRef.current?.injectJavaScript(
@@ -448,6 +470,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           hideKeyboardAccessoryView
           allowsInlineMediaPlayback
           mixedContentMode="always"
+          androidLayerType="hardware"
           injectedJavaScript={`document.documentElement.style.colorScheme='${theme.mode}';true;`}
           onLoadEnd={() => {
             readyRef.current = true;

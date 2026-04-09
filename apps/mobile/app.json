@@ -40,7 +40,8 @@
         "expo-build-properties",
         {
           "android": {
-            "enableJetifier": true
+            "enableJetifier": true,
+            "usesCleartextTraffic": true
           }
         }
       ]

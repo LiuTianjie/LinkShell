@@ -183,6 +183,19 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 - CORS + 限流 + 优雅关闭
 - Daemon 模式（CLI 和 Gateway 均支持后台运行）
 
+## Sponsors
+
+- [AI18N](https://ai18n.chat/) — Unified AI API Gateway，支持 Claude 模型的 OpenAI / Anthropic 兼容 API
+
+## Buy Me a Coffee
+
+如果 LinkShell 对你有帮助，可以请作者喝杯咖啡：
+
+<p>
+  <img src="docs/assets/pay_wechat.jpg" alt="WeChat Pay" width="180" />
+  <img src="docs/assets/pay_ali.jpg" alt="Alipay" width="180" />
+</p>
+
 ## License
 
 MIT

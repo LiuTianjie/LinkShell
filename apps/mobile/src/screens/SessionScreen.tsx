@@ -340,7 +340,14 @@ export function SessionScreen({
 
   useEffect(() => {
     if (status !== "connected") setKeyboardHintVisible(false);
-  }, [status]);
+    // Android: auto-focus terminal when connected, no need for hint
+    if (status === "connected" && Platform.OS === "android" && !inputDisabled) {
+      setKeyboardHintVisible(false);
+      setTimeout(() => {
+        termRef.current?.focusCursor();
+      }, 500);
+    }
+  }, [status, inputDisabled]);
 
   useEffect(() => {
     const applyKeyboardFrame = (event: KeyboardEvent) => {
@@ -980,11 +987,12 @@ const VoiceBar = memo(function VoiceBar({
   theme: Theme;
   onSend: (text: string) => void;
 }) {
-  const { partialText, finalText, start, cancel } = useVoiceInput();
+  const { partialText, finalText, start, stop, cancel } = useVoiceInput();
   const [pressing, setPressing] = useState(false);
   const [editText, setEditText] = useState("");
   const [editing, setEditing] = useState(false);
   const [inCancelZone, setInCancelZone] = useState(false);
+  const [waitingForResult, setWaitingForResult] = useState(false);
   const localeRef = useRef<"en-US" | "zh-CN">("zh-CN");
   // Refs to access latest recognized text inside PanResponder closure
   const partialRef = useRef("");
@@ -998,6 +1006,31 @@ const VoiceBar = memo(function VoiceBar({
   useEffect(() => {
     finalRef.current = finalText;
   }, [finalText]);
+
+  // Handle delayed final result from stop() (Android speech recognition)
+  useEffect(() => {
+    if (!waitingForResult || !finalText.trim()) return;
+    setWaitingForResult(false);
+    const prev = editTextRef.current;
+    const pos = selectionRef.current;
+    const before = prev.slice(0, pos);
+    const after = prev.slice(pos);
+    const insert = finalText.trim();
+    const combined =
+      before +
+      (before && !before.endsWith(" ") ? " " : "") +
+      insert +
+      (after && !after.startsWith(" ") ? " " : "") +
+      after;
+    const newPos = (
+      before +
+      (before && !before.endsWith(" ") ? " " : "") +
+      insert
+    ).length;
+    updateEditText(combined);
+    selectionRef.current = newPos;
+    setEditing(true);
+  }, [finalText, waitingForResult]);
 
   const updateEditText = (text: string) => {
     editTextRef.current = text;
@@ -1024,12 +1057,15 @@ const VoiceBar = memo(function VoiceBar({
         if (gestureState.dy < CANCEL_THRESHOLD) {
           // Dragged into cancel zone — discard this round only
           cancel();
+          setWaitingForResult(false);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         } else {
-          // Capture whatever text we have before killing the mic
+          // Capture whatever text we have right now
           const captured = finalRef.current || partialRef.current;
-          cancel(); // immediately release mic
           if (captured.trim()) {
+            // Already have text — use it immediately
+            cancel();
+            setWaitingForResult(false);
             const prev = editTextRef.current;
             const pos = selectionRef.current;
             const before = prev.slice(0, pos);
@@ -1049,6 +1085,10 @@ const VoiceBar = memo(function VoiceBar({
             updateEditText(combined);
             selectionRef.current = newPos;
             setEditing(true);
+          } else {
+            // No text yet — stop() gracefully and wait for final result
+            stop();
+            setWaitingForResult(true);
           }
         }
       },

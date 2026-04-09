@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Platform } from "react-native";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 
 export interface UseVoiceInputReturn {
@@ -85,7 +86,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
     ExpoSpeechRecognitionModule.start({
       lang: locale,
       interimResults: true,
-      addsPunctuation: true,
+      ...(Platform.OS === "ios" ? { addsPunctuation: true } : {}),
       continuous: false,
     });
   }, []);

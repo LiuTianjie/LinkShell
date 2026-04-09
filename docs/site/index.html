@@ -397,6 +397,30 @@
       animation: blink 1s step-end infinite;
     }
 
+    .donate-qr {
+      display: flex;
+      gap: 32px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .donate-qr figure {
+      text-align: center;
+    }
+
+    .donate-qr img {
+      width: 180px;
+      height: 180px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-solid);
+    }
+
+    .donate-qr figcaption {
+      margin-top: 8px;
+      font-size: 14px;
+      color: var(--text-sec);
+    }
+
     @media (max-width: 640px) {
       h1 {
         font-size: 28px;
@@ -824,6 +848,36 @@
     </div>
   </section>
 
+  <!-- SPONSORS -->
+  <section class="sec" style="text-align:center" data-page="home">
+    <div class="c">
+      <h2 data-i18n="sponsorTitle">Sponsors</h2>
+      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="sponsorDesc">感谢以下赞助商对 LinkShell 的支持。</p>
+      <a href="https://ai18n.chat/" style="display:inline-block;border:1px solid var(--border-solid);border-radius:var(--radius);padding:16px 32px;text-decoration:none;transition:border-color .15s" onmouseover="this.style.borderColor='var(--text)'" onmouseout="this.style.borderColor='var(--border-solid)'">
+        <span style="font-weight:700;font-size:18px" class="ta">AI18N</span>
+        <span style="display:block;color:var(--text-sec);font-size:14px;margin-top:4px" data-i18n="sponsorAi18nDesc">Unified AI API Gateway</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- DONATE -->
+  <section class="sec" style="text-align:center" data-page="home">
+    <div class="c">
+      <h2 data-i18n="donateTitle">Buy Me a Coffee</h2>
+      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="donateDesc">如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。</p>
+      <div class="donate-qr">
+        <figure>
+          <img src="../assets/pay_wechat.jpg" alt="WeChat Pay" />
+          <figcaption data-i18n="donateWechat">微信支付</figcaption>
+        </figure>
+        <figure>
+          <img src="../assets/pay_ali.jpg" alt="Alipay" />
+          <figcaption data-i18n="donateAlipay">支付宝</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
   <!-- CTA -->
   <section style="text-align:center;padding:96px 0 48px" data-page="home">
     <div class="c">
@@ -964,6 +1018,13 @@
         ctaTitle: "准备好你的第一次漫游了吗？",
         ctaDesc: "放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。",
         footerText: "出于对 Vibe Coding 的热爱。© 2026 MIT 开源。",
+        donateTitle: "Buy Me a Coffee",
+        donateDesc: "如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。",
+        donateWechat: "微信支付",
+        donateAlipay: "支付宝",
+        sponsorTitle: "Sponsors",
+        sponsorDesc: "感谢以下赞助商对 LinkShell 的支持。",
+        sponsorAi18nDesc: "Unified AI API Gateway",
       },
       en: {
         pageTitle: "LinkShell | Desktop First, Roam Anywhere",
@@ -1079,6 +1140,13 @@
         ctaTitle: "Ready for your first roam?",
         ctaDesc: "Skip the heavy cloud VM migrations. Set up the relay in seconds and put your whole dev environment in your pocket.",
         footerText: "Crafted for Vibe Coding. © 2026 Open Source / MIT.",
+        donateTitle: "Buy Me a Coffee",
+        donateDesc: "If LinkShell helps you, consider buying the author a coffee.",
+        donateWechat: "WeChat Pay",
+        donateAlipay: "Alipay",
+        sponsorTitle: "Sponsors",
+        sponsorDesc: "Thanks to our sponsors for supporting LinkShell.",
+        sponsorAi18nDesc: "Unified AI API Gateway",
       },
     };
 
