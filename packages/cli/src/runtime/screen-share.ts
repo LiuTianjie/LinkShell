@@ -147,6 +147,16 @@ export class ScreenShare {
       const offer = await this.pc.createOffer();
       await this.pc.setLocalDescription(offer);
 
+      // Notify client that WebRTC mode is active BEFORE sending the offer,
+      // so the client mounts the WebView and is ready to process the offer.
+      this.options.onStatus(
+        createEnvelope({
+          type: "screen.status",
+          sessionId: this.options.sessionId,
+          payload: { active: true, mode: "webrtc" as const },
+        }),
+      );
+
       this.options.onSignal(
         createEnvelope({
           type: "screen.offer",

@@ -139,6 +139,8 @@ export function ScreenView({
   const [fullscreen, setFullscreen] = useState(false);
   const frameCountRef = useRef(0);
   const lastFrameIdRef = useRef(-1);
+  const webViewReady = useRef(false);
+  const pendingInjects = useRef<string[]>([]);
   const isLandscape = winW > winH;
 
   // FPS counter
@@ -158,23 +160,48 @@ export function ScreenView({
     }
   }, [screenFrame]);
 
+  // Safe inject: queues JS if WebView isn't loaded yet
+  const safeInject = useCallback((js: string) => {
+    if (webViewReady.current && webViewRef.current) {
+      webViewRef.current.injectJavaScript(js);
+    } else {
+      pendingInjects.current.push(js);
+    }
+  }, []);
+
+  const handleWebViewLoad = useCallback(() => {
+    webViewReady.current = true;
+    for (const js of pendingInjects.current) {
+      webViewRef.current?.injectJavaScript(js);
+    }
+    pendingInjects.current = [];
+  }, []);
+
+  // Reset readiness when WebView unmounts (mode switches away from webrtc)
+  useEffect(() => {
+    if (mode !== "webrtc") {
+      webViewReady.current = false;
+      pendingInjects.current = [];
+    }
+  }, [mode]);
+
   // Forward SDP offer to WebView
   useEffect(() => {
     if (pendingOffer && mode === "webrtc") {
       const js = `window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "offer", sdp: pendingOffer.sdp }))});true;`;
-      webViewRef.current?.injectJavaScript(js);
+      safeInject(js);
     }
-  }, [pendingOffer, mode]);
+  }, [pendingOffer, mode, safeInject]);
 
   // Forward ICE candidates to WebView
   useEffect(() => {
     if (pendingIceCandidates.length > 0 && mode === "webrtc") {
       for (const ice of pendingIceCandidates) {
         const js = `window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "ice", ...ice }))});true;`;
-        webViewRef.current?.injectJavaScript(js);
+        safeInject(js);
       }
     }
-  }, [pendingIceCandidates, mode]);
+  }, [pendingIceCandidates, mode, safeInject]);
 
   const handleWebViewMessage = useCallback((event: { nativeEvent: { data: string } }) => {
     try {
@@ -201,6 +228,8 @@ export function ScreenView({
 
   const handleStop = useCallback(() => {
     setPaused(false);
+    webViewReady.current = false;
+    pendingInjects.current = [];
     // Tell WebView to close RTCPeerConnection
     webViewRef.current?.injectJavaScript(`window.handleRNMessage('{"type":"close"}');true;`);
     setRtcState("new");
@@ -261,6 +290,7 @@ export function ScreenView({
           javaScriptEnabled
           domStorageEnabled
           onMessage={handleWebViewMessage}
+          onLoad={handleWebViewLoad}
           scrollEnabled={false}
           bounces={false}
           allowsInlineMediaPlayback

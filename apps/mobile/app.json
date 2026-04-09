@@ -35,14 +35,22 @@
           "root": "./src/app"
         }
       ],
-      "expo-speech-recognition"
+      "expo-speech-recognition",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableJetifier": true
+          }
+        }
+      ]
     ],
     "web": {
       "bundler": "metro"
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
-      "buildNumber": "6",
+      "buildNumber": "9",
       "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {
@@ -78,7 +86,8 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.bd.linkshell"
+      "package": "com.bd.linkshell",
+      "versionCode": 4
     },
     "extra": {
       "eas": {
