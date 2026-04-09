@@ -420,8 +420,14 @@
           <a
             href="#how"
             class="hover:text-brand transition-colors"
-            data-i18n="navDocs"
+            data-i18n="navHow"
             >工作原理</a
+          >
+          <a
+            href="#docs"
+            class="hover:text-brand transition-colors"
+            data-i18n="navDocs"
+            >文档</a
           >
           <a
             href="https://github.com/LiuTianjie/LinkShell"
@@ -1823,6 +1829,437 @@
         </div>
       </section>
 
+      <!-- Documentation Section -->
+      <section class="max-w-7xl mx-auto px-6 mb-32" id="docs">
+        <h2
+          class="text-3xl md:text-5xl font-bold tracking-tight mb-4 text-center"
+          data-i18n="docsSectionTitle"
+        >
+          文档
+        </h2>
+        <p
+          class="text-muted text-lg text-center mb-16 max-w-2xl mx-auto"
+          data-i18n="docsSectionDesc"
+        >
+          从安装到部署，你需要知道的一切。
+        </p>
+
+        <!-- Architecture -->
+        <div class="mb-20">
+          <h3
+            class="text-2xl font-bold mb-6 flex items-center gap-3"
+            data-i18n="docsArchTitle"
+          >
+            <span
+              class="w-8 h-8 rounded-lg bg-brand text-white flex items-center justify-center text-sm font-mono"
+              >01</span
+            >
+            架构概览
+          </h3>
+          <div class="bento-card">
+            <p
+              class="text-muted leading-relaxed mb-6"
+              data-i18n="docsArchDesc"
+            >
+              LinkShell 采用三层架构：本地 CLI 捕获 PTY
+              输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。
+            </p>
+            <div
+              class="bg-brand text-white font-mono text-xs p-6 rounded-xl overflow-x-auto"
+            >
+              <div class="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-0 text-center">
+                <div class="px-4 py-3 bg-white/10 rounded-lg">
+                  <div class="text-green-400 font-bold mb-1">CLI (Host)</div>
+                  <div class="text-gray-400 text-[11px]">PTY Bridge</div>
+                  <div class="text-gray-400 text-[11px]">Screen Share</div>
+                  <div class="text-gray-400 text-[11px]">Scrollback Buffer</div>
+                </div>
+                <div class="text-gray-500 text-lg hidden md:block">&nbsp;&larr; WebSocket &rarr;&nbsp;</div>
+                <div class="text-gray-500 text-lg md:hidden">&uarr; WebSocket &darr;</div>
+                <div class="px-4 py-3 bg-white/10 rounded-lg">
+                  <div class="text-purple-400 font-bold mb-1">Gateway</div>
+                  <div class="text-gray-400 text-[11px]">Session Relay</div>
+                  <div class="text-gray-400 text-[11px]">Pairing Service</div>
+                  <div class="text-gray-400 text-[11px]">Control Rights</div>
+                </div>
+                <div class="text-gray-500 text-lg hidden md:block">&nbsp;&larr; WebSocket &rarr;&nbsp;</div>
+                <div class="text-gray-500 text-lg md:hidden">&uarr; WebSocket &darr;</div>
+                <div class="px-4 py-3 bg-white/10 rounded-lg">
+                  <div class="text-blue-400 font-bold mb-1">Mobile App</div>
+                  <div class="text-gray-400 text-[11px]">xterm.js Render</div>
+                  <div class="text-gray-400 text-[11px]">QR Pairing</div>
+                  <div class="text-gray-400 text-[11px]">Multi-Gateway</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CLI Reference -->
+        <div class="mb-20">
+          <h3
+            class="text-2xl font-bold mb-6 flex items-center gap-3"
+            data-i18n="docsCliTitle"
+          >
+            <span
+              class="w-8 h-8 rounded-lg bg-brand text-white flex items-center justify-center text-sm font-mono"
+              >02</span
+            >
+            CLI 命令参考
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- start -->
+            <div class="bento-card">
+              <div class="font-mono text-sm font-bold text-brand mb-2">
+                linkshell start
+              </div>
+              <p class="text-muted text-sm mb-3" data-i18n="docsCmdStart">
+                启动桥接会话。自动启动内置网关，桥接 AI 代理进程并生成配对二维码。
+              </p>
+              <div
+                class="bg-brand/5 font-mono text-xs p-3 rounded-lg space-y-1 text-brand"
+              >
+                <div>--daemon &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;后台守护模式运行</div>
+                <div>--provider &nbsp;&nbsp;&nbsp;指定 AI 提供者 (claude / codex / custom)</div>
+                <div>--screen &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;启用远程桌面共享</div>
+                <div>--port &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;指定网关端口 (默认 8787)</div>
+              </div>
+            </div>
+            <!-- gateway -->
+            <div class="bento-card">
+              <div class="font-mono text-sm font-bold text-brand mb-2">
+                linkshell gateway
+              </div>
+              <p class="text-muted text-sm mb-3" data-i18n="docsCmdGateway">
+                单独启动网关服务器。适用于独立部署网关到远程服务器的场景。
+              </p>
+              <div
+                class="bg-brand/5 font-mono text-xs p-3 rounded-lg space-y-1 text-brand"
+              >
+                <div>--port &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;指定监听端口</div>
+                <div>--host &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;指定绑定地址</div>
+                <div>--daemon &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;后台守护模式运行</div>
+              </div>
+            </div>
+            <!-- setup -->
+            <div class="bento-card">
+              <div class="font-mono text-sm font-bold text-brand mb-2">
+                linkshell setup
+              </div>
+              <p class="text-muted text-sm mb-3" data-i18n="docsCmdSetup">
+                交互式初始化配置。引导你完成网关地址、AI 提供者等基础设置。
+              </p>
+              <div
+                class="bg-brand/5 font-mono text-xs p-3 rounded-lg text-brand"
+              >
+                无额外参数，交互式引导完成配置
+              </div>
+            </div>
+            <!-- doctor -->
+            <div class="bento-card">
+              <div class="font-mono text-sm font-bold text-brand mb-2">
+                linkshell doctor
+              </div>
+              <p class="text-muted text-sm mb-3" data-i18n="docsCmdDoctor">
+                环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。
+              </p>
+              <div
+                class="bg-brand/5 font-mono text-xs p-3 rounded-lg text-brand"
+              >
+                自动检测并报告所有环境问题
+              </div>
+            </div>
+            <!-- status -->
+            <div class="bento-card">
+              <div class="font-mono text-sm font-bold text-brand mb-2">
+                linkshell status
+              </div>
+              <p class="text-muted text-sm mb-3" data-i18n="docsCmdStatus">
+                查看当前运行状态。显示活跃会话、网关连接状态和守护进程信息。
+              </p>
+              <div
+                class="bg-brand/5 font-mono text-xs p-3 rounded-lg text-brand"
+              >
+                显示会话 ID、连接状态、运行时长
+              </div>
+            </div>
+            <!-- stop -->
+            <div class="bento-card">
+              <div class="font-mono text-sm font-bold text-brand mb-2">
+                linkshell stop
+              </div>
+              <p class="text-muted text-sm mb-3" data-i18n="docsCmdStop">
+                停止守护进程。优雅关闭桥接会话和内置网关。
+              </p>
+              <div
+                class="bg-brand/5 font-mono text-xs p-3 rounded-lg text-brand"
+              >
+                安全断开所有连接并清理资源
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Deployment -->
+        <div class="mb-20">
+          <h3
+            class="text-2xl font-bold mb-6 flex items-center gap-3"
+            data-i18n="docsDeployTitle"
+          >
+            <span
+              class="w-8 h-8 rounded-lg bg-brand text-white flex items-center justify-center text-sm font-mono"
+              >03</span
+            >
+            部署方式
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- Local -->
+            <div class="bento-card">
+              <div
+                class="w-12 h-12 rounded-xl bg-green-100 border border-green-200 flex items-center justify-center mb-4"
+              >
+                <svg
+                  class="w-6 h-6 text-green-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.5"
+                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                  />
+                </svg>
+              </div>
+              <h4 class="font-bold mb-2" data-i18n="docsDeployLocal">
+                本地直连（最简单）
+              </h4>
+              <p class="text-muted text-sm mb-4" data-i18n="docsDeployLocalDesc">
+                CLI 内置网关，同一局域网内手机直连电脑。零配置，开箱即用。
+              </p>
+              <div
+                class="bg-brand text-white font-mono text-xs p-3 rounded-lg"
+              >
+                <div class="text-green-400">$</div>
+                <div>npm i -g linkshell-cli</div>
+                <div>linkshell start --daemon</div>
+              </div>
+            </div>
+            <!-- Remote Server -->
+            <div class="bento-card border-2 border-brand">
+              <div
+                class="w-12 h-12 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center mb-4"
+              >
+                <svg
+                  class="w-6 h-6 text-purple-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.5"
+                    d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
+                  />
+                </svg>
+              </div>
+              <h4 class="font-bold mb-2" data-i18n="docsDeployRemote">
+                远程服务器
+              </h4>
+              <p class="text-muted text-sm mb-4" data-i18n="docsDeployRemoteDesc">
+                将网关部署到公网服务器，配合 Nginx 反向代理 + HTTPS，跨网络访问。
+              </p>
+              <div
+                class="bg-brand text-white font-mono text-xs p-3 rounded-lg space-y-1"
+              >
+                <div class="text-gray-400"># 服务器端</div>
+                <div>linkshell gateway --daemon</div>
+                <div class="text-gray-400 mt-2"># 本地</div>
+                <div>linkshell start \</div>
+                <div>&nbsp; --gateway wss://your.server</div>
+              </div>
+            </div>
+            <!-- Docker -->
+            <div class="bento-card">
+              <div
+                class="w-12 h-12 rounded-xl bg-blue-100 border border-blue-200 flex items-center justify-center mb-4"
+              >
+                <svg
+                  class="w-6 h-6 text-blue-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.5"
+                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                  />
+                </svg>
+              </div>
+              <h4 class="font-bold mb-2" data-i18n="docsDeployDocker">
+                Docker 部署
+              </h4>
+              <p class="text-muted text-sm mb-4" data-i18n="docsDeployDockerDesc">
+                使用 Docker Compose 一键部署网关。最低要求 1 核 512MB 内存。
+              </p>
+              <div
+                class="bg-brand text-white font-mono text-xs p-3 rounded-lg"
+              >
+                <div>docker compose up -d</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Protocol & Reliability -->
+        <div class="mb-20">
+          <h3
+            class="text-2xl font-bold mb-6 flex items-center gap-3"
+            data-i18n="docsProtocolTitle"
+          >
+            <span
+              class="w-8 h-8 rounded-lg bg-brand text-white flex items-center justify-center text-sm font-mono"
+              >04</span
+            >
+            协议与可靠性
+          </h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bento-card text-center">
+              <div class="text-3xl font-bold text-brand mb-2">16</div>
+              <div class="text-sm text-muted" data-i18n="docsProtoMsgTypes">
+                消息类型（Zod 校验）
+              </div>
+            </div>
+            <div class="bento-card text-center">
+              <div class="text-3xl font-bold text-brand mb-2">ACK</div>
+              <div class="text-sm text-muted" data-i18n="docsProtoAck">
+                双层缓冲确认机制
+              </div>
+            </div>
+            <div class="bento-card text-center">
+              <div class="text-3xl font-bold text-brand mb-2">1000</div>
+              <div class="text-sm text-muted" data-i18n="docsProtoScrollback">
+                消息回滚缓冲区
+              </div>
+            </div>
+            <div class="bento-card text-center">
+              <div class="text-3xl font-bold text-brand mb-2">15s</div>
+              <div class="text-sm text-muted" data-i18n="docsProtoHeartbeat">
+                心跳检测间隔
+              </div>
+            </div>
+          </div>
+          <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bento-card">
+              <h4 class="font-bold mb-3" data-i18n="docsReliabilityTitle">
+                可靠性保障
+              </h4>
+              <ul class="space-y-2 text-sm text-muted">
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+                  <span data-i18n="docsRel1">指数退避自动重连（CLI 和 App 双端）</span>
+                </li>
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+                  <span data-i18n="docsRel2">会话持久化（主机断连后保持 60 秒）</span>
+                </li>
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+                  <span data-i18n="docsRel3">空闲会话 30 分钟自动清理</span>
+                </li>
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+                  <span data-i18n="docsRel4">协议版本协商，向前兼容</span>
+                </li>
+              </ul>
+            </div>
+            <div class="bento-card">
+              <h4 class="font-bold mb-3" data-i18n="docsControlTitle">
+                控制模型
+              </h4>
+              <ul class="space-y-2 text-sm text-muted">
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                  <span data-i18n="docsCtrl1">单控制者模型，防止多端输入冲突</span>
+                </li>
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                  <span data-i18n="docsCtrl2">控制权请求 / 释放 / 转移机制</span>
+                </li>
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                  <span data-i18n="docsCtrl3">6 位配对码 + QR 码安全配对</span>
+                </li>
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                  <span data-i18n="docsCtrl4">CORS 和速率限制保护</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- FAQ -->
+        <div>
+          <h3
+            class="text-2xl font-bold mb-6 flex items-center gap-3"
+            data-i18n="docsFaqTitle"
+          >
+            <span
+              class="w-8 h-8 rounded-lg bg-brand text-white flex items-center justify-center text-sm font-mono"
+              >05</span
+            >
+            常见问题
+          </h3>
+          <div class="space-y-4">
+            <div class="bento-card">
+              <h4 class="font-bold mb-2" data-i18n="docsFaq1Q">
+                需要公网服务器吗？
+              </h4>
+              <p class="text-muted text-sm" data-i18n="docsFaq1A">
+                不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。
+              </p>
+            </div>
+            <div class="bento-card">
+              <h4 class="font-bold mb-2" data-i18n="docsFaq2Q">
+                支持哪些 AI 代理？
+              </h4>
+              <p class="text-muted text-sm" data-i18n="docsFaq2A">
+                目前支持 Claude Code、OpenAI Codex，以及任意自定义 Shell 进程。通过 --provider 参数指定。
+              </p>
+            </div>
+            <div class="bento-card">
+              <h4 class="font-bold mb-2" data-i18n="docsFaq3Q">
+                手机 App 在哪里下载？
+              </h4>
+              <p class="text-muted text-sm" data-i18n="docsFaq3A">
+                iOS 版本通过 TestFlight 分发，Android 版本可从 GitHub Releases 下载 APK。正式版本上架 App Store 和 Google Play 后会在此更新。
+              </p>
+            </div>
+            <div class="bento-card">
+              <h4 class="font-bold mb-2" data-i18n="docsFaq4Q">
+                数据安全吗？会经过第三方服务器吗？
+              </h4>
+              <p class="text-muted text-sm" data-i18n="docsFaq4A">
+                本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。网关不存储任何终端数据。
+              </p>
+            </div>
+            <div class="bento-card">
+              <h4 class="font-bold mb-2" data-i18n="docsFaq5Q">
+                远程桌面功能如何工作？
+              </h4>
+              <p class="text-muted text-sm" data-i18n="docsFaq5A">
+                使用 --screen 参数启动后，通过 WebRTC 以 30fps 实时传输桌面画面。网络条件不佳时自动降级为截图流模式，确保始终可用。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Final CTA -->
       <section class="max-w-4xl mx-auto px-6 text-center mb-12">
         <div class="bg-surface border border-border rounded-[2rem] p-12">
@@ -1869,8 +2306,14 @@
           <a
             href="#how"
             class="text-muted hover:text-brand transition-colors"
-            data-i18n="navDocs"
+            data-i18n="navHow"
             >原理</a
+          >
+          <a
+            href="#docs"
+            class="text-muted hover:text-brand transition-colors"
+            data-i18n="navDocs"
+            >文档</a
           >
         </div>
       </div>
@@ -1880,7 +2323,8 @@
       const translations = {
         zh: {
           pageTitle: "LinkShell | 始于桌面，随处接管",
-          navDocs: "工作原理",
+          navHow: "工作原理",
+          navDocs: "文档",
           navGithub: "GitHub",
           heroBadge: "LinkShell v1.0 直连就绪",
           heroTitle1: "终端漫游",
@@ -1940,12 +2384,65 @@
           projFeature2: "独立终端 — 每个项目拥有独立的命令执行环境",
           projFeature3: "最近项目 — 智能记忆常用项目，一键直达",
           projFeature4: "实时状态 — 并行任务进度一览无余",
+          docsSectionTitle: "文档",
+          docsSectionDesc: "从安装到部署，你需要知道的一切。",
+          docsArchTitle: "01 架构概览",
+          docsArchDesc:
+            "LinkShell 采用三层架构：本地 CLI 捕获 PTY 输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。",
+          docsCliTitle: "02 CLI 命令参考",
+          docsCmdStart: "启动桥接会话。自动启动内置网关，桥接 AI 代理进程并生成配对二维码。",
+          docsCmdGateway: "单独启动网关服务器。适用于独立部署网关到远程服务器的场景。",
+          docsCmdSetup: "交互式初始化配置。引导你完成网关地址、AI 提供者等基础设置。",
+          docsCmdDoctor: "环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。",
+          docsCmdStatus: "查看当前运行状态。显示活跃会话、网关连接状态和守护进程信息。",
+          docsCmdStop: "停止守护进程。优雅关闭桥接会话和内置网关。",
+          docsDeployTitle: "03 部署方式",
+          docsDeployLocal: "本地直连（最简单）",
+          docsDeployLocalDesc: "CLI 内置网关，同一局域网内手机直连电脑。零配置，开箱即用。",
+          docsDeployRemote: "远程服务器",
+          docsDeployRemoteDesc:
+            "将网关部署到公网服务器，配合 Nginx 反向代理 + HTTPS，跨网络访问。",
+          docsDeployDocker: "Docker 部署",
+          docsDeployDockerDesc:
+            "使用 Docker Compose 一键部署网关。最低要求 1 核 512MB 内存。",
+          docsProtocolTitle: "04 协议与可靠性",
+          docsProtoMsgTypes: "消息类型（Zod 校验）",
+          docsProtoAck: "双层缓冲确认机制",
+          docsProtoScrollback: "消息回滚缓冲区",
+          docsProtoHeartbeat: "心跳检测间隔",
+          docsReliabilityTitle: "可靠性保障",
+          docsRel1: "指数退避自动重连（CLI 和 App 双端）",
+          docsRel2: "会话持久化（主机断连后保持 60 秒）",
+          docsRel3: "空闲会话 30 分钟自动清理",
+          docsRel4: "协议版本协商，向前兼容",
+          docsControlTitle: "控制模型",
+          docsCtrl1: "单控制者模型，防止多端输入冲突",
+          docsCtrl2: "控制权请求 / 释放 / 转移机制",
+          docsCtrl3: "6 位配对码 + QR 码安全配对",
+          docsCtrl4: "CORS 和速率限制保护",
+          docsFaqTitle: "05 常见问题",
+          docsFaq1Q: "需要公网服务器吗？",
+          docsFaq1A:
+            "不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。",
+          docsFaq2Q: "支持哪些 AI 代理？",
+          docsFaq2A:
+            "目前支持 Claude Code、OpenAI Codex，以及任意自定义 Shell 进程。通过 --provider 参数指定。",
+          docsFaq3Q: "手机 App 在哪里下载？",
+          docsFaq3A:
+            "iOS 版本通过 TestFlight 分发，Android 版本可从 GitHub Releases 下载 APK。正式版本上架 App Store 和 Google Play 后会在此更新。",
+          docsFaq4Q: "数据安全吗？会经过第三方服务器吗？",
+          docsFaq4A:
+            "本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。网关不存储任何终端数据。",
+          docsFaq5Q: "远程桌面功能如何工作？",
+          docsFaq5A:
+            "使用 --screen 参数启动后，通过 WebRTC 以 30fps 实时传输桌面画面。网络条件不佳时自动降级为截图流模式，确保始终可用。",
           footerText:
             "出于对 Vibe Coding 的热爱。© 2026 基于 MIT 协议开源。探索自由编程边界。",
         },
         en: {
           pageTitle: "LinkShell | Desktop First, Roam Anywhere",
-          navDocs: "How It Works",
+          navHow: "How It Works",
+          navDocs: "Docs",
           navGithub: "GitHub",
           heroBadge: "LinkShell v1.0 is Live",
           heroTitle1: "Terminal Bridge",
@@ -2013,6 +2510,66 @@
           projFeature3:
             "Recent Projects — smart memory of frequently used projects",
           projFeature4: "Live Status — parallel task progress at a glance",
+          docsSectionTitle: "Documentation",
+          docsSectionDesc:
+            "Everything you need to know, from installation to deployment.",
+          docsArchTitle: "01 Architecture Overview",
+          docsArchDesc:
+            "LinkShell uses a three-tier architecture: the local CLI captures PTY output, relays it through a gateway, and renders a full terminal on mobile. All computation stays local — your phone is just a remote window.",
+          docsCliTitle: "02 CLI Command Reference",
+          docsCmdStart:
+            "Start a bridge session. Auto-starts the built-in gateway, bridges the AI agent process, and generates a pairing QR code.",
+          docsCmdGateway:
+            "Start the gateway server standalone. For deploying the gateway on a remote server independently.",
+          docsCmdSetup:
+            "Interactive configuration wizard. Guides you through gateway address, AI provider, and other basic settings.",
+          docsCmdDoctor:
+            "Environment diagnostic tool. Checks Node.js version, dependency integrity, network connectivity, and more.",
+          docsCmdStatus:
+            "View current running status. Shows active sessions, gateway connection state, and daemon info.",
+          docsCmdStop:
+            "Stop the daemon. Gracefully shuts down bridge sessions and the built-in gateway.",
+          docsDeployTitle: "03 Deployment Options",
+          docsDeployLocal: "Local Direct (Simplest)",
+          docsDeployLocalDesc:
+            "CLI has a built-in gateway. Phone connects directly to your computer on the same LAN. Zero config, works out of the box.",
+          docsDeployRemote: "Remote Server",
+          docsDeployRemoteDesc:
+            "Deploy the gateway to a public server with Nginx reverse proxy + HTTPS for cross-network access.",
+          docsDeployDocker: "Docker Deploy",
+          docsDeployDockerDesc:
+            "One-command gateway deployment with Docker Compose. Minimum 1 core, 512MB RAM.",
+          docsProtocolTitle: "04 Protocol & Reliability",
+          docsProtoMsgTypes: "Message Types (Zod validated)",
+          docsProtoAck: "Dual-layer ACK buffering",
+          docsProtoScrollback: "Message scrollback buffer",
+          docsProtoHeartbeat: "Heartbeat detection interval",
+          docsReliabilityTitle: "Reliability Guarantees",
+          docsRel1: "Exponential backoff auto-reconnect (both CLI and App)",
+          docsRel2: "Session persistence (60s after host disconnect)",
+          docsRel3: "Idle session auto-cleanup after 30 minutes",
+          docsRel4: "Protocol version negotiation, forward compatible",
+          docsControlTitle: "Control Model",
+          docsCtrl1: "Single controller model prevents multi-device input conflicts",
+          docsCtrl2: "Control rights request / release / transfer mechanism",
+          docsCtrl3: "6-digit pairing code + QR code secure pairing",
+          docsCtrl4: "CORS and rate limiting protection",
+          docsFaqTitle: "05 FAQ",
+          docsFaq1Q: "Do I need a public server?",
+          docsFaq1A:
+            "No. The CLI has a built-in gateway — your phone connects directly to your computer on the same LAN. You only need a public server if you want cross-network access.",
+          docsFaq2Q: "Which AI agents are supported?",
+          docsFaq2A:
+            "Currently supports Claude Code, OpenAI Codex, and any custom shell process. Specify via the --provider flag.",
+          docsFaq3Q: "Where can I download the mobile app?",
+          docsFaq3A:
+            "iOS is distributed via TestFlight, Android APK is available from GitHub Releases. App Store and Google Play listings will be updated here once available.",
+          docsFaq4Q: "Is my data secure? Does it pass through third-party servers?",
+          docsFaq4A:
+            "In local mode, data stays entirely within your LAN. In remote mode, data passes through your own self-hosted gateway relay — never through any third-party server. The gateway stores no terminal data.",
+          docsFaq5Q: "How does the remote desktop feature work?",
+          docsFaq5A:
+            "With the --screen flag, your desktop is streamed at 30fps via WebRTC. On poor network conditions, it automatically falls back to screenshot streaming to ensure availability.",
           footerText:
             "Crafted for Vibe Coding. © 2026 Open Source / MIT. Pushing the boundaries of freedom.",
         },
