@@ -6,7 +6,32 @@
 
 在手机上远程查看和控制本地 Claude Code / Codex 终端会话。
 
-官网：https://liutianjie.github.io/LinkShell/
+<p align="center">
+  <a href="https://liutianjie.github.io/LinkShell/">🌐 官网</a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">📦 Releases</a>
+</p>
+
+## 📲 下载 App
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://liutianjie.github.io/LinkShell/">
+        <img src="https://img.shields.io/badge/iOS-App_Store-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download on App Store" />
+      </a>
+      <br /><sub>iOS 14+</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">
+        <img src="https://img.shields.io/badge/Android-APK_下载-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" />
+      </a>
+      <br /><sub>Android 8+</sub>
+    </td>
+  </tr>
+</table>
+
+> Android 版本可从 GitHub Releases 下载 APK，iOS 版本即将上架 App Store。
 
 ## 一条命令开始
 
