@@ -9,6 +9,7 @@ export default function SessionsTab() {
       gatewayBaseUrl={ctx.gatewayBaseUrl}
       onSelectSession={ctx.handleConnectSession}
       refreshKey={ctx.sessionRefreshKey}
+      deviceToken={ctx.manager.deviceToken}
     />
   );
 }

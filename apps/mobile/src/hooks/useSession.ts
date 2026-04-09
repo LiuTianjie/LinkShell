@@ -6,6 +6,7 @@ import {
   serializeEnvelope,
 } from "@linkshell/protocol";
 import type { Envelope } from "@linkshell/protocol";
+import { getDeviceToken, setDeviceToken } from "../storage/device-token";
 
 export type ConnectionStatus =
   | "idle"
@@ -73,7 +74,11 @@ export interface SessionHandle {
     frameId: number;
   } | null;
   pendingOffer: { sdp: string } | null;
-  pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
+  pendingIceCandidates: {
+    candidate: string;
+    sdpMid?: string | null;
+    sdpMLineIndex?: number | null;
+  }[];
   claim: (pairingCode: string) => Promise<string | null>;
   connectToSession: (
     sessionId: string,
@@ -86,7 +91,10 @@ export interface SessionHandle {
   releaseControl: () => void;
   startScreen: (fps: number, quality: number, scale: number) => void;
   stopScreen: () => void;
-  sendScreenSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
+  sendScreenSignal: (
+    type: "screen.answer" | "screen.ice",
+    payload: any,
+  ) => void;
   reconnect: () => void;
   disconnect: () => void;
 }
@@ -119,8 +127,16 @@ export function useSession({
     height: number;
     frameId: number;
   } | null>(null);
-  const [pendingOffer, setPendingOffer] = useState<{ sdp: string } | null>(null);
-  const [pendingIceCandidates, setPendingIceCandidates] = useState<{ candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[]>([]);
+  const [pendingOffer, setPendingOffer] = useState<{ sdp: string } | null>(
+    null,
+  );
+  const [pendingIceCandidates, setPendingIceCandidates] = useState<
+    {
+      candidate: string;
+      sdpMid?: string | null;
+      sdpMLineIndex?: number | null;
+    }[]
+  >([]);
 
   const socketRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -128,7 +144,14 @@ export function useSession({
   const healthProbeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempts = useRef(0);
   const deviceIdRef = useRef(generateId());
+  const deviceTokenRef = useRef<string | null>(null);
   const sessionIdRef = useRef("");
+
+  useEffect(() => {
+    getDeviceToken().then((t) => {
+      deviceTokenRef.current = t;
+    });
+  }, []);
   const lastAckedSeqRef = useRef(-1);
   const terminalSnapshotRef = useRef<TerminalStreamSnapshot>({
     sessionId: "",
@@ -217,7 +240,10 @@ export function useSession({
     const base = (gatewayOverride ?? activeGatewayBaseUrlRef.current)
       .replace(/^https:/, "wss:")
       .replace(/^http:/, "ws:");
-    return `${base}/ws?sessionId=${encodeURIComponent(sid)}&role=client&deviceId=${deviceIdRef.current}`;
+    const tokenParam = deviceTokenRef.current
+      ? `&token=${encodeURIComponent(deviceTokenRef.current)}`
+      : "";
+    return `${base}/ws?sessionId=${encodeURIComponent(sid)}&role=client&deviceId=${deviceIdRef.current}${tokenParam}`;
   }, []);
 
   const stopHeartbeat = useCallback(() => {
@@ -285,8 +311,12 @@ export function useSession({
         if (healthProbeRef.current) clearTimeout(healthProbeRef.current);
         (async () => {
           try {
+            const headers: Record<string, string> = {};
+            const token = await getDeviceToken();
+            if (token) headers["Authorization"] = `Bearer ${token}`;
             const res = await fetch(
               `${resolvedGateway}/sessions/${encodeURIComponent(sid)}`,
+              { headers },
             );
             if (!res.ok) {
               // Can't verify — fallback to connected
@@ -472,7 +502,14 @@ export function useSession({
           }
           case "screen.ice": {
             const p = parseTypedPayload("screen.ice", envelope.payload);
-            setPendingIceCandidates((prev) => [...prev, { candidate: p.candidate, sdpMid: p.sdpMid, sdpMLineIndex: p.sdpMLineIndex }]);
+            setPendingIceCandidates((prev) => [
+              ...prev,
+              {
+                candidate: p.candidate,
+                sdpMid: p.sdpMid,
+                sdpMLineIndex: p.sdpMLineIndex,
+              },
+            ]);
             break;
           }
           default:
@@ -529,13 +566,18 @@ export function useSession({
       const claimUrl = `${gatewayBaseUrl}/pairings/claim`;
 
       try {
+        const currentToken = deviceTokenRef.current ?? (await getDeviceToken());
         const res = await fetch(claimUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ pairingCode }),
+          body: JSON.stringify({
+            pairingCode,
+            deviceToken: currentToken ?? undefined,
+          }),
         });
         const body = (await res.json()) as {
           sessionId?: string;
+          deviceToken?: string;
           error?: string;
         };
         if (!res.ok || !body.sessionId) {
@@ -545,6 +587,10 @@ export function useSession({
             ("error:" + (body.error ?? "claim_failed")) as ConnectionStatus,
           );
           return null;
+        }
+        if (body.deviceToken) {
+          deviceTokenRef.current = body.deviceToken;
+          setDeviceToken(body.deviceToken);
         }
         manualDisconnectRef.current = false;
         setConnectionDetail(null);
@@ -648,15 +694,18 @@ export function useSession({
     setPendingIceCandidates([]);
   }, [sendRaw]);
 
-  const sendScreenSignal = useCallback((type: "screen.answer" | "screen.ice", payload: any) => {
-    sendRaw(
-      createEnvelope({
-        type,
-        sessionId: sessionIdRef.current,
-        payload,
-      }),
-    );
-  }, [sendRaw]);
+  const sendScreenSignal = useCallback(
+    (type: "screen.answer" | "screen.ice", payload: any) => {
+      sendRaw(
+        createEnvelope({
+          type,
+          sessionId: sessionIdRef.current,
+          payload,
+        }),
+      );
+    },
+    [sendRaw],
+  );
 
   const sendImage = useCallback(
     (base64Data: string, filename: string) => {

@@ -12,6 +12,7 @@ import type {
   TerminalStreamEvent,
   TerminalStreamSnapshot,
 } from "./useSession";
+import { ensureDeviceToken, setDeviceToken } from "../storage/device-token";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -66,10 +67,23 @@ export interface SessionInfo {
   terminals: Map<string, TerminalInfo>;
   activeTerminalId: string | null;
   terminalStream: TerminalStream; // active terminal's stream (for backward compat)
-  screenStatus: { active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string };
-  screenFrame: { data: string; width: number; height: number; frameId: number } | null;
+  screenStatus: {
+    active: boolean;
+    mode: "webrtc" | "fallback" | "off";
+    error?: string;
+  };
+  screenFrame: {
+    data: string;
+    width: number;
+    height: number;
+    frameId: number;
+  } | null;
   pendingOffer: { sdp: string } | null;
-  pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
+  pendingIceCandidates: {
+    candidate: string;
+    sdpMid?: string | null;
+    sdpMLineIndex?: number | null;
+  }[];
   browseResult: BrowseResult | null;
 }
 
@@ -86,7 +100,10 @@ export interface SessionManagerHandle {
   releaseControl: () => void;
   startScreen: (fps: number, quality: number, scale: number) => void;
   stopScreen: () => void;
-  sendScreenSignal: (type: "screen.answer" | "screen.ice", payload: any) => void;
+  sendScreenSignal: (
+    type: "screen.answer" | "screen.ice",
+    payload: any,
+  ) => void;
   reconnect: () => void;
   disconnectSession: (sessionId: string) => void;
   disconnectAll: () => void;
@@ -103,9 +120,23 @@ export interface SessionManagerHandle {
   /** Remove an exited terminal from the local map */
   removeTerminal: (terminalId: string) => void;
   /** Register callback for terminal.status changes (for Live Activity fast path) */
-  onStatusChange: (cb: ((sessionId: string, terminalId: string, status: TerminalInfo["structuredStatus"]) => void) | null) => void;
+  onStatusChange: (
+    cb:
+      | ((
+          sessionId: string,
+          terminalId: string,
+          status: TerminalInfo["structuredStatus"],
+        ) => void)
+      | null,
+  ) => void;
   /** Send permission decision back to CLI hook server */
-  sendPermissionDecision: (sessionId: string, terminalId: string, requestId: string, decision: "allow" | "deny") => void;
+  sendPermissionDecision: (
+    sessionId: string,
+    terminalId: string,
+    requestId: string,
+    decision: "allow" | "deny",
+  ) => void;
+  deviceToken: string | null;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -181,10 +212,23 @@ interface InternalSession {
   terminalListeners: Set<(event: TerminalStreamEvent) => void>;
   terminalStream: TerminalStream;
   // Screen
-  screenStatus: { active: boolean; mode: "webrtc" | "fallback" | "off"; error?: string };
-  screenFrame: { data: string; width: number; height: number; frameId: number } | null;
+  screenStatus: {
+    active: boolean;
+    mode: "webrtc" | "fallback" | "off";
+    error?: string;
+  };
+  screenFrame: {
+    data: string;
+    width: number;
+    height: number;
+    frameId: number;
+  } | null;
   pendingOffer: { sdp: string } | null;
-  pendingIceCandidates: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }[];
+  pendingIceCandidates: {
+    candidate: string;
+    sdpMid?: string | null;
+    sdpMLineIndex?: number | null;
+  }[];
   // Pending status for terminals not yet recreated (during reconnect)
   pendingStatusByTerminal: Map<string, InternalTerminal["structuredStatus"]>;
   chunkBuf: {
@@ -197,8 +241,16 @@ interface InternalSession {
   browseResult: BrowseResult | null;
 }
 
-function createInternalTerminal(terminalId: string, cwd: string, projectName: string, provider: string): InternalTerminal {
-  const snapshot: TerminalStreamSnapshot = { sessionId: terminalId, chunks: [] };
+function createInternalTerminal(
+  terminalId: string,
+  cwd: string,
+  projectName: string,
+  provider: string,
+): InternalTerminal {
+  const snapshot: TerminalStreamSnapshot = {
+    sessionId: terminalId,
+    chunks: [],
+  };
   const listeners = new Set<(event: TerminalStreamEvent) => void>();
   return {
     terminalId,
@@ -209,16 +261,25 @@ function createInternalTerminal(terminalId: string, cwd: string, projectName: st
     snapshot,
     listeners,
     stream: {
-      getSnapshot: () => ({ sessionId: snapshot.sessionId, chunks: [...snapshot.chunks] }),
+      getSnapshot: () => ({
+        sessionId: snapshot.sessionId,
+        chunks: [...snapshot.chunks],
+      }),
       subscribe: (listener) => {
         listeners.add(listener);
-        return () => { listeners.delete(listener); };
+        return () => {
+          listeners.delete(listener);
+        };
       },
     },
   };
 }
 
-function createInternalSession(sessionId: string, gatewayUrl: string, deviceId: string): InternalSession {
+function createInternalSession(
+  sessionId: string,
+  gatewayUrl: string,
+  deviceId: string,
+): InternalSession {
   const snapshot: TerminalStreamSnapshot = { sessionId, chunks: [] };
   const listeners = new Set<(event: TerminalStreamEvent) => void>();
   return {
@@ -244,10 +305,15 @@ function createInternalSession(sessionId: string, gatewayUrl: string, deviceId: 
     terminalSnapshot: snapshot,
     terminalListeners: listeners,
     terminalStream: {
-      getSnapshot: () => ({ sessionId: snapshot.sessionId, chunks: [...snapshot.chunks] }),
+      getSnapshot: () => ({
+        sessionId: snapshot.sessionId,
+        chunks: [...snapshot.chunks],
+      }),
       subscribe: (listener) => {
         listeners.add(listener);
-        return () => { listeners.delete(listener); };
+        return () => {
+          listeners.delete(listener);
+        };
       },
     },
     screenStatus: { active: false, mode: "off" },
@@ -274,7 +340,9 @@ function toSessionInfo(s: InternalSession): SessionInfo {
     });
   }
   // Use active terminal's stream if available, otherwise legacy stream
-  const activeTerm = s.activeTerminalId ? s.terminals.get(s.activeTerminalId) : undefined;
+  const activeTerm = s.activeTerminalId
+    ? s.terminals.get(s.activeTerminalId)
+    : undefined;
   return {
     sessionId: s.sessionId,
     gatewayUrl: s.gatewayUrl,
@@ -307,7 +375,21 @@ export function useSessionManager(): SessionManagerHandle {
   const tick = useCallback(() => setTick((t) => t + 1), []);
 
   const deviceIdRef = useRef(generateId());
-  const statusChangeCbRef = useRef<((sessionId: string, terminalId: string, status: TerminalInfo["structuredStatus"]) => void) | null>(null);
+  const deviceTokenRef = useRef<string | null>(null);
+  const statusChangeCbRef = useRef<
+    | ((
+        sessionId: string,
+        terminalId: string,
+        status: TerminalInfo["structuredStatus"],
+      ) => void)
+    | null
+  >(null);
+
+  useEffect(() => {
+    ensureDeviceToken().then((token) => {
+      deviceTokenRef.current = token;
+    });
+  }, []);
 
   // ── Helpers ────────────────────────────────────────────────────
 
@@ -315,7 +397,11 @@ export function useSessionManager(): SessionManagerHandle {
     for (const listener of s.terminalListeners) listener(event);
   };
 
-  const emitTerminalForId = (s: InternalSession, terminalId: string, event: TerminalStreamEvent) => {
+  const emitTerminalForId = (
+    s: InternalSession,
+    terminalId: string,
+    event: TerminalStreamEvent,
+  ) => {
     const term = s.terminals.get(terminalId);
     if (term) {
       for (const listener of term.listeners) listener(event);
@@ -326,23 +412,37 @@ export function useSessionManager(): SessionManagerHandle {
     }
   };
 
-  const appendChunk = (s: InternalSession, terminalId: string, chunk: string) => {
+  const appendChunk = (
+    s: InternalSession,
+    terminalId: string,
+    chunk: string,
+  ) => {
     // Append to per-terminal stream
     const term = s.terminals.get(terminalId);
     if (term) {
       term.snapshot.chunks.push(chunk);
       if (term.snapshot.chunks.length > TERMINAL_REPLAY_LIMIT) {
-        term.snapshot.chunks.splice(0, term.snapshot.chunks.length - TERMINAL_REPLAY_LIMIT);
+        term.snapshot.chunks.splice(
+          0,
+          term.snapshot.chunks.length - TERMINAL_REPLAY_LIMIT,
+        );
       }
     }
     // Append to legacy stream if active terminal
     if (s.activeTerminalId === terminalId || !s.activeTerminalId) {
       s.terminalSnapshot.chunks.push(chunk);
       if (s.terminalSnapshot.chunks.length > TERMINAL_REPLAY_LIMIT) {
-        s.terminalSnapshot.chunks.splice(0, s.terminalSnapshot.chunks.length - TERMINAL_REPLAY_LIMIT);
+        s.terminalSnapshot.chunks.splice(
+          0,
+          s.terminalSnapshot.chunks.length - TERMINAL_REPLAY_LIMIT,
+        );
       }
     }
-    emitTerminalForId(s, terminalId, { type: "append", sessionId: s.sessionId, chunk });
+    emitTerminalForId(s, terminalId, {
+      type: "append",
+      sessionId: s.sessionId,
+      chunk,
+    });
   };
 
   const sendRaw = (s: InternalSession, envelope: Envelope) => {
@@ -352,33 +452,48 @@ export function useSessionManager(): SessionManagerHandle {
   };
 
   const stopHeartbeat = (s: InternalSession) => {
-    if (s.heartbeatTimer) { clearInterval(s.heartbeatTimer); s.heartbeatTimer = null; }
+    if (s.heartbeatTimer) {
+      clearInterval(s.heartbeatTimer);
+      s.heartbeatTimer = null;
+    }
   };
 
   const startHeartbeat = (s: InternalSession) => {
     stopHeartbeat(s);
     s.heartbeatTimer = setInterval(() => {
-      sendRaw(s, createEnvelope({
-        type: "session.heartbeat",
-        sessionId: s.sessionId,
-        payload: { ts: Date.now() },
-      }));
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "session.heartbeat",
+          sessionId: s.sessionId,
+          payload: { ts: Date.now() },
+        }),
+      );
     }, HEARTBEAT_INTERVAL);
   };
 
   const requestControl = (s: InternalSession) => {
-    sendRaw(s, createEnvelope({
-      type: "control.claim",
-      sessionId: s.sessionId,
-      payload: { deviceId: s.deviceId },
-    }));
+    sendRaw(
+      s,
+      createEnvelope({
+        type: "control.claim",
+        sessionId: s.sessionId,
+        payload: { deviceId: s.deviceId },
+      }),
+    );
   };
 
   const cleanupSession = (s: InternalSession) => {
     s.manualDisconnect = true;
     stopHeartbeat(s);
-    if (s.reconnectTimer) { clearTimeout(s.reconnectTimer); s.reconnectTimer = null; }
-    if (s.healthProbeTimer) { clearTimeout(s.healthProbeTimer); s.healthProbeTimer = null; }
+    if (s.reconnectTimer) {
+      clearTimeout(s.reconnectTimer);
+      s.reconnectTimer = null;
+    }
+    if (s.healthProbeTimer) {
+      clearTimeout(s.healthProbeTimer);
+      s.healthProbeTimer = null;
+    }
     s.socket?.close();
     s.socket = null;
   };
@@ -386,13 +501,21 @@ export function useSessionManager(): SessionManagerHandle {
   // ── Connect socket for a session ──────────────────────────────
 
   const connectSocket = (s: InternalSession, isReconnect = false) => {
-    if (s.reconnectTimer) { clearTimeout(s.reconnectTimer); s.reconnectTimer = null; }
+    if (s.reconnectTimer) {
+      clearTimeout(s.reconnectTimer);
+      s.reconnectTimer = null;
+    }
     s.manualDisconnect = false;
     s.status = isReconnect ? "reconnecting" : "connecting";
     tick();
 
-    const base = s.gatewayUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
-    const url = `${base}/ws?sessionId=${encodeURIComponent(s.sessionId)}&role=client&deviceId=${s.deviceId}`;
+    const base = s.gatewayUrl
+      .replace(/^https:/, "wss:")
+      .replace(/^http:/, "ws:");
+    const tokenParam = deviceTokenRef.current
+      ? `&token=${encodeURIComponent(deviceTokenRef.current)}`
+      : "";
+    const url = `${base}/ws?sessionId=${encodeURIComponent(s.sessionId)}&role=client&deviceId=${s.deviceId}${tokenParam}`;
     const ws = new WebSocket(url);
     s.socket = ws;
 
@@ -403,18 +526,30 @@ export function useSessionManager(): SessionManagerHandle {
       requestControl(s);
 
       // Always request terminal list so we discover all running terminals
-      sendRaw(s, createEnvelope({
-        type: "terminal.list",
-        sessionId: s.sessionId,
-        payload: { terminals: [] },
-      }));
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "terminal.list",
+          sessionId: s.sessionId,
+          payload: { terminals: [] },
+        }),
+      );
 
       // Health probe
       (async () => {
         try {
-          const res = await fetch(`${s.gatewayUrl}/sessions/${encodeURIComponent(s.sessionId)}`);
+          const headers: Record<string, string> = {};
+          if (deviceTokenRef.current)
+            headers["Authorization"] = `Bearer ${deviceTokenRef.current}`;
+          const res = await fetch(
+            `${s.gatewayUrl}/sessions/${encodeURIComponent(s.sessionId)}`,
+            { headers },
+          );
           if (!res.ok) {
-            if (s.status === "connecting" || s.status === "reconnecting") { s.status = "connected"; tick(); }
+            if (s.status === "connecting" || s.status === "reconnecting") {
+              s.status = "connected";
+              tick();
+            }
             return;
           }
           const body = (await res.json()) as {
@@ -442,7 +577,10 @@ export function useSessionManager(): SessionManagerHandle {
           }
           tick();
         } catch {
-          if (s.status === "connecting" || s.status === "reconnecting") { s.status = "connected"; tick(); }
+          if (s.status === "connecting" || s.status === "reconnecting") {
+            s.status = "connected";
+            tick();
+          }
         }
       })();
 
@@ -451,18 +589,28 @@ export function useSessionManager(): SessionManagerHandle {
         s.terminals.clear();
         s.activeTerminalId = null;
         s.terminalSnapshot = { sessionId: s.sessionId, chunks: [] };
-        emitTerminal(s, { type: "reset", snapshot: { sessionId: s.sessionId, chunks: [] } });
-        sendRaw(s, createEnvelope({
-          type: "session.resume",
-          sessionId: s.sessionId,
-          payload: { lastAckedSeq: s.lastAckedSeq },
-        }));
+        emitTerminal(s, {
+          type: "reset",
+          snapshot: { sessionId: s.sessionId, chunks: [] },
+        });
+        sendRaw(
+          s,
+          createEnvelope({
+            type: "session.resume",
+            sessionId: s.sessionId,
+            payload: { lastAckedSeq: s.lastAckedSeq },
+          }),
+        );
       }
     };
 
     ws.onmessage = (event) => {
       let envelope: Envelope;
-      try { envelope = parseEnvelope(String(event.data)); } catch { return; }
+      try {
+        envelope = parseEnvelope(String(event.data));
+      } catch {
+        return;
+      }
 
       switch (envelope.type) {
         case "terminal.output": {
@@ -474,7 +622,12 @@ export function useSessionManager(): SessionManagerHandle {
           const tid = (envelope as any).terminalId ?? "default";
           // Auto-create terminal entry if we don't have it yet (backward compat)
           if (!s.terminals.has(tid)) {
-            const t = createInternalTerminal(tid, s.cwd ?? "", s.projectName ?? tid, s.provider ?? "claude");
+            const t = createInternalTerminal(
+              tid,
+              s.cwd ?? "",
+              s.projectName ?? tid,
+              s.provider ?? "claude",
+            );
             s.terminals.set(tid, t);
             if (!s.activeTerminalId) s.activeTerminalId = tid;
           }
@@ -483,12 +636,15 @@ export function useSessionManager(): SessionManagerHandle {
             const next = Math.max(s.lastAckedSeq, envelope.seq);
             if (next !== s.lastAckedSeq) {
               s.lastAckedSeq = next;
-              sendRaw(s, createEnvelope({
-                type: "session.ack",
-                sessionId: s.sessionId,
-                terminalId: tid,
-                payload: { seq: next },
-              }));
+              sendRaw(
+                s,
+                createEnvelope({
+                  type: "session.ack",
+                  sessionId: s.sessionId,
+                  terminalId: tid,
+                  payload: { seq: next },
+                }),
+              );
             }
           }
           tick();
@@ -500,21 +656,42 @@ export function useSessionManager(): SessionManagerHandle {
           if (s.terminals.has(p.terminalId)) {
             s.activeTerminalId = p.terminalId;
             const term = s.terminals.get(p.terminalId)!;
-            s.terminalSnapshot = { sessionId: s.sessionId, chunks: [...term.snapshot.chunks] };
-            emitTerminal(s, { type: "reset", snapshot: { sessionId: s.sessionId, chunks: [...term.snapshot.chunks] } });
+            s.terminalSnapshot = {
+              sessionId: s.sessionId,
+              chunks: [...term.snapshot.chunks],
+            };
+            emitTerminal(s, {
+              type: "reset",
+              snapshot: {
+                sessionId: s.sessionId,
+                chunks: [...term.snapshot.chunks],
+              },
+            });
           } else {
-            const t = createInternalTerminal(p.terminalId, p.cwd, p.projectName, s.provider ?? "claude");
+            const t = createInternalTerminal(
+              p.terminalId,
+              p.cwd,
+              p.projectName,
+              s.provider ?? "claude",
+            );
             // Apply any pending status from reconnect replay
             const pendingStatus = s.pendingStatusByTerminal.get(p.terminalId);
             if (pendingStatus) {
               t.structuredStatus = pendingStatus;
               s.pendingStatusByTerminal.delete(p.terminalId);
-              statusChangeCbRef.current?.(s.sessionId, p.terminalId, pendingStatus);
+              statusChangeCbRef.current?.(
+                s.sessionId,
+                p.terminalId,
+                pendingStatus,
+              );
             }
             s.terminals.set(p.terminalId, t);
             s.activeTerminalId = p.terminalId;
             s.terminalSnapshot = { sessionId: s.sessionId, chunks: [] };
-            emitTerminal(s, { type: "reset", snapshot: { sessionId: s.sessionId, chunks: [] } });
+            emitTerminal(s, {
+              type: "reset",
+              snapshot: { sessionId: s.sessionId, chunks: [] },
+            });
           }
           tick();
           break;
@@ -523,14 +700,25 @@ export function useSessionManager(): SessionManagerHandle {
           const p = parseTypedPayload("terminal.list", envelope.payload);
           for (const info of p.terminals) {
             if (!s.terminals.has(info.terminalId)) {
-              const t = createInternalTerminal(info.terminalId, info.cwd, info.projectName, info.provider);
+              const t = createInternalTerminal(
+                info.terminalId,
+                info.cwd,
+                info.projectName,
+                info.provider,
+              );
               t.status = info.status;
               // Apply any pending status from reconnect replay
-              const pendingStatus = s.pendingStatusByTerminal.get(info.terminalId);
+              const pendingStatus = s.pendingStatusByTerminal.get(
+                info.terminalId,
+              );
               if (pendingStatus) {
                 t.structuredStatus = pendingStatus;
                 s.pendingStatusByTerminal.delete(info.terminalId);
-                statusChangeCbRef.current?.(s.sessionId, info.terminalId, pendingStatus);
+                statusChangeCbRef.current?.(
+                  s.sessionId,
+                  info.terminalId,
+                  pendingStatus,
+                );
               }
               s.terminals.set(info.terminalId, t);
             } else {
@@ -554,17 +742,30 @@ export function useSessionManager(): SessionManagerHandle {
           if (term) term.status = "exited";
           // Auto-switch if the exited terminal was active
           if (s.activeTerminalId === tid) {
-            const next = [...s.terminals.values()].find((t) => t.status === "running");
+            const next = [...s.terminals.values()].find(
+              (t) => t.status === "running",
+            );
             if (next) {
               s.activeTerminalId = next.terminalId;
-              s.terminalSnapshot = { sessionId: s.sessionId, chunks: [...next.snapshot.chunks] };
+              s.terminalSnapshot = {
+                sessionId: s.sessionId,
+                chunks: [...next.snapshot.chunks],
+              };
               for (const listener of s.terminalListeners) {
-                listener({ type: "reset", snapshot: { sessionId: s.sessionId, chunks: [...next.snapshot.chunks] } });
+                listener({
+                  type: "reset",
+                  snapshot: {
+                    sessionId: s.sessionId,
+                    chunks: [...next.snapshot.chunks],
+                  },
+                });
               }
             }
           }
           // Only mark session exited if all terminals exited
-          const allExited = s.terminals.size > 0 && [...s.terminals.values()].every((t) => t.status === "exited");
+          const allExited =
+            s.terminals.size > 0 &&
+            [...s.terminals.values()].every((t) => t.status === "exited");
           if (allExited) {
             s.status = "session_exited";
             s.connectionDetail = "All terminals exited.";
@@ -583,7 +784,11 @@ export function useSessionManager(): SessionManagerHandle {
             break;
           }
           s.connectionDetail = p.message;
-          if (p.code === "session_terminated") { s.status = "session_exited"; tick(); break; }
+          if (p.code === "session_terminated") {
+            s.status = "session_exited";
+            tick();
+            break;
+          }
           s.status = `error:${p.code}` as ConnectionStatus;
           tick();
           break;
@@ -602,7 +807,8 @@ export function useSessionManager(): SessionManagerHandle {
         }
         case "session.host_disconnected":
           s.status = "host_disconnected" as ConnectionStatus;
-          s.connectionDetail = "Host connection closed. Waiting for it to come back.";
+          s.connectionDetail =
+            "Host connection closed. Waiting for it to come back.";
           tick();
           break;
         case "session.host_reconnected":
@@ -613,16 +819,33 @@ export function useSessionManager(): SessionManagerHandle {
         case "screen.frame": {
           const p = parseTypedPayload("screen.frame", envelope.payload);
           if (p.chunkTotal <= 1) {
-            s.screenFrame = { data: p.data, width: p.width, height: p.height, frameId: p.frameId };
+            s.screenFrame = {
+              data: p.data,
+              width: p.width,
+              height: p.height,
+              frameId: p.frameId,
+            };
           } else {
             if (!s.chunkBuf || s.chunkBuf.frameId !== p.frameId) {
-              s.chunkBuf = { frameId: p.frameId, chunks: new Map(), total: p.chunkTotal, width: p.width, height: p.height };
+              s.chunkBuf = {
+                frameId: p.frameId,
+                chunks: new Map(),
+                total: p.chunkTotal,
+                width: p.width,
+                height: p.height,
+              };
             }
             s.chunkBuf.chunks.set(p.chunkIndex, p.data);
             if (s.chunkBuf.chunks.size === s.chunkBuf.total) {
               let fullData = "";
-              for (let i = 0; i < s.chunkBuf.total; i++) fullData += s.chunkBuf.chunks.get(i) ?? "";
-              s.screenFrame = { data: fullData, width: s.chunkBuf.width, height: s.chunkBuf.height, frameId: p.frameId };
+              for (let i = 0; i < s.chunkBuf.total; i++)
+                fullData += s.chunkBuf.chunks.get(i) ?? "";
+              s.screenFrame = {
+                data: fullData,
+                width: s.chunkBuf.width,
+                height: s.chunkBuf.height,
+                frameId: p.frameId,
+              };
               s.chunkBuf = null;
             }
           }
@@ -643,12 +866,23 @@ export function useSessionManager(): SessionManagerHandle {
         }
         case "screen.ice": {
           const p = parseTypedPayload("screen.ice", envelope.payload);
-          s.pendingIceCandidates = [...s.pendingIceCandidates, { candidate: p.candidate, sdpMid: p.sdpMid, sdpMLineIndex: p.sdpMLineIndex }];
+          s.pendingIceCandidates = [
+            ...s.pendingIceCandidates,
+            {
+              candidate: p.candidate,
+              sdpMid: p.sdpMid,
+              sdpMLineIndex: p.sdpMLineIndex,
+            },
+          ];
           tick();
           break;
         }
         case "terminal.browse.result": {
-          const p = envelope.payload as { path: string; entries: BrowseEntry[]; error?: string };
+          const p = envelope.payload as {
+            path: string;
+            entries: BrowseEntry[];
+            error?: string;
+          };
           s.browseResult = { path: p.path, entries: p.entries, error: p.error };
           tick();
           break;
@@ -675,7 +909,11 @@ export function useSessionManager(): SessionManagerHandle {
           const statusData = { ...p, updatedAt: Date.now() };
           if (term) {
             term.structuredStatus = statusData;
-            statusChangeCbRef.current?.(s.sessionId, tid, term.structuredStatus);
+            statusChangeCbRef.current?.(
+              s.sessionId,
+              tid,
+              term.structuredStatus,
+            );
           } else {
             // Terminal not yet recreated (reconnect) — buffer for later
             s.pendingStatusByTerminal.set(tid, statusData);
@@ -702,14 +940,18 @@ export function useSessionManager(): SessionManagerHandle {
 
   const scheduleReconnect = (s: InternalSession) => {
     if (s.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
-      s.connectionDetail = "Gateway is unreachable. Retry when the server is back.";
+      s.connectionDetail =
+        "Gateway is unreachable. Retry when the server is back.";
       s.status = "disconnected";
       tick();
       return;
     }
     s.status = "reconnecting";
     tick();
-    const delay = Math.min(RECONNECT_BASE_DELAY * 2 ** s.reconnectAttempts, RECONNECT_MAX_DELAY);
+    const delay = Math.min(
+      RECONNECT_BASE_DELAY * 2 ** s.reconnectAttempts,
+      RECONNECT_MAX_DELAY,
+    );
     s.reconnectAttempts++;
     s.reconnectTimer = setTimeout(() => connectSocket(s, true), delay);
   };
@@ -721,78 +963,116 @@ export function useSessionManager(): SessionManagerHandle {
     return sessionsRef.current.get(activeSessionId);
   }, [activeSessionId]);
 
-  const claim = useCallback(async (pairingCode: string, gatewayUrl: string): Promise<string | null> => {
-    try {
-      const res = await fetch(`${gatewayUrl}/pairings/claim`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pairingCode }),
-      });
-      const body = (await res.json()) as { sessionId?: string; error?: string };
-      if (!res.ok || !body.sessionId) return null;
+  const claim = useCallback(
+    async (pairingCode: string, gatewayUrl: string): Promise<string | null> => {
+      try {
+        const currentToken =
+          deviceTokenRef.current ?? (await ensureDeviceToken());
+        const res = await fetch(`${gatewayUrl}/pairings/claim`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pairingCode, deviceToken: currentToken }),
+        });
+        const body = (await res.json()) as {
+          sessionId?: string;
+          deviceToken?: string;
+          error?: string;
+        };
+        if (!res.ok || !body.sessionId) return null;
+        if (body.deviceToken) {
+          deviceTokenRef.current = body.deviceToken;
+          setDeviceToken(body.deviceToken);
+        }
 
-      const sid = body.sessionId;
-      const s = createInternalSession(sid, gatewayUrl, deviceIdRef.current);
-      sessionsRef.current.set(sid, s);
-      setActiveSessionId(sid);
+        const sid = body.sessionId;
+        const s = createInternalSession(sid, gatewayUrl, deviceIdRef.current);
+        sessionsRef.current.set(sid, s);
+        setActiveSessionId(sid);
+        connectSocket(s);
+        tick();
+        return sid;
+      } catch {
+        return null;
+      }
+    },
+    [tick],
+  );
+
+  const connectToSession = useCallback(
+    (sessionId: string, gatewayUrl: string) => {
+      // If already connected, just switch to it
+      const existing = sessionsRef.current.get(sessionId);
+      if (existing) {
+        setActiveSessionId(sessionId);
+        return;
+      }
+
+      const s = createInternalSession(
+        sessionId,
+        gatewayUrl,
+        deviceIdRef.current,
+      );
+      sessionsRef.current.set(sessionId, s);
+      setActiveSessionId(sessionId);
       connectSocket(s);
       tick();
-      return sid;
-    } catch {
-      return null;
-    }
-  }, [tick]);
+    },
+    [tick],
+  );
 
-  const connectToSession = useCallback((sessionId: string, gatewayUrl: string) => {
-    // If already connected, just switch to it
-    const existing = sessionsRef.current.get(sessionId);
-    if (existing) {
-      setActiveSessionId(sessionId);
-      return;
-    }
+  const sendInput = useCallback(
+    (data: string) => {
+      const s = getActive();
+      if (!s) return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "terminal.input",
+          sessionId: s.sessionId,
+          terminalId: s.activeTerminalId ?? "default",
+          deviceId: s.deviceId,
+          payload: { data },
+        }),
+      );
+    },
+    [getActive],
+  );
 
-    const s = createInternalSession(sessionId, gatewayUrl, deviceIdRef.current);
-    sessionsRef.current.set(sessionId, s);
-    setActiveSessionId(sessionId);
-    connectSocket(s);
-    tick();
-  }, [tick]);
+  const sendImage = useCallback(
+    (base64Data: string, filename: string) => {
+      const s = getActive();
+      if (!s) return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "file.upload",
+          sessionId: s.sessionId,
+          terminalId: s.activeTerminalId ?? "default",
+          deviceId: s.deviceId,
+          payload: { data: base64Data, filename },
+        }),
+      );
+    },
+    [getActive],
+  );
 
-  const sendInput = useCallback((data: string) => {
-    const s = getActive();
-    if (!s) return;
-    sendRaw(s, createEnvelope({
-      type: "terminal.input",
-      sessionId: s.sessionId,
-      terminalId: s.activeTerminalId ?? "default",
-      deviceId: s.deviceId,
-      payload: { data },
-    }));
-  }, [getActive]);
-
-  const sendImage = useCallback((base64Data: string, filename: string) => {
-    const s = getActive();
-    if (!s) return;
-    sendRaw(s, createEnvelope({
-      type: "file.upload",
-      sessionId: s.sessionId,
-      terminalId: s.activeTerminalId ?? "default",
-      deviceId: s.deviceId,
-      payload: { data: base64Data, filename },
-    }));
-  }, [getActive]);
-
-  const sendResize = useCallback((cols: number, rows: number) => {
-    const s = getActive();
-    if (!s) return;
-    sendRaw(s, createEnvelope({
-      type: "terminal.resize",
-      sessionId: s.sessionId,
-      terminalId: s.activeTerminalId ?? "default",
-      deviceId: s.deviceId,
-      payload: { cols, rows },
-    }));
-  }, [getActive]);
+  const sendResize = useCallback(
+    (cols: number, rows: number) => {
+      const s = getActive();
+      if (!s) return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "terminal.resize",
+          sessionId: s.sessionId,
+          terminalId: s.activeTerminalId ?? "default",
+          deviceId: s.deviceId,
+          payload: { cols, rows },
+        }),
+      );
+    },
+    [getActive],
+  );
 
   const claimControlFn = useCallback(() => {
     const s = getActive();
@@ -802,64 +1082,91 @@ export function useSessionManager(): SessionManagerHandle {
   const releaseControlFn = useCallback(() => {
     const s = getActive();
     if (!s) return;
-    sendRaw(s, createEnvelope({
-      type: "control.release",
-      sessionId: s.sessionId,
-      payload: { deviceId: s.deviceId },
-    }));
+    sendRaw(
+      s,
+      createEnvelope({
+        type: "control.release",
+        sessionId: s.sessionId,
+        payload: { deviceId: s.deviceId },
+      }),
+    );
   }, [getActive]);
 
-  const startScreenFn = useCallback((fps: number, quality: number, scale: number) => {
-    const s = getActive();
-    if (!s) return;
-    sendRaw(s, createEnvelope({
-      type: "screen.start",
-      sessionId: s.sessionId,
-      payload: { fps, quality, scale },
-    }));
-  }, [getActive]);
+  const startScreenFn = useCallback(
+    (fps: number, quality: number, scale: number) => {
+      const s = getActive();
+      if (!s) return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "screen.start",
+          sessionId: s.sessionId,
+          payload: { fps, quality, scale },
+        }),
+      );
+    },
+    [getActive],
+  );
 
   const stopScreenFn = useCallback(() => {
     const s = getActive();
     if (!s) return;
-    sendRaw(s, createEnvelope({
-      type: "screen.stop",
-      sessionId: s.sessionId,
-      payload: {},
-    }));
+    sendRaw(
+      s,
+      createEnvelope({
+        type: "screen.stop",
+        sessionId: s.sessionId,
+        payload: {},
+      }),
+    );
     s.screenStatus = { active: false, mode: "off" };
     s.pendingOffer = null;
     s.pendingIceCandidates = [];
     tick();
   }, [getActive, tick]);
 
-  const sendScreenSignalFn = useCallback((type: "screen.answer" | "screen.ice", payload: any) => {
-    const s = getActive();
-    if (!s) return;
-    sendRaw(s, createEnvelope({ type, sessionId: s.sessionId, payload }));
-  }, [getActive]);
+  const sendScreenSignalFn = useCallback(
+    (type: "screen.answer" | "screen.ice", payload: any) => {
+      const s = getActive();
+      if (!s) return;
+      sendRaw(s, createEnvelope({ type, sessionId: s.sessionId, payload }));
+    },
+    [getActive],
+  );
 
   const reconnectFn = useCallback(() => {
     const s = getActive();
     if (!s) return;
-    if (s.reconnectTimer) { clearTimeout(s.reconnectTimer); s.reconnectTimer = null; }
-    if (s.socket) { s.manualDisconnect = true; s.socket.close(); s.socket = null; }
+    if (s.reconnectTimer) {
+      clearTimeout(s.reconnectTimer);
+      s.reconnectTimer = null;
+    }
+    if (s.socket) {
+      s.manualDisconnect = true;
+      s.socket.close();
+      s.socket = null;
+    }
     s.manualDisconnect = false;
     connectSocket(s, true);
   }, [getActive]);
 
-  const disconnectSession = useCallback((sessionId: string) => {
-    const s = sessionsRef.current.get(sessionId);
-    if (!s) return;
-    cleanupSession(s);
-    sessionsRef.current.delete(sessionId);
-    if (activeSessionId === sessionId) {
-      // Switch to another session or null
-      const remaining = [...sessionsRef.current.keys()];
-      setActiveSessionId(remaining.length > 0 ? remaining[remaining.length - 1] : null);
-    }
-    tick();
-  }, [activeSessionId, tick]);
+  const disconnectSession = useCallback(
+    (sessionId: string) => {
+      const s = sessionsRef.current.get(sessionId);
+      if (!s) return;
+      cleanupSession(s);
+      sessionsRef.current.delete(sessionId);
+      if (activeSessionId === sessionId) {
+        // Switch to another session or null
+        const remaining = [...sessionsRef.current.keys()];
+        setActiveSessionId(
+          remaining.length > 0 ? remaining[remaining.length - 1] : null,
+        );
+      }
+      tick();
+    },
+    [activeSessionId, tick],
+  );
 
   const disconnectAll = useCallback(() => {
     for (const s of sessionsRef.current.values()) cleanupSession(s);
@@ -868,90 +1175,137 @@ export function useSessionManager(): SessionManagerHandle {
     tick();
   }, [tick]);
 
-  const spawnTerminalFn = useCallback((cwd: string) => {
-    const s = getActive();
-    if (!s) return;
-    // Client-side dedup: if a running terminal already exists for this cwd, just switch to it
-    for (const [tid, t] of s.terminals) {
-      if (t.cwd === cwd && t.status === "running") {
-        switchTerminalFn(tid);
-        return;
+  const spawnTerminalFn = useCallback(
+    (cwd: string) => {
+      const s = getActive();
+      if (!s) return;
+      // Client-side dedup: if a running terminal already exists for this cwd, just switch to it
+      for (const [tid, t] of s.terminals) {
+        if (t.cwd === cwd && t.status === "running") {
+          switchTerminalFn(tid);
+          return;
+        }
       }
-    }
-    sendRaw(s, createEnvelope({
-      type: "terminal.spawn",
-      sessionId: s.sessionId,
-      payload: { cwd },
-    }));
-  }, [getActive]);
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "terminal.spawn",
+          sessionId: s.sessionId,
+          payload: { cwd },
+        }),
+      );
+    },
+    [getActive],
+  );
 
-  const switchTerminalFn = useCallback((terminalId: string) => {
-    const s = getActive();
-    if (!s) return;
-    if (!s.terminals.has(terminalId)) return;
-    s.activeTerminalId = terminalId;
-    // Reset legacy stream to point to new terminal
-    const term = s.terminals.get(terminalId)!;
-    s.terminalSnapshot = { sessionId: s.sessionId, chunks: [...term.snapshot.chunks] };
-    for (const listener of s.terminalListeners) {
-      listener({ type: "reset", snapshot: { sessionId: s.sessionId, chunks: [...term.snapshot.chunks] } });
-    }
-    tick();
-  }, [getActive, tick]);
+  const switchTerminalFn = useCallback(
+    (terminalId: string) => {
+      const s = getActive();
+      if (!s) return;
+      if (!s.terminals.has(terminalId)) return;
+      s.activeTerminalId = terminalId;
+      // Reset legacy stream to point to new terminal
+      const term = s.terminals.get(terminalId)!;
+      s.terminalSnapshot = {
+        sessionId: s.sessionId,
+        chunks: [...term.snapshot.chunks],
+      };
+      for (const listener of s.terminalListeners) {
+        listener({
+          type: "reset",
+          snapshot: {
+            sessionId: s.sessionId,
+            chunks: [...term.snapshot.chunks],
+          },
+        });
+      }
+      tick();
+    },
+    [getActive, tick],
+  );
 
   const requestTerminalListFn = useCallback(() => {
     const s = getActive();
     if (!s) return;
-    sendRaw(s, createEnvelope({
-      type: "terminal.list",
-      sessionId: s.sessionId,
-      payload: { terminals: [] },
-    }));
+    sendRaw(
+      s,
+      createEnvelope({
+        type: "terminal.list",
+        sessionId: s.sessionId,
+        payload: { terminals: [] },
+      }),
+    );
   }, [getActive]);
 
-  const browseDirectoryFn = useCallback((path: string) => {
-    const s = getActive();
-    if (!s) return;
-    s.browseResult = null; // clear previous result
-    sendRaw(s, createEnvelope({
-      type: "terminal.browse" as any,
-      sessionId: s.sessionId,
-      payload: { path },
-    }));
-    tick();
-  }, [getActive, tick]);
+  const browseDirectoryFn = useCallback(
+    (path: string) => {
+      const s = getActive();
+      if (!s) return;
+      s.browseResult = null; // clear previous result
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "terminal.browse" as any,
+          sessionId: s.sessionId,
+          payload: { path },
+        }),
+      );
+      tick();
+    },
+    [getActive, tick],
+  );
 
-  const killTerminalFn = useCallback((terminalId: string) => {
-    const s = getActive();
-    if (!s) return;
-    const term = s.terminals.get(terminalId);
-    if (!term || term.status !== "running") return;
-    sendRaw(s, createEnvelope({
-      type: "terminal.kill" as any,
-      sessionId: s.sessionId,
-      payload: { terminalId },
-    }));
-  }, [getActive]);
+  const killTerminalFn = useCallback(
+    (terminalId: string) => {
+      const s = getActive();
+      if (!s) return;
+      const term = s.terminals.get(terminalId);
+      if (!term || term.status !== "running") return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "terminal.kill" as any,
+          sessionId: s.sessionId,
+          payload: { terminalId },
+        }),
+      );
+    },
+    [getActive],
+  );
 
-  const removeTerminalFn = useCallback((terminalId: string) => {
-    const s = getActive();
-    if (!s) return;
-    s.terminals.delete(terminalId);
-    // If we removed the active terminal, switch to another
-    if (s.activeTerminalId === terminalId) {
-      const next = [...s.terminals.values()].find((t) => t.status === "running") ?? [...s.terminals.values()][0];
-      if (next) {
-        s.activeTerminalId = next.terminalId;
-        s.terminalSnapshot = { sessionId: s.sessionId, chunks: [...next.snapshot.chunks] };
-        for (const listener of s.terminalListeners) {
-          listener({ type: "reset", snapshot: { sessionId: s.sessionId, chunks: [...next.snapshot.chunks] } });
+  const removeTerminalFn = useCallback(
+    (terminalId: string) => {
+      const s = getActive();
+      if (!s) return;
+      s.terminals.delete(terminalId);
+      // If we removed the active terminal, switch to another
+      if (s.activeTerminalId === terminalId) {
+        const next =
+          [...s.terminals.values()].find((t) => t.status === "running") ??
+          [...s.terminals.values()][0];
+        if (next) {
+          s.activeTerminalId = next.terminalId;
+          s.terminalSnapshot = {
+            sessionId: s.sessionId,
+            chunks: [...next.snapshot.chunks],
+          };
+          for (const listener of s.terminalListeners) {
+            listener({
+              type: "reset",
+              snapshot: {
+                sessionId: s.sessionId,
+                chunks: [...next.snapshot.chunks],
+              },
+            });
+          }
+        } else {
+          s.activeTerminalId = null;
         }
-      } else {
-        s.activeTerminalId = null;
       }
-    }
-    tick();
-  }, [getActive, tick]);
+      tick();
+    },
+    [getActive, tick],
+  );
 
   // Build sessions map for consumers
   const sessions = new Map<string, SessionInfo>();
@@ -989,17 +1343,28 @@ export function useSessionManager(): SessionManagerHandle {
     browseDirectory: browseDirectoryFn,
     killTerminal: killTerminalFn,
     removeTerminal: removeTerminalFn,
-    onStatusChange: (cb) => { statusChangeCbRef.current = cb; },
-    sendPermissionDecision: (sessionId: string, terminalId: string, requestId: string, decision: "allow" | "deny") => {
+    onStatusChange: (cb) => {
+      statusChangeCbRef.current = cb;
+    },
+    sendPermissionDecision: (
+      sessionId: string,
+      terminalId: string,
+      requestId: string,
+      decision: "allow" | "deny",
+    ) => {
       const s = sessionsRef.current.get(sessionId);
       if (!s) return;
-      sendRaw(s, createEnvelope({
-        type: "permission.decision",
-        sessionId,
-        terminalId,
-        deviceId: s.deviceId,
-        payload: { requestId, decision },
-      }));
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "permission.decision",
+          sessionId,
+          terminalId,
+          deviceId: s.deviceId,
+          payload: { requestId, decision },
+        }),
+      );
     },
+    deviceToken: deviceTokenRef.current,
   };
 }

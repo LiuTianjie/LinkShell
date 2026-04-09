@@ -11,6 +11,7 @@ import {
 import { z, ZodError } from "zod";
 import { SessionManager } from "./sessions.js";
 import { PairingManager } from "./pairings.js";
+import { TokenManager } from "./tokens.js";
 import { handleSocketMessage } from "./relay.js";
 
 export interface EmbeddedGatewayOptions {
@@ -33,7 +34,10 @@ const MAX_WS_MESSAGE_SIZE = 50 * 1024 * 1024; // 50MB (supports base64 image upl
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 
 const createPairingBody = z.object({ sessionId: z.string().optional() });
-const claimPairingBody = z.object({ pairingCode: z.string().length(6) });
+const claimPairingBody = z.object({
+  pairingCode: z.string().length(6),
+  deviceToken: z.string().min(1).optional(),
+});
 
 class BodyTooLargeError extends Error {}
 
@@ -66,6 +70,13 @@ function getClientIp(req: IncomingMessage): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
+function extractBearerToken(req: IncomingMessage): string | null {
+  const auth = req.headers.authorization;
+  if (!auth) return null;
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match?.[1] ?? null;
+}
+
 /**
  * Start an embedded gateway. Returns a handle to get URLs and close it.
  * Used by CLI when no external --gateway is provided.
@@ -86,6 +97,7 @@ export function startEmbeddedGateway(
 
   const sessionManager = new SessionManager();
   const pairingManager = new PairingManager();
+  const tokenManager = new TokenManager();
 
   const server = createServer(async (req, res) => {
     if (req.method === "OPTIONS") {
@@ -126,30 +138,53 @@ export function startEmbeddedGateway(
           json(res, result.status, { error: result.error });
           return;
         }
-        json(res, 200, { sessionId: result.sessionId });
+        const token = tokenManager.register(body.deviceToken);
+        tokenManager.bind(token, result.sessionId);
+        json(res, 200, { sessionId: result.sessionId, deviceToken: token });
         return;
       }
 
       if (method === "GET" && url.pathname === "/sessions") {
-        const sessions = sessionManager.listActive().map((s) => ({
-          id: s.id,
-          state: s.state,
-          hasHost: !!s.host,
-          clientCount: s.clients.size,
-          controllerId: s.controllerId ?? null,
-          lastActivity: s.lastActivity,
-          createdAt: s.createdAt,
-          provider: s.provider ?? null,
-          hostname: s.hostname ?? null,
-          platform: s.platform ?? null,
-        }));
+        const token = extractBearerToken(req);
+        if (!token || !tokenManager.validate(token)) {
+          json(res, 401, {
+            error: "unauthorized",
+            message: "Valid device token required",
+          });
+          return;
+        }
+        const allowedIds = tokenManager.getSessionIds(token);
+        const sessions = sessionManager
+          .listActive()
+          .filter((s) => allowedIds.has(s.id))
+          .map((s) => ({
+            id: s.id,
+            state: s.state,
+            hasHost: !!s.host,
+            clientCount: s.clients.size,
+            controllerId: s.controllerId ?? null,
+            lastActivity: s.lastActivity,
+            createdAt: s.createdAt,
+            provider: s.provider ?? null,
+            hostname: s.hostname ?? null,
+            platform: s.platform ?? null,
+          }));
         json(res, 200, { sessions });
         return;
       }
 
       const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
       if (method === "GET" && sessionMatch) {
-        const summary = sessionManager.getSummary(sessionMatch[1]!);
+        const token = extractBearerToken(req);
+        const targetId = sessionMatch[1]!;
+        if (!token || !tokenManager.owns(token, targetId)) {
+          json(res, 401, {
+            error: "unauthorized",
+            message: "Valid device token required",
+          });
+          return;
+        }
+        const summary = sessionManager.getSummary(targetId);
         if (!summary) {
           json(res, 404, { error: "session_not_found" });
           return;
@@ -221,6 +256,15 @@ export function startEmbeddedGateway(
       }
 
       const deviceId = url.searchParams.get("deviceId") ?? randomUUID();
+
+      if (role === "client") {
+        const token = url.searchParams.get("token");
+        if (!token || !tokenManager.owns(token, sessionId)) {
+          socket.close(4001, "unauthorized");
+          return;
+        }
+      }
+
       const device = { socket, role, deviceId, connectedAt: Date.now() };
 
       if (role === "host") {
@@ -318,6 +362,7 @@ export function startEmbeddedGateway(
             wss.clients.forEach((ws) => ws.close(1001, "shutting down"));
             sessionManager.destroy();
             pairingManager.destroy();
+            tokenManager.destroy();
             server.close(() => res());
           }),
       });

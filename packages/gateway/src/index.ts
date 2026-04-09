@@ -11,6 +11,7 @@ import {
 import { z, ZodError } from "zod";
 import { SessionManager } from "./sessions.js";
 import { PairingManager } from "./pairings.js";
+import { TokenManager } from "./tokens.js";
 import { handleSocketMessage } from "./relay.js";
 
 const port = Number(process.env.PORT ?? 8787);
@@ -29,6 +30,7 @@ function log(level: "debug" | "info" | "warn" | "error", msg: string): void {
 
 const sessionManager = new SessionManager();
 const pairingManager = new PairingManager();
+const tokenManager = new TokenManager();
 
 const PING_INTERVAL = 20_000;
 const MAX_BODY_SIZE = 4096;
@@ -93,6 +95,13 @@ function getClientIp(req: IncomingMessage): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
+function extractBearerToken(req: IncomingMessage): string | null {
+  const auth = req.headers.authorization;
+  if (!auth) return null;
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match?.[1] ?? null;
+}
+
 // ── CORS ────────────────────────────────────────────────────────────
 
 function setCors(res: ServerResponse): void {
@@ -105,7 +114,10 @@ function setCors(res: ServerResponse): void {
 // ── HTTP API ────────────────────────────────────────────────────────
 
 const createPairingBody = z.object({ sessionId: z.string().optional() });
-const claimPairingBody = z.object({ pairingCode: z.string().length(6) });
+const claimPairingBody = z.object({
+  pairingCode: z.string().length(6),
+  deviceToken: z.string().min(1).optional(),
+});
 
 const server = createServer(async (req, res) => {
   setCors(res);
@@ -183,24 +195,38 @@ async function handleRequest(
       json(res, result.status, { error: result.error });
       return;
     }
-    json(res, 200, { sessionId: result.sessionId });
+    const token = tokenManager.register(body.deviceToken);
+    tokenManager.bind(token, result.sessionId);
+    json(res, 200, { sessionId: result.sessionId, deviceToken: token });
     return;
   }
 
   // Session list
   if (method === "GET" && url.pathname === "/sessions") {
-    const sessions = sessionManager.listActive().map((s) => ({
-      id: s.id,
-      state: s.state,
-      hasHost: !!s.host,
-      clientCount: s.clients.size,
-      controllerId: s.controllerId ?? null,
-      lastActivity: s.lastActivity,
-      createdAt: s.createdAt,
-      provider: s.provider ?? null,
-      hostname: s.hostname ?? null,
-      platform: s.platform ?? null,
-    }));
+    const token = extractBearerToken(req);
+    if (!token || !tokenManager.validate(token)) {
+      json(res, 401, {
+        error: "unauthorized",
+        message: "Valid device token required",
+      });
+      return;
+    }
+    const allowedIds = tokenManager.getSessionIds(token);
+    const sessions = sessionManager
+      .listActive()
+      .filter((s) => allowedIds.has(s.id))
+      .map((s) => ({
+        id: s.id,
+        state: s.state,
+        hasHost: !!s.host,
+        clientCount: s.clients.size,
+        controllerId: s.controllerId ?? null,
+        lastActivity: s.lastActivity,
+        createdAt: s.createdAt,
+        provider: s.provider ?? null,
+        hostname: s.hostname ?? null,
+        platform: s.platform ?? null,
+      }));
     json(res, 200, { sessions });
     return;
   }
@@ -208,7 +234,16 @@ async function handleRequest(
   // Session detail
   const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
   if (method === "GET" && sessionMatch) {
-    const summary = sessionManager.getSummary(sessionMatch[1]!);
+    const token = extractBearerToken(req);
+    const targetId = sessionMatch[1]!;
+    if (!token || !tokenManager.owns(token, targetId)) {
+      json(res, 401, {
+        error: "unauthorized",
+        message: "Valid device token required",
+      });
+      return;
+    }
+    const summary = sessionManager.getSummary(targetId);
     if (!summary) {
       json(res, 404, { error: "session_not_found" });
       return;
@@ -270,6 +305,14 @@ wss.on(
     }
 
     const deviceId = url.searchParams.get("deviceId") ?? randomUUID();
+
+    if (role === "client") {
+      const token = url.searchParams.get("token");
+      if (!token || !tokenManager.owns(token, sessionId)) {
+        socket.close(4001, "unauthorized");
+        return;
+      }
+    }
 
     const device = {
       socket,
@@ -397,6 +440,7 @@ function shutdown() {
   wss.clients.forEach((ws) => ws.close(1001, "server shutting down"));
   sessionManager.destroy();
   pairingManager.destroy();
+  tokenManager.destroy();
   server.close(() => {
     process.stdout.write("[gateway] stopped\n");
     process.exit(0);

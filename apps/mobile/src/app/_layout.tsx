@@ -133,7 +133,9 @@ function AppInner() {
         lastSavedSessionsRef.current.delete(sid);
       });
       addServer(info.gatewayUrl).catch(() => {});
-      fetchWithTimeout(`${info.gatewayUrl}/sessions`)
+      const authHeaders: Record<string, string> = {};
+      if (manager.deviceToken) authHeaders["Authorization"] = `Bearer ${manager.deviceToken}`;
+      fetchWithTimeout(`${info.gatewayUrl}/sessions`, { headers: authHeaders })
         .then((res) => (res.ok ? res.json() : null))
         .then((body: any) => {
           if (!body) return;

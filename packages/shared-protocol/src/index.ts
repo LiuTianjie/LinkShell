@@ -143,7 +143,7 @@ export const screenStartPayloadSchema = z.object({
 export const screenStopPayloadSchema = z.object({});
 
 export const screenFramePayloadSchema = z.object({
-  data: z.string(),           // base64 JPEG
+  data: z.string(), // base64 JPEG
   width: z.number().int(),
   height: z.number().int(),
   frameId: z.number().int(),
@@ -221,27 +221,41 @@ export const terminalBrowseResultPayloadSchema = z.object({
 // ── Terminal status payloads (from Claude Code hooks) ────────────────
 
 export const terminalStatusPayloadSchema = z.object({
-  phase: z.enum(["thinking", "tool_use", "outputting", "waiting", "idle", "error"]),
+  phase: z.enum([
+    "thinking",
+    "tool_use",
+    "outputting",
+    "waiting",
+    "idle",
+    "error",
+  ]),
   seq: z.number().optional(),
   toolName: z.string().optional(),
   toolInput: z.string().optional(),
   permissionRequest: z.string().optional(),
   summary: z.string().optional(),
-  topPermission: z.object({
-    requestId: z.string(),
-    toolName: z.string(),
-    toolInput: z.string(),
-    permissionRequest: z.string(),
-    timestamp: z.number(),
-  }).optional(),
+  topPermission: z
+    .object({
+      requestId: z.string(),
+      toolName: z.string(),
+      toolInput: z.string(),
+      permissionRequest: z.string(),
+      timestamp: z.number(),
+    })
+    .optional(),
   pendingPermissionCount: z.number().optional(),
 });
 
 // ── File upload payloads ────────────────────────────────────────────
 
 export const fileUploadPayloadSchema = z.object({
-  data: z.string(),           // base64 encoded
+  data: z.string(), // base64 encoded
   filename: z.string().min(1),
+});
+
+export const permissionDecisionPayloadSchema = z.object({
+  requestId: z.string().min(1),
+  decision: z.enum(["allow", "deny"]),
 });
 
 export const errorPayloadSchema = z.object({
@@ -285,6 +299,7 @@ export const protocolMessageSchemas = {
   "terminal.browse.result": terminalBrowseResultPayloadSchema,
   "terminal.kill": terminalKillPayloadSchema,
   "terminal.status": terminalStatusPayloadSchema,
+  "permission.decision": permissionDecisionPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

@@ -1,9 +1,25 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
+import {
+  DarkTheme,
+  DefaultTheme,
+  NavigationContainer,
+} from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Animated, Dimensions, FlatList, Linking, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  Animated,
+  Dimensions,
+  FlatList,
+  Linking,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppSymbol } from "./src/components/AppSymbol";
@@ -39,7 +55,15 @@ const LAST_SESSION_KEY = "@linkshell/last_session";
 
 const Tab = createBottomTabNavigator();
 
-function SFIcon({ name, color, size = 22 }: { name: string; color: string; size?: number }) {
+function SFIcon({
+  name,
+  color,
+  size = 22,
+}: {
+  name: string;
+  color: string;
+  size?: number;
+}) {
   return <AppSymbol name={name} size={size} color={color} />;
 }
 
@@ -81,117 +105,282 @@ function FolderPickerModal({
   const pathParts = currentPath.split("/").filter(Boolean);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
       <View style={{ flex: 1, backgroundColor: theme.bg }}>
-          {/* Header */}
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border }}>
-            <Text style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>选择文件夹</Text>
-            <Pressable onPress={onClose} hitSlop={8}>
-              <Text style={{ color: theme.accent, fontSize: 15 }}>关闭</Text>
-            </Pressable>
-          </View>
+        {/* Header */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.border,
+          }}
+        >
+          <Text style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>
+            选择文件夹
+          </Text>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Text style={{ color: theme.accent, fontSize: 15 }}>关闭</Text>
+          </Pressable>
+        </View>
 
-          {/* Breadcrumb */}
-          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, flexWrap: "wrap" }}>
-            <Pressable onPress={() => onBrowse("/")} hitSlop={4}>
-              <Text style={{ color: theme.accent, fontSize: 13 }}>/</Text>
-            </Pressable>
-            {pathParts.map((part, i) => {
-              const fullPath = "/" + pathParts.slice(0, i + 1).join("/");
-              const isLast = i === pathParts.length - 1;
-              return (
-                <View key={fullPath} style={{ flexDirection: "row", alignItems: "center" }}>
-                  <Text style={{ color: theme.textTertiary, fontSize: 13, marginHorizontal: 2 }}>/</Text>
-                  <Pressable onPress={() => !isLast && onBrowse(fullPath)} hitSlop={4}>
-                    <Text style={{ color: isLast ? theme.text : theme.accent, fontSize: 13, fontWeight: isLast ? "600" : "400" }}>{part}</Text>
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
-
-          {/* Open here button */}
-          <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
-            {getRunningTerminalId(currentPath) ? (
-              <Pressable
-                onPress={() => { onSelect(currentPath); onClose(); }}
-                style={{ backgroundColor: theme.success + "30", borderRadius: 8, paddingVertical: 10, alignItems: "center" }}
+        {/* Breadcrumb */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <Pressable onPress={() => onBrowse("/")} hitSlop={4}>
+            <Text style={{ color: theme.accent, fontSize: 13 }}>/</Text>
+          </Pressable>
+          {pathParts.map((part, i) => {
+            const fullPath = "/" + pathParts.slice(0, i + 1).join("/");
+            const isLast = i === pathParts.length - 1;
+            return (
+              <View
+                key={fullPath}
+                style={{ flexDirection: "row", alignItems: "center" }}
               >
-                <Text style={{ color: theme.success, fontWeight: "600", fontSize: 14 }}>切换到此终端 (运行中)</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                onPress={() => { onSelect(currentPath); onClose(); }}
-                style={{ backgroundColor: theme.accentLight, borderRadius: 8, paddingVertical: 10, alignItems: "center" }}
-              >
-                <Text style={{ color: theme.accent, fontWeight: "600", fontSize: 14 }}>在此打开终端</Text>
-              </Pressable>
-            )}
-          </View>
-
-          {/* Error */}
-          {browseResult?.error && (
-            <Text style={{ color: theme.error, fontSize: 12, paddingHorizontal: 16, paddingBottom: 4 }}>{browseResult.error}</Text>
-          )}
-
-          {/* Directory list */}
-          <FlatList
-            data={browseResult?.entries ?? []}
-            keyExtractor={(item) => item.path}
-            style={{ flex: 1 }}
-            contentContainerStyle={{ paddingHorizontal: 12 }}
-            ListEmptyComponent={
-              <Text style={{ color: theme.textTertiary, fontSize: 13, textAlign: "center", paddingTop: 24 }}>
-                {browseResult ? "空目录" : "加载中..."}
-              </Text>
-            }
-            renderItem={({ item }) => {
-              const running = getRunningTerminalId(item.path);
-              return (
-                <Pressable
-                  onPress={() => onBrowse(item.path)}
-                  style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.borderLight }}
+                <Text
+                  style={{
+                    color: theme.textTertiary,
+                    fontSize: 13,
+                    marginHorizontal: 2,
+                  }}
                 >
-                  <AppSymbol name="folder.fill" size={18} color={running ? theme.success : theme.accent} />
-                  <Text style={{ color: theme.text, fontSize: 15, marginLeft: 10, flex: 1 }} numberOfLines={1}>{item.name}</Text>
-                  {running && (
-                    <View style={{ backgroundColor: theme.success + "25", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                      <Text style={{ color: theme.success, fontSize: 10, fontWeight: "600" }}>运行中</Text>
-                    </View>
-                  )}
-                  <AppSymbol name="chevron.right" size={12} color={theme.textTertiary} />
+                  /
+                </Text>
+                <Pressable
+                  onPress={() => !isLast && onBrowse(fullPath)}
+                  hitSlop={4}
+                >
+                  <Text
+                    style={{
+                      color: isLast ? theme.text : theme.accent,
+                      fontSize: 13,
+                      fontWeight: isLast ? "600" : "400",
+                    }}
+                  >
+                    {part}
+                  </Text>
                 </Pressable>
-              );
-            }}
-          />
+              </View>
+            );
+          })}
+        </View>
 
-          {/* Manual path input */}
-          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border }}>
-            <TextInput
-              value={manualPath}
-              onChangeText={setManualPath}
-              placeholder="手动输入路径..."
-              placeholderTextColor={theme.textTertiary}
-              style={{ flex: 1, color: theme.text, fontSize: 14, backgroundColor: theme.bgInput, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 }}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="go"
-              onSubmitEditing={() => {
-                const p = manualPath.trim();
-                if (p) { onSelect(p); onClose(); setManualPath(""); }
-              }}
-            />
+        {/* Open here button */}
+        <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+          {getRunningTerminalId(currentPath) ? (
             <Pressable
               onPress={() => {
-                const p = manualPath.trim();
-                if (p) { onSelect(p); onClose(); setManualPath(""); }
+                onSelect(currentPath);
+                onClose();
               }}
-              style={{ marginLeft: 8, backgroundColor: theme.accentLight, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 }}
+              style={{
+                backgroundColor: theme.success + "30",
+                borderRadius: 8,
+                paddingVertical: 10,
+                alignItems: "center",
+              }}
             >
-              <Text style={{ color: theme.accent, fontWeight: "600", fontSize: 14 }}>打开</Text>
+              <Text
+                style={{
+                  color: theme.success,
+                  fontWeight: "600",
+                  fontSize: 14,
+                }}
+              >
+                切换到此终端 (运行中)
+              </Text>
             </Pressable>
-          </View>
+          ) : (
+            <Pressable
+              onPress={() => {
+                onSelect(currentPath);
+                onClose();
+              }}
+              style={{
+                backgroundColor: theme.accentLight,
+                borderRadius: 8,
+                paddingVertical: 10,
+                alignItems: "center",
+              }}
+            >
+              <Text
+                style={{ color: theme.accent, fontWeight: "600", fontSize: 14 }}
+              >
+                在此打开终端
+              </Text>
+            </Pressable>
+          )}
         </View>
+
+        {/* Error */}
+        {browseResult?.error && (
+          <Text
+            style={{
+              color: theme.error,
+              fontSize: 12,
+              paddingHorizontal: 16,
+              paddingBottom: 4,
+            }}
+          >
+            {browseResult.error}
+          </Text>
+        )}
+
+        {/* Directory list */}
+        <FlatList
+          data={browseResult?.entries ?? []}
+          keyExtractor={(item) => item.path}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 12 }}
+          ListEmptyComponent={
+            <Text
+              style={{
+                color: theme.textTertiary,
+                fontSize: 13,
+                textAlign: "center",
+                paddingTop: 24,
+              }}
+            >
+              {browseResult ? "空目录" : "加载中..."}
+            </Text>
+          }
+          renderItem={({ item }) => {
+            const running = getRunningTerminalId(item.path);
+            return (
+              <Pressable
+                onPress={() => onBrowse(item.path)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 10,
+                  borderBottomWidth: StyleSheet.hairlineWidth,
+                  borderBottomColor: theme.borderLight,
+                }}
+              >
+                <AppSymbol
+                  name="folder.fill"
+                  size={18}
+                  color={running ? theme.success : theme.accent}
+                />
+                <Text
+                  style={{
+                    color: theme.text,
+                    fontSize: 15,
+                    marginLeft: 10,
+                    flex: 1,
+                  }}
+                  numberOfLines={1}
+                >
+                  {item.name}
+                </Text>
+                {running && (
+                  <View
+                    style={{
+                      backgroundColor: theme.success + "25",
+                      borderRadius: 4,
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: theme.success,
+                        fontSize: 10,
+                        fontWeight: "600",
+                      }}
+                    >
+                      运行中
+                    </Text>
+                  </View>
+                )}
+                <AppSymbol
+                  name="chevron.right"
+                  size={12}
+                  color={theme.textTertiary}
+                />
+              </Pressable>
+            );
+          }}
+        />
+
+        {/* Manual path input */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.border,
+          }}
+        >
+          <TextInput
+            value={manualPath}
+            onChangeText={setManualPath}
+            placeholder="手动输入路径..."
+            placeholderTextColor={theme.textTertiary}
+            style={{
+              flex: 1,
+              color: theme.text,
+              fontSize: 14,
+              backgroundColor: theme.bgInput,
+              borderRadius: 8,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+            }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="go"
+            onSubmitEditing={() => {
+              const p = manualPath.trim();
+              if (p) {
+                onSelect(p);
+                onClose();
+                setManualPath("");
+              }
+            }}
+          />
+          <Pressable
+            onPress={() => {
+              const p = manualPath.trim();
+              if (p) {
+                onSelect(p);
+                onClose();
+                setManualPath("");
+              }
+            }}
+            style={{
+              marginLeft: 8,
+              backgroundColor: theme.accentLight,
+              borderRadius: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+            }}
+          >
+            <Text
+              style={{ color: theme.accent, fontWeight: "600", fontSize: 14 }}
+            >
+              打开
+            </Text>
+          </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -199,13 +388,20 @@ function FolderPickerModal({
 function AppInner() {
   const { theme } = useTheme();
   const [gatewayBaseUrl, setGatewayBaseUrl] = useState(DEFAULT_GATEWAY);
-  const [activeScreen, setActiveScreen] = useState<"tabs" | "scanner" | "terminal">("tabs");
-  const [pendingPairing, setPendingPairing] = useState<{ code: string; gateway?: string } | null>(null);
+  const [activeScreen, setActiveScreen] = useState<
+    "tabs" | "scanner" | "terminal"
+  >("tabs");
+  const [pendingPairing, setPendingPairing] = useState<{
+    code: string;
+    gateway?: string;
+  } | null>(null);
   const [connectionSheetVisible, setConnectionSheetVisible] = useState(false);
   const [gatewayListVisible, setGatewayListVisible] = useState(false);
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
   const [folderPickerVisible, setFolderPickerVisible] = useState(false);
-  const gatewaySlideAnim = useRef(new Animated.Value(Dimensions.get("window").width)).current;
+  const gatewaySlideAnim = useRef(
+    new Animated.Value(Dimensions.get("window").width),
+  ).current;
   const lastSavedSessionsRef = useRef(new Set<string>());
 
   const manager = useSessionManager();
@@ -217,18 +413,17 @@ function AppInner() {
 
   const hasAnySessions = manager.sessions.size > 0;
 
-  const isInSession = hasAnySessions && (
-    activeScreen === "terminal" ||
-    (activeSession && (
-      activeSession.status === "connected" ||
-      activeSession.status === "connecting" ||
-      activeSession.status === "claiming" ||
-      activeSession.status === "reconnecting" ||
-      activeSession.status === "session_exited" ||
-      activeSession.status === "host_disconnected" ||
-      activeSession.status.startsWith("error:")
-    ))
-  );
+  const isInSession =
+    hasAnySessions &&
+    (activeScreen === "terminal" ||
+      (activeSession &&
+        (activeSession.status === "connected" ||
+          activeSession.status === "connecting" ||
+          activeSession.status === "claiming" ||
+          activeSession.status === "reconnecting" ||
+          activeSession.status === "session_exited" ||
+          activeSession.status === "host_disconnected" ||
+          activeSession.status.startsWith("error:"))));
 
   const currentScreen = isInSession ? "terminal" : activeScreen;
 
@@ -277,7 +472,9 @@ function AppInner() {
       setConnectionSheetVisible(false);
     };
 
-    Linking.getInitialURL().then(applyLink).catch(() => {});
+    Linking.getInitialURL()
+      .then(applyLink)
+      .catch(() => {});
     const sub = Linking.addEventListener("url", ({ url }) => applyLink(url));
     return () => sub.remove();
   }, [manager]);
@@ -295,22 +492,27 @@ function AppInner() {
     setPendingPairing(null);
 
     let active = true;
-    manager.claim(pairing.code, gateway).then((sid) => {
-      if (!active) return;
-      if (sid) {
-        setConnectionSheetVisible(false);
-        setActiveScreen("terminal");
-      } else {
+    manager
+      .claim(pairing.code, gateway)
+      .then((sid) => {
+        if (!active) return;
+        if (sid) {
+          setConnectionSheetVisible(false);
+          setActiveScreen("terminal");
+        } else {
+          setActiveScreen("tabs");
+          setConnectionSheetVisible(true);
+        }
+      })
+      .catch(() => {
+        if (!active) return;
         setActiveScreen("tabs");
         setConnectionSheetVisible(true);
-      }
-    }).catch(() => {
-      if (!active) return;
-      setActiveScreen("tabs");
-      setConnectionSheetVisible(true);
-    });
+      });
 
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [gatewayBaseUrl, pendingPairing, manager]);
 
   // Save to history when sessions connect
@@ -326,20 +528,50 @@ function AppInner() {
       addServer(info.gatewayUrl).catch(() => {});
 
       // Enrich history with metadata
-      fetchWithTimeout(`${info.gatewayUrl}/sessions`)
+      const authHeaders: Record<string, string> = {};
+      if (manager.deviceToken)
+        authHeaders["Authorization"] = `Bearer ${manager.deviceToken}`;
+      fetchWithTimeout(`${info.gatewayUrl}/sessions`, { headers: authHeaders })
         .then((res) => (res.ok ? res.json() : null))
-        .then((body: { sessions: Array<{ id: string; hostname?: string; provider?: string; platform?: string; projectName?: string; cwd?: string }> } | null) => {
-          if (!body) return;
-          const match = body.sessions.find((s) => s.id === sid);
-          if (match) enrichHistory(sid, match);
-        })
+        .then(
+          (
+            body: {
+              sessions: Array<{
+                id: string;
+                hostname?: string;
+                provider?: string;
+                platform?: string;
+                projectName?: string;
+                cwd?: string;
+              }>;
+            } | null,
+          ) => {
+            if (!body) return;
+            const match = body.sessions.find((s) => s.id === sid);
+            if (match) enrichHistory(sid, match);
+          },
+        )
         .catch(() => {});
     }
   }, [manager.sessions]);
 
   // Live Activity: track ALL sessions, not just active one
   const liveActivityActiveRef = useRef(false);
-  const parsersRef = useRef(new Map<string, { parser: ThrottledTerminalParser; unsub: () => void; status: string; lastLine: string; contextLines: string; quickActions: { label: string; input: string; needsInput: boolean }[]; provider: string; connectedAt: number }>());
+  const parsersRef = useRef(
+    new Map<
+      string,
+      {
+        parser: ThrottledTerminalParser;
+        unsub: () => void;
+        status: string;
+        lastLine: string;
+        contextLines: string;
+        quickActions: { label: string; input: string; needsInput: boolean }[];
+        provider: string;
+        connectedAt: number;
+      }
+    >(),
+  );
   const sessionsRef = useRef(manager.sessions);
   const activeSidRef = useRef(manager.activeSessionId);
   sessionsRef.current = manager.sessions;
@@ -358,19 +590,24 @@ function AppInner() {
       const entry = parsersRef.current.get(sid);
 
       // Prefer structured status from hooks if fresh (< 30s)
-      const activeTerm = info.activeTerminalId ? info.terminals.get(info.activeTerminalId) : undefined;
+      const activeTerm = info.activeTerminalId
+        ? info.terminals.get(info.activeTerminalId)
+        : undefined;
       const ss = activeTerm?.structuredStatus;
-      const useStructured = ss && (now - ss.updatedAt) < 30_000;
+      const useStructured = ss && now - ss.updatedAt < 30_000;
 
       snapshots.push({
         sid,
         tid: info.activeTerminalId || "default",
         phase: useStructured ? ss.phase : (entry?.status ?? "idle"),
-        project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 20),
+        project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(
+          0,
+          20,
+        ),
         provider: entry?.provider ?? info.provider ?? "claude",
         tool: ss?.toolName || "",
         elapsed: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
-        hasPermission: !!(ss?.topPermission),
+        hasPermission: !!ss?.topPermission,
         permCount: ss?.pendingPermissionCount ?? 0,
       });
 
@@ -378,9 +615,16 @@ function AppInner() {
         sid,
         tid: info.activeTerminalId || "default",
         toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
-        contextLines: useStructured && ss.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? ""),
+        contextLines:
+          useStructured && ss.permissionRequest
+            ? ss.permissionRequest
+            : (entry?.contextLines ?? ""),
         permissionTool: ss?.topPermission?.toolName || "",
-        permissionContext: (ss?.topPermission?.permissionRequest || ss?.topPermission?.toolInput || "").slice(0, 200),
+        permissionContext: (
+          ss?.topPermission?.permissionRequest ||
+          ss?.topPermission?.toolInput ||
+          ""
+        ).slice(0, 200),
         permissionRequestId: ss?.topPermission?.requestId || "",
         quickActions: entry?.quickActions ?? [],
       });
@@ -389,8 +633,17 @@ function AppInner() {
     if (snapshots.length === 0) return;
 
     // Sort: error > waiting > tool_use > thinking > outputting > idle
-    const priority: Record<string, number> = { error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5 };
-    snapshots.sort((a, b) => (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9));
+    const priority: Record<string, number> = {
+      error: 0,
+      waiting: 1,
+      tool_use: 2,
+      thinking: 3,
+      outputting: 4,
+      idle: 5,
+    };
+    snapshots.sort(
+      (a, b) => (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9),
+    );
     extended.sort((a, b) => {
       const ai = snapshots.findIndex((s) => s.sid === a.sid);
       const bi = snapshots.findIndex((s) => s.sid === b.sid);
@@ -428,7 +681,11 @@ function AppInner() {
         status: "idle",
         lastLine: "",
         contextLines: "",
-        quickActions: [] as { label: string; input: string; needsInput: boolean }[],
+        quickActions: [] as {
+          label: string;
+          input: string;
+          needsInput: boolean;
+        }[],
         provider: info.provider || "claude",
         connectedAt: Date.now(),
       };
@@ -450,7 +707,9 @@ function AppInner() {
     }
 
     // Start or end live activity based on session count
-    const hasConnected = [...currentSessions.values()].some((s) => s.status === "connected");
+    const hasConnected = [...currentSessions.values()].some(
+      (s) => s.status === "connected",
+    );
 
     if (hasConnected && !liveActivityActiveRef.current) {
       isLiveActivityAvailable().then((ok) => {
@@ -461,18 +720,24 @@ function AppInner() {
         for (const [sid, info] of sessionsRef.current) {
           if (info.status !== "connected") continue;
           const e = parsersRef.current.get(sid);
-          const activeTerm = info.activeTerminalId ? info.terminals.get(info.activeTerminalId) : undefined;
+          const activeTerm = info.activeTerminalId
+            ? info.terminals.get(info.activeTerminalId)
+            : undefined;
           const ss = activeTerm?.structuredStatus;
 
           snapshots.push({
             sid,
             tid: info.activeTerminalId || "default",
             phase: ss?.phase || (e?.status ?? "idle"),
-            project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 20),
+            project: (
+              info.projectName ||
+              info.hostname ||
+              sid.slice(0, 8)
+            ).slice(0, 20),
             provider: e?.provider ?? info.provider ?? "claude",
             tool: ss?.toolName || "",
             elapsed: Math.floor((now - (e?.connectedAt ?? now)) / 1000),
-            hasPermission: !!(ss?.topPermission),
+            hasPermission: !!ss?.topPermission,
             permCount: ss?.pendingPermissionCount ?? 0,
           });
 
@@ -480,9 +745,13 @@ function AppInner() {
             sid,
             tid: info.activeTerminalId || "default",
             toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
-            contextLines: (e?.contextLines ?? ""),
+            contextLines: e?.contextLines ?? "",
             permissionTool: ss?.topPermission?.toolName || "",
-            permissionContext: (ss?.topPermission?.permissionRequest || ss?.topPermission?.toolInput || "").slice(0, 200),
+            permissionContext: (
+              ss?.topPermission?.permissionRequest ||
+              ss?.topPermission?.toolInput ||
+              ""
+            ).slice(0, 200),
             permissionRequestId: ss?.topPermission?.requestId || "",
             quickActions: e?.quickActions ?? [],
           });
@@ -537,7 +806,10 @@ function AppInner() {
       try {
         const raw = await AsyncStorage.getItem(LAST_SESSION_KEY);
         if (raw) {
-          const last = JSON.parse(raw) as { gateway: string; sessionId: string };
+          const last = JSON.parse(raw) as {
+            gateway: string;
+            sessionId: string;
+          };
           setGatewayBaseUrl(last.gateway);
           setActiveScreen("terminal");
           manager.connectToSession(last.sessionId, last.gateway);
@@ -552,7 +824,10 @@ function AppInner() {
       if (info) {
         await AsyncStorage.setItem(
           LAST_SESSION_KEY,
-          JSON.stringify({ gateway: info.gatewayUrl, sessionId: manager.activeSessionId }),
+          JSON.stringify({
+            gateway: info.gatewayUrl,
+            sessionId: manager.activeSessionId,
+          }),
         );
       }
     }
@@ -582,16 +857,19 @@ function AppInner() {
     [gatewayBaseUrl, manager],
   );
 
-  const handleDisconnectSession = useCallback((sessionId: string) => {
-    manager.disconnectSession(sessionId);
-    if (manager.sessions.size <= 1) {
-      // Last session being removed — effect will end live activity
-      liveActivityActiveRef.current = false;
-      endLiveActivity();
-      AsyncStorage.removeItem(LAST_SESSION_KEY);
-      setActiveScreen("tabs");
-    }
-  }, [manager]);
+  const handleDisconnectSession = useCallback(
+    (sessionId: string) => {
+      manager.disconnectSession(sessionId);
+      if (manager.sessions.size <= 1) {
+        // Last session being removed — effect will end live activity
+        liveActivityActiveRef.current = false;
+        endLiveActivity();
+        AsyncStorage.removeItem(LAST_SESSION_KEY);
+        setActiveScreen("tabs");
+      }
+    },
+    [manager],
+  );
 
   const handleDisconnectAll = useCallback(() => {
     liveActivityActiveRef.current = false;
@@ -607,11 +885,13 @@ function AppInner() {
   }, [manager]);
 
   // Build session tabs list for SessionScreen
-  const sessionTabs = Array.from(manager.sessions.entries()).map(([sid, info]) => ({
-    sessionId: sid,
-    label: info.projectName || info.hostname || sid.slice(0, 8),
-    status: info.status,
-  }));
+  const sessionTabs = Array.from(manager.sessions.entries()).map(
+    ([sid, info]) => ({
+      sessionId: sid,
+      label: info.projectName || info.hostname || sid.slice(0, 8),
+      status: info.status,
+    }),
+  );
 
   // Build terminal tabs for active session
   const terminalTabs = activeSession
@@ -625,29 +905,30 @@ function AppInner() {
   // Compatibility: derive single-session-like status for ConnectionSheet
   const displayStatus = activeSession?.status ?? "idle";
 
-  const navTheme = theme.mode === "dark"
-    ? {
-        ...DarkTheme,
-        colors: {
-          ...DarkTheme.colors,
-          background: theme.bg,
-          card: theme.tabBg,
-          border: theme.tabBorder,
-          primary: theme.accent,
-          text: theme.text,
-        },
-      }
-    : {
-        ...DefaultTheme,
-        colors: {
-          ...DefaultTheme.colors,
-          background: theme.bg,
-          card: theme.tabBg,
-          border: theme.tabBorder,
-          primary: theme.accent,
-          text: theme.text,
-        },
-      };
+  const navTheme =
+    theme.mode === "dark"
+      ? {
+          ...DarkTheme,
+          colors: {
+            ...DarkTheme.colors,
+            background: theme.bg,
+            card: theme.tabBg,
+            border: theme.tabBorder,
+            primary: theme.accent,
+            text: theme.text,
+          },
+        }
+      : {
+          ...DefaultTheme,
+          colors: {
+            ...DefaultTheme.colors,
+            background: theme.bg,
+            card: theme.tabBg,
+            border: theme.tabBorder,
+            primary: theme.accent,
+            text: theme.text,
+          },
+        };
 
   if (currentScreen === "terminal" && activeSession) {
     return (
@@ -734,7 +1015,11 @@ function AppInner() {
             },
             tabBarBackground: () => (
               <GlassBar
-                blurTint={theme.mode === "dark" ? "systemThinMaterialDark" : "systemThinMaterialLight"}
+                blurTint={
+                  theme.mode === "dark"
+                    ? "systemThinMaterialDark"
+                    : "systemThinMaterialLight"
+                }
                 fallbackColor={theme.tabBg}
                 style={StyleSheet.absoluteFill}
               />
@@ -779,6 +1064,7 @@ function AppInner() {
                 gatewayBaseUrl={gatewayBaseUrl}
                 onSelectSession={handleConnectSession}
                 refreshKey={sessionRefreshKey}
+                deviceToken={manager.deviceToken}
               />
             )}
           </Tab.Screen>
@@ -792,21 +1078,32 @@ function AppInner() {
               ),
             }}
           >
-            {() => <SettingsScreen gatewayBaseUrl={gatewayBaseUrl} onGatewayChange={setGatewayBaseUrl} onOpenGatewayList={() => {
-              setGatewayListVisible(true);
-              gatewaySlideAnim.setValue(Dimensions.get("window").width);
-              Animated.timing(gatewaySlideAnim, {
-                toValue: 0,
-                duration: 300,
-                useNativeDriver: true,
-              }).start();
-            }} />}
+            {() => (
+              <SettingsScreen
+                gatewayBaseUrl={gatewayBaseUrl}
+                onGatewayChange={setGatewayBaseUrl}
+                onOpenGatewayList={() => {
+                  setGatewayListVisible(true);
+                  gatewaySlideAnim.setValue(Dimensions.get("window").width);
+                  Animated.timing(gatewaySlideAnim, {
+                    toValue: 0,
+                    duration: 300,
+                    useNativeDriver: true,
+                  }).start();
+                }}
+              />
+            )}
           </Tab.Screen>
         </Tab.Navigator>
       </NavigationContainer>
 
       {gatewayListVisible ? (
-        <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: gatewaySlideAnim }] }]}>
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFill,
+            { transform: [{ translateX: gatewaySlideAnim }] },
+          ]}
+        >
           <GatewayListScreen
             onBack={() => {
               Animated.timing(gatewaySlideAnim, {

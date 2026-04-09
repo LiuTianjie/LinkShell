@@ -51,6 +51,7 @@ interface SessionListScreenProps {
   gatewayBaseUrl: string;
   onSelectSession: (sessionId: string, serverUrl?: string) => void;
   refreshKey?: number;
+  deviceToken?: string | null;
 }
 
 /* ── Skeleton pulse ─────────────────────────────── */
@@ -117,7 +118,13 @@ function SkeletonRow({ theme }: { theme: Theme }) {
 }
 
 /* ── Fade-in wrapper ────────────────────────────── */
-function FadeIn({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
+function FadeIn({
+  children,
+  delay = 0,
+}: {
+  children: React.ReactNode;
+  delay?: number;
+}) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
   useEffect(() => {
@@ -342,12 +349,24 @@ function GatewaySection({
                     <AppSymbol name="terminal.fill" size={16} color="#ffffff" />
                   </View>
                   <View style={{ flex: 1, gap: 2 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 5,
+                      }}
+                    >
                       <Text
                         numberOfLines={1}
-                        style={{ color: theme.text, fontSize: 15, flexShrink: 1 }}
+                        style={{
+                          color: theme.text,
+                          fontSize: 15,
+                          flexShrink: 1,
+                        }}
                       >
-                        {session.projectName ?? session.hostname ?? session.id.slice(0, 8)}
+                        {session.projectName ??
+                          session.hostname ??
+                          session.id.slice(0, 8)}
                       </Text>
                       {session.platform ? (
                         <AppSymbol
@@ -361,7 +380,9 @@ function GatewaySection({
                       numberOfLines={1}
                       style={{ color: theme.textTertiary, fontSize: 13 }}
                     >
-                      {session.hostname && session.projectName ? `${session.hostname} · ` : ""}
+                      {session.hostname && session.projectName
+                        ? `${session.hostname} · `
+                        : ""}
                       {session.hasHost ? "主机在线" : "主机离线"}
                       {session.clientCount > 0
                         ? ` · ${session.clientCount} 个客户端`
@@ -390,6 +411,7 @@ export function SessionListScreen({
   gatewayBaseUrl,
   onSelectSession,
   refreshKey,
+  deviceToken,
 }: SessionListScreenProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -411,9 +433,13 @@ export function SessionListScreen({
     );
 
     // Fetch all in parallel
+    const authHeaders: Record<string, string> = {};
+    if (deviceToken) authHeaders["Authorization"] = `Bearer ${deviceToken}`;
     const results = await Promise.allSettled(
       servers.map(async (server) => {
-        const res = await fetchWithTimeout(`${server.url}/sessions`);
+        const res = await fetchWithTimeout(`${server.url}/sessions`, {
+          headers: authHeaders,
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const body = (await res.json()) as { sessions: SessionInfo[] };
         return body.sessions.sort((a, b) => b.lastActivity - a.lastActivity);
@@ -448,19 +474,14 @@ export function SessionListScreen({
     setRefreshing(false);
   }, [fetchAllGateways]);
 
-  const totalSessions = groups.reduce(
-    (sum, g) => sum + g.sessions.length,
-    0,
-  );
+  const totalSessions = groups.reduce((sum, g) => sum + g.sessions.length, 0);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <ScrollView
         contentContainerStyle={{
           paddingBottom: Math.max(insets.bottom, 20),
-          ...(initialLoad && groups.length === 0
-            ? { flexGrow: 1 }
-            : undefined),
+          ...(initialLoad && groups.length === 0 ? { flexGrow: 1 } : undefined),
         }}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -567,10 +588,14 @@ function safeHost(url: string): string {
 
 function platformIcon(platform: string | null | undefined): string {
   switch (platform) {
-    case "darwin": return "apple.logo";
-    case "linux": return "server.rack";
-    case "win32": return "pc";
-    default: return "desktopcomputer";
+    case "darwin":
+      return "apple.logo";
+    case "linux":
+      return "server.rack";
+    case "win32":
+      return "pc";
+    default:
+      return "desktopcomputer";
   }
 }
 
