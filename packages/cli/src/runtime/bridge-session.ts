@@ -481,7 +481,7 @@ export class BridgeSession {
       hookPort = result.port;
       hookConfigPath = result.configPath;
       // Also set up hooks for other providers
-      const curlCmd = `curl -s -X POST http://127.0.0.1:${result.port}/hook -H 'Content-Type: application/json' -d "$(cat)"`;
+      const curlCmd = `curl -s -X POST http://127.0.0.1:${result.port}/hook -H 'Content-Type: application/json' --data-binary @-`;
       this.setupCodexHooks(terminalId, curlCmd);
       this.setupGeminiHooks(terminalId, curlCmd);
       this.setupCopilotHooks(terminalId, curlCmd);
@@ -760,8 +760,29 @@ export class BridgeSession {
     const rawHookName = (event.hook_event_name ?? event.event_name) as string | undefined;
     if (!rawHookName) return;
 
+    // Auto-detect actual provider from hook event fields
+    let detectedProvider = provider;
+    if (event.session_id || event.transcript_path || event.permission_mode) {
+      detectedProvider = "claude";
+    } else if (event.codex_session_id || (typeof rawHookName === "string" && /^(pre|post)ToolUse$|^session(Start|End)$/.test(rawHookName) && event.codex_version)) {
+      detectedProvider = "codex";
+    } else if (typeof rawHookName === "string" && /^(Before|After)(Tool|SubmitPrompt)$|^Session(Start|End)$/.test(rawHookName)) {
+      detectedProvider = "gemini";
+    } else if (typeof rawHookName === "string" && /^(pre|post)ToolUse$|^session(Start|End)$/.test(rawHookName) && !event.session_id) {
+      // Copilot uses same camelCase as codex but without codex-specific fields
+      // Fall through to normalizeHookName which tries all providers
+    }
+
+    // Update terminal provider if we detected a specific one
+    const hookTerm = this.terminals.get(terminalId);
+    if (hookTerm && hookTerm.provider === "custom" && detectedProvider !== provider) {
+      hookTerm.provider = detectedProvider;
+      this.log(`detected provider for ${terminalId}: ${detectedProvider}`);
+      this.sendTerminalList();
+    }
+
     // Normalize hook event names from different providers to unified names
-    const hookName = this.normalizeHookName(rawHookName, provider);
+    const hookName = this.normalizeHookName(rawHookName, detectedProvider);
     if (!hookName) return;
 
     let phase: string;
