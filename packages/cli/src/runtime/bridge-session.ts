@@ -775,7 +775,7 @@ export class BridgeSession {
 
     // Update terminal provider if we detected a specific one
     const hookTerm = this.terminals.get(terminalId);
-    if (hookTerm && hookTerm.provider === "custom" && detectedProvider !== provider) {
+    if (hookTerm && hookTerm.provider === "custom" && detectedProvider !== "custom") {
       hookTerm.provider = detectedProvider;
       this.log(`detected provider for ${terminalId}: ${detectedProvider}`);
       this.sendTerminalList();
