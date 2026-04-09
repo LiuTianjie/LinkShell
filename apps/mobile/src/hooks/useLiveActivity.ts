@@ -53,9 +53,8 @@ function buildState(
         permissionRequestId: tp?.requestId || "",
         quickActions: hasPermission
           ? [
-              { label: "允许", input: "1\n", needsInput: false, desc: "允许本次执行" },
-              { label: "本次允许", input: "2\n", needsInput: false, desc: "本会话内不再询问" },
-              { label: "拒绝", input: "3\n", needsInput: false, desc: "拒绝并继续" },
+              { label: "允许", input: "allow", needsInput: false },
+              { label: "拒绝", input: "deny", needsInput: false },
             ]
           : [],
       });
@@ -281,11 +280,23 @@ export function useLiveActivity(manager: SessionManagerHandle) {
       (event: { sessionId: string; terminalId: string; input: string; requestId: string }) => {
         const info = manager.sessions.get(event.sessionId);
         if (!info) return;
-        manager.setActiveSessionId(event.sessionId);
-        if (event.terminalId && event.terminalId !== "default") {
-          manager.switchTerminal(event.terminalId);
+
+        // input is "allow" or "deny" — send as permission decision
+        if (event.requestId && (event.input === "allow" || event.input === "deny")) {
+          manager.sendPermissionDecision(
+            event.sessionId,
+            event.terminalId,
+            event.requestId,
+            event.input,
+          );
+        } else {
+          // Fallback: send as terminal input
+          manager.setActiveSessionId(event.sessionId);
+          if (event.terminalId && event.terminalId !== "default") {
+            manager.switchTerminal(event.terminalId);
+          }
+          setTimeout(() => manager.sendInput(event.input), 50);
         }
-        setTimeout(() => manager.sendInput(event.input), 50);
 
         if (event.requestId) {
           confirmAction(event.requestId);

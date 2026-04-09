@@ -104,6 +104,8 @@ export interface SessionManagerHandle {
   removeTerminal: (terminalId: string) => void;
   /** Register callback for terminal.status changes (for Live Activity fast path) */
   onStatusChange: (cb: ((sessionId: string, terminalId: string, status: TerminalInfo["structuredStatus"]) => void) | null) => void;
+  /** Send permission decision back to CLI hook server */
+  sendPermissionDecision: (sessionId: string, terminalId: string, requestId: string, decision: "allow" | "deny") => void;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -988,5 +990,16 @@ export function useSessionManager(): SessionManagerHandle {
     killTerminal: killTerminalFn,
     removeTerminal: removeTerminalFn,
     onStatusChange: (cb) => { statusChangeCbRef.current = cb; },
+    sendPermissionDecision: (sessionId: string, terminalId: string, requestId: string, decision: "allow" | "deny") => {
+      const s = sessionsRef.current.get(sessionId);
+      if (!s) return;
+      sendRaw(s, createEnvelope({
+        type: "permission.decision",
+        sessionId,
+        terminalId,
+        deviceId: s.deviceId,
+        payload: { requestId, decision },
+      }));
+    },
   };
 }
