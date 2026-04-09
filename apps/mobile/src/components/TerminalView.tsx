@@ -295,11 +295,6 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 .xterm-screen canvas{max-width:100% !important;}
 </style>`,
           )
-          // Let xterm own keyboard input for IME
-          .replace(
-            /if \(term\.textarea\) \{\n  term\.textarea\.readOnly = true;\n  term\.textarea\.tabIndex = -1;\n  term\.textarea\.setAttribute\('inputmode', 'none'\);\n  term\.textarea\.blur\(\);\n\}/,
-            `if (term.textarea) {\n  term.textarea.readOnly = false;\n  term.textarea.tabIndex = 0;\n  term.textarea.style.colorScheme = '${theme.mode}';\n  term.textarea.setAttribute('autocapitalize', 'off');\n  term.textarea.setAttribute('autocorrect', 'off');\n  term.textarea.setAttribute('spellcheck', 'false');\n  term.textarea.setAttribute('autocomplete', 'off');\n}`,
-          )
           .replace(
             "window.addEventListener('resize',function(){fitAddon.fit();});",
             "window.addEventListener('resize',function(){safeFit();sendSize();});",

@@ -74,10 +74,12 @@ term.loadAddon(new WebLinksAddon.WebLinksAddon());
 term.open(document.getElementById('terminal'));
 
 if (term.textarea) {
-  term.textarea.readOnly = true;
-  term.textarea.tabIndex = -1;
-  term.textarea.setAttribute('inputmode', 'none');
-  term.textarea.blur();
+  term.textarea.readOnly = false;
+  term.textarea.tabIndex = 0;
+  term.textarea.setAttribute('autocapitalize', 'off');
+  term.textarea.setAttribute('autocorrect', 'off');
+  term.textarea.setAttribute('spellcheck', 'false');
+  term.textarea.setAttribute('autocomplete', 'off');
 }
 
 setTimeout(function(){fitAddon.fit();sendSize();},150);

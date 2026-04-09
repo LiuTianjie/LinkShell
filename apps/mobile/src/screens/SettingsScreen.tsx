@@ -94,7 +94,7 @@ export function SettingsScreen({
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 20) }}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 20) + 60 }}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}

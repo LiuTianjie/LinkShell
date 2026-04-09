@@ -88,7 +88,7 @@
         "android.permission.RECORD_AUDIO"
       ],
       "package": "com.bd.linkshell",
-      "versionCode": 4
+      "versionCode": 5
     },
     "extra": {
       "eas": {
