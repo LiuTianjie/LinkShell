@@ -536,6 +536,7 @@ export function useSessionManager(): SessionManagerHandle {
               existing.status = info.status;
               existing.cwd = info.cwd;
               existing.projectName = info.projectName;
+              if (info.provider) existing.provider = info.provider;
             }
           }
           // Set active terminal if not set
