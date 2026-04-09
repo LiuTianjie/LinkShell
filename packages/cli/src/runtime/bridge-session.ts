@@ -634,15 +634,14 @@ export class BridgeSession {
     writeFileSync(backupPath, JSON.stringify(existing));
 
     const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
-    const hookEntryWithMatcher = { matcher: "*", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
-    const permissionEntry = { matcher: "*", hooks: [{ type: "command", command: curlCmd, timeout: 86400 }] };
+    const permissionEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 86400 }] };
 
     const merged = {
       ...existing,
       hooks: {
-        PreToolUse: [hookEntryWithMatcher],
-        PostToolUse: [hookEntryWithMatcher],
-        PostToolUseFailure: [hookEntryWithMatcher],
+        PreToolUse: [hookEntry],
+        PostToolUse: [hookEntry],
+        PostToolUseFailure: [hookEntry],
         Stop: [hookEntry],
         PermissionRequest: [permissionEntry],
         UserPromptSubmit: [hookEntry],

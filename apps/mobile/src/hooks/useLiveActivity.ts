@@ -51,8 +51,9 @@ function buildState(sessions: Map<string, SessionInfo>, activeSessionId: string 
       permissionRequestId: tp?.requestId || "",
       quickActions: hasPermission
         ? [
-            { label: "允许", input: "y", needsInput: false },
-            { label: "拒绝", input: "n", needsInput: false },
+            { label: "允许", input: "1\n", needsInput: false },
+            { label: "本次允许", input: "2\n", needsInput: false },
+            { label: "拒绝", input: "3\n", needsInput: false },
           ]
         : [],
     };
