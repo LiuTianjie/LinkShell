@@ -1,4 +1,5 @@
 import AppIntents
+import ActivityKit
 import Foundation
 
 @available(iOS 17.0, *)
@@ -46,7 +47,7 @@ struct QuickActionIntent: AppIntent {
         if processed.count > 50 { processed = Array(processed.suffix(50)) }
         defaults.set(processed, forKey: LiveActivityStore.processedActionsKey)
 
-        // Enqueue action
+        // Enqueue action for main app
         var queue = defaults.array(forKey: LiveActivityStore.pendingActionsKey) as? [[String: String]] ?? []
         queue.append([
             "actionId": actionId,
@@ -58,6 +59,36 @@ struct QuickActionIntent: AppIntent {
         ])
         defaults.set(queue, forKey: LiveActivityStore.pendingActionsKey)
         defaults.synchronize()
+
+        // Optimistic update: clear permission from extended data
+        let key = "\(sessionId):\(terminalId)"
+        var extMap = LiveActivityStore.readExtendedData()
+        if var ext = extMap[key] {
+            ext.permissionTool = ""
+            ext.permissionContext = ""
+            ext.permissionRequestId = ""
+            ext.quickActions = []
+            extMap[key] = ext
+            LiveActivityStore.writeExtendedData(Array(extMap.values))
+        }
+
+        // Optimistic update: set phase to "thinking" in ContentState
+        if #available(iOS 16.2, *) {
+            for activity in Activity<LinkShellAttributes>.activities {
+                var terminals = activity.content.state.terminals
+                if let idx = terminals.firstIndex(where: { $0.sid == sessionId && $0.tid == terminalId }) {
+                    terminals[idx].phase = "thinking"
+                    terminals[idx].hasPermission = false
+                    terminals[idx].permCount = max(0, terminals[idx].permCount - 1)
+                }
+                let newState = LinkShellAttributes.ContentState(
+                    terminals: terminals,
+                    focusedSid: activity.content.state.focusedSid,
+                    focusedTid: activity.content.state.focusedTid
+                )
+                await activity.update(ActivityContent(state: newState, staleDate: nil))
+            }
+        }
 
         // Darwin notification to wake main app
         CFNotificationCenterPostNotification(

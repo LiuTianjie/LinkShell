@@ -29,8 +29,8 @@ import {
   startLiveActivity,
   updateLiveActivity,
   endLiveActivity,
-  type SessionSnapshot,
-  type ExtendedSessionData,
+  type TerminalSnapshot,
+  type ExtendedTerminalData,
 } from "./src/native/LiveActivity";
 import { ThrottledTerminalParser } from "./src/utils/terminal-parser";
 
@@ -350,8 +350,8 @@ function AppInner() {
     const currentSessions = sessionsRef.current;
     const activeSid = activeSidRef.current;
     const now = Date.now();
-    const snapshots: SessionSnapshot[] = [];
-    const extended: ExtendedSessionData[] = [];
+    const snapshots: TerminalSnapshot[] = [];
+    const extended: ExtendedTerminalData[] = [];
 
     for (const [sid, info] of currentSessions) {
       if (info.status !== "connected") continue;
@@ -376,6 +376,7 @@ function AppInner() {
 
       extended.push({
         sid,
+        tid: info.activeTerminalId || "default",
         toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
         contextLines: useStructured && ss.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? ""),
         permissionTool: ss?.topPermission?.toolName || "",
@@ -401,7 +402,7 @@ function AppInner() {
     // Alert when any session has permission requests
     const needsAlert = snapshots.some((s) => s.hasPermission);
 
-    updateLiveActivity(snapshots, extended, aid, needsAlert);
+    updateLiveActivity(snapshots, extended, aid, aid, needsAlert);
   }, []);
 
   useEffect(() => {
@@ -455,8 +456,8 @@ function AppInner() {
       isLiveActivityAvailable().then((ok) => {
         if (!ok) return;
         const now = Date.now();
-        const snapshots: SessionSnapshot[] = [];
-        const extended: ExtendedSessionData[] = [];
+        const snapshots: TerminalSnapshot[] = [];
+        const extended: ExtendedTerminalData[] = [];
         for (const [sid, info] of sessionsRef.current) {
           if (info.status !== "connected") continue;
           const e = parsersRef.current.get(sid);
@@ -477,6 +478,7 @@ function AppInner() {
 
           extended.push({
             sid,
+            tid: info.activeTerminalId || "default",
             toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
             contextLines: (e?.contextLines ?? ""),
             permissionTool: ss?.topPermission?.toolName || "",
@@ -487,7 +489,7 @@ function AppInner() {
         }
         if (snapshots.length === 0) return;
         const aid = activeSidRef.current ?? snapshots[0]?.sid ?? "";
-        startLiveActivity(snapshots, extended, aid).then((id) => {
+        startLiveActivity(snapshots, extended, aid, "default").then((id) => {
           if (id) liveActivityActiveRef.current = true;
         });
       });

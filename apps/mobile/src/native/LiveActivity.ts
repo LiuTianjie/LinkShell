@@ -2,9 +2,9 @@ import { NativeModules, Platform } from "react-native";
 
 const { LiveActivityModule } = NativeModules;
 
-// ── Compact snapshot (matches Swift SessionSnapshot) ──
+// ── Compact snapshot (matches Swift TerminalSnapshot) ──
 
-export interface SessionSnapshot {
+export interface TerminalSnapshot {
   sid: string;
   tid: string;
   phase: string;
@@ -16,10 +16,11 @@ export interface SessionSnapshot {
   permCount: number;
 }
 
-// ── Extended data (written to UserDefaults for widget) ──
+// ── Extended data (written to UserDefaults for widget, keyed by sid:tid) ──
 
-export interface ExtendedSessionData {
+export interface ExtendedTerminalData {
   sid: string;
+  tid: string;
   toolDescription: string;
   contextLines: string;
   permissionTool: string;
@@ -32,6 +33,7 @@ export interface QuickAction {
   label: string;
   input: string;
   needsInput: boolean;
+  desc?: string;
 }
 
 // ── Native bridge ──
@@ -48,16 +50,18 @@ export async function isLiveActivityAvailable(): Promise<boolean> {
 }
 
 export async function startLiveActivity(
-  snapshots: SessionSnapshot[],
-  extendedData: ExtendedSessionData[],
-  activeSessionId: string,
+  terminals: TerminalSnapshot[],
+  extendedData: ExtendedTerminalData[],
+  focusedSid: string,
+  focusedTid: string,
 ): Promise<string | null> {
   if (!isIOS || !LiveActivityModule) return null;
   try {
     return await LiveActivityModule.startActivity(
-      JSON.stringify(snapshots),
+      JSON.stringify(terminals),
       JSON.stringify(extendedData),
-      activeSessionId,
+      focusedSid,
+      focusedTid,
     );
   } catch (e) {
     console.warn("[LiveActivity] start failed:", e);
@@ -66,17 +70,19 @@ export async function startLiveActivity(
 }
 
 export async function updateLiveActivity(
-  snapshots: SessionSnapshot[],
-  extendedData: ExtendedSessionData[],
-  activeSessionId: string,
+  terminals: TerminalSnapshot[],
+  extendedData: ExtendedTerminalData[],
+  focusedSid: string,
+  focusedTid: string,
   alert?: boolean,
 ): Promise<void> {
   if (!isIOS || !LiveActivityModule) return;
   try {
     await LiveActivityModule.updateActivity(
-      JSON.stringify(snapshots),
+      JSON.stringify(terminals),
       JSON.stringify(extendedData),
-      activeSessionId,
+      focusedSid,
+      focusedTid,
       alert ?? false,
     );
   } catch {

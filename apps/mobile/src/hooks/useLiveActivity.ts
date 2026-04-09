@@ -7,73 +7,90 @@ import {
   updateLiveActivity,
   endLiveActivity,
   confirmAction,
-  type SessionSnapshot,
-  type ExtendedSessionData,
+  type TerminalSnapshot,
+  type ExtendedTerminalData,
 } from "../native/LiveActivity";
 
-// ── Build state from structured status (no terminal parsing) ──
+// ── Build state from all terminals across all sessions ──
 
-function buildState(sessions: Map<string, SessionInfo>, activeSessionId: string | null) {
-  const snapshots: SessionSnapshot[] = [];
-  const extended: ExtendedSessionData[] = [];
-  const now = Date.now();
+function buildState(
+  sessions: Map<string, SessionInfo>,
+  activeSessionId: string | null,
+) {
+  const terminals: TerminalSnapshot[] = [];
+  const extended: ExtendedTerminalData[] = [];
+
+  let focusedSid = "";
+  let focusedTid = "";
 
   for (const [sid, info] of sessions) {
     if (info.status !== "connected") continue;
 
-    const activeTerm = info.activeTerminalId
-      ? info.terminals.get(info.activeTerminalId)
-      : undefined;
-    const ss = activeTerm?.structuredStatus;
+    for (const [tid, term] of info.terminals) {
+      const ss = term.structuredStatus;
+      const hasPermission = !!(ss?.topPermission);
+      const tp = ss?.topPermission;
 
-    const hasPermission = !!(ss?.topPermission);
-    const tp = ss?.topPermission;
+      terminals.push({
+        sid,
+        tid,
+        phase: ss?.phase || "idle",
+        project: (term.projectName || info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 20),
+        provider: term.provider || info.provider || "claude",
+        tool: ss?.toolName || "",
+        elapsed: 0,
+        hasPermission,
+        permCount: ss?.pendingPermissionCount ?? (hasPermission ? 1 : 0),
+      });
 
-    const snapshot: SessionSnapshot = {
-      sid,
-      tid: info.activeTerminalId || "default",
-      phase: ss?.phase || "idle",
-      project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 20),
-      provider: activeTerm?.provider || info.provider || "claude",
-      tool: ss?.toolName || "",
-      elapsed: 0, // filled below
-      hasPermission,
-      permCount: ss?.pendingPermissionCount ?? (hasPermission ? 1 : 0),
-    };
+      extended.push({
+        sid,
+        tid,
+        toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
+        contextLines: (ss?.permissionRequest || ss?.summary || "").slice(0, 300),
+        permissionTool: tp?.toolName || "",
+        permissionContext: (tp?.permissionRequest || tp?.toolInput || "").slice(0, 200),
+        permissionRequestId: tp?.requestId || "",
+        quickActions: hasPermission
+          ? [
+              { label: "允许", input: "1\n", needsInput: false, desc: "允许本次执行" },
+              { label: "本次允许", input: "2\n", needsInput: false, desc: "本会话内不再询问" },
+              { label: "拒绝", input: "3\n", needsInput: false, desc: "拒绝并继续" },
+            ]
+          : [],
+      });
 
-    const ext: ExtendedSessionData = {
-      sid,
-      toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
-      contextLines: (ss?.permissionRequest || ss?.summary || "").slice(0, 300),
-      permissionTool: tp?.toolName || "",
-      permissionContext: (tp?.permissionRequest || tp?.toolInput || "").slice(0, 200),
-      permissionRequestId: tp?.requestId || "",
-      quickActions: hasPermission
-        ? [
-            { label: "允许", input: "1\n", needsInput: false },
-            { label: "本次允许", input: "2\n", needsInput: false },
-            { label: "拒绝", input: "3\n", needsInput: false },
-          ]
-        : [],
-    };
-
-    snapshots.push(snapshot);
-    extended.push(ext);
+      // Track focused terminal
+      if (sid === activeSessionId && tid === info.activeTerminalId) {
+        focusedSid = sid;
+        focusedTid = tid;
+      }
+    }
   }
 
-  // Sort: error > waiting > tool_use > thinking > outputting > idle
+  // Sort: hasPermission first, then by phase priority
   const priority: Record<string, number> = {
     error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5,
   };
-  snapshots.sort((a, b) => (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9));
-  extended.sort((a, b) => {
-    const ai = snapshots.findIndex((s) => s.sid === a.sid);
-    const bi = snapshots.findIndex((s) => s.sid === b.sid);
-    return ai - bi;
+  terminals.sort((a, b) => {
+    if (a.hasPermission !== b.hasPermission) return a.hasPermission ? -1 : 1;
+    return (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9);
   });
+  // Keep extended in same order as terminals
+  const termOrder = new Map(terminals.map((t, i) => [`${t.sid}:${t.tid}`, i]));
+  extended.sort((a, b) => (termOrder.get(`${a.sid}:${a.tid}`) ?? 99) - (termOrder.get(`${b.sid}:${b.tid}`) ?? 99));
 
-  const aid = activeSessionId ?? snapshots[0]?.sid ?? "";
-  return { snapshots, extended, aid };
+  // Cap at 10 terminals (4KB budget)
+  terminals.splice(10);
+  extended.splice(10);
+
+  // Default focused to first terminal if not set
+  if (!focusedSid && terminals.length > 0) {
+    focusedSid = terminals[0].sid;
+    focusedTid = terminals[0].tid;
+  }
+
+  return { terminals, extended, focusedSid, focusedTid };
 }
 
 // ── Tiered throttle ──
@@ -81,11 +98,7 @@ function buildState(sessions: Map<string, SessionInfo>, activeSessionId: string 
 class TieredThrottle {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastFire = 0;
-  private pending = false;
   private fn: () => void;
-
-  // Default intervals
-  private immediateTypes = new Set(["permission", "phase_change"]);
   private debounceMs = 300;
   private tickMs = 5000;
 
@@ -96,7 +109,7 @@ class TieredThrottle {
   fire(reason: "permission" | "phase_change" | "tick") {
     const now = Date.now();
 
-    if (this.immediateTypes.has(reason)) {
+    if (reason === "permission") {
       this.cancel();
       this.lastFire = now;
       this.fn();
@@ -104,7 +117,6 @@ class TieredThrottle {
     }
 
     if (reason === "phase_change") {
-      // Debounce phase changes
       this.cancel();
       this.timer = setTimeout(() => {
         this.lastFire = Date.now();
@@ -141,6 +153,7 @@ export function useLiveActivity(manager: SessionManagerHandle) {
   const sessionsRef = useRef(manager.sessions);
   const activeSidRef = useRef(manager.activeSessionId);
   const startTimesRef = useRef(new Map<string, number>());
+  const lastProviderRef = useRef(new Map<string, string>());
 
   sessionsRef.current = manager.sessions;
   activeSidRef.current = manager.activeSessionId;
@@ -163,25 +176,39 @@ export function useLiveActivity(manager: SessionManagerHandle) {
   const pushUpdate = useCallback(() => {
     if (!activeRef.current) return;
 
-    const { snapshots, extended, aid } = buildState(
+    const { terminals, extended, focusedSid, focusedTid } = buildState(
       sessionsRef.current,
       activeSidRef.current,
     );
 
-    if (snapshots.length === 0) return;
+    if (terminals.length === 0) return;
 
     // Fill elapsed times
     const now = Date.now();
-    for (const s of snapshots) {
-      const t = startTimesRef.current.get(s.sid);
-      s.elapsed = t ? Math.floor((now - t) / 1000) : 0;
+    for (const t of terminals) {
+      const start = startTimesRef.current.get(t.sid);
+      t.elapsed = start ? Math.floor((now - start) / 1000) : 0;
     }
 
-    const hasPermission = snapshots.some((s) => s.hasPermission);
+    // Detect provider changes and clear stale permission data
+    for (let i = 0; i < terminals.length; i++) {
+      const key = `${terminals[i].sid}:${terminals[i].tid}`;
+      const prev = lastProviderRef.current.get(key);
+      if (prev && prev !== terminals[i].provider) {
+        // Provider switched — clear permission state
+        extended[i].permissionTool = "";
+        extended[i].permissionContext = "";
+        extended[i].permissionRequestId = "";
+        extended[i].quickActions = [];
+      }
+      lastProviderRef.current.set(key, terminals[i].provider);
+    }
+
+    const hasPermission = terminals.some((t) => t.hasPermission);
     const needsAlert = hasPermission && !lastAlertRef.current;
     lastAlertRef.current = hasPermission;
 
-    updateLiveActivity(snapshots, extended, aid, needsAlert);
+    updateLiveActivity(terminals, extended, focusedSid, focusedTid, needsAlert);
   }, []);
 
   const throttle = useRef<TieredThrottle | null>(null);
@@ -196,32 +223,30 @@ export function useLiveActivity(manager: SessionManagerHandle) {
     );
 
     if (hasConnected && !activeRef.current) {
-      // Start
       isLiveActivityAvailable().then((ok) => {
         if (!ok) return;
-        const { snapshots, extended, aid } = buildState(
+        const { terminals, extended, focusedSid, focusedTid } = buildState(
           sessionsRef.current,
           activeSidRef.current,
         );
-        if (snapshots.length === 0) return;
+        if (terminals.length === 0) return;
 
         const now = Date.now();
-        for (const s of snapshots) {
-          const t = startTimesRef.current.get(s.sid);
-          s.elapsed = t ? Math.floor((now - t) / 1000) : 0;
+        for (const t of terminals) {
+          const start = startTimesRef.current.get(t.sid);
+          t.elapsed = start ? Math.floor((now - start) / 1000) : 0;
         }
 
-        startLiveActivity(snapshots, extended, aid).then((id) => {
+        startLiveActivity(terminals, extended, focusedSid, focusedTid).then((id) => {
           if (id) activeRef.current = true;
         });
       });
     } else if (!hasConnected && activeRef.current) {
-      // End
       activeRef.current = false;
       lastAlertRef.current = false;
+      lastProviderRef.current.clear();
       endLiveActivity();
     } else if (hasConnected && activeRef.current) {
-      // Update
       throttle.current?.fire("phase_change");
     }
   }, [manager.sessions, manager.activeSessionId, pushUpdate]);
@@ -262,7 +287,6 @@ export function useLiveActivity(manager: SessionManagerHandle) {
         }
         setTimeout(() => manager.sendInput(event.input), 50);
 
-        // Clear permission card from widget
         if (event.requestId) {
           confirmAction(event.requestId);
         }

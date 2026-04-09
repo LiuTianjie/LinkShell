@@ -776,8 +776,15 @@ export class BridgeSession {
       if (detectedProvider !== "custom") {
         hookTerm.provider = detectedProvider;
         this.log(`detected provider for ${terminalId}: ${detectedProvider}`);
+        this.permissionStacks.delete(terminalId);
         this.sendTerminalList();
       }
+    } else if (hookTerm && hookTerm.provider !== "custom" && detectedProvider !== hookTerm.provider) {
+      // Provider switched mid-session (e.g., user exited claude and started codex)
+      hookTerm.provider = detectedProvider;
+      this.log(`provider switched for ${terminalId}: ${detectedProvider}`);
+      this.permissionStacks.delete(terminalId);
+      this.sendTerminalList();
     }
 
     // Normalize hook event names from different providers to unified names
