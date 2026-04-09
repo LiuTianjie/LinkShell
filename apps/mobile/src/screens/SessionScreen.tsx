@@ -340,14 +340,7 @@ export function SessionScreen({
 
   useEffect(() => {
     if (status !== "connected") setKeyboardHintVisible(false);
-    // Android: auto-focus terminal when connected, no need for hint
-    if (status === "connected" && Platform.OS === "android" && !inputDisabled) {
-      setKeyboardHintVisible(false);
-      setTimeout(() => {
-        termRef.current?.focusCursor();
-      }, 500);
-    }
-  }, [status, inputDisabled]);
+  }, [status]);
 
   useEffect(() => {
     const applyKeyboardFrame = (event: KeyboardEvent) => {
@@ -1364,6 +1357,52 @@ const TerminalStage = memo(function TerminalStage({
   const ctrlRef = useRef(false);
   ctrlRef.current = ctrlActive;
 
+  // Android keyboard proxy: hidden native TextInput to reliably open soft keyboard
+  const proxyInputRef = useRef<TextInput>(null);
+  const isAndroid = Platform.OS === "android";
+  const SENTINEL = " "; // keep one char so backspace is always detectable
+  const proxyBufferRef = useRef(SENTINEL);
+
+  const resetProxy = useCallback(() => {
+    proxyBufferRef.current = SENTINEL;
+    proxyInputRef.current?.setNativeProps({ text: SENTINEL });
+  }, []);
+
+  const handleProxyChange = useCallback(
+    (text: string) => {
+      const prev = proxyBufferRef.current;
+      if (text.length > prev.length) {
+        // Character(s) added
+        const added = text.slice(prev.length);
+        // Check for newline (Enter key)
+        if (added.includes("\n")) {
+          onInput("\r");
+          resetProxy();
+        } else {
+          onInput(added);
+          proxyBufferRef.current = text;
+        }
+      } else if (text.length < prev.length) {
+        // Backspace
+        onInput("\x7f");
+        if (text.length === 0) {
+          // Sentinel was deleted, restore it
+          resetProxy();
+        } else {
+          proxyBufferRef.current = text;
+        }
+      }
+    },
+    [onInput, resetProxy],
+  );
+
+  const focusProxy = useCallback(() => {
+    if (isAndroid) {
+      resetProxy();
+      setTimeout(() => proxyInputRef.current?.focus(), 50);
+    }
+  }, [isAndroid, resetProxy]);
+
   const handleInput = useCallback(
     async (data: string) => {
       if (data === "\x10paste\x10") {
@@ -1399,6 +1438,26 @@ const TerminalStage = memo(function TerminalStage({
       }}
       onLayout={onLayout}
     >
+      {/* Android: hidden native TextInput as keyboard proxy */}
+      {isAndroid ? (
+        <TextInput
+          ref={proxyInputRef}
+          style={{
+            position: "absolute",
+            opacity: 0,
+            height: 1,
+            width: 1,
+            left: -9999,
+          }}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="off"
+          blurOnSubmit={false}
+          multiline
+          onChangeText={handleProxyChange}
+          defaultValue={SENTINEL}
+        />
+      ) : null}
       <View
         style={{
           flex: 1,
@@ -1550,6 +1609,8 @@ const TerminalStage = memo(function TerminalStage({
               if (keyboardUp) {
                 Keyboard.dismiss();
                 termRef.current?.blurCursor();
+              } else if (isAndroid) {
+                focusProxy();
               } else {
                 onRequestFocus();
               }
@@ -1582,7 +1643,7 @@ const TerminalStage = memo(function TerminalStage({
           }}
         >
           <Pressable
-            onPress={onRequestFocus}
+            onPress={isAndroid ? focusProxy : onRequestFocus}
             style={{ position: "absolute", bottom: VOICE_BAR_HEIGHT + 16 }}
           >
             <GlassBar

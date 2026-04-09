@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #201d1d;
-      --surface: #302c2c;
+      --bg: #1a1a1e;
+      --surface: #2a2a30;
       --text: #fdfcfc;
       --text-sec: #9a9898;
       --text-muted: #6e6e73;
@@ -22,7 +22,7 @@
       --warning: #ff9f0a;
       --danger: #ff3b30;
       --border: rgba(15, 0, 0, 0.12);
-      --border-solid: #646262;
+      --border-solid: #5a5a64;
       --radius: 4px;
       --font: 'Berkeley Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
       --max-w: 860px;
@@ -447,6 +447,16 @@
       .sec {
         padding: 48px 0;
       }
+
+      .hero-flex {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .hero-flex img {
+        width: 140px !important;
+        height: 140px !important;
+      }
     }
   </style>
 </head>
@@ -456,7 +466,7 @@
   <!-- NAV -->
   <nav class="nav">
     <div class="nav-in">
-      <a href="#" class="nav-b">[LS] LinkShell</a>
+      <a href="#" class="nav-b"><img src="../assets/adaptive-icon.png" alt="LinkShell" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-right:8px">LinkShell</a>
       <div class="nav-r">
         <a href="#how" data-i18n="navHow">工作原理</a><span class="sep">|</span>
         <a href="#docs" class="nav-link" data-i18n="navDocs">文档</a><span class="sep">|</span>
@@ -468,18 +478,23 @@
 
   <!-- HERO -->
   <section class="sec" style="padding-top:120px" data-page="home">
-    <div class="c">
-      <p style="color:var(--success);margin-bottom:24px;font-weight:500" data-i18n="heroBadge">&gt; LinkShell v1.0 现已发布
-      </p>
-      <h1 style="margin-bottom:16px"><span data-i18n="heroTitle1">终端漫游</span><span
-          data-i18n="heroTitleSep">，</span><span data-i18n="heroTitle2">随时随地，自由接管</span></h1>
-      <p style="color:var(--text-sec);margin-bottom:12px;max-width:600px" data-i18n="heroLead">
-        纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。</p>
-      <p style="color:var(--warning);margin-bottom:32px;font-size:14px" data-i18n="heroGateway">🎁 限时免费体验公网 Gateway
-        地址：ws://115.191.50.117:8787/ws</p>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
-        <a href="https://github.com/LiuTianjie/LinkShell" class="btn btn-s" data-i18n="btnGithub">查看仓库</a>
+    <div class="c hero-flex" style="display:flex;align-items:center;gap:48px">
+      <div style="flex:1">
+        <p style="color:var(--success);margin-bottom:24px;font-weight:500" data-i18n="heroBadge">&gt; LinkShell v1.0 现已发布
+        </p>
+        <h1 style="margin-bottom:16px"><span data-i18n="heroTitle1">终端漫游</span><span
+            data-i18n="heroTitleSep">，</span><span data-i18n="heroTitle2">随时随地，自由接管</span></h1>
+        <p style="color:var(--text-sec);margin-bottom:12px;max-width:600px" data-i18n="heroLead">
+          纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。</p>
+        <p style="color:var(--warning);margin-bottom:32px;font-size:14px" data-i18n="heroGateway">🎁 限时免费体验公网 Gateway
+          地址：ws://115.191.50.117:8787/ws</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
+          <a href="https://github.com/LiuTianjie/LinkShell" class="btn btn-s" data-i18n="btnGithub">查看仓库</a>
+        </div>
+      </div>
+      <div style="flex-shrink:0">
+        <img src="../assets/adaptive-icon.png" alt="LinkShell Logo" style="width:220px;height:220px;border-radius:32px" />
       </div>
     </div>
   </section>
@@ -890,7 +905,7 @@
   <!-- FOOTER -->
   <footer>
     <div class="ft">
-      <span style="font-weight:700;font-size:14px">[LS] LinkShell</span>
+      <span style="font-weight:700;font-size:14px"><img src="../assets/adaptive-icon.png" alt="LinkShell" style="width:20px;height:20px;border-radius:4px;vertical-align:middle;margin-right:6px">LinkShell</span>
       <span style="color:var(--text-muted);font-size:14px" data-i18n="footerText">出于对 Vibe Coding 的热爱。© 2026 MIT
         开源。</span>
       <div style="display:flex;gap:16px">

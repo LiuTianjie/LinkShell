@@ -10,7 +10,6 @@ import {
   Animated,
   Clipboard,
   PanResponder,
-  Platform,
   StyleSheet,
   View,
 } from "react-native";
@@ -367,27 +366,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           postToWebView({ type: "zoom_reset" });
         },
         focusCursor() {
-          if (!readyRef.current) {
-            // WebView not ready yet — retry after a short delay
-            setTimeout(() => {
-              if (readyRef.current) {
-                webViewRef.current?.injectJavaScript(
-                  `try{if(term&&term.textarea){term.textarea.focus();term.focus();}}catch(e){}true;`,
-                );
-              }
-            }, 300);
-            return;
-          }
-          if (Platform.OS === "android") {
-            // Android: directly focus the textarea element to trigger soft keyboard
-            webViewRef.current?.injectJavaScript(
-              `try{if(term&&term.textarea){term.textarea.focus();term.focus();}}catch(e){}true;`,
-            );
-          } else {
-            webViewRef.current?.injectJavaScript(
-              `try{if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "focus_cursor" }))});}}catch(e){}true;`,
-            );
-          }
+          if (!readyRef.current) return;
+          webViewRef.current?.injectJavaScript(
+            `try{if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "focus_cursor" }))});}}catch(e){}true;`,
+          );
         },
         blurCursor() {
           webViewRef.current?.injectJavaScript(
@@ -470,7 +452,6 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           hideKeyboardAccessoryView
           allowsInlineMediaPlayback
           mixedContentMode="always"
-          androidLayerType="hardware"
           injectedJavaScript={`document.documentElement.style.colorScheme='${theme.mode}';true;`}
           onLoadEnd={() => {
             readyRef.current = true;

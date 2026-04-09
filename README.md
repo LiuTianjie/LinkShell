@@ -1,6 +1,12 @@
-# LinkShell
+<p align="center">
+  <img src="docs/assets/adaptive-icon.png" alt="LinkShell" width="120" style="border-radius:24px" />
+  <br />
+  <strong>LinkShell</strong>
+</p>
 
 在手机上远程查看和控制本地 Claude Code / Codex 终端会话。
+
+官网：https://liutianjie.github.io/LinkShell/
 
 ## 一条命令开始
 
