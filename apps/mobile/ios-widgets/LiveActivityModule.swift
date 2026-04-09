@@ -15,6 +15,7 @@ class LiveActivityModule: NSObject {
     func startActivity(_ snapshotsJson: String,
                        extendedJson: String,
                        activeSessionId: String,
+                       focusedTid: String,
                        resolver resolve: @escaping RCTPromiseResolveBlock,
                        rejecter reject: @escaping RCTPromiseRejectBlock) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -32,8 +33,9 @@ class LiveActivityModule: NSObject {
 
         let attributes = LinkShellAttributes(startedAt: Date())
         let state = LinkShellAttributes.ContentState(
-            snapshots: snapshots,
-            activeSessionId: activeSessionId
+            terminals: snapshots,
+            focusedSid: activeSessionId,
+            focusedTid: focusedTid
         )
 
         do {
@@ -57,6 +59,7 @@ class LiveActivityModule: NSObject {
     func updateActivity(_ snapshotsJson: String,
                         extendedJson: String,
                         activeSessionId: String,
+                        focusedTid: String,
                         alert: Bool,
                         resolver resolve: @escaping RCTPromiseResolveBlock,
                         rejecter reject: @escaping RCTPromiseRejectBlock) {
@@ -74,8 +77,9 @@ class LiveActivityModule: NSObject {
         writeExtendedData(extendedJson)
 
         let state = LinkShellAttributes.ContentState(
-            snapshots: snapshots,
-            activeSessionId: activeSessionId
+            terminals: snapshots,
+            focusedSid: activeSessionId,
+            focusedTid: focusedTid
         )
 
         Task {
@@ -123,8 +127,9 @@ class LiveActivityModule: NSObject {
             for activity in Activity<LinkShellAttributes>.activities {
                 if activity.id == aid {
                     let finalState = LinkShellAttributes.ContentState(
-                        snapshots: [],
-                        activeSessionId: ""
+                        terminals: [],
+                        focusedSid: "",
+                        focusedTid: ""
                     )
                     let content = ActivityContent(state: finalState, staleDate: nil)
                     await activity.end(content, dismissalPolicy: .after(.now + 5))
@@ -180,9 +185,9 @@ class LiveActivityModule: NSObject {
 
     // MARK: - Helpers
 
-    private func decodeSnapshots(_ json: String) -> [SessionSnapshot]? {
+    private func decodeSnapshots(_ json: String) -> [TerminalSnapshot]? {
         guard let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode([SessionSnapshot].self, from: data)
+        return try? JSONDecoder().decode([TerminalSnapshot].self, from: data)
     }
 
     private func writeExtendedData(_ json: String) {

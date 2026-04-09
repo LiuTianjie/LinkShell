@@ -17,7 +17,6 @@ struct LinkShellLiveActivity: Widget {
             let otherCount = all.count - 1
 
             return DynamicIsland {
-                // ── Expanded Leading ──
                 DynamicIslandExpandedRegion(.leading) {
                     if let t = focused {
                         HStack(spacing: 5) {
@@ -30,7 +29,6 @@ struct LinkShellLiveActivity: Widget {
                     }
                 }
 
-                // ── Expanded Trailing ──
                 DynamicIslandExpandedRegion(.trailing) {
                     if let t = focused {
                         HStack(spacing: 6) {
@@ -50,7 +48,6 @@ struct LinkShellLiveActivity: Widget {
                     }
                 }
 
-                // ── Expanded Center ──
                 DynamicIslandExpandedRegion(.center) {
                     if let t = focused {
                         HStack(spacing: 6) {
@@ -64,29 +61,22 @@ struct LinkShellLiveActivity: Widget {
                     }
                 }
 
-                // ── Expanded Bottom ──
                 DynamicIslandExpandedRegion(.bottom) {
                     if let t = focused {
                         if t.hasPermission, let fe = focusedExt, !fe.permissionTool.isEmpty {
-                            PermissionCard(terminal: t, ext: fe, compact: true)
-                        } else {
-                            VStack(spacing: 4) {
-                                if let fe = focusedExt, !fe.toolDescription.isEmpty {
-                                    Text(fe.toolDescription)
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundColor(.white.opacity(0.6))
-                                        .lineLimit(3)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(6)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                .fill(.white.opacity(0.05))
-                                        )
-                                }
-                                if otherCount > 0 {
-                                    OtherTerminalsBar(terminals: all, focusedSid: t.sid, focusedTid: t.tid, maxShow: 3)
-                                }
-                            }
+                            // Compact permission: tool name + inline action buttons
+                            CompactPermission(terminal: t, ext: fe)
+                        } else if let fe = focusedExt, !fe.toolDescription.isEmpty {
+                            Text(fe.toolDescription)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.6))
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(4)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(.white.opacity(0.05))
+                                )
                         }
                     }
                 }
@@ -98,7 +88,11 @@ struct LinkShellLiveActivity: Widget {
                 if let t = focused {
                     HStack(spacing: 3) {
                         PhaseDot(phase: t.phase, size: 6)
-                        if !t.tool.isEmpty {
+                        if t.hasPermission {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.orange)
+                        } else if !t.tool.isEmpty {
                             Text(t.tool.prefix(4))
                                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.7))
@@ -125,6 +119,101 @@ struct LinkShellLiveActivity: Widget {
     }
 }
 
+// MARK: - Compact Permission (for Dynamic Island expanded)
+
+@available(iOS 16.2, *)
+struct CompactPermission: View {
+    let terminal: TerminalSnapshot
+    let ext: ExtendedTerminalData
+
+    var body: some View {
+        VStack(spacing: 3) {
+            // Tool name + context in one line
+            HStack(spacing: 4) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 9))
+                    .foregroundColor(.cyan)
+                Text(ext.permissionTool)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.cyan)
+                    .lineLimit(1)
+                if !ext.permissionContext.isEmpty {
+                    Text(ext.permissionContext)
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+
+            // Horizontal action buttons (compact)
+            HStack(spacing: 4) {
+                ForEach(Array(ext.quickActions.enumerated()), id: \.offset) { _, action in
+                    ActionChip(action: action, terminal: terminal, requestId: ext.permissionRequestId)
+                }
+                if terminal.permCount > 1 {
+                    Text("+\(terminal.permCount - 1)")
+                        .font(.system(size: 8))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Action Chip (compact horizontal button)
+
+@available(iOS 16.2, *)
+struct ActionChip: View {
+    let action: QuickAction
+    let terminal: TerminalSnapshot
+    let requestId: String
+
+    private var isAllow: Bool {
+        let l = action.label.lowercased()
+        return l.contains("允许") || l.contains("allow") || l.contains("yes")
+    }
+    private var isDeny: Bool {
+        let l = action.label.lowercased()
+        return l.contains("拒绝") || l.contains("deny") || l.contains("no")
+    }
+    private var color: Color {
+        if isDeny { return .red.opacity(0.8) }
+        if isAllow { return .green }
+        return .blue
+    }
+
+    var body: some View {
+        if #available(iOS 17.0, *) {
+            Button(intent: QuickActionIntent(
+                sessionId: terminal.sid,
+                terminalId: terminal.tid,
+                inputData: action.input,
+                requestId: requestId
+            )) {
+                chipLabel
+            }
+            .buttonStyle(.plain)
+        } else {
+            Link(destination: actionURL(terminal.sid, terminal.tid, action)) {
+                chipLabel
+            }
+        }
+    }
+
+    private var chipLabel: some View {
+        Text(action.label)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(color.opacity(0.2))
+            )
+    }
+}
+
 // MARK: - Lock Screen View
 
 @available(iOS 16.2, *)
@@ -138,52 +227,52 @@ struct LockScreenView: View {
         let focusedExt = focused.flatMap { ext["\($0.sid):\($0.tid)"] }
         let permTerminals = all.filter { $0.hasPermission }
 
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             // Header row
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 if let t = focused {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(providerColor(t.provider).opacity(0.15))
-                            .frame(width: 40, height: 40)
-                        ProviderLogo(provider: t.provider, size: 24)
+                            .frame(width: 36, height: 36)
+                        ProviderLogo(provider: t.provider, size: 22)
                         if all.count > 1 {
                             Text("\(all.count)")
-                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .font(.system(size: 8, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
-                                .padding(.horizontal, 4)
+                                .padding(.horizontal, 3)
                                 .padding(.vertical, 1)
                                 .background(Capsule().fill(Color.blue))
-                                .offset(x: 14, y: -14)
+                                .offset(x: 12, y: -12)
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 5) {
                             Text(t.project)
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(.white)
                                 .lineLimit(1)
                             PhasePill(phase: t.phase)
                             Spacer()
                             Text(formatElapsed(t.elapsed))
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 10, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.4))
                         }
 
                         if !t.tool.isEmpty {
                             HStack(spacing: 4) {
-                                ToolBadge(name: t.tool, fontSize: 10)
+                                ToolBadge(name: t.tool, fontSize: 9)
                                 if let fe = focusedExt, !fe.toolDescription.isEmpty {
                                     Text(fe.toolDescription)
-                                        .font(.system(size: 10, design: .monospaced))
+                                        .font(.system(size: 9, design: .monospaced))
                                         .foregroundColor(.white.opacity(0.5))
                                         .lineLimit(1)
                                 }
                             }
                         } else if let fe = focusedExt, !fe.contextLines.isEmpty, permTerminals.isEmpty {
                             Text(fe.contextLines)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 9, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.5))
                                 .lineLimit(1)
                         }
@@ -191,19 +280,13 @@ struct LockScreenView: View {
                 }
             }
 
-            // Permission cards (list style)
-            if !permTerminals.isEmpty {
-                VStack(spacing: 6) {
-                    ForEach(Array(permTerminals.prefix(2).enumerated()), id: \.offset) { _, t in
-                        if let e = ext["\(t.sid):\(t.tid)"] {
-                            PermissionCard(terminal: t, ext: e, compact: false)
-                        }
-                    }
-                    if permTerminals.count > 2 {
-                        Text("还有 \(permTerminals.count - 2) 个待处理")
-                            .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.4))
-                    }
+            // Permission cards — only show first one on lock screen
+            if let firstPerm = permTerminals.first, let e = ext["\(firstPerm.sid):\(firstPerm.tid)"] {
+                PermissionCard(terminal: firstPerm, ext: e)
+                if permTerminals.count > 1 {
+                    Text("还有 \(permTerminals.count - 1) 个待处理")
+                        .font(.system(size: 9))
+                        .foregroundColor(.white.opacity(0.4))
                 }
             }
 
@@ -212,107 +295,90 @@ struct LockScreenView: View {
                 OtherTerminalsBar(terminals: all, focusedSid: t.sid, focusedTid: t.tid, maxShow: 3)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(Color.black.opacity(0.85))
     }
 }
 
-// MARK: - Permission Card (List Style)
+// MARK: - Permission Card (Lock Screen)
 
 @available(iOS 16.2, *)
 struct PermissionCard: View {
     let terminal: TerminalSnapshot
     let ext: ExtendedTerminalData
-    let compact: Bool
 
     var body: some View {
-        let fontSize: CGFloat = compact ? 10 : 11
-
-        VStack(spacing: 4) {
-            // Header: tool name + context
-            HStack {
+        VStack(spacing: 3) {
+            // Header
+            HStack(spacing: 4) {
                 Image(systemName: "lock.shield")
-                    .font(.system(size: fontSize))
+                    .font(.system(size: 10))
                     .foregroundColor(.cyan)
                 Text(ext.permissionTool)
-                    .font(.system(size: fontSize, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundColor(.cyan)
                     .lineLimit(1)
                 Spacer()
-                Text(terminal.project)
-                    .font(.system(size: fontSize - 1))
-                    .foregroundColor(.white.opacity(0.4))
-                    .lineLimit(1)
+                if terminal.permCount > 1 {
+                    Text("+\(terminal.permCount - 1)")
+                        .font(.system(size: 8))
+                        .foregroundColor(.white.opacity(0.35))
+                }
             }
 
+            // Context (1 line max)
             if !ext.permissionContext.isEmpty {
                 Text(ext.permissionContext)
-                    .font(.system(size: fontSize - 1, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.6))
-                    .lineLimit(compact ? 2 : 3)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.5))
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            // Action list (vertical)
+            // Action rows
             VStack(spacing: 0) {
-                ForEach(Array(ext.quickActions.enumerated()), id: \.offset) { idx, action in
-                    ActionRow(
-                        action: action,
-                        terminal: terminal,
-                        requestId: ext.permissionRequestId,
-                        fontSize: fontSize
-                    )
-                    if idx < ext.quickActions.count - 1 {
-                        Divider().background(.white.opacity(0.1))
+                ForEach(Array(ext.quickActions.prefix(3).enumerated()), id: \.offset) { idx, action in
+                    ActionRow(action: action, terminal: terminal, requestId: ext.permissionRequestId)
+                    if idx < min(ext.quickActions.count, 3) - 1 {
+                        Divider().background(.white.opacity(0.08))
                     }
                 }
             }
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(.white.opacity(0.06))
+                    .fill(.white.opacity(0.05))
             )
-
-            if terminal.permCount > 1 {
-                Text("+\(terminal.permCount - 1) 待处理")
-                    .font(.system(size: fontSize - 2))
-                    .foregroundColor(.white.opacity(0.35))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
         }
-        .padding(6)
+        .padding(5)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.white.opacity(0.06))
+                .fill(.white.opacity(0.05))
         )
     }
 }
 
-// MARK: - Action Row (List Item)
+// MARK: - Action Row
 
 @available(iOS 16.2, *)
 struct ActionRow: View {
     let action: QuickAction
     let terminal: TerminalSnapshot
     let requestId: String
-    let fontSize: CGFloat
 
     private var isAllow: Bool {
         let l = action.label.lowercased()
-        return l.contains("允许") || l.contains("allow") || l.contains("yes") || l.contains("approve")
+        return l.contains("允许") || l.contains("allow") || l.contains("yes")
     }
-
     private var isDeny: Bool {
         let l = action.label.lowercased()
-        return l.contains("拒绝") || l.contains("deny") || l.contains("no") || l.contains("reject")
+        return l.contains("拒绝") || l.contains("deny") || l.contains("no")
     }
-
     private var color: Color {
         if isDeny { return .red.opacity(0.8) }
         if isAllow { return .green }
         return .blue
     }
-
     private var icon: String {
         if isDeny { return "xmark.circle.fill" }
         if isAllow { return "checkmark.circle.fill" }
@@ -338,28 +404,25 @@ struct ActionRow: View {
     }
 
     private var rowContent: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: fontSize + 1))
+                .font(.system(size: 11))
                 .foregroundColor(color)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(action.label)
-                    .font(.system(size: fontSize, weight: .medium))
-                    .foregroundColor(.white)
-                if let desc = action.desc, !desc.isEmpty {
-                    Text(desc)
-                        .font(.system(size: fontSize - 2))
-                        .foregroundColor(.white.opacity(0.4))
-                }
+            Text(action.label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white)
+            if let desc = action.desc, !desc.isEmpty {
+                Text(desc)
+                    .font(.system(size: 9))
+                    .foregroundColor(.white.opacity(0.35))
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.system(size: fontSize - 2))
-                .foregroundColor(.white.opacity(0.3))
+                .font(.system(size: 8))
+                .foregroundColor(.white.opacity(0.2))
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
     }
 }
 
@@ -413,13 +476,12 @@ struct ProviderLogo: View {
 @available(iOS 16.2, *)
 struct PhasePill: View {
     let phase: String
-
     var body: some View {
         let (text, color) = phaseDisplay(phase)
         Text(text)
-            .font(.system(size: 10, weight: .medium))
+            .font(.system(size: 9, weight: .medium))
             .foregroundColor(color)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -432,11 +494,8 @@ struct PhasePill: View {
 struct PhaseDot: View {
     let phase: String
     let size: CGFloat
-
     var body: some View {
-        Circle()
-            .fill(phaseColor(phase))
-            .frame(width: size, height: size)
+        Circle().fill(phaseColor(phase)).frame(width: size, height: size)
     }
 }
 
@@ -444,12 +503,11 @@ struct PhaseDot: View {
 struct ToolBadge: View {
     let name: String
     let fontSize: CGFloat
-
     var body: some View {
         Text(name)
             .font(.system(size: fontSize, weight: .medium, design: .monospaced))
             .foregroundColor(.cyan)
-            .padding(.horizontal, 5)
+            .padding(.horizontal, 4)
             .padding(.vertical, 1)
             .background(
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
@@ -467,20 +525,20 @@ struct OtherTerminalsBar: View {
 
     var body: some View {
         let others = terminals.filter { !($0.sid == focusedSid && $0.tid == focusedTid) }
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ForEach(Array(others.prefix(maxShow).enumerated()), id: \.offset) { _, t in
                 HStack(spacing: 3) {
-                    PhaseDot(phase: t.phase, size: 5)
+                    PhaseDot(phase: t.phase, size: 4)
                     ProviderLogo(provider: t.provider, size: 10)
                     Text(t.project)
-                        .font(.system(size: 10))
+                        .font(.system(size: 9))
                         .foregroundColor(.white.opacity(0.5))
                         .lineLimit(1)
                 }
             }
             if others.count > maxShow {
                 Text("+\(others.count - maxShow)")
-                    .font(.system(size: 9))
+                    .font(.system(size: 8))
                     .foregroundColor(.white.opacity(0.35))
             }
         }

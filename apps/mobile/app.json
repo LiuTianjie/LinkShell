@@ -2,7 +2,7 @@
   "expo": {
     "name": "LinkShell",
     "slug": "linkshell",
-    "version": "1.0.5",
+    "version": "1.0.7",
     "scheme": "linkshell",
     "icon": "./assets/adaptive-icon.png",
     "splash": {
@@ -42,7 +42,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
-      "buildNumber": "17",
+      "buildNumber": "3",
       "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {
