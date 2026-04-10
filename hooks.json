@@ -4,42 +4,42 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "curl -s -X POST \"http://127.0.0.1:64436/hook?m=lsh-mnt3sgmd-a7y2&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "bash": "curl -s -X POST \"http://127.0.0.1:55357/hook?m=lsh-mnt5zya9-14l5&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
         "timeoutSec": 30
       }
     ],
     "sessionEnd": [
       {
         "type": "command",
-        "bash": "curl -s -X POST \"http://127.0.0.1:64436/hook?m=lsh-mnt3sgmd-a7y2&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "bash": "curl -s -X POST \"http://127.0.0.1:55357/hook?m=lsh-mnt5zya9-14l5&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
         "timeoutSec": 30
       }
     ],
     "userPromptSubmitted": [
       {
         "type": "command",
-        "bash": "curl -s -X POST \"http://127.0.0.1:64436/hook?m=lsh-mnt3sgmd-a7y2&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "bash": "curl -s -X POST \"http://127.0.0.1:55357/hook?m=lsh-mnt5zya9-14l5&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
         "timeoutSec": 30
       }
     ],
     "preToolUse": [
       {
         "type": "command",
-        "bash": "curl -s -X POST \"http://127.0.0.1:64436/hook?m=lsh-mnt3sgmd-a7y2&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "bash": "curl -s -X POST \"http://127.0.0.1:55357/hook?m=lsh-mnt5zya9-14l5&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
         "timeoutSec": 30
       }
     ],
     "postToolUse": [
       {
         "type": "command",
-        "bash": "curl -s -X POST \"http://127.0.0.1:64436/hook?m=lsh-mnt3sgmd-a7y2&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "bash": "curl -s -X POST \"http://127.0.0.1:55357/hook?m=lsh-mnt5zya9-14l5&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
         "timeoutSec": 30
       }
     ],
     "errorOccurred": [
       {
         "type": "command",
-        "bash": "curl -s -X POST \"http://127.0.0.1:64436/hook?m=lsh-mnt3sgmd-a7y2&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "bash": "curl -s -X POST \"http://127.0.0.1:55357/hook?m=lsh-mnt5zya9-14l5&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
         "timeoutSec": 30
       }
     ]
