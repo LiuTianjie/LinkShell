@@ -567,7 +567,7 @@ function AppInner() {
         status: string;
         lastLine: string;
         contextLines: string;
-        quickActions: { label: string; input: string; needsInput: boolean }[];
+        quickActions: { label: string; input: string; needsInput: boolean; desc?: string }[];
         provider: string;
         connectedAt: number;
       }
@@ -618,7 +618,7 @@ function AppInner() {
         tid: info.activeTerminalId || "default",
         phase: useStructured ? ss.phase : (entry?.status ?? "idle"),
         project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 30),
-        provider: entry?.provider ?? info.provider ?? "claude",
+        provider: (info.provider && info.provider !== "custom" ? info.provider : null) ?? entry?.provider ?? info.provider ?? "claude",
         tool: ss?.toolName || "",
         elapsed: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
         hasPermission,

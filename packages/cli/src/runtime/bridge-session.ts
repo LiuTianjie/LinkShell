@@ -51,7 +51,7 @@ interface TerminalInstance {
   status: "running" | "exited";
   hookServer?: http.Server;
   hookPort?: number;
-  hookConfigPath?: string;
+  hookConfigPaths: string[];
 }
 
 function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
@@ -130,6 +130,7 @@ export class BridgeSession {
   }>>();
   // Pending permission responses: requestId → HTTP response callback
   private pendingPermissions = new Map<string, (decision: "allow" | "deny") => void>();
+  private hookMarker = `lsh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   private screenCapture: ScreenFallback | undefined;
   private screenShare: ScreenShare | undefined;
 
@@ -496,23 +497,23 @@ export class BridgeSession {
     // For "custom" shell, set up hooks for all providers since user may launch any of them
     let hookServer: http.Server | undefined;
     let hookPort: number | undefined;
-    let hookConfigPath: string | undefined;
+    const hookConfigPaths: string[] = [];
 
     if (provider === "custom") {
       const result = await this.setupHookServer(terminalId, args, "claude");
       hookServer = result.server;
       hookPort = result.port;
-      hookConfigPath = result.configPath;
-      // Also set up hooks for other providers
-      const curlCmd = `curl -s -X POST http://127.0.0.1:${result.port}/hook -H 'Content-Type: application/json' --data-binary @-`;
-      this.setupCodexHooks(terminalId, curlCmd);
-      this.setupGeminiHooks(terminalId, curlCmd);
-      this.setupCopilotHooks(terminalId, curlCmd);
+      hookConfigPaths.push(result.configPath);
+      // Also set up hooks for other providers (curlCmd already has marker from setupHookServer)
+      const curlCmd = `curl -s -X POST "http://127.0.0.1:${result.port}/hook?m=${this.hookMarker}" -H 'Content-Type: application/json' --data-binary @-`;
+      hookConfigPaths.push(this.setupCodexHooks(terminalId, curlCmd));
+      hookConfigPaths.push(this.setupGeminiHooks(terminalId, curlCmd));
+      hookConfigPaths.push(this.setupCopilotHooks(terminalId, curlCmd));
     } else if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "copilot") {
       const result = await this.setupHookServer(terminalId, args, provider);
       hookServer = result.server;
       hookPort = result.port;
-      hookConfigPath = result.configPath;
+      hookConfigPaths.push(result.configPath);
     }
 
     const term: TerminalInstance = {
@@ -537,7 +538,7 @@ export class BridgeSession {
       status: "running",
       hookServer,
       hookPort,
-      hookConfigPath,
+      hookConfigPaths,
     };
 
     term.pty.onData((data) => {
@@ -591,11 +592,21 @@ export class BridgeSession {
     port: number;
     configPath: string;
   }> {
+    const marker = this.hookMarker;
     const server = http.createServer((req, res) => {
       this.log(`hook server received: ${req.method} ${req.url}`);
-      if (req.method !== "POST" || req.url !== "/hook") {
+      const reqUrl = new URL(req.url ?? "/", "http://localhost");
+      if (req.method !== "POST" || reqUrl.pathname !== "/hook") {
         res.writeHead(404);
         res.end();
+        return;
+      }
+      // Check marker — ignore events from other linkshell instances or non-linkshell CLIs
+      const reqMarker = reqUrl.searchParams.get("m");
+      if (reqMarker && reqMarker !== marker) {
+        this.log(`ignoring hook event with foreign marker: ${reqMarker}`);
+        res.writeHead(200);
+        res.end("ok");
         return;
       }
       let body = "";
@@ -643,9 +654,9 @@ export class BridgeSession {
       });
       server.on("error", reject);
     });
-    this.log(`hook server for ${terminalId} (${provider}) listening on port ${port}`);
+    this.log(`hook server for ${terminalId} (${provider}) listening on port ${port}, marker=${marker}`);
 
-    const curlCmd = `curl -s -X POST http://127.0.0.1:${port}/hook -H 'Content-Type: application/json' --data-binary @-`;
+    const curlCmd = `curl -s -X POST "http://127.0.0.1:${port}/hook?m=${marker}" -H 'Content-Type: application/json' --data-binary @-`;
     let configPath: string;
 
     if (provider === "codex") {
@@ -668,35 +679,37 @@ export class BridgeSession {
     if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
     const settingsPath = join(claudeDir, "settings.json");
 
-    // Backup existing settings
     let existing: Record<string, unknown> = {};
     try {
       existing = JSON.parse(readFileSync(settingsPath, "utf8"));
     } catch { /* doesn't exist yet */ }
 
-    // Save backup for restore
-    const backupPath = join(tmpdir(), `linkshell-claude-settings-backup-${terminalId}.json`);
-    writeFileSync(backupPath, JSON.stringify(existing));
-
     const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
     const permissionEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 86400 }] };
 
-    const merged = {
-      ...existing,
-      hooks: {
-        PreToolUse: [hookEntry],
-        PostToolUse: [hookEntry],
-        PostToolUseFailure: [hookEntry],
-        Stop: [hookEntry],
-        PermissionRequest: [permissionEntry],
-        UserPromptSubmit: [hookEntry],
-        SessionStart: [hookEntry],
-      },
+    const hookEvents: Record<string, typeof hookEntry> = {
+      PreToolUse: hookEntry,
+      PostToolUse: hookEntry,
+      PostToolUseFailure: hookEntry,
+      Stop: hookEntry,
+      PermissionRequest: permissionEntry,
+      UserPromptSubmit: hookEntry,
+      SessionStart: hookEntry,
     };
-    writeFileSync(settingsPath, JSON.stringify(merged, null, 2));
-    this.log(`claude hooks written to ${settingsPath} (backup at ${backupPath})`);
 
-    return backupPath;
+    // Append our entries to existing hooks (don't overwrite)
+    const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
+    for (const [eventName, entry] of Object.entries(hookEvents)) {
+      const arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      arr.push(entry);
+      existingHooks[eventName] = arr;
+    }
+
+    const merged = { ...existing, hooks: existingHooks };
+    writeFileSync(settingsPath, JSON.stringify(merged, null, 2));
+    this.log(`claude hooks appended to ${settingsPath}`);
+
+    return settingsPath;
   }
 
   private setupCodexHooks(terminalId: string, curlCmd: string): string {
@@ -716,27 +729,24 @@ export class BridgeSession {
 
     const hooksPath = join(codexDir, "hooks.json");
     const hookEntry = { hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
-    const config = {
-      hooks: {
-        SessionStart: [hookEntry],
-        PreToolUse: [hookEntry],
-        PostToolUse: [hookEntry],
-      },
+    const hookEvents: Record<string, typeof hookEntry> = {
+      SessionStart: hookEntry,
+      PreToolUse: hookEntry,
+      PostToolUse: hookEntry,
     };
 
-    // Backup existing hooks.json if present and not ours
-    if (existsSync(hooksPath)) {
-      try {
-        const existing = readFileSync(hooksPath, "utf8");
-        if (!existing.includes(`127.0.0.1:`) || !existing.includes("/hook")) {
-          writeFileSync(`${hooksPath}.linkshell-backup`, existing);
-          this.log(`backed up existing codex hooks`);
-        }
-      } catch { /* ignore */ }
+    // Read existing and append
+    let existing: { hooks?: Record<string, unknown[]> } = {};
+    try { existing = JSON.parse(readFileSync(hooksPath, "utf8")); } catch { /* doesn't exist yet */ }
+    const existingHooks = existing.hooks ?? {};
+    for (const [eventName, entry] of Object.entries(hookEvents)) {
+      const arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      arr.push(entry);
+      existingHooks[eventName] = arr;
     }
 
-    writeFileSync(hooksPath, JSON.stringify(config, null, 2));
-    this.log(`codex hook config written to ${hooksPath}`);
+    writeFileSync(hooksPath, JSON.stringify({ hooks: existingHooks }, null, 2));
+    this.log(`codex hooks appended to ${hooksPath}`);
     return hooksPath;
   }
 
@@ -747,13 +757,13 @@ export class BridgeSession {
 
     const settingsPath = join(geminiDir, "settings.json");
     const hookEntry = { hooks: [{ type: "command", command: curlCmd, timeout: 5000 }] };
-    const hookConfig = {
-      SessionStart: [hookEntry],
-      BeforeTool: [hookEntry],
-      AfterTool: [hookEntry],
-      BeforeSubmitPrompt: [hookEntry],
-      AfterSubmitPrompt: [hookEntry],
-      SessionEnd: [hookEntry],
+    const hookEvents: Record<string, typeof hookEntry> = {
+      SessionStart: hookEntry,
+      BeforeTool: hookEntry,
+      AfterTool: hookEntry,
+      BeforeSubmitPrompt: hookEntry,
+      AfterSubmitPrompt: hookEntry,
+      SessionEnd: hookEntry,
     };
 
     // Merge with existing settings if present
@@ -762,24 +772,26 @@ export class BridgeSession {
       existing = JSON.parse(readFileSync(settingsPath, "utf8"));
     } catch { /* doesn't exist yet */ }
 
-    // Backup existing hooks if present and not ours
-    if (existing.hooks && JSON.stringify(existing.hooks).indexOf("127.0.0.1:") === -1) {
-      writeFileSync(`${settingsPath}.linkshell-backup`, JSON.stringify(existing, null, 2));
-      this.log(`backed up existing gemini settings`);
+    const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
+    for (const [eventName, entry] of Object.entries(hookEvents)) {
+      const arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      arr.push(entry);
+      existingHooks[eventName] = arr;
     }
 
-    existing.hooks = hookConfig;
+    existing.hooks = existingHooks;
     writeFileSync(settingsPath, JSON.stringify(existing, null, 2));
-    this.log(`gemini hook config written to ${settingsPath}`);
+    this.log(`gemini hooks appended to ${settingsPath}`);
     return settingsPath;
   }
 
   private setupCopilotHooks(terminalId: string, curlCmd: string): string {
     // Copilot uses ~/.copilot/hooks/<name>.json — flat format with `bash` key
+    // Each linkshell instance uses a unique file based on marker
     const copilotDir = join(homedir(), ".copilot", "hooks");
     if (!existsSync(copilotDir)) mkdirSync(copilotDir, { recursive: true });
 
-    const hooksPath = join(copilotDir, "linkshell.json");
+    const hooksPath = join(copilotDir, `linkshell-${this.hookMarker}.json`);
     const mkHook = (eventName: string) => ({
       type: "command",
       bash: `${curlCmd.replace('"$(cat)"', `'{"hook_event_name":"${eventName}"}'`)}`,
@@ -1037,33 +1049,58 @@ export class BridgeSession {
       term.hookServer = undefined;
       this.log(`hook server closed for ${term.id}`);
     }
-    if (term.hookConfigPath) {
-      const configPath = term.hookConfigPath;
+    const marker = this.hookMarker;
+    for (const configPath of term.hookConfigPaths) {
       try {
-        if (term.provider === "claude") {
-          // configPath is the backup file — restore settings.json from it
-          const settingsPath = join(homedir(), ".claude", "settings.json");
+        // Copilot: per-instance file — just delete it
+        if (configPath.includes(`linkshell-${marker}`)) {
           if (existsSync(configPath)) {
-            const backup = readFileSync(configPath, "utf8");
-            writeFileSync(settingsPath, backup);
             unlinkSync(configPath);
-            this.log(`restored claude settings.json from backup`);
+            this.log(`removed copilot hook file ${configPath}`);
           }
         } else {
-          // Codex/Gemini/Copilot use home dir configs — restore backup if exists
-          const backupPath = `${configPath}.linkshell-backup`;
-          if (existsSync(backupPath)) {
-            const backup = readFileSync(backupPath, "utf8");
-            writeFileSync(configPath, backup);
-            unlinkSync(backupPath);
-            this.log(`restored backup for ${configPath}`);
-          } else if (configPath.startsWith(tmpdir())) {
-            unlinkSync(configPath);
-          }
+          // Claude/Codex/Gemini: remove our entries from the shared config
+          this.removeHookEntries(configPath, marker);
         }
       } catch { /* ignore */ }
-      term.hookConfigPath = undefined;
     }
+    term.hookConfigPaths = [];
+  }
+
+  /** Remove hook entries containing our marker from a JSON config file */
+  private removeHookEntries(configPath: string, marker: string): void {
+    if (!existsSync(configPath)) return;
+    try {
+      const raw = JSON.parse(readFileSync(configPath, "utf8"));
+      const hooks = raw.hooks as Record<string, unknown[]> | undefined;
+      if (!hooks) return;
+
+      let changed = false;
+      for (const [eventName, entries] of Object.entries(hooks)) {
+        if (!Array.isArray(entries)) continue;
+        const filtered = entries.filter((entry) => {
+          const str = JSON.stringify(entry);
+          return !str.includes(marker);
+        });
+        if (filtered.length !== entries.length) {
+          changed = true;
+          if (filtered.length === 0) {
+            delete hooks[eventName];
+          } else {
+            hooks[eventName] = filtered;
+          }
+        }
+      }
+
+      if (changed) {
+        // If no hooks left, remove the hooks key entirely
+        if (Object.keys(hooks).length === 0) {
+          delete raw.hooks;
+        }
+        writeFileSync(configPath, JSON.stringify(raw, null, 2));
+        this.log(`removed our hook entries from ${configPath}`);
+      }
+    } catch { /* ignore parse errors */ }
   }
 
   private send(message: Envelope): void {

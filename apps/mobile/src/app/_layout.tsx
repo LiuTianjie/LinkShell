@@ -17,6 +17,7 @@ import { ThemeProvider, useTheme } from "../theme";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 import { parsePairingLink } from "../utils/pairing-link";
 import { useLiveActivity } from "../hooks/useLiveActivity";
+import { useLiveActivityLifecycle } from "../hooks/useLiveActivityLifecycle";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
 const LAST_SESSION_KEY = "@linkshell/last_session";
@@ -148,6 +149,7 @@ function AppInner() {
 
   // Live Activity
   useLiveActivity(manager);
+  useLiveActivityLifecycle(manager);
 
   // App state
   const handleForeground = useCallback(async () => {

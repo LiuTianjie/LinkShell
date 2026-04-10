@@ -926,9 +926,17 @@ export function useSessionManager(): SessionManagerHandle {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       stopHeartbeat(s);
       if (s.socket === ws) s.socket = null;
+      // 4001 = unauthorized (token doesn't own this session) — don't reconnect
+      const code = (event as any)?.code as number | undefined;
+      if (code === 4001) {
+        s.status = "disconnected";
+        s.connectionDetail = "Unauthorized: device token does not own this session.";
+        tick();
+        return;
+      }
       if (!s.manualDisconnect && s.status !== "session_exited") {
         s.connectionDetail = "Gateway connection lost. Reconnecting...";
         scheduleReconnect(s);
