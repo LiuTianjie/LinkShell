@@ -28,20 +28,26 @@ class LiveActivityModule: NSObject {
 
         writeExtendedData(extendedJson)
 
-        let attributes = LinkShellAttributes(startedAt: Date())
+        // End any stale activities before starting a new one
+        Task {
+            for activity in Activity<LinkShellAttributes>.activities {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
 
-        do {
-            let content = ActivityContent(state: state, staleDate: nil)
-            let activity = try Activity.request(
-                attributes: attributes,
-                content: content,
-                pushType: nil
-            )
-            activityId = activity.id
-            startTime = Date()
-            resolve(activity.id)
-        } catch {
-            reject("START_FAILED", error.localizedDescription, error)
+            let attributes = LinkShellAttributes(startedAt: Date())
+            do {
+                let content = ActivityContent(state: state, staleDate: nil)
+                let activity = try Activity.request(
+                    attributes: attributes,
+                    content: content,
+                    pushType: nil
+                )
+                self.activityId = activity.id
+                self.startTime = Date()
+                resolve(activity.id)
+            } catch {
+                reject("START_FAILED", error.localizedDescription, error)
+            }
         }
     }
 

@@ -62,7 +62,14 @@ function buildCandidate(
     tid: info.activeTerminalId || "default",
     phase: useStructured ? ss!.phase : (entry?.status ?? "idle"),
     project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 30),
-    provider: (info.provider && info.provider !== "custom" ? info.provider : null) ?? entry?.provider ?? info.provider ?? "claude",
+    provider: (() => {
+      // Priority: active terminal provider (from hooks via terminal.list) > session provider > fallback
+      const termProvider = activeTerm?.provider;
+      const resolved = (termProvider && termProvider !== "custom" ? termProvider : null)
+        ?? (info.provider && info.provider !== "custom" ? info.provider : null)
+        ?? info.provider ?? "claude";
+      return resolved;
+    })(),
     tool: ss?.toolName || "",
     elapsed: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
     hasPermission,
@@ -74,12 +81,10 @@ function buildCandidate(
     permissionRequestId: ss?.topPermission?.requestId || "",
     quickActions: hasPermission
       ? [
-          { label: "允许", input: "allow", needsInput: false, desc: "允许执行此操作" },
-          { label: "拒绝", input: "deny", needsInput: false, desc: "拒绝此操作" },
+          { label: "允许", input: "allow", needsInput: false },
+          { label: "拒绝", input: "deny", needsInput: false },
           ...(entry?.quickActions?.filter((a) => a.input !== "allow" && a.input !== "deny").map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
-        ].concat(
-          (entry?.quickActions?.filter((a) => a.input !== "allow" && a.input !== "deny").map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
-        )
+        ]
       : (entry?.quickActions?.map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
   };
 }
@@ -131,12 +136,54 @@ export function useLiveActivityLifecycle(manager: SessionManagerHandle) {
     for (const [sid, info] of currentSessions) {
       if (info.status !== "connected") continue;
       const entry = parsersRef.current.get(sid);
-      const activeTerm = info.activeTerminalId
-        ? info.terminals.get(info.activeTerminalId)
-        : undefined;
-      const ss = activeTerm?.structuredStatus;
-      const useStructured = !!(ss && now - ss.updatedAt < 30_000);
-      candidates.push(buildCandidate(sid, info, entry, now, useStructured));
+
+      // Collect ALL running terminals, not just the active one
+      for (const [tid, term] of info.terminals) {
+        if (term.status === "exited") continue;
+        const ss = term.structuredStatus;
+        const useStructured = !!(ss && now - ss.updatedAt < 30_000);
+        const hasPermission = !!ss?.topPermission;
+        const termProvider = term.provider;
+
+        candidates.push({
+          sid,
+          tid,
+          phase: useStructured ? ss!.phase : (entry?.status ?? "idle"),
+          project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 30),
+          provider: (() => {
+            const resolved = (termProvider && termProvider !== "custom" ? termProvider : null)
+              ?? (info.provider && info.provider !== "custom" ? info.provider : null)
+              ?? info.provider ?? "claude";
+            return resolved;
+          })(),
+          tool: ss?.toolName || "",
+          elapsed: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
+          hasPermission,
+          permCount: ss?.pendingPermissionCount ?? 0,
+          toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 500),
+          contextLines: (useStructured && ss?.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? "")).slice(0, 500),
+          permissionTool: ss?.topPermission?.toolName || "",
+          permissionContext: (ss?.topPermission?.permissionRequest || ss?.topPermission?.toolInput || "").slice(0, 400),
+          permissionRequestId: ss?.topPermission?.requestId || "",
+          quickActions: hasPermission
+            ? [
+                { label: "允许", input: "allow", needsInput: false },
+                { label: "拒绝", input: "deny", needsInput: false },
+                ...(entry?.quickActions?.filter((a) => a.input !== "allow" && a.input !== "deny").map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
+              ]
+            : (entry?.quickActions?.map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
+        });
+      }
+
+      // If no terminals yet, add a single candidate for the session
+      if (info.terminals.size === 0) {
+        const activeTerm = info.activeTerminalId
+          ? info.terminals.get(info.activeTerminalId)
+          : undefined;
+        const ss = activeTerm?.structuredStatus;
+        const useStructured = !!(ss && now - ss.updatedAt < 30_000);
+        candidates.push(buildCandidate(sid, info, entry, now, useStructured));
+      }
     }
 
     if (candidates.length === 0) return;
@@ -185,7 +232,6 @@ export function useLiveActivityLifecycle(manager: SessionManagerHandle) {
         entry.lastLine = result.lastLine;
         entry.contextLines = result.contextLines;
         entry.quickActions = result.quickActions;
-        if (result.provider !== "unknown") entry.provider = result.provider;
         pushLiveActivityUpdate();
       }, 1000);
 

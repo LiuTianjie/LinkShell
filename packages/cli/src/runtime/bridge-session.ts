@@ -489,6 +489,8 @@ export class BridgeSession {
     for (const [k, v] of Object.entries(this.options.providerConfig.env)) {
       if (v !== undefined) cleanEnv[k] = v;
     }
+    // Inject marker so child CLIs' hook commands carry our identity
+    cleanEnv["LINKSHELL_ID"] = this.hookMarker;
 
     const provider = providerOverride ?? this.options.providerConfig.provider;
     const args = [...this.options.providerConfig.args];
@@ -505,7 +507,7 @@ export class BridgeSession {
       hookPort = result.port;
       hookConfigPaths.push(result.configPath);
       // Also set up hooks for other providers (curlCmd already has marker from setupHookServer)
-      const curlCmd = `curl -s -X POST "http://127.0.0.1:${result.port}/hook?m=${this.hookMarker}" -H 'Content-Type: application/json' --data-binary @-`;
+      const curlCmd = `curl -s -X POST "http://127.0.0.1:${result.port}/hook?m=${this.hookMarker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @-`;
       hookConfigPaths.push(this.setupCodexHooks(terminalId, curlCmd));
       hookConfigPaths.push(this.setupGeminiHooks(terminalId, curlCmd));
       hookConfigPaths.push(this.setupCopilotHooks(terminalId, curlCmd));
@@ -601,10 +603,12 @@ export class BridgeSession {
         res.end();
         return;
       }
-      // Check marker — ignore events from other linkshell instances or non-linkshell CLIs
+      // Check marker — reject events not from our PTY
+      // m must match; lid must match OR be empty (some CLIs don't inherit env vars)
       const reqMarker = reqUrl.searchParams.get("m");
-      if (reqMarker && reqMarker !== marker) {
-        this.log(`ignoring hook event with foreign marker: ${reqMarker}`);
+      const reqLid = reqUrl.searchParams.get("lid") ?? "";
+      if (reqMarker !== marker || (reqLid !== "" && reqLid !== marker)) {
+        this.log(`ignoring hook event: m=${reqMarker} lid=${reqLid} (expected ${marker})`);
         res.writeHead(200);
         res.end("ok");
         return;
@@ -656,7 +660,7 @@ export class BridgeSession {
     });
     this.log(`hook server for ${terminalId} (${provider}) listening on port ${port}, marker=${marker}`);
 
-    const curlCmd = `curl -s -X POST "http://127.0.0.1:${port}/hook?m=${marker}" -H 'Content-Type: application/json' --data-binary @-`;
+    const curlCmd = `curl -s -X POST "http://127.0.0.1:${port}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @-`;
     let configPath: string;
 
     if (provider === "codex") {
@@ -697,10 +701,12 @@ export class BridgeSession {
       SessionStart: hookEntry,
     };
 
-    // Append our entries to existing hooks (don't overwrite)
+    // Append our entries to existing hooks (first remove stale linkshell entries)
     const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
     for (const [eventName, entry] of Object.entries(hookEvents)) {
-      const arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      // Remove any dead linkshell hook entries (from previous instances)
+      arr = arr.filter((e) => !JSON.stringify(e).includes("/hook"));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -713,26 +719,40 @@ export class BridgeSession {
   }
 
   private setupCodexHooks(terminalId: string, curlCmd: string): string {
-    // Codex uses ~/.codex/hooks.json — nested format (no matcher)
+    // Codex uses ~/.codex/hooks.json — same format as Claude (with matcher)
     const codexDir = join(homedir(), ".codex");
     if (!existsSync(codexDir)) mkdirSync(codexDir, { recursive: true });
 
-    // Ensure codex_hooks = true in config.toml
+    // Ensure [features] codex_hooks = true in config.toml
     const tomlPath = join(codexDir, "config.toml");
     let tomlContent = "";
     try { tomlContent = readFileSync(tomlPath, "utf8"); } catch { /* doesn't exist yet */ }
-    if (!tomlContent.includes("codex_hooks")) {
-      tomlContent += `\ncodex_hooks = true\n`;
+
+    // Remove top-level codex_hooks (wrong location) and ensure it's under [features]
+    const hasFeatureSection = tomlContent.includes("[features]");
+    const hasCodexHooksUnderFeatures = hasFeatureSection &&
+      /\[features\][^\[]*codex_hooks\s*=\s*true/s.test(tomlContent);
+
+    if (!hasCodexHooksUnderFeatures) {
+      // Remove any top-level codex_hooks line
+      tomlContent = tomlContent.replace(/^codex_hooks\s*=.*\n?/m, "");
+      if (!tomlContent.includes("[features]")) {
+        tomlContent += `\n[features]\ncodex_hooks = true\n`;
+      } else {
+        tomlContent = tomlContent.replace("[features]", "[features]\ncodex_hooks = true");
+      }
       writeFileSync(tomlPath, tomlContent);
-      this.log(`enabled codex_hooks in ${tomlPath}`);
+      this.log(`enabled codex_hooks under [features] in ${tomlPath}`);
     }
 
     const hooksPath = join(codexDir, "hooks.json");
-    const hookEntry = { hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
+    const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
     const hookEvents: Record<string, typeof hookEntry> = {
       SessionStart: hookEntry,
       PreToolUse: hookEntry,
       PostToolUse: hookEntry,
+      UserPromptSubmit: hookEntry,
+      Stop: hookEntry,
     };
 
     // Read existing and append
@@ -740,7 +760,8 @@ export class BridgeSession {
     try { existing = JSON.parse(readFileSync(hooksPath, "utf8")); } catch { /* doesn't exist yet */ }
     const existingHooks = existing.hooks ?? {};
     for (const [eventName, entry] of Object.entries(hookEvents)) {
-      const arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      arr = arr.filter((e) => !JSON.stringify(e).includes("/hook"));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -751,19 +772,17 @@ export class BridgeSession {
   }
 
   private setupGeminiHooks(terminalId: string, curlCmd: string): string {
-    // Gemini uses ~/.gemini/settings.json — nested format, timeout in milliseconds
+    // Gemini uses ~/.gemini/settings.json — same format as Claude (with matcher)
     const geminiDir = join(homedir(), ".gemini");
     if (!existsSync(geminiDir)) mkdirSync(geminiDir, { recursive: true });
 
     const settingsPath = join(geminiDir, "settings.json");
-    const hookEntry = { hooks: [{ type: "command", command: curlCmd, timeout: 5000 }] };
+    const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5000 }] };
     const hookEvents: Record<string, typeof hookEntry> = {
       SessionStart: hookEntry,
+      SessionEnd: hookEntry,
       BeforeTool: hookEntry,
       AfterTool: hookEntry,
-      BeforeSubmitPrompt: hookEntry,
-      AfterSubmitPrompt: hookEntry,
-      SessionEnd: hookEntry,
     };
 
     // Merge with existing settings if present
@@ -774,7 +793,8 @@ export class BridgeSession {
 
     const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
     for (const [eventName, entry] of Object.entries(hookEvents)) {
-      const arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      arr = arr.filter((e) => !JSON.stringify(e).includes("/hook"));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -786,29 +806,36 @@ export class BridgeSession {
   }
 
   private setupCopilotHooks(terminalId: string, curlCmd: string): string {
-    // Copilot uses ~/.copilot/hooks/<name>.json — flat format with `bash` key
-    // Each linkshell instance uses a unique file based on marker
-    const copilotDir = join(homedir(), ".copilot", "hooks");
-    if (!existsSync(copilotDir)) mkdirSync(copilotDir, { recursive: true });
-
-    const hooksPath = join(copilotDir, `linkshell-${this.hookMarker}.json`);
-    const mkHook = (eventName: string) => ({
+    // Copilot loads hooks from CWD as hooks.json
+    const cwd = this.terminals.get(terminalId)?.cwd ?? process.cwd();
+    const hooksPath = join(cwd, "hooks.json");
+    const mkHook = () => ({
       type: "command",
-      bash: `${curlCmd.replace('"$(cat)"', `'{"hook_event_name":"${eventName}"}'`)}`,
-      timeoutSec: 5,
+      bash: curlCmd,
+      timeoutSec: 30,
     });
-    const config = {
-      version: 1,
-      hooks: {
-        sessionStart: [mkHook("sessionStart")],
-        preToolUse: [mkHook("preToolUse")],
-        postToolUse: [mkHook("postToolUse")],
-        sessionEnd: [mkHook("sessionEnd")],
-      },
+    const hookEvents: Record<string, ReturnType<typeof mkHook>> = {
+      sessionStart: mkHook(),
+      sessionEnd: mkHook(),
+      userPromptSubmitted: mkHook(),
+      preToolUse: mkHook(),
+      postToolUse: mkHook(),
+      errorOccurred: mkHook(),
     };
 
-    writeFileSync(hooksPath, JSON.stringify(config, null, 2));
-    this.log(`copilot hook config written to ${hooksPath}`);
+    // Read existing and append
+    let existing: { version?: number; hooks?: Record<string, unknown[]> } = {};
+    try { existing = JSON.parse(readFileSync(hooksPath, "utf8")); } catch { /* doesn't exist yet */ }
+    const existingHooks = existing.hooks ?? {};
+    for (const [eventName, entry] of Object.entries(hookEvents)) {
+      let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
+      arr = arr.filter((e) => !JSON.stringify(e).includes("/hook"));
+      arr.push(entry);
+      existingHooks[eventName] = arr;
+    }
+
+    writeFileSync(hooksPath, JSON.stringify({ version: 1, hooks: existingHooks }, null, 2));
+    this.log(`copilot hooks appended to ${hooksPath}`);
     return hooksPath;
   }
 
@@ -816,30 +843,35 @@ export class BridgeSession {
     const rawHookName = (event.hook_event_name ?? event.event_name) as string | undefined;
     if (!rawHookName) return;
 
-    // Auto-detect actual provider from hook event fields (only when terminal is "custom")
+    // Auto-detect provider from hook event fields
     const hookTerm = this.terminals.get(terminalId);
     let detectedProvider = provider;
-    if (hookTerm?.provider === "custom") {
-      if (event.session_id || event.transcript_path || event.permission_mode) {
-        detectedProvider = "claude";
-      } else if (event.codex_session_id || event.codex_version) {
+
+    // Always detect from transcript_path (most reliable), regardless of current provider
+    const transcriptPath = typeof event.transcript_path === "string" ? event.transcript_path as string : "";
+    if (transcriptPath.includes(".claude/")) {
+      detectedProvider = "claude";
+    } else if (transcriptPath.includes(".gemini/")) {
+      detectedProvider = "gemini";
+    } else if (transcriptPath.includes(".codex/")) {
+      detectedProvider = "codex";
+    } else if (hookTerm?.provider === "custom") {
+      // Fallback heuristics only when provider is still unknown
+      if (event.model && typeof event.model === "string" && /^(gpt|o[0-9]|codex)/i.test(event.model as string)) {
         detectedProvider = "codex";
-      } else if (/^(Before|After)(Tool|SubmitPrompt)$|^Session(Start|End)$/.test(rawHookName)) {
+      } else if (event.session_id && !transcriptPath) {
+        detectedProvider = "codex";
+      } else if (/^(Before|After)(Tool)$|^Session(Start|End)$/.test(rawHookName)) {
         detectedProvider = "gemini";
-      } else if (/^(pre|post)ToolUse$|^session(Start|End)$/.test(rawHookName)) {
+      } else if (/^(pre|post)ToolUse$|^session(Start|End)$|^userPromptSubmitted$|^errorOccurred$/.test(rawHookName)) {
         detectedProvider = "copilot";
       }
+    }
 
-      if (detectedProvider !== "custom") {
-        hookTerm.provider = detectedProvider;
-        this.log(`detected provider for ${terminalId}: ${detectedProvider}`);
-        this.permissionStacks.delete(terminalId);
-        this.sendTerminalList();
-      }
-    } else if (hookTerm && hookTerm.provider !== "custom" && detectedProvider !== hookTerm.provider) {
-      // Provider switched mid-session (e.g., user exited claude and started codex)
+    if (hookTerm && detectedProvider !== hookTerm.provider) {
+      const wasCustom = hookTerm.provider === "custom";
       hookTerm.provider = detectedProvider;
-      this.log(`provider switched for ${terminalId}: ${detectedProvider}`);
+      this.log(`${wasCustom ? "detected" : "provider switched"} provider for ${terminalId}: ${detectedProvider}`);
       this.permissionStacks.delete(terminalId);
       this.sendTerminalList();
     }
@@ -895,6 +927,12 @@ export class BridgeSession {
         if (event.stop_reason) summary = String(event.stop_reason);
         this.drainPendingPermissions(terminalId);
         this.permissionStacks.delete(terminalId);
+        // Reset provider to "custom" when a CLI session ends inside a custom shell
+        if (hookTerm && this.options.providerConfig.provider === "custom") {
+          hookTerm.provider = "custom";
+          this.log(`provider reset to custom for ${terminalId} (CLI session ended)`);
+          this.sendTerminalList();
+        }
         break;
       case "PermissionRequest":
         phase = "waiting";
@@ -973,12 +1011,14 @@ export class BridgeSession {
       return rawName;
     }
 
-    // Codex events (PascalCase in nested format)
+    // Codex events — same as Claude (PascalCase)
     if (provider === "codex") {
       switch (rawName) {
         case "PreToolUse": case "preToolUse": return "PreToolUse";
         case "PostToolUse": case "postToolUse": return "PostToolUse";
         case "SessionStart": case "sessionStart": return "SessionStart";
+        case "UserPromptSubmit": return "UserPromptSubmit";
+        case "Stop": return "Stop";
         default: return undefined;
       }
     }
@@ -988,8 +1028,6 @@ export class BridgeSession {
       switch (rawName) {
         case "BeforeTool": return "PreToolUse";
         case "AfterTool": return "PostToolUse";
-        case "BeforeSubmitPrompt": return "SessionStart";
-        case "AfterSubmitPrompt": return "Stop";
         case "SessionStart": return "SessionStart";
         case "SessionEnd": return "Stop";
         default: return undefined;
@@ -1003,6 +1041,8 @@ export class BridgeSession {
         case "postToolUse": return "PostToolUse";
         case "sessionStart": return "SessionStart";
         case "sessionEnd": return "Stop";
+        case "userPromptSubmitted": return "UserPromptSubmit";
+        case "errorOccurred": return "PostToolUseFailure";
         default: return undefined;
       }
     }

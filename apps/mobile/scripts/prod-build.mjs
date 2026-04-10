@@ -69,7 +69,7 @@ if (!skipPrebuild) {
 
 // ── Step 3: Pod install ─────────────────────────────────────────────
 console.log("\n  ━━━ Step 3/5: Pod install ━━━");
-run("pod install", { cwd: iosDir });
+run("pod install --repo-update", { cwd: iosDir });
 
 // ── Open Xcode mode ─────────────────────────────────────────────────
 if (openXcode) {

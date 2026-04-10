@@ -212,15 +212,15 @@ export function SessionScreen({
 
   const handleTerminalInput = useCallback(
     (data: string) => {
-      // Ctrl+D safety: block if pressed more than 2 times within 1s
+      // Ctrl+D safety: block if pressed more than 1 time within 2s
       if (data === "\u0004") {
         const cd = ctrlDRef.current;
         cd.count++;
         if (cd.timer) clearTimeout(cd.timer);
         cd.timer = setTimeout(() => {
           cd.count = 0;
-        }, 1000);
-        if (cd.count > 2) {
+        }, 2000);
+        if (cd.count > 1) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           return;
         }

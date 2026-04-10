@@ -51,7 +51,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
-      "buildNumber": "9",
+      "buildNumber": "11",
       "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {
@@ -88,7 +88,7 @@
         "android.permission.RECORD_AUDIO"
       ],
       "package": "com.bd.linkshell",
-      "versionCode": 5
+      "versionCode": 6
     },
     "extra": {
       "eas": {

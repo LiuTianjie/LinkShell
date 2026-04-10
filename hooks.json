@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "curl -s -X POST \"http://127.0.0.1:60655/hook?m=lsh-mnt2kvew-5k9b&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "timeoutSec": 30
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "curl -s -X POST \"http://127.0.0.1:60655/hook?m=lsh-mnt2kvew-5k9b&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "timeoutSec": 30
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "curl -s -X POST \"http://127.0.0.1:60655/hook?m=lsh-mnt2kvew-5k9b&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "timeoutSec": 30
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "curl -s -X POST \"http://127.0.0.1:60655/hook?m=lsh-mnt2kvew-5k9b&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "timeoutSec": 30
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "curl -s -X POST \"http://127.0.0.1:60655/hook?m=lsh-mnt2kvew-5k9b&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "timeoutSec": 30
+      }
+    ],
+    "errorOccurred": [
+      {
+        "type": "command",
+        "bash": "curl -s -X POST \"http://127.0.0.1:60655/hook?m=lsh-mnt2kvew-5k9b&lid=$LINKSHELL_ID\" -H 'Content-Type: application/json' --data-binary @-",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}

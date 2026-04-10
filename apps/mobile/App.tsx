@@ -618,7 +618,9 @@ function AppInner() {
         tid: info.activeTerminalId || "default",
         phase: useStructured ? ss.phase : (entry?.status ?? "idle"),
         project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 30),
-        provider: (info.provider && info.provider !== "custom" ? info.provider : null) ?? entry?.provider ?? info.provider ?? "claude",
+        provider: (activeTerm?.provider && activeTerm.provider !== "custom" ? activeTerm.provider : null)
+          ?? (info.provider && info.provider !== "custom" ? info.provider : null)
+          ?? info.provider ?? "claude",
         tool: ss?.toolName || "",
         elapsed: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
         hasPermission,
@@ -630,12 +632,10 @@ function AppInner() {
         permissionRequestId: ss?.topPermission?.requestId || "",
         quickActions: hasPermission
           ? [
-              { label: "允许", input: "allow", needsInput: false, desc: "允许执行此操作" },
-              { label: "拒绝", input: "deny", needsInput: false, desc: "拒绝此操作" },
+              { label: "允许", input: "allow", needsInput: false },
+              { label: "拒绝", input: "deny", needsInput: false },
               ...(entry?.quickActions?.filter((a) => a.input !== "allow" && a.input !== "deny").map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
-            ].concat(
-                (entry?.quickActions?.filter((a) => a.input !== "allow" && a.input !== "deny").map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
-              )
+            ]
           : (entry?.quickActions?.map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
       });
     }
@@ -729,7 +729,6 @@ function AppInner() {
         entry.lastLine = result.lastLine;
         entry.contextLines = result.contextLines;
         entry.quickActions = result.quickActions;
-        if (result.provider !== "unknown") entry.provider = result.provider;
         pushLiveActivityUpdate();
       }, 1000);
 

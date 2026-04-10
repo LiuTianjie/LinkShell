@@ -15,10 +15,10 @@ struct LinkShellLiveActivity: Widget {
 
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(spacing: 6) {
-                        ProviderLogo(provider: state.provider, size: 20)
+                    HStack(spacing: 8) {
+                        ProviderLogo(provider: state.provider, size: 24)
                         Text(state.project)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.white)
                             .lineLimit(1)
                     }
@@ -29,10 +29,10 @@ struct LinkShellLiveActivity: Widget {
                         PhasePill(phase: state.phase)
                         if state.otherCount > 0 {
                             Text("+\(state.otherCount)")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
                                 .foregroundColor(.white.opacity(0.5))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
                                 .background(
                                     RoundedRectangle(cornerRadius: 4, style: .continuous)
                                         .fill(.white.opacity(0.1))
@@ -44,56 +44,114 @@ struct LinkShellLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.center) {
                     HStack(spacing: 6) {
                         if !state.tool.isEmpty {
-                            ToolBadge(name: state.tool, fontSize: 10)
+                            ToolBadge(name: state.tool, fontSize: 11)
                         }
                         Text(formatElapsed(state.elapsed))
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.white.opacity(0.4))
                     }
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
-                    if state.hasPermission, let ext = ext, !ext.permissionTool.isEmpty {
-                        // Permission: tool name + action list
-                        VStack(spacing: 4) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "lock.shield")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.cyan)
-                                Text(ext.permissionTool)
-                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                    .foregroundColor(.cyan)
-                                    .lineLimit(1)
-                                Spacer()
-                            }
-                            ForEach(Array(ext.quickActions.enumerated()), id: \.offset) { _, action in
-                                ActionRow(action: action, state: state, requestId: ext.permissionRequestId)
-                            }
-                            if ext.quickActions.isEmpty {
-                                Link(destination: URL(string: "linkshell://open?session=\(state.sid)")!) {
-                                    Text("打开查看")
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundColor(.blue)
+                    VStack(spacing: 8) {
+                        if state.hasPermission, let ext = ext, !ext.permissionTool.isEmpty {
+                            // Permission: tool name + context + action list
+                            VStack(spacing: 6) {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "lock.shield")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.cyan)
+                                    Text(ext.permissionTool)
+                                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                        .foregroundColor(.cyan)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    if state.permCount > 1 {
+                                        Text("+\(state.permCount - 1)")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.white.opacity(0.35))
+                                    }
+                                }
+
+                                if !ext.permissionContext.isEmpty {
+                                    Text(ext.permissionContext)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .lineLimit(4)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(8)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                                .fill(.white.opacity(0.06))
+                                        )
+                                }
+
+                                VStack(spacing: 0) {
+                                    ForEach(Array(ext.quickActions.enumerated()), id: \.offset) { idx, action in
+                                        if idx > 0 {
+                                            Divider().background(.white.opacity(0.1))
+                                        }
+                                        ActionRow(action: action, state: state, requestId: ext.permissionRequestId)
+                                    }
+                                }
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(.white.opacity(0.06))
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                                if ext.quickActions.isEmpty {
+                                    Link(destination: URL(string: "linkshell://open?session=\(state.sid)")!) {
+                                        Text("打开查看")
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundColor(.blue)
+                                    }
                                 }
                             }
-                        }
-                    } else if let ext = ext, !ext.toolDescription.isEmpty {
-                        Text(ext.toolDescription)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.6))
-                            .lineLimit(3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(.white.opacity(0.05))
+                            .padding(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(.orange.opacity(0.3), lineWidth: 0.5)
                             )
-                    } else if let ext = ext, !ext.contextLines.isEmpty {
-                        Text(ext.contextLines)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.5))
-                            .lineLimit(3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if let ext = ext, !ext.toolDescription.isEmpty {
+                            Text(ext.toolDescription)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.7))
+                                .lineLimit(5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(.white.opacity(0.06))
+                                )
+                        } else if let ext = ext, !ext.contextLines.isEmpty {
+                            Text(ext.contextLines)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.6))
+                                .lineLimit(5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(.white.opacity(0.06))
+                                )
+                        }
+
+                        // Secondary terminals
+                        if let ext = ext, !ext.secondaryTerminals.isEmpty {
+                            HStack(spacing: 8) {
+                                ForEach(Array(ext.secondaryTerminals.prefix(4).enumerated()), id: \.offset) { _, t in
+                                    HStack(spacing: 4) {
+                                        ProviderLogo(provider: t.provider, size: 14)
+                                        PhaseDot(phase: t.phase, size: 6)
+                                    }
+                                }
+                                Spacer()
+                                Text("\(state.otherCount) 个终端运行中")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.white.opacity(0.35))
+                            }
+                        }
                     }
                 }
             } compactLeading: {
@@ -138,9 +196,9 @@ struct ActionRow: View {
     let requestId: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Text(action.desc ?? action.label)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(.white.opacity(0.7))
                 .lineLimit(1)
             Spacer()
@@ -160,14 +218,16 @@ struct ActionRow: View {
                 }
             }
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
     }
 
     private var actionButton: some View {
         Text("选择")
-            .font(.system(size: 10, weight: .medium))
+            .font(.system(size: 11, weight: .medium))
             .foregroundColor(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(buttonColor.opacity(0.25))
@@ -331,9 +391,9 @@ struct LockScreenView: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.black.opacity(0.85))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .activityBackgroundTint(.black.opacity(0.6))
     }
 }
 
