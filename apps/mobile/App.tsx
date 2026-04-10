@@ -45,8 +45,9 @@ import {
   startLiveActivity,
   updateLiveActivity,
   endLiveActivity,
-  type TerminalSnapshot,
-  type ExtendedTerminalData,
+  type ActivityState,
+  type ExtendedActivityData,
+  type SecondaryTerminal,
 } from "./src/native/LiveActivity";
 import { ThrottledTerminalParser } from "./src/utils/terminal-parser";
 
@@ -580,82 +581,115 @@ function AppInner() {
   const pushLiveActivityUpdate = useCallback(() => {
     if (!liveActivityActiveRef.current) return;
     const currentSessions = sessionsRef.current;
-    const activeSid = activeSidRef.current;
     const now = Date.now();
-    const snapshots: TerminalSnapshot[] = [];
-    const extended: ExtendedTerminalData[] = [];
+
+    // Collect all terminal candidates
+    const candidates: {
+      sid: string;
+      tid: string;
+      phase: string;
+      project: string;
+      provider: string;
+      tool: string;
+      elapsed: number;
+      hasPermission: boolean;
+      permCount: number;
+      toolDescription: string;
+      contextLines: string;
+      permissionTool: string;
+      permissionContext: string;
+      permissionRequestId: string;
+      quickActions: { label: string; input: string; needsInput: boolean; desc?: string }[];
+    }[] = [];
 
     for (const [sid, info] of currentSessions) {
       if (info.status !== "connected") continue;
       const entry = parsersRef.current.get(sid);
 
-      // Prefer structured status from hooks if fresh (< 30s)
       const activeTerm = info.activeTerminalId
         ? info.terminals.get(info.activeTerminalId)
         : undefined;
       const ss = activeTerm?.structuredStatus;
       const useStructured = ss && now - ss.updatedAt < 30_000;
+      const hasPermission = !!ss?.topPermission;
 
-      snapshots.push({
+      candidates.push({
         sid,
         tid: info.activeTerminalId || "default",
         phase: useStructured ? ss.phase : (entry?.status ?? "idle"),
-        project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(
-          0,
-          20,
-        ),
+        project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 30),
         provider: entry?.provider ?? info.provider ?? "claude",
         tool: ss?.toolName || "",
         elapsed: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
-        hasPermission: !!ss?.topPermission,
+        hasPermission,
         permCount: ss?.pendingPermissionCount ?? 0,
-      });
-
-      extended.push({
-        sid,
-        tid: info.activeTerminalId || "default",
-        toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
-        contextLines:
-          useStructured && ss.permissionRequest
-            ? ss.permissionRequest
-            : (entry?.contextLines ?? ""),
+        toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 500),
+        contextLines: (useStructured && ss.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? "")).slice(0, 500),
         permissionTool: ss?.topPermission?.toolName || "",
-        permissionContext: (
-          ss?.topPermission?.permissionRequest ||
-          ss?.topPermission?.toolInput ||
-          ""
-        ).slice(0, 200),
+        permissionContext: (ss?.topPermission?.permissionRequest || ss?.topPermission?.toolInput || "").slice(0, 400),
         permissionRequestId: ss?.topPermission?.requestId || "",
-        quickActions: entry?.quickActions ?? [],
+        quickActions: hasPermission
+          ? [
+              { label: "允许", input: "allow", needsInput: false, desc: "允许执行此操作" },
+              { label: "拒绝", input: "deny", needsInput: false, desc: "拒绝此操作" },
+              ...(entry?.quickActions?.filter((a) => a.input !== "allow" && a.input !== "deny").map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
+            ].concat(
+                (entry?.quickActions?.filter((a) => a.input !== "allow" && a.input !== "deny").map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
+              )
+          : (entry?.quickActions?.map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
       });
     }
 
-    if (snapshots.length === 0) return;
+    if (candidates.length === 0) return;
 
-    // Sort: error > waiting > tool_use > thinking > outputting > idle
+    // Sort: hasPermission first, then by phase priority
     const priority: Record<string, number> = {
-      error: 0,
-      waiting: 1,
-      tool_use: 2,
-      thinking: 3,
-      outputting: 4,
-      idle: 5,
+      error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5,
     };
-    snapshots.sort(
-      (a, b) => (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9),
-    );
-    extended.sort((a, b) => {
-      const ai = snapshots.findIndex((s) => s.sid === a.sid);
-      const bi = snapshots.findIndex((s) => s.sid === b.sid);
-      return ai - bi;
+    candidates.sort((a, b) => {
+      if (a.hasPermission !== b.hasPermission) return a.hasPermission ? -1 : 1;
+      return (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9);
     });
 
-    const aid = activeSid ?? snapshots[0]?.sid ?? "";
+    const primary = candidates[0];
+    const totalPermCount = candidates.reduce((sum, c) => sum + c.permCount, 0);
 
-    // Alert when any session has permission requests
-    const needsAlert = snapshots.some((s) => s.hasPermission);
+    const state: ActivityState = {
+      sid: primary.sid,
+      tid: primary.tid,
+      phase: primary.phase,
+      project: primary.project,
+      provider: primary.provider,
+      tool: primary.tool,
+      elapsed: primary.elapsed,
+      hasPermission: primary.hasPermission,
+      permCount: primary.permCount,
+      otherCount: candidates.length - 1,
+      totalPermCount,
+    };
 
-    updateLiveActivity(snapshots, extended, aid, aid, needsAlert);
+    const secondaryTerminals: SecondaryTerminal[] = candidates.slice(1, 6).map((c) => ({
+      sid: c.sid,
+      tid: c.tid,
+      provider: c.provider,
+      phase: c.phase,
+      hasPermission: c.hasPermission,
+    }));
+
+    const extended: ExtendedActivityData = {
+      sid: primary.sid,
+      tid: primary.tid,
+      toolDescription: primary.toolDescription,
+      contextLines: primary.contextLines,
+      permissionTool: primary.permissionTool,
+      permissionContext: primary.permissionContext,
+      permissionRequestId: primary.permissionRequestId,
+      quickActions: primary.quickActions,
+      secondaryTerminals,
+    };
+
+    const needsAlert = candidates.some((c) => c.hasPermission);
+    updateLiveActivity(state, extended, needsAlert);
   }, []);
 
   useEffect(() => {
@@ -715,8 +749,16 @@ function AppInner() {
       isLiveActivityAvailable().then((ok) => {
         if (!ok) return;
         const now = Date.now();
-        const snapshots: TerminalSnapshot[] = [];
-        const extended: ExtendedTerminalData[] = [];
+        const candidates: {
+          sid: string; tid: string; phase: string; project: string;
+          provider: string; tool: string; elapsed: number;
+          hasPermission: boolean; permCount: number;
+          toolDescription: string; contextLines: string;
+          permissionTool: string; permissionContext: string;
+          permissionRequestId: string;
+          quickActions: { label: string; input: string; needsInput: boolean; desc?: string }[];
+        }[] = [];
+
         for (const [sid, info] of sessionsRef.current) {
           if (info.status !== "connected") continue;
           const e = parsersRef.current.get(sid);
@@ -724,41 +766,68 @@ function AppInner() {
             ? info.terminals.get(info.activeTerminalId)
             : undefined;
           const ss = activeTerm?.structuredStatus;
+          const hasPermission = !!ss?.topPermission;
 
-          snapshots.push({
+          candidates.push({
             sid,
             tid: info.activeTerminalId || "default",
             phase: ss?.phase || (e?.status ?? "idle"),
-            project: (
-              info.projectName ||
-              info.hostname ||
-              sid.slice(0, 8)
-            ).slice(0, 20),
+            project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 30),
             provider: e?.provider ?? info.provider ?? "claude",
             tool: ss?.toolName || "",
             elapsed: Math.floor((now - (e?.connectedAt ?? now)) / 1000),
-            hasPermission: !!ss?.topPermission,
+            hasPermission,
             permCount: ss?.pendingPermissionCount ?? 0,
-          });
-
-          extended.push({
-            sid,
-            tid: info.activeTerminalId || "default",
-            toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 200),
-            contextLines: e?.contextLines ?? "",
+            toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 500),
+            contextLines: (e?.contextLines ?? "").slice(0, 500),
             permissionTool: ss?.topPermission?.toolName || "",
-            permissionContext: (
-              ss?.topPermission?.permissionRequest ||
-              ss?.topPermission?.toolInput ||
-              ""
-            ).slice(0, 200),
+            permissionContext: (ss?.topPermission?.permissionRequest || ss?.topPermission?.toolInput || "").slice(0, 400),
             permissionRequestId: ss?.topPermission?.requestId || "",
-            quickActions: e?.quickActions ?? [],
+            quickActions: hasPermission
+              ? [
+                  { label: "允许", input: "allow", needsInput: false, desc: "允许执行此操作" },
+                  { label: "拒绝", input: "deny", needsInput: false, desc: "拒绝此操作" },
+                ]
+              : (e?.quickActions?.map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
           });
         }
-        if (snapshots.length === 0) return;
-        const aid = activeSidRef.current ?? snapshots[0]?.sid ?? "";
-        startLiveActivity(snapshots, extended, aid, "default").then((id) => {
+        if (candidates.length === 0) return;
+
+        const priority: Record<string, number> = {
+          error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5,
+        };
+        candidates.sort((a, b) => {
+          if (a.hasPermission !== b.hasPermission) return a.hasPermission ? -1 : 1;
+          return (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9);
+        });
+
+        const primary = candidates[0];
+        const totalPermCount = candidates.reduce((sum, c) => sum + c.permCount, 0);
+
+        const state: ActivityState = {
+          sid: primary.sid, tid: primary.tid, phase: primary.phase,
+          project: primary.project, provider: primary.provider,
+          tool: primary.tool, elapsed: primary.elapsed,
+          hasPermission: primary.hasPermission, permCount: primary.permCount,
+          otherCount: candidates.length - 1, totalPermCount,
+        };
+
+        const secondaryTerminals: SecondaryTerminal[] = candidates.slice(1, 6).map((c) => ({
+          sid: c.sid, tid: c.tid, provider: c.provider, phase: c.phase, hasPermission: c.hasPermission,
+        }));
+
+        const extended: ExtendedActivityData = {
+          sid: primary.sid, tid: primary.tid,
+          toolDescription: primary.toolDescription,
+          contextLines: primary.contextLines,
+          permissionTool: primary.permissionTool,
+          permissionContext: primary.permissionContext,
+          permissionRequestId: primary.permissionRequestId,
+          quickActions: primary.quickActions,
+          secondaryTerminals,
+        };
+
+        startLiveActivity(state, extended).then((id) => {
           if (id) liveActivityActiveRef.current = true;
         });
       });

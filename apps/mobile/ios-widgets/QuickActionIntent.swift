@@ -34,8 +34,6 @@ struct QuickActionIntent: AppIntent {
             return .result()
         }
 
-        let actionId = UUID().uuidString
-
         // Dedup: check if this requestId was already processed
         var processed = defaults.array(forKey: LiveActivityStore.processedActionsKey) as? [String] ?? []
         if processed.contains(requestId) {
@@ -50,7 +48,7 @@ struct QuickActionIntent: AppIntent {
         // Enqueue action for main app
         var queue = defaults.array(forKey: LiveActivityStore.pendingActionsKey) as? [[String: String]] ?? []
         queue.append([
-            "actionId": actionId,
+            "actionId": UUID().uuidString,
             "sessionId": sessionId,
             "terminalId": terminalId,
             "input": inputData,
@@ -61,32 +59,25 @@ struct QuickActionIntent: AppIntent {
         defaults.synchronize()
 
         // Optimistic update: clear permission from extended data
-        let key = "\(sessionId):\(terminalId)"
-        var extMap = LiveActivityStore.readExtendedData()
-        if var ext = extMap[key] {
+        if var ext = LiveActivityStore.readExtendedData(), ext.permissionRequestId == requestId {
             ext.permissionTool = ""
             ext.permissionContext = ""
             ext.permissionRequestId = ""
             ext.quickActions = []
-            extMap[key] = ext
-            LiveActivityStore.writeExtendedData(Array(extMap.values))
+            LiveActivityStore.writeExtendedData(ext)
         }
 
         // Optimistic update: set phase to "thinking" in ContentState
         if #available(iOS 16.2, *) {
             for activity in Activity<LinkShellAttributes>.activities {
-                var terminals = activity.content.state.terminals
-                if let idx = terminals.firstIndex(where: { $0.sid == sessionId && $0.tid == terminalId }) {
-                    terminals[idx].phase = "thinking"
-                    terminals[idx].hasPermission = false
-                    terminals[idx].permCount = max(0, terminals[idx].permCount - 1)
+                var state = activity.content.state
+                if state.sid == sessionId && state.tid == terminalId {
+                    state.phase = "thinking"
+                    state.hasPermission = false
+                    state.permCount = max(0, state.permCount - 1)
+                    state.totalPermCount = max(0, state.totalPermCount - 1)
                 }
-                let newState = LinkShellAttributes.ContentState(
-                    terminals: terminals,
-                    focusedSid: activity.content.state.focusedSid,
-                    focusedTid: activity.content.state.focusedTid
-                )
-                await activity.update(ActivityContent(state: newState, staleDate: nil))
+                await activity.update(ActivityContent(state: state, staleDate: nil))
             }
         }
 

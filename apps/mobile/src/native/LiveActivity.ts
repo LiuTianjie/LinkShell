@@ -2,9 +2,9 @@ import { NativeModules, Platform } from "react-native";
 
 const { LiveActivityModule } = NativeModules;
 
-// ── Compact snapshot (matches Swift TerminalSnapshot) ──
+// ── Activity state (matches Swift ContentState) ──
 
-export interface TerminalSnapshot {
+export interface ActivityState {
   sid: string;
   tid: string;
   phase: string;
@@ -14,11 +14,13 @@ export interface TerminalSnapshot {
   elapsed: number;
   hasPermission: boolean;
   permCount: number;
+  otherCount: number;
+  totalPermCount: number;
 }
 
-// ── Extended data (written to UserDefaults for widget, keyed by sid:tid) ──
+// ── Extended data (single object, written to UserDefaults for widget) ──
 
-export interface ExtendedTerminalData {
+export interface ExtendedActivityData {
   sid: string;
   tid: string;
   toolDescription: string;
@@ -27,6 +29,15 @@ export interface ExtendedTerminalData {
   permissionContext: string;
   permissionRequestId: string;
   quickActions: QuickAction[];
+  secondaryTerminals: SecondaryTerminal[];
+}
+
+export interface SecondaryTerminal {
+  sid: string;
+  tid: string;
+  provider: string;
+  phase: string;
+  hasPermission: boolean;
 }
 
 export interface QuickAction {
@@ -50,18 +61,14 @@ export async function isLiveActivityAvailable(): Promise<boolean> {
 }
 
 export async function startLiveActivity(
-  terminals: TerminalSnapshot[],
-  extendedData: ExtendedTerminalData[],
-  focusedSid: string,
-  focusedTid: string,
+  state: ActivityState,
+  extended: ExtendedActivityData,
 ): Promise<string | null> {
   if (!isIOS || !LiveActivityModule) return null;
   try {
     return await LiveActivityModule.startActivity(
-      JSON.stringify(terminals),
-      JSON.stringify(extendedData),
-      focusedSid,
-      focusedTid,
+      JSON.stringify(state),
+      JSON.stringify(extended),
     );
   } catch (e) {
     console.warn("[LiveActivity] start failed:", e);
@@ -70,19 +77,15 @@ export async function startLiveActivity(
 }
 
 export async function updateLiveActivity(
-  terminals: TerminalSnapshot[],
-  extendedData: ExtendedTerminalData[],
-  focusedSid: string,
-  focusedTid: string,
+  state: ActivityState,
+  extended: ExtendedActivityData,
   alert?: boolean,
 ): Promise<void> {
   if (!isIOS || !LiveActivityModule) return;
   try {
     await LiveActivityModule.updateActivity(
-      JSON.stringify(terminals),
-      JSON.stringify(extendedData),
-      focusedSid,
-      focusedTid,
+      JSON.stringify(state),
+      JSON.stringify(extended),
       alert ?? false,
     );
   } catch {

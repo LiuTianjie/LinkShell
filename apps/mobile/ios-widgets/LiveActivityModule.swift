@@ -12,10 +12,8 @@ class LiveActivityModule: NSObject {
     // MARK: - Start
 
     @objc
-    func startActivity(_ snapshotsJson: String,
+    func startActivity(_ stateJson: String,
                        extendedJson: String,
-                       activeSessionId: String,
-                       focusedTid: String,
                        resolver resolve: @escaping RCTPromiseResolveBlock,
                        rejecter reject: @escaping RCTPromiseRejectBlock) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -23,20 +21,14 @@ class LiveActivityModule: NSObject {
             return
         }
 
-        guard let snapshots = decodeSnapshots(snapshotsJson) else {
-            reject("DECODE_FAILED", "Failed to decode snapshots JSON", nil)
+        guard let state = decodeState(stateJson) else {
+            reject("DECODE_FAILED", "Failed to decode state JSON", nil)
             return
         }
 
-        // Write extended data to shared UserDefaults
         writeExtendedData(extendedJson)
 
         let attributes = LinkShellAttributes(startedAt: Date())
-        let state = LinkShellAttributes.ContentState(
-            terminals: snapshots,
-            focusedSid: activeSessionId,
-            focusedTid: focusedTid
-        )
 
         do {
             let content = ActivityContent(state: state, staleDate: nil)
@@ -56,10 +48,8 @@ class LiveActivityModule: NSObject {
     // MARK: - Update
 
     @objc
-    func updateActivity(_ snapshotsJson: String,
+    func updateActivity(_ stateJson: String,
                         extendedJson: String,
-                        activeSessionId: String,
-                        focusedTid: String,
                         alert: Bool,
                         resolver resolve: @escaping RCTPromiseResolveBlock,
                         rejecter reject: @escaping RCTPromiseRejectBlock) {
@@ -68,19 +58,12 @@ class LiveActivityModule: NSObject {
             return
         }
 
-        guard let snapshots = decodeSnapshots(snapshotsJson) else {
-            reject("DECODE_FAILED", "Failed to decode snapshots JSON", nil)
+        guard let state = decodeState(stateJson) else {
+            reject("DECODE_FAILED", "Failed to decode state JSON", nil)
             return
         }
 
-        // Write extended data to shared UserDefaults
         writeExtendedData(extendedJson)
-
-        let state = LinkShellAttributes.ContentState(
-            terminals: snapshots,
-            focusedSid: activeSessionId,
-            focusedTid: focusedTid
-        )
 
         Task {
             for activity in Activity<LinkShellAttributes>.activities {
@@ -119,7 +102,6 @@ class LiveActivityModule: NSObject {
         activityId = nil
         startTime = nil
 
-        // Clear extended data
         LiveActivityStore.defaults?.removeObject(forKey: LiveActivityStore.extendedDataKey)
         LiveActivityStore.defaults?.synchronize()
 
@@ -127,9 +109,10 @@ class LiveActivityModule: NSObject {
             for activity in Activity<LinkShellAttributes>.activities {
                 if activity.id == aid {
                     let finalState = LinkShellAttributes.ContentState(
-                        terminals: [],
-                        focusedSid: "",
-                        focusedTid: ""
+                        sid: "", tid: "", phase: "idle", project: "",
+                        provider: "custom", tool: "", elapsed: 0,
+                        hasPermission: false, permCount: 0,
+                        otherCount: 0, totalPermCount: 0
                     )
                     let content = ActivityContent(state: finalState, staleDate: nil)
                     await activity.end(content, dismissalPolicy: .after(.now + 5))
@@ -141,32 +124,27 @@ class LiveActivityModule: NSObject {
         }
     }
 
-    // MARK: - Confirm Action (clear permission from widget)
+    // MARK: - Confirm Action
 
     @objc
     func confirmAction(_ requestId: String,
                        resolver resolve: @escaping RCTPromiseResolveBlock,
                        rejecter reject: @escaping RCTPromiseRejectBlock) {
-        var extendedMap = LiveActivityStore.readExtendedData()
-        var changed = false
-
-        for (sid, var data) in extendedMap {
-            if data.permissionRequestId == requestId {
-                data.permissionTool = ""
-                data.permissionContext = ""
-                data.permissionRequestId = ""
-                data.quickActions = []
-                extendedMap[sid] = data
-                changed = true
-                break
-            }
+        guard var ext = LiveActivityStore.readExtendedData() else {
+            resolve(false)
+            return
         }
 
-        if changed {
-            LiveActivityStore.writeExtendedData(Array(extendedMap.values))
+        if ext.permissionRequestId == requestId {
+            ext.permissionTool = ""
+            ext.permissionContext = ""
+            ext.permissionRequestId = ""
+            ext.quickActions = []
+            LiveActivityStore.writeExtendedData(ext)
+            resolve(true)
+        } else {
+            resolve(false)
         }
-
-        resolve(changed)
     }
 
     // MARK: - Availability
@@ -185,14 +163,13 @@ class LiveActivityModule: NSObject {
 
     // MARK: - Helpers
 
-    private func decodeSnapshots(_ json: String) -> [TerminalSnapshot]? {
+    private func decodeState(_ json: String) -> LinkShellAttributes.ContentState? {
         guard let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode([TerminalSnapshot].self, from: data)
+        return try? JSONDecoder().decode(LinkShellAttributes.ContentState.self, from: data)
     }
 
     private func writeExtendedData(_ json: String) {
         guard let defaults = LiveActivityStore.defaults else { return }
-        // Store raw JSON directly — widget will decode
         defaults.set(json.data(using: .utf8), forKey: LiveActivityStore.extendedDataKey)
         defaults.synchronize()
     }

@@ -2,17 +2,13 @@
 
 @interface RCT_EXTERN_MODULE(LiveActivityModule, NSObject)
 
-RCT_EXTERN_METHOD(startActivity:(NSString *)snapshotsJson
+RCT_EXTERN_METHOD(startActivity:(NSString *)stateJson
                   extendedJson:(NSString *)extendedJson
-                  activeSessionId:(NSString *)activeSessionId
-                  focusedTid:(NSString *)focusedTid
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(updateActivity:(NSString *)snapshotsJson
+RCT_EXTERN_METHOD(updateActivity:(NSString *)stateJson
                   extendedJson:(NSString *)extendedJson
-                  activeSessionId:(NSString *)activeSessionId
-                  focusedTid:(NSString *)focusedTid
                   alert:(BOOL)alert
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)

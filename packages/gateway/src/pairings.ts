@@ -7,7 +7,7 @@ export interface PairingRecord {
   claimed: boolean;
 }
 
-const PAIRING_TTL = 10 * 60_000; // 10 minutes
+const PAIRING_TTL = 7 * 24 * 60 * 60_000; // 7 days
 const CLEANUP_INTERVAL = 60_000;
 
 export class PairingManager {

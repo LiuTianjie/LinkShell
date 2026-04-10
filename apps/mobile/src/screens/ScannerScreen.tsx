@@ -134,21 +134,7 @@ export function ScannerScreen({ onClose, onScan }: ScannerScreenProps) {
             })}
             onPress={requestPermission}
           >
-            <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>授权摄像头</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => ({
-              width: "100%",
-              minHeight: 50,
-              borderRadius: 12,
-              borderCurve: "continuous" as const,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.7 : 1,
-            })}
-            onPress={onClose}
-          >
-            <Text style={{ color: "#007aff", fontSize: 17, fontWeight: "500" }}>稍后再说</Text>
+            <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>继续</Text>
           </Pressable>
         </View>
       </View>
