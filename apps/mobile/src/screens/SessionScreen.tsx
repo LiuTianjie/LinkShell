@@ -351,7 +351,11 @@ export function SessionScreen({
       const nextInset =
         Platform.OS === "ios"
           ? Math.max(0, windowHeight - event.endCoordinates.screenY)
-          : Math.max(0, event.endCoordinates.height);
+          : Math.max(
+              0,
+              windowHeight - event.endCoordinates.screenY,
+              event.endCoordinates.height,
+            );
 
       setKeyboardInset(nextInset);
     };
@@ -1424,6 +1428,7 @@ const TerminalStage = memo(function TerminalStage({
                   stream={tInfo.terminalStream}
                   onInput={isActive ? handleInput : undefined}
                   onResize={isActive ? onResize : undefined}
+                  onRequestKeyboard={isActive ? onRequestFocus : undefined}
                 />
               </View>
             );
@@ -1434,6 +1439,7 @@ const TerminalStage = memo(function TerminalStage({
             stream={stream}
             onInput={handleInput}
             onResize={onResize}
+            onRequestKeyboard={onRequestFocus}
           />
         )}
       </View>

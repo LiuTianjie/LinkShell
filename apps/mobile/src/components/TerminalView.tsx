@@ -4,13 +4,16 @@ import React, {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
   forwardRef,
 } from "react";
 import {
   Animated,
   Clipboard,
   PanResponder,
+  Platform,
   StyleSheet,
+  TextInput,
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
@@ -43,13 +46,19 @@ interface TerminalViewProps {
   stream: TerminalStream;
   onInput?: (data: string) => void;
   onResize?: (cols: number, rows: number) => void;
+  onRequestKeyboard?: () => void;
 }
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  function TerminalView({ stream, onInput, onResize }, ref) {
+  function TerminalView({ stream, onInput, onResize, onRequestKeyboard }, ref) {
     const { theme } = useTheme();
     const webViewRef = useRef<WebView>(null);
     const readyRef = useRef(false);
+    const isAndroid = Platform.OS === "android";
+    const androidInputRef = useRef<TextInput>(null);
+    // Android hidden TextInput state: use a sentinel char to detect backspace
+    const androidBufRef = useRef(" ");
+    const [androidInputValue, setAndroidInputValue] = useState(" ");
 
     // Scrollbar state (refs to avoid re-renders)
     const scrollInfoRef = useRef({
@@ -365,11 +374,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           webViewRef.current?.injectJavaScript(
             `try{if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify({ type: "focus_cursor" }))});}}catch(e){}true;`,
           );
+          if (isAndroid) androidInputRef.current?.focus();
         },
         blurCursor() {
           webViewRef.current?.injectJavaScript(
             "try{window.term.blur();document.activeElement&&document.activeElement.blur();}catch(e){}true;",
           );
+          if (isAndroid) androidInputRef.current?.blur();
         },
         copy() {
           postToWebView({ type: "copy" });
@@ -424,10 +435,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             scrollInfoRef.current = info;
             updateThumbPosition(info);
             if (!isDraggingRef.current) flashScrollbar();
+          } else if (msg.type === "request_keyboard") {
+            if (isAndroid) androidInputRef.current?.focus();
+            if (onRequestKeyboard) onRequestKeyboard();
           }
         } catch {}
       },
-      [onInput, onResize, updateThumbPosition, flashScrollbar],
+      [onInput, onResize, onRequestKeyboard, updateThumbPosition, flashScrollbar],
     );
 
     return (
@@ -447,6 +461,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           hideKeyboardAccessoryView
           allowsInlineMediaPlayback
           mixedContentMode="always"
+          textZoom={100}
           injectedJavaScript={`document.documentElement.style.colorScheme='${theme.mode}';true;`}
           onLoadEnd={() => {
             readyRef.current = true;
@@ -455,6 +470,35 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             });
           }}
         />
+        {/* Android: hidden native TextInput to reliably trigger soft keyboard */}
+        {isAndroid && (
+          <TextInput
+            ref={androidInputRef}
+            style={styles.androidHiddenInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="off"
+            blurOnSubmit={false}
+            caretHidden
+            onSubmitEditing={() => {
+              onInput?.("\r");
+            }}
+            onChangeText={(text) => {
+              const prev = androidBufRef.current;
+              if (text.length > prev.length) {
+                const added = text.slice(prev.length);
+                onInput?.(added);
+              } else if (text.length < prev.length) {
+                const deleted = prev.length - text.length;
+                for (let i = 0; i < deleted; i++) onInput?.("\x7f");
+              }
+              // Reset to single space sentinel after processing
+              androidBufRef.current = " ";
+              setAndroidInputValue(" ");
+            }}
+            value={androidInputValue}
+          />
+        )}
         {/* Native scrollbar overlay */}
         <View
           style={styles.scrollbarTrack}
@@ -504,6 +548,14 @@ const styles = StyleSheet.create({
   },
   webview: {
     flex: 1,
+  },
+  androidHiddenInput: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 1,
+    height: 1,
+    opacity: 0,
   },
   scrollbarTrack: {
     position: "absolute",

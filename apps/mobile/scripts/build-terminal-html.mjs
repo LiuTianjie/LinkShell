@@ -86,6 +86,7 @@ setTimeout(function(){fitAddon.fit();sendSize();},150);
 
 // xterm 6.x gesture system calls preventDefault on touchstart, blocking native focus.
 // Re-implement tap-to-focus manually.
+var _isAndroid = /Android/i.test(navigator.userAgent);
 (function(){
   var el = document.getElementById('terminal');
   if (!el) return;
@@ -104,6 +105,12 @@ setTimeout(function(){fitAddon.fit();sendSize();},150);
       var dy = Math.abs(e.changedTouches[0].pageY - startY);
       if (dx < 20 && dy < 20) {
         term.focus();
+        // Android WebView: term.focus() alone won't show keyboard.
+        // Explicitly click the textarea and ask RN to request focus.
+        if (_isAndroid && term.textarea) {
+          term.textarea.click();
+          window.ReactNativeWebView.postMessage(JSON.stringify({type:'request_keyboard'}));
+        }
       }
     }
   }, {passive: true});
@@ -112,6 +119,9 @@ setTimeout(function(){fitAddon.fit();sendSize();},150);
 function focusCursor(){
   try {
     term.focus();
+    if (_isAndroid && term.textarea) {
+      term.textarea.click();
+    }
   } catch (e) {}
 }
 
