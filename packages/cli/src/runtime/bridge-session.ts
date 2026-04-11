@@ -367,6 +367,36 @@ export class BridgeSession {
         }
         break;
       }
+      case "terminal.mkdir": {
+        const p = parseTypedPayload("terminal.mkdir", envelope.payload);
+        const rawPath = p.path.startsWith("~") ? p.path.replace(/^~/, homedir()) : p.path;
+        const dirPath = resolve(rawPath);
+        try {
+          mkdirSync(dirPath, { recursive: true });
+          // Browse the parent to refresh the listing
+          const parentPath = join(dirPath, "..");
+          const entries = readdirSync(parentPath, { withFileTypes: true })
+            .filter((d) => d.isDirectory() && !d.name.startsWith("."))
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((d) => ({
+              name: d.name,
+              path: join(parentPath, d.name),
+              isDirectory: true,
+            }));
+          this.send(createEnvelope({
+            type: "terminal.browse.result",
+            sessionId: this.sessionId,
+            payload: { path: parentPath, entries },
+          }));
+        } catch (err: unknown) {
+          this.send(createEnvelope({
+            type: "terminal.browse.result",
+            sessionId: this.sessionId,
+            payload: { path: dirPath, entries: [], error: (err as Error).message },
+          }));
+        }
+        break;
+      }
       case "terminal.list": {
         this.sendTerminalList();
         break;

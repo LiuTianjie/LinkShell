@@ -201,6 +201,10 @@ export const terminalKillPayloadSchema = z.object({
   terminalId: z.string().min(1),
 });
 
+export const terminalMkdirPayloadSchema = z.object({
+  path: z.string().min(1),
+});
+
 // ── Terminal browse payloads ──────────────────────────────────────
 
 export const terminalBrowsePayloadSchema = z.object({
@@ -330,6 +334,7 @@ export const protocolMessageSchemas = {
   "terminal.browse": terminalBrowsePayloadSchema,
   "terminal.browse.result": terminalBrowseResultPayloadSchema,
   "terminal.kill": terminalKillPayloadSchema,
+  "terminal.mkdir": terminalMkdirPayloadSchema,
   "terminal.status": terminalStatusPayloadSchema,
   "permission.decision": permissionDecisionPayloadSchema,
   "tunnel.request": tunnelRequestPayloadSchema,

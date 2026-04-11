@@ -115,6 +115,8 @@ export interface SessionManagerHandle {
   requestTerminalList: () => void;
   /** Browse a directory on the host */
   browseDirectory: (path: string) => void;
+  /** Create a directory on the host */
+  mkdirRemote: (path: string) => void;
   /** Kill a terminal in the active session */
   killTerminal: (terminalId: string) => void;
   /** Remove an exited terminal from the local map */
@@ -1349,6 +1351,18 @@ export function useSessionManager(): SessionManagerHandle {
     switchTerminal: switchTerminalFn,
     requestTerminalList: requestTerminalListFn,
     browseDirectory: browseDirectoryFn,
+    mkdirRemote: (path: string) => {
+      const s = getActive();
+      if (!s) return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "terminal.mkdir" as any,
+          sessionId: s.sessionId,
+          payload: { path },
+        }),
+      );
+    },
     killTerminal: killTerminalFn,
     removeTerminal: removeTerminalFn,
     onStatusChange: (cb) => {

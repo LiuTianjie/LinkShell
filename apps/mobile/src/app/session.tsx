@@ -56,6 +56,7 @@ export default function SessionRoute() {
         browseResult={activeSession.browseResult}
         terminals={activeSession.terminals}
         onBrowse={manager.browseDirectory}
+        onMkdir={manager.mkdirRemote}
         onSelect={(path: string) => manager.spawnTerminal(path)}
         onClose={() => ctx.setFolderPickerVisible(false)}
         theme={theme}

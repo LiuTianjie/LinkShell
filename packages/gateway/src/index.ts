@@ -15,6 +15,7 @@ import { TokenManager } from "./tokens.js";
 import { handleSocketMessage } from "./relay.js";
 import {
   parseTunnelPath,
+  parseTunnelCookie,
   handleTunnelRequest,
   cleanupSessionTunnels,
 } from "./tunnel.js";
@@ -264,10 +265,22 @@ async function handleRequest(
     return;
   }
 
-  // Tunnel HTTP proxy
+  // Tunnel HTTP proxy (explicit path)
   const tunnelParsed = parseTunnelPath(url.pathname);
   if (tunnelParsed) {
     await handleTunnelRequest(req, res, sessionManager, tokenManager, tunnelParsed, url);
+    return;
+  }
+
+  // Tunnel fallback: cookie-based routing for sub-resources (e.g. /_next/static/...)
+  const tunnelCookie = parseTunnelCookie(req);
+  if (tunnelCookie) {
+    const fallbackParsed = {
+      sessionId: tunnelCookie.sessionId,
+      port: tunnelCookie.port,
+      path: url.pathname,
+    };
+    await handleTunnelRequest(req, res, sessionManager, tokenManager, fallbackParsed, url, tunnelCookie.token);
     return;
   }
 
@@ -297,6 +310,24 @@ server.on("upgrade", (request, socket, head) => {
     import("./tunnel.js").then(({ handleTunnelWsUpgrade }) => {
       wss.handleUpgrade(request, socket, head, (ws) => {
         handleTunnelWsUpgrade(ws, tunnelParsed, url, sessionManager, tokenManager);
+      });
+    });
+    return;
+  }
+
+  // Tunnel WS fallback via cookie (for HMR paths like /_next/webpack-hmr)
+  const tunnelCookie = parseTunnelCookie(request);
+  if (tunnelCookie && url.pathname !== "/ws") {
+    const fallbackParsed = {
+      sessionId: tunnelCookie.sessionId,
+      port: tunnelCookie.port,
+      path: url.pathname,
+    };
+    // Inject token into URL so handleTunnelWsUpgrade can auth
+    url.searchParams.set("token", tunnelCookie.token);
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      import("./tunnel.js").then(({ handleTunnelWsUpgrade }) => {
+        handleTunnelWsUpgrade(ws, fallbackParsed, url, sessionManager, tokenManager);
       });
     });
     return;

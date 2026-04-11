@@ -55,13 +55,28 @@ function extractToken(req: IncomingMessage, url: URL): string | null {
   // Check query param
   const qToken = url.searchParams.get("token");
   if (qToken) return qToken;
-  // Check cookie
+  // Check cookie (token-only cookie)
   const cookie = req.headers.cookie;
   if (cookie) {
-    const match = cookie.match(/lsh_tunnel=([^;]+)/);
+    const match = cookie.match(/lsh_token=([^;]+)/);
     if (match?.[1]) return match[1];
   }
   return null;
+}
+
+/** Parse lsh_tunnel cookie: "sessionId:port:token" */
+export function parseTunnelCookie(req: IncomingMessage): { sessionId: string; port: number; token: string } | null {
+  const cookie = req.headers.cookie;
+  if (!cookie) return null;
+  const match = cookie.match(/lsh_tunnel=([^;]+)/);
+  if (!match?.[1]) return null;
+  const parts = decodeURIComponent(match[1]).split(":");
+  if (parts.length < 3) return null;
+  const sessionId = parts[0]!;
+  const port = Number(parts[1]);
+  const token = parts.slice(2).join(":"); // token may contain colons
+  if (!sessionId || isNaN(port) || port < 1 || port > 65535 || !token) return null;
+  return { sessionId, port, token };
 }
 
 function errorResponse(res: ServerResponse, status: number, message: string): void {
@@ -92,18 +107,20 @@ export async function handleTunnelRequest(
   tokens: TokenManager,
   parsed: { sessionId: string; port: number; path: string },
   url: URL,
+  preAuthToken?: string,
 ): Promise<void> {
   const { sessionId, port, path } = parsed;
 
   // Auth
-  const token = extractToken(req, url);
+  const token = preAuthToken || extractToken(req, url);
   if (!token || !tokens.owns(token, sessionId)) {
     errorResponse(res, 401, "Unauthorized");
     return;
   }
 
-  // Set auth cookie for subsequent sub-resource requests
-  res.setHeader("Set-Cookie", `lsh_tunnel=${token}; Path=/tunnel/${sessionId}/; HttpOnly; SameSite=Lax`);
+  // Set auth cookie for subsequent sub-resource requests (root path so /_next/... etc. are covered)
+  const cookieVal = encodeURIComponent(`${sessionId}:${port}:${token}`);
+  res.setHeader("Set-Cookie", `lsh_tunnel=${cookieVal}; Path=/; HttpOnly; SameSite=Lax`);
 
   // Validate session & host
   const session = sessions.get(sessionId);

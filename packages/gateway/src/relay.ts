@@ -233,6 +233,7 @@ function handleClientMessage(
     case "terminal.kill":
     case "terminal.list":
     case "terminal.browse":
+    case "terminal.mkdir":
       sendToHost(session, envelope);
       break;
     default:

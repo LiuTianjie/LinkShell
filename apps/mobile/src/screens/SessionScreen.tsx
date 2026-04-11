@@ -181,6 +181,7 @@ export function SessionScreen({
     "terminal",
   );
   const [showTerminalGrid, setShowTerminalGrid] = useState(false);
+  const [browserFullscreen, setBrowserFullscreen] = useState(false);
 
   const keyboardVisible = keyboardInset > 0;
   const stageBottomInset = keyboardVisible ? keyboardInset : insets.bottom;
@@ -499,20 +500,23 @@ export function SessionScreen({
             />
           </View>
 
-          {activeTab === "browser" && gatewayUrl ? (
+          {gatewayUrl ? (
             <View
+              pointerEvents={activeTab === "browser" ? "auto" : "none"}
               style={[
                 StyleSheet.absoluteFillObject,
-                {
-                  top: insets.top + 46,
-                  bottom: stageBottomInset,
-                },
+                browserFullscreen
+                  ? { top: 0, bottom: 0 }
+                  : { top: insets.top + 40, bottom: stageBottomInset },
+                {  opacity: activeTab === "browser" ? 1 : 0 },
               ]}
             >
               <BrowserView
                 gatewayUrl={gatewayUrl}
                 sessionId={sessionId}
                 deviceToken={deviceToken ?? null}
+                isFullscreen={browserFullscreen}
+                onToggleFullscreen={() => setBrowserFullscreen((f) => !f)}
               />
             </View>
           ) : null}
@@ -533,6 +537,7 @@ export function SessionScreen({
       </View>
 
       {/* Top overlay — over scrolling content */}
+      {!(activeTab === "browser" && browserFullscreen) && (
       <View
         style={{
           position: "absolute",
@@ -655,6 +660,7 @@ export function SessionScreen({
           </View>
         ) : null}
       </View>
+      )}
 
       {showTerminalGrid ? (
         <TerminalGridOverlay
