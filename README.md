@@ -1,15 +1,39 @@
 <p align="center">
-  <img src="docs/assets/adaptive-icon.png" alt="LinkShell" width="120" style="border-radius:24px" />
-  <br />
-  <strong>LinkShell</strong>
+  <img src="docs/assets/adaptive-icon.png" alt="LinkShell" width="160" style="border-radius:24px" />
 </p>
 
-在手机上远程查看和控制本地 Claude Code / Codex 终端会话。
+<h1 align="center">LinkShell</h1>
+
+<p align="center">
+  <strong>Remote Terminal for Claude Code & Codex</strong>
+</p>
+
+<p align="center">
+  在手机上远程查看和控制本地 Claude Code / Codex 终端会话
+</p>
 
 <p align="center">
   <a href="https://liutianjie.github.io/LinkShell/">🌐 官网</a>
-  &nbsp;&nbsp;|&nbsp;&nbsp;
+  &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">📦 Releases</a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="docs/user-guide.md">📖 文档</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/license/LiuTianjie/LinkShell?style=flat-square" alt="License" />
+  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Android%20%7C%20macOS%20%7C%20Linux-blue?style=flat-square" alt="Platform" />
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/2.png" alt="Home" width="180" />
+  &nbsp;
+  <img src="docs/assets/1.png" alt="Terminal" width="180" />
+  &nbsp;
+  <img src="docs/assets/3.png" alt="Gemini CLI" width="180" />
+  &nbsp;
+  <img src="docs/assets/4.png" alt="Multi Session" width="180" />
 </p>
 
 ## 📲 下载 App

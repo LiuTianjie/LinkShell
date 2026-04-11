@@ -27,6 +27,7 @@ import { GlassBar } from "../components/GlassBar";
 import { TerminalView } from "../components/TerminalView";
 import type { TerminalViewHandle } from "../components/TerminalView";
 import { ScreenView } from "../components/ScreenView";
+import { BrowserView } from "../components/BrowserView";
 import type { ConnectionStatus, TerminalStream } from "../hooks/useSession";
 import type { TerminalInfo } from "../hooks/useSessionManager";
 import { useTheme } from "../theme";
@@ -107,6 +108,9 @@ interface SessionScreenProps {
   terminals?: Map<string, TerminalInfo>;
   onKillTerminal?: (terminalId: string) => void;
   onRemoveTerminal?: (terminalId: string) => void;
+  // Tunnel browser
+  gatewayUrl?: string;
+  deviceToken?: string | null;
 }
 
 export function SessionScreen({
@@ -141,6 +145,8 @@ export function SessionScreen({
   terminals,
   onKillTerminal,
   onRemoveTerminal,
+  gatewayUrl,
+  deviceToken,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -171,7 +177,7 @@ export function SessionScreen({
   const [keyboardHintVisible, setKeyboardHintVisible] = useState(false);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [keyboardInset, setKeyboardInset] = useState(0);
-  const [activeTab, setActiveTab] = useState<"terminal" | "desktop">(
+  const [activeTab, setActiveTab] = useState<"terminal" | "desktop" | "browser">(
     "terminal",
   );
   const [showTerminalGrid, setShowTerminalGrid] = useState(false);
@@ -189,6 +195,12 @@ export function SessionScreen({
     setActiveTab("terminal");
     onStopScreen();
   }, [onStopScreen]);
+
+  const switchToBrowser = useCallback(() => {
+    setActiveTab("browser");
+    Keyboard.dismiss();
+    termRef.current?.blurCursor();
+  }, []);
 
   const hasControl = controllerId === deviceId;
   const isControlledByOther = Boolean(
@@ -487,6 +499,24 @@ export function SessionScreen({
             />
           </View>
 
+          {activeTab === "browser" && gatewayUrl ? (
+            <View
+              style={[
+                StyleSheet.absoluteFillObject,
+                {
+                  top: insets.top + 46,
+                  bottom: stageBottomInset,
+                },
+              ]}
+            >
+              <BrowserView
+                gatewayUrl={gatewayUrl}
+                sessionId={sessionId}
+                deviceToken={deviceToken ?? null}
+              />
+            </View>
+          ) : null}
+
           {showFullOverlay ? (
             <SessionOverlay
               connectionDetail={connectionDetail}
@@ -539,6 +569,7 @@ export function SessionScreen({
           onReleaseControl={onReleaseControl}
           onSwitchDesktop={switchToDesktop}
           onSwitchTerminal={switchToTerminal}
+          onSwitchBrowser={switchToBrowser}
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
           onZoomReset={handleZoomReset}
@@ -658,6 +689,7 @@ const SessionHeader = memo(function SessionHeader({
   onReleaseControl,
   onSwitchDesktop,
   onSwitchTerminal,
+  onSwitchBrowser,
   onZoomIn,
   onZoomOut,
   onZoomReset,
@@ -671,7 +703,7 @@ const SessionHeader = memo(function SessionHeader({
   activeTerminalLabel,
   onShowTerminalGrid,
 }: {
-  activeTab: "terminal" | "desktop";
+  activeTab: "terminal" | "desktop" | "browser";
   hasControl: boolean;
   isControlledByOther: boolean;
   onClaimControl: () => void;
@@ -679,6 +711,7 @@ const SessionHeader = memo(function SessionHeader({
   onReleaseControl: () => void;
   onSwitchDesktop: () => void;
   onSwitchTerminal: () => void;
+  onSwitchBrowser: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
@@ -840,6 +873,31 @@ const SessionHeader = memo(function SessionHeader({
               size={14}
               color={
                 activeTab === "desktop" ? theme.accent : theme.textTertiary
+              }
+            />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => ({
+              width: 34,
+              height: 26,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor:
+                activeTab === "browser"
+                  ? theme.mode === "light"
+                    ? "rgba(255,255,255,0.9)"
+                    : "rgba(255,255,255,0.08)"
+                  : pressed
+                    ? "rgba(128,128,128,0.2)"
+                    : "transparent",
+            })}
+            onPress={onSwitchBrowser}
+          >
+            <AppSymbol
+              name="globe"
+              size={14}
+              color={
+                activeTab === "browser" ? theme.accent : theme.textTertiary
               }
             />
           </Pressable>

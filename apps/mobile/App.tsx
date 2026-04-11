@@ -1038,6 +1038,8 @@ function AppInner() {
           terminals={activeSession.terminals}
           onKillTerminal={manager.killTerminal}
           onRemoveTerminal={manager.removeTerminal}
+          gatewayUrl={activeSession.gatewayUrl}
+          deviceToken={manager.deviceToken}
         />
         <FolderPickerModal
           visible={folderPickerVisible}

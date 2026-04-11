@@ -13,6 +13,12 @@ import { SessionManager } from "./sessions.js";
 import { PairingManager } from "./pairings.js";
 import { TokenManager } from "./tokens.js";
 import { handleSocketMessage } from "./relay.js";
+import {
+  parseTunnelPath,
+  handleTunnelRequest,
+  handleTunnelWsUpgrade,
+  cleanupSessionTunnels,
+} from "./tunnel.js";
 
 export interface EmbeddedGatewayOptions {
   port?: number;
@@ -204,6 +210,13 @@ export function startEmbeddedGateway(
         return;
       }
 
+      // Tunnel HTTP proxy
+      const tunnelParsed = parseTunnelPath(url.pathname);
+      if (tunnelParsed) {
+        await handleTunnelRequest(req, res, sessionManager, tokenManager, tunnelParsed, url);
+        return;
+      }
+
       json(res, 404, { error: "not_found" });
     } catch (err) {
       if (err instanceof ZodError) {
@@ -235,6 +248,16 @@ export function startEmbeddedGateway(
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+
+    // Tunnel WebSocket upgrade (for HMR etc.)
+    const tunnelParsed = parseTunnelPath(url.pathname);
+    if (tunnelParsed) {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        handleTunnelWsUpgrade(ws, tunnelParsed, url, sessionManager, tokenManager);
+      });
+      return;
+    }
+
     if (url.pathname !== "/ws") {
       socket.destroy();
       return;

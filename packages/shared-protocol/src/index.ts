@@ -264,6 +264,37 @@ export const errorPayloadSchema = z.object({
   message: z.string().min(1),
 });
 
+// ── Tunnel payloads ────────────────────────────────────────────────
+
+export const tunnelRequestPayloadSchema = z.object({
+  requestId: z.string().min(1),
+  method: z.string().min(1),
+  url: z.string(),
+  headers: z.record(z.string()),
+  body: z.string().nullable(), // base64 encoded
+  port: z.number().int().min(1).max(65535),
+});
+
+export const tunnelResponsePayloadSchema = z.object({
+  requestId: z.string().min(1),
+  statusCode: z.number().int(),
+  headers: z.record(z.string()),
+  body: z.string(), // base64 encoded chunk
+  isFinal: z.boolean(),
+});
+
+export const tunnelWsDataPayloadSchema = z.object({
+  requestId: z.string().min(1),
+  data: z.string(), // base64 encoded
+  isBinary: z.boolean(),
+});
+
+export const tunnelWsClosePayloadSchema = z.object({
+  requestId: z.string().min(1),
+  code: z.number().int().optional(),
+  reason: z.string().optional(),
+});
+
 // ── Protocol message type registry ──────────────────────────────────
 
 export const protocolMessageSchemas = {
@@ -301,6 +332,10 @@ export const protocolMessageSchemas = {
   "terminal.kill": terminalKillPayloadSchema,
   "terminal.status": terminalStatusPayloadSchema,
   "permission.decision": permissionDecisionPayloadSchema,
+  "tunnel.request": tunnelRequestPayloadSchema,
+  "tunnel.response": tunnelResponsePayloadSchema,
+  "tunnel.ws.data": tunnelWsDataPayloadSchema,
+  "tunnel.ws.close": tunnelWsClosePayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

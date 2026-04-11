@@ -7,6 +7,11 @@ import {
 } from "@linkshell/protocol";
 import type { Envelope } from "@linkshell/protocol";
 import type { SessionManager, ConnectedDevice } from "./sessions.js";
+import {
+  handleTunnelResponse,
+  handleTunnelWsData,
+  handleTunnelWsClose,
+} from "./tunnel.js";
 
 export function handleSocketMessage(
   socket: WebSocket,
@@ -89,6 +94,22 @@ function handleHostMessage(
     }
     case "session.heartbeat":
       break;
+    // Tunnel: host → gateway (not broadcast to clients)
+    case "tunnel.response": {
+      const p = parseTypedPayload("tunnel.response", envelope.payload);
+      handleTunnelResponse(p);
+      return;
+    }
+    case "tunnel.ws.data": {
+      const p = parseTypedPayload("tunnel.ws.data", envelope.payload);
+      handleTunnelWsData(p);
+      return;
+    }
+    case "tunnel.ws.close": {
+      const p = parseTypedPayload("tunnel.ws.close", envelope.payload);
+      handleTunnelWsClose(p);
+      return;
+    }
     case "control.grant":
     case "control.reject":
       broadcastToClients(session, envelope);

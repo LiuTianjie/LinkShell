@@ -133,6 +133,7 @@ export class BridgeSession {
   private hookMarker = `lsh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   private screenCapture: ScreenFallback | undefined;
   private screenShare: ScreenShare | undefined;
+  private tunnelSockets = new Map<string, WebSocket>();
 
   constructor(options: BridgeSessionOptions) {
     this.options = options;
@@ -442,9 +443,207 @@ export class BridgeSession {
         }
         break;
       }
+      case "tunnel.request": {
+        const p = parseTypedPayload("tunnel.request", envelope.payload);
+        this.handleTunnelRequest(p);
+        break;
+      }
+      case "tunnel.ws.data": {
+        const p = parseTypedPayload("tunnel.ws.data", envelope.payload);
+        this.handleTunnelWsData(p);
+        break;
+      }
+      case "tunnel.ws.close": {
+        const p = parseTypedPayload("tunnel.ws.close", envelope.payload);
+        this.handleTunnelWsClose(p);
+        break;
+      }
       default:
         break;
     }
+  }
+
+  // ── Tunnel handlers ────────────────────────────────────────────────
+
+  private handleTunnelRequest(payload: {
+    requestId: string;
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    body: string | null;
+    port: number;
+  }): void {
+    const { requestId, method, url: reqUrl, headers, body, port } = payload;
+
+    // WebSocket upgrade request
+    if (headers.upgrade === "websocket") {
+      this.handleTunnelWsUpgrade(requestId, port, reqUrl);
+      return;
+    }
+
+    const parsedUrl = new URL(reqUrl, `http://127.0.0.1:${port}`);
+
+    const reqOptions: http.RequestOptions = {
+      hostname: "127.0.0.1",
+      port,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method,
+      headers: { ...headers, host: `127.0.0.1:${port}` },
+    };
+
+    const proxyReq = http.request(reqOptions, (proxyRes) => {
+      // Collect response headers
+      const resHeaders: Record<string, string> = {};
+      for (const [key, val] of Object.entries(proxyRes.headers)) {
+        if (typeof val === "string") resHeaders[key] = val;
+        else if (Array.isArray(val)) resHeaders[key] = val.join(", ");
+      }
+
+      let firstChunk = true;
+      proxyRes.on("data", (chunk: Buffer) => {
+        this.send(
+          createEnvelope({
+            type: "tunnel.response",
+            sessionId: this.sessionId,
+            payload: {
+              requestId,
+              statusCode: proxyRes.statusCode ?? 200,
+              headers: firstChunk ? resHeaders : {},
+              body: chunk.toString("base64"),
+              isFinal: false,
+            },
+          }),
+        );
+        firstChunk = false;
+      });
+
+      proxyRes.on("end", () => {
+        this.send(
+          createEnvelope({
+            type: "tunnel.response",
+            sessionId: this.sessionId,
+            payload: {
+              requestId,
+              statusCode: proxyRes.statusCode ?? 200,
+              headers: firstChunk ? resHeaders : {},
+              body: "",
+              isFinal: true,
+            },
+          }),
+        );
+      });
+
+      proxyRes.on("error", () => {
+        this.sendTunnelError(requestId, 502, "Upstream read error");
+      });
+    });
+
+    proxyReq.on("error", () => {
+      this.sendTunnelError(requestId, 502, "Connection refused");
+    });
+
+    proxyReq.setTimeout(30_000, () => {
+      proxyReq.destroy();
+      this.sendTunnelError(requestId, 504, "Upstream timeout");
+    });
+
+    if (body) {
+      proxyReq.write(Buffer.from(body, "base64"));
+    }
+    proxyReq.end();
+  }
+
+  private handleTunnelWsUpgrade(requestId: string, port: number, url: string): void {
+    const wsUrl = `ws://127.0.0.1:${port}${url}`;
+    const localWs = new WebSocket(wsUrl);
+
+    localWs.on("open", () => {
+      this.tunnelSockets.set(requestId, localWs);
+    });
+
+    localWs.on("message", (data: Buffer | string) => {
+      const isBinary = typeof data !== "string";
+      const buf = typeof data === "string" ? Buffer.from(data) : data;
+      this.send(
+        createEnvelope({
+          type: "tunnel.ws.data",
+          sessionId: this.sessionId,
+          payload: {
+            requestId,
+            data: buf.toString("base64"),
+            isBinary,
+          },
+        }),
+      );
+    });
+
+    localWs.on("close", (code, reason) => {
+      this.tunnelSockets.delete(requestId);
+      this.send(
+        createEnvelope({
+          type: "tunnel.ws.close",
+          sessionId: this.sessionId,
+          payload: {
+            requestId,
+            code,
+            reason: reason?.toString() || "",
+          },
+        }),
+      );
+    });
+
+    localWs.on("error", () => {
+      this.tunnelSockets.delete(requestId);
+      this.send(
+        createEnvelope({
+          type: "tunnel.ws.close",
+          sessionId: this.sessionId,
+          payload: {
+            requestId,
+            code: 1001,
+            reason: "Local WebSocket error",
+          },
+        }),
+      );
+    });
+  }
+
+  private handleTunnelWsData(payload: {
+    requestId: string;
+    data: string;
+    isBinary: boolean;
+  }): void {
+    const ws = this.tunnelSockets.get(payload.requestId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const buf = Buffer.from(payload.data, "base64");
+    ws.send(payload.isBinary ? buf : buf.toString("utf8"));
+  }
+
+  private handleTunnelWsClose(payload: {
+    requestId: string;
+    code?: number;
+    reason?: string;
+  }): void {
+    const ws = this.tunnelSockets.get(payload.requestId);
+    if (!ws) return;
+    ws.close(payload.code ?? 1000, payload.reason ?? "");
+    this.tunnelSockets.delete(payload.requestId);
+  }
+
+  private sendTunnelError(requestId: string, statusCode: number, message: string): void {
+    this.send(
+      createEnvelope({
+        type: "tunnel.response",
+        sessionId: this.sessionId,
+        payload: {
+          requestId,
+          statusCode,
+          headers: { "content-type": "text/plain" },
+          body: Buffer.from(message).toString("base64"),
+          isFinal: true,
+        },
+      }),
+    );
   }
 
   private sendTerminalList(): void {
@@ -1274,6 +1473,11 @@ export class BridgeSession {
     }
     this.socket?.close();
     this.socket = undefined;
+    // Clean up tunnel WebSockets
+    for (const ws of this.tunnelSockets.values()) {
+      ws.close(1001, "Session stopped");
+    }
+    this.tunnelSockets.clear();
     for (const term of this.terminals.values()) {
       this.cleanupHookServer(term);
       if (term.status === "running") term.pty.kill();
