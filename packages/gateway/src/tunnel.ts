@@ -209,29 +209,29 @@ export function handleTunnelResponse(payload: {
   body: string;
   isFinal: boolean;
 }): void {
-  const pending = pendingRequests.get(payload.requestId);
-  if (!pending) return;
+  try {
+    const pending = pendingRequests.get(payload.requestId);
+    if (!pending) return;
 
-  if (!pending.headersSent) {
-    // Merge CORS headers
-    const responseHeaders: Record<string, string> = {
-      ...payload.headers,
-      "access-control-allow-origin": "*",
-    };
-    pending.res.writeHead(payload.statusCode, responseHeaders);
-    pending.headersSent = true;
-  }
+    if (!pending.headersSent) {
+      const responseHeaders: Record<string, string> = {
+        ...payload.headers,
+        "access-control-allow-origin": "*",
+      };
+      pending.res.writeHead(payload.statusCode, responseHeaders);
+      pending.headersSent = true;
+    }
 
-  // Write body chunk
-  if (payload.body) {
-    pending.res.write(Buffer.from(payload.body, "base64"));
-  }
+    if (payload.body) {
+      pending.res.write(Buffer.from(payload.body, "base64"));
+    }
 
-  if (payload.isFinal) {
-    clearTimeout(pending.timeout);
-    pendingRequests.delete(payload.requestId);
-    pending.res.end();
-  }
+    if (payload.isFinal) {
+      clearTimeout(pending.timeout);
+      pendingRequests.delete(payload.requestId);
+      pending.res.end();
+    }
+  } catch {}
 }
 
 export function handleTunnelWsData(payload: {
@@ -239,10 +239,12 @@ export function handleTunnelWsData(payload: {
   data: string;
   isBinary: boolean;
 }): void {
-  const pending = pendingWsSockets.get(payload.requestId);
-  if (!pending) return;
-  const buf = Buffer.from(payload.data, "base64");
-  pending.ws.send(payload.isBinary ? buf : buf.toString("utf8"));
+  try {
+    const pending = pendingWsSockets.get(payload.requestId);
+    if (!pending || pending.ws.readyState !== 1) return;
+    const buf = Buffer.from(payload.data, "base64");
+    pending.ws.send(payload.isBinary ? buf : buf.toString("utf8"));
+  } catch {}
 }
 
 export function handleTunnelWsClose(payload: {
@@ -250,10 +252,15 @@ export function handleTunnelWsClose(payload: {
   code?: number;
   reason?: string;
 }): void {
-  const pending = pendingWsSockets.get(payload.requestId);
-  if (!pending) return;
-  pending.ws.close(payload.code ?? 1000, payload.reason ?? "");
-  pendingWsSockets.delete(payload.requestId);
+  try {
+    const pending = pendingWsSockets.get(payload.requestId);
+    if (!pending) return;
+    pendingWsSockets.delete(payload.requestId);
+    if (pending.ws.readyState === 1) {
+      const code = typeof payload.code === "number" && payload.code >= 1000 && payload.code <= 4999 ? payload.code : 1000;
+      pending.ws.close(code, payload.reason ?? "");
+    }
+  } catch {}
 }
 
 export function registerTunnelWs(requestId: string, ws: WebSocket): void {
@@ -329,36 +336,41 @@ export function handleTunnelWsUpgrade(
 
   // Forward data from browser WS to host
   ws.on("message", (data: Buffer | string) => {
-    const s = sessions.get(sessionId);
-    if (!s?.host || s.host.socket.readyState !== s.host.socket.OPEN) return;
-    const isBinary = typeof data !== "string";
-    const buf = typeof data === "string" ? Buffer.from(data) : data;
-    const fwd = createEnvelope({
-      type: "tunnel.ws.data",
-      sessionId,
-      payload: {
-        requestId,
-        data: buf.toString("base64"),
-        isBinary,
-      },
-    });
-    s.host.socket.send(serializeEnvelope(fwd));
+    try {
+      const s = sessions.get(sessionId);
+      if (!s?.host || s.host.socket.readyState !== s.host.socket.OPEN) return;
+      const isBinary = typeof data !== "string";
+      const buf = typeof data === "string" ? Buffer.from(data) : data;
+      const fwd = createEnvelope({
+        type: "tunnel.ws.data",
+        sessionId,
+        payload: {
+          requestId,
+          data: buf.toString("base64"),
+          isBinary,
+        },
+      });
+      s.host.socket.send(serializeEnvelope(fwd));
+    } catch {}
   });
 
   ws.on("close", (code, reason) => {
-    removeTunnelWs(requestId);
-    untrackRequest(sessionId, requestId);
-    const s = sessions.get(sessionId);
-    if (!s?.host || s.host.socket.readyState !== s.host.socket.OPEN) return;
-    const fwd = createEnvelope({
-      type: "tunnel.ws.close",
-      sessionId,
-      payload: {
-        requestId,
-        code,
-        reason: reason?.toString() || "",
-      },
-    });
-    s.host.socket.send(serializeEnvelope(fwd));
+    try {
+      removeTunnelWs(requestId);
+      untrackRequest(sessionId, requestId);
+      const s = sessions.get(sessionId);
+      if (!s?.host || s.host.socket.readyState !== s.host.socket.OPEN) return;
+      const safeCode = typeof code === "number" && code >= 1000 && code <= 4999 ? code : 1000;
+      const fwd = createEnvelope({
+        type: "tunnel.ws.close",
+        sessionId,
+        payload: {
+          requestId,
+          code: safeCode,
+          reason: reason?.toString() || "",
+        },
+      });
+      s.host.socket.send(serializeEnvelope(fwd));
+    } catch {}
   });
 }

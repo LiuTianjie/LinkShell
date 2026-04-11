@@ -603,6 +603,16 @@
         <code class="term"
           style="display:block;padding:8px 16px">linkshell start --daemon --provider claude --screen</code>
       </div>
+
+      <div style="margin-top:24px">
+        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span data-i18n="f5Title">端口转发预览</span></p>
+        <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="f5Desc">远程启动 dev server，手机直接预览页面。支持 CSS/JS/图片完整加载、HMR 热更新、PC/手机视图切换和全屏模式。</p>
+        <div class="term" style="padding:8px 16px"><span class="tm"># 远程终端启动 dev server</span>
+<span class="tp">$</span> <span class="tc">npm run dev</span>
+<span class="to">  ➜ Local: http://localhost:3000</span>
+
+<span class="tm"># App 切换到 Browser 标签，输入端口 3000，即可预览</span></div>
+      </div>
     </div>
   </section>
 
@@ -796,9 +806,26 @@
         <div class="li g" data-i18n="docsScreen4">App 端切换 — 在 App 内切换 Terminal / Desktop 标签，随时查看桌面</div>
       </div>
 
+      <!-- Port Forwarding -->
+      <div style="margin-bottom:64px">
+        <h3><span class="tm">05</span> <span data-i18n="docsPortFwdTitle">端口转发</span></h3>
+        <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsPortFwdDesc">在远程终端启动 dev server 后，直接在手机上预览页面。通过 Gateway 中继 HTTP 请求，支持完整的 Web 应用预览。</p>
+        <div class="term" style="margin-bottom:16px"><span class="tm"># 远程终端启动 dev server</span>
+<span class="tp">$</span> <span class="tc">npm run dev</span>
+<span class="to">  ➜ Local: http://localhost:3000</span>
+
+<span class="tm"># App 切换到 Browser 标签（globe 图标），输入端口 3000</span>
+<span class="ts">➜ Preview: http://gateway:8787/tunnel/{sessionId}/3000/</span></div>
+        <div class="li g" data-i18n="docsPortFwd1">完整加载 — HTML、CSS、JS、图片等所有资源通过 tunnel 代理</div>
+        <div class="li g" data-i18n="docsPortFwd2">HMR 支持 — WebSocket 热更新自动转发，Vite / Next.js / webpack 均可</div>
+        <div class="li g" data-i18n="docsPortFwd3">视图切换 — 一键切换 PC / 手机视图，桌面模式以 1024px 宽度渲染</div>
+        <div class="li g" data-i18n="docsPortFwd4">全屏预览 — 隐藏所有 UI，沉浸式查看页面效果</div>
+        <p style="color:var(--warning);font-size:14px;margin-top:12px" data-i18n="docsPortFwdReq">需要 linkshell-cli ≥ 0.2.53 / gateway ≥ 0.2.17</p>
+      </div>
+
       <!-- Protocol & Reliability -->
       <div style="margin-bottom:64px">
-        <h3><span class="tm">05</span> <span data-i18n="docsProtocolTitle">协议与可靠性</span></h3>
+        <h3><span class="tm">06</span> <span data-i18n="docsProtocolTitle">协议与可靠性</span></h3>
 
       <div class="stat-g">
         <div class="stat">
@@ -839,7 +866,7 @@
 
       <!-- FAQ -->
       <div>
-        <h3><span class="tm">06</span> <span data-i18n="docsFaqTitle">常见问题</span></h3>
+        <h3><span class="tm">07</span> <span data-i18n="docsFaqTitle">常见问题</span></h3>
 
       <div style="margin-bottom:24px">
         <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq1Q">Q: 需要公网服务器吗？</p>

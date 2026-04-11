@@ -136,6 +136,22 @@ linkshell start --daemon --provider claude --screen
 >
 > 安装后 CLI 会自动检测屏幕设备并启动 H.264 编码流。如果同时安装了 [werift](https://github.com/nicktomlin/werift)（`npm i -g werift`），会优先使用 WebRTC 低延迟传输；否则回退到截图流模式。
 
+### 端口转发（预览 Dev Server）
+
+在远程终端启动 dev server 后，可以直接在手机上预览页面：
+
+1. 在终端中启动服务，如 `npm run dev`（监听 3000 端口）
+2. 切换到 App 的 Browser 标签（globe 图标）
+3. 输入端口号，点击 Go
+
+支持：
+- 静态资源、CSS、JS、图片等完整加载
+- HMR / WebSocket 热更新（Vite、Next.js 等）
+- PC / 手机视图切换
+- 全屏预览模式
+
+> 需要 `linkshell-cli >= 0.2.53`，`@linkshell/gateway >= 0.2.17`
+
 ### 远程模式（独立 Gateway，跨网络）
 
 在服务器上：
@@ -226,6 +242,8 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 | `GET` | `/sessions` | 列出活跃会话 |
 | `GET` | `/sessions/:id` | 会话详情 |
 | `WS` | `/ws?sessionId=&role=` | 实时连接 |
+| `GET/POST` | `/tunnel/:sessionId/:port/**` | HTTP 端口转发 |
+| `WS` | `/tunnel/:sessionId/:port/**` | WebSocket 端口转发（HMR） |
 
 ## 可靠性
 

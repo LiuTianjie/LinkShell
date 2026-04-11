@@ -609,13 +609,14 @@ export class BridgeSession {
 
     localWs.on("close", (code, reason) => {
       this.tunnelSockets.delete(requestId);
+      const safeCode = typeof code === "number" && code >= 1000 && code <= 4999 ? code : 1000;
       this.send(
         createEnvelope({
           type: "tunnel.ws.close",
           sessionId: this.sessionId,
           payload: {
             requestId,
-            code,
+            code: safeCode,
             reason: reason?.toString() || "",
           },
         }),
@@ -656,7 +657,8 @@ export class BridgeSession {
   }): void {
     const ws = this.tunnelSockets.get(payload.requestId);
     if (!ws) return;
-    ws.close(payload.code ?? 1000, payload.reason ?? "");
+    const code = payload.code && payload.code >= 1000 && payload.code <= 4999 ? payload.code : 1000;
+    ws.close(code, payload.reason ?? "");
     this.tunnelSockets.delete(payload.requestId);
   }
 

@@ -75,20 +75,32 @@ export function BrowserView({
   }, []);
 
   // JS to force desktop viewport — runs BEFORE page content loads
+  // Also uses MutationObserver to prevent frameworks from resetting viewport
   const BEFORE_LOAD_JS = viewportMode === "desktop" ? `
     (function() {
-      var vp = document.querySelector('meta[name="viewport"]');
-      if (vp) {
-        vp.setAttribute('content', 'width=1024');
-      } else {
-        var m = document.createElement('meta');
-        m.name = 'viewport';
-        m.content = 'width=1024';
-        document.head.appendChild(m);
+      function forceDesktop() {
+        var vp = document.querySelector('meta[name="viewport"]');
+        if (vp) {
+          vp.setAttribute('content', 'width=1024');
+        } else {
+          var m = document.createElement('meta');
+          m.name = 'viewport';
+          m.content = 'width=1024';
+          document.head.appendChild(m);
+        }
       }
+      forceDesktop();
+      new MutationObserver(function() { forceDesktop(); })
+        .observe(document.documentElement, { childList: true, subtree: true, attributes: true });
     })();
     true;
   ` : undefined;
+
+  const webViewDesktopProps = viewportMode === "desktop" ? {
+    userAgent: DESKTOP_USER_AGENT,
+    contentMode: "desktop" as const,
+    injectedJavaScriptBeforeContentLoaded: BEFORE_LOAD_JS,
+  } : {};
 
   // JS to extract theme-color — runs AFTER page loads
   const INJECTED_JS = `
@@ -137,10 +149,9 @@ export function BrowserView({
             setCanGoForward(navState.canGoForward);
             setCurrentUrl(navState.url);
           }}
-          injectedJavaScriptBeforeContentLoaded={BEFORE_LOAD_JS}
           injectedJavaScript={INJECTED_JS}
           onMessage={handleWebViewMessage}
-          userAgent={viewportMode === "desktop" ? DESKTOP_USER_AGENT : undefined}
+          {...webViewDesktopProps}
           sharedCookiesEnabled
           javaScriptEnabled
           domStorageEnabled
@@ -309,10 +320,9 @@ export function BrowserView({
               setCanGoForward(navState.canGoForward);
               setCurrentUrl(navState.url);
             }}
-            injectedJavaScriptBeforeContentLoaded={BEFORE_LOAD_JS}
             injectedJavaScript={INJECTED_JS}
             onMessage={handleWebViewMessage}
-            userAgent={viewportMode === "desktop" ? DESKTOP_USER_AGENT : undefined}
+            {...webViewDesktopProps}
             sharedCookiesEnabled
             javaScriptEnabled
             domStorageEnabled
