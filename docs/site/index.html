@@ -984,6 +984,8 @@
         f3Desc: "独有的单控制者防冲突模型。避免多端并抢焦点，画面精准对齐不串流。",
         f4Title: "远程桌面",
         f4Desc: "不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC 30fps 丝滑体验，自动降级到截图流兜底。",
+        f5Title: "端口转发预览",
+        f5Desc: "远程启动 dev server，手机直接预览页面。支持 CSS/JS/图片完整加载、HMR 热更新、PC/手机视图切换和全屏模式。",
         diSectionTitle: "灵动岛，让 AI 触手可及",
         diSectionDesc: "iPhone 灵动岛实时展示 Claude 工作状态。识别到需要操作时，一键快速响应，无需切回 App。",
         diFeature1: "实时状态 — 思考中、编码中、等待确认，一目了然",
@@ -1054,6 +1056,13 @@
         docsScreen2: "截图流兜底 — 网络条件不佳时自动降级为截图流模式，保证可用性",
         docsScreen3: "自动切换 — 无需手动配置，运行时根据网络质量自动选择最优方案",
         docsScreen4: "App 端切换 — 在 App 内切换 Terminal / Desktop 标签，随时查看桌面",
+        docsPortFwdTitle: "端口转发",
+        docsPortFwdDesc: "在远程终端启动 dev server 后，直接在手机上预览页面。通过 Gateway 中继 HTTP 请求，支持完整的 Web 应用预览。",
+        docsPortFwd1: "完整加载 — HTML、CSS、JS、图片等所有资源通过 tunnel 代理",
+        docsPortFwd2: "HMR 支持 — WebSocket 热更新自动转发，Vite / Next.js / webpack 均可",
+        docsPortFwd3: "视图切换 — 一键切换 PC / 手机视图，桌面模式以 1024px 宽度渲染",
+        docsPortFwd4: "全屏预览 — 隐藏所有 UI，沉浸式查看页面效果",
+        docsPortFwdReq: "需要 linkshell-cli \u2265 0.2.53 / gateway \u2265 0.2.17",
         docsFaq1Q: "Q: 需要公网服务器吗？",
         docsFaq1A: "不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。",
         docsFaq2Q: "Q: 支持哪些 AI 代理？",
@@ -1108,6 +1117,15 @@
         f3Desc: "Features a Single Controller locking model. Prevent multi-device input races and keep screens meticulously synchronized.",
         f4Title: "Remote Desktop",
         f4Desc: "Not just terminal. Add --screen to view your desktop in real-time. WebRTC at 30fps with automatic screenshot fallback.",
+        f5Title: "Port Forwarding Preview",
+        f5Desc: "Start a dev server remotely, preview it on your phone. Full CSS/JS/image loading, HMR hot reload, PC/mobile view toggle, and fullscreen mode.",
+        docsPortFwdTitle: "Port Forwarding",
+        docsPortFwdDesc: "After starting a dev server in the remote terminal, preview the page directly on your phone. HTTP requests are relayed through the Gateway for full web app preview.",
+        docsPortFwd1: "Full Loading — HTML, CSS, JS, images all proxied through the tunnel",
+        docsPortFwd2: "HMR Support — WebSocket hot reload forwarded automatically for Vite / Next.js / webpack",
+        docsPortFwd3: "View Toggle — switch between PC / mobile views, desktop mode renders at 1024px width",
+        docsPortFwd4: "Fullscreen — hide all UI for immersive page preview",
+        docsPortFwdReq: "Requires linkshell-cli \u2265 0.2.53 / gateway \u2265 0.2.17",
         diSectionTitle: "Dynamic Island, AI at Your Fingertips",
         diSectionDesc: "iPhone Dynamic Island shows Claude's live status. One-tap quick actions when Claude needs your input — no need to switch back to the app.",
         diFeature1: "Live Status — thinking, coding, awaiting confirmation at a glance",
@@ -1203,7 +1221,7 @@
 
     const textNodes = Array.from(document.querySelectorAll("[data-i18n]"));
     const langBtn = document.getElementById("lang-toggle");
-    let currentLang = "zh";
+    let currentLang = "en";
 
     function applyLanguage(lang) {
       const dict = translations[lang];
@@ -1220,7 +1238,7 @@
       applyLanguage(currentLang);
     });
 
-    applyLanguage("zh");
+    applyLanguage("en");
 
     // Deploy tabs
     document.querySelectorAll('.tab[data-tab]').forEach(btn => {
