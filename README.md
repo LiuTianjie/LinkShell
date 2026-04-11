@@ -9,15 +9,21 @@
 </p>
 
 <p align="center">
-  在手机上远程查看和控制本地 Claude Code / Codex 终端会话
+  Remotely view and control your local Claude Code / Codex terminal sessions from your phone
 </p>
 
 <p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/">🌐 官网</a>
+  <strong>English</strong>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="README_CN.md">中文</a>
+</p>
+
+<p align="center">
+  <a href="https://liutianjie.github.io/LinkShell/">🌐 Website</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">📦 Releases</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="docs/user-guide.md">📖 文档</a>
+  <a href="docs/user-guide.md">📖 Docs</a>
 </p>
 
 <p align="center">
@@ -36,7 +42,7 @@
   <img src="docs/assets/4.png" alt="Multi Session" width="180" />
 </p>
 
-## 📲 下载 App
+## 📲 Download
 
 <table>
   <tr>
@@ -48,80 +54,80 @@
     </td>
     <td align="center">
       <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">
-        <img src="https://img.shields.io/badge/Android-APK_下载-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" />
+        <img src="https://img.shields.io/badge/Android-Download_APK-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" />
       </a>
       <br /><sub>Android 8+</sub>
     </td>
   </tr>
 </table>
 
-> Android 版本可从 GitHub Releases 下载 APK，iOS 版本即将上架 App Store。
+> Android APK is available from GitHub Releases. iOS version is coming soon to the App Store.
 
-## 一条命令开始
+## Get Started
 
 ```bash
 npm install -g linkshell-cli
 linkshell start --daemon --provider claude
 ```
 
-CLI 会在后台启动内置 Gateway + 终端桥接，打印配对码和 QR 码。手机扫码即连。App 断开不影响后台进程。
+The CLI starts a built-in Gateway + terminal bridge in the background, then prints a pairing code and QR code. Scan to connect. Disconnecting the app does not affect the background process.
 
-## 命令一览
+## Commands
 
 ```bash
-linkshell start --daemon --provider claude   # 后台启动（内置 Gateway + 桥接）
-linkshell start --provider claude             # 前台启动
-linkshell status                              # 查看运行状态
-linkshell stop                                # 停止所有后台进程
-tail -f ~/.linkshell/bridge.log               # 查看日志
+linkshell start --daemon --provider claude   # Start in background (built-in Gateway + bridge)
+linkshell start --provider claude             # Start in foreground
+linkshell status                              # Check running status
+linkshell stop                                # Stop all background processes
+tail -f ~/.linkshell/bridge.log               # View logs
 
-linkshell gateway --daemon                    # 单独后台启动 Gateway（服务器部署用）
-linkshell gateway status                      # 查看 Gateway 状态
-linkshell gateway stop                        # 停止 Gateway
+linkshell gateway --daemon                    # Start Gateway separately in background (for server deployment)
+linkshell gateway status                      # Check Gateway status
+linkshell gateway stop                        # Stop Gateway
 
-linkshell setup                               # 交互式配置
-linkshell doctor                              # 环境检查
+linkshell setup                               # Interactive configuration
+linkshell doctor                              # Environment check
 ```
 
-## 架构
+## Architecture
 
 ```
-你的电脑                                         你的手机
+Your Computer                                    Your Phone
 ┌──────────────────────┐   WebSocket   ┌──────────┐
-│ CLI + 内置 Gateway    │ ◄───────────► │ App      │
-│ (PTY + 消息中转)      │              │ (xterm)  │
-└──────────────────────┘              └──────────┘
+│ CLI + Built-in GW    │ ◄───────────► │ App      │
+│ (PTY + Relay)        │               │ (xterm)  │
+└──────────────────────┘               └──────────┘
 ```
 
-默认模式下 CLI 内置 Gateway，一条命令搞定。也可以把 Gateway 独立部署到公网服务器：
+By default, the CLI includes a built-in Gateway — one command does it all. You can also deploy the Gateway separately on a public server:
 
 ```
-你的电脑                    公网服务器                    你的手机
+Your Computer              Public Server                Your Phone
 ┌──────────┐  WebSocket   ┌──────────┐   WebSocket   ┌──────────┐
 │ CLI      │ ────────────►│ Gateway  │◄──────────── │ App      │
-│ (PTY)    │              │ (中转)    │              │ (xterm)  │
+│ (PTY)    │              │ (Relay)  │              │ (xterm)  │
 └──────────┘              └──────────┘              └──────────┘
 ```
 
-## 使用方式
+## Usage
 
-### 最简模式（内置 Gateway，局域网）
+### Simple Mode (Built-in Gateway, LAN)
 
 ```bash
 linkshell start --daemon --provider claude
 ```
 
-手机和电脑在同一 WiFi，CLI 自动检测局域网 IP 生成 QR 码。
+With your phone and computer on the same WiFi, the CLI auto-detects the LAN IP and generates a QR code.
 
-### 远程桌面查看
+### Remote Desktop Viewing
 
 ```bash
 linkshell start --daemon --provider claude --screen
 ```
 
-加 `--screen` 后，App 端可以切换到 Desktop 标签查看电脑桌面。支持 WebRTC（30fps）和截图流（fallback）两种模式，自动选择最优方案。
+With `--screen`, the app can switch to the Desktop tab to view your computer screen. Supports WebRTC (30fps) and screenshot streaming (fallback), automatically selecting the best option.
 
-> **前置依赖：** 需要安装 [ffmpeg](https://ffmpeg.org/)。
+> **Prerequisite:** [ffmpeg](https://ffmpeg.org/) must be installed.
 >
 > ```bash
 > # macOS
@@ -134,40 +140,40 @@ linkshell start --daemon --provider claude --screen
 > choco install ffmpeg
 > ```
 >
-> 安装后 CLI 会自动检测屏幕设备并启动 H.264 编码流。如果同时安装了 [werift](https://github.com/nicktomlin/werift)（`npm i -g werift`），会优先使用 WebRTC 低延迟传输；否则回退到截图流模式。
+> Once installed, the CLI auto-detects screen devices and starts H.264 encoding. If [werift](https://github.com/nicktomlin/werift) is also installed (`npm i -g werift`), WebRTC low-latency transport is preferred; otherwise it falls back to screenshot streaming.
 
-### 端口转发（预览 Dev Server）
+### Port Forwarding (Preview Dev Server)
 
-在远程终端启动 dev server 后，可以直接在手机上预览页面：
+After starting a dev server in the remote terminal, you can preview pages directly on your phone:
 
-1. 在终端中启动服务，如 `npm run dev`（监听 3000 端口）
-2. 切换到 App 的 Browser 标签（globe 图标）
-3. 输入端口号，点击 Go
+1. Start a service in the terminal, e.g. `npm run dev` (listening on port 3000)
+2. Switch to the Browser tab (globe icon) in the app
+3. Enter the port number and tap Go
 
-支持：
-- 静态资源、CSS、JS、图片等完整加载
-- HMR / WebSocket 热更新（Vite、Next.js 等）
-- PC / 手机视图切换
-- 全屏预览模式
+Supports:
+- Full loading of static assets, CSS, JS, images, etc.
+- HMR / WebSocket hot reload (Vite, Next.js, etc.)
+- PC / mobile view switching
+- Fullscreen preview mode
 
-> 需要 `linkshell-cli >= 0.2.53`，`@linkshell/gateway >= 0.2.17`
+> Requires `linkshell-cli >= 0.2.53`, `@linkshell/gateway >= 0.2.17`
 
-### 远程模式（独立 Gateway，跨网络）
+### Remote Mode (Standalone Gateway, Cross-Network)
 
-在服务器上：
+On the server:
 
 ```bash
 npm install -g linkshell-cli
 linkshell gateway --daemon --port 8787
 ```
 
-在你的电脑上：
+On your computer:
 
 ```bash
 linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider claude
 ```
 
-也可以用 Docker 部署 Gateway：
+You can also deploy the Gateway with Docker:
 
 ```bash
 git clone https://github.com/LiuTianjie/LinkShell
@@ -175,94 +181,94 @@ cd LinkShell
 docker compose up -d
 ```
 
-详细部署文档见 [docs/deploy.md](docs/deploy.md)。
+See [docs/deploy.md](docs/deploy.md) for detailed deployment instructions.
 
-### 管理后台进程
+### Manage Background Processes
 
 ```bash
-linkshell status    # 查看 Bridge 和 Gateway 运行状态
-linkshell stop      # 停止所有后台进程
+linkshell status    # Check Bridge and Gateway status
+linkshell stop      # Stop all background processes
 ```
 
-### 手机连接
+### Connect from Phone
 
-在 App 中：
-- 扫描 CLI 打印的 QR 码（推荐）
-- 或手动输入 Gateway 地址 + 6 位配对码
-- 或从会话列表直接选择
+In the app:
+- Scan the QR code printed by the CLI (recommended)
+- Or manually enter the Gateway address + 6-digit pairing code
+- Or select from the session list
 
-App 断开后重新连接不影响后台进程，扫码或输入配对码即可恢复。
+Reconnecting after disconnection does not affect background processes — just scan or enter the pairing code to resume.
 
-## 本地开发
+## Local Development
 
 ```bash
 pnpm install
-pnpm dev:gateway    # 单独启动网关 (localhost:8787)
-pnpm dev:web        # Web 调试端 (localhost:5173)
+pnpm dev:gateway    # Start gateway (localhost:8787)
+pnpm dev:web        # Web debug client (localhost:5173)
 pnpm dev:app        # Expo App
 
-# CLI 本地联调
+# CLI local development
 pnpm --filter linkshell-cli dev start --provider custom --command bash
 ```
 
-## 交接文档
+## Handoff Docs
 
-1. [docs/ai-handoff.md](docs/ai-handoff.md) — 仓库级接手说明
-2. [apps/mobile/README.md](apps/mobile/README.md) — 移动端信息架构
+1. [docs/ai-handoff.md](docs/ai-handoff.md) — Repository-level handoff guide
+2. [apps/mobile/README.md](apps/mobile/README.md) — Mobile information architecture
 
-## 项目结构
+## Project Structure
 
 ```
 ├── packages/
-│   ├── shared-protocol/       # 三端共享协议（Zod schema、16 种消息类型、版本协商）
-│   ├── cli/                   # CLI（PTY、内置 Gateway、daemon、doctor/setup）
-│   └── gateway/               # 云端网关（配对、会话、路由、控制权、限流）
+│   ├── shared-protocol/       # Shared protocol (Zod schema, 16 message types, version negotiation)
+│   ├── cli/                   # CLI (PTY, built-in Gateway, daemon, doctor/setup)
+│   └── gateway/               # Cloud gateway (pairing, sessions, routing, control, rate limiting)
 │       └── Dockerfile
 ├── apps/
-│   ├── mobile/                # Expo App（WebView + xterm.js、多服务器管理、会话列表）
-│   └── web-debug/             # Web 调试端（Vite + xterm.js + 调试面板）
+│   ├── mobile/                # Expo App (WebView + xterm.js, multi-server management, session list)
+│   └── web-debug/             # Web debug client (Vite + xterm.js + debug panel)
 ├── docs/
-│   ├── site/                  # 宣传 Landing Page
-│   ├── ai-handoff.md          # 接手说明
-│   ├── deploy.md              # Gateway 部署文档
-│   └── user-guide.md          # 终端用户文档
+│   ├── site/                  # Landing page
+│   ├── ai-handoff.md          # Handoff guide
+│   ├── deploy.md              # Gateway deployment docs
+│   └── user-guide.md          # End-user documentation
 ├── docker-compose.yml
 ├── .env.example
 └── PRD.md
 ```
 
-## 网关 API
+## Gateway API
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/healthz` | 健康检查 |
-| `POST` | `/pairings` | 创建配对（6 位 code，10 分钟有效） |
-| `POST` | `/pairings/claim` | 用 code 换取 sessionId |
-| `GET` | `/pairings/:code/status` | 查询配对状态 |
-| `GET` | `/sessions` | 列出活跃会话 |
-| `GET` | `/sessions/:id` | 会话详情 |
-| `WS` | `/ws?sessionId=&role=` | 实时连接 |
-| `GET/POST` | `/tunnel/:sessionId/:port/**` | HTTP 端口转发 |
-| `WS` | `/tunnel/:sessionId/:port/**` | WebSocket 端口转发（HMR） |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/healthz` | Health check |
+| `POST` | `/pairings` | Create pairing (6-digit code, valid for 10 minutes) |
+| `POST` | `/pairings/claim` | Exchange code for sessionId |
+| `GET` | `/pairings/:code/status` | Query pairing status |
+| `GET` | `/sessions` | List active sessions |
+| `GET` | `/sessions/:id` | Session details |
+| `WS` | `/ws?sessionId=&role=` | Real-time connection |
+| `GET/POST` | `/tunnel/:sessionId/:port/**` | HTTP port forwarding |
+| `WS` | `/tunnel/:sessionId/:port/**` | WebSocket port forwarding (HMR) |
 
-## 可靠性
+## Reliability
 
-- ACK 确认 + 双层缓冲（CLI 1000 条 + 网关 200 条）
-- 指数退避自动重连（CLI 和 App 双端）
-- 心跳检测（15s/20s）
-- 会话保持（host 断开保留 60s，空闲 30min 清理）
-- 单设备控制权管理
-- 协议版本协商
-- CORS + 限流 + 优雅关闭
-- Daemon 模式（CLI 和 Gateway 均支持后台运行）
+- ACK confirmation + dual-layer buffering (CLI 1000 messages + Gateway 200 messages)
+- Exponential backoff auto-reconnect (both CLI and App)
+- Heartbeat detection (15s/20s)
+- Session persistence (host disconnect retained for 60s, idle cleanup after 30min)
+- Single-device control management
+- Protocol version negotiation
+- CORS + rate limiting + graceful shutdown
+- Daemon mode (both CLI and Gateway support background running)
 
 ## Sponsors
 
-- [AI18N](https://ai18n.chat/) — Unified AI API Gateway，支持 Claude 模型的 OpenAI / Anthropic 兼容 API
+- [AI18N](https://ai18n.chat/) — Unified AI API Gateway with OpenAI / Anthropic compatible API for Claude models
 
 ## Buy Me a Coffee
 
-如果 LinkShell 对你有帮助，可以请作者喝杯咖啡：
+If LinkShell has been helpful to you, consider buying the author a coffee:
 
 <p>
   <img src="docs/assets/pay_wechat.jpg" alt="WeChat Pay" width="180" />
