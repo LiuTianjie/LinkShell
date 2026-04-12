@@ -270,7 +270,7 @@ export class ScreenShare {
 
     // RTP state
     let seqNum = 0;
-    let timestamp = 0;
+    let timestamp = -Math.floor(90000 / fps); // so first bump yields 0
     const clockRate = 90000;
     const frameDuration = Math.floor(clockRate / fps);
     const ssrc = (Math.random() * 0xffffffff) >>> 0;
@@ -350,7 +350,7 @@ export class ScreenShare {
       }
     };
 
-    const extractNalUnits = () => {
+    const extractNalUnits = (flush = false) => {
       // Find NAL unit boundaries (0x00000001 or 0x000001)
       const units: Buffer[] = [];
       let start = -1;
@@ -373,11 +373,22 @@ export class ScreenShare {
         }
       }
 
-      if (start >= 0 && units.length > 0) {
+      // On flush (ffmpeg exit), emit the trailing NAL unit too
+      if (flush && start >= 0) {
+        units.push(nalBuffer.subarray(start));
+        nalBuffer = Buffer.alloc(0);
+        return units;
+      }
+
+      if (start >= 0) {
         // Keep remaining data from last start code onward
         nalBuffer = nalBuffer.subarray(start);
-      } else if (start < 0) {
-        // No start code found yet, keep accumulating
+      }
+
+      // Safety cap: if buffer grows beyond 4MB without producing NALs, discard
+      if (nalBuffer.length > 4 * 1024 * 1024 && units.length === 0) {
+        process.stderr.write(`[screen-share] NAL buffer exceeded 4MB, resetting\n`);
+        nalBuffer = Buffer.alloc(0);
       }
 
       return units;
@@ -401,6 +412,11 @@ export class ScreenShare {
     });
 
     this.ffmpeg.on("exit", (code) => {
+      // Flush any remaining NAL unit in the buffer
+      const remaining = extractNalUnits(true);
+      for (const unit of remaining) {
+        sendNalUnit(unit);
+      }
       if (this.active) {
         process.stderr.write(`[screen-share] ffmpeg exited with code ${code}\n`);
         this.stop();

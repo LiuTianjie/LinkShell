@@ -139,6 +139,10 @@ export interface SessionManagerHandle {
     decision: "allow" | "deny",
   ) => void;
   deviceToken: string | null;
+  /** Request shell history from the host */
+  requestHistory: () => void;
+  /** Shell history entries from the host */
+  historyEntries: string[];
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -378,6 +382,8 @@ export function useSessionManager(): SessionManagerHandle {
 
   const deviceIdRef = useRef(generateId());
   const deviceTokenRef = useRef<string | null>(null);
+  const historyEntriesRef = useRef<string[]>([]);
+  const [historyEntries, setHistoryEntries] = useState<string[]>([]);
   const statusChangeCbRef = useRef<
     | ((
         sessionId: string,
@@ -889,6 +895,12 @@ export function useSessionManager(): SessionManagerHandle {
           tick();
           break;
         }
+        case "terminal.history.response": {
+          const p = envelope.payload as { entries: string[]; shell?: string };
+          historyEntriesRef.current = p.entries;
+          setHistoryEntries(p.entries);
+          break;
+        }
         case "terminal.status": {
           const tid = (envelope as any).terminalId ?? "default";
           const p = envelope.payload as {
@@ -1265,6 +1277,19 @@ export function useSessionManager(): SessionManagerHandle {
     [getActive, tick],
   );
 
+  const requestHistoryFn = useCallback(() => {
+    const s = getActive();
+    if (!s) return;
+    sendRaw(
+      s,
+      createEnvelope({
+        type: "terminal.history.request" as any,
+        sessionId: s.sessionId,
+        payload: { count: 200 },
+      }),
+    );
+  }, [getActive]);
+
   const killTerminalFn = useCallback(
     (terminalId: string) => {
       const s = getActive();
@@ -1400,5 +1425,7 @@ export function useSessionManager(): SessionManagerHandle {
       }
     },
     deviceToken: deviceTokenRef.current,
+    requestHistory: requestHistoryFn,
+    historyEntries,
   };
 }

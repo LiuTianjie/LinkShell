@@ -197,6 +197,15 @@ export function HomeScreen({
             borderRadius: 12,
             borderCurve: "continuous" as const,
             overflow: "hidden",
+            ...(theme.mode === "light"
+              ? {
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.06,
+                  shadowRadius: 4,
+                  elevation: 2,
+                }
+              : {}),
           }}
         >
           <Pressable
@@ -352,6 +361,15 @@ export function HomeScreen({
               paddingHorizontal: 20,
               alignItems: "center",
               gap: 8,
+              ...(theme.mode === "light"
+                ? {
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: 0.06,
+                    shadowRadius: 4,
+                    elevation: 2,
+                  }
+                : {}),
             }}
           >
             <AppSymbol
@@ -388,6 +406,15 @@ export function HomeScreen({
               borderRadius: 12,
               borderCurve: "continuous" as const,
               overflow: "hidden",
+              ...(theme.mode === "light"
+                ? {
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: 0.06,
+                    shadowRadius: 4,
+                    elevation: 2,
+                  }
+                : {}),
             }}
           >
             {history.map((item, index) => (

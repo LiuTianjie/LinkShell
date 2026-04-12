@@ -299,6 +299,17 @@ export const tunnelWsClosePayloadSchema = z.object({
   reason: z.string().optional(),
 });
 
+// ── Terminal history payloads ─────────────────────────────────────
+
+export const terminalHistoryRequestPayloadSchema = z.object({
+  count: z.number().int().min(1).max(500).default(100),
+});
+
+export const terminalHistoryResponsePayloadSchema = z.object({
+  entries: z.array(z.string()),
+  shell: z.string().optional(),
+});
+
 // ── Protocol message type registry ──────────────────────────────────
 
 export const protocolMessageSchemas = {
@@ -341,6 +352,8 @@ export const protocolMessageSchemas = {
   "tunnel.response": tunnelResponsePayloadSchema,
   "tunnel.ws.data": tunnelWsDataPayloadSchema,
   "tunnel.ws.close": tunnelWsClosePayloadSchema,
+  "terminal.history.request": terminalHistoryRequestPayloadSchema,
+  "terminal.history.response": terminalHistoryResponsePayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

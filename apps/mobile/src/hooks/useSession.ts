@@ -23,6 +23,7 @@ const HEARTBEAT_INTERVAL = 15_000;
 const RECONNECT_BASE_DELAY = 1_000;
 const RECONNECT_MAX_DELAY = 15_000;
 const RECONNECT_MAX_ATTEMPTS = 15;
+const HEALTH_PROBE_INTERVAL = 30_000;
 
 export interface UseSessionOptions {
   gatewayBaseUrl: string;
@@ -97,6 +98,8 @@ export interface SessionHandle {
   ) => void;
   reconnect: () => void;
   disconnect: () => void;
+  requestHistory: (count?: number) => void;
+  historyEntries: string[];
 }
 
 function generateId(): string {
@@ -137,6 +140,7 @@ export function useSession({
       sdpMLineIndex?: number | null;
     }[]
   >([]);
+  const [historyEntries, setHistoryEntries] = useState<string[]>([]);
 
   const socketRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -512,6 +516,11 @@ export function useSession({
             ]);
             break;
           }
+          case "terminal.history.response": {
+            const p = parseTypedPayload("terminal.history.response", envelope.payload);
+            setHistoryEntries(p.entries);
+            break;
+          }
           default:
             break;
         }
@@ -538,13 +547,41 @@ export function useSession({
     [wsUrl, startHeartbeat, stopHeartbeat, sendRaw, requestControl],
   );
 
+  const startHealthProbe = useCallback(
+    (sid: string) => {
+      if (healthProbeRef.current) clearTimeout(healthProbeRef.current);
+      const probe = async () => {
+        try {
+          const base = activeGatewayBaseUrlRef.current;
+          const res = await fetch(`${base}/healthz`, {
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (res.ok) {
+            // Gateway is back — reconnect automatically
+            reconnectAttempts.current = 0;
+            healthProbeRef.current = null;
+            connectSocket(sid, true, activeGatewayBaseUrlRef.current);
+            return;
+          }
+        } catch {
+          // Still unreachable
+        }
+        // Schedule next probe
+        healthProbeRef.current = setTimeout(probe, HEALTH_PROBE_INTERVAL);
+      };
+      healthProbeRef.current = setTimeout(probe, HEALTH_PROBE_INTERVAL);
+    },
+    [connectSocket],
+  );
+
   const scheduleReconnect = useCallback(
     (sid: string) => {
       if (reconnectAttempts.current >= RECONNECT_MAX_ATTEMPTS) {
         setConnectionDetail(
-          "Gateway is unreachable. Retry when the server is back.",
+          "Gateway is unreachable. Will auto-retry when the server is back.",
         );
         setStatus("disconnected");
+        startHealthProbe(sid);
         return;
       }
       setStatus("reconnecting");
@@ -557,7 +594,7 @@ export function useSession({
         connectSocket(sid, true, activeGatewayBaseUrlRef.current);
       }, delay);
     },
-    [connectSocket],
+    [connectSocket, startHealthProbe],
   );
 
   const claim = useCallback(
@@ -721,6 +758,19 @@ export function useSession({
     [sendRaw],
   );
 
+  const requestHistory = useCallback(
+    (count = 100) => {
+      sendRaw(
+        createEnvelope({
+          type: "terminal.history.request",
+          sessionId: sessionIdRef.current,
+          payload: { count },
+        }),
+      );
+    },
+    [sendRaw],
+  );
+
   const reconnect = useCallback(() => {
     const sid = sessionIdRef.current;
     if (!sid) {
@@ -732,12 +782,18 @@ export function useSession({
       reconnectRef.current = null;
     }
 
+    if (healthProbeRef.current) {
+      clearTimeout(healthProbeRef.current);
+      healthProbeRef.current = null;
+    }
+
     if (socketRef.current) {
       manualDisconnectRef.current = true;
       socketRef.current.close();
       socketRef.current = null;
     }
 
+    reconnectAttempts.current = 0;
     manualDisconnectRef.current = false;
     connectSocket(sid, true, activeGatewayBaseUrlRef.current);
   }, [connectSocket]);
@@ -797,5 +853,7 @@ export function useSession({
     sendScreenSignal,
     reconnect,
     disconnect,
+    requestHistory,
+    historyEntries,
   };
 }

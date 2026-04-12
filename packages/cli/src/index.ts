@@ -5,6 +5,9 @@ import { resolveProviderConfig } from "./providers.js";
 import { loadConfig } from "./config.js";
 import { runDoctor } from "./commands/doctor.js";
 import { runSetup } from "./commands/setup.js";
+import { runUpgrade } from "./commands/upgrade.js";
+import { runLogin } from "./commands/login.js";
+import { runLogout } from "./commands/logout.js";
 import { getLanIp } from "./utils/lan-ip.js";
 
 import { createRequire } from "node:module";
@@ -350,6 +353,27 @@ program
   .description("Interactive setup wizard")
   .action(async () => {
     await runSetup();
+  });
+
+program
+  .command("upgrade")
+  .description("Upgrade LinkShell to the latest version")
+  .action(async () => {
+    await runUpgrade();
+  });
+
+program
+  .command("login")
+  .description("Log in to LinkShell (enables premium gateway)")
+  .action(async () => {
+    await runLogin();
+  });
+
+program
+  .command("logout")
+  .description("Log out of LinkShell")
+  .action(() => {
+    runLogout();
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
