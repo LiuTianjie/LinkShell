@@ -33,6 +33,10 @@
 </p>
 
 <p align="center">
+  <a href="https://www.producthunt.com/products/linkshell?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-linkshell" target="_blank" rel="noopener noreferrer"><img alt="LinkShell - Control your AI terminal sessions from your phone. | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1120419&amp;theme=dark&amp;t=1775998159516" /></a>
+</p>
+
+<p align="center">
   <video src="https://github.com/user-attachments/assets/cc09d3a7-239c-4d5c-a2a7-76f64d4af070" width="280" autoplay loop muted playsinline></video>
   &nbsp;&nbsp;
   <video src="https://github.com/user-attachments/assets/d24a1699-fb8e-4a27-a51d-27a290f7ec73" width="280" autoplay loop muted playsinline></video>
