@@ -62,7 +62,17 @@
 ## 一条命令开始
 
 ```bash
+# npm
 npm install -g linkshell-cli
+
+# Homebrew (macOS)
+brew install LiuTianjie/linkshell/linkshell
+
+# 或 curl 安装
+curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
+```
+
+```bash
 linkshell start --daemon --provider claude
 ```
 
@@ -83,6 +93,9 @@ linkshell gateway stop                        # 停止 Gateway
 
 linkshell setup                               # 交互式配置
 linkshell doctor                              # 环境检查
+linkshell upgrade                             # 升级到最新版本
+linkshell login                               # 登录（启用高级网关）
+linkshell logout                              # 退出登录
 ```
 
 ## 架构
@@ -172,6 +185,11 @@ linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider clau
 也可以用 Docker 部署 Gateway：
 
 ```bash
+# 从 Docker Hub 拉取（推荐）
+docker pull linkshell/gateway:latest
+docker run -d -p 8787:8787 --name linkshell-gateway linkshell/gateway:latest
+
+# 或从源码构建
 git clone https://github.com/LiuTianjie/LinkShell
 cd LinkShell
 docker compose up -d
@@ -216,15 +234,17 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 
 ```
 ├── packages/
-│   ├── shared-protocol/       # 三端共享协议（Zod schema、16 种消息类型、版本协商）
-│   ├── cli/                   # CLI（PTY、内置 Gateway、daemon、doctor/setup）
-│   └── gateway/               # 云端网关（配对、会话、路由、控制权、限流）
+│   ├── shared-protocol/       # 三端共享协议（Zod schema、消息类型、版本协商）
+│   ├── cli/                   # CLI（PTY、内置 Gateway、daemon、doctor/setup/login/upgrade）
+│   └── gateway/               # 云端网关（配对、会话、路由、控制权、认证、限流）
 │       └── Dockerfile
 ├── apps/
 │   ├── mobile/                # Expo App（WebView + xterm.js、多服务器管理、会话列表）
+│   ├── web-dashboard/         # Web 管理面板（Vite + React + Tailwind、登录、订阅、设备管理）
 │   └── web-debug/             # Web 调试端（Vite + xterm.js + 调试面板）
 ├── docs/
-│   ├── site/                  # 宣传 Landing Page
+│   ├── site/                  # 宣传 Landing Page + 安装脚本
+│   ├── brew/                  # Homebrew formula
 │   ├── ai-handoff.md          # 接手说明
 │   ├── deploy.md              # Gateway 部署文档
 │   └── user-guide.md          # 终端用户文档

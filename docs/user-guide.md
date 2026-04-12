@@ -49,8 +49,23 @@ linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider clau
 ## 安装
 
 ```bash
+# npm（推荐）
 npm install -g linkshell-cli
+
+# Homebrew (macOS)
+brew install LiuTianjie/linkshell/linkshell
+
+# 一键安装
+curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 ```
+
+## 升级
+
+```bash
+linkshell upgrade
+```
+
+自动检测安装方式（npm 或 brew），拉取最新版本。
 
 ## 首次配置（可选）
 
@@ -144,6 +159,9 @@ linkshell stop
 | `linkshell gateway status` | 查看 Gateway 状态 |
 | `linkshell setup` | 交互式配置向导 |
 | `linkshell doctor` | 环境检查和连通性诊断 |
+| `linkshell upgrade` | 升级到最新版本 |
+| `linkshell login` | 登录账户（启用高级网关） |
+| `linkshell logout` | 退出登录 |
 
 ## 常见问题
 
@@ -181,6 +199,7 @@ npm install -g @anthropic-ai/claude-code
 LinkShell 会自动重连：
 - 短暂断网（几秒）：自动恢复，不丢失输出
 - 较长断网（几十秒）：重连后从上次确认点重放输出
+- 超过重连上限：自动进入慢速探测模式（每 30 秒检测一次），Gateway 恢复后自动重连，无需手动操作
 - 超过 60 秒：host 会话可能被清理，需要重新启动 CLI
 
 ### 多个设备可以同时连接吗

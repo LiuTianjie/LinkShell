@@ -62,7 +62,17 @@
 ## Get Started
 
 ```bash
+# npm
 npm install -g linkshell-cli
+
+# Homebrew (macOS)
+brew install LiuTianjie/linkshell/linkshell
+
+# or curl
+curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
+```
+
+```bash
 linkshell start --daemon --provider claude
 ```
 
@@ -83,6 +93,9 @@ linkshell gateway stop                        # Stop Gateway
 
 linkshell setup                               # Interactive configuration
 linkshell doctor                              # Environment check
+linkshell upgrade                             # Upgrade to latest version
+linkshell login                               # Log in (enables premium gateway)
+linkshell logout                              # Log out
 ```
 
 ## Architecture
@@ -172,6 +185,11 @@ linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider clau
 You can also deploy the Gateway with Docker:
 
 ```bash
+# From Docker Hub (recommended)
+docker pull linkshell/gateway:latest
+docker run -d -p 8787:8787 --name linkshell-gateway linkshell/gateway:latest
+
+# Or build from source
 git clone https://github.com/LiuTianjie/LinkShell
 cd LinkShell
 docker compose up -d
@@ -216,15 +234,17 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 
 ```
 ├── packages/
-│   ├── shared-protocol/       # Shared protocol (Zod schema, 16 message types, version negotiation)
-│   ├── cli/                   # CLI (PTY, built-in Gateway, daemon, doctor/setup)
-│   └── gateway/               # Cloud gateway (pairing, sessions, routing, control, rate limiting)
+│   ├── shared-protocol/       # Shared protocol (Zod schema, message types, version negotiation)
+│   ├── cli/                   # CLI (PTY, built-in Gateway, daemon, doctor/setup/login/upgrade)
+│   └── gateway/               # Cloud gateway (pairing, sessions, routing, control, auth, rate limiting)
 │       └── Dockerfile
 ├── apps/
 │   ├── mobile/                # Expo App (WebView + xterm.js, multi-server management, session list)
+│   ├── web-dashboard/         # Web dashboard (Vite + React + Tailwind, login, subscription, devices)
 │   └── web-debug/             # Web debug client (Vite + xterm.js + debug panel)
 ├── docs/
-│   ├── site/                  # Landing page
+│   ├── site/                  # Landing page + install script
+│   ├── brew/                  # Homebrew formula
 │   ├── ai-handoff.md          # Handoff guide
 │   ├── deploy.md              # Gateway deployment docs
 │   └── user-guide.md          # End-user documentation
