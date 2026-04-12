@@ -725,6 +725,8 @@ function AppInner() {
           onRemoveTerminal={manager.removeTerminal}
           gatewayUrl={activeSession.gatewayUrl}
           deviceToken={manager.deviceToken}
+          historyEntries={manager.historyEntries}
+          onRequestHistory={manager.requestHistory}
         />
         <FolderPickerModal
           visible={folderPickerVisible}

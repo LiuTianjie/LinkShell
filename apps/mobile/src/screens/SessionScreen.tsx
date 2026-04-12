@@ -34,6 +34,7 @@ import { useTheme } from "../theme";
 import type { Theme } from "../theme";
 
 import { useVoiceInput } from "../hooks/useVoiceInput";
+import { HistorySheet } from "../components/HistorySheet";
 
 const SHORTCUT_BAR_HEIGHT = 44;
 const VOICE_BAR_HEIGHT = 40;
@@ -111,6 +112,9 @@ interface SessionScreenProps {
   // Tunnel browser
   gatewayUrl?: string;
   deviceToken?: string | null;
+  // Shell history
+  historyEntries?: string[];
+  onRequestHistory?: () => void;
 }
 
 export function SessionScreen({
@@ -147,6 +151,8 @@ export function SessionScreen({
   onRemoveTerminal,
   gatewayUrl,
   deviceToken,
+  historyEntries,
+  onRequestHistory,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -472,6 +478,8 @@ export function SessionScreen({
               terminals={terminals}
               activeTerminalId={activeTerminalId}
               getTermRef={getTermRef}
+              historyEntries={historyEntries}
+              onRequestHistory={onRequestHistory}
             />
           </View>
 
@@ -1399,6 +1407,8 @@ const TerminalStage = memo(function TerminalStage({
   terminals,
   activeTerminalId,
   getTermRef,
+  historyEntries,
+  onRequestHistory,
 }: {
   bottomInset: number;
   headerPadding?: number;
@@ -1418,10 +1428,13 @@ const TerminalStage = memo(function TerminalStage({
   getTermRef?: (
     terminalId: string,
   ) => React.RefObject<TerminalViewHandle | null>;
+  historyEntries?: string[];
+  onRequestHistory?: () => void;
 }) {
   const showShortcutBar = !inputDisabled;
   const showVoiceBar = !inputDisabled;
   const [ctrlActive, setCtrlActive] = useState(false);
+  const [historyVisible, setHistoryVisible] = useState(false);
   const ctrlRef = useRef(false);
   ctrlRef.current = ctrlActive;
 
@@ -1583,6 +1596,24 @@ const TerminalStage = memo(function TerminalStage({
               </Pressable>
             ))}
           </ScrollView>
+          {/* History */}
+          <Pressable
+            style={({ pressed }) => ({
+              width: 34,
+              height: 26,
+              borderRadius: 8,
+              borderCurve: "continuous" as const,
+              backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
+              alignItems: "center",
+              justifyContent: "center",
+            })}
+            onPress={() => {
+              onRequestHistory?.();
+              setHistoryVisible(true);
+            }}
+          >
+            <AppSymbol name="clock.arrow.circlepath" size={17} color={theme.text} />
+          </Pressable>
           {/* Image picker */}
           <Pressable
             style={({ pressed }) => ({
@@ -1635,6 +1666,12 @@ const TerminalStage = memo(function TerminalStage({
           onSend={(text) => handleInput(text + "\r")}
         />
       ) : null}
+      <HistorySheet
+        visible={historyVisible}
+        entries={historyEntries ?? []}
+        onSelect={(cmd) => handleInput(cmd + "\r")}
+        onClose={() => setHistoryVisible(false)}
+      />
     </View>
   );
 });

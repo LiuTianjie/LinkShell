@@ -252,6 +252,15 @@ function GatewaySection({
             borderRadius: 12,
             borderCurve: "continuous" as const,
             overflow: "hidden",
+            ...(theme.mode === "light"
+              ? {
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.06,
+                  shadowRadius: 4,
+                  elevation: 2,
+                }
+              : {}),
           }}
         >
           {group.loading ? (
