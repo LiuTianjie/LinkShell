@@ -33,13 +33,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/2.png" alt="Home" width="180" />
-  &nbsp;
-  <img src="docs/assets/1.png" alt="Terminal" width="180" />
-  &nbsp;
-  <img src="docs/assets/3.png" alt="Gemini CLI" width="180" />
-  &nbsp;
-  <img src="docs/assets/4.png" alt="Multi Session" width="180" />
+  <video src="docs/assets/1.mp4" width="280" autoplay loop muted playsinline></video>
+  &nbsp;&nbsp;
+  <video src="docs/assets/2.mp4" width="280" autoplay loop muted playsinline></video>
 </p>
 
 ## 📲 Download
