@@ -22,7 +22,18 @@ linkshell gateway stop
 
 ## 方式 2：Docker 部署
 
-### 最小部署
+### 从 Docker Hub 拉取（推荐）
+
+```bash
+docker pull linkshell/gateway:latest
+docker run -d \
+  -p 8787:8787 \
+  --name linkshell-gateway \
+  --restart unless-stopped \
+  linkshell/gateway:latest
+```
+
+### 从源码构建
 
 ```bash
 git clone https://github.com/LiuTianjie/LinkShell
@@ -53,6 +64,12 @@ docker compose logs -f gateway
 ### 更新
 
 ```bash
+# Docker Hub 方式
+docker pull linkshell/gateway:latest
+docker stop linkshell-gateway && docker rm linkshell-gateway
+docker run -d -p 8787:8787 --name linkshell-gateway --restart unless-stopped linkshell/gateway:latest
+
+# 源码方式
 git pull
 docker compose up -d --build
 ```
