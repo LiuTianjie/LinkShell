@@ -33,13 +33,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/2.png" alt="Home" width="180" />
-  &nbsp;
-  <img src="docs/assets/1.png" alt="Terminal" width="180" />
-  &nbsp;
-  <img src="docs/assets/3.png" alt="Gemini CLI" width="180" />
-  &nbsp;
-  <img src="docs/assets/4.png" alt="Multi Session" width="180" />
+  <video src="https://github.com/user-attachments/assets/cc09d3a7-239c-4d5c-a2a7-76f64d4af070" width="280" autoplay loop muted playsinline></video>
+  &nbsp;&nbsp;
+  <video src="https://github.com/user-attachments/assets/d24a1699-fb8e-4a27-a51d-27a290f7ec73" width="280" autoplay loop muted playsinline></video>
 </p>
 
 ## 📲 下载 App

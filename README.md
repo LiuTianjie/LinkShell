@@ -33,9 +33,9 @@
 </p>
 
 <p align="center">
-  <video src="docs/assets/1.mp4" width="280" autoplay loop muted playsinline></video>
+  <video src="https://github.com/user-attachments/assets/cc09d3a7-239c-4d5c-a2a7-76f64d4af070" width="280" autoplay loop muted playsinline></video>
   &nbsp;&nbsp;
-  <video src="docs/assets/2.mp4" width="280" autoplay loop muted playsinline></video>
+  <video src="https://github.com/user-attachments/assets/d24a1699-fb8e-4a27-a51d-27a290f7ec73" width="280" autoplay loop muted playsinline></video>
 </p>
 
 ## 📲 Download
