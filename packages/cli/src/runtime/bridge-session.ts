@@ -401,6 +401,42 @@ export class BridgeSession {
         this.sendTerminalList();
         break;
       }
+      case "terminal.history.request": {
+        const p = parseTypedPayload("terminal.history.request", envelope.payload);
+        const count = p.count ?? 100;
+        let entries: string[] = [];
+        let shell = "unknown";
+        try {
+          const home = homedir();
+          // Try zsh first, then bash
+          const histFiles = [
+            { path: join(home, ".zsh_history"), shell: "zsh" },
+            { path: join(home, ".bash_history"), shell: "bash" },
+          ];
+          for (const hf of histFiles) {
+            if (existsSync(hf.path)) {
+              const raw = readFileSync(hf.path, "utf8");
+              const lines = raw.split("\n").filter(Boolean);
+              // zsh history lines may start with ": <timestamp>:0;" — strip prefix
+              const parsed = lines.map((l) => {
+                const m = l.match(/^:\s*\d+:\d+;(.*)$/);
+                return m ? m[1]! : l;
+              });
+              // Deduplicate and take last N
+              const unique = [...new Set(parsed.reverse())].slice(0, count).reverse();
+              entries = unique;
+              shell = hf.shell;
+              break;
+            }
+          }
+        } catch {}
+        this.send(createEnvelope({
+          type: "terminal.history.response",
+          sessionId: this.sessionId,
+          payload: { entries, shell },
+        }));
+        break;
+      }
       case "session.ack": {
         const p = parseTypedPayload("session.ack", envelope.payload);
         const term = this.terminals.get(tid);

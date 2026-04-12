@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,6 +7,13 @@ import { AppSymbol } from "../components/AppSymbol";
 import { useTheme } from "../theme";
 import { clearHistory, loadHistory } from "../storage/history";
 import { getDefaultServer, loadServers } from "../storage/servers";
+import {
+  loadSession,
+  signIn,
+  signUp,
+  signOut,
+  type AuthSession,
+} from "../lib/supabase";
 
 interface SettingsScreenProps {
   gatewayBaseUrl: string;
@@ -28,16 +35,24 @@ export function SettingsScreen({
   const [historyCount, setHistoryCount] = useState(0);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showSupport, setShowSupport] = useState(false);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const refreshCounts = useCallback(async () => {
-    const [servers, history, defaultSrv] = await Promise.all([
+    const [servers, history, defaultSrv, session] = await Promise.all([
       loadServers(),
       loadHistory(),
       getDefaultServer(),
+      loadSession(),
     ]);
     setServerCount(servers.length);
     setHistoryCount(history.length);
     setDefaultServerName(defaultSrv?.name ?? "未设置");
+    setAuthSession(session);
   }, []);
 
   useEffect(() => {
@@ -117,8 +132,95 @@ export function SettingsScreen({
           </Text>
         </View>
 
+        {/* Account Section */}
+        <Text style={[sectionLabel, { paddingTop: 24 }]}>账户</Text>
+        <View style={cardStyle}>
+          {authSession ? (
+            <>
+              <SettingsRow
+                icon="person.fill"
+                iconBg="#34c759"
+                label={authSession.user.email ?? "已登录"}
+                value={authSession.user.plan === "pro" ? "Pro" : "Free"}
+                theme={theme}
+              />
+              <View style={{ height: 0.5, backgroundColor: theme.separator, marginLeft: 58 }} />
+              <Pressable
+                onPress={() => {
+                  Alert.alert("退出登录", "确定要退出当前账户吗？", [
+                    { text: "取消", style: "cancel" },
+                    {
+                      text: "退出",
+                      style: "destructive",
+                      onPress: async () => {
+                        await signOut();
+                        setAuthSession(null);
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      },
+                    },
+                  ]);
+                }}
+                style={({ pressed }) => ({
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 11,
+                  paddingHorizontal: 16,
+                  gap: 12,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <View
+                  style={{
+                    width: 30, height: 30, borderRadius: 7, borderCurve: "continuous",
+                    backgroundColor: "#ff3b30", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  <AppSymbol name="rectangle.portrait.and.arrow.right" size={14} color="#ffffff" />
+                </View>
+                <Text style={{ flex: 1, fontSize: 17, color: theme.error }}>退出登录</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Pressable
+              onPress={() => {
+                setAuthError(null);
+                setAuthEmail("");
+                setAuthPassword("");
+                setShowAuth(true);
+              }}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                paddingVertical: 11,
+                paddingHorizontal: 16,
+                gap: 12,
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <View
+                style={{
+                  width: 30, height: 30, borderRadius: 7, borderCurve: "continuous",
+                  backgroundColor: "#007aff", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <AppSymbol name="person.fill" size={16} color="#ffffff" />
+              </View>
+              <Text style={{ flex: 1, fontSize: 17, color: theme.text }}>登录 / 注册</Text>
+              <AppSymbol name="chevron.right" size={13} color={theme.textTertiary} />
+            </Pressable>
+          )}
+        </View>
+        <Text
+          style={{
+            fontSize: 12, color: theme.textTertiary,
+            paddingHorizontal: 36, paddingTop: 6,
+          }}
+        >
+          登录后可使用高级网关服务，无需自建网关。
+        </Text>
+
         {/* Appearance Section */}
-        <Text style={[sectionLabel, { paddingTop: 24 }]}>外观</Text>
+        <Text style={[sectionLabel]}>外观</Text>
         <View style={cardStyle}>
           <View
             style={{
@@ -394,6 +496,106 @@ export function SettingsScreen({
         theme={theme}
         content={SUPPORT_TEXT}
       />
+
+      {/* Auth Modal */}
+      <Modal
+        visible={showAuth}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowAuth(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: 20 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingBottom: 16 }}>
+            <Text style={{ fontSize: 20, fontWeight: "700", color: theme.text }}>登录 / 注册</Text>
+            <Pressable onPress={() => setShowAuth(false)} hitSlop={8}>
+              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.accent }}>关闭</Text>
+            </Pressable>
+          </View>
+          <View style={{ paddingHorizontal: 20, gap: 12 }}>
+            <TextInput
+              placeholder="邮箱"
+              placeholderTextColor={theme.textTertiary}
+              value={authEmail}
+              onChangeText={setAuthEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              style={{
+                height: 44, borderRadius: 10, borderWidth: 1,
+                borderColor: theme.border, backgroundColor: theme.bgInput,
+                color: theme.text, paddingHorizontal: 14, fontSize: 16,
+              }}
+            />
+            <TextInput
+              placeholder="密码"
+              placeholderTextColor={theme.textTertiary}
+              value={authPassword}
+              onChangeText={setAuthPassword}
+              secureTextEntry
+              style={{
+                height: 44, borderRadius: 10, borderWidth: 1,
+                borderColor: theme.border, backgroundColor: theme.bgInput,
+                color: theme.text, paddingHorizontal: 14, fontSize: 16,
+              }}
+            />
+            {authError ? (
+              <Text style={{ color: theme.error, fontSize: 13, paddingHorizontal: 4 }}>{authError}</Text>
+            ) : null}
+            <Pressable
+              disabled={authLoading || !authEmail || !authPassword}
+              onPress={async () => {
+                setAuthLoading(true);
+                setAuthError(null);
+                const result = await signIn(authEmail, authPassword);
+                setAuthLoading(false);
+                if (result.error) {
+                  setAuthError(result.error);
+                } else if (result.session) {
+                  setAuthSession(result.session);
+                  setShowAuth(false);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                }
+              }}
+              style={({ pressed }) => ({
+                height: 44, borderRadius: 10, backgroundColor: theme.accent,
+                alignItems: "center", justifyContent: "center",
+                opacity: (authLoading || !authEmail || !authPassword) ? 0.5 : pressed ? 0.8 : 1,
+              })}
+            >
+              <Text style={{ color: theme.textInverse, fontSize: 16, fontWeight: "600" }}>
+                {authLoading ? "登录中..." : "登录"}
+              </Text>
+            </Pressable>
+            <Pressable
+              disabled={authLoading || !authEmail || !authPassword}
+              onPress={async () => {
+                setAuthLoading(true);
+                setAuthError(null);
+                const result = await signUp(authEmail, authPassword);
+                setAuthLoading(false);
+                if (result.error) {
+                  setAuthError(result.error);
+                } else if (result.session) {
+                  setAuthSession(result.session);
+                  setShowAuth(false);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                } else {
+                  setAuthError("注册成功，请查收验证邮件后登录。");
+                }
+              }}
+              style={({ pressed }) => ({
+                height: 44, borderRadius: 10, borderWidth: 1, borderColor: theme.accent,
+                alignItems: "center", justifyContent: "center",
+                opacity: (authLoading || !authEmail || !authPassword) ? 0.5 : pressed ? 0.8 : 1,
+              })}
+            >
+              <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "600" }}>
+                注册新账户
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

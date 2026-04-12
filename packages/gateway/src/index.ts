@@ -19,6 +19,7 @@ import {
   handleTunnelRequest,
   cleanupSessionTunnels,
 } from "./tunnel.js";
+import { AUTH_REQUIRED, requireAuth, checkWsAuth } from "./auth-middleware.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const logLevel = (process.env.LOG_LEVEL ?? "info") as
@@ -171,6 +172,12 @@ async function handleRequest(
   if (method === "GET" && url.pathname === "/healthz") {
     json(res, 200, { ok: true });
     return;
+  }
+
+  // Auth check for premium gateway (skip healthz)
+  if (AUTH_REQUIRED) {
+    const authResult = await requireAuth(req, res);
+    if (!authResult) return; // response already sent
   }
 
   // Create pairing
@@ -342,6 +349,21 @@ server.on("upgrade", (request, socket, head) => {
   if (!isRateLimitBypassed(ip) && !wsConnectLimiter.allow(ip)) {
     socket.write("HTTP/1.1 429 Too Many Requests\r\n\r\n");
     socket.destroy();
+    return;
+  }
+
+  // Auth check for premium gateway WebSocket connections
+  if (AUTH_REQUIRED) {
+    checkWsAuth(request).then((authResult) => {
+      if (!authResult || !authResult.authenticated) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request, url);
+      });
+    });
     return;
   }
 
