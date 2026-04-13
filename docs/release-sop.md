@@ -74,20 +74,14 @@ CI 会自动：
 
 ## 6. 更新 Homebrew Formula
 
-npm 发布后，更新 Homebrew tap：
+npm 发布后，运行脚本自动更新 tap：
 
 ```bash
-# 1. 下载新版 tarball 并计算 sha256
-curl -L -o linkshell-cli.tgz "https://registry.npmjs.org/linkshell-cli/-/linkshell-cli-X.Y.Z.tgz"
-shasum -a 256 linkshell-cli.tgz
+# 自动检测版本、下载 tarball、算 sha256、更新 tap 仓库并推送
+./scripts/update-brew.sh
 
-# 2. 更新 Formula
-# 编辑 docs/brew/Formula/linkshell.rb：
-#   - 更新 url 中的版本号
-#   - 更新 sha256 值
-
-# 3. 如果使用独立 tap 仓库，推送到 homebrew-linkshell 仓库
-# 如果 formula 在本仓库，直接提交即可
+# 或指定版本号
+./scripts/update-brew.sh X.Y.Z
 ```
 
 ### Homebrew Tap 首次配置
