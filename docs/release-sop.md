@@ -63,11 +63,11 @@ git push origin gateway-v0.2.23
 
 CI 会自动：
 - 构建 Docker 镜像
-- 推送到 Docker Hub: `linkshell/gateway:latest` + `linkshell/gateway:0.2.23`
+- 推送到 Docker Hub: `nickname4th/linkshell-gateway:latest` + `nickname4th/linkshell-gateway:0.2.23`
 
 ### Docker Hub 首次配置
 
-1. 在 [Docker Hub](https://hub.docker.com/) 创建 `linkshell/gateway` 仓库
+1. 在 [Docker Hub](https://hub.docker.com/) 创建 `nickname4th/linkshell-gateway` 仓库
 2. 在 GitHub repo Settings → Secrets 添加：
    - `DOCKERHUB_USERNAME`: Docker Hub 用户名
    - `DOCKERHUB_TOKEN`: Docker Hub Access Token（在 Docker Hub → Account Settings → Security 创建）
@@ -149,8 +149,8 @@ gh release upload vX.Y.Z ./apps/mobile/android/app/build/outputs/apk/release/app
 npm info linkshell-cli version
 
 # 验证 Docker
-docker pull linkshell/gateway:latest
-docker run --rm linkshell/gateway:latest node -e "console.log('ok')"
+docker pull nickname4th/linkshell-gateway:latest
+docker run --rm nickname4th/linkshell-gateway:latest node -e "console.log('ok')"
 
 # 验证 Homebrew（首次 tap 后）
 brew update

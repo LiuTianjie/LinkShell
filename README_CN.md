@@ -190,8 +190,8 @@ linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider clau
 
 ```bash
 # 从 Docker Hub 拉取（推荐）
-docker pull linkshell/gateway:latest
-docker run -d -p 8787:8787 --name linkshell-gateway linkshell/gateway:latest
+docker pull nickname4th/linkshell-gateway:latest
+docker run -d -p 8787:8787 --name linkshell-gateway nickname4th/linkshell-gateway:latest
 
 # 或从源码构建
 git clone https://github.com/LiuTianjie/LinkShell

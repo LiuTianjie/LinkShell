@@ -25,12 +25,12 @@ linkshell gateway stop
 ### 从 Docker Hub 拉取（推荐）
 
 ```bash
-docker pull linkshell/gateway:latest
+docker pull nickname4th/linkshell-gateway:latest
 docker run -d \
   -p 8787:8787 \
   --name linkshell-gateway \
   --restart unless-stopped \
-  linkshell/gateway:latest
+  nickname4th/linkshell-gateway:latest
 ```
 
 ### 从源码构建
@@ -65,9 +65,9 @@ docker compose logs -f gateway
 
 ```bash
 # Docker Hub 方式
-docker pull linkshell/gateway:latest
+docker pull nickname4th/linkshell-gateway:latest
 docker stop linkshell-gateway && docker rm linkshell-gateway
-docker run -d -p 8787:8787 --name linkshell-gateway --restart unless-stopped linkshell/gateway:latest
+docker run -d -p 8787:8787 --name linkshell-gateway --restart unless-stopped nickname4th/linkshell-gateway:latest
 
 # 源码方式
 git pull

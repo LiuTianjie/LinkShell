@@ -190,8 +190,8 @@ You can also deploy the Gateway with Docker:
 
 ```bash
 # From Docker Hub (recommended)
-docker pull linkshell/gateway:latest
-docker run -d -p 8787:8787 --name linkshell-gateway linkshell/gateway:latest
+docker pull nickname4th/linkshell-gateway:latest
+docker run -d -p 8787:8787 --name linkshell-gateway nickname4th/linkshell-gateway:latest
 
 # Or build from source
 git clone https://github.com/LiuTianjie/LinkShell

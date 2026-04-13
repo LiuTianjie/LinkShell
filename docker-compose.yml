@@ -1,6 +1,6 @@
 services:
   gateway:
-    image: linkshell-gateway
+    image: nickname4th/linkshell-gateway:latest
     container_name: linkshell-gateway
     build:
       context: .
