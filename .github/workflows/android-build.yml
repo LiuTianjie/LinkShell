@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,6 +34,10 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build workspace packages
+        run: pnpm -r --filter '!@linkshell/app' build
         working-directory: .
 
       # Parse version from tag: v1.2.3 -> version=1.2.3, versionCode=10203
