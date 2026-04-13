@@ -1,0 +1,77 @@
+name: Build Android
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      # Parse version from tag: v1.2.3 -> version=1.2.3, versionCode=10203
+      - name: Set version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$TAG"
+          CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "Version: $TAG  VersionCode: $CODE"
+
+      - name: Update app.json version
+        run: |
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json','utf8'));
+            app.expo.version = '${{ steps.version.outputs.name }}';
+            app.expo.android.versionCode = ${{ steps.version.outputs.code }};
+            fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
+          "
+
+      - name: Build terminal HTML
+        run: node scripts/build-terminal-html.mjs
+
+      - name: Expo prebuild
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build AAB
+        run: ./gradlew bundleRelease
+        working-directory: apps/mobile/android
+
+      - name: Build APK
+        run: ./gradlew assembleRelease
+        working-directory: apps/mobile/android
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: LinkShell ${{ steps.version.outputs.name }}
+          files: |
+            apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+            apps/mobile/android/app/build/outputs/apk/release/app-release.apk
