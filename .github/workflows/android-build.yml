@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS]
     defaults:
       run:
         working-directory: apps/mobile
@@ -24,14 +24,6 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: 17
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
 
       - run: pnpm install --frozen-lockfile
         working-directory: .

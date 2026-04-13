@@ -1,0 +1,103 @@
+name: Build iOS & Upload TestFlight
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS]
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build workspace packages
+        run: pnpm -r --filter '!@linkshell/app' build
+        working-directory: .
+
+      # Parse version from tag: v1.2.3 -> version=1.2.3, buildNumber=10203
+      - name: Set version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$TAG"
+          CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "Version: $TAG  BuildNumber: $CODE"
+
+      - name: Update app.json version
+        run: |
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json','utf8'));
+            app.expo.version = '${{ steps.version.outputs.name }}';
+            app.expo.ios.buildNumber = String(${{ steps.version.outputs.code }});
+            fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
+          "
+
+      - name: Build terminal HTML
+        run: node scripts/build-terminal-html.mjs
+
+      - name: Expo prebuild
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Pod install
+        run: pod install --repo-update
+        working-directory: apps/mobile/ios
+
+      - name: Archive
+        run: |
+          xcodebuild archive \
+            -workspace ios/LinkShell.xcworkspace \
+            -scheme LinkShell \
+            -configuration Release \
+            -archivePath build/LinkShell.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_STYLE=Automatic \
+            -allowProvisioningUpdates \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+      - name: Export & Upload to TestFlight
+        run: |
+          cat > build/ExportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store-connect</string>
+              <key>destination</key>
+              <string>upload</string>
+              <key>teamID</key>
+              <string>L95PYLFT86</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>uploadSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath build/LinkShell.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates
