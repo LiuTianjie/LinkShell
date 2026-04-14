@@ -110,6 +110,20 @@ export class SessionManager {
     this.maybeDelete(sessionId);
   }
 
+  /** Force-delete a session: disconnect host + all clients, remove from map. */
+  forceDelete(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    if (session.host) {
+      try { session.host.socket.close(1000, "session deleted"); } catch {}
+    }
+    for (const [, client] of session.clients) {
+      try { client.socket.close(1000, "session deleted"); } catch {}
+    }
+    this.sessions.delete(sessionId);
+    return true;
+  }
+
   bufferOutput(sessionId: string, envelope: Envelope): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;

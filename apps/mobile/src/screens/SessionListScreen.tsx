@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   LayoutAnimation,
   Platform,
@@ -12,6 +13,7 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import { Swipeable } from "react-native-gesture-handler";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
@@ -22,6 +24,7 @@ import {
   loadSession,
   fetchOfficialGateways,
   fetchMySessions,
+  getValidSession,
 } from "../lib/supabase";
 
 if (
@@ -163,13 +166,16 @@ function GatewaySection({
   group,
   theme,
   onSelect,
+  onDelete,
   index,
 }: {
   group: GatewayGroup;
   theme: Theme;
   onSelect: (sessionId: string, serverUrl: string) => void;
+  onDelete: (sessionId: string, serverUrl: string, hasHost: boolean) => void;
   index: number;
 }) {
+  const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
   return (
     <FadeIn delay={index * 80}>
       <View style={{ marginTop: index > 0 ? 24 : 16 }}>
@@ -352,6 +358,46 @@ function GatewaySection({
                     }}
                   />
                 ) : null}
+                <Swipeable
+                  ref={(ref) => {
+                    if (ref) swipeableRefs.current.set(session.id, ref);
+                    else swipeableRefs.current.delete(session.id);
+                  }}
+                  renderRightActions={(_progress, dragX) => {
+                    const scale = dragX.interpolate({
+                      inputRange: [-80, 0],
+                      outputRange: [1, 0.5],
+                      extrapolate: "clamp",
+                    });
+                    return (
+                      <Pressable
+                        style={{
+                          backgroundColor: "#ff3b30",
+                          justifyContent: "center",
+                          alignItems: "center",
+                          width: 80,
+                        }}
+                        onPress={() => {
+                          swipeableRefs.current.get(session.id)?.close();
+                          onDelete(session.id, group.server.url, session.hasHost);
+                        }}
+                      >
+                        <Animated.View style={{ transform: [{ scale }] }}>
+                          <AppSymbol name="trash.fill" size={20} color="#ffffff" />
+                          <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "500", marginTop: 2 }}>
+                            删除
+                          </Text>
+                        </Animated.View>
+                      </Pressable>
+                    );
+                  }}
+                  overshootRight={false}
+                  onSwipeableWillOpen={() => {
+                    swipeableRefs.current.forEach((s, id) => {
+                      if (id !== session.id) s.close();
+                    });
+                  }}
+                >
                 <Pressable
                   style={({ pressed }) => ({
                     flexDirection: "row",
@@ -413,15 +459,21 @@ function GatewaySection({
                       numberOfLines={1}
                       style={{ color: theme.textTertiary, fontSize: 13 }}
                     >
+                      {session.provider ?? "unknown"}
                       {session.hostname && session.projectName
-                        ? `${session.hostname} · `
+                        ? ` · ${session.hostname}`
                         : ""}
+                      {" · "}
                       {session.hasHost ? "主机在线" : "主机离线"}
                       {session.clientCount > 0
                         ? ` · ${session.clientCount} 个客户端`
                         : ""}
                       {" · "}
                       {timeAgo(session.lastActivity)}
+                      {" · "}
+                      <Text style={{ fontVariant: ["tabular-nums"] }}>
+                        {session.id.slice(0, 8)}
+                      </Text>
                     </Text>
                   </View>
                   <AppSymbol
@@ -430,6 +482,7 @@ function GatewaySection({
                     color={theme.textTertiary}
                   />
                 </Pressable>
+                </Swipeable>
               </React.Fragment>
             ))
           )}
@@ -556,6 +609,40 @@ export function SessionListScreen({
     setRefreshing(false);
   }, [fetchAllGateways]);
 
+  const handleDeleteSession = useCallback(
+    (sessionId: string, serverUrl: string, hasHost: boolean) => {
+      const doDelete = async () => {
+        try {
+          const session = await getValidSession();
+          if (session?.accessToken) {
+            await fetchWithTimeout(`${serverUrl}/sessions/${sessionId}`, {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${session.accessToken}` },
+            }, 5_000);
+          }
+        } catch {}
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setGroups((prev) =>
+          prev.map((g) => ({
+            ...g,
+            sessions: g.sessions.filter((s) => s.id !== sessionId),
+          })),
+        );
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      };
+
+      if (hasHost) {
+        Alert.alert("删除会话", "该会话主机仍在线，确定要强制删除吗？", [
+          { text: "取消", style: "cancel" },
+          { text: "删除", style: "destructive", onPress: doDelete },
+        ]);
+      } else {
+        doDelete();
+      }
+    },
+    [],
+  );
+
   const totalSessions = groups.reduce((sum, g) => sum + g.sessions.length, 0);
 
   return (
@@ -612,6 +699,7 @@ export function SessionListScreen({
             group={group}
             theme={theme}
             onSelect={onSelectSession}
+            onDelete={handleDeleteSession}
             index={index}
           />
         ))}
