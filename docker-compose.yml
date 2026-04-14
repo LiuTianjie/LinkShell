@@ -11,6 +11,10 @@ services:
       - NODE_ENV=production
       - PORT=8787
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - AUTH_REQUIRED=${AUTH_REQUIRED:-false}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8787/healthz"]

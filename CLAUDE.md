@@ -47,10 +47,12 @@ Key steps:
 
 ## Auth & Backend
 
-- Supabase project: `mkbeusztkzffnzjdwmqk`
-- Tables: `linkshell_profiles`, `linkshell_device_tokens`, `linkshell_subscriptions`
-- Gateway auth: `AUTH_REQUIRED=true` env var enables JWT validation via `auth-middleware.ts`
-- CLI auth: `~/.linkshell/auth.json`, commands `linkshell login` / `linkshell logout`
+- Supabase project: `mkbeusztkzffnzjdwmqk` (shared with iTool)
+- Tables: `linkshell_device_tokens`, `linkshell_official_gateways` (+ iTool's `profiles` for subscription)
+- Gateway auth: `AUTH_REQUIRED=true` env var enables JWT validation + subscription check via `auth-middleware.ts`
+- Gateway env vars for official deployment: `AUTH_REQUIRED`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+- CLI auth: `~/.linkshell/auth.json`, commands `linkshell login` (iTool OAuth) / `linkshell logout` / `linkshell list`
+- Subscription check: queries iTool's `profiles.plan` + `profiles.plan_expires_at`
 
 ## Conventions
 

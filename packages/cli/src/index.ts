@@ -161,6 +161,13 @@ program
     // Save PID for status/stop
     daemon.savePid("bridge", process.pid);
 
+    // Load auth token if logged in
+    let authToken: string | undefined;
+    try {
+      const { getValidToken } = await import("./auth.js");
+      authToken = (await getValidToken()) ?? undefined;
+    } catch {}
+
     const session = new BridgeSession({
       gatewayUrl,
       gatewayHttpUrl,
@@ -173,6 +180,7 @@ program
       verbose: Boolean(options.verbose),
       screen: Boolean(options.screen),
       providerConfig,
+      authToken,
     });
 
     const cleanup = async () => {
@@ -374,6 +382,93 @@ program
   .description("Log out of LinkShell")
   .action(() => {
     runLogout();
+  });
+
+program
+  .command("list")
+  .description("List your sessions on official gateways")
+  .action(async () => {
+    const { getValidToken, loadAuth, SUPABASE_URL, SUPABASE_ANON_KEY } =
+      await import("./auth.js");
+    const token = await getValidToken();
+    if (!token) {
+      process.stderr.write(
+        "\n  Not logged in. Run: linkshell login\n\n",
+      );
+      return;
+    }
+
+    const auth = loadAuth();
+    process.stderr.write(`\n  Logged in as ${auth?.email || auth?.userId || "unknown"}\n\n`);
+
+    // Fetch official gateways
+    let gateways: { url: string; name: string; region: string | null }[] = [];
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/linkshell_official_gateways?enabled=eq.true&select=url,name,region`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            apikey: SUPABASE_ANON_KEY,
+          },
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (res.ok) {
+        gateways = (await res.json()) as typeof gateways;
+      }
+    } catch {}
+
+    if (gateways.length === 0) {
+      process.stderr.write("  No official gateways available.\n\n");
+      return;
+    }
+
+    process.stderr.write("  Official Gateways:\n\n");
+
+    for (const gw of gateways) {
+      const label = gw.region ? `${gw.name} (${gw.region})` : gw.name;
+      // Fetch user's sessions on this gateway
+      let sessions: {
+        id: string;
+        provider: string | null;
+        projectName: string | null;
+        hasHost: boolean;
+        lastActivity: number;
+      }[] = [];
+      try {
+        const res = await fetch(`${gw.url}/sessions/mine`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (res.ok) {
+          const body = (await res.json()) as { sessions: typeof sessions };
+          sessions = body.sessions;
+        }
+      } catch {}
+
+      process.stderr.write(`  \x1b[32m✓\x1b[0m ${label}\n`);
+      process.stderr.write(`    ${gw.url}\n`);
+
+      if (sessions.length === 0) {
+        process.stderr.write("    (no active sessions)\n\n");
+      } else {
+        for (const s of sessions) {
+          const ago = Math.round((Date.now() - s.lastActivity) / 60_000);
+          const agoStr = ago < 1 ? "just now" : `${ago}m ago`;
+          const info = [s.provider, s.projectName].filter(Boolean).join(" · ");
+          const hostIcon = s.hasHost ? "\x1b[32m●\x1b[0m" : "\x1b[31m●\x1b[0m";
+          process.stderr.write(
+            `    └ ${hostIcon} ${s.id.slice(0, 8)} — ${info || "unknown"} · ${agoStr}\n`,
+          );
+        }
+        process.stderr.write("\n");
+      }
+    }
+
+    process.stderr.write(
+      "  Connect: linkshell start --gateway <url> --provider claude\n\n",
+    );
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {

@@ -19,7 +19,7 @@ import {
   handleTunnelRequest,
   cleanupSessionTunnels,
 } from "./tunnel.js";
-import { AUTH_REQUIRED, requireAuth, checkWsAuth } from "./auth-middleware.js";
+import { AUTH_REQUIRED, requireAuth, checkWsAuth, validateRequest, checkSubscriptionByUserId } from "./auth-middleware.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const logLevel = (process.env.LOG_LEVEL ?? "info") as
@@ -174,7 +174,23 @@ async function handleRequest(
     return;
   }
 
-  // Auth check for premium gateway (skip healthz)
+  // Sessions owned by authenticated user (before AUTH_REQUIRED guard — uses its own auth)
+  if (method === "GET" && url.pathname === "/sessions/mine") {
+    const authResult = await validateRequest(req);
+    if (!authResult || !authResult.userId) {
+      json(res, 401, { error: "auth_required", message: "Authentication required" });
+      return;
+    }
+    const sessions = sessionManager
+      .listActive()
+      .filter((s) => s.userId === authResult.userId)
+      .map((s) => sessionManager.getSummary(s.id))
+      .filter(Boolean);
+    json(res, 200, { sessions });
+    return;
+  }
+
+  // Auth check for premium gateway (skip healthz and /sessions/mine)
   if (AUTH_REQUIRED) {
     const authResult = await requireAuth(req, res);
     if (!authResult) return; // response already sent
@@ -360,6 +376,12 @@ server.on("upgrade", (request, socket, head) => {
         socket.destroy();
         return;
       }
+      if (!authResult.subscribed) {
+        socket.write("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nPro subscription required. Subscribe at https://itool.tech\r\n");
+        socket.destroy();
+        return;
+      }
+      (request as any).__authResult = authResult;
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit("connection", ws, request, url);
       });
@@ -408,6 +430,15 @@ wss.on(
         existingSession.clients.size > 0 &&
         existingSession.state === "host_disconnected";
       sessionManager.setHost(sessionId, device);
+
+      // Associate userId from auth (for AUTH_REQUIRED gateways)
+      const authResult = (_request as any).__authResult as
+        | { userId?: string }
+        | undefined;
+      if (authResult?.userId) {
+        const session = sessionManager.get(sessionId);
+        if (session) session.userId = authResult.userId;
+      }
       if (isReconnect) {
         const notification = serializeEnvelope(
           createEnvelope({
@@ -530,6 +561,57 @@ function shutdown() {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+// ── Subscription expiry checker (AUTH_REQUIRED gateways only) ──────
+
+const SUB_CHECK_INTERVAL = 5 * 60_000; // 5 minutes
+
+if (AUTH_REQUIRED) {
+  setInterval(async () => {
+    for (const session of sessionManager.listActive()) {
+      if (!session.userId || !session.host) continue;
+      const stillSubscribed = await checkSubscriptionByUserId(session.userId);
+      if (!stillSubscribed) {
+        log("info", `subscription expired for user ${session.userId}, disconnecting session ${session.id}`);
+        // Notify host
+        try {
+          session.host.socket.send(
+            serializeEnvelope(
+              createEnvelope({
+                type: "session.error",
+                sessionId: session.id,
+                payload: {
+                  code: "subscription_expired",
+                  message: "Your Pro subscription has expired. Renew at https://itool.tech",
+                },
+              }),
+            ),
+          );
+        } catch {}
+        // Close host connection
+        session.host.socket.close(4003, "subscription_expired");
+        // Notify clients
+        for (const [, client] of session.clients) {
+          try {
+            client.socket.send(
+              serializeEnvelope(
+                createEnvelope({
+                  type: "session.error",
+                  sessionId: session.id,
+                  payload: {
+                    code: "subscription_expired",
+                    message: "Host subscription expired. Session ended.",
+                  },
+                }),
+              ),
+            );
+            client.socket.close(4003, "subscription_expired");
+          } catch {}
+        }
+      }
+    }
+  }, SUB_CHECK_INTERVAL);
+}
 
 // ── Start ───────────────────────────────────────────────────────────
 

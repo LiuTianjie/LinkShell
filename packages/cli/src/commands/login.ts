@@ -3,13 +3,16 @@ import { execSync } from "node:child_process";
 import { saveAuth, SUPABASE_URL, SUPABASE_ANON_KEY } from "../auth.js";
 import type { AuthTokens } from "../auth.js";
 
+const ITOOL_AUTH_URL = "https://itool.tech/en/auth/linkshell";
+
 /**
- * CLI login via browser-based OAuth flow.
+ * CLI login via iTool OAuth flow.
  *
  * 1. Start a temporary local HTTP server to receive the callback
- * 2. Open the Supabase Auth URL in the browser
- * 3. User logs in, Supabase redirects back to localhost with tokens
- * 4. Save tokens to ~/.linkshell/auth.json
+ * 2. Open browser to iTool's LinkShell auth page
+ * 3. User logs in/registers on iTool
+ * 4. iTool redirects back to localhost with Supabase tokens
+ * 5. Save tokens to ~/.linkshell/auth.json
  */
 export async function runLogin(): Promise<void> {
   process.stderr.write("\n  LinkShell Login\n\n");
@@ -33,7 +36,15 @@ export async function runLogin(): Promise<void> {
       .then(() => { document.body.innerHTML = '<h2>Login successful! You can close this tab.</h2>'; })
       .catch(() => { document.body.innerHTML = '<h2>Login failed. Please try again.</h2>'; });
   } else {
-    document.body.innerHTML = '<h2>No auth data received. Please try again.</h2>';
+    // Try query params (iTool may pass tokens as query params)
+    const params = window.location.search.substring(1);
+    if (params) {
+      fetch('/token?' + params, { method: 'POST' })
+        .then(() => { document.body.innerHTML = '<h2>Login successful! You can close this tab.</h2>'; })
+        .catch(() => { document.body.innerHTML = '<h2>Login failed. Please try again.</h2>'; });
+    } else {
+      document.body.innerHTML = '<h2>No auth data received. Please try again.</h2>';
+    }
   }
 </script>
 </body>
@@ -52,9 +63,10 @@ export async function runLogin(): Promise<void> {
           return;
         }
 
-        // Fetch user info
+        // Fetch user info + plan
         let userId = "";
         let email = "";
+        let plan = "free";
         try {
           const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
             headers: {
@@ -70,6 +82,32 @@ export async function runLogin(): Promise<void> {
             };
             userId = user.id;
             email = user.email ?? "";
+
+            // Check subscription from profiles table
+            const profileRes = await fetch(
+              `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=plan,plan_expires_at&limit=1`,
+              {
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                  apikey: SUPABASE_ANON_KEY,
+                },
+                signal: AbortSignal.timeout(5_000),
+              },
+            );
+            if (profileRes.ok) {
+              const profiles = (await profileRes.json()) as {
+                plan: string;
+                plan_expires_at: string | null;
+              }[];
+              if (
+                profiles.length > 0 &&
+                profiles[0]!.plan === "pro" &&
+                profiles[0]!.plan_expires_at &&
+                new Date(profiles[0]!.plan_expires_at) > new Date()
+              ) {
+                plan = "pro";
+              }
+            }
           }
         } catch {}
 
@@ -85,9 +123,11 @@ export async function runLogin(): Promise<void> {
         res.writeHead(200);
         res.end("ok");
 
-        process.stderr.write(`  \x1b[32m✓\x1b[0m Logged in as ${email || userId}\n\n`);
+        const planLabel = plan === "pro" ? "\x1b[32mPro\x1b[0m" : "Free";
+        process.stderr.write(
+          `  \x1b[32m✓\x1b[0m Logged in as ${email || userId} (${planLabel})\n\n`,
+        );
 
-        // Close server after a short delay
         setTimeout(() => {
           server.close();
           resolve();
@@ -99,26 +139,24 @@ export async function runLogin(): Promise<void> {
       res.end("Not found");
     });
 
-    // Listen on a random available port
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
       if (!addr || typeof addr === "string") {
-        process.stderr.write("  \x1b[31m✗\x1b[0m Failed to start local server\n\n");
+        process.stderr.write(
+          "  \x1b[31m✗\x1b[0m Failed to start local server\n\n",
+        );
         resolve();
         return;
       }
 
       const port = addr.port;
-      const redirectUrl = `http://localhost:${port}/callback`;
-      const authUrl =
-        `${SUPABASE_URL}/auth/v1/authorize?provider=github` +
-        `&redirect_to=${encodeURIComponent(redirectUrl)}`;
+      const callbackUrl = `http://localhost:${port}/callback`;
+      const authUrl = `${ITOOL_AUTH_URL}?callback=${encodeURIComponent(callbackUrl)}`;
 
-      process.stderr.write(`  Opening browser for login...\n`);
-      process.stderr.write(`  If the browser doesn't open, visit:\n`);
+      process.stderr.write("  Opening browser for login...\n");
+      process.stderr.write("  If the browser doesn't open, visit:\n");
       process.stderr.write(`  ${authUrl}\n\n`);
 
-      // Open browser
       try {
         const cmd =
           process.platform === "darwin"
@@ -127,9 +165,7 @@ export async function runLogin(): Promise<void> {
               ? "start"
               : "xdg-open";
         execSync(`${cmd} "${authUrl}"`, { stdio: "ignore" });
-      } catch {
-        // User will need to open manually
-      }
+      } catch {}
 
       // Timeout after 5 minutes
       setTimeout(() => {
