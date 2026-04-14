@@ -738,13 +738,13 @@
       <div style="margin-bottom:48px">
         <h3 data-i18n="step1Title">[1] 安装 CLI</h3>
         <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step1Desc">一条命令全局安装。内置网关开箱即用，无需额外部署服务器。</p>
-        <div class="term"><span class="tm"># 全局安装 CLI</span>
+        <div class="term"><span class="tm" data-i18n="tmInstallCli"># 全局安装 CLI</span>
 <span class="tp">$</span> <span class="tc">npm i -g linkshell-cli</span>
 
-<span class="tm"># 初始化配置</span>
+<span class="tm" data-i18n="tmInitConfig"># 初始化配置</span>
 <span class="tp">$</span> <span class="tc">linkshell setup</span>
 
-<span class="tm"># 检查环境</span>
+<span class="tm" data-i18n="tmCheckEnv"># 检查环境</span>
 <span class="tp">$</span> <span class="tc">linkshell doctor</span>
 <span class="ts">✓ All checks passed</span>
         </div>
@@ -778,11 +778,11 @@
           </div>
           <div class="tab-pane" id="tab-qs-public">
             <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsPubDesc">先在公网服务器部署网关，本地 CLI 连接远程网关。</p>
-            <div class="term"><span class="tm"># 服务器端：启动网关</span>
+            <div class="term"><span class="tm" data-i18n="tmServerGateway"># 服务器端：启动网关</span>
 <span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
 <span class="to">Gateway listening on 0.0.0.0:8787</span>
 
-<span class="tm"># 本地：连接远程网关</span>
+<span class="tm" data-i18n="tmLocalConnect"># 本地：连接远程网关</span>
 <span class="tp">$</span> <span class="tc">linkshell start --gateway wss://gw.example.com</span>
 
 <span class="to">Connected to remote gateway</span>
@@ -799,7 +799,7 @@
           </div>
           <div class="tab-pane" id="tab-qs-official">
             <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsOfficialDesc">Pro 订阅用户直接使用官方托管 Gateway，一条命令登录即可连接。</p>
-            <div class="term"><span class="tm"># 登录 iTool 账号</span>
+            <div class="term"><span class="tm" data-i18n="tmLoginAccount"># 登录 iTool 账号</span>
 <span class="tp">$</span> <span class="tc">linkshell login</span>
 <span class="to">Opening browser for login...</span>
 <span class="ts">✓ Logged in as user@example.com (Pro)</span>
@@ -865,11 +865,11 @@
             data-i18n="f5Title">端口转发预览</span></p>
         <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="f5Desc">远程启动 dev server，手机直接预览页面。支持
           CSS/JS/图片完整加载、HMR 热更新、PC/手机视图切换和全屏模式。</p>
-        <div class="term" style="padding:8px 16px"><span class="tm"># 远程终端启动 dev server</span>
+        <div class="term" style="padding:8px 16px"><span class="tm" data-i18n="tmStartDevServer"># 远程终端启动 dev server</span>
 <span class="tp">$</span> <span class="tc">npm run dev</span>
 <span class="to"> ➜ Local: http://localhost:3000</span>
 
-<span class="tm"># App 切换到 Browser 标签，输入端口 3000，即可预览</span>
+<span class="tm" data-i18n="tmAppBrowserTab"># App 切换到 Browser 标签，输入端口 3000，即可预览</span>
         </div>
       </div>
     </div>
@@ -974,10 +974,10 @@
           <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdStart">启动桥接会话。自动启动内置网关，桥接 AI
             代理进程并生成配对二维码。</p>
           <div class="term"><span class="tm">FLAGS</span>
---daemon <span class="to">后台守护模式运行</span>
---provider <span class="to">指定 AI 提供者 (claude / codex / custom)</span>
---screen <span class="to">启用远程桌面共享</span>
---port <span class="to">指定网关端口 (默认 8787)</span></div>
+--daemon <span class="to" data-i18n="flagDaemon">后台守护模式运行</span>
+--provider <span class="to" data-i18n="flagProvider">指定 AI 提供者 (claude / codex / custom)</span>
+--screen <span class="to" data-i18n="flagScreen">启用远程桌面共享</span>
+--port <span class="to" data-i18n="flagPort">指定网关端口 (默认 8787)</span></div>
         </div>
 
         <div style="margin-bottom:32px">
@@ -985,9 +985,9 @@
           <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdGateway">单独启动网关服务器。适用于独立部署网关到远程服务器的场景。
           </p>
           <div class="term"><span class="tm">FLAGS</span>
---port <span class="to">指定监听端口</span>
---host <span class="to">指定绑定地址</span>
---daemon <span class="to">后台守护模式运行</span></div>
+--port <span class="to" data-i18n="flagGwPort">指定监听端口</span>
+--host <span class="to" data-i18n="flagGwHost">指定绑定地址</span>
+--daemon <span class="to" data-i18n="flagGwDaemon">后台守护模式运行</span></div>
         </div>
 
         <div style="margin-bottom:32px">
@@ -1054,10 +1054,10 @@
                 class="ta" data-i18n="docsDeployRemoteTag">[推荐]</span></p>
             <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployRemoteDesc">将网关部署到公网服务器，配合 Nginx
               反向代理 + HTTPS，跨网络访问。</p>
-            <div class="term" style="margin-bottom:16px"><span class="tm"># 服务器端</span>
+            <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmDeployServer"># 服务器端</span>
 <span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
 
-<span class="tm"># 本地</span>
+<span class="tm" data-i18n="tmDeployLocal"># 本地</span>
 <span class="tp">$</span> <span class="tc">linkshell start --gateway wss://your.server</span>
             </div>
             <p style="font-weight:700;margin-bottom:4px;margin-top:20px" data-i18n="docsDeployDocker">Docker 部署</p>
@@ -1072,12 +1072,12 @@
           <div class="tab-pane" id="tab-official">
             <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployOfficial">官方托管 Gateway</span> <span class="ts" data-i18n="docsDeployOfficialTag">[Pro]</span></p>
             <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployOfficialDesc">订阅 iTool Pro 即可使用官方托管的 Gateway，无需自建服务器。登录后自动连接，手机 App 自动发现会话。</p>
-            <div class="term" style="margin-bottom:16px"><span class="tm"># 登录</span>
+            <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmLogin"># 登录</span>
 <span class="tp">$</span> <span class="tc">linkshell login</span>
 <span class="ts">✓ Logged in as user@example.com (Pro)</span>
 <span class="ts">✓ Bridge started in background</span>
 
-<span class="tm"># 查看会话</span>
+<span class="tm" data-i18n="tmViewSessions"># 查看会话</span>
 <span class="tp">$</span> <span class="tc">linkshell list</span>
 <span class="ts">✓ Official Gateway (Asia)</span>
 <span class="to">  └ ● a1b2c3d4 — claude · my-project · just now</span>
@@ -1111,11 +1111,11 @@
         <h3><span class="tm">05</span> <span data-i18n="docsPortFwdTitle">端口转发</span></h3>
         <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsPortFwdDesc">在远程终端启动 dev server
           后，直接在手机上预览页面。通过 Gateway 中继 HTTP 请求，支持完整的 Web 应用预览。</p>
-        <div class="term" style="margin-bottom:16px"><span class="tm"># 远程终端启动 dev server</span>
+        <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmDocsStartDev"># 远程终端启动 dev server</span>
 <span class="tp">$</span> <span class="tc">npm run dev</span>
 <span class="to"> ➜ Local: http://localhost:3000</span>
 
-<span class="tm"># App 切换到 Browser 标签（globe 图标），输入端口 3000</span>
+<span class="tm" data-i18n="tmDocsAppBrowser"># App 切换到 Browser 标签（globe 图标），输入端口 3000</span>
 <span class="ts">➜ Preview: http://gateway:8787/tunnel/{sessionId}/3000/</span>
         </div>
         <div class="li g" data-i18n="docsPortFwd1">完整加载 — HTML、CSS、JS、图片等所有资源通过 tunnel 代理</div>
@@ -1549,6 +1549,27 @@
         pricingFaq2A: "可以。PayPal 订阅可随时取消，取消后在当前周期结束前仍可使用。",
         pricingFaq3Q: "Q: 支持哪些支付方式？",
         pricingFaq3A: "国际用户推荐 PayPal（支持信用卡），国内用户可使用爱发电（支持微信/支付宝）。",
+        tmInstallCli: "# 全局安装 CLI",
+        tmInitConfig: "# 初始化配置",
+        tmCheckEnv: "# 检查环境",
+        tmServerGateway: "# 服务器端：启动网关",
+        tmLocalConnect: "# 本地：连接远程网关",
+        tmLoginAccount: "# 登录 iTool 账号",
+        tmStartDevServer: "# 远程终端启动 dev server",
+        tmAppBrowserTab: "# App 切换到 Browser 标签，输入端口 3000，即可预览",
+        flagDaemon: "后台守护模式运行",
+        flagProvider: "指定 AI 提供者 (claude / codex / custom)",
+        flagScreen: "启用远程桌面共享",
+        flagPort: "指定网关端口 (默认 8787)",
+        flagGwPort: "指定监听端口",
+        flagGwHost: "指定绑定地址",
+        flagGwDaemon: "后台守护模式运行",
+        tmDeployServer: "# 服务器端",
+        tmDeployLocal: "# 本地",
+        tmLogin: "# 登录",
+        tmViewSessions: "# 查看会话",
+        tmDocsStartDev: "# 远程终端启动 dev server",
+        tmDocsAppBrowser: "# App 切换到 Browser 标签（globe 图标），输入端口 3000",
       },
       en: {
         pageTitle: "LinkShell | Desktop First, Roam Anywhere",
@@ -1731,6 +1752,27 @@
         pricingFaq2A: "Yes. PayPal subscriptions can be cancelled anytime. You'll retain access until the end of the current billing period.",
         pricingFaq3Q: "Q: What payment methods are supported?",
         pricingFaq3A: "International users: PayPal (credit card supported). Chinese users: Afdian (WeChat Pay / Alipay).",
+        tmInstallCli: "# Install CLI globally",
+        tmInitConfig: "# Initialize config",
+        tmCheckEnv: "# Check environment",
+        tmServerGateway: "# Server: start gateway",
+        tmLocalConnect: "# Local: connect to remote gateway",
+        tmLoginAccount: "# Log in to iTool account",
+        tmStartDevServer: "# Start dev server remotely",
+        tmAppBrowserTab: "# Switch to Browser tab in App, enter port 3000 to preview",
+        flagDaemon: "Run in background daemon mode",
+        flagProvider: "Specify AI provider (claude / codex / custom)",
+        flagScreen: "Enable remote desktop sharing",
+        flagPort: "Specify gateway port (default 8787)",
+        flagGwPort: "Specify listen port",
+        flagGwHost: "Specify bind address",
+        flagGwDaemon: "Run in background daemon mode",
+        tmDeployServer: "# Server",
+        tmDeployLocal: "# Local",
+        tmLogin: "# Login",
+        tmViewSessions: "# View sessions",
+        tmDocsStartDev: "# Start dev server in remote terminal",
+        tmDocsAppBrowser: "# Switch to Browser tab (globe icon) in App, enter port 3000",
       },
     };
 
