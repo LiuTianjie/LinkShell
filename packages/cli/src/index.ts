@@ -465,6 +465,7 @@ program
     process.stderr.write(`    Stop:   linkshell stop\n`);
     process.stderr.write(`    Status: linkshell status\n`);
     process.stderr.write(`    Logs:   tail -f ${daemon.getLogFile("bridge")}\n\n`);
+    process.exit(0);
   });
 
 program

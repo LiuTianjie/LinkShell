@@ -190,6 +190,32 @@ async function handleRequest(
     return;
   }
 
+  // Delete a session owned by authenticated user
+  if (method === "DELETE" && url.pathname.startsWith("/sessions/")) {
+    const sessionId = url.pathname.split("/")[2];
+    if (!sessionId) {
+      json(res, 400, { error: "missing_session_id" });
+      return;
+    }
+    const authResult = await validateRequest(req);
+    if (!authResult || !authResult.userId) {
+      json(res, 401, { error: "auth_required", message: "Authentication required" });
+      return;
+    }
+    const session = sessionManager.get(sessionId);
+    if (!session) {
+      json(res, 404, { error: "not_found" });
+      return;
+    }
+    if (session.userId && session.userId === authResult.userId) {
+      sessionManager.forceDelete(sessionId);
+      json(res, 200, { ok: true });
+      return;
+    }
+    json(res, 403, { error: "forbidden", message: "You do not own this session" });
+    return;
+  }
+
   // Auth check for premium gateway (skip healthz and /sessions/mine)
   if (AUTH_REQUIRED) {
     const authResult = await requireAuth(req, res);
