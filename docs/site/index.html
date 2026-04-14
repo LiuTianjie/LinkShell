@@ -422,6 +422,207 @@
       color: var(--text-sec);
     }
 
+    /* Pricing */
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      max-width: 720px;
+    }
+
+    .pricing-card {
+      border: 1px solid var(--border-solid);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+      position: relative;
+    }
+
+    .pricing-card.pro {
+      border-color: var(--success);
+      box-shadow: 0 0 20px rgba(48, 209, 88, 0.1);
+    }
+
+    .pricing-card .plan-name {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .pricing-card .plan-price {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .pricing-card .plan-period {
+      font-size: 13px;
+      color: var(--text-sec);
+      margin-bottom: 20px;
+    }
+
+    .pricing-card .plan-features {
+      list-style: none;
+      margin-bottom: 24px;
+    }
+
+    .pricing-card .plan-features li {
+      color: var(--text-sec);
+      font-size: 14px;
+      padding: 4px 0;
+      padding-left: 20px;
+      position: relative;
+    }
+
+    .pricing-card .plan-features li::before {
+      content: '✓';
+      position: absolute;
+      left: 0;
+      color: var(--success);
+    }
+
+    .pricing-badge {
+      position: absolute;
+      top: -1px;
+      right: 16px;
+      background: var(--success);
+      color: var(--bg);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 10px;
+      border-radius: 0 0 var(--radius) var(--radius);
+    }
+
+    .cycle-toggle {
+      display: flex;
+      gap: 0;
+      margin-bottom: 24px;
+      max-width: 280px;
+    }
+
+    .cycle-btn {
+      flex: 1;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 6px 16px;
+      background: transparent;
+      color: var(--text-sec);
+      border: 1px solid var(--border-solid);
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .cycle-btn:first-child {
+      border-radius: var(--radius) 0 0 var(--radius);
+    }
+
+    .cycle-btn:last-child {
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin-left: -1px;
+    }
+
+    .cycle-btn.active {
+      background: var(--text);
+      color: var(--bg);
+      border-color: var(--text);
+      z-index: 1;
+      position: relative;
+    }
+
+    .pay-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 16px;
+      max-width: 280px;
+    }
+
+    .pay-tab {
+      flex: 1;
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 12px;
+      background: transparent;
+      color: var(--text-sec);
+      border: 1px solid var(--border-solid);
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .pay-tab:first-child {
+      border-radius: var(--radius) 0 0 var(--radius);
+    }
+
+    .pay-tab:last-child {
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin-left: -1px;
+    }
+
+    .pay-tab.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      z-index: 1;
+      position: relative;
+    }
+
+    .auth-form input {
+      font-family: var(--font);
+      font-size: 14px;
+      padding: 8px 12px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border-solid);
+      border-radius: var(--radius);
+      width: 100%;
+      outline: none;
+    }
+
+    .auth-form input:focus {
+      border-color: var(--accent);
+    }
+
+    .auth-form .auth-btn {
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 8px 20px;
+      border-radius: var(--radius);
+      border: none;
+      cursor: pointer;
+      width: 100%;
+      transition: opacity .15s;
+    }
+
+    .auth-form .auth-btn:hover {
+      opacity: 0.85;
+    }
+
+    .auth-form .auth-btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .auth-form .auth-btn-afdian {
+      background: linear-gradient(135deg, #00aaff 0%, #0077cc 100%);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      text-decoration: none;
+      text-align: center;
+    }
+
+    #pricing-auth-status {
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    #paypal-button-container {
+      max-width: 280px;
+    }
+
     @media (max-width: 640px) {
       h1 {
         font-size: 28px;
@@ -458,6 +659,10 @@
         width: 140px !important;
         height: 140px !important;
       }
+
+      .pricing-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -472,6 +677,7 @@
       <div class="nav-r">
         <a href="#how" data-i18n="navHow">工作原理</a><span class="sep">|</span>
         <a href="#docs" class="nav-link" data-i18n="navDocs">文档</a><span class="sep">|</span>
+        <a href="#pricing" class="nav-link" data-i18n="navPricing">定价</a><span class="sep">|</span>
         <a href="https://github.com/LiuTianjie/LinkShell" data-i18n="navGithub">GitHub</a><span class="sep">|</span>
         <button class="lang" id="lang-toggle">EN</button>
       </div>
@@ -997,6 +1203,111 @@
     </div>
   </section>
 
+  <!-- PRICING -->
+  <section class="sec" id="pricing" data-page="pricing">
+    <div class="c">
+      <h2 data-i18n="pricingTitle">选择你的方案</h2>
+      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="pricingDesc">免费使用全部核心功能。升级 Pro 解锁官方托管 Gateway，随时随地连接。</p>
+
+      <div class="pricing-grid">
+        <!-- Free -->
+        <div class="pricing-card">
+          <div class="plan-name" data-i18n="pricingFree">Free</div>
+          <div class="plan-price">$0</div>
+          <div class="plan-period" data-i18n="pricingFreeForever">永久免费</div>
+          <ul class="plan-features">
+            <li data-i18n="pricingF1">内置网关（局域网直连）</li>
+            <li data-i18n="pricingF2">终端桥接 + 二维码配对</li>
+            <li data-i18n="pricingF3">Claude / Codex / 自定义代理</li>
+            <li data-i18n="pricingF4">远程桌面（WebRTC）</li>
+            <li data-i18n="pricingF5">端口转发预览</li>
+            <li data-i18n="pricingF6">自建网关部署</li>
+          </ul>
+          <a href="#quickstart" class="btn btn-s" style="width:100%;text-align:center" data-i18n="pricingStartFree">开始使用</a>
+        </div>
+
+        <!-- Pro -->
+        <div class="pricing-card pro">
+          <div class="pricing-badge">POPULAR</div>
+          <div class="plan-name">Pro <span style="color:var(--success)">⚡</span></div>
+          <div style="margin-bottom:16px">
+            <div class="cycle-toggle">
+              <button class="cycle-btn active" data-cycle="monthly" onclick="setPricingCycle('monthly')"><span data-i18n="pricingMonthly">月付</span></button>
+              <button class="cycle-btn" data-cycle="yearly" onclick="setPricingCycle('yearly')"><span data-i18n="pricingYearly">年付</span></button>
+            </div>
+            <div id="price-monthly" class="plan-price">$1<span style="font-size:14px;font-weight:400;color:var(--text-sec)"> /mo</span></div>
+            <div id="price-yearly" class="plan-price" style="display:none">$12<span style="font-size:14px;font-weight:400;color:var(--text-sec)"> /yr</span></div>
+            <div class="plan-period"><span id="price-alt-monthly" data-i18n="pricingAltMonthly">¥9.9/月（爱发电）</span><span id="price-alt-yearly" style="display:none" data-i18n="pricingAltYearly">¥99/年（爱发电）</span></div>
+          </div>
+          <ul class="plan-features">
+            <li data-i18n="pricingP1">Free 全部功能</li>
+            <li data-i18n="pricingP2">官方托管 Gateway</li>
+            <li data-i18n="pricingP3">App 自动发现会话（免扫码）</li>
+            <li data-i18n="pricingP4">多区域节点</li>
+            <li data-i18n="pricingP5">优先技术支持</li>
+          </ul>
+
+          <!-- Auth / Payment area -->
+          <div id="pricing-auth-area">
+            <div id="pricing-auth-status"></div>
+
+            <!-- Login form (shown when not logged in) -->
+            <div id="pricing-login-form" class="auth-form" style="display:none">
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+                <input type="email" id="pricing-email" placeholder="Email" autocomplete="email" />
+                <input type="password" id="pricing-password" placeholder="Password" autocomplete="current-password" />
+                <div id="pricing-auth-error" style="color:var(--danger);font-size:12px;display:none"></div>
+                <button class="auth-btn auth-btn-primary" onclick="pricingSignIn()" data-i18n="pricingLogin">登录</button>
+                <button class="auth-btn" style="background:var(--surface);color:var(--text)" onclick="pricingSignUp()" data-i18n="pricingRegister">注册新账户</button>
+              </div>
+            </div>
+
+            <!-- Payment area (shown when logged in but not Pro) -->
+            <div id="pricing-payment" style="display:none">
+              <div class="pay-tabs">
+                <button class="pay-tab active" onclick="setPayMethod('paypal')">PayPal</button>
+                <button class="pay-tab" onclick="setPayMethod('afdian')" data-i18n="pricingAfdianTab">爱发电</button>
+              </div>
+              <div id="pay-paypal">
+                <div id="paypal-button-container"></div>
+              </div>
+              <div id="pay-afdian" style="display:none">
+                <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian" style="display:flex;margin-bottom:8px" data-i18n="pricingAfdianBtn">前往爱发电支付 ↗</a>
+                <button class="auth-btn" style="background:var(--surface);color:var(--text)" onclick="pricingRefreshPlan()" data-i18n="pricingAfdianRefresh">支付完成？点击刷新状态</button>
+                <p style="color:var(--text-muted);font-size:11px;margin-top:8px;text-align:center" data-i18n="pricingAfdianNote">支付后请点击刷新按钮同步订阅状态</p>
+              </div>
+            </div>
+
+            <!-- Already Pro -->
+            <div id="pricing-pro-status" style="display:none">
+              <div class="term" style="text-align:center;padding:16px">
+                <span class="ts">✓</span> <span data-i18n="pricingAlreadyPro">你已是 Pro 用户</span>
+                <br><span style="color:var(--text-sec);font-size:13px" data-i18n="pricingExpires">到期时间：</span><span id="pricing-expires" style="color:var(--text-sec);font-size:13px"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FAQ -->
+      <div style="margin-top:64px;max-width:720px">
+        <h3 data-i18n="pricingFaqTitle">常见问题</h3>
+        <div style="margin-top:16px;margin-bottom:16px">
+          <p style="font-weight:700;margin-bottom:4px" data-i18n="pricingFaq1Q">Q: 免费版有什么限制？</p>
+          <p style="color:var(--text-sec)" data-i18n="pricingFaq1A">没有功能限制。免费版包含所有核心功能，只是需要自建网关。Pro 提供官方托管网关，省去部署和维护。</p>
+        </div>
+        <div style="margin-bottom:16px">
+          <p style="font-weight:700;margin-bottom:4px" data-i18n="pricingFaq2Q">Q: 可以随时取消吗？</p>
+          <p style="color:var(--text-sec)" data-i18n="pricingFaq2A">可以。PayPal 订阅可随时取消，取消后在当前周期结束前仍可使用。</p>
+        </div>
+        <div>
+          <p style="font-weight:700;margin-bottom:4px" data-i18n="pricingFaq3Q">Q: 支持哪些支付方式？</p>
+          <p style="color:var(--text-sec)" data-i18n="pricingFaq3A">国际用户推荐 PayPal（支持信用卡），国内用户可使用爱发电（支持微信/支付宝）。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- SPONSORS -->
   <section class="sec" style="text-align:center" data-page="home">
     <div class="c">
@@ -1202,6 +1513,42 @@
         sponsorTitle: "Sponsors",
         sponsorDesc: "感谢以下赞助商对 LinkShell 的支持。",
         sponsorAi18nDesc: "Unified AI API Gateway",
+        navPricing: "定价",
+        pricingTitle: "选择你的方案",
+        pricingDesc: "免费使用全部核心功能。升级 Pro 解锁官方托管 Gateway，随时随地连接。",
+        pricingFree: "Free",
+        pricingFreeForever: "永久免费",
+        pricingF1: "内置网关（局域网直连）",
+        pricingF2: "终端桥接 + 二维码配对",
+        pricingF3: "Claude / Codex / 自定义代理",
+        pricingF4: "远程桌面（WebRTC）",
+        pricingF5: "端口转发预览",
+        pricingF6: "自建网关部署",
+        pricingStartFree: "开始使用",
+        pricingMonthly: "月付",
+        pricingYearly: "年付",
+        pricingAltMonthly: "¥9.9/月（爱发电）",
+        pricingAltYearly: "¥99/年（爱发电）",
+        pricingP1: "Free 全部功能",
+        pricingP2: "官方托管 Gateway",
+        pricingP3: "App 自动发现会话（免扫码）",
+        pricingP4: "多区域节点",
+        pricingP5: "优先技术支持",
+        pricingLogin: "登录",
+        pricingRegister: "注册新账户",
+        pricingAfdianTab: "爱发电",
+        pricingAfdianBtn: "前往爱发电支付 ↗",
+        pricingAfdianRefresh: "支付完成？点击刷新状态",
+        pricingAfdianNote: "支付后请点击刷新按钮同步订阅状态",
+        pricingAlreadyPro: "你已是 Pro 用户",
+        pricingExpires: "到期时间：",
+        pricingFaqTitle: "常见问题",
+        pricingFaq1Q: "Q: 免费版有什么限制？",
+        pricingFaq1A: "没有功能限制。免费版包含所有核心功能，只是需要自建网关。Pro 提供官方托管网关，省去部署和维护。",
+        pricingFaq2Q: "Q: 可以随时取消吗？",
+        pricingFaq2A: "可以。PayPal 订阅可随时取消，取消后在当前周期结束前仍可使用。",
+        pricingFaq3Q: "Q: 支持哪些支付方式？",
+        pricingFaq3A: "国际用户推荐 PayPal（支持信用卡），国内用户可使用爱发电（支持微信/支付宝）。",
       },
       en: {
         pageTitle: "LinkShell | Desktop First, Roam Anywhere",
@@ -1348,6 +1695,42 @@
         sponsorTitle: "Sponsors",
         sponsorDesc: "Thanks to our sponsors for supporting LinkShell.",
         sponsorAi18nDesc: "Unified AI API Gateway",
+        navPricing: "Pricing",
+        pricingTitle: "Choose Your Plan",
+        pricingDesc: "All core features are free. Upgrade to Pro for official managed Gateway — connect from anywhere.",
+        pricingFree: "Free",
+        pricingFreeForever: "Free forever",
+        pricingF1: "Built-in gateway (LAN direct)",
+        pricingF2: "Terminal bridge + QR pairing",
+        pricingF3: "Claude / Codex / custom agents",
+        pricingF4: "Remote desktop (WebRTC)",
+        pricingF5: "Port forwarding preview",
+        pricingF6: "Self-hosted gateway",
+        pricingStartFree: "Get Started",
+        pricingMonthly: "Monthly",
+        pricingYearly: "Yearly",
+        pricingAltMonthly: "¥9.9/mo (Afdian)",
+        pricingAltYearly: "¥99/yr (Afdian)",
+        pricingP1: "Everything in Free",
+        pricingP2: "Official managed Gateway",
+        pricingP3: "Auto-discover sessions (no QR)",
+        pricingP4: "Multi-region nodes",
+        pricingP5: "Priority support",
+        pricingLogin: "Sign In",
+        pricingRegister: "Create Account",
+        pricingAfdianTab: "Afdian",
+        pricingAfdianBtn: "Pay via Afdian ↗",
+        pricingAfdianRefresh: "Paid? Click to refresh status",
+        pricingAfdianNote: "After payment, click refresh to sync your subscription",
+        pricingAlreadyPro: "You are a Pro user",
+        pricingExpires: "Expires: ",
+        pricingFaqTitle: "FAQ",
+        pricingFaq1Q: "Q: Are there limits on the free plan?",
+        pricingFaq1A: "No feature limits. Free includes all core features — you just need to self-host the gateway. Pro provides an official managed gateway so you don't have to.",
+        pricingFaq2Q: "Q: Can I cancel anytime?",
+        pricingFaq2A: "Yes. PayPal subscriptions can be cancelled anytime. You'll retain access until the end of the current billing period.",
+        pricingFaq3Q: "Q: What payment methods are supported?",
+        pricingFaq3A: "International users: PayPal (credit card supported). Chinese users: Afdian (WeChat Pay / Alipay).",
       },
     };
 
@@ -1402,6 +1785,9 @@
       const hash = location.hash.replace('#', '') || 'home';
       if (hash === 'docs') {
         showPage('docs');
+      } else if (hash === 'pricing') {
+        showPage('pricing');
+        initPricing();
       } else {
         showPage('home');
         // scroll to anchor if needed
@@ -1427,6 +1813,244 @@
 
     window.addEventListener('hashchange', route);
     route();
+  </script>
+
+  <!-- Supabase CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <!-- Pricing logic -->
+  <script>
+    const SUPABASE_URL = 'https://mkbeusztkzffnzjdwmqk.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rYmV1c3p0a3pmZm56amR3bXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5Nzc0NzgsImV4cCI6MjA4MTU1MzQ3OH0.2wlT6q6687Z5rpEYsdp01IQpNNl_XWv0IAfBgwPyDP0';
+    const PAYPAL_CLIENT_ID = 'Aeu_JU69ebK6bYL1EvrgmgwybrEAmd27Likg5IUPQvG6Bv6WKC6by0f6eYIMV5dAa5cTXsag1klYUFEy';
+    const PAYPAL_MONTHLY_PLAN = 'P-22T6697901334320RNGLSTWA';
+    const PAYPAL_YEARLY_PLAN = 'P-8VP22277J80187409NGLSSXY';
+    const AFDIAN_URL = 'https://ifdian.net/order/create';
+    const AFDIAN_MONTHLY_PLAN = '44b0ef7e0e4111f1b7cb52540025c377';
+    const AFDIAN_YEARLY_PLAN = 'b44fe6000e4111f1b1cb5254001e7c00';
+
+    let supabaseClient = null;
+    let pricingUser = null;
+    let pricingCycle = 'monthly';
+    let pricingPayMethod = 'paypal';
+    let paypalLoaded = false;
+    let pricingInitialized = false;
+
+    function getSupabase() {
+      if (!supabaseClient && window.supabase) {
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      }
+      return supabaseClient;
+    }
+
+    function setPricingCycle(cycle) {
+      pricingCycle = cycle;
+      document.querySelectorAll('.cycle-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.cycle === cycle);
+      });
+      document.getElementById('price-monthly').style.display = cycle === 'monthly' ? '' : 'none';
+      document.getElementById('price-yearly').style.display = cycle === 'yearly' ? '' : 'none';
+      document.getElementById('price-alt-monthly').style.display = cycle === 'monthly' ? '' : 'none';
+      document.getElementById('price-alt-yearly').style.display = cycle === 'yearly' ? '' : 'none';
+      renderPaypal();
+    }
+
+    function setPayMethod(method) {
+      pricingPayMethod = method;
+      document.querySelectorAll('.pay-tab').forEach(b => {
+        b.classList.toggle('active', b.textContent.toLowerCase().includes(method === 'paypal' ? 'paypal' : (currentLang === 'zh' ? '爱发电' : 'afdian').toLowerCase()));
+      });
+      // Simpler: toggle by index
+      const tabs = document.querySelectorAll('.pay-tab');
+      tabs[0].classList.toggle('active', method === 'paypal');
+      tabs[1].classList.toggle('active', method === 'afdian');
+      document.getElementById('pay-paypal').style.display = method === 'paypal' ? '' : 'none';
+      document.getElementById('pay-afdian').style.display = method === 'afdian' ? '' : 'none';
+      if (method === 'paypal') renderPaypal();
+      if (method === 'afdian') updateAfdianLink();
+    }
+
+    function updateAfdianLink() {
+      const planId = pricingCycle === 'yearly' ? AFDIAN_YEARLY_PLAN : AFDIAN_MONTHLY_PLAN;
+      const userId = pricingUser ? pricingUser.id : '';
+      const link = document.getElementById('afdian-link');
+      if (link) {
+        link.href = AFDIAN_URL + '?plan_id=' + planId + '&product_type=0&custom_order_id=' + userId;
+      }
+    }
+
+    function loadPaypalSdk() {
+      return new Promise((resolve, reject) => {
+        if (paypalLoaded) { resolve(); return; }
+        if (document.getElementById('paypal-sdk')) { resolve(); return; }
+        const s = document.createElement('script');
+        s.id = 'paypal-sdk';
+        s.src = 'https://www.paypal.com/sdk/js?client-id=' + PAYPAL_CLIENT_ID + '&vault=true&intent=subscription&currency=USD';
+        s.onload = () => { paypalLoaded = true; resolve(); };
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+
+    async function renderPaypal() {
+      const container = document.getElementById('paypal-button-container');
+      if (!container || pricingPayMethod !== 'paypal' || !pricingUser) return;
+      container.innerHTML = '';
+      try {
+        await loadPaypalSdk();
+        if (!window.paypal) return;
+        const planId = pricingCycle === 'yearly' ? PAYPAL_YEARLY_PLAN : PAYPAL_MONTHLY_PLAN;
+        window.paypal.Buttons({
+          style: { layout: 'vertical', shape: 'rect', color: 'gold', label: 'subscribe' },
+          createSubscription: function(data, actions) {
+            return actions.subscription.create({ plan_id: planId });
+          },
+          onApprove: async function(data) {
+            if (!data.subscriptionID || !pricingUser) return;
+            try {
+              const sb = getSupabase();
+              const { data: { session: authSession } } = await sb.auth.getSession();
+              const token = authSession?.access_token ?? '';
+              const res = await fetch('https://itool.tech/api/paypal/capture-subscription', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + token,
+                },
+                body: JSON.stringify({
+                  subscriptionID: data.subscriptionID,
+                  userID: pricingUser.id,
+                  planType: pricingCycle,
+                }),
+              });
+              if (res.ok) {
+                await checkPricingPlan();
+              } else {
+                showAuthError('Payment capture failed. Please contact support.');
+              }
+            } catch (e) {
+              showAuthError('Network error. Please try again.');
+            }
+          },
+          onError: function(err) {
+            console.error('[PayPal]', err);
+          }
+        }).render('#paypal-button-container');
+      } catch (e) {
+        container.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Failed to load PayPal. Please try again.</p>';
+      }
+    }
+
+    function showAuthError(msg) {
+      const el = document.getElementById('pricing-auth-error');
+      if (el) { el.textContent = msg; el.style.display = ''; }
+    }
+
+    function hideAuthError() {
+      const el = document.getElementById('pricing-auth-error');
+      if (el) el.style.display = 'none';
+    }
+
+    async function checkPricingPlan() {
+      if (!pricingUser) return;
+      const sb = getSupabase();
+      if (!sb) return;
+      try {
+        const { data } = await sb.from('profiles').select('plan,plan_expires_at').eq('id', pricingUser.id).limit(1).single();
+        if (data && data.plan === 'pro' && data.plan_expires_at && new Date(data.plan_expires_at) > new Date()) {
+          // Show Pro status
+          document.getElementById('pricing-login-form').style.display = 'none';
+          document.getElementById('pricing-payment').style.display = 'none';
+          document.getElementById('pricing-pro-status').style.display = '';
+          document.getElementById('pricing-expires').textContent = new Date(data.plan_expires_at).toLocaleDateString();
+          document.getElementById('pricing-auth-status').innerHTML = '<span class="ts">●</span> ' + (pricingUser.email || pricingUser.id) + ' <span style="color:var(--success);font-weight:600">Pro</span> <a href="javascript:pricingSignOut()" style="color:var(--text-muted);font-size:12px;margin-left:8px">' + (currentLang === 'zh' ? '退出' : 'Sign out') + '</a>';
+        } else {
+          // Show payment
+          document.getElementById('pricing-login-form').style.display = 'none';
+          document.getElementById('pricing-payment').style.display = '';
+          document.getElementById('pricing-pro-status').style.display = 'none';
+          document.getElementById('pricing-auth-status').innerHTML = '<span class="to">●</span> ' + (pricingUser.email || pricingUser.id) + ' <span style="color:var(--text-sec)">Free</span> <a href="javascript:pricingSignOut()" style="color:var(--text-muted);font-size:12px;margin-left:8px">' + (currentLang === 'zh' ? '退出' : 'Sign out') + '</a>';
+          updateAfdianLink();
+          if (pricingPayMethod === 'paypal') renderPaypal();
+        }
+      } catch {
+        // Default to payment view
+        document.getElementById('pricing-login-form').style.display = 'none';
+        document.getElementById('pricing-payment').style.display = '';
+        document.getElementById('pricing-pro-status').style.display = 'none';
+      }
+    }
+
+    async function initPricing() {
+      const sb = getSupabase();
+      if (!sb) return;
+      try {
+        const { data: { session } } = await sb.auth.getSession();
+        if (session && session.user) {
+          pricingUser = session.user;
+          await checkPricingPlan();
+        } else {
+          pricingUser = null;
+          document.getElementById('pricing-login-form').style.display = '';
+          document.getElementById('pricing-payment').style.display = 'none';
+          document.getElementById('pricing-pro-status').style.display = 'none';
+          document.getElementById('pricing-auth-status').innerHTML = '';
+        }
+      } catch {
+        document.getElementById('pricing-login-form').style.display = '';
+      }
+    }
+
+    async function pricingSignIn() {
+      hideAuthError();
+      const email = document.getElementById('pricing-email').value.trim();
+      const password = document.getElementById('pricing-password').value;
+      if (!email || !password) { showAuthError(currentLang === 'zh' ? '请输入邮箱和密码' : 'Please enter email and password'); return; }
+      const sb = getSupabase();
+      if (!sb) return;
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { showAuthError(error.message); return; }
+      pricingUser = data.user;
+      await checkPricingPlan();
+    }
+
+    async function pricingSignUp() {
+      hideAuthError();
+      const email = document.getElementById('pricing-email').value.trim();
+      const password = document.getElementById('pricing-password').value;
+      if (!email || !password) { showAuthError(currentLang === 'zh' ? '请输入邮箱和密码' : 'Please enter email and password'); return; }
+      const sb = getSupabase();
+      if (!sb) return;
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if (error) { showAuthError(error.message); return; }
+      if (data.user && data.session) {
+        pricingUser = data.user;
+        await checkPricingPlan();
+      } else {
+        showAuthError(currentLang === 'zh' ? '注册成功，请查收验证邮件后登录' : 'Registration successful. Please check your email to verify.');
+      }
+    }
+
+    async function pricingSignOut() {
+      const sb = getSupabase();
+      if (sb) await sb.auth.signOut();
+      pricingUser = null;
+      document.getElementById('pricing-login-form').style.display = '';
+      document.getElementById('pricing-payment').style.display = 'none';
+      document.getElementById('pricing-pro-status').style.display = 'none';
+      document.getElementById('pricing-auth-status').innerHTML = '';
+      document.getElementById('paypal-button-container').innerHTML = '';
+    }
+
+    async function pricingRefreshPlan() {
+      if (!pricingUser) return;
+      const btn = event.target;
+      btn.textContent = currentLang === 'zh' ? '刷新中...' : 'Refreshing...';
+      btn.disabled = true;
+      await checkPricingPlan();
+      btn.textContent = currentLang === 'zh' ? '支付完成？点击刷新状态' : 'Paid? Click to refresh status';
+      btn.disabled = false;
+    }
   </script>
 
 </body>
