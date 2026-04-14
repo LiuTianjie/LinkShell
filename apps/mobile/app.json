@@ -2,7 +2,7 @@
   "expo": {
     "name": "LinkShell",
     "slug": "linkshell",
-    "version": "1.0.7",
+    "version": "1.1.1",
     "scheme": "linkshell",
     "icon": "./assets/adaptive-icon.png",
     "splash": {
@@ -51,7 +51,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.bd.linkshell",
-      "buildNumber": "13",
+      "buildNumber": "15",
       "appleTeamId": "L95PYLFT86",
       "icon": "./assets/adaptive-icon.png",
       "infoPlist": {
@@ -88,7 +88,7 @@
         "android.permission.RECORD_AUDIO"
       ],
       "package": "com.bd.linkshell",
-      "versionCode": 10
+      "versionCode": 1
     },
     "extra": {
       "eas": {

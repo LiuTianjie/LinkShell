@@ -1508,13 +1508,16 @@ export class BridgeSession {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnecting || this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+    if (this.reconnecting) return;
+
+    // In daemon mode, never give up — reset attempts after hitting max
+    if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
       process.stderr.write(
-        "[bridge] max reconnect attempts reached, stopping bridge session\n",
+        "[bridge] max reconnect attempts reached, resetting counter and continuing...\n",
       );
-      this.stop(1);
-      return;
+      this.reconnectAttempts = 0;
     }
+
     this.reconnecting = true;
     const delay = Math.min(
       RECONNECT_BASE_DELAY * 2 ** this.reconnectAttempts,

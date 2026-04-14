@@ -164,8 +164,8 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: ^0.2.22
-        version: 0.2.22
+        specifier: ^0.2.25
+        version: 0.2.25
       '@linkshell/protocol':
         specifier: ^0.2.18
         version: 0.2.18
@@ -1281,8 +1281,8 @@ packages:
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
 
-  '@linkshell/gateway@0.2.22':
-    resolution: {integrity: sha512-gOlORrhaa17GYszQm1/gNJ8zgJhv2Sc+Cg9Wfnt5Lt75B6T2+feLCFvnXfuqzGNXRft25r8QxZnBw9g7+kP8mw==}
+  '@linkshell/gateway@0.2.25':
+    resolution: {integrity: sha512-7W6ZcsIkc2ywZKHk39X2I+zYVpESxj+WVic3rQqmhqdeXhIaJx0YE01hf+AP9UGGxcxlOnfZykF5P5BS042fSg==}
 
   '@linkshell/protocol@0.2.18':
     resolution: {integrity: sha512-pMQqQeBe2bYWLVE2m4WSg/70UuuiCWw5FqtEfTi1JXxsCXSZo8kXkn6uGpNb6btn0gnnNFn4w4gYlxt658FglA==}
@@ -5897,7 +5897,7 @@ snapshots:
   '@leichtgewicht/ip-codec@2.0.5':
     optional: true
 
-  '@linkshell/gateway@0.2.22':
+  '@linkshell/gateway@0.2.25':
     dependencies:
       '@linkshell/protocol': 0.2.18
       ws: 8.20.0
