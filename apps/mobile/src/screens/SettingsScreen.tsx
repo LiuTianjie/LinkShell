@@ -19,12 +19,14 @@ interface SettingsScreenProps {
   gatewayBaseUrl: string;
   onGatewayChange: (url: string) => void;
   onOpenGatewayList: () => void;
+  onAuthChanged?: () => void;
 }
 
 export function SettingsScreen({
   gatewayBaseUrl,
   onGatewayChange,
   onOpenGatewayList,
+  onAuthChanged,
 }: SettingsScreenProps) {
   const { theme, toggleTheme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -155,6 +157,7 @@ export function SettingsScreen({
                       onPress: async () => {
                         await signOut();
                         setAuthSession(null);
+                        onAuthChanged?.();
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                       },
                     },
@@ -553,6 +556,7 @@ export function SettingsScreen({
                 } else if (result.session) {
                   setAuthSession(result.session);
                   setShowAuth(false);
+                  onAuthChanged?.();
                   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 }
               }}
@@ -578,6 +582,7 @@ export function SettingsScreen({
                 } else if (result.session) {
                   setAuthSession(result.session);
                   setShowAuth(false);
+                  onAuthChanged?.();
                   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 } else {
                   setAuthError("注册成功，请查收验证邮件后登录。");

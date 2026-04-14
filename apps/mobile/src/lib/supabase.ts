@@ -214,6 +214,21 @@ export async function registerDeviceToken(
 }
 
 /**
+ * Get a valid session, refreshing token if needed.
+ */
+export async function getValidSession(): Promise<AuthSession | null> {
+  const session = await loadSession();
+  if (!session) return null;
+
+  // If token expires in less than 60s, refresh
+  if (session.expiresAt - Date.now() < 60_000) {
+    return refreshSession();
+  }
+
+  return session;
+}
+
+/**
  * Fetch official gateways list.
  */
 export interface OfficialGateway {
@@ -223,7 +238,7 @@ export interface OfficialGateway {
 }
 
 export async function fetchOfficialGateways(): Promise<OfficialGateway[]> {
-  const session = await loadSession();
+  const session = await getValidSession();
   if (!session) return [];
 
   try {
@@ -261,7 +276,7 @@ export async function fetchMySessions(
     lastActivity: number;
   }[]
 > {
-  const session = await loadSession();
+  const session = await getValidSession();
   if (!session) return [];
 
   try {

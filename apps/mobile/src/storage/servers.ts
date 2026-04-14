@@ -5,7 +5,8 @@ export interface SavedServer {
   name: string;
   isDefault: boolean;
   addedAt: number;
-  lastUsedAt: number;
+  lastUsedAt?: number;
+  isOfficial?: boolean;
 }
 
 const STORAGE_KEY = "@linkshell/servers";

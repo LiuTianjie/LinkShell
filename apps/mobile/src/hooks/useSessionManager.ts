@@ -508,7 +508,7 @@ export function useSessionManager(): SessionManagerHandle {
 
   // ── Connect socket for a session ──────────────────────────────
 
-  const connectSocket = (s: InternalSession, isReconnect = false) => {
+  const connectSocket = async (s: InternalSession, isReconnect = false) => {
     if (s.reconnectTimer) {
       clearTimeout(s.reconnectTimer);
       s.reconnectTimer = null;
@@ -523,7 +523,18 @@ export function useSessionManager(): SessionManagerHandle {
     const tokenParam = deviceTokenRef.current
       ? `&token=${encodeURIComponent(deviceTokenRef.current)}`
       : "";
-    const url = `${base}/ws?sessionId=${encodeURIComponent(s.sessionId)}&role=client&deviceId=${s.deviceId}${tokenParam}`;
+
+    // Add Supabase auth token for official gateways
+    let authParam = "";
+    try {
+      const { getValidSession } = await import("../lib/supabase");
+      const session = await getValidSession();
+      if (session?.accessToken) {
+        authParam = `&auth_token=${encodeURIComponent(session.accessToken)}`;
+      }
+    } catch {}
+
+    const url = `${base}/ws?sessionId=${encodeURIComponent(s.sessionId)}&role=client&deviceId=${s.deviceId}${tokenParam}${authParam}`;
     const ws = new WebSocket(url);
     s.socket = ws;
 
