@@ -31,6 +31,7 @@ export interface BridgeSessionOptions {
   verbose?: boolean;
   screen?: boolean;
   providerConfig: ProviderConfig;
+  authToken?: string;
 }
 
 const HEARTBEAT_INTERVAL = 15_000;
@@ -158,9 +159,13 @@ export class BridgeSession {
   }
 
   private async createPairing(): Promise<void> {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (this.options.authToken) {
+      headers["Authorization"] = `Bearer ${this.options.authToken}`;
+    }
     const res = await fetch(`${this.options.gatewayHttpUrl}/pairings`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({}),
     });
     if (!res.ok) {
@@ -222,6 +227,9 @@ export class BridgeSession {
     const url = new URL(this.options.gatewayUrl);
     url.searchParams.set("sessionId", this.sessionId);
     url.searchParams.set("role", "host");
+    if (this.options.authToken) {
+      url.searchParams.set("auth_token", this.options.authToken);
+    }
 
     this.socket = new WebSocket(url);
 

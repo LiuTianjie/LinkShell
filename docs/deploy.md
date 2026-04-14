@@ -150,3 +150,52 @@ Gateway 是纯消息转发，资源消耗很低：
 - CPU：几乎可忽略
 - 带宽：取决于终端输出量，通常很小
 - 最小配置：1 核 512MB 即可运行
+
+## 官方 Gateway 部署（需订阅验证）
+
+如果你要部署一个需要订阅验证的官方 Gateway（仅允许 Pro 用户连接），需要额外配置 Supabase 环境变量。
+
+### Docker 方式
+
+```bash
+docker run -d \
+  -p 8787:8787 \
+  --name linkshell-gateway \
+  --restart unless-stopped \
+  -e AUTH_REQUIRED=true \
+  -e SUPABASE_URL=https://your-project.supabase.co \
+  -e SUPABASE_ANON_KEY=your-anon-key \
+  -e SUPABASE_SERVICE_ROLE_KEY=your-service-role-key \
+  nickname4th/linkshell-gateway:latest
+```
+
+### docker-compose 方式
+
+```bash
+cp .env.example .env
+# 编辑 .env，设置：
+# AUTH_REQUIRED=true
+# SUPABASE_URL=https://your-project.supabase.co
+# SUPABASE_ANON_KEY=your-anon-key
+# SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+docker compose up -d
+```
+
+### 环境变量说明
+
+| 变量 | 必需 | 说明 |
+|------|------|------|
+| `AUTH_REQUIRED` | 否 | 设为 `true` 启用订阅验证，默认 `false` |
+| `SUPABASE_URL` | AUTH_REQUIRED=true 时必需 | Supabase 项目 URL |
+| `SUPABASE_ANON_KEY` | AUTH_REQUIRED=true 时必需 | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | AUTH_REQUIRED=true 时必需 | 用于服务端订阅到期检查 |
+
+### 行为差异
+
+- `AUTH_REQUIRED=false`（默认）：任何人都可以连接，适合自建 Gateway
+- `AUTH_REQUIRED=true`：
+  - 所有 HTTP 和 WebSocket 连接需要有效的 Supabase JWT
+  - 验证用户是否有活跃的 Pro 订阅
+  - 非订阅用户收到 `subscription_required` 错误，提示去 itool.tech 订阅
+  - 每 5 分钟检查已连接用户的订阅状态，到期自动断开

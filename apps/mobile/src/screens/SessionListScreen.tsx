@@ -17,6 +17,11 @@ import { AppSymbol } from "../components/AppSymbol";
 import { useTheme, type Theme } from "../theme";
 import { loadServers, type SavedServer } from "../storage/servers";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
+import {
+  loadSession,
+  fetchOfficialGateways,
+  fetchMySessions,
+} from "../lib/supabase";
 
 if (
   Platform.OS === "android" &&
@@ -464,6 +469,38 @@ export function SessionListScreen({
         error: null,
       };
     });
+
+    // Fetch official gateway sessions for Pro users
+    const session = await loadSession();
+    if (session && session.user.plan === "pro") {
+      try {
+        const officialGws = await fetchOfficialGateways();
+        const officialResults = await Promise.allSettled(
+          officialGws.map((gw) => fetchMySessions(gw.url)),
+        );
+        for (let i = 0; i < officialGws.length; i++) {
+          const gw = officialGws[i]!;
+          const result = officialResults[i]!;
+          const sessions =
+            result.status === "fulfilled"
+              ? (result.value as SessionInfo[]).sort(
+                  (a, b) => b.lastActivity - a.lastActivity,
+                )
+              : [];
+          finalGroups.unshift({
+            server: {
+              url: gw.url,
+              name: `⚡ ${gw.name}${gw.region ? ` (${gw.region})` : ""}`,
+              isDefault: false,
+              addedAt: 0,
+            },
+            sessions,
+            loading: false,
+            error: null,
+          });
+        }
+      } catch {}
+    }
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setGroups(finalGroups);

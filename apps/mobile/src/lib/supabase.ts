@@ -42,7 +42,7 @@ export async function clearSession(): Promise<void> {
 async function fetchUserPlan(accessToken: string, userId: string): Promise<string> {
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/linkshell_subscriptions?user_id=eq.${userId}&status=eq.active&select=plan&limit=1`,
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=plan,plan_expires_at&limit=1`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -52,8 +52,13 @@ async function fetchUserPlan(accessToken: string, userId: string): Promise<strin
       },
     );
     if (res.ok) {
-      const subs = (await res.json()) as { plan: string }[];
-      if (subs.length > 0) return subs[0]!.plan;
+      const profiles = (await res.json()) as { plan: string; plan_expires_at: string | null }[];
+      if (profiles.length > 0) {
+        const p = profiles[0]!;
+        if (p.plan === "pro" && p.plan_expires_at && new Date(p.plan_expires_at) > new Date()) {
+          return "pro";
+        }
+      }
     }
   } catch {}
   return "free";
@@ -208,4 +213,70 @@ export async function registerDeviceToken(
       signal: AbortSignal.timeout(5_000),
     });
   } catch {}
+}
+
+/**
+ * Fetch official gateways list.
+ */
+export interface OfficialGateway {
+  url: string;
+  name: string;
+  region: string | null;
+}
+
+export async function fetchOfficialGateways(): Promise<OfficialGateway[]> {
+  const session = await loadSession();
+  if (!session) return [];
+
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/linkshell_official_gateways?enabled=eq.true&select=url,name,region`,
+      {
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          apikey: SUPABASE_ANON_KEY,
+        },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (res.ok) {
+      return (await res.json()) as OfficialGateway[];
+    }
+  } catch {}
+  return [];
+}
+
+/**
+ * Fetch user's sessions on an official gateway.
+ */
+export async function fetchMySessions(
+  gatewayUrl: string,
+): Promise<
+  {
+    id: string;
+    state: string;
+    hasHost: boolean;
+    clientCount: number;
+    provider: string | null;
+    hostname: string | null;
+    projectName: string | null;
+    lastActivity: number;
+  }[]
+> {
+  const session = await loadSession();
+  if (!session) return [];
+
+  try {
+    const res = await fetch(`${gatewayUrl}/sessions/mine`, {
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+      },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { sessions: any[] };
+      return body.sessions ?? [];
+    }
+  } catch {}
+  return [];
 }

@@ -27,6 +27,8 @@ export interface Session {
   platform: string | undefined;
   cwd: string | undefined;
   projectName: string | undefined;
+  // Auth: user who owns this session (set on AUTH_REQUIRED gateways)
+  userId: string | undefined;
 }
 
 const OUTPUT_BUFFER_CAPACITY = 200;
@@ -60,6 +62,7 @@ export class SessionManager {
         platform: undefined,
         cwd: undefined,
         projectName: undefined,
+        userId: undefined,
       };
       this.sessions.set(sessionId, session);
     }
@@ -194,6 +197,7 @@ export class SessionManager {
       platform: session.platform ?? null,
       cwd: session.cwd ?? null,
       projectName: session.projectName ?? null,
+      userId: session.userId ?? null,
     };
   }
 
