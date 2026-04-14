@@ -491,8 +491,7 @@
             data-i18n="heroTitleSep">，</span><span data-i18n="heroTitle2">随时随地，自由接管</span></h1>
         <p style="color:var(--text-sec);margin-bottom:12px;max-width:600px" data-i18n="heroLead">
           纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。</p>
-        <p style="color:var(--warning);margin-bottom:32px;font-size:14px" data-i18n="heroGateway">🎁 限时免费体验公网 Gateway
-          地址：wss://zkiwacrrxzaj.sealosbja.site/ws</p>
+        <p style="color:var(--warning);margin-bottom:32px;font-size:14px" data-i18n="heroGateway">🚀 Pro 订阅用户可直接使用官方 Gateway，无需自建服务器。<a href="https://itool.tech" style="color:var(--warning)">了解更多 →</a></p>
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;white-space:nowrap">
           <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
           <a href="https://github.com/LiuTianjie/LinkShell" class="btn btn-s" data-i18n="btnGithub">查看仓库</a>
@@ -552,6 +551,7 @@
         <div class="tabs">
           <button class="tab active" data-tab="qs-lan" data-i18n="tabLan">局域网</button>
           <button class="tab" data-tab="qs-public" data-i18n="tabPublic">公网</button>
+          <button class="tab" data-tab="qs-official" data-i18n="tabOfficial">官方 Gateway</button>
         </div>
         <div class="tab-body">
           <div class="tab-pane active" id="tab-qs-lan">
@@ -589,6 +589,23 @@
               </svg>
 
               <span class="ts">➜ Code:</span> <span class="ta">293847</span>
+            </div>
+          </div>
+          <div class="tab-pane" id="tab-qs-official">
+            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsOfficialDesc">Pro 订阅用户直接使用官方托管 Gateway，一条命令登录即可连接。</p>
+            <div class="term"><span class="tm"># 登录 iTool 账号</span>
+              <span class="tp">$</span> <span class="tc">linkshell login</span>
+              <span class="to">Opening browser for login...</span>
+              <span class="ts">✓ Logged in as user@example.com (Pro)</span>
+
+              <span class="to">Available gateways:</span>
+              <span class="to">  [1] Official Gateway (Asia)  wss://gw.linkshell.app/ws</span>
+              <span class="to">  [0] Skip</span>
+
+              <span class="to">Connect to gateway [1]: </span><span class="ta">1</span>
+
+              <span class="ts">✓ Bridge started in background (PID 12345)</span>
+              <span class="to">  Open the LinkShell app on your phone to connect.</span>
             </div>
           </div>
         </div>
@@ -790,6 +807,21 @@
           <p style="font-weight:700;margin-bottom:4px">linkshell stop</p>
           <p style="color:var(--text-sec)" data-i18n="docsCmdStop">停止守护进程。优雅关闭桥接会话和内置网关。</p>
         </div>
+
+        <div style="margin-top:32px">
+          <p style="font-weight:700;margin-bottom:4px">linkshell login</p>
+          <p style="color:var(--text-sec)" data-i18n="docsCmdLogin">登录 iTool 账号。浏览器跳转授权后自动保存凭证，Pro 用户可直接选择官方 Gateway 连接。</p>
+        </div>
+
+        <div style="margin-top:32px">
+          <p style="font-weight:700;margin-bottom:4px">linkshell logout</p>
+          <p style="color:var(--text-sec)" data-i18n="docsCmdLogout">退出登录，清除本地凭证。</p>
+        </div>
+
+        <div style="margin-top:32px">
+          <p style="font-weight:700;margin-bottom:4px">linkshell list</p>
+          <p style="color:var(--text-sec)" data-i18n="docsCmdList">列出官方 Gateway 上你的活跃会话。需要先登录。</p>
+        </div>
       </div>
 
       <!-- Deployment -->
@@ -800,6 +832,7 @@
         <div class="tabs">
           <button class="tab active" data-tab="lan" data-i18n="tabLan">局域网</button>
           <button class="tab" data-tab="public" data-i18n="tabPublic">公网</button>
+          <button class="tab" data-tab="official" data-i18n="tabOfficial">官方 Gateway</button>
         </div>
         <div class="tab-body">
           <div class="tab-pane active" id="tab-lan">
@@ -833,6 +866,23 @@
             <div class="li b" data-i18n="pubTip1">支持跨网络、4G/5G 随时接入</div>
             <div class="li b" data-i18n="pubTip2">推荐 Nginx 反代 + Let's Encrypt HTTPS</div>
             <div class="li b" data-i18n="pubTip3">数据仅经过你自己的服务器中继</div>
+          </div>
+          <div class="tab-pane" id="tab-official">
+            <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployOfficial">官方托管 Gateway</span> <span class="ts" data-i18n="docsDeployOfficialTag">[Pro]</span></p>
+            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployOfficialDesc">订阅 iTool Pro 即可使用官方托管的 Gateway，无需自建服务器。登录后自动连接，手机 App 自动发现会话。</p>
+            <div class="term" style="margin-bottom:16px"><span class="tm"># 登录</span>
+              <span class="tp">$</span> <span class="tc">linkshell login</span>
+              <span class="ts">✓ Logged in as user@example.com (Pro)</span>
+              <span class="ts">✓ Bridge started in background</span>
+
+              <span class="tm"># 查看会话</span>
+              <span class="tp">$</span> <span class="tc">linkshell list</span>
+              <span class="ts">✓ Official Gateway (Asia)</span>
+              <span class="to">  └ ● a1b2c3d4 — claude · my-project · just now</span>
+            </div>
+            <div class="li g" data-i18n="officialTip1">零配置，登录即用，无需部署服务器</div>
+            <div class="li g" data-i18n="officialTip2">手机 App 登录后自动发现会话，无需扫码</div>
+            <div class="li g" data-i18n="officialTip3">订阅到期自动断开，数据不留存</div>
           </div>
         </div>
       </div>
@@ -943,6 +993,10 @@
           <p style="color:var(--text-sec)" data-i18n="docsFaq5A">使用 --screen 参数启动后，通过 WebRTC 以 30fps
             实时传输桌面画面。网络条件不佳时自动降级为截图流模式。</p>
         </div>
+        <div style="margin-top:24px">
+          <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq6Q">Q: 官方 Gateway 是什么？和自建有什么区别？</p>
+          <p style="color:var(--text-sec)" data-i18n="docsFaq6A">官方 Gateway 是 LinkShell 团队托管的公网网关，订阅 iTool Pro 即可使用。无需自建服务器，登录后一键连接。手机 App 登录同一账号后自动发现会话，无需扫码。自建网关则完全独立，不依赖任何第三方服务。</p>
+        </div>
       </div>
     </div>
   </section>
@@ -1017,7 +1071,7 @@
         heroTitleSep: "，",
         heroTitle2: "随时随地，自由接管",
         heroLead: "纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。",
-        heroGateway: "🎁 限时免费体验公网 Gateway 地址：wss://zkiwacrrxzaj.sealosbja.site/ws",
+        heroGateway: "🚀 Pro 订阅用户可直接使用官方 Gateway，无需自建服务器。了解更多 →",
         btnStart: "立即部署",
         btnGithub: "查看仓库",
         btnAndroid: "Android 下载",
@@ -1073,10 +1127,14 @@
         docsCmdDoctor: "环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。",
         docsCmdStatus: "查看当前运行状态。显示活跃会话、网关连接状态和守护进程信息。",
         docsCmdStop: "停止守护进程。优雅关闭桥接会话和内置网关。",
+        docsCmdLogin: "登录 iTool 账号。浏览器跳转授权后自动保存凭证，Pro 用户可直接选择官方 Gateway 连接。",
+        docsCmdLogout: "退出登录，清除本地凭证。",
+        docsCmdList: "列出官方 Gateway 上你的活跃会话。需要先登录。",
         docsDeployTitle: "部署方式",
         docsDeployDesc: "根据你的网络环境选择合适的部署方式。",
         tabLan: "局域网",
         tabPublic: "公网",
+        tabOfficial: "官方 Gateway",
         docsDeployLocal: "本地直连（最简单）",
         docsDeployLocalDesc: "CLI 内置网关，同一局域网内手机直连电脑。零配置，开箱即用。",
         docsDeployRemote: "远程服务器",
@@ -1090,6 +1148,13 @@
         pubTip1: "支持跨网络、4G/5G 随时接入",
         pubTip2: "推荐 Nginx 反代 + Let's Encrypt HTTPS",
         pubTip3: "数据仅经过你自己的服务器中继",
+        docsDeployOfficial: "官方托管 Gateway",
+        docsDeployOfficialTag: "[Pro]",
+        docsDeployOfficialDesc: "订阅 iTool Pro 即可使用官方托管的 Gateway，无需自建服务器。登录后自动连接，手机 App 自动发现会话。",
+        officialTip1: "零配置，登录即用，无需部署服务器",
+        officialTip2: "手机 App 登录后自动发现会话，无需扫码",
+        officialTip3: "订阅到期自动断开，数据不留存",
+        qsOfficialDesc: "Pro 订阅用户直接使用官方托管 Gateway，一条命令登录即可连接。",
         docsProtocolTitle: "协议与可靠性",
         docsProtoMsgTypes: "消息类型 (Zod)",
         docsProtoAck: "双层缓冲确认",
@@ -1129,6 +1194,8 @@
         docsFaq4A: "本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。",
         docsFaq5Q: "Q: 远程桌面功能如何工作？",
         docsFaq5A: "使用 --screen 参数启动后，通过 WebRTC 以 30fps 实时传输桌面画面。网络条件不佳时自动降级为截图流模式。",
+        docsFaq6Q: "Q: 官方 Gateway 是什么？和自建有什么区别？",
+        docsFaq6A: "官方 Gateway 是 LinkShell 团队托管的公网网关，订阅 iTool Pro 即可使用。无需自建服务器，登录后一键连接。手机 App 登录同一账号后自动发现会话，无需扫码。自建网关则完全独立，不依赖任何第三方服务。",
         ctaTitle: "准备好你的第一次漫游了吗？",
         ctaDesc: "放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。",
         footerText: "出于对 Vibe Coding 的热爱。© 2026 MIT 开源。",
@@ -1150,7 +1217,7 @@
         heroTitleSep: " — ",
         heroTitle2: "Take over anywhere.",
         heroLead: "A pure Terminal Bridge architecture. Keep heavy workloads on your desktop, and claim the PTY session from your phone anywhere.",
-        heroGateway: "🎁 Free trial Gateway: wss://zkiwacrrxzaj.sealosbja.site/ws",
+        heroGateway: "🚀 Pro subscribers get instant access to Official Gateway — no server setup needed. Learn more →",
         btnStart: "Deploy Now",
         btnGithub: "View Repo",
         btnAndroid: "Android Download",
@@ -1213,10 +1280,14 @@
         docsCmdDoctor: "Environment diagnostic tool. Checks Node.js version, dependency integrity, network connectivity, and more.",
         docsCmdStatus: "View current running status. Shows active sessions, gateway connection state, and daemon info.",
         docsCmdStop: "Stop the daemon. Gracefully shuts down bridge sessions and the built-in gateway.",
+        docsCmdLogin: "Log in to your iTool account. Opens browser for OAuth, then Pro users can pick an official Gateway to connect.",
+        docsCmdLogout: "Log out and clear local credentials.",
+        docsCmdList: "List your active sessions on official Gateways. Requires login.",
         docsDeployTitle: "Deployment Options",
         docsDeployDesc: "Choose the right deployment for your network setup.",
         tabLan: "LAN",
         tabPublic: "Public",
+        tabOfficial: "Official Gateway",
         docsDeployLocal: "Local Direct (Simplest)",
         docsDeployLocalDesc: "CLI has a built-in gateway. Phone connects directly to your computer on the same LAN. Zero config.",
         docsDeployRemote: "Remote Server",
@@ -1230,6 +1301,13 @@
         pubTip1: "Cross-network access via 4G/5G anytime",
         pubTip2: "Recommended: Nginx reverse proxy + Let's Encrypt HTTPS",
         pubTip3: "Data only passes through your own server relay",
+        docsDeployOfficial: "Official Managed Gateway",
+        docsDeployOfficialTag: "[Pro]",
+        docsDeployOfficialDesc: "Subscribe to iTool Pro to use the officially managed Gateway. No server setup needed. Auto-connect after login, and the mobile App discovers sessions automatically.",
+        officialTip1: "Zero config — log in and go, no server to deploy",
+        officialTip2: "Mobile App auto-discovers sessions after login, no QR scan needed",
+        officialTip3: "Auto-disconnect on subscription expiry, no data retained",
+        qsOfficialDesc: "Pro subscribers connect to the official managed Gateway with a single login command.",
         docsProtocolTitle: "Protocol & Reliability",
         docsProtoMsgTypes: "Message Types (Zod)",
         docsProtoAck: "Dual-layer ACK",
@@ -1262,6 +1340,8 @@
         docsFaq4A: "In local mode, data stays entirely within your LAN. In remote mode, data passes through your own self-hosted gateway relay — never through any third-party server.",
         docsFaq5Q: "Q: How does the remote desktop feature work?",
         docsFaq5A: "With the --screen flag, your desktop is streamed at 30fps via WebRTC. On poor network conditions, it automatically falls back to screenshot streaming.",
+        docsFaq6Q: "Q: What is the Official Gateway? How is it different from self-hosted?",
+        docsFaq6A: "The Official Gateway is a managed public relay hosted by the LinkShell team, available to iTool Pro subscribers. No server setup needed — just log in and connect. The mobile App auto-discovers your sessions when logged into the same account. Self-hosted gateways are fully independent with no third-party dependency.",
         ctaTitle: "Ready for your first roam?",
         ctaDesc: "Skip the heavy cloud VM migrations. Set up the relay in seconds and put your whole dev environment in your pocket.",
         footerText: "Crafted for Vibe Coding. © 2026 Open Source / MIT.",

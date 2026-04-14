@@ -6,6 +6,7 @@ import {
   serializeEnvelope,
 } from "@linkshell/protocol";
 import type { Envelope } from "@linkshell/protocol";
+import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 import { getDeviceToken, setDeviceToken } from "../storage/device-token";
 
 export type ConnectionStatus =
@@ -553,9 +554,7 @@ export function useSession({
       const probe = async () => {
         try {
           const base = activeGatewayBaseUrlRef.current;
-          const res = await fetch(`${base}/healthz`, {
-            signal: AbortSignal.timeout(5_000),
-          });
+          const res = await fetchWithTimeout(`${base}/healthz`, {}, 5_000);
           if (res.ok) {
             // Gateway is back — reconnect automatically
             reconnectAttempts.current = 0;

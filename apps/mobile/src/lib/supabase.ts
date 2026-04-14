@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 
 const SUPABASE_URL = "https://mkbeusztkzffnzjdwmqk.supabase.co";
 const SUPABASE_ANON_KEY =
@@ -41,15 +42,15 @@ export async function clearSession(): Promise<void> {
 
 async function fetchUserPlan(accessToken: string, userId: string): Promise<string> {
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=plan,plan_expires_at&limit=1`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           apikey: SUPABASE_ANON_KEY,
         },
-        signal: AbortSignal.timeout(5_000),
       },
+      5_000,
     );
     if (res.ok) {
       const profiles = (await res.json()) as { plan: string; plan_expires_at: string | null }[];
@@ -69,15 +70,14 @@ export async function signUp(
   password: string,
 ): Promise<{ session: AuthSession | null; error: string | null }> {
   try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+    const res = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/signup`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         apikey: SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({ email, password }),
-      signal: AbortSignal.timeout(10_000),
-    });
+    }, 10_000);
     const body = await res.json() as any;
     if (!res.ok) {
       return { session: null, error: body.error_description || body.msg || "Sign up failed" };
@@ -104,7 +104,7 @@ export async function signIn(
   password: string,
 ): Promise<{ session: AuthSession | null; error: string | null }> {
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${SUPABASE_URL}/auth/v1/token?grant_type=password`,
       {
         method: "POST",
@@ -113,8 +113,8 @@ export async function signIn(
           apikey: SUPABASE_ANON_KEY,
         },
         body: JSON.stringify({ email, password }),
-        signal: AbortSignal.timeout(10_000),
       },
+      10_000,
     );
     const body = await res.json() as any;
     if (!res.ok) {
@@ -138,14 +138,13 @@ export async function signOut(): Promise<void> {
   const session = await loadSession();
   if (session) {
     try {
-      await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+      await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/logout`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${session.accessToken}`,
           apikey: SUPABASE_ANON_KEY,
         },
-        signal: AbortSignal.timeout(5_000),
-      });
+      }, 5_000);
     } catch {}
   }
   await clearSession();
@@ -156,7 +155,7 @@ export async function refreshSession(): Promise<AuthSession | null> {
   if (!session?.refreshToken) return null;
 
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,
       {
         method: "POST",
@@ -165,8 +164,8 @@ export async function refreshSession(): Promise<AuthSession | null> {
           apikey: SUPABASE_ANON_KEY,
         },
         body: JSON.stringify({ refresh_token: session.refreshToken }),
-        signal: AbortSignal.timeout(10_000),
       },
+      10_000,
     );
     if (!res.ok) return null;
     const body = await res.json() as any;
@@ -196,7 +195,7 @@ export async function registerDeviceToken(
   if (!session) return;
 
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/linkshell_device_tokens`, {
+    await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/linkshell_device_tokens`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -210,8 +209,7 @@ export async function registerDeviceToken(
         device_name: deviceName,
         platform,
       }),
-      signal: AbortSignal.timeout(5_000),
-    });
+    }, 5_000);
   } catch {}
 }
 
@@ -229,15 +227,15 @@ export async function fetchOfficialGateways(): Promise<OfficialGateway[]> {
   if (!session) return [];
 
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${SUPABASE_URL}/rest/v1/linkshell_official_gateways?enabled=eq.true&select=url,name,region`,
       {
         headers: {
           Authorization: `Bearer ${session.accessToken}`,
           apikey: SUPABASE_ANON_KEY,
         },
-        signal: AbortSignal.timeout(5_000),
       },
+      5_000,
     );
     if (res.ok) {
       return (await res.json()) as OfficialGateway[];
@@ -267,12 +265,11 @@ export async function fetchMySessions(
   if (!session) return [];
 
   try {
-    const res = await fetch(`${gatewayUrl}/sessions/mine`, {
+    const res = await fetchWithTimeout(`${gatewayUrl}/sessions/mine`, {
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
       },
-      signal: AbortSignal.timeout(5_000),
-    });
+    }, 5_000);
     if (res.ok) {
       const body = (await res.json()) as { sessions: any[] };
       return body.sessions ?? [];

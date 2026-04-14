@@ -14,10 +14,18 @@ const ITOOL_AUTH_URL = "https://itool.tech/en/auth/linkshell";
  * 4. iTool redirects back to localhost with Supabase tokens
  * 5. Save tokens to ~/.linkshell/auth.json
  */
-export async function runLogin(): Promise<void> {
+export interface LoginResult {
+  success: boolean;
+  plan: "pro" | "free";
+  email: string;
+  userId: string;
+  accessToken: string;
+}
+
+export async function runLogin(): Promise<LoginResult | null> {
   process.stderr.write("\n  LinkShell Login\n\n");
 
-  return new Promise<void>((resolve) => {
+  return new Promise<LoginResult | null>((resolve) => {
     const server = http.createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
 
@@ -130,7 +138,13 @@ export async function runLogin(): Promise<void> {
 
         setTimeout(() => {
           server.close();
-          resolve();
+          resolve({
+            success: true,
+            plan: plan as "pro" | "free",
+            email,
+            userId,
+            accessToken,
+          });
         }, 500);
         return;
       }
@@ -145,7 +159,7 @@ export async function runLogin(): Promise<void> {
         process.stderr.write(
           "  \x1b[31m✗\x1b[0m Failed to start local server\n\n",
         );
-        resolve();
+        resolve(null);
         return;
       }
 
@@ -171,7 +185,7 @@ export async function runLogin(): Promise<void> {
       setTimeout(() => {
         process.stderr.write("  Login timed out.\n\n");
         server.close();
-        resolve();
+        resolve(null);
       }, 5 * 60 * 1000);
     });
   });
