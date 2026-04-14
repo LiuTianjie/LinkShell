@@ -374,7 +374,97 @@ program
   .command("login")
   .description("Log in to LinkShell (enables premium gateway)")
   .action(async () => {
-    await runLogin();
+    const result = await runLogin();
+    if (!result) return;
+
+    if (result.plan !== "pro") {
+      process.stderr.write(
+        "  Upgrade to Pro for official gateway access: https://itool.tech\n\n",
+      );
+      return;
+    }
+
+    // Pro user — fetch official gateways and offer to connect
+    const { SUPABASE_URL, SUPABASE_ANON_KEY } = await import("./auth.js");
+    let gateways: { url: string; name: string; region: string | null }[] = [];
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/linkshell_official_gateways?enabled=eq.true&select=url,name,region`,
+        {
+          headers: {
+            Authorization: `Bearer ${result.accessToken}`,
+            apikey: SUPABASE_ANON_KEY,
+          },
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (res.ok) {
+        gateways = (await res.json()) as typeof gateways;
+      }
+    } catch {}
+
+    if (gateways.length === 0) {
+      process.stderr.write("  No official gateways available yet.\n\n");
+      return;
+    }
+
+    process.stderr.write("  Available gateways:\n\n");
+    for (let i = 0; i < gateways.length; i++) {
+      const gw = gateways[i]!;
+      const label = gw.region ? `${gw.name} (${gw.region})` : gw.name;
+      process.stderr.write(`    [${i + 1}] ${label}  ${gw.url}\n`);
+    }
+    process.stderr.write(`    [0] Skip\n\n`);
+
+    const { createInterface } = await import("node:readline");
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    const answer = await new Promise<string>((res) => {
+      rl.question("  Connect to gateway [1]: ", (ans) => {
+        rl.close();
+        res(ans.trim());
+      });
+    });
+
+    if (answer === "0") return;
+
+    const idx = (answer === "" ? 1 : Number(answer)) - 1;
+    if (idx < 0 || idx >= gateways.length || Number.isNaN(idx)) {
+      process.stderr.write("  Invalid choice.\n\n");
+      return;
+    }
+
+    const chosen = gateways[idx]!;
+    const gwWsUrl = chosen.url.replace(/\/$/, "").replace(/^https:/, "wss:").replace(/^http:/, "ws:") + "/ws";
+
+    process.stderr.write(`\n  Connecting to ${chosen.name}...\n`);
+
+    // Start daemon with the chosen gateway
+    const daemon = await import("./utils/daemon.js");
+    const existingPid = daemon.readPid("bridge");
+    if (existingPid) {
+      process.stderr.write(
+        `  Bridge already running (PID ${existingPid}). Run: linkshell stop\n\n`,
+      );
+      return;
+    }
+
+    const childArgs = [
+      "start",
+      "--_foreground-bridge",
+      "--gateway", gwWsUrl,
+      "--provider", config.provider ?? "claude",
+      "--client-name", config.clientName ?? "local-cli",
+      "--cols", String(config.cols ?? 120),
+      "--rows", String(config.rows ?? 36),
+    ];
+
+    const pid = daemon.spawnDaemon("bridge", childArgs);
+    process.stderr.write(`\n  \x1b[32m✓\x1b[0m Bridge started in background (PID ${pid})\n`);
+    process.stderr.write(`    Gateway: ${chosen.name}\n`);
+    process.stderr.write(`    Open the LinkShell app on your phone to connect.\n\n`);
+    process.stderr.write(`    Stop:   linkshell stop\n`);
+    process.stderr.write(`    Status: linkshell status\n`);
+    process.stderr.write(`    Logs:   tail -f ${daemon.getLogFile("bridge")}\n\n`);
   });
 
 program
@@ -448,7 +538,8 @@ program
       } catch {}
 
       process.stderr.write(`  \x1b[32m✓\x1b[0m ${label}\n`);
-      process.stderr.write(`    ${gw.url}\n`);
+      const wsUrl = gw.url.replace(/\/$/, "").replace(/^https:/, "wss:").replace(/^http:/, "ws:") + "/ws";
+      process.stderr.write(`    ${wsUrl}\n`);
 
       if (sessions.length === 0) {
         process.stderr.write("    (no active sessions)\n\n");
