@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { useTheme, type Theme } from "../theme";
@@ -310,6 +311,7 @@ function GatewaySection({
                 paddingVertical: 20,
                 paddingHorizontal: 16,
                 alignItems: "center",
+                gap: 6,
               }}
             >
               <Text
@@ -320,6 +322,23 @@ function GatewaySection({
               >
                 暂无活动会话
               </Text>
+              {group.server.isOfficial ? (
+                <Text
+                  style={{
+                    color: theme.textTertiary,
+                    fontSize: 12,
+                    textAlign: "center",
+                    lineHeight: 18,
+                    marginTop: 4,
+                  }}
+                >
+                  在电脑终端运行{" "}
+                  <Text style={{ color: theme.accent, fontWeight: "600" }}>
+                    linkshell login
+                  </Text>{" "}
+                  登录并连接官方网关
+                </Text>
+              ) : null}
             </View>
           ) : (
             group.sessions.map((session, i) => (
@@ -472,6 +491,7 @@ export function SessionListScreen({
 
     // Fetch official gateway sessions for Pro users
     const session = await loadSession();
+    const officialUrls = new Set<string>();
     if (session && session.user.plan === "pro") {
       try {
         const officialGws = await fetchOfficialGateways();
@@ -480,6 +500,7 @@ export function SessionListScreen({
         );
         for (let i = 0; i < officialGws.length; i++) {
           const gw = officialGws[i]!;
+          officialUrls.add(gw.url.replace(/\/+$/, ""));
           const result = officialResults[i]!;
           const sessions =
             result.status === "fulfilled"
@@ -493,6 +514,7 @@ export function SessionListScreen({
               name: `⚡ ${gw.name}${gw.region ? ` (${gw.region})` : ""}`,
               isDefault: false,
               addedAt: 0,
+              isOfficial: true,
             },
             sessions,
             loading: false,
@@ -500,6 +522,16 @@ export function SessionListScreen({
           });
         }
       } catch {}
+    }
+
+    // Remove saved servers that duplicate official gateways
+    if (officialUrls.size > 0) {
+      for (let i = finalGroups.length - 1; i >= 0; i--) {
+        const g = finalGroups[i]!;
+        if (!g.server.isOfficial && officialUrls.has(g.server.url.replace(/\/+$/, ""))) {
+          finalGroups.splice(i, 1);
+        }
+      }
     }
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -510,6 +542,13 @@ export function SessionListScreen({
   useEffect(() => {
     fetchAllGateways();
   }, [fetchAllGateways, refreshKey]);
+
+  // Refresh when tab gains focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchAllGateways();
+    }, [fetchAllGateways]),
+  );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -569,7 +608,7 @@ export function SessionListScreen({
         {/* Gateway sections */}
         {groups.map((group, index) => (
           <GatewaySection
-            key={group.server.url}
+            key={`${group.server.isOfficial ? "official-" : ""}${group.server.url}`}
             group={group}
             theme={theme}
             onSelect={onSelectSession}

@@ -409,7 +409,20 @@ wss.on(
 
     if (role === "client") {
       const token = url.searchParams.get("token");
-      if (!token || !tokenManager.owns(token, sessionId)) {
+      const authResult = (_request as any).__authResult as
+        | { userId?: string }
+        | undefined;
+      const session = sessionManager.get(sessionId);
+
+      // Allow if: device token owns session, OR auth user owns session
+      const tokenOwns = token && tokenManager.owns(token, sessionId);
+      const authOwns =
+        AUTH_REQUIRED &&
+        authResult?.userId &&
+        session?.userId &&
+        authResult.userId === session.userId;
+
+      if (!tokenOwns && !authOwns) {
         socket.close(4001, "unauthorized");
         return;
       }

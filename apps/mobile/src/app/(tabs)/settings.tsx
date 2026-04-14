@@ -12,6 +12,7 @@ export default function SettingsTab() {
       gatewayBaseUrl={ctx.gatewayBaseUrl}
       onGatewayChange={ctx.setGatewayBaseUrl}
       onOpenGatewayList={() => router.push("/gateway-list")}
+      onAuthChanged={() => ctx.setSessionRefreshKey((k) => k + 1)}
     />
   );
 }
