@@ -7,6 +7,7 @@ import {
 } from "@linkshell/protocol";
 import type { SessionManager } from "./sessions.js";
 import type { TokenManager } from "./tokens.js";
+import { AUTH_REQUIRED } from "./auth-middleware.js";
 
 const TUNNEL_TIMEOUT = 30_000;
 const MAX_TUNNEL_BODY = 10 * 1024 * 1024; // 10MB
@@ -111,16 +112,50 @@ export async function handleTunnelRequest(
 ): Promise<void> {
   const { sessionId, port, path } = parsed;
 
-  // Auth
+  // Auth: device token OR Supabase JWT (userId owns session)
   const token = preAuthToken || extractToken(req, url);
-  if (!token || !tokens.owns(token, sessionId)) {
+  const tokenOwns = token && tokens.owns(token, sessionId);
+  let authOwns = false;
+  let authJwt: string | null = null;
+  if (!tokenOwns && AUTH_REQUIRED) {
+    // Try preAuthToken as JWT first (from cookie fallback), then from request headers/params
+    const jwtCandidate = preAuthToken || url.searchParams.get("auth_token") || (() => {
+      const auth = req.headers.authorization;
+      if (auth) { const m = auth.match(/^Bearer\s+(.+)$/i); if (m?.[1]) return m[1]; }
+      return null;
+    })();
+    if (jwtCandidate) {
+      try {
+        const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
+        const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY ?? "";
+        if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+          const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+            headers: { Authorization: `Bearer ${jwtCandidate}`, apikey: SUPABASE_ANON_KEY },
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (userRes.ok) {
+            const user = (await userRes.json()) as { id: string };
+            const session = sessions.get(sessionId);
+            if (user.id && session?.userId && user.id === session.userId) {
+              authOwns = true;
+              authJwt = jwtCandidate;
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+  if (!tokenOwns && !authOwns) {
     errorResponse(res, 401, "Unauthorized");
     return;
   }
 
-  // Set auth cookie for subsequent sub-resource requests (root path so /_next/... etc. are covered)
-  const cookieVal = encodeURIComponent(`${sessionId}:${port}:${token}`);
-  res.setHeader("Set-Cookie", `lsh_tunnel=${cookieVal}; Path=/; HttpOnly; SameSite=Lax`);
+  // Set auth cookie for subsequent sub-resource requests
+  const cookieToken = tokenOwns ? token : authJwt;
+  if (cookieToken) {
+    const cookieVal = encodeURIComponent(`${sessionId}:${port}:${cookieToken}`);
+    res.setHeader("Set-Cookie", `lsh_tunnel=${cookieVal}; Path=/; HttpOnly; SameSite=Lax`);
+  }
 
   // Validate session & host
   const session = sessions.get(sessionId);
@@ -290,18 +325,43 @@ export function cleanupSessionTunnels(sessionId: string): void {
   sessionRequests.delete(sessionId);
 }
 
-export function handleTunnelWsUpgrade(
+export async function handleTunnelWsUpgrade(
   ws: WebSocket,
   parsed: { sessionId: string; port: number; path: string },
   url: URL,
   sessions: SessionManager,
   tokens: TokenManager,
-): void {
+): Promise<void> {
   const { sessionId, port, path } = parsed;
 
-  // Auth from query param or cookie in upgrade request
+  // Auth: device token OR Supabase JWT (userId owns session)
   const token = url.searchParams.get("token");
-  if (!token || !tokens.owns(token, sessionId)) {
+  const tokenOwns = token && tokens.owns(token, sessionId);
+  let authOwns = false;
+  if (!tokenOwns && AUTH_REQUIRED) {
+    // Try auth_token param first, then fall back to token param (cookie fallback stores JWT there)
+    const authToken = url.searchParams.get("auth_token") || token;
+    if (authToken) {
+      try {
+        const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
+        const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY ?? "";
+        if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+          const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+            headers: { Authorization: `Bearer ${authToken}`, apikey: SUPABASE_ANON_KEY },
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (userRes.ok) {
+            const user = (await userRes.json()) as { id: string };
+            const session = sessions.get(sessionId);
+            if (user.id && session?.userId && user.id === session.userId) {
+              authOwns = true;
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+  if (!tokenOwns && !authOwns) {
     ws.close(4001, "Unauthorized");
     return;
   }

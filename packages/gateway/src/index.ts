@@ -216,7 +216,26 @@ async function handleRequest(
     return;
   }
 
-  // Auth check for premium gateway (skip healthz and /sessions/mine)
+  // Tunnel HTTP proxy (explicit path) — before AUTH_REQUIRED, tunnel has its own auth
+  const tunnelParsed = parseTunnelPath(url.pathname);
+  if (tunnelParsed) {
+    await handleTunnelRequest(req, res, sessionManager, tokenManager, tunnelParsed, url);
+    return;
+  }
+
+  // Tunnel fallback: cookie-based routing for sub-resources (e.g. /_next/static/...)
+  const tunnelCookie = parseTunnelCookie(req);
+  if (tunnelCookie) {
+    const fallbackParsed = {
+      sessionId: tunnelCookie.sessionId,
+      port: tunnelCookie.port,
+      path: url.pathname,
+    };
+    await handleTunnelRequest(req, res, sessionManager, tokenManager, fallbackParsed, url, tunnelCookie.token);
+    return;
+  }
+
+  // Auth check for premium gateway (skip healthz, /sessions/mine, tunnel)
   if (AUTH_REQUIRED) {
     const authResult = await requireAuth(req, res);
     if (!authResult) return; // response already sent
@@ -314,25 +333,6 @@ async function handleRequest(
     return;
   }
 
-  // Tunnel HTTP proxy (explicit path)
-  const tunnelParsed = parseTunnelPath(url.pathname);
-  if (tunnelParsed) {
-    await handleTunnelRequest(req, res, sessionManager, tokenManager, tunnelParsed, url);
-    return;
-  }
-
-  // Tunnel fallback: cookie-based routing for sub-resources (e.g. /_next/static/...)
-  const tunnelCookie = parseTunnelCookie(req);
-  if (tunnelCookie) {
-    const fallbackParsed = {
-      sessionId: tunnelCookie.sessionId,
-      port: tunnelCookie.port,
-      path: url.pathname,
-    };
-    await handleTunnelRequest(req, res, sessionManager, tokenManager, fallbackParsed, url, tunnelCookie.token);
-    return;
-  }
-
   json(res, 404, { error: "not_found" });
 }
 
@@ -357,8 +357,8 @@ server.on("upgrade", (request, socket, head) => {
     }
     // Import dynamically to handle tunnel WS upgrade
     import("./tunnel.js").then(({ handleTunnelWsUpgrade }) => {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        handleTunnelWsUpgrade(ws, tunnelParsed, url, sessionManager, tokenManager);
+      wss.handleUpgrade(request, socket, head, async (ws) => {
+        await handleTunnelWsUpgrade(ws, tunnelParsed, url, sessionManager, tokenManager);
       });
     });
     return;
@@ -374,10 +374,9 @@ server.on("upgrade", (request, socket, head) => {
     };
     // Inject token into URL so handleTunnelWsUpgrade can auth
     url.searchParams.set("token", tunnelCookie.token);
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      import("./tunnel.js").then(({ handleTunnelWsUpgrade }) => {
-        handleTunnelWsUpgrade(ws, fallbackParsed, url, sessionManager, tokenManager);
-      });
+    wss.handleUpgrade(request, socket, head, async (ws) => {
+      const { handleTunnelWsUpgrade } = await import("./tunnel.js");
+      await handleTunnelWsUpgrade(ws, fallbackParsed, url, sessionManager, tokenManager);
     });
     return;
   }

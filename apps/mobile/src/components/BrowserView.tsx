@@ -19,6 +19,7 @@ interface BrowserViewProps {
   gatewayUrl: string;
   sessionId: string;
   deviceToken: string | null;
+  authToken: string | null;
   onToggleFullscreen?: () => void;
   isFullscreen?: boolean;
 }
@@ -30,6 +31,7 @@ export function BrowserView({
   gatewayUrl,
   sessionId,
   deviceToken,
+  authToken,
   onToggleFullscreen,
   isFullscreen,
 }: BrowserViewProps) {
@@ -47,7 +49,7 @@ export function BrowserView({
   const [pageThemeColor, setPageThemeColor] = useState<string | null>(null);
 
   const tunnelUrl = activePort
-    ? `${gatewayUrl}/tunnel/${encodeURIComponent(sessionId)}/${activePort}/${deviceToken ? `?token=${encodeURIComponent(deviceToken)}` : ""}`
+    ? `${gatewayUrl}/tunnel/${encodeURIComponent(sessionId)}/${activePort}/${deviceToken ? `?token=${encodeURIComponent(deviceToken)}` : authToken ? `?auth_token=${encodeURIComponent(authToken)}` : ""}`
     : null;
 
   const handleGo = useCallback(() => {
@@ -186,14 +188,85 @@ export function BrowserView({
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      {/* URL bar */}
+    <View style={[styles.container, { backgroundColor: theme.bgTerminal }]}>
+      {/* Current URL display — top */}
+      {currentUrl ? (
+        <View
+          style={[
+            styles.urlDisplay,
+            { backgroundColor: theme.bgTerminal, borderBottomColor: theme.separator },
+          ]}
+        >
+          <Text
+            style={[styles.urlText, { color: theme.textTertiary }]}
+            numberOfLines={1}
+            ellipsizeMode="middle"
+          >
+            {currentUrl}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* WebView or placeholder */}
+      {tunnelUrl ? (
+        <View style={styles.webViewContainer}>
+          <WebView
+            key={webViewKey}
+            ref={webViewRef}
+            source={{ uri: tunnelUrl }}
+            style={{ backgroundColor: theme.bgTerminal }}
+            onLoadStart={() => setLoading(true)}
+            onLoadEnd={() => setLoading(false)}
+            onNavigationStateChange={(navState) => {
+              setCanGoBack(navState.canGoBack);
+              setCanGoForward(navState.canGoForward);
+              setCurrentUrl(navState.url);
+            }}
+            injectedJavaScript={INJECTED_JS}
+            onMessage={handleWebViewMessage}
+            {...webViewDesktopProps}
+            sharedCookiesEnabled
+            javaScriptEnabled
+            domStorageEnabled
+            allowsInlineMediaPlayback
+            mediaPlaybackRequiresUserAction={false}
+          />
+          {loading && (
+            <View style={styles.loadingOverlay}>
+              <ActivityIndicator size="small" color={theme.accent} />
+            </View>
+          )}
+        </View>
+      ) : (
+        <View style={styles.placeholder}>
+          <AppSymbol name="globe" size={48} color={theme.textTertiary} />
+          <Text style={[styles.placeholderText, { color: theme.textSecondary }]}>
+            输入端口号预览远程服务
+          </Text>
+          <Text
+            style={[styles.placeholderHint, { color: theme.textTertiary }]}
+          >
+            例如: 3000, 5173, 8080
+          </Text>
+          <View style={styles.versionHint}>
+            <Text style={[styles.versionText, { color: theme.textTertiary }]}>
+              需要 linkshell-cli {"\u2265"} 0.2.53 / gateway {"\u2265"} 0.2.17
+            </Text>
+            <Text style={[styles.versionText, { color: theme.textTertiary }]}>
+              npm i -g linkshell-cli 更新
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Bottom bar — Safari style */}
       <View
         style={[
           styles.urlBar,
           {
-            backgroundColor: theme.bgCard,
-            borderBottomColor: theme.separator,
+            backgroundColor: theme.bgTerminal,
+            borderTopColor: theme.separator,
+            paddingBottom: Math.max(insets.bottom, 8),
           },
         ]}
       >
@@ -286,76 +359,6 @@ export function BrowserView({
           </Pressable>
         )}
       </View>
-
-      {/* Current URL display */}
-      {currentUrl ? (
-        <View
-          style={[
-            styles.urlDisplay,
-            { backgroundColor: theme.bgCard, borderBottomColor: theme.separator },
-          ]}
-        >
-          <Text
-            style={[styles.urlText, { color: theme.textTertiary }]}
-            numberOfLines={1}
-            ellipsizeMode="middle"
-          >
-            {currentUrl}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* WebView or placeholder */}
-      {tunnelUrl ? (
-        <View style={styles.webViewContainer}>
-          <WebView
-            key={webViewKey}
-            ref={webViewRef}
-            source={{ uri: tunnelUrl }}
-            style={{ backgroundColor: theme.bg }}
-            onLoadStart={() => setLoading(true)}
-            onLoadEnd={() => setLoading(false)}
-            onNavigationStateChange={(navState) => {
-              setCanGoBack(navState.canGoBack);
-              setCanGoForward(navState.canGoForward);
-              setCurrentUrl(navState.url);
-            }}
-            injectedJavaScript={INJECTED_JS}
-            onMessage={handleWebViewMessage}
-            {...webViewDesktopProps}
-            sharedCookiesEnabled
-            javaScriptEnabled
-            domStorageEnabled
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-          />
-          {loading && (
-            <View style={styles.loadingOverlay}>
-              <ActivityIndicator size="small" color={theme.accent} />
-            </View>
-          )}
-        </View>
-      ) : (
-        <View style={styles.placeholder}>
-          <AppSymbol name="globe" size={48} color={theme.textTertiary} />
-          <Text style={[styles.placeholderText, { color: theme.textSecondary }]}>
-            输入端口号预览远程服务
-          </Text>
-          <Text
-            style={[styles.placeholderHint, { color: theme.textTertiary }]}
-          >
-            例如: 3000, 5173, 8080
-          </Text>
-          <View style={styles.versionHint}>
-            <Text style={[styles.versionText, { color: theme.textTertiary }]}>
-              需要 linkshell-cli {"\u2265"} 0.2.53 / gateway {"\u2265"} 0.2.17
-            </Text>
-            <Text style={[styles.versionText, { color: theme.textTertiary }]}>
-              npm i -g linkshell-cli 更新
-            </Text>
-          </View>
-        </View>
-      )}
     </View>
   );
 }
@@ -369,7 +372,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 8,
     paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: StyleSheet.hairlineWidth,
     gap: 4,
   },
   navBtn: {

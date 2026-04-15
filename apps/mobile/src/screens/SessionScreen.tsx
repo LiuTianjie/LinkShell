@@ -21,6 +21,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import { MenuView } from "@react-native-menu/menu";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { GlassBar } from "../components/GlassBar";
@@ -35,6 +36,8 @@ import type { Theme } from "../theme";
 
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { HistorySheet } from "../components/HistorySheet";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 
 const SHORTCUT_BAR_HEIGHT = 44;
 const VOICE_BAR_HEIGHT = 40;
@@ -112,6 +115,7 @@ interface SessionScreenProps {
   // Tunnel browser
   gatewayUrl?: string;
   deviceToken?: string | null;
+  authToken?: string | null;
   // Shell history
   historyEntries?: string[];
   onRequestHistory?: () => void;
@@ -151,6 +155,7 @@ export function SessionScreen({
   onRemoveTerminal,
   gatewayUrl,
   deviceToken,
+  authToken,
   historyEntries,
   onRequestHistory,
 }: SessionScreenProps) {
@@ -183,9 +188,9 @@ export function SessionScreen({
   const [keyboardHintVisible, setKeyboardHintVisible] = useState(false);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [keyboardInset, setKeyboardInset] = useState(0);
-  const [activeTab, setActiveTab] = useState<"terminal" | "desktop" | "browser">(
-    "terminal",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "terminal" | "desktop" | "browser"
+  >("terminal");
   const [showTerminalGrid, setShowTerminalGrid] = useState(false);
   const [browserFullscreen, setBrowserFullscreen] = useState(false);
 
@@ -438,14 +443,8 @@ export function SessionScreen({
   const isErrorState = status === "disconnected" || status.startsWith("error:");
   const showFullOverlay = isConnecting || isHostOffline || isErrorState;
 
-  const toolbarBg =
-    theme.mode === "light" ? "#efeff4" : "rgba(255,255,255,0.1)";
-
-  const chromeBg = theme.mode === "light" ? "#fafafa" : theme.bgElevated;
-
   return (
     <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
-      {/* Terminal content — fills entire area, scrolls behind header */}
       <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
         <View
           style={{
@@ -463,7 +462,7 @@ export function SessionScreen({
           >
             <TerminalStage
               bottomInset={stageBottomInset}
-              headerPadding={insets.top + 46}
+              headerPadding={insets.top}
               keyboardUp={keyboardVisible}
               inputDisabled={inputDisabled}
               keyboardHintVisible={keyboardHintVisible && !keyboardVisible}
@@ -516,13 +515,14 @@ export function SessionScreen({
                 browserFullscreen
                   ? { top: 0, bottom: 0 }
                   : { top: insets.top + 40, bottom: stageBottomInset },
-                {  opacity: activeTab === "browser" ? 1 : 0 },
+                { opacity: activeTab === "browser" ? 1 : 0 },
               ]}
             >
               <BrowserView
                 gatewayUrl={gatewayUrl}
                 sessionId={sessionId}
                 deviceToken={deviceToken ?? null}
+                authToken={authToken ?? null}
                 isFullscreen={browserFullscreen}
                 onToggleFullscreen={() => setBrowserFullscreen((f) => !f)}
               />
@@ -544,130 +544,140 @@ export function SessionScreen({
         </View>
       </View>
 
-      {/* Top overlay — over scrolling content */}
+      {/* Top overlay — floating elements over terminal content */}
       {!(activeTab === "browser" && browserFullscreen) && (
-      <View
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-        }}
-      >
-        <View
-          style={{
-            height: insets.top,
-            backgroundColor: chromeBg,
-          }}
-        />
-
-        {sessionTabs && sessionTabs.length > 1 ? (
-          <SessionTabBar
-            tabs={sessionTabs}
-            activeTabId={activeTabId ?? sessionId}
-            onSwitch={onSwitchSession}
-            onClose={onCloseSession}
-            theme={theme}
-          />
-        ) : null}
-
-        {terminalTabs && terminalTabs.length > 0 ? null : null}
-
-        <SessionHeader
-          activeTab={activeTab}
-          hasControl={hasControl}
-          isControlledByOther={isControlledByOther}
-          onClaimControl={onClaimControl}
-          onLeave={handleLeave}
-          onReleaseControl={onReleaseControl}
-          onSwitchDesktop={switchToDesktop}
-          onSwitchTerminal={switchToTerminal}
-          onSwitchBrowser={switchToBrowser}
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          onZoomReset={handleZoomReset}
-          sessionId={sessionId}
-          status={status}
-          theme={theme}
-          toolbarBg={toolbarBg}
-          chromeBg={chromeBg}
-          zoomPercent={zoomPercent}
-          terminalCount={
-            terminalTabs?.filter((t) => t.status === "running").length ?? 0
-          }
-          activeTerminalLabel={
-            terminalTabs?.find((t) => t.terminalId === activeTerminalId)?.label
-          }
-          onShowTerminalGrid={() => {
-            Keyboard.dismiss();
-            setShowTerminalGrid(true);
-          }}
-        />
-
-        {banner ? (
-          <View
-            style={{
-              paddingHorizontal: 16,
-              paddingVertical: 8,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              backgroundColor:
-                banner.tone === "error" ? theme.errorLight : theme.accentLight,
-            }}
-          >
-            <Text
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20 }}>
+          {sessionTabs && sessionTabs.length > 1 ? (
+            <View
               style={{
-                fontSize: 13,
-                fontWeight: "500",
-                color: banner.tone === "error" ? theme.error : theme.accent,
-                flex: 1,
+                position: "absolute",
+                top: insets.top,
+                left: 0,
+                right: 0,
               }}
             >
-              {banner.text}
-            </Text>
-            {showReconnectButton ? (
-              <Pressable
-                style={({ pressed }) => ({
-                  borderRadius: 6,
-                  borderCurve: "continuous" as const,
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  marginLeft: 8,
-                  backgroundColor: pressed
-                    ? "rgba(128,128,128,0.2)"
-                    : theme.bgCard,
-                })}
-                onPress={onReconnect}
-              >
-                <Text
-                  style={{
-                    fontSize: 13,
-                    fontWeight: "600",
-                    color: theme.accent,
-                  }}
-                >
-                  重试
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
+              <SessionTabBar
+                tabs={sessionTabs}
+                activeTabId={activeTabId ?? sessionId}
+                onSwitch={onSwitchSession}
+                onClose={onCloseSession}
+                theme={theme}
+              />
+            </View>
+          ) : null}
 
-        {connectionDetail && !banner ? (
-          <View
-            style={{
-              backgroundColor: chromeBg,
-              paddingHorizontal: 16,
-              paddingVertical: 4,
+          {terminalTabs && terminalTabs.length > 0 ? null : null}
+
+          <SessionHeader
+            activeTab={activeTab}
+            hasControl={hasControl}
+            isControlledByOther={isControlledByOther}
+            onClaimControl={onClaimControl}
+            onLeave={handleLeave}
+            onReleaseControl={onReleaseControl}
+            onSwitchDesktop={switchToDesktop}
+            onSwitchTerminal={switchToTerminal}
+            onSwitchBrowser={switchToBrowser}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onZoomReset={handleZoomReset}
+            sessionId={sessionId}
+            status={status}
+            theme={theme}
+            zoomPercent={zoomPercent}
+            insetTop={insets.top}
+            terminalCount={
+              terminalTabs?.filter((t) => t.status === "running").length ?? 0
+            }
+            activeTerminalLabel={
+              terminalTabs?.find((t) => t.terminalId === activeTerminalId)
+                ?.label
+            }
+            onShowTerminalGrid={() => {
+              Keyboard.dismiss();
+              setShowTerminalGrid(true);
             }}
-          >
-            <Text style={{ fontSize: 11, color: theme.textTertiary }}>
-              {connectionDetail}
-            </Text>
-          </View>
-        ) : null}
-      </View>
+          />
+
+          {banner ? (
+            <View
+              style={{
+                position: "absolute",
+                top: insets.top + 48,
+                left: 12,
+                right: 12,
+                borderRadius: 10,
+                borderCurve: "continuous",
+                overflow: "hidden",
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                backgroundColor:
+                  banner.tone === "error"
+                    ? theme.errorLight
+                    : theme.accentLight,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontWeight: "500",
+                  color: banner.tone === "error" ? theme.error : theme.accent,
+                  flex: 1,
+                }}
+              >
+                {banner.text}
+              </Text>
+              {showReconnectButton ? (
+                <Pressable
+                  style={({ pressed }) => ({
+                    borderRadius: 6,
+                    borderCurve: "continuous" as const,
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    marginLeft: 8,
+                    backgroundColor: pressed
+                      ? "rgba(128,128,128,0.2)"
+                      : theme.bgCard,
+                  })}
+                  onPress={onReconnect}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "600",
+                      color: theme.accent,
+                    }}
+                  >
+                    重试
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+
+          {connectionDetail && !banner ? (
+            <View
+              style={{
+                position: "absolute",
+                top: insets.top + 48,
+                left: 12,
+                right: 12,
+                borderRadius: 10,
+                borderCurve: "continuous",
+                overflow: "hidden",
+                paddingHorizontal: 16,
+                paddingVertical: 4,
+              }}
+            >
+              <Text style={{ fontSize: 11, color: theme.textTertiary }}>
+                {connectionDetail}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       )}
 
       {showTerminalGrid ? (
@@ -710,9 +720,8 @@ const SessionHeader = memo(function SessionHeader({
   sessionId,
   status,
   theme,
-  toolbarBg,
-  chromeBg,
   zoomPercent,
+  insetTop,
   terminalCount,
   activeTerminalLabel,
   onShowTerminalGrid,
@@ -732,9 +741,8 @@ const SessionHeader = memo(function SessionHeader({
   sessionId: string;
   status: ConnectionStatus;
   theme: Theme;
-  toolbarBg: string;
-  chromeBg: string;
   zoomPercent: number;
+  insetTop?: number;
   terminalCount?: number;
   activeTerminalLabel?: string;
   onShowTerminalGrid?: () => void;
@@ -764,18 +772,117 @@ const SessionHeader = memo(function SessionHeader({
     return { color: "#f87171", bg: "rgba(248,113,113,0.12)", text: "已断开" };
   })();
 
+  const controlDisabled =
+    status !== "connected" && status !== "host_disconnected";
+
+  // Build menu actions
+  const menuActions: any[] = [
+    {
+      id: "control",
+      title: hasControl ? "释放控制权" : "获取控制权",
+      image: Platform.select({
+        ios: hasControl ? "hand.raised.fill" : "hand.raised",
+      }),
+      attributes: controlDisabled ? { disabled: true } : {},
+      state: hasControl ? "on" : undefined,
+    },
+    {
+      id: "zoom-reset",
+      title: `重置缩放 (${zoomPercent}%)`,
+      image: Platform.select({ ios: "arrow.counterclockwise" }),
+    },
+  ];
+
+  // Tab switching — inline submenu to group
+  const switchActions: any[] = [];
+  if (activeTab !== "desktop") {
+    switchActions.push({
+      id: "switch-desktop",
+      title: "远程桌面",
+      image: Platform.select({ ios: "rectangle.on.rectangle" }),
+    });
+  }
+  if (activeTab !== "browser") {
+    switchActions.push({
+      id: "switch-browser",
+      title: "浏览器",
+      image: Platform.select({ ios: "globe" }),
+    });
+  }
+  if (activeTab !== "terminal") {
+    switchActions.push({
+      id: "switch-terminal",
+      title: "终端",
+      image: Platform.select({ ios: "terminal.fill" }),
+    });
+  }
+  if (switchActions.length > 0) {
+    menuActions.push({
+      id: "switch-group",
+      title: "",
+      displayInline: true,
+      subactions: switchActions,
+    });
+  }
+
+  if ((terminalCount ?? 0) > 0 && onShowTerminalGrid) {
+    menuActions.push({
+      id: "terminal-grid",
+      title: `终端列表 (${terminalCount})`,
+      image: Platform.select({ ios: "square.grid.2x2" }),
+    });
+  }
+
+  menuActions.push({
+    id: "disconnect-group",
+    title: "",
+    displayInline: true,
+    subactions: [
+      {
+        id: "disconnect",
+        title: "返回首页",
+        image: Platform.select({ ios: "house.fill" }),
+        attributes: { destructive: true },
+      },
+    ],
+  });
+
   return (
     <View
       style={{
-        paddingHorizontal: 12,
-        paddingBottom: 12,
-        gap: 4,
-        backgroundColor: chromeBg,
+        position: "absolute",
+        top: (insetTop ?? 0) + 4,
+        left: 12,
+        right: 12,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
       }}
+      pointerEvents="box-none"
     >
-      {/* Row 1: status pill + folder name + exit */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        {/* Status dot */}
+      {/* Left: status pill */}
+      <GlassBar
+        blurTint={
+          theme.mode === "dark"
+            ? "systemUltraThinMaterialDark"
+            : "systemUltraThinMaterialLight"
+        }
+        fallbackColor={
+          theme.mode === "light"
+            ? "rgba(250,250,250,0.6)"
+            : "rgba(42,42,43,0.55)"
+        }
+        style={{
+          borderRadius: 14,
+          borderCurve: "continuous",
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 7,
+          flexShrink: 1,
+        }}
+      >
         <View
           style={{
             width: 8,
@@ -784,12 +891,9 @@ const SessionHeader = memo(function SessionHeader({
             backgroundColor: statusConfig.color,
           }}
         />
-
-        {/* Folder name */}
         <Text
           style={{
-            flex: 1,
-            fontSize: 13,
+            fontSize: 15,
             fontWeight: "600",
             color: theme.text,
           }}
@@ -798,248 +902,192 @@ const SessionHeader = memo(function SessionHeader({
         >
           {folderName}
         </Text>
+      </GlassBar>
 
-        {/* Control - icon only */}
-        <Pressable
-          style={({ pressed }) => ({
-            width: 32,
-            height: 28,
-            borderRadius: 8,
-            borderCurve: "continuous" as const,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: hasControl
-              ? pressed
-                ? theme.accent
-                : theme.accentLight
-              : pressed
-                ? toolbarBg
-                : "transparent",
-          })}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            hasControl ? onReleaseControl() : onClaimControl();
-          }}
-          disabled={status !== "connected" && status !== "host_disconnected"}
-        >
-          <AppSymbol
-            name={hasControl ? "hand.raised.fill" : "hand.raised"}
-            size={15}
-            color={hasControl ? theme.accent : theme.textSecondary}
-          />
-        </Pressable>
-
-        {/* Terminal/Desktop icon switcher */}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            borderRadius: 8,
-            borderCurve: "continuous" as const,
-            backgroundColor: toolbarBg,
-            overflow: "hidden",
-          }}
-        >
-          <Pressable
-            style={({ pressed }) => ({
-              width: 34,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor:
-                activeTab === "terminal"
-                  ? theme.mode === "light"
-                    ? "rgba(255,255,255,0.9)"
-                    : "rgba(255,255,255,0.08)"
-                  : pressed
-                    ? "rgba(128,128,128,0.2)"
-                    : "transparent",
-            })}
-            onPress={onSwitchTerminal}
+      {/* Right: action buttons */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        {/* Contextual mode toggle button — appears when not on terminal */}
+        {activeTab !== "terminal" ? (
+          <GlassBar
+            blurTint={
+              theme.mode === "dark"
+                ? "systemUltraThinMaterialDark"
+                : "systemUltraThinMaterialLight"
+            }
+            fallbackColor={
+              theme.mode === "light"
+                ? "rgba(250,250,250,0.6)"
+                : "rgba(42,42,43,0.55)"
+            }
+            style={{
+              borderRadius: 14,
+              borderCurve: "continuous",
+            }}
           >
-            <AppSymbol
-              name="terminal.fill"
-              size={14}
-              color={
-                activeTab === "terminal" ? theme.accent : theme.textTertiary
-              }
-            />
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => ({
-              width: 34,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor:
-                activeTab === "desktop"
-                  ? theme.mode === "light"
-                    ? "rgba(255,255,255,0.9)"
-                    : "rgba(255,255,255,0.08)"
-                  : pressed
-                    ? "rgba(128,128,128,0.2)"
-                    : "transparent",
-            })}
-            onPress={onSwitchDesktop}
-          >
-            <AppSymbol
-              name="rectangle.on.rectangle"
-              size={14}
-              color={
-                activeTab === "desktop" ? theme.accent : theme.textTertiary
-              }
-            />
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => ({
-              width: 34,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor:
-                activeTab === "browser"
-                  ? theme.mode === "light"
-                    ? "rgba(255,255,255,0.9)"
-                    : "rgba(255,255,255,0.08)"
-                  : pressed
-                    ? "rgba(128,128,128,0.2)"
-                    : "transparent",
-            })}
-            onPress={onSwitchBrowser}
-          >
-            <AppSymbol
-              name="globe"
-              size={14}
-              color={
-                activeTab === "browser" ? theme.accent : theme.textTertiary
-              }
-            />
-          </Pressable>
-        </View>
-
-        {/* Zoom controls */}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            borderRadius: 7,
-            borderCurve: "continuous" as const,
-            backgroundColor: toolbarBg,
-            overflow: "hidden",
-          }}
-        >
-          <Pressable
-            style={({ pressed }) => ({
-              width: 28,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: pressed
-                ? "rgba(128,128,128,0.2)"
-                : "transparent",
-            })}
-            onPress={onZoomOut}
-          >
-            <AppSymbol
-              name="textformat.size.smaller"
-              size={12}
-              color={theme.textSecondary}
-            />
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => ({
-              minWidth: 38,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              paddingHorizontal: 3,
-              backgroundColor: pressed
-                ? "rgba(128,128,128,0.2)"
-                : "transparent",
-            })}
-            onPress={onZoomReset}
-          >
-            <Text
-              style={{
-                fontSize: 10,
-                fontWeight: "600",
-                color: theme.accent,
-                fontVariant: ["tabular-nums"],
-              }}
+            <Pressable
+              onPress={onSwitchTerminal}
+              hitSlop={6}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed
+                  ? "rgba(128,128,128,0.2)"
+                  : "transparent",
+                borderRadius: 14,
+              })}
             >
-              {zoomPercent}%
-            </Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => ({
-              width: 28,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: pressed
-                ? "rgba(128,128,128,0.2)"
-                : "transparent",
-            })}
-            onPress={onZoomIn}
-          >
-            <AppSymbol
-              name="textformat.size.larger"
-              size={12}
-              color={theme.textSecondary}
-            />
-          </Pressable>
-        </View>
-
-        {/* Terminal count + grid button pill */}
-        {(terminalCount ?? 0) > 0 && onShowTerminalGrid ? (
-          <Pressable
-            onPress={onShowTerminalGrid}
-            hitSlop={6}
-            style={({ pressed }) => ({
-              flexDirection: "row",
-              alignItems: "center",
-              borderRadius: 7,
-              borderCurve: "continuous" as const,
-              backgroundColor: pressed ? "rgba(128,128,128,0.2)" : toolbarBg,
-              overflow: "hidden",
-              paddingHorizontal: 8,
-              height: 26,
-              gap: 5,
-            })}
-          >
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: "700",
-                color: theme.textSecondary,
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {terminalCount}
-            </Text>
-            <AppSymbol
-              name="square.grid.2x2"
-              size={12}
-              color={theme.textSecondary}
-            />
-          </Pressable>
+              <AppSymbol name="terminal.fill" size={16} color={theme.textSecondary} />
+            </Pressable>
+          </GlassBar>
         ) : null}
 
-        <Pressable
-          onPress={onLeave}
-          hitSlop={6}
-          style={({ pressed }) => ({
-            width: 32,
-            height: 26,
-            borderRadius: 7,
-            borderCurve: "continuous" as const,
-            backgroundColor: pressed ? "rgba(255,59,48,0.2)" : "transparent",
-            alignItems: "center",
-            justifyContent: "center",
-          })}
+        {/* Zoom — only on terminal tab */}
+        {activeTab === "terminal" ? (
+          <GlassBar
+            blurTint={
+              theme.mode === "dark"
+                ? "systemUltraThinMaterialDark"
+                : "systemUltraThinMaterialLight"
+            }
+            fallbackColor={
+              theme.mode === "light"
+                ? "rgba(250,250,250,0.6)"
+                : "rgba(42,42,43,0.55)"
+            }
+            style={{
+              borderRadius: 14,
+              borderCurve: "continuous",
+            }}
+          >
+            <MenuView
+              title=""
+              onPressAction={({ nativeEvent }) => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                switch (nativeEvent.event) {
+                  case "zoom-in":
+                    onZoomIn();
+                    break;
+                  case "zoom-out":
+                    onZoomOut();
+                    break;
+                  case "zoom-reset":
+                    onZoomReset();
+                    break;
+                }
+              }}
+              actions={[
+                {
+                  id: "zoom-in",
+                  title: "放大",
+                  image: Platform.select({ ios: "plus.magnifyingglass" }),
+                },
+                {
+                  id: "zoom-reset",
+                  title: `重置 (${zoomPercent}%)`,
+                  image: Platform.select({ ios: "arrow.counterclockwise" }),
+                },
+                {
+                  id: "zoom-out",
+                  title: "缩小",
+                  image: Platform.select({ ios: "minus.magnifyingglass" }),
+                },
+              ]}
+            >
+              <Pressable
+                hitSlop={6}
+                style={({ pressed }) => ({
+                  width: 36,
+                  height: 36,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: pressed
+                    ? "rgba(128,128,128,0.2)"
+                    : "transparent",
+                  borderRadius: 14,
+                })}
+              >
+                <AppSymbol name="magnifyingglass" size={16} color={theme.textSecondary} />
+              </Pressable>
+            </MenuView>
+          </GlassBar>
+        ) : null}
+
+        {/* Ellipsis menu — native UIMenu */}
+        <GlassBar
+          blurTint={
+            theme.mode === "dark"
+              ? "systemUltraThinMaterialDark"
+              : "systemUltraThinMaterialLight"
+          }
+          fallbackColor={
+            theme.mode === "light"
+              ? "rgba(250,250,250,0.6)"
+              : "rgba(42,42,43,0.55)"
+          }
+          style={{
+            borderRadius: 14,
+            borderCurve: "continuous",
+          }}
         >
-          <AppSymbol name="power" size={14} color={theme.error} />
-        </Pressable>
+          <MenuView
+            title=""
+            onPressAction={({ nativeEvent }) => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              switch (nativeEvent.event) {
+                case "control":
+                  hasControl ? onReleaseControl() : onClaimControl();
+                  break;
+                case "zoom-in":
+                  onZoomIn();
+                  break;
+                case "zoom-out":
+                  onZoomOut();
+                  break;
+                case "zoom-reset":
+                  onZoomReset();
+                  break;
+                case "switch-desktop":
+                  onSwitchDesktop();
+                  break;
+                case "switch-browser":
+                  onSwitchBrowser();
+                  break;
+                case "switch-terminal":
+                  onSwitchTerminal();
+                  break;
+                case "terminal-grid":
+                  onShowTerminalGrid?.();
+                  break;
+                case "disconnect":
+                  onLeave();
+                  break;
+              }
+            }}
+            actions={menuActions}
+          >
+            <Pressable
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed
+                  ? "rgba(128,128,128,0.2)"
+                  : "transparent",
+                borderRadius: 14,
+              })}
+            >
+              <AppSymbol
+                name="ellipsis.circle"
+                size={20}
+                color={theme.textSecondary}
+              />
+            </Pressable>
+          </MenuView>
+        </GlassBar>
       </View>
     </View>
   );
@@ -1340,29 +1388,27 @@ const VoiceBar = memo(function VoiceBar({
       <View
         style={{
           position: "absolute",
-          left: 0,
-          right: 0,
-          bottom: bottomInset - 6,
+          left: 12,
+          right: 12,
+          bottom: bottomInset + 2,
           height: VOICE_BAR_HEIGHT,
           flexDirection: "row",
           alignItems: "center",
-          paddingHorizontal: 12,
+          paddingHorizontal: 4,
           gap: 8,
-          backgroundColor:
-            theme.mode === "light" ? "#fafafa" : theme.bgTerminal,
         }}
       >
         <View
           style={{
             flex: 1,
             height: 30,
-            borderRadius: 6,
+            borderRadius: 10,
             borderCurve: "continuous",
             backgroundColor: pressing
               ? inCancelZone
                 ? theme.errorLight
                 : theme.accent
-              : theme.bgElevated,
+              : "rgba(128,128,128,0.15)",
             alignItems: "center",
             justifyContent: "center",
             flexDirection: "row",
@@ -1389,7 +1435,6 @@ const VoiceBar = memo(function VoiceBar({
     </>
   );
 });
-
 const TerminalStage = memo(function TerminalStage({
   bottomInset,
   headerPadding,
@@ -1469,15 +1514,32 @@ const TerminalStage = memo(function TerminalStage({
     <View
       style={{
         flex: 1,
-        backgroundColor: theme.mode === "light" ? "#fafafa" : theme.bgTerminal,
+        backgroundColor: theme.bgTerminal,
       }}
       onLayout={onLayout}
     >
+      {/* Top gradient fade overlay — terminal content fades into safe area */}
+      <View
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: (headerPadding ?? 0) + 50,
+          zIndex: 10,
+        }}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={[theme.bgTerminal, theme.bgTerminal + "CC", theme.bgTerminal + "66", theme.bgTerminal + "00"]}
+          locations={[0, 0.4, 0.7, 1]}
+          style={StyleSheet.absoluteFillObject}
+        />
+      </View>
       <View
         style={{
           flex: 1,
           paddingBottom: terminalPadding,
-          paddingTop: headerPadding ?? 0,
         }}
       >
         {hasMultipleTerminals ? (
@@ -1506,6 +1568,7 @@ const TerminalStage = memo(function TerminalStage({
                   onInput={isActive ? handleInput : undefined}
                   onResize={isActive ? onResize : undefined}
                   onRequestKeyboard={isActive ? onRequestFocus : undefined}
+                  topInset={headerPadding}
                 />
               </View>
             );
@@ -1517,6 +1580,7 @@ const TerminalStage = memo(function TerminalStage({
             onInput={handleInput}
             onResize={onResize}
             onRequestKeyboard={onRequestFocus}
+            topInset={headerPadding}
           />
         )}
       </View>
@@ -1524,17 +1588,15 @@ const TerminalStage = memo(function TerminalStage({
         <View
           style={{
             position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: bottomInset,
+            left: 12,
+            right: 12,
+            bottom: bottomInset + 4,
             height: SHORTCUT_BAR_HEIGHT,
             paddingVertical: 5,
             flexDirection: "row",
             alignItems: "center",
             gap: 4,
-            paddingHorizontal: 12,
-            backgroundColor:
-              theme.mode === "light" ? "#fafafa" : theme.bgTerminal,
+            paddingHorizontal: 4,
           }}
         >
           <ScrollView
@@ -1557,8 +1619,8 @@ const TerminalStage = memo(function TerminalStage({
                 backgroundColor: ctrlActive
                   ? theme.accent
                   : pressed
-                    ? theme.bgCard
-                    : theme.bgElevated,
+                    ? "rgba(128,128,128,0.2)"
+                    : "transparent",
               })}
               onPress={() => setCtrlActive((v) => !v)}
             >
@@ -1580,7 +1642,9 @@ const TerminalStage = memo(function TerminalStage({
                   paddingVertical: 6,
                   borderRadius: 8,
                   borderCurve: "continuous" as const,
-                  backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
+                  backgroundColor: pressed
+                    ? "rgba(128,128,128,0.2)"
+                    : "transparent",
                 })}
                 onPress={() => handleInput(item.value)}
               >
@@ -1596,24 +1660,6 @@ const TerminalStage = memo(function TerminalStage({
               </Pressable>
             ))}
           </ScrollView>
-          {/* History */}
-          <Pressable
-            style={({ pressed }) => ({
-              width: 34,
-              height: 26,
-              borderRadius: 8,
-              borderCurve: "continuous" as const,
-              backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
-              alignItems: "center",
-              justifyContent: "center",
-            })}
-            onPress={() => {
-              onRequestHistory?.();
-              setHistoryVisible(true);
-            }}
-          >
-            <AppSymbol name="clock.arrow.circlepath" size={17} color={theme.text} />
-          </Pressable>
           {/* Image picker */}
           <Pressable
             style={({ pressed }) => ({
@@ -1621,7 +1667,9 @@ const TerminalStage = memo(function TerminalStage({
               height: 26,
               borderRadius: 8,
               borderCurve: "continuous" as const,
-              backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
+              backgroundColor: pressed
+                ? "rgba(128,128,128,0.2)"
+                : "transparent",
               alignItems: "center",
               justifyContent: "center",
             })}
@@ -1636,7 +1684,9 @@ const TerminalStage = memo(function TerminalStage({
               height: 26,
               borderRadius: 8,
               borderCurve: "continuous" as const,
-              backgroundColor: pressed ? theme.bgCard : theme.bgElevated,
+              backgroundColor: pressed
+                ? "rgba(128,128,128,0.2)"
+                : "transparent",
               alignItems: "center",
               justifyContent: "center",
             })}
@@ -1666,12 +1716,6 @@ const TerminalStage = memo(function TerminalStage({
           onSend={(text) => handleInput(text + "\r")}
         />
       ) : null}
-      <HistorySheet
-        visible={historyVisible}
-        entries={historyEntries ?? []}
-        onSelect={(cmd) => handleInput(cmd + "\r")}
-        onClose={() => setHistoryVisible(false)}
-      />
     </View>
   );
 });
@@ -2362,118 +2406,6 @@ const TerminalGridOverlay = memo(function TerminalGridOverlay({
         />
       </Animated.View>
     </Animated.View>
-  );
-});
-
-const TerminalTabBar = memo(function TerminalTabBar({
-  tabs,
-  activeTabId,
-  onSwitch,
-  onAdd,
-  theme,
-}: {
-  tabs: TerminalTab[];
-  activeTabId: string;
-  onSwitch?: (terminalId: string) => void;
-  onAdd?: () => void;
-  theme: Theme;
-}) {
-  return (
-    <GlassBar
-      blurTint={
-        theme.mode === "dark"
-          ? "systemThinMaterialDark"
-          : "systemThinMaterialLight"
-      }
-      fallbackColor={theme.mode === "light" ? "#fafafa" : theme.bgElevated}
-      style={{}}
-    >
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{
-          paddingHorizontal: 8,
-          gap: 2,
-          alignItems: "center",
-        }}
-        style={{ height: 34 }}
-      >
-        {tabs.map((tab) => {
-          const isActive = tab.terminalId === activeTabId;
-          const isExited = tab.status === "exited";
-          return (
-            <Pressable
-              key={tab.terminalId}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 5,
-                paddingHorizontal: 10,
-                paddingVertical: 5,
-                borderRadius: 7,
-                borderCurve: "continuous" as const,
-                backgroundColor: isActive
-                  ? theme.mode === "light"
-                    ? "rgba(0,0,0,0.06)"
-                    : "rgba(255,255,255,0.08)"
-                  : pressed
-                    ? "rgba(128,128,128,0.1)"
-                    : "transparent",
-              })}
-              onPress={() => onSwitch?.(tab.terminalId)}
-            >
-              <AppSymbol
-                name={isExited ? "xmark.circle" : "terminal.fill"}
-                size={12}
-                color={
-                  isActive
-                    ? theme.accent
-                    : isExited
-                      ? theme.textTertiary
-                      : theme.textSecondary
-                }
-              />
-              <Text
-                numberOfLines={1}
-                style={{
-                  fontSize: 12,
-                  fontWeight: isActive ? "600" : "400",
-                  color: isActive
-                    ? theme.text
-                    : isExited
-                      ? theme.textTertiary
-                      : theme.textSecondary,
-                  maxWidth: 100,
-                }}
-              >
-                {tab.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-        {onAdd ? (
-          <Pressable
-            style={({ pressed }) => ({
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              borderCurve: "continuous" as const,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: pressed
-                ? "rgba(128,128,128,0.15)"
-                : "transparent",
-            })}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              onAdd();
-            }}
-          >
-            <AppSymbol name="plus" size={13} color={theme.textTertiary} />
-          </Pressable>
-        ) : null}
-      </ScrollView>
-    </GlassBar>
   );
 });
 
