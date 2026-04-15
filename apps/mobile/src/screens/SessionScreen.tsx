@@ -547,27 +547,6 @@ export function SessionScreen({
       {/* Top overlay — floating elements over terminal content */}
       {!(activeTab === "browser" && browserFullscreen) && (
         <View style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20, height: insets.top + 90 }} pointerEvents="box-none">
-          {sessionTabs && sessionTabs.length > 1 ? (
-            <View
-              style={{
-                position: "absolute",
-                top: insets.top,
-                left: 0,
-                right: 0,
-              }}
-            >
-              <SessionTabBar
-                tabs={sessionTabs}
-                activeTabId={activeTabId ?? sessionId}
-                onSwitch={onSwitchSession}
-                onClose={onCloseSession}
-                theme={theme}
-              />
-            </View>
-          ) : null}
-
-          {terminalTabs && terminalTabs.length > 0 ? null : null}
-
           <SessionHeader
             activeTab={activeTab}
             hasControl={hasControl}
@@ -585,7 +564,7 @@ export function SessionScreen({
             status={status}
             theme={theme}
             zoomPercent={zoomPercent}
-            insetTop={(insets.top) + (sessionTabs && sessionTabs.length > 1 ? 40 : 0)}
+            insetTop={insets.top}
             terminalCount={
               terminalTabs?.filter((t) => t.status === "running").length ?? 0
             }
