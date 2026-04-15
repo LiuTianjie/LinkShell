@@ -546,7 +546,7 @@ export function SessionScreen({
 
       {/* Top overlay — floating elements over terminal content */}
       {!(activeTab === "browser" && browserFullscreen) && (
-        <View style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20 }}>
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20, height: insets.top + 90 }} pointerEvents="box-none">
           {sessionTabs && sessionTabs.length > 1 ? (
             <View
               style={{
@@ -585,7 +585,7 @@ export function SessionScreen({
             status={status}
             theme={theme}
             zoomPercent={zoomPercent}
-            insetTop={insets.top}
+            insetTop={(insets.top) + (sessionTabs && sessionTabs.length > 1 ? 40 : 0)}
             terminalCount={
               terminalTabs?.filter((t) => t.status === "running").length ?? 0
             }
@@ -793,7 +793,7 @@ const SessionHeader = memo(function SessionHeader({
     },
   ];
 
-  // Tab switching — inline submenu to group
+  // Tab switching — inline submenu to group (iOS only, Android gets flat list)
   const switchActions: any[] = [];
   if (activeTab !== "desktop") {
     switchActions.push({
@@ -817,12 +817,16 @@ const SessionHeader = memo(function SessionHeader({
     });
   }
   if (switchActions.length > 0) {
-    menuActions.push({
-      id: "switch-group",
-      title: "",
-      displayInline: true,
-      subactions: switchActions,
-    });
+    if (Platform.OS === "ios") {
+      menuActions.push({
+        id: "switch-group",
+        title: "",
+        displayInline: true,
+        subactions: switchActions,
+      });
+    } else {
+      menuActions.push(...switchActions);
+    }
   }
 
   if ((terminalCount ?? 0) > 0 && onShowTerminalGrid) {
@@ -833,19 +837,27 @@ const SessionHeader = memo(function SessionHeader({
     });
   }
 
-  menuActions.push({
-    id: "disconnect-group",
-    title: "",
-    displayInline: true,
-    subactions: [
-      {
-        id: "disconnect",
-        title: "返回首页",
-        image: Platform.select({ ios: "house.fill" }),
-        attributes: { destructive: true },
-      },
-    ],
-  });
+  if (Platform.OS === "ios") {
+    menuActions.push({
+      id: "disconnect-group",
+      title: "",
+      displayInline: true,
+      subactions: [
+        {
+          id: "disconnect",
+          title: "返回首页",
+          image: Platform.select({ ios: "house.fill" }),
+          attributes: { destructive: true },
+        },
+      ],
+    });
+  } else {
+    menuActions.push({
+      id: "disconnect",
+      title: "返回首页",
+      attributes: { destructive: true },
+    });
+  }
 
   return (
     <View
@@ -995,21 +1007,16 @@ const SessionHeader = memo(function SessionHeader({
                 },
               ]}
             >
-              <Pressable
-                hitSlop={6}
-                style={({ pressed }) => ({
+              <View
+                style={{
                   width: 36,
                   height: 36,
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: pressed
-                    ? "rgba(128,128,128,0.2)"
-                    : "transparent",
-                  borderRadius: 14,
-                })}
+                }}
               >
                 <AppSymbol name="magnifyingglass" size={16} color={theme.textSecondary} />
-              </Pressable>
+              </View>
             </MenuView>
           </GlassBar>
         ) : null}
@@ -1067,25 +1074,20 @@ const SessionHeader = memo(function SessionHeader({
             }}
             actions={menuActions}
           >
-            <Pressable
-              hitSlop={8}
-              style={({ pressed }) => ({
+            <View
+              style={{
                 width: 36,
                 height: 36,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: pressed
-                  ? "rgba(128,128,128,0.2)"
-                  : "transparent",
-                borderRadius: 14,
-              })}
+              }}
             >
               <AppSymbol
                 name="ellipsis.circle"
                 size={20}
                 color={theme.textSecondary}
               />
-            </Pressable>
+            </View>
           </MenuView>
         </GlassBar>
       </View>

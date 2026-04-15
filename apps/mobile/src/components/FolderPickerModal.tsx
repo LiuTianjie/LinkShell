@@ -85,7 +85,13 @@ export function FolderPickerModal({
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 20, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border }}>
           <Text style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>选择文件夹</Text>
           <Pressable onPress={onClose} hitSlop={8}>
-            <Text style={{ color: theme.accent, fontSize: 15 }}>关闭</Text>
+            <View style={{
+              width: 30, height: 30, borderRadius: 15,
+              backgroundColor: theme.mode === "dark" ? "#48484a" : "#e5e5ea",
+              alignItems: "center", justifyContent: "center",
+            }}>
+              <AppSymbol name="xmark" size={11} color={theme.textSecondary} />
+            </View>
           </Pressable>
         </View>
 

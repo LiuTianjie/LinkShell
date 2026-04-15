@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { useTheme } from "../theme";
+import { AppSymbol } from "./AppSymbol";
 
 interface HistorySheetProps {
   visible: boolean;
@@ -71,7 +72,13 @@ export function HistorySheet({
         <View style={[styles.header, { borderBottomColor: theme.separator }]}>
           <Text style={[styles.title, { color: theme.text }]}>Shell History</Text>
           <Pressable onPress={handleClose} hitSlop={8}>
-            <Text style={[styles.close, { color: theme.accent }]}>关闭</Text>
+            <View style={{
+              width: 30, height: 30, borderRadius: 15,
+              backgroundColor: theme.mode === "dark" ? "#48484a" : "#e5e5ea",
+              alignItems: "center", justifyContent: "center",
+            }}>
+              <AppSymbol name="xmark" size={11} color={theme.mode === "dark" ? "#e5e2e3" : "#3a3a3c"} />
+            </View>
           </Pressable>
         </View>
         <View style={styles.searchRow}>

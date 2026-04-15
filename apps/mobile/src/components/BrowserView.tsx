@@ -48,9 +48,20 @@ export function BrowserView({
   const [webViewKey, setWebViewKey] = useState(0);
   const [pageThemeColor, setPageThemeColor] = useState<string | null>(null);
 
+  // Build tunnel URL with available auth params
   const tunnelUrl = activePort
-    ? `${gatewayUrl}/tunnel/${encodeURIComponent(sessionId)}/${activePort}/${deviceToken ? `?token=${encodeURIComponent(deviceToken)}` : authToken ? `?auth_token=${encodeURIComponent(authToken)}` : ""}`
+    ? (() => {
+        const base = `${gatewayUrl}/tunnel/${encodeURIComponent(sessionId)}/${activePort}`;
+        const params: string[] = [];
+        if (deviceToken) params.push(`token=${encodeURIComponent(deviceToken)}`);
+        if (authToken) params.push(`auth_token=${encodeURIComponent(authToken)}`);
+        return params.length ? `${base}?${params.join("&")}` : base;
+      })()
     : null;
+
+  if (__DEV__ && tunnelUrl) {
+    console.log("[BrowserView] tunnelUrl:", tunnelUrl.substring(0, 120), "deviceToken:", !!deviceToken, "authToken:", !!authToken);
+  }
 
   const handleGo = useCallback(() => {
     const p = port.trim();

@@ -697,7 +697,12 @@
             data-i18n="heroTitleSep">，</span><span data-i18n="heroTitle2">随时随地，自由接管</span></h1>
         <p style="color:var(--text-sec);margin-bottom:12px;max-width:600px" data-i18n="heroLead">
           纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。</p>
-        <p style="color:var(--warning);margin-bottom:32px;font-size:14px" data-i18n="heroGateway">🚀 Pro 订阅用户可直接使用官方 Gateway，无需自建服务器。<a href="https://itool.tech" style="color:var(--warning)">了解更多 →</a></p>
+        <p style="color:var(--warning);margin-bottom:12px;font-size:14px" data-i18n="heroGateway">🚀 Pro 订阅用户可直接使用官方
+          Gateway，无需自建服务器。<a href="https://itool.tech" style="color:var(--warning)">了解更多 →</a></p>
+        <p style="color:var(--green);margin-bottom:32px;font-size:14px"><span data-i18n="heroFreeGateway">🎉
+            限时免费网关开放中：</span><code
+            style="background:rgba(0,255,0,0.1);padding:2px 8px;border-radius:4px;font-size:12px;user-select:all"
+            data-i18n="heroFreeGatewayCmd">linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws</code></p>
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;white-space:nowrap">
           <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
           <a href="https://github.com/LiuTianjie/LinkShell" class="btn btn-s" data-i18n="btnGithub">查看仓库</a>
@@ -739,14 +744,14 @@
         <h3 data-i18n="step1Title">[1] 安装 CLI</h3>
         <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step1Desc">一条命令全局安装。内置网关开箱即用，无需额外部署服务器。</p>
         <div class="term"><span class="tm" data-i18n="tmInstallCli"># 全局安装 CLI</span>
-<span class="tp">$</span> <span class="tc">npm i -g linkshell-cli</span>
+          <span class="tp">$</span> <span class="tc">npm i -g linkshell-cli</span>
 
-<span class="tm" data-i18n="tmInitConfig"># 初始化配置</span>
-<span class="tp">$</span> <span class="tc">linkshell setup</span>
+          <span class="tm" data-i18n="tmInitConfig"># 初始化配置</span>
+          <span class="tp">$</span> <span class="tc">linkshell setup</span>
 
-<span class="tm" data-i18n="tmCheckEnv"># 检查环境</span>
-<span class="tp">$</span> <span class="tc">linkshell doctor</span>
-<span class="ts">✓ All checks passed</span>
+          <span class="tm" data-i18n="tmCheckEnv"># 检查环境</span>
+          <span class="tp">$</span> <span class="tc">linkshell doctor</span>
+          <span class="ts">✓ All checks passed</span>
         </div>
       </div>
 
@@ -758,14 +763,15 @@
           <button class="tab active" data-tab="qs-lan" data-i18n="tabLan">局域网</button>
           <button class="tab" data-tab="qs-public" data-i18n="tabPublic">公网</button>
           <button class="tab" data-tab="qs-official" data-i18n="tabOfficial">官方 Gateway</button>
+          <button class="tab" data-tab="qs-free" data-i18n="tabFree">限时免费</button>
         </div>
         <div class="tab-body">
           <div class="tab-pane active" id="tab-qs-lan">
             <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsLanDesc">同一局域网内，CLI 内置网关直连，零配置。</p>
             <div class="term"><span class="tp">$</span> <span class="tc">linkshell start</span>
 
-<span class="to">Built-in gateway started on port 8787</span>
-<span class="to">LAN address: http://192.168.1.10:8787</span>
+              <span class="to">Built-in gateway started on port 8787</span>
+              <span class="to">LAN address: http://192.168.1.10:8787</span>
 
               <svg class="qr" viewBox="0 0 25 25" shape-rendering="crispEdges">
                 <rect width="25" height="25" fill="none" />
@@ -773,20 +779,20 @@
                   d="M0,0h7v1h-7zM9,0h1v1h-1zM11,0h2v1h-2zM14,0h1v1h-1zM16,0h2v1h-2zM18,0h7v1h-7zM0,1h1v1h-1zM6,1h1v1h-1zM8,1h1v1h-1zM10,1h1v1h-1zM12,1h2v1h-2zM15,1h1v1h-1zM17,1h1v1h-1zM18,1h1v1h-1zM24,1h1v1h-1zM0,2h1v1h-1zM2,2h3v1h-3zM6,2h1v1h-1zM9,2h1v1h-1zM11,2h1v1h-1zM13,2h1v1h-1zM15,2h2v1h-2zM18,2h1v1h-1zM20,2h3v1h-3zM24,2h1v1h-1zM0,3h1v1h-1zM2,3h3v1h-3zM6,3h1v1h-1zM8,3h1v1h-1zM10,3h2v1h-2zM14,3h1v1h-1zM16,3h1v1h-1zM18,3h1v1h-1zM20,3h3v1h-3zM24,3h1v1h-1zM0,4h1v1h-1zM2,4h3v1h-3zM6,4h1v1h-1zM9,4h2v1h-2zM12,4h1v1h-1zM15,4h1v1h-1zM18,4h1v1h-1zM20,4h3v1h-3zM24,4h1v1h-1zM0,5h1v1h-1zM6,5h1v1h-1zM8,5h1v1h-1zM10,5h1v1h-1zM13,5h1v1h-1zM15,5h1v1h-1zM17,5h1v1h-1zM18,5h1v1h-1zM24,5h1v1h-1zM0,6h7v1h-7zM8,6h1v1h-1zM10,6h1v1h-1zM12,6h1v1h-1zM14,6h1v1h-1zM16,6h1v1h-1zM18,6h7v1h-7zM9,7h1v1h-1zM11,7h2v1h-2zM14,7h2v1h-2zM0,8h2v1h-2zM3,8h1v1h-1zM5,8h2v1h-2zM8,8h1v1h-1zM10,8h1v1h-1zM12,8h2v1h-2zM15,8h1v1h-1zM17,8h1v1h-1zM19,8h1v1h-1zM21,8h1v1h-1zM23,8h2v1h-2zM1,9h2v1h-2zM4,9h1v1h-1zM7,9h1v1h-1zM9,9h2v1h-2zM12,9h1v1h-1zM14,9h2v1h-2zM17,9h1v1h-1zM19,9h2v1h-2zM22,9h1v1h-1zM24,9h1v1h-1zM0,10h1v1h-1zM2,10h2v1h-2zM5,10h1v1h-1zM8,10h2v1h-2zM11,10h1v1h-1zM13,10h1v1h-1zM15,10h2v1h-2zM18,10h1v1h-1zM20,10h2v1h-2zM23,10h1v1h-1zM1,11h1v1h-1zM3,11h2v1h-2zM6,11h1v1h-1zM8,11h1v1h-1zM10,11h2v1h-2zM13,11h2v1h-2zM16,11h1v1h-1zM19,11h1v1h-1zM21,11h1v1h-1zM23,11h2v1h-2zM0,12h2v1h-2zM3,12h1v1h-1zM5,12h2v1h-2zM9,12h1v1h-1zM11,12h1v1h-1zM14,12h1v1h-1zM16,12h2v1h-2zM20,12h1v1h-1zM22,12h2v1h-2zM1,13h1v1h-1zM4,13h1v1h-1zM6,13h2v1h-2zM10,13h2v1h-2zM13,13h1v1h-1zM15,13h1v1h-1zM17,13h2v1h-2zM21,13h1v1h-1zM24,13h1v1h-1zM0,14h1v1h-1zM2,14h2v1h-2zM5,14h1v1h-1zM7,14h1v1h-1zM9,14h2v1h-2zM12,14h1v1h-1zM14,14h2v1h-2zM18,14h1v1h-1zM20,14h1v1h-1zM22,14h1v1h-1zM24,14h1v1h-1zM1,15h2v1h-2zM4,15h1v1h-1zM8,15h1v1h-1zM10,15h1v1h-1zM13,15h1v1h-1zM16,15h1v1h-1zM19,15h2v1h-2zM23,15h1v1h-1zM0,16h1v1h-1zM3,16h2v1h-2zM6,16h1v1h-1zM9,16h2v1h-2zM12,16h2v1h-2zM15,16h1v1h-1zM17,16h1v1h-1zM20,16h1v1h-1zM22,16h2v1h-2zM8,17h2v1h-2zM11,17h1v1h-1zM13,17h2v1h-2zM16,17h1v1h-1zM19,17h1v1h-1zM21,17h1v1h-1zM24,17h1v1h-1zM0,18h7v1h-7zM8,18h1v1h-1zM10,18h2v1h-2zM13,18h1v1h-1zM15,18h2v1h-2zM18,18h1v1h-1zM20,18h2v1h-2zM23,18h1v1h-1zM0,19h1v1h-1zM6,19h1v1h-1zM9,19h1v1h-1zM11,19h1v1h-1zM14,19h1v1h-1zM17,19h1v1h-1zM18,19h1v1h-1zM24,19h1v1h-1zM0,20h1v1h-1zM2,20h3v1h-3zM6,20h1v1h-1zM8,20h2v1h-2zM11,20h2v1h-2zM14,20h1v1h-1zM16,20h2v1h-2zM18,20h1v1h-1zM20,20h3v1h-3zM24,20h1v1h-1zM0,21h1v1h-1zM2,21h3v1h-3zM6,21h1v1h-1zM10,21h1v1h-1zM12,21h2v1h-2zM15,21h1v1h-1zM18,21h1v1h-1zM20,21h3v1h-3zM24,21h1v1h-1zM0,22h1v1h-1zM2,22h3v1h-3zM6,22h1v1h-1zM9,22h1v1h-1zM11,22h1v1h-1zM14,22h1v1h-1zM16,22h1v1h-1zM18,22h1v1h-1zM20,22h3v1h-3zM24,22h1v1h-1zM0,23h1v1h-1zM6,23h1v1h-1zM8,23h2v1h-2zM12,23h1v1h-1zM15,23h1v1h-1zM17,23h2v1h-2zM18,23h1v1h-1zM24,23h1v1h-1zM0,24h7v1h-7zM9,24h1v1h-1zM11,24h2v1h-2zM14,24h1v1h-1zM16,24h1v1h-1zM18,24h7v1h-7z" />
               </svg>
 
-<span class="ts">➜ Code:</span> <span class="ta">847293</span>
+              <span class="ts">➜ Code:</span> <span class="ta">847293</span>
             </div>
           </div>
           <div class="tab-pane" id="tab-qs-public">
             <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsPubDesc">先在公网服务器部署网关，本地 CLI 连接远程网关。</p>
             <div class="term"><span class="tm" data-i18n="tmServerGateway"># 服务器端：启动网关</span>
-<span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
-<span class="to">Gateway listening on 0.0.0.0:8787</span>
+              <span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
+              <span class="to">Gateway listening on 0.0.0.0:8787</span>
 
-<span class="tm" data-i18n="tmLocalConnect"># 本地：连接远程网关</span>
-<span class="tp">$</span> <span class="tc">linkshell start --gateway wss://gw.example.com</span>
+              <span class="tm" data-i18n="tmLocalConnect"># 本地：连接远程网关</span>
+              <span class="tp">$</span> <span class="tc">linkshell start --gateway wss://gw.example.com</span>
 
-<span class="to">Connected to remote gateway</span>
-<span class="to">Public address: https://gw.example.com</span>
+              <span class="to">Connected to remote gateway</span>
+              <span class="to">Public address: https://gw.example.com</span>
 
               <svg class="qr" viewBox="0 0 25 25" shape-rendering="crispEdges">
                 <rect width="25" height="25" fill="none" />
@@ -794,24 +800,42 @@
                   d="M0,0h7v1h-7zM9,0h2v1h-2zM12,0h1v1h-1zM14,0h2v1h-2zM18,0h7v1h-7zM0,1h1v1h-1zM6,1h1v1h-1zM9,1h1v1h-1zM11,1h1v1h-1zM13,1h2v1h-2zM16,1h1v1h-1zM18,1h1v1h-1zM24,1h1v1h-1zM0,2h1v1h-1zM2,2h3v1h-3zM6,2h1v1h-1zM8,2h1v1h-1zM10,2h2v1h-2zM14,2h1v1h-1zM16,2h1v1h-1zM18,2h1v1h-1zM20,2h3v1h-3zM24,2h1v1h-1zM0,3h1v1h-1zM2,3h3v1h-3zM6,3h1v1h-1zM9,3h2v1h-2zM12,3h1v1h-1zM15,3h2v1h-2zM18,3h1v1h-1zM20,3h3v1h-3zM24,3h1v1h-1zM0,4h1v1h-1zM2,4h3v1h-3zM6,4h1v1h-1zM8,4h2v1h-2zM11,4h1v1h-1zM13,4h1v1h-1zM16,4h1v1h-1zM18,4h1v1h-1zM20,4h3v1h-3zM24,4h1v1h-1zM0,5h1v1h-1zM6,5h1v1h-1zM9,5h1v1h-1zM11,5h2v1h-2zM14,5h1v1h-1zM16,5h1v1h-1zM18,5h1v1h-1zM24,5h1v1h-1zM0,6h7v1h-7zM8,6h1v1h-1zM10,6h1v1h-1zM12,6h1v1h-1zM14,6h1v1h-1zM16,6h1v1h-1zM18,6h7v1h-7zM8,7h1v1h-1zM10,7h3v1h-3zM14,7h1v1h-1zM16,7h1v1h-1zM0,8h1v1h-1zM3,8h2v1h-2zM6,8h1v1h-1zM8,8h1v1h-1zM11,8h1v1h-1zM13,8h2v1h-2zM16,8h1v1h-1zM18,8h2v1h-2zM21,8h1v1h-1zM23,8h1v1h-1zM1,9h1v1h-1zM3,9h1v1h-1zM5,9h2v1h-2zM9,9h1v1h-1zM12,9h2v1h-2zM15,9h1v1h-1zM17,9h2v1h-2zM20,9h1v1h-1zM22,9h2v1h-2zM0,10h2v1h-2zM4,10h1v1h-1zM6,10h1v1h-1zM8,10h2v1h-2zM11,10h1v1h-1zM14,10h1v1h-1zM16,10h2v1h-2zM19,10h1v1h-1zM21,10h2v1h-2zM24,10h1v1h-1zM1,11h2v1h-2zM5,11h1v1h-1zM7,11h2v1h-2zM10,11h1v1h-1zM12,11h2v1h-2zM15,11h1v1h-1zM18,11h1v1h-1zM20,11h1v1h-1zM22,11h1v1h-1zM24,11h1v1h-1zM0,12h1v1h-1zM3,12h1v1h-1zM5,12h2v1h-2zM9,12h2v1h-2zM13,12h1v1h-1zM15,12h2v1h-2zM19,12h1v1h-1zM21,12h1v1h-1zM23,12h1v1h-1zM2,13h1v1h-1zM4,13h2v1h-2zM8,13h1v1h-1zM10,13h1v1h-1zM12,13h1v1h-1zM14,13h2v1h-2zM17,13h1v1h-1zM20,13h2v1h-2zM24,13h1v1h-1zM1,14h1v1h-1zM3,14h2v1h-2zM7,14h1v1h-1zM9,14h1v1h-1zM11,14h2v1h-2zM14,14h1v1h-1zM16,14h1v1h-1zM19,14h2v1h-2zM22,14h1v1h-1zM24,14h1v1h-1zM0,15h2v1h-2zM3,15h1v1h-1zM6,15h1v1h-1zM8,15h2v1h-2zM12,15h1v1h-1zM14,15h1v1h-1zM17,15h1v1h-1zM20,15h1v1h-1zM23,15h2v1h-2zM1,16h1v1h-1zM4,16h2v1h-2zM8,16h1v1h-1zM10,16h2v1h-2zM13,16h1v1h-1zM16,16h2v1h-2zM19,16h1v1h-1zM21,16h2v1h-2zM24,16h1v1h-1zM8,17h1v1h-1zM10,17h1v1h-1zM13,17h2v1h-2zM16,17h1v1h-1zM18,17h1v1h-1zM21,17h1v1h-1zM23,17h1v1h-1zM0,18h7v1h-7zM9,18h2v1h-2zM12,18h1v1h-1zM14,18h1v1h-1zM17,18h1v1h-1zM19,18h2v1h-2zM22,18h1v1h-1zM24,18h1v1h-1zM0,19h1v1h-1zM6,19h1v1h-1zM8,19h1v1h-1zM10,19h1v1h-1zM13,19h2v1h-2zM16,19h1v1h-1zM18,19h1v1h-1zM20,19h1v1h-1zM23,19h1v1h-1zM0,20h1v1h-1zM2,20h3v1h-3zM6,20h1v1h-1zM9,20h1v1h-1zM11,20h2v1h-2zM15,20h1v1h-1zM17,20h2v1h-2zM20,20h1v1h-1zM22,20h2v1h-2zM0,21h1v1h-1zM2,21h3v1h-3zM6,21h1v1h-1zM8,21h2v1h-2zM12,21h1v1h-1zM14,21h1v1h-1zM16,21h1v1h-1zM19,21h1v1h-1zM21,21h1v1h-1zM24,21h1v1h-1zM0,22h1v1h-1zM2,22h3v1h-3zM6,22h1v1h-1zM10,22h1v1h-1zM13,22h1v1h-1zM15,22h2v1h-2zM18,22h2v1h-2zM22,22h1v1h-1zM0,23h1v1h-1zM6,23h1v1h-1zM9,23h1v1h-1zM11,23h1v1h-1zM14,23h1v1h-1zM17,23h1v1h-1zM20,23h2v1h-2zM24,23h1v1h-1zM0,24h7v1h-7zM8,24h2v1h-2zM11,24h1v1h-1zM13,24h2v1h-2zM16,24h1v1h-1zM18,24h7v1h-7z" />
               </svg>
 
-<span class="ts">➜ Code:</span> <span class="ta">293847</span>
+              <span class="ts">➜ Code:</span> <span class="ta">293847</span>
             </div>
           </div>
           <div class="tab-pane" id="tab-qs-official">
-            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsOfficialDesc">Pro 订阅用户直接使用官方托管 Gateway，一条命令登录即可连接。</p>
+            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsOfficialDesc">Pro 订阅用户直接使用官方托管
+              Gateway，一条命令登录即可连接。</p>
             <div class="term"><span class="tm" data-i18n="tmLoginAccount"># 登录 iTool 账号</span>
-<span class="tp">$</span> <span class="tc">linkshell login</span>
-<span class="to">Opening browser for login...</span>
-<span class="ts">✓ Logged in as user@example.com (Pro)</span>
+              <span class="tp">$</span> <span class="tc">linkshell login</span>
+              <span class="to">Opening browser for login...</span>
+              <span class="ts">✓ Logged in as user@example.com (Pro)</span>
 
-<span class="to">Available gateways:</span>
-<span class="to">  [1] Official Gateway (Asia)  wss://gw.linkshell.app/ws</span>
-<span class="to">  [0] Skip</span>
+              <span class="to">Available gateways:</span>
+              <span class="to"> [1] Official Gateway (Asia) wss://gw.linkshell.app/ws</span>
+              <span class="to"> [0] Skip</span>
 
-<span class="to">Connect to gateway [1]: </span><span class="ta">1</span>
+              <span class="to">Connect to gateway [1]: </span><span class="ta">1</span>
 
-<span class="ts">✓ Bridge started in background (PID 12345)</span>
-<span class="to">  Open the LinkShell app on your phone to connect.</span>
+              <span class="ts">✓ Bridge started in background (PID 12345)</span>
+              <span class="to"> Open the LinkShell app on your phone to connect.</span>
+            </div>
+          </div>
+          <div class="tab-pane" id="tab-qs-free">
+            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsFreeDesc">限时免费公网网关，无需登录、无需自建服务器，直接连接体验。</p>
+            <div class="term"><span class="tm" data-i18n="tmFreeConnect"># 直接连接免费网关</span>
+              <span class="tp">$</span> <span class="tc">linkshell start --gateway
+                wss://zkiwacrrxzaj.sealosbja.site/ws</span>
+
+              <span class="to">Connected to free gateway</span>
+
+              <svg class="qr" viewBox="0 0 25 25" shape-rendering="crispEdges">
+                <rect width="25" height="25" fill="none" />
+                <path fill="#9a9898"
+                  d="M0,0h7v1h-7zM9,0h1v1h-1zM11,0h2v1h-2zM14,0h1v1h-1zM16,0h2v1h-2zM18,0h7v1h-7zM0,1h1v1h-1zM6,1h1v1h-1zM8,1h1v1h-1zM10,1h1v1h-1zM12,1h2v1h-2zM15,1h1v1h-1zM17,1h1v1h-1zM18,1h1v1h-1zM24,1h1v1h-1zM0,2h1v1h-1zM2,2h3v1h-3zM6,2h1v1h-1zM9,2h1v1h-1zM11,2h1v1h-1zM13,2h1v1h-1zM15,2h2v1h-2zM18,2h1v1h-1zM20,2h3v1h-3zM24,2h1v1h-1zM0,3h1v1h-1zM2,3h3v1h-3zM6,3h1v1h-1zM8,3h1v1h-1zM10,3h2v1h-2zM14,3h1v1h-1zM16,3h1v1h-1zM18,3h1v1h-1zM20,3h3v1h-3zM24,3h1v1h-1zM0,4h1v1h-1zM2,4h3v1h-3zM6,4h1v1h-1zM9,4h2v1h-2zM12,4h1v1h-1zM15,4h1v1h-1zM18,4h1v1h-1zM20,4h3v1h-3zM24,4h1v1h-1zM0,5h1v1h-1zM6,5h1v1h-1zM8,5h1v1h-1zM10,5h1v1h-1zM13,5h1v1h-1zM15,5h1v1h-1zM17,5h1v1h-1zM18,5h1v1h-1zM24,5h1v1h-1zM0,6h7v1h-7zM8,6h1v1h-1zM10,6h1v1h-1zM12,6h1v1h-1zM14,6h1v1h-1zM16,6h1v1h-1zM18,6h7v1h-7z" />
+              </svg>
+
+              <span class="ts">➜ Code:</span> <span class="ta">519382</span>
             </div>
           </div>
         </div>
@@ -822,10 +846,10 @@
         <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step3Desc">打开 LinkShell App（iOS /
           Android），对准终端二维码扫一扫，立刻接管会话。</p>
         <div class="term"><span class="to">&gt; scanning QR...</span>
-<span class="to">&gt; pairing code: </span><span class="ta">847293</span>
-<span class="ts">&gt; connected to session #1</span>
-<span class="ts">&gt; control acquired</span>
-<span class="cur"></span>
+          <span class="to">&gt; pairing code: </span><span class="ta">847293</span>
+          <span class="ts">&gt; connected to session #1</span>
+          <span class="ts">&gt; control acquired</span>
+          <span class="cur"></span>
         </div>
       </div>
     </div>
@@ -865,11 +889,12 @@
             data-i18n="f5Title">端口转发预览</span></p>
         <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="f5Desc">远程启动 dev server，手机直接预览页面。支持
           CSS/JS/图片完整加载、HMR 热更新、PC/手机视图切换和全屏模式。</p>
-        <div class="term" style="padding:8px 16px"><span class="tm" data-i18n="tmStartDevServer"># 远程终端启动 dev server</span>
-<span class="tp">$</span> <span class="tc">npm run dev</span>
-<span class="to"> ➜ Local: http://localhost:3000</span>
+        <div class="term" style="padding:8px 16px"><span class="tm" data-i18n="tmStartDevServer"># 远程终端启动 dev
+            server</span>
+          <span class="tp">$</span> <span class="tc">npm run dev</span>
+          <span class="to"> ➜ Local: http://localhost:3000</span>
 
-<span class="tm" data-i18n="tmAppBrowserTab"># App 切换到 Browser 标签，输入端口 3000，即可预览</span>
+          <span class="tm" data-i18n="tmAppBrowserTab"># App 切换到 Browser 标签，输入端口 3000，即可预览</span>
         </div>
       </div>
     </div>
@@ -883,12 +908,12 @@
         工作状态。识别到需要操作时，一键快速响应，无需切回 App。</p>
 
       <div class="term" style="margin-bottom:24px">┌─ compact ──────────────────────────────┐
-│ · · ·                                 │
-├─ expanded ─────────────────────────────┤
-│ <span class="ta">Claude Code</span> — Editing App.tsx...      │
-├─ action ───────────────────────────────┤
-│ Run <span class="tc">`npm test`</span>? <span class="to">[deny]</span> <span class="ts">[approve]</span>      │
-└────────────────────────────────────────┘</div>
+        │ · · · │
+        ├─ expanded ─────────────────────────────┤
+        │ <span class="ta">Claude Code</span> — Editing App.tsx... │
+        ├─ action ───────────────────────────────┤
+        │ Run <span class="tc">`npm test`</span>? <span class="to">[deny]</span> <span class="ts">[approve]</span> │
+        └────────────────────────────────────────┘</div>
 
       <div class="li g" data-i18n="diFeature1">实时状态 — 思考中、编码中、等待确认，一目了然</div>
       <div class="li g" data-i18n="diFeature2">快捷操作 — Claude 请求执行命令时，灵动岛直接审批</div>
@@ -905,16 +930,18 @@
         每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。</p>
 
       <div class="term" style="margin-bottom:24px"><span class="tp">$</span> <span class="tc">linkshell status</span>
-<span class="to">Session #3 | 2 projects active</span>
+        <span class="to">Session #3 | 2 projects active</span>
 
-<span class="tm">PROJECTS</span>
-<span class="ts">linkshell-app</span> ~/projects/linkshell-app <span class="ts">[████████░░] 85%</span>
-<span class="ta">api-server</span> ~/projects/api-server <span class="ta">[██████░░░░] 60%</span>
-<span style="color:var(--warning)">ml-pipeline</span> ~/projects/ml-pipeline <span style="color:var(--warning)">[████░░░░░░] 40%</span>
+        <span class="tm">PROJECTS</span>
+        <span class="ts">linkshell-app</span> ~/projects/linkshell-app <span class="ts">[████████░░] 85%</span>
+        <span class="ta">api-server</span> ~/projects/api-server <span class="ta">[██████░░░░] 60%</span>
+        <span style="color:var(--warning)">ml-pipeline</span> ~/projects/ml-pipeline <span
+          style="color:var(--warning)">[████░░░░░░] 40%</span>
 
-<span class="tm">TERMINALS</span>
-<span class="to">[1] linkshell-app</span> <span class="tp">$</span> npm test <span class="ts">PASS 12/12</span>
-<span class="to">[2] api-server</span> <span class="tp">$</span> cargo build <span class="ta">Compiling...</span>
+        <span class="tm">TERMINALS</span>
+        <span class="to">[1] linkshell-app</span> <span class="tp">$</span> npm test <span class="ts">PASS 12/12</span>
+        <span class="to">[2] api-server</span> <span class="tp">$</span> cargo build <span
+          class="ta">Compiling...</span>
       </div>
 
       <div class="li b" data-i18n="projFeature1">多项目并行 — 同一会话内切换不同项目目录</div>
@@ -957,12 +984,14 @@
         <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsArchDesc">LinkShell 采用三层架构：本地 CLI 捕获 PTY
           输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。</p>
         <div class="term">┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
-│ <span class="ts">CLI (Host)</span> │ &lt;─ <span class="tm">WS</span> ─&gt; │ <span class="ta">Gateway</span> │ &lt;─ <span class="tm">WS</span> ─&gt; │ <span style="color:var(--warning)">Mobile App</span> │
-│                  │ │                  │ │                  │
-│ PTY Bridge       │ │ Session Relay    │ │ xterm.js Render  │
-│ Screen Share     │ │ Pairing Service  │ │ QR Pairing       │
-│ Scrollback Buf   │ │ Control Rights   │ │ Multi-Gateway    │
-└──────────────────┘ └──────────────────┘ └──────────────────┘</div>
+          │ <span class="ts">CLI (Host)</span> │ &lt;─ <span class="tm">WS</span> ─&gt; │ <span
+            class="ta">Gateway</span> │ &lt;─ <span class="tm">WS</span> ─&gt; │ <span
+            style="color:var(--warning)">Mobile App</span> │
+          │ │ │ │ │ │
+          │ PTY Bridge │ │ Session Relay │ │ xterm.js Render │
+          │ Screen Share │ │ Pairing Service │ │ QR Pairing │
+          │ Scrollback Buf │ │ Control Rights │ │ Multi-Gateway │
+          └──────────────────┘ └──────────────────┘ └──────────────────┘</div>
       </div>
 
       <!-- CLI Reference -->
@@ -974,10 +1003,10 @@
           <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdStart">启动桥接会话。自动启动内置网关，桥接 AI
             代理进程并生成配对二维码。</p>
           <div class="term"><span class="tm">FLAGS</span>
---daemon <span class="to" data-i18n="flagDaemon">后台守护模式运行</span>
---provider <span class="to" data-i18n="flagProvider">指定 AI 提供者 (claude / codex / custom)</span>
---screen <span class="to" data-i18n="flagScreen">启用远程桌面共享</span>
---port <span class="to" data-i18n="flagPort">指定网关端口 (默认 8787)</span></div>
+            --daemon <span class="to" data-i18n="flagDaemon">后台守护模式运行</span>
+            --provider <span class="to" data-i18n="flagProvider">指定 AI 提供者 (claude / codex / custom)</span>
+            --screen <span class="to" data-i18n="flagScreen">启用远程桌面共享</span>
+            --port <span class="to" data-i18n="flagPort">指定网关端口 (默认 8787)</span></div>
         </div>
 
         <div style="margin-bottom:32px">
@@ -985,9 +1014,9 @@
           <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdGateway">单独启动网关服务器。适用于独立部署网关到远程服务器的场景。
           </p>
           <div class="term"><span class="tm">FLAGS</span>
---port <span class="to" data-i18n="flagGwPort">指定监听端口</span>
---host <span class="to" data-i18n="flagGwHost">指定绑定地址</span>
---daemon <span class="to" data-i18n="flagGwDaemon">后台守护模式运行</span></div>
+            --port <span class="to" data-i18n="flagGwPort">指定监听端口</span>
+            --host <span class="to" data-i18n="flagGwHost">指定绑定地址</span>
+            --daemon <span class="to" data-i18n="flagGwDaemon">后台守护模式运行</span></div>
         </div>
 
         <div style="margin-bottom:32px">
@@ -1012,7 +1041,8 @@
 
         <div style="margin-top:32px">
           <p style="font-weight:700;margin-bottom:4px">linkshell login</p>
-          <p style="color:var(--text-sec)" data-i18n="docsCmdLogin">登录 iTool 账号。浏览器跳转授权后自动保存凭证，Pro 用户可直接选择官方 Gateway 连接。</p>
+          <p style="color:var(--text-sec)" data-i18n="docsCmdLogin">登录 iTool 账号。浏览器跳转授权后自动保存凭证，Pro 用户可直接选择官方 Gateway 连接。
+          </p>
         </div>
 
         <div style="margin-top:32px">
@@ -1035,6 +1065,7 @@
           <button class="tab active" data-tab="lan" data-i18n="tabLan">局域网</button>
           <button class="tab" data-tab="public" data-i18n="tabPublic">公网</button>
           <button class="tab" data-tab="official" data-i18n="tabOfficial">官方 Gateway</button>
+          <button class="tab" data-tab="free" data-i18n="tabFree">限时免费</button>
         </div>
         <div class="tab-body">
           <div class="tab-pane active" id="tab-lan">
@@ -1043,7 +1074,7 @@
               内置网关，同一局域网内手机直连电脑。零配置，开箱即用。</p>
             <div class="term" style="margin-bottom:16px"><span class="tp">$</span> <span class="tc">npm i -g
                 linkshell-cli</span>
-<span class="tp">$</span> <span class="tc">linkshell start --daemon</span>
+              <span class="tp">$</span> <span class="tc">linkshell start --daemon</span>
             </div>
             <div class="li g" data-i18n="lanTip1">手机和电脑需在同一 Wi-Fi 下</div>
             <div class="li g" data-i18n="lanTip2">无需任何服务器，开箱即用</div>
@@ -1055,10 +1086,10 @@
             <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployRemoteDesc">将网关部署到公网服务器，配合 Nginx
               反向代理 + HTTPS，跨网络访问。</p>
             <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmDeployServer"># 服务器端</span>
-<span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
+              <span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
 
-<span class="tm" data-i18n="tmDeployLocal"># 本地</span>
-<span class="tp">$</span> <span class="tc">linkshell start --gateway wss://your.server</span>
+              <span class="tm" data-i18n="tmDeployLocal"># 本地</span>
+              <span class="tp">$</span> <span class="tc">linkshell start --gateway wss://your.server</span>
             </div>
             <p style="font-weight:700;margin-bottom:4px;margin-top:20px" data-i18n="docsDeployDocker">Docker 部署</p>
             <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployDockerDesc">使用 Docker Compose
@@ -1070,21 +1101,36 @@
             <div class="li b" data-i18n="pubTip3">数据仅经过你自己的服务器中继</div>
           </div>
           <div class="tab-pane" id="tab-official">
-            <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployOfficial">官方托管 Gateway</span> <span class="ts" data-i18n="docsDeployOfficialTag">[Pro]</span></p>
-            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployOfficialDesc">订阅 iTool Pro 即可使用官方托管的 Gateway，无需自建服务器。登录后自动连接，手机 App 自动发现会话。</p>
+            <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployOfficial">官方托管 Gateway</span> <span
+                class="ts" data-i18n="docsDeployOfficialTag">[Pro]</span></p>
+            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployOfficialDesc">订阅 iTool Pro
+              即可使用官方托管的 Gateway，无需自建服务器。登录后自动连接，手机 App 自动发现会话。</p>
             <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmLogin"># 登录</span>
-<span class="tp">$</span> <span class="tc">linkshell login</span>
-<span class="ts">✓ Logged in as user@example.com (Pro)</span>
-<span class="ts">✓ Bridge started in background</span>
+              <span class="tp">$</span> <span class="tc">linkshell login</span>
+              <span class="ts">✓ Logged in as user@example.com (Pro)</span>
+              <span class="ts">✓ Bridge started in background</span>
 
-<span class="tm" data-i18n="tmViewSessions"># 查看会话</span>
-<span class="tp">$</span> <span class="tc">linkshell list</span>
-<span class="ts">✓ Official Gateway (Asia)</span>
-<span class="to">  └ ● a1b2c3d4 — claude · my-project · just now</span>
+              <span class="tm" data-i18n="tmViewSessions"># 查看会话</span>
+              <span class="tp">$</span> <span class="tc">linkshell list</span>
+              <span class="ts">✓ Official Gateway (Asia)</span>
+              <span class="to"> └ ● a1b2c3d4 — claude · my-project · just now</span>
             </div>
             <div class="li g" data-i18n="officialTip1">零配置，登录即用，无需部署服务器</div>
             <div class="li g" data-i18n="officialTip2">手机 App 登录后自动发现会话，无需扫码</div>
             <div class="li g" data-i18n="officialTip3">订阅到期自动断开，数据不留存</div>
+          </div>
+          <div class="tab-pane" id="tab-free">
+            <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployFree">限时免费网关</span> <span class="ta"
+                data-i18n="docsDeployFreeTag">[限时]</span></p>
+            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployFreeDesc">
+              限时开放的免费公网网关，无需登录、无需自建服务器，一条命令直接体验跨网络连接。</p>
+            <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmFreeConnect"># 直接连接免费网关</span>
+              <span class="tp">$</span> <span class="tc">linkshell start --gateway
+                wss://zkiwacrrxzaj.sealosbja.site/ws</span>
+            </div>
+            <div class="li g" data-i18n="freeTip1">无需登录、无需注册，直接使用</div>
+            <div class="li g" data-i18n="freeTip2">支持跨网络访问，体验与 Pro 一致</div>
+            <div class="li b" data-i18n="freeTip3">限时开放，随时可能关闭</div>
           </div>
         </div>
       </div>
@@ -1097,8 +1143,8 @@
         <div class="term" style="margin-bottom:16px"><span class="tp">$</span> <span class="tc">linkshell start --daemon
             --provider claude --screen</span>
 
-<span class="to">Screen sharing enabled</span>
-<span class="to">Mode: WebRTC (30fps) | Fallback: Screenshot stream</span>
+          <span class="to">Screen sharing enabled</span>
+          <span class="to">Mode: WebRTC (30fps) | Fallback: Screenshot stream</span>
         </div>
         <div class="li g" data-i18n="docsScreen1">WebRTC 模式 — 默认以 30fps 实时推流桌面画面，延迟极低</div>
         <div class="li g" data-i18n="docsScreen2">截图流兜底 — 网络条件不佳时自动降级为截图流模式，保证可用性</div>
@@ -1111,12 +1157,13 @@
         <h3><span class="tm">05</span> <span data-i18n="docsPortFwdTitle">端口转发</span></h3>
         <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsPortFwdDesc">在远程终端启动 dev server
           后，直接在手机上预览页面。通过 Gateway 中继 HTTP 请求，支持完整的 Web 应用预览。</p>
-        <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmDocsStartDev"># 远程终端启动 dev server</span>
-<span class="tp">$</span> <span class="tc">npm run dev</span>
-<span class="to"> ➜ Local: http://localhost:3000</span>
+        <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmDocsStartDev"># 远程终端启动 dev
+            server</span>
+          <span class="tp">$</span> <span class="tc">npm run dev</span>
+          <span class="to"> ➜ Local: http://localhost:3000</span>
 
-<span class="tm" data-i18n="tmDocsAppBrowser"># App 切换到 Browser 标签（globe 图标），输入端口 3000</span>
-<span class="ts">➜ Preview: http://gateway:8787/tunnel/{sessionId}/3000/</span>
+          <span class="tm" data-i18n="tmDocsAppBrowser"># App 切换到 Browser 标签（globe 图标），输入端口 3000</span>
+          <span class="ts">➜ Preview: http://gateway:8787/tunnel/{sessionId}/3000/</span>
         </div>
         <div class="li g" data-i18n="docsPortFwd1">完整加载 — HTML、CSS、JS、图片等所有资源通过 tunnel 代理</div>
         <div class="li g" data-i18n="docsPortFwd2">HMR 支持 — WebSocket 热更新自动转发，Vite / Next.js / webpack 均可</div>
@@ -1197,7 +1244,8 @@
         </div>
         <div style="margin-top:24px">
           <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq6Q">Q: 官方 Gateway 是什么？和自建有什么区别？</p>
-          <p style="color:var(--text-sec)" data-i18n="docsFaq6A">官方 Gateway 是 LinkShell 团队托管的公网网关，订阅 iTool Pro 即可使用。无需自建服务器，登录后一键连接。手机 App 登录同一账号后自动发现会话，无需扫码。自建网关则完全独立，不依赖任何第三方服务。</p>
+          <p style="color:var(--text-sec)" data-i18n="docsFaq6A">官方 Gateway 是 LinkShell 团队托管的公网网关，订阅 iTool Pro
+            即可使用。无需自建服务器，登录后一键连接。手机 App 登录同一账号后自动发现会话，无需扫码。自建网关则完全独立，不依赖任何第三方服务。</p>
         </div>
       </div>
     </div>
@@ -1207,7 +1255,8 @@
   <section class="sec" id="pricing" data-page="pricing">
     <div class="c">
       <h2 data-i18n="pricingTitle">选择你的方案</h2>
-      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="pricingDesc">免费使用全部核心功能。升级 Pro 解锁官方托管 Gateway，随时随地连接。</p>
+      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="pricingDesc">免费使用全部核心功能。升级 Pro 解锁官方托管
+        Gateway，随时随地连接。</p>
 
       <div class="pricing-grid">
         <!-- Free -->
@@ -1223,7 +1272,8 @@
             <li data-i18n="pricingF5">端口转发预览</li>
             <li data-i18n="pricingF6">自建网关部署</li>
           </ul>
-          <a href="#quickstart" class="btn btn-s" style="width:100%;text-align:center" data-i18n="pricingStartFree">开始使用</a>
+          <a href="#quickstart" class="btn btn-s" style="width:100%;text-align:center"
+            data-i18n="pricingStartFree">开始使用</a>
         </div>
 
         <!-- Pro -->
@@ -1232,12 +1282,17 @@
           <div class="plan-name">Pro <span style="color:var(--success)">⚡</span></div>
           <div style="margin-bottom:16px">
             <div class="cycle-toggle">
-              <button class="cycle-btn active" data-cycle="monthly" onclick="setPricingCycle('monthly')"><span data-i18n="pricingMonthly">月付</span></button>
-              <button class="cycle-btn" data-cycle="yearly" onclick="setPricingCycle('yearly')"><span data-i18n="pricingYearly">年付</span></button>
+              <button class="cycle-btn active" data-cycle="monthly" onclick="setPricingCycle('monthly')"><span
+                  data-i18n="pricingMonthly">月付</span></button>
+              <button class="cycle-btn" data-cycle="yearly" onclick="setPricingCycle('yearly')"><span
+                  data-i18n="pricingYearly">年付</span></button>
             </div>
-            <div id="price-monthly" class="plan-price">$1<span style="font-size:14px;font-weight:400;color:var(--text-sec)"> /mo</span></div>
-            <div id="price-yearly" class="plan-price" style="display:none">$12<span style="font-size:14px;font-weight:400;color:var(--text-sec)"> /yr</span></div>
-            <div class="plan-period"><span id="price-alt-monthly" data-i18n="pricingAltMonthly">¥9.9/月（爱发电）</span><span id="price-alt-yearly" style="display:none" data-i18n="pricingAltYearly">¥99/年（爱发电）</span></div>
+            <div id="price-monthly" class="plan-price">$1<span
+                style="font-size:14px;font-weight:400;color:var(--text-sec)"> /mo</span></div>
+            <div id="price-yearly" class="plan-price" style="display:none">$12<span
+                style="font-size:14px;font-weight:400;color:var(--text-sec)"> /yr</span></div>
+            <div class="plan-period"><span id="price-alt-monthly" data-i18n="pricingAltMonthly">¥9.9/月（爱发电）</span><span
+                id="price-alt-yearly" style="display:none" data-i18n="pricingAltYearly">¥99/年（爱发电）</span></div>
           </div>
           <ul class="plan-features">
             <li data-i18n="pricingP1">Free 全部功能</li>
@@ -1258,7 +1313,8 @@
                 <input type="password" id="pricing-password" placeholder="Password" autocomplete="current-password" />
                 <div id="pricing-auth-error" style="color:var(--danger);font-size:12px;display:none"></div>
                 <button class="auth-btn auth-btn-primary" onclick="pricingSignIn()" data-i18n="pricingLogin">登录</button>
-                <button class="auth-btn" style="background:var(--surface);color:var(--text)" onclick="pricingSignUp()" data-i18n="pricingRegister">注册新账户</button>
+                <button class="auth-btn" style="background:var(--surface);color:var(--text)" onclick="pricingSignUp()"
+                  data-i18n="pricingRegister">注册新账户</button>
               </div>
             </div>
 
@@ -1272,9 +1328,12 @@
                 <div id="paypal-button-container"></div>
               </div>
               <div id="pay-afdian" style="display:none">
-                <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian" style="display:flex;margin-bottom:8px" data-i18n="pricingAfdianBtn">前往爱发电支付 ↗</a>
-                <button class="auth-btn" style="background:var(--surface);color:var(--text)" onclick="pricingRefreshPlan()" data-i18n="pricingAfdianRefresh">支付完成？点击刷新状态</button>
-                <p style="color:var(--text-muted);font-size:11px;margin-top:8px;text-align:center" data-i18n="pricingAfdianNote">支付后请点击刷新按钮同步订阅状态</p>
+                <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian"
+                  style="display:flex;margin-bottom:8px" data-i18n="pricingAfdianBtn">前往爱发电支付 ↗</a>
+                <button class="auth-btn" style="background:var(--surface);color:var(--text)"
+                  onclick="pricingRefreshPlan()" data-i18n="pricingAfdianRefresh">支付完成？点击刷新状态</button>
+                <p style="color:var(--text-muted);font-size:11px;margin-top:8px;text-align:center"
+                  data-i18n="pricingAfdianNote">支付后请点击刷新按钮同步订阅状态</p>
               </div>
             </div>
 
@@ -1282,7 +1341,8 @@
             <div id="pricing-pro-status" style="display:none">
               <div class="term" style="text-align:center;padding:16px">
                 <span class="ts">✓</span> <span data-i18n="pricingAlreadyPro">你已是 Pro 用户</span>
-                <br><span style="color:var(--text-sec);font-size:13px" data-i18n="pricingExpires">到期时间：</span><span id="pricing-expires" style="color:var(--text-sec);font-size:13px"></span>
+                <br><span style="color:var(--text-sec);font-size:13px" data-i18n="pricingExpires">到期时间：</span><span
+                  id="pricing-expires" style="color:var(--text-sec);font-size:13px"></span>
               </div>
             </div>
           </div>
@@ -1294,7 +1354,8 @@
         <h3 data-i18n="pricingFaqTitle">常见问题</h3>
         <div style="margin-top:16px;margin-bottom:16px">
           <p style="font-weight:700;margin-bottom:4px" data-i18n="pricingFaq1Q">Q: 免费版有什么限制？</p>
-          <p style="color:var(--text-sec)" data-i18n="pricingFaq1A">没有功能限制。免费版包含所有核心功能，只是需要自建网关。Pro 提供官方托管网关，省去部署和维护。</p>
+          <p style="color:var(--text-sec)" data-i18n="pricingFaq1A">没有功能限制。免费版包含所有核心功能，只是需要自建网关。Pro 提供官方托管网关，省去部署和维护。
+          </p>
         </div>
         <div style="margin-bottom:16px">
           <p style="font-weight:700;margin-bottom:4px" data-i18n="pricingFaq2Q">Q: 可以随时取消吗？</p>
@@ -1462,6 +1523,17 @@
         officialTip2: "手机 App 登录后自动发现会话，无需扫码",
         officialTip3: "订阅到期自动断开，数据不留存",
         qsOfficialDesc: "Pro 订阅用户直接使用官方托管 Gateway，一条命令登录即可连接。",
+        tabFree: "限时免费",
+        qsFreeDesc: "限时免费公网网关，无需登录、无需自建服务器，直接连接体验。",
+        tmFreeConnect: "# 直接连接免费网关",
+        docsDeployFree: "限时免费网关",
+        docsDeployFreeTag: "[限时]",
+        docsDeployFreeDesc: "限时开放的免费公网网关，无需登录、无需自建服务器，一条命令直接体验跨网络连接。",
+        freeTip1: "无需登录、无需注册，直接使用",
+        freeTip2: "支持跨网络访问，体验与 Pro 一致",
+        freeTip3: "限时开放，随时可能关闭",
+        heroFreeGateway: "🎉 限时免费网关开放中：",
+        heroFreeGatewayCmd: "linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws",
         docsProtocolTitle: "协议与可靠性",
         docsProtoMsgTypes: "消息类型 (Zod)",
         docsProtoAck: "双层缓冲确认",
@@ -1672,6 +1744,17 @@
         officialTip2: "Mobile App auto-discovers sessions after login, no QR scan needed",
         officialTip3: "Auto-disconnect on subscription expiry, no data retained",
         qsOfficialDesc: "Pro subscribers connect to the official managed Gateway with a single login command.",
+        tabFree: "Free (Limited)",
+        qsFreeDesc: "Free public gateway for a limited time. No login or server setup needed — just connect and try.",
+        tmFreeConnect: "# Connect to free gateway",
+        docsDeployFree: "Free Gateway (Limited Time)",
+        docsDeployFreeTag: "[Limited]",
+        docsDeployFreeDesc: "A free public gateway open for a limited time. No login or server setup required — one command to experience cross-network access.",
+        freeTip1: "No login or registration required",
+        freeTip2: "Cross-network access, same experience as Pro",
+        freeTip3: "Available for a limited time, may close at any time",
+        heroFreeGateway: "🎉 Free gateway available now:",
+        heroFreeGatewayCmd: "linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws",
         docsProtocolTitle: "Protocol & Reliability",
         docsProtoMsgTypes: "Message Types (Zod)",
         docsProtoAck: "Dual-layer ACK",
@@ -1944,10 +2027,10 @@
         const planId = pricingCycle === 'yearly' ? PAYPAL_YEARLY_PLAN : PAYPAL_MONTHLY_PLAN;
         window.paypal.Buttons({
           style: { layout: 'vertical', shape: 'rect', color: 'gold', label: 'subscribe' },
-          createSubscription: function(data, actions) {
+          createSubscription: function (data, actions) {
             return actions.subscription.create({ plan_id: planId });
           },
-          onApprove: async function(data) {
+          onApprove: async function (data) {
             if (!data.subscriptionID || !pricingUser) return;
             try {
               const sb = getSupabase();
@@ -1974,7 +2057,7 @@
               showAuthError('Network error. Please try again.');
             }
           },
-          onError: function(err) {
+          onError: function (err) {
             console.error('[PayPal]', err);
           }
         }).render('#paypal-button-container');

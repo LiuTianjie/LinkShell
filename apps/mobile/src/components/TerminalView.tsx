@@ -47,10 +47,11 @@ interface TerminalViewProps {
   onInput?: (data: string) => void;
   onResize?: (cols: number, rows: number) => void;
   onRequestKeyboard?: () => void;
+  topInset?: number;
 }
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
-  function TerminalView({ stream, onInput, onResize, onRequestKeyboard }, ref) {
+  function TerminalView({ stream, onInput, onResize, onRequestKeyboard, topInset = 0 }, ref) {
     const { theme } = useTheme();
     const webViewRef = useRef<WebView>(null);
     const readyRef = useRef(false);
@@ -187,15 +188,26 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       const enhancedHandlerScript = `
 <script>
 (function(){
+  var _topInset = ${topInset + 40};
+  var _xtermEl = document.querySelector('.xterm');
+  if(_xtermEl) _xtermEl.style.transition = 'padding-top 0.3s ease';
+  function updateDynamicPadding(){
+    if(!_xtermEl) { _xtermEl = document.querySelector('.xterm'); if(_xtermEl) _xtermEl.style.transition = 'padding-top 0.3s ease'; }
+    if(!_xtermEl) return;
+    var viewportY = term.buffer.active.viewportY || 0;
+    _xtermEl.style.paddingTop = (viewportY === 0 ? _topInset : 2) + 'px';
+  }
   function restoreChunks(chunks){
     term.reset();
     if(Array.isArray(chunks) && chunks.length > 0){
       term.write(chunks.join(''));
     }
     safeFit();
-    setTimeout(function(){ snapBottom(); }, 50);
+    setTimeout(function(){ snapBottom(); updateDynamicPadding(); }, 50);
     sendSize();
   }
+  term.onLineFeed(function(){ updateDynamicPadding(); });
+  term.onScroll(function(){ updateDynamicPadding(); });
   var prevHandle = window.handleRNMessage;
   window.handleRNMessage = function(msg){
     try{
@@ -207,6 +219,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       if(p.type==='refit'){
         safeFit();
         sendSize();
+        updateDynamicPadding();
         return;
       }
       if(p.type==='scroll_bottom'){
@@ -216,7 +229,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       if(p.type==='write'){
         var wasNear = term.buffer.active.viewportY >= term.buffer.active.baseY;
         term.write(p.data || '');
+        updateDynamicPadding();
         if(wasNear) setTimeout(function(){ snapBottom(); }, 10);
+        setTimeout(updateDynamicPadding, 50);
         return;
       }
       if(p.type==='focus_cursor'){
@@ -231,7 +246,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     if(prevHandle){
       prevHandle(msg);
     }
+    // After any passthrough (e.g. clear), re-check padding
+    try { updateDynamicPadding(); } catch(e) {}
   };
+  setTimeout(updateDynamicPadding, 200);
 })();
 </script>`;
 
@@ -243,6 +261,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function send(){
     raf=false;
     if(!window.term)return;
+    if(typeof updateDynamicPadding==='function') updateDynamicPadding();
     var buf=term.buffer.active;
     var baseY=buf.baseY||0;
     var viewportY=buf.viewportY||0;
@@ -313,13 +332,12 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
             /theme:\{background:'#020617',foreground:'#e2e8f0',cursor:'#3b82f6',selectionBackground:'#334155'\}/,
             `theme:${JSON.stringify(termTheme)}`,
           )
-          // Inject enhanced handler + resize bridge + scroll bridge before </body>
           .replace(
             "</body>",
             `${resizeBridgeScript}${enhancedHandlerScript}${scrollBridgeScript}</body>`,
           )
       );
-    }, [theme.accent, theme.bgTerminal, theme.mode]);
+    }, [theme.accent, theme.bgTerminal, theme.mode, topInset]);
 
     const postToWebView = useCallback((msg: object) => {
       const js = `if(window.handleRNMessage){window.handleRNMessage(${JSON.stringify(JSON.stringify(msg))})}true;`;

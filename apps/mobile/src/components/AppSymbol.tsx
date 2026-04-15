@@ -49,6 +49,11 @@ const FALLBACK_ICONS: Record<string, React.ComponentProps<typeof MaterialCommuni
   xmark: "close",
   "xmark.circle": "close-circle-outline",
   "xmark.circle.fill": "close-circle",
+  "ellipsis.circle": "dots-horizontal-circle-outline",
+  "arrow.counterclockwise": "refresh",
+  "magnifyingglass": "magnify",
+  "plus.magnifyingglass": "magnify-plus-outline",
+  "minus.magnifyingglass": "magnify-minus-outline",
 };
 
 interface AppSymbolProps {
