@@ -719,11 +719,11 @@
               <path
                 d="M17.523 2.226l1.392-2.415a.4.4 0 00-.692-.4L16.8 1.85A8.67 8.67 0 0012 .9a8.67 8.67 0 00-4.8.95L5.777-.589a.4.4 0 00-.692.4l1.392 2.415C3.492 3.842 1.5 6.727 1.5 10.134h21c0-3.407-1.992-6.292-4.977-7.908zM7.5 7.134a1 1 0 110-2 1 1 0 010 2zm9 0a1 1 0 110-2 1 1 0 010 2zM1.5 11.134v9a1.5 1.5 0 003 0v-9zm18 0v9a1.5 1.5 0 003 0v-9zm-15 0v10.5a1.5 1.5 0 001.5 1.5h1.5v3a1.5 1.5 0 003 0v-3h3v3a1.5 1.5 0 003 0v-3H18a1.5 1.5 0 001.5-1.5v-10.5z" />
             </svg><span data-i18n="btnAndroid">Android 下载</span></a>
-          <span class="btn btn-s" style="cursor:default;opacity:0.5"><svg width="16" height="16" viewBox="0 0 24 24"
+          <a href="https://apps.apple.com/cn/app/linkshell/id6761547516" class="btn btn-s"><svg width="16" height="16" viewBox="0 0 24 24"
               fill="currentColor" style="vertical-align:-2px;margin-right:6px">
               <path
                 d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
-            </svg><span data-i18n="btnIos">iOS 敬请期待</span></span>
+            </svg><span data-i18n="btnIos">App Store 下载</span></a>
         </div>
       </div>
       <div style="flex-shrink:0;display:flex;gap:12px">
@@ -1226,8 +1226,8 @@
         </div>
         <div style="margin-bottom:24px">
           <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq3Q">Q: 手机 App 在哪里下载？</p>
-          <p style="color:var(--text-sec)" data-i18n="docsFaq3A">iOS 版本通过 TestFlight 分发，Android 版本可从 GitHub Releases 下载
-            APK。正式版本上架后会在此更新。</p>
+          <p style="color:var(--text-sec)" data-i18n="docsFaq3A">iOS 版本已上架 <a href="https://apps.apple.com/cn/app/linkshell/id6761547516" target="_blank" rel="noopener">App Store</a>，Android 版本可从 GitHub Releases 下载
+            APK。</p>
         </div>
         <div style="margin-bottom:24px">
           <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq4Q">Q: 数据安全吗？会经过第三方服务器吗？</p>
@@ -1439,7 +1439,7 @@
         btnStart: "立即部署",
         btnGithub: "查看仓库",
         btnAndroid: "Android 下载",
-        btnIos: "iOS 敬请期待",
+        btnIos: "App Store 下载",
         howItWorksTitle: "只需三步，建立你的终端链路",
         step1Title: "[1] 安装 CLI",
         step1Desc: "一条命令全局安装。内置网关开箱即用，无需额外部署服务器。",
@@ -1564,7 +1564,7 @@
         docsFaq2Q: "Q: 支持哪些 AI 代理？",
         docsFaq2A: "目前支持 Claude Code、OpenAI Codex，以及任意自定义 Shell 进程。通过 --provider 参数指定。",
         docsFaq3Q: "Q: 手机 App 在哪里下载？",
-        docsFaq3A: "iOS 版本通过 TestFlight 分发，Android 版本可从 GitHub Releases 下载 APK。正式版本上架后会在此更新。",
+        docsFaq3A: "iOS 版本已上架 <a href=\"https://apps.apple.com/cn/app/linkshell/id6761547516\" target=\"_blank\" rel=\"noopener\">App Store</a>，Android 版本可从 GitHub Releases 下载 APK。",
         docsFaq4Q: "Q: 数据安全吗？会经过第三方服务器吗？",
         docsFaq4A: "本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。",
         docsFaq5Q: "Q: 远程桌面功能如何工作？",
@@ -1653,7 +1653,7 @@
         btnStart: "Deploy Now",
         btnGithub: "View Repo",
         btnAndroid: "Android Download",
-        btnIos: "iOS Coming Soon",
+        btnIos: "App Store",
         howItWorksTitle: "Establish your link in 3 steps",
         step1Title: "[1] Install CLI",
         step1Desc: "One command to install globally. Built-in gateway works out of the box — no extra server needed.",
@@ -1778,7 +1778,7 @@
         docsFaq2Q: "Q: Which AI agents are supported?",
         docsFaq2A: "Currently supports Claude Code, OpenAI Codex, and any custom shell process. Specify via the --provider flag.",
         docsFaq3Q: "Q: Where can I download the mobile app?",
-        docsFaq3A: "iOS is distributed via TestFlight, Android APK is available from GitHub Releases. App Store and Google Play listings will be updated here once available.",
+        docsFaq3A: "iOS version is available on the <a href=\"https://apps.apple.com/cn/app/linkshell/id6761547516\" target=\"_blank\" rel=\"noopener\">App Store</a>, Android APK is available from GitHub Releases.",
         docsFaq4Q: "Q: Is my data secure? Does it pass through third-party servers?",
         docsFaq4A: "In local mode, data stays entirely within your LAN. In remote mode, data passes through your own self-hosted gateway relay — never through any third-party server.",
         docsFaq5Q: "Q: How does the remote desktop feature work?",

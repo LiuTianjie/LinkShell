@@ -47,7 +47,7 @@
 <table>
   <tr>
     <td align="center">
-      <a href="https://liutianjie.github.io/LinkShell/">
+      <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">
         <img src="https://img.shields.io/badge/iOS-App_Store-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download on App Store" />
       </a>
       <br /><sub>iOS 14+</sub>
@@ -61,7 +61,7 @@
   </tr>
 </table>
 
-> Android 版本可从 GitHub Releases 下载 APK，iOS 版本即将上架 App Store。
+> Android 版本可从 GitHub Releases 下载 APK，iOS 版本已上架 App Store。
 
 ## 一条命令开始
 
