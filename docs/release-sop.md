@@ -63,7 +63,7 @@ git push origin gateway-v0.2.23
 
 CI 会自动：
 - 构建 Docker 镜像
-- 推送到 Docker Hub: `nickname4th/linkshell-gateway:latest` + `nickname4th/linkshell-gateway:0.2.23`
+- 推送到 Docker Hub: `nickname4th/linkshell-gateway:latest` + `nickname4th/linkshell-gateway:0.2.23` + `nickname4th/linkshell-gateway:0.2`
 
 ### Docker Hub 首次配置
 
@@ -99,7 +99,7 @@ cd apps/mobile
 pnpm prod:ios
 ```
 
-在 Xcode 中 Archive → Upload to App Store Connect → 提交审核。
+脚本会自动 bump iOS build number、prebuild、archive，并上传到 App Store Connect。若 App Store Connect 提示当前 train 已关闭，需要先提高 `expo.version`，再重新构建上传。
 
 ### Android
 

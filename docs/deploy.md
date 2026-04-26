@@ -169,6 +169,14 @@ docker run -d \
   nickname4th/linkshell-gateway:latest
 ```
 
+首次部署官方 Gateway 时，建议先在 Supabase SQL Editor 执行：
+
+```sql
+-- 见仓库内 docs/supabase-gateway-state.sql
+```
+
+这会创建 `linkshell_gateway_tokens` 和 `linkshell_gateway_pairings` 两张表，用来持久化设备 token 和短期配对状态。表不存在时 Gateway 会自动退回内存态，但 Docker 重启或滚动部署后用户可能需要重新配对。
+
 ### docker-compose 方式
 
 ```bash
@@ -190,6 +198,9 @@ docker compose up -d
 | `SUPABASE_URL` | AUTH_REQUIRED=true 时必需 | Supabase 项目 URL |
 | `SUPABASE_ANON_KEY` | AUTH_REQUIRED=true 时必需 | Supabase anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | AUTH_REQUIRED=true 时必需 | 用于服务端订阅到期检查 |
+| `SUPABASE_GATEWAY_TOKEN_TABLE` | 否 | Gateway token 持久化表名，默认 `linkshell_gateway_tokens` |
+| `SUPABASE_GATEWAY_PAIRING_TABLE` | 否 | Gateway 配对状态持久化表名，默认 `linkshell_gateway_pairings` |
+| `PAIRING_TTL_MS` | 否 | 配对码有效期，默认 10 分钟 |
 
 ### 行为差异
 
@@ -199,3 +210,4 @@ docker compose up -d
   - 验证用户是否有活跃的 Pro 订阅
   - 非订阅用户收到 `subscription_required` 错误，提示去 itool.tech 订阅
   - 每 5 分钟检查已连接用户的订阅状态，到期自动断开
+  - 配置 Supabase 后会持久化设备 token 和未过期配对状态，提升 Docker 重启后的恢复体验
