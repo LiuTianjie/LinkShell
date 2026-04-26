@@ -1,0 +1,20 @@
+{
+  "name": "LinkShell",
+  "short_name": "LinkShell",
+  "description": "Remote terminal control for Claude Code, OpenAI Codex, and shell sessions from iOS and Android.",
+  "start_url": "https://liutianjie.github.io/LinkShell/",
+  "scope": "https://liutianjie.github.io/LinkShell/",
+  "display": "standalone",
+  "background_color": "#1a1a1e",
+  "theme_color": "#1a1a1e",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "assets/adaptive-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["developer", "productivity", "utilities"]
+}

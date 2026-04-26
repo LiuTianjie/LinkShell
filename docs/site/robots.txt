@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://liutianjie.github.io/LinkShell/sitemap.xml
