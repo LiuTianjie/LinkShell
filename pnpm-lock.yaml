@@ -170,11 +170,11 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: ^0.2.25
-        version: 0.2.26
+        specifier: ^0.2.27
+        version: 0.2.27
       '@linkshell/protocol':
-        specifier: ^0.2.18
-        version: 0.2.19
+        specifier: ^0.2.20
+        version: 0.2.20
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -205,8 +205,8 @@ importers:
   packages/gateway:
     dependencies:
       '@linkshell/protocol':
-        specifier: ^0.2.18
-        version: 0.2.19
+        specifier: ^0.2.20
+        version: 0.2.20
       ws:
         specifier: ^8.18.1
         version: 8.20.0
@@ -1288,11 +1288,11 @@ packages:
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
 
-  '@linkshell/gateway@0.2.26':
-    resolution: {integrity: sha512-9M9s2zfqEPGxAvpT/H0P7pK8W7KSGh7pz65RfeXtXrBaTtfSE66x9H1Lxfw90SjtktSYTAXlzcAE+UKB1tODeA==}
+  '@linkshell/gateway@0.2.27':
+    resolution: {integrity: sha512-dF068NptehtDKZpjlLMta2cp+i97lm7W98BEgavwteCvXl1NIT+trzk7XNi97GQ5vTpvLSgCXPVSO6aNYBuLuA==}
 
-  '@linkshell/protocol@0.2.19':
-    resolution: {integrity: sha512-3d8VXBZT4pYqdviJNVL2ltnTaiyn82yedKsnYEGTCu+wLJ7SMVe0YrVRNXosGkRZw+e/AqmPQ8Er7SKoP8oYgg==}
+  '@linkshell/protocol@0.2.20':
+    resolution: {integrity: sha512-7WFricWEg2ql0bYEciLdESbnhU3tLz69dEmBvNkgrtixEY/JUVBS8EkU5SFGk80uBQRMRLQVKJsLKKY8TC0JqQ==}
 
   '@minhducsun2002/leb128@1.0.0':
     resolution: {integrity: sha512-eFrYUPDVHeuwWHluTG1kwNQUEUcFjVKYwPkU8z9DR1JH3AW7JtJsG9cRVGmwz809kKtGfwGJj58juCZxEvnI/g==}
@@ -2053,6 +2053,7 @@ packages:
   '@xmldom/xmldom@0.8.12':
     resolution: {integrity: sha512-9k/gHF6n/pAi/9tqr3m3aqkuiNosYTurLLUtc7xQ9sxB/wm7WPygCv8GYa6mS0fLJEHhqMC1ATYhz++U/lRHqg==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@xterm/addon-fit@0.12.0-beta.197':
     resolution: {integrity: sha512-EoYQVIWp90XmNXBfrEocz5tk44JLMdHL9+Asd57Bj9DuERLLszA8pkF3wbuR5C7555g3sRTMTHlzYQ3gv9xbOw==}
@@ -6073,16 +6074,16 @@ snapshots:
   '@leichtgewicht/ip-codec@2.0.5':
     optional: true
 
-  '@linkshell/gateway@0.2.26':
+  '@linkshell/gateway@0.2.27':
     dependencies:
-      '@linkshell/protocol': 0.2.19
+      '@linkshell/protocol': 0.2.20
       ws: 8.20.0
       zod: 3.25.76
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@linkshell/protocol@0.2.19':
+  '@linkshell/protocol@0.2.20':
     dependencies:
       zod: 3.25.76
 

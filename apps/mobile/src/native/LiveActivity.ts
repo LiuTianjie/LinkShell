@@ -80,16 +80,17 @@ export async function updateLiveActivity(
   state: ActivityState,
   extended: ExtendedActivityData,
   alert?: boolean,
-): Promise<void> {
-  if (!isIOS || !LiveActivityModule) return;
+): Promise<boolean> {
+  if (!isIOS || !LiveActivityModule) return false;
   try {
     await LiveActivityModule.updateActivity(
       JSON.stringify(state),
       JSON.stringify(extended),
       alert ?? false,
     );
+    return true;
   } catch {
-    // Silently ignore update failures
+    return false;
   }
 }
 

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { NativeModules, NativeEventEmitter, Platform } from "react-native";
+import { AppState, NativeModules, NativeEventEmitter, Platform } from "react-native";
 import type { SessionManagerHandle } from "./useSessionManager";
 import { confirmAction } from "../native/LiveActivity";
 
@@ -9,6 +9,9 @@ import { confirmAction } from "../native/LiveActivity";
 export function useLiveActivity(manager: SessionManagerHandle) {
   useEffect(() => {
     if (Platform.OS !== "ios" || !NativeModules.ActionBridgeModule) return;
+    const checkPendingActions = () => {
+      NativeModules.ActionBridgeModule.checkPendingActions?.().catch?.(() => {});
+    };
     const emitter = new NativeEventEmitter(NativeModules.ActionBridgeModule);
     const sub = emitter.addListener(
       "onQuickAction",
@@ -36,6 +39,13 @@ export function useLiveActivity(manager: SessionManagerHandle) {
         }
       },
     );
-    return () => sub.remove();
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active") checkPendingActions();
+    });
+    checkPendingActions();
+    return () => {
+      sub.remove();
+      appStateSub.remove();
+    };
   }, [manager]);
 }

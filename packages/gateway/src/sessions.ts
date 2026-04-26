@@ -84,6 +84,9 @@ export class SessionManager {
   addClient(sessionId: string, device: ConnectedDevice): void {
     const session = this.getOrCreate(sessionId);
     session.clients.set(device.deviceId, device);
+    if (!session.controllerId) {
+      session.controllerId = device.deviceId;
+    }
     session.lastActivity = Date.now();
   }
 
@@ -154,16 +157,26 @@ export class SessionManager {
     return [...session.lastStatusByTerminal.values()];
   }
 
-  getReplayFrom(sessionId: string, afterSeq: number): Envelope[] {
+  getReplayFrom(
+    sessionId: string,
+    afterSeqByTerminal: Record<string, number>,
+    fallbackAfterSeq = -1,
+  ): Envelope[] {
     const session = this.sessions.get(sessionId);
     if (!session) return [];
     const result: Envelope[] = [];
-    for (const buf of session.outputBuffers.values()) {
+    for (const [terminalId, buf] of session.outputBuffers) {
+      const afterSeq = afterSeqByTerminal[terminalId] ?? fallbackAfterSeq;
       for (const e of buf) {
         if (e.seq !== undefined && e.seq > afterSeq) result.push(e);
       }
     }
-    return result.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+    return result.sort((a, b) => {
+      const at = Date.parse(a.timestamp);
+      const bt = Date.parse(b.timestamp);
+      if (!Number.isNaN(at) && !Number.isNaN(bt) && at !== bt) return at - bt;
+      return (a.seq ?? 0) - (b.seq ?? 0);
+    });
   }
 
   claimControl(sessionId: string, deviceId: string): boolean {

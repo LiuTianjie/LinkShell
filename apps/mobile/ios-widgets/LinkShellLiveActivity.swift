@@ -77,7 +77,7 @@ struct LinkShellLiveActivity: Widget {
                                     Text(ext.permissionContext)
                                         .font(.system(size: 11, design: .monospaced))
                                         .foregroundColor(.white.opacity(0.6))
-                                        .lineLimit(4)
+                                        .lineLimit(2)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(8)
                                         .background(
@@ -87,7 +87,7 @@ struct LinkShellLiveActivity: Widget {
                                 }
 
                                 VStack(spacing: 0) {
-                                    ForEach(Array(ext.quickActions.enumerated()), id: \.offset) { idx, action in
+                                    ForEach(Array(ext.quickActions.prefix(2).enumerated()), id: \.offset) { idx, action in
                                         if idx > 0 {
                                             Divider().background(.white.opacity(0.1))
                                         }
@@ -117,7 +117,7 @@ struct LinkShellLiveActivity: Widget {
                             Text(ext.toolDescription)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.7))
-                                .lineLimit(5)
+                                .lineLimit(3)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
                                 .background(
@@ -128,7 +128,7 @@ struct LinkShellLiveActivity: Widget {
                             Text(ext.contextLines)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.6))
-                                .lineLimit(5)
+                                .lineLimit(3)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
                                 .background(
@@ -138,7 +138,7 @@ struct LinkShellLiveActivity: Widget {
                         }
 
                         // Secondary terminals
-                        if let ext = ext, !ext.secondaryTerminals.isEmpty {
+                        if !state.hasPermission, let ext = ext, !ext.secondaryTerminals.isEmpty {
                             HStack(spacing: 8) {
                                 ForEach(Array(ext.secondaryTerminals.prefix(4).enumerated()), id: \.offset) { _, t in
                                     HStack(spacing: 4) {
@@ -149,7 +149,7 @@ struct LinkShellLiveActivity: Widget {
                                 Spacer()
                                 Text("\(state.otherCount) 个终端运行中")
                                     .font(.system(size: 10))
-                                    .foregroundColor(.white.opacity(0.35))
+                                    .foregroundColor(.white.opacity(0.55))
                             }
                         }
                     }
@@ -197,10 +197,12 @@ struct ActionRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(action.desc ?? action.label)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(.white.opacity(0.7))
-                .lineLimit(1)
+            if let desc = action.desc, desc != action.label {
+                Text(desc)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(1)
+            }
             Spacer()
             if #available(iOS 17.0, *) {
                 Button(intent: QuickActionIntent(
@@ -223,7 +225,7 @@ struct ActionRow: View {
     }
 
     private var actionButton: some View {
-        Text("选择")
+        Text(action.label)
             .font(.system(size: 11, weight: .medium))
             .foregroundColor(.white)
             .padding(.horizontal, 12)
@@ -267,7 +269,7 @@ struct LockScreenView: View {
                         }
                         Text(formatElapsed(state.elapsed))
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(.white.opacity(0.65))
                     }
                 }
                 Spacer()
@@ -280,7 +282,7 @@ struct LockScreenView: View {
                 if let ext = ext, !ext.toolDescription.isEmpty {
                     Text(ext.toolDescription)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(.white.opacity(0.75))
                         .lineLimit(4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
@@ -291,7 +293,7 @@ struct LockScreenView: View {
                 } else if let ext = ext, !ext.contextLines.isEmpty {
                     Text(ext.contextLines)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(.white.opacity(0.65))
                         .lineLimit(4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
@@ -326,7 +328,7 @@ struct LockScreenView: View {
                     if !ext.permissionContext.isEmpty {
                         Text(ext.permissionContext)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.5))
+                            .foregroundColor(.white.opacity(0.65))
                             .lineLimit(3)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -387,7 +389,7 @@ struct LockScreenView: View {
                     Spacer()
                     Text("\(state.otherCount) 个终端运行中")
                         .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.35))
+                        .foregroundColor(.white.opacity(0.55))
                 }
             }
         }
@@ -407,10 +409,12 @@ struct LockScreenActionRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(action.desc ?? action.label)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.white.opacity(0.7))
-                .lineLimit(2)
+            if let desc = action.desc, desc != action.label {
+                Text(desc)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.75))
+                    .lineLimit(2)
+            }
             Spacer()
             if #available(iOS 17.0, *) {
                 Button(intent: QuickActionIntent(
@@ -433,7 +437,7 @@ struct LockScreenActionRow: View {
     }
 
     private var lockScreenButton: some View {
-        Text("选择")
+        Text(action.label)
             .font(.system(size: 11, weight: .medium))
             .foregroundColor(.white)
             .padding(.horizontal, 12)
@@ -545,9 +549,19 @@ struct ToolBadge: View {
 // MARK: - Helpers
 
 func actionURL(_ sessionId: String, _ terminalId: String, _ action: QuickAction) -> URL {
-    let bg = action.needsInput ? "" : "&bg=1"
-    let encoded = action.input.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-    return URL(string: "linkshell://input?session=\(sessionId)&terminal=\(terminalId)&data=\(encoded)\(bg)")!
+    var components = URLComponents()
+    components.scheme = "linkshell"
+    components.host = "input"
+    var items = [
+        URLQueryItem(name: "session", value: sessionId),
+        URLQueryItem(name: "terminal", value: terminalId),
+        URLQueryItem(name: "data", value: action.input),
+    ]
+    if !action.needsInput {
+        items.append(URLQueryItem(name: "bg", value: "1"))
+    }
+    components.queryItems = items
+    return components.url!
 }
 
 func providerColor(_ provider: String) -> Color {

@@ -39,6 +39,10 @@ const RECONNECT_BASE_DELAY = 1_000;
 const RECONNECT_MAX_DELAY = 30_000;
 const RECONNECT_MAX_ATTEMPTS = 20;
 const DEFAULT_TERMINAL_ID = "default";
+const HOOK_BODY_LIMIT = 256 * 1024;
+const PERMISSION_REQUEST_TIMEOUT_MS = Number(
+  process.env.LINKSHELL_PERMISSION_TIMEOUT_MS ?? 5 * 60_000,
+);
 
 interface TerminalInstance {
   id: string;
@@ -53,6 +57,17 @@ interface TerminalInstance {
   hookServer?: http.Server;
   hookPort?: number;
   hookConfigPaths: string[];
+}
+
+interface PendingPermission {
+  terminalId: string;
+  timeout: ReturnType<typeof setTimeout>;
+  resolve: (decision: "allow" | "deny") => void;
+}
+
+function isLinkShellHookEntry(entry: unknown): boolean {
+  const raw = JSON.stringify(entry);
+  return /\/hook\?m=lsh-[^"'\s]+/.test(raw);
 }
 
 function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
@@ -130,7 +145,7 @@ export class BridgeSession {
     timestamp: number;
   }>>();
   // Pending permission responses: requestId → HTTP response callback
-  private pendingPermissions = new Map<string, (decision: "allow" | "deny") => void>();
+  private pendingPermissions = new Map<string, PendingPermission>();
   private hookMarker = `lsh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   private screenCapture: ScreenFallback | undefined;
   private screenShare: ScreenShare | undefined;
@@ -261,7 +276,13 @@ export class BridgeSession {
     });
 
     this.socket.on("message", (data) => {
-      const envelope = parseEnvelope(data.toString());
+      let envelope: Envelope;
+      try {
+        envelope = parseEnvelope(data.toString());
+      } catch (err) {
+        this.log(`invalid gateway message ignored: ${err}`);
+        return;
+      }
       this.log(
         `recv ${envelope.type}${envelope.seq !== undefined ? ` seq=${envelope.seq}` : ""}`,
       );
@@ -457,7 +478,11 @@ export class BridgeSession {
         const p = parseTypedPayload("session.resume", envelope.payload);
         // Replay all terminals
         for (const [termId, term] of this.terminals) {
-          this.replayFrom(termId, term, p.lastAckedSeq);
+          this.replayFrom(
+            termId,
+            term,
+            p.lastAckedSeqByTerminal[termId] ?? p.lastAckedSeq,
+          );
         }
         // Also send terminal list so client knows what's available
         this.sendTerminalList();
@@ -498,20 +523,8 @@ export class BridgeSession {
       }
       case "permission.decision": {
         const p = envelope.payload as { requestId: string; decision: "allow" | "deny" };
-        const resolve = this.pendingPermissions.get(p.requestId);
-        if (resolve) {
-          this.pendingPermissions.delete(p.requestId);
-          resolve(p.decision);
+        if (this.resolvePendingPermission(p.requestId, p.decision)) {
           this.log(`permission decision for ${p.requestId}: ${p.decision}`);
-          // Pop from permission stack
-          if (p.decision === "allow" || p.decision === "deny") {
-            const stack = this.permissionStacks.get(tid);
-            if (stack) {
-              const idx = stack.findIndex((s) => s.requestId === p.requestId);
-              if (idx >= 0) stack.splice(idx, 1);
-              if (stack.length === 0) this.permissionStacks.delete(tid);
-            }
-          }
         } else {
           this.log(`no pending permission for ${p.requestId}`);
         }
@@ -889,8 +902,19 @@ export class BridgeSession {
         return;
       }
       let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      let bodyTooLarge = false;
+      req.on("data", (chunk: Buffer) => {
+        if (bodyTooLarge) return;
+        body += chunk.toString();
+        if (Buffer.byteLength(body, "utf8") > HOOK_BODY_LIMIT) {
+          bodyTooLarge = true;
+          res.writeHead(413);
+          res.end("payload too large");
+          req.destroy();
+        }
+      });
       req.on("end", () => {
+        if (bodyTooLarge || res.writableEnded) return;
         this.log(`hook body (${body.length} bytes): ${body.slice(0, 200)}`);
         try {
           const event = JSON.parse(body);
@@ -899,15 +923,26 @@ export class BridgeSession {
           // PermissionRequest: hold connection, wait for user decision from mobile app
           if (hookName === "PermissionRequest") {
             const requestId = `pr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            this.pendingPermissions.set(requestId, (decision) => {
-              const responseJson = JSON.stringify({
-                hookSpecificOutput: {
-                  hookEventName: "PermissionRequest",
-                  decision: { behavior: decision },
-                },
-              });
-              res.writeHead(200, { "Content-Type": "application/json" });
-              res.end(responseJson);
+            const timeout = setTimeout(() => {
+              if (this.resolvePendingPermission(requestId, "deny")) {
+                this.log(`permission request ${requestId} timed out`);
+                this.sendPermissionSnapshot(terminalId, "thinking", "permission timed out");
+              }
+            }, PERMISSION_REQUEST_TIMEOUT_MS);
+            this.pendingPermissions.set(requestId, {
+              terminalId,
+              timeout,
+              resolve: (decision) => {
+                if (res.writableEnded) return;
+                const responseJson = JSON.stringify({
+                  hookSpecificOutput: {
+                    hookEventName: "PermissionRequest",
+                    decision: { behavior: decision },
+                  },
+                });
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(responseJson);
+              },
             });
             // Send status with requestId so app can route decision back
             this.handleHookEvent(terminalId, event, provider, requestId);
@@ -964,9 +999,16 @@ export class BridgeSession {
     } catch { /* doesn't exist yet */ }
 
     const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
-    const permissionEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 86400 }] };
+    const permissionEntry = {
+      matcher: "",
+      hooks: [{
+        type: "command",
+        command: curlCmd,
+        timeout: Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000),
+      }],
+    };
 
-    const hookEvents: Record<string, typeof hookEntry> = {
+    const hookEvents: Record<string, typeof hookEntry | typeof permissionEntry> = {
       PreToolUse: hookEntry,
       PostToolUse: hookEntry,
       PostToolUseFailure: hookEntry,
@@ -981,7 +1023,7 @@ export class BridgeSession {
     for (const [eventName, entry] of Object.entries(hookEvents)) {
       let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
       // Remove any dead linkshell hook entries (from previous instances)
-      arr = arr.filter((e) => !JSON.stringify(e).includes("/hook"));
+      arr = arr.filter((e) => !isLinkShellHookEntry(e));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -1036,7 +1078,7 @@ export class BridgeSession {
     const existingHooks = existing.hooks ?? {};
     for (const [eventName, entry] of Object.entries(hookEvents)) {
       let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      arr = arr.filter((e) => !JSON.stringify(e).includes("/hook"));
+      arr = arr.filter((e) => !isLinkShellHookEntry(e));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -1069,7 +1111,7 @@ export class BridgeSession {
     const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
     for (const [eventName, entry] of Object.entries(hookEvents)) {
       let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      arr = arr.filter((e) => !JSON.stringify(e).includes("/hook"));
+      arr = arr.filter((e) => !isLinkShellHookEntry(e));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -1104,7 +1146,7 @@ export class BridgeSession {
     const existingHooks = existing.hooks ?? {};
     for (const [eventName, entry] of Object.entries(hookEvents)) {
       let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      arr = arr.filter((e) => !JSON.stringify(e).includes("/hook"));
+      arr = arr.filter((e) => !isLinkShellHookEntry(e));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -1334,10 +1376,7 @@ export class BridgeSession {
 
   /** Auto-resolve a single pending permission (user acted in terminal) */
   private autoResolvePending(requestId: string): void {
-    const resolve = this.pendingPermissions.get(requestId);
-    if (resolve) {
-      this.pendingPermissions.delete(requestId);
-      resolve("allow");
+    if (this.resolvePendingPermission(requestId, "allow")) {
       this.log(`auto-resolved pending permission ${requestId} (user acted in terminal)`);
     }
   }
@@ -1346,14 +1385,51 @@ export class BridgeSession {
   private drainPendingPermissions(terminalId: string): void {
     const stack = this.permissionStacks.get(terminalId);
     if (!stack) return;
-    for (const entry of stack) {
-      const resolve = this.pendingPermissions.get(entry.requestId);
-      if (resolve) {
-        this.pendingPermissions.delete(entry.requestId);
-        resolve("deny");
+    for (const entry of [...stack]) {
+      if (this.resolvePendingPermission(entry.requestId, "deny")) {
         this.log(`drained pending permission ${entry.requestId}`);
       }
     }
+  }
+
+  private resolvePendingPermission(requestId: string, decision: "allow" | "deny"): boolean {
+    const pending = this.pendingPermissions.get(requestId);
+    if (!pending) return false;
+    this.pendingPermissions.delete(requestId);
+    clearTimeout(pending.timeout);
+    pending.resolve(decision);
+
+    const stack = this.permissionStacks.get(pending.terminalId);
+    if (stack) {
+      const idx = stack.findIndex((entry) => entry.requestId === requestId);
+      if (idx >= 0) stack.splice(idx, 1);
+      if (stack.length === 0) this.permissionStacks.delete(pending.terminalId);
+    }
+    return true;
+  }
+
+  private sendPermissionSnapshot(
+    terminalId: string,
+    phase: string,
+    summary?: string,
+  ): void {
+    const stack = this.permissionStacks.get(terminalId);
+    const topPermission = stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
+    const pendingPermissionCount = stack?.length ?? 0;
+    const term = this.terminals.get(terminalId);
+    const seq = term ? term.statusSeq++ : 0;
+    this.send(createEnvelope({
+      type: "terminal.status",
+      sessionId: this.sessionId,
+      terminalId,
+      payload: {
+        phase,
+        seq,
+        ...(summary && { summary }),
+        ...(topPermission && { topPermission }),
+        ...(pendingPermissionCount > 0 && { pendingPermissionCount }),
+      },
+    }));
   }
 
   private cleanupHookServer(term: TerminalInstance): void {

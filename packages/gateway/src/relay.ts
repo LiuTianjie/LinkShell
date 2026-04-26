@@ -141,29 +141,31 @@ function handleClientMessage(
   deviceId: string,
   sessions: SessionManager,
 ): void {
+  const requireController = (): boolean => {
+    if (session.controllerId === deviceId) return true;
+    socket.send(
+      serializeEnvelope(
+        createEnvelope({
+          type: "session.error",
+          sessionId: session.id,
+          payload: {
+            code: "control_conflict",
+            message: "Not the controller",
+          },
+        }),
+      ),
+    );
+    return false;
+  };
+
   switch (envelope.type) {
     case "terminal.input": {
-      // Only controller can send input
-      if (session.controllerId !== deviceId) {
-        socket.send(
-          serializeEnvelope(
-            createEnvelope({
-              type: "session.error",
-              sessionId: session.id,
-              payload: {
-                code: "control_conflict",
-                message: "Not the controller",
-              },
-            }),
-          ),
-        );
-        return;
-      }
+      if (!requireController()) return;
       sendToHost(session, envelope);
       break;
     }
     case "terminal.resize": {
-      if (session.controllerId !== deviceId) return;
+      if (!requireController()) return;
       sendToHost(session, envelope);
       break;
     }
@@ -175,7 +177,11 @@ function handleClientMessage(
     case "session.resume": {
       const p = parseTypedPayload("session.resume", envelope.payload);
       // Replay from gateway buffer first
-      const replay = sessions.getReplayFrom(session.id, p.lastAckedSeq);
+      const replay = sessions.getReplayFrom(
+        session.id,
+        p.lastAckedSeqByTerminal,
+        p.lastAckedSeq,
+      );
       for (const msg of replay) {
         const payload = msg.payload as Record<string, unknown>;
         socket.send(
@@ -183,6 +189,7 @@ function handleClientMessage(
             createEnvelope({
               type: "terminal.output",
               sessionId: session.id,
+              terminalId: msg.terminalId,
               seq: msg.seq,
               payload: { ...payload, isReplay: true },
             }),
@@ -234,6 +241,10 @@ function handleClientMessage(
     case "terminal.list":
     case "terminal.browse":
     case "terminal.mkdir":
+    case "terminal.history.request":
+    case "file.upload":
+    case "permission.decision":
+      if (!requireController()) return;
       sendToHost(session, envelope);
       break;
     default:

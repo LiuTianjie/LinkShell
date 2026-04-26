@@ -74,17 +74,10 @@ class ActionBridgeModule: RCTEventEmitter {
         defaults.removeObject(forKey: LiveActivityStore.pendingActionsKey)
         defaults.synchronize()
 
-        let now = Date().timeIntervalSince1970
-
         for action in queue {
             guard let sessionId = action["sessionId"],
                   let terminalId = action["terminalId"],
                   let input = action["input"] else { continue }
-
-            // Skip stale actions (> 30 seconds old)
-            if let ts = action["timestamp"], let timestamp = Double(ts), now - timestamp > 30 {
-                continue
-            }
 
             sendEvent(withName: "onQuickAction", body: [
                 "sessionId": sessionId,

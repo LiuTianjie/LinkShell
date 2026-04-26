@@ -6,10 +6,12 @@
       "scale" : "1x"
     },
     {
+      "filename" : "copilot-logo@2x.png",
       "idiom" : "universal",
       "scale" : "2x"
     },
     {
+      "filename" : "copilot-logo@3x.png",
       "idiom" : "universal",
       "scale" : "3x"
     }

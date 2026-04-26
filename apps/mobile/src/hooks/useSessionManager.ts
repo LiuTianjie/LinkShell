@@ -25,6 +25,7 @@ export interface TerminalInfo {
   terminalStream: TerminalStream;
   structuredStatus?: {
     phase: string;
+    seq?: number;
     toolName?: string;
     toolInput?: string;
     permissionRequest?: string;
@@ -176,6 +177,7 @@ interface InternalTerminal {
   stream: TerminalStream;
   structuredStatus?: {
     phase: string;
+    seq?: number;
     toolName?: string;
     toolInput?: string;
     permissionRequest?: string;
@@ -209,6 +211,9 @@ interface InternalSession {
   healthProbeTimer: ReturnType<typeof setTimeout> | null;
   reconnectAttempts: number;
   lastAckedSeq: number;
+  lastAckedSeqByTerminal: Map<string, number>;
+  pendingOutbound: Array<{ envelope: Envelope; dedupeKey?: string }>;
+  outboundDedupeKeys: Set<string>;
   manualDisconnect: boolean;
   // Multi-terminal
   terminals: Map<string, InternalTerminal>;
@@ -246,6 +251,8 @@ interface InternalSession {
   } | null;
   browseResult: BrowseResult | null;
 }
+
+const OUTBOUND_QUEUE_LIMIT = 100;
 
 function createInternalTerminal(
   terminalId: string,
@@ -305,6 +312,9 @@ function createInternalSession(
     healthProbeTimer: null,
     reconnectAttempts: 0,
     lastAckedSeq: -1,
+    lastAckedSeqByTerminal: new Map(),
+    pendingOutbound: [],
+    outboundDedupeKeys: new Set(),
     manualDisconnect: false,
     terminals: new Map(),
     activeTerminalId: null,
@@ -453,10 +463,40 @@ export function useSessionManager(): SessionManagerHandle {
     });
   };
 
-  const sendRaw = (s: InternalSession, envelope: Envelope) => {
+  let connectSocket: (s: InternalSession, isReconnect?: boolean) => Promise<void>;
+
+  const flushOutbound = (s: InternalSession) => {
+    if (!s.socket || s.socket.readyState !== WebSocket.OPEN) return;
+    const queued = s.pendingOutbound.splice(0);
+    s.outboundDedupeKeys.clear();
+    for (const item of queued) {
+      s.socket.send(serializeEnvelope(item.envelope));
+    }
+  };
+
+  const sendRaw = (
+    s: InternalSession,
+    envelope: Envelope,
+    options?: { queue?: boolean; dedupeKey?: string },
+  ): boolean => {
     if (s.socket && s.socket.readyState === WebSocket.OPEN) {
       s.socket.send(serializeEnvelope(envelope));
+      return true;
     }
+    if (!options?.queue) return false;
+    if (options.dedupeKey && s.outboundDedupeKeys.has(options.dedupeKey)) {
+      return true;
+    }
+    if (s.pendingOutbound.length >= OUTBOUND_QUEUE_LIMIT) {
+      const dropped = s.pendingOutbound.shift();
+      if (dropped?.dedupeKey) s.outboundDedupeKeys.delete(dropped.dedupeKey);
+    }
+    s.pendingOutbound.push({ envelope, dedupeKey: options.dedupeKey });
+    if (options.dedupeKey) s.outboundDedupeKeys.add(options.dedupeKey);
+    if (!s.socket && !s.manualDisconnect) {
+      connectSocket(s, true);
+    }
+    return true;
   };
 
   const stopHeartbeat = (s: InternalSession) => {
@@ -508,7 +548,7 @@ export function useSessionManager(): SessionManagerHandle {
 
   // ── Connect socket for a session ──────────────────────────────
 
-  const connectSocket = async (s: InternalSession, isReconnect = false) => {
+  connectSocket = async (s: InternalSession, isReconnect = false) => {
     if (s.reconnectTimer) {
       clearTimeout(s.reconnectTimer);
       s.reconnectTimer = null;
@@ -543,6 +583,7 @@ export function useSessionManager(): SessionManagerHandle {
       s.reconnectAttempts = 0;
       startHeartbeat(s);
       requestControl(s);
+      flushOutbound(s);
 
       // Always request terminal list so we discover all running terminals
       sendRaw(
@@ -617,7 +658,12 @@ export function useSessionManager(): SessionManagerHandle {
           createEnvelope({
             type: "session.resume",
             sessionId: s.sessionId,
-            payload: { lastAckedSeq: s.lastAckedSeq },
+            payload: {
+              lastAckedSeq: s.lastAckedSeq,
+              lastAckedSeqByTerminal: Object.fromEntries(
+                s.lastAckedSeqByTerminal,
+              ),
+            },
           }),
         );
       }
@@ -655,13 +701,18 @@ export function useSessionManager(): SessionManagerHandle {
             const next = Math.max(s.lastAckedSeq, envelope.seq);
             if (next !== s.lastAckedSeq) {
               s.lastAckedSeq = next;
+            }
+            const currentForTerminal = s.lastAckedSeqByTerminal.get(tid) ?? -1;
+            const nextForTerminal = Math.max(currentForTerminal, envelope.seq);
+            if (nextForTerminal !== currentForTerminal) {
+              s.lastAckedSeqByTerminal.set(tid, nextForTerminal);
               sendRaw(
                 s,
                 createEnvelope({
                   type: "session.ack",
                   sessionId: s.sessionId,
                   terminalId: tid,
-                  payload: { seq: next },
+                  payload: { seq: nextForTerminal },
                 }),
               );
             }
@@ -931,6 +982,16 @@ export function useSessionManager(): SessionManagerHandle {
             pendingPermissionCount?: number;
           };
           const term = s.terminals.get(tid);
+          const existingSeq =
+            term?.structuredStatus?.seq ??
+            s.pendingStatusByTerminal.get(tid)?.seq;
+          if (
+            p.seq !== undefined &&
+            existingSeq !== undefined &&
+            p.seq < existingSeq
+          ) {
+            break;
+          }
           const statusData = { ...p, updatedAt: Date.now() };
           if (term) {
             term.structuredStatus = statusData;
@@ -1066,6 +1127,7 @@ export function useSessionManager(): SessionManagerHandle {
           deviceId: s.deviceId,
           payload: { data },
         }),
+        { queue: true },
       );
     },
     [getActive],
@@ -1412,7 +1474,7 @@ export function useSessionManager(): SessionManagerHandle {
     ) => {
       const s = sessionsRef.current.get(sessionId);
       if (!s) return;
-      sendRaw(
+      const accepted = sendRaw(
         s,
         createEnvelope({
           type: "permission.decision",
@@ -1421,7 +1483,9 @@ export function useSessionManager(): SessionManagerHandle {
           deviceId: s.deviceId,
           payload: { requestId, decision },
         }),
+        { queue: true, dedupeKey: `permission:${requestId}` },
       );
+      if (!accepted) return;
       // Clear topPermission from structuredStatus so buildState
       // doesn't re-add the permission to the Live Activity
       const term = s.terminals.get(terminalId);

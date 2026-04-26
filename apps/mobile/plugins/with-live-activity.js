@@ -164,6 +164,8 @@ function withLiveActivity(config) {
       const bundleId = config.ios?.bundleIdentifier ?? "com.bd.linkshell";
       const widgetBundleId = bundleId + ".widgets";
       const teamId = config.ios?.appleTeamId ?? "L95PYLFT86";
+      const currentProjectVersion = config.ios?.buildNumber ?? "1";
+      const marketingVersion = config.version ?? "1.0";
 
       // ── PBXBuildFile entries ──
       const buildFileEntries = `
@@ -413,13 +415,13 @@ function withLiveActivity(config) {
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = "${WIDGET_TARGET_NAME}/${WIDGET_TARGET_NAME}.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = ${currentProjectVersion};
 				DEVELOPMENT_TEAM = ${teamId};
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "${WIDGET_TARGET_NAME}/Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = ${marketingVersion};
 				PRODUCT_BUNDLE_IDENTIFIER = "${widgetBundleId}";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { GatewayStateStore } from "./state-store.js";
 
 const CLEANUP_INTERVAL = 5 * 60_000;
 const SESSION_TTL = 7 * 24 * 60 * 60_000; // 7 days — prune stale bindings
@@ -15,14 +16,40 @@ export class TokenManager {
   private sessionToToken = new Map<string, string>();
   private cleanupTimer: ReturnType<typeof setInterval>;
 
-  constructor() {
+  constructor(private readonly store?: GatewayStateStore) {
     this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL);
+  }
+
+  async hydrate(): Promise<void> {
+    if (!this.store) return;
+    try {
+      const records = await this.store.loadTokens();
+      const now = Date.now();
+      for (const record of records) {
+        if (now - record.lastUsedAt > SESSION_TTL) {
+          void this.store.deleteToken(record.token).catch(() => {});
+          continue;
+        }
+        this.tokens.set(record.token, {
+          token: record.token,
+          sessionIds: new Set(record.sessionIds),
+          createdAt: record.createdAt,
+          lastUsedAt: record.lastUsedAt,
+        });
+        for (const sessionId of record.sessionIds) {
+          this.sessionToToken.set(sessionId, record.token);
+        }
+      }
+    } catch (err) {
+      process.stderr.write(`[gateway] token store hydrate failed, using memory only: ${err}\n`);
+    }
   }
 
   register(deviceToken?: string): string {
     if (deviceToken && this.tokens.has(deviceToken)) {
       const record = this.tokens.get(deviceToken)!;
       record.lastUsedAt = Date.now();
+      this.persist(record);
       return deviceToken;
     }
     const token = deviceToken || randomUUID();
@@ -32,6 +59,7 @@ export class TokenManager {
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
     });
+    this.persist(this.tokens.get(token)!);
     return token;
   }
 
@@ -41,6 +69,7 @@ export class TokenManager {
     record.sessionIds.add(sessionId);
     record.lastUsedAt = Date.now();
     this.sessionToToken.set(sessionId, token);
+    this.persist(record);
     return true;
   }
 
@@ -48,6 +77,7 @@ export class TokenManager {
     const record = this.tokens.get(token);
     if (!record) return false;
     record.lastUsedAt = Date.now();
+    this.persist(record);
     return true;
   }
 
@@ -55,6 +85,7 @@ export class TokenManager {
     const record = this.tokens.get(token);
     if (!record) return false;
     record.lastUsedAt = Date.now();
+    this.persist(record);
     return record.sessionIds.has(sessionId);
   }
 
@@ -62,6 +93,7 @@ export class TokenManager {
     const record = this.tokens.get(token);
     if (!record) return new Set();
     record.lastUsedAt = Date.now();
+    this.persist(record);
     return record.sessionIds;
   }
 
@@ -77,8 +109,20 @@ export class TokenManager {
           this.sessionToToken.delete(sid);
         }
         this.tokens.delete(token);
+        void this.store?.deleteToken(token).catch(() => {});
       }
     }
+  }
+
+  private persist(record: TokenRecord): void {
+    void this.store?.saveToken({
+      token: record.token,
+      sessionIds: [...record.sessionIds],
+      createdAt: record.createdAt,
+      lastUsedAt: record.lastUsedAt,
+    }).catch((err) => {
+      process.stderr.write(`[gateway] token store save failed: ${err}\n`);
+    });
   }
 
   destroy(): void {

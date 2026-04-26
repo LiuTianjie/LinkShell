@@ -32,16 +32,38 @@ function connectWs(sessionId: string, role: string, deviceId?: string): Promise<
   return new Promise((resolve, reject) => {
     const url = `${WS_BASE}/ws?sessionId=${sessionId}&role=${role}${deviceId ? `&deviceId=${deviceId}` : ""}`;
     const ws = new WebSocket(url);
+    attachMessageBuffer(ws);
     ws.on("open", () => resolve(ws));
     ws.on("error", reject);
   });
 }
 
+const messageQueues = new WeakMap<WebSocket, ReturnType<typeof parseEnvelope>[]>();
+const messageWaiters = new WeakMap<WebSocket, Array<(msg: ReturnType<typeof parseEnvelope>) => void>>();
+
+function attachMessageBuffer(ws: WebSocket): void {
+  messageQueues.set(ws, []);
+  messageWaiters.set(ws, []);
+  ws.on("message", (data) => {
+    const msg = parseEnvelope(data.toString());
+    const waiters = messageWaiters.get(ws) ?? [];
+    const waiter = waiters.shift();
+    if (waiter) {
+      waiter(msg);
+    } else {
+      messageQueues.get(ws)?.push(msg);
+    }
+  });
+}
+
 function waitForMessage(ws: WebSocket): Promise<ReturnType<typeof parseEnvelope>> {
+  const queue = messageQueues.get(ws);
+  const queued = queue?.shift();
+  if (queued) return Promise.resolve(queued);
   return new Promise((resolve) => {
-    ws.once("message", (data) => {
-      resolve(parseEnvelope(data.toString()));
-    });
+    const waiters = messageWaiters.get(ws) ?? [];
+    waiters.push(resolve);
+    messageWaiters.set(ws, waiters);
   });
 }
 

@@ -88,7 +88,10 @@ export const sessionAckPayloadSchema = z.object({
 });
 
 export const sessionResumePayloadSchema = z.object({
-  lastAckedSeq: z.number().int().min(-1),
+  // Backward-compatible single-terminal cursor.
+  lastAckedSeq: z.number().int().min(-1).optional().default(-1),
+  // Multi-terminal resume cursor keyed by terminalId.
+  lastAckedSeqByTerminal: z.record(z.number().int().min(-1)).optional().default({}),
 });
 
 export const sessionHeartbeatPayloadSchema = z.object({

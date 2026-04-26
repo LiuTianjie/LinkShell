@@ -6,7 +6,7 @@ import Foundation
 struct QuickActionIntent: AppIntent {
     static var title: LocalizedStringResource = "Execute Quick Action"
     static var description = IntentDescription("Send input to a LinkShell terminal session")
-    static var openAppWhenRun: Bool = false
+    static var openAppWhenRun: Bool = true
 
     @Parameter(title: "Session ID")
     var sessionId: String
@@ -34,16 +34,18 @@ struct QuickActionIntent: AppIntent {
             return .result()
         }
 
-        // Dedup: check if this requestId was already processed
-        var processed = defaults.array(forKey: LiveActivityStore.processedActionsKey) as? [String] ?? []
-        if processed.contains(requestId) {
-            return .result()
-        }
+        // Dedup permission decisions only. Non-permission actions often have an
+        // empty requestId and must remain repeatable.
+        if !requestId.isEmpty {
+            var processed = defaults.array(forKey: LiveActivityStore.processedActionsKey) as? [String] ?? []
+            if processed.contains(requestId) {
+                return .result()
+            }
 
-        // Mark as processed (keep last 50)
-        processed.append(requestId)
-        if processed.count > 50 { processed = Array(processed.suffix(50)) }
-        defaults.set(processed, forKey: LiveActivityStore.processedActionsKey)
+            processed.append(requestId)
+            if processed.count > 50 { processed = Array(processed.suffix(50)) }
+            defaults.set(processed, forKey: LiveActivityStore.processedActionsKey)
+        }
 
         // Enqueue action for main app
         var queue = defaults.array(forKey: LiveActivityStore.pendingActionsKey) as? [[String: String]] ?? []
@@ -59,7 +61,7 @@ struct QuickActionIntent: AppIntent {
         defaults.synchronize()
 
         // Optimistic update: clear permission from extended data
-        if var ext = LiveActivityStore.readExtendedData(), ext.permissionRequestId == requestId {
+        if !requestId.isEmpty, var ext = LiveActivityStore.readExtendedData(), ext.permissionRequestId == requestId {
             ext.permissionTool = ""
             ext.permissionContext = ""
             ext.permissionRequestId = ""
@@ -73,9 +75,11 @@ struct QuickActionIntent: AppIntent {
                 var state = activity.content.state
                 if state.sid == sessionId && state.tid == terminalId {
                     state.phase = "thinking"
-                    state.hasPermission = false
-                    state.permCount = max(0, state.permCount - 1)
-                    state.totalPermCount = max(0, state.totalPermCount - 1)
+                    if !requestId.isEmpty {
+                        state.hasPermission = false
+                        state.permCount = max(0, state.permCount - 1)
+                        state.totalPermCount = max(0, state.totalPermCount - 1)
+                    }
                 }
                 await activity.update(ActivityContent(state: state, staleDate: nil))
             }

@@ -12,6 +12,7 @@ import { z, ZodError } from "zod";
 import { SessionManager } from "./sessions.js";
 import { PairingManager } from "./pairings.js";
 import { TokenManager } from "./tokens.js";
+import { createSupabaseStateStore } from "./state-store.js";
 import { handleSocketMessage } from "./relay.js";
 import {
   parseTunnelPath,
@@ -35,9 +36,11 @@ function log(level: "debug" | "info" | "warn" | "error", msg: string): void {
   }
 }
 
+const stateStore = createSupabaseStateStore();
 const sessionManager = new SessionManager();
-const pairingManager = new PairingManager();
-const tokenManager = new TokenManager();
+const pairingManager = new PairingManager(stateStore);
+const tokenManager = new TokenManager(stateStore);
+await Promise.all([pairingManager.hydrate(), tokenManager.hydrate()]);
 
 const PING_INTERVAL = 20_000;
 const MAX_BODY_SIZE = 4096;
