@@ -78,7 +78,8 @@ export function AgentWorkspaceScreen({
   const visibleConversations = showArchived
     ? workspace.archivedConversations
     : workspace.conversations;
-  const connectedProjects = projects.filter((project) => connectedSessionIds.has(project.sessionId));
+  const recentProjects = projects.slice(0, 6);
+  const hasResumeTarget = recentProjects.length > 0 || workspace.conversations.length > 0;
 
   const openProject = useCallback(
     async (project: ProjectRecord) => {
@@ -90,16 +91,29 @@ export function AgentWorkspaceScreen({
   );
 
   const openConversation = useCallback(
-    (conversationId: string) => {
+    async (conversationId: string) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      onOpenConversation(conversationId);
+      const id = await workspace.resumeConversation(conversationId);
+      if (id) onOpenConversation(id);
     },
-    [onOpenConversation],
+    [onOpenConversation, workspace],
   );
 
   const startFromSession = useCallback(async () => {
     const session = workspace.connectedSessions[0];
     if (!session) {
+      const project = recentProjects[0];
+      if (project) {
+        const id = await workspace.openProject(project);
+        if (id) onOpenConversation(id);
+        return;
+      }
+      const conversation = workspace.conversations[0];
+      if (conversation) {
+        const id = await workspace.resumeConversation(conversation.id);
+        if (id) onOpenConversation(id);
+        return;
+      }
       onOpenConnectionSheet();
       return;
     }
@@ -110,7 +124,20 @@ export function AgentWorkspaceScreen({
       title: session.projectName || session.hostname || "Agent",
     });
     if (id) onOpenConversation(id);
-  }, [onOpenConnectionSheet, onOpenConversation, workspace]);
+  }, [onOpenConnectionSheet, onOpenConversation, recentProjects, workspace]);
+
+  const primaryTitle =
+    workspace.connectedSessions.length > 0
+      ? "新建 Agent 对话"
+      : hasResumeTarget
+        ? "继续 Agent 对话"
+        : "连接 Mac";
+  const primarySubtitle =
+    workspace.connectedSessions.length > 0
+      ? `${workspace.connectedSessions[0]?.hostname ?? "本机"} · ${workspace.connectedSessions.length} 个在线会话`
+      : hasResumeTarget
+        ? "复用已有配对恢复会话，无需重新扫码"
+        : "首次使用需要连接 CLI";
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -156,18 +183,18 @@ export function AgentWorkspaceScreen({
             >
               {workspace.connectedSessions.length > 0 ? (
                 <AppSymbol name="sparkles" size={17} color="#fff" />
+              ) : hasResumeTarget ? (
+                <AppSymbol name="arrow.clockwise" size={17} color="#fff" />
               ) : (
                 <AppSymbol name="plus" size={17} color="#fff" />
               )}
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700" }}>
-                {workspace.connectedSessions.length > 0 ? "新建 Agent 对话" : "连接 Mac"}
+                {primaryTitle}
               </Text>
               <Text style={{ color: "rgba(255,255,255,0.78)", fontSize: 13, marginTop: 2 }} numberOfLines={1}>
-                {workspace.connectedSessions.length > 0
-                  ? `${workspace.connectedSessions[0]?.hostname ?? "本机"} · ${workspace.connectedSessions.length} 个在线会话`
-                  : "先连接 CLI，再使用 Agent Workspace"}
+                {primarySubtitle}
               </Text>
             </View>
             <AppSymbol name="chevron.right" size={16} color="rgba(255,255,255,0.9)" />
@@ -222,11 +249,13 @@ export function AgentWorkspaceScreen({
           </View>
         ) : null}
 
-        {connectedProjects.length > 0 ? (
+        {recentProjects.length > 0 ? (
           <View style={{ gap: 8 }}>
             <SectionTitle theme={theme}>最近项目</SectionTitle>
             <View style={{ paddingHorizontal: 20, gap: 8 }}>
-              {connectedProjects.slice(0, 4).map((project) => (
+              {recentProjects.slice(0, 4).map((project) => {
+                const online = connectedSessionIds.has(project.sessionId);
+                return (
                 <Pressable
                   key={project.id}
                   onPress={() => openProject(project)}
@@ -246,12 +275,13 @@ export function AgentWorkspaceScreen({
                       {project.projectName || project.cwd.split("/").filter(Boolean).pop() || project.cwd}
                     </Text>
                     <Text style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-                      {[project.hostname, shortPath(project.cwd)].filter(Boolean).join(" · ")}
+                      {[project.hostname, shortPath(project.cwd), online ? "在线" : "可恢复"].filter(Boolean).join(" · ")}
                     </Text>
                   </View>
                   <AppSymbol name="chevron.right" size={14} color={theme.textTertiary} />
                 </Pressable>
-              ))}
+                );
+              })}
             </View>
           </View>
         ) : null}

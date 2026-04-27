@@ -22,6 +22,7 @@ import {
 
 interface OpenConversationInput {
   sessionId: string;
+  serverUrl?: string;
   cwd: string;
   title?: string;
   model?: string;
@@ -39,6 +40,7 @@ export interface AgentWorkspaceHandle {
   requestCapabilities: (sessionId?: string) => void;
   openConversation: (input: OpenConversationInput) => Promise<string | null>;
   openProject: (record: ProjectRecord) => Promise<string | null>;
+  resumeConversation: (conversationId: string) => Promise<string | null>;
   getConversation: (conversationId: string) => AgentConversationRecord | undefined;
   getTimeline: (conversationId: string) => AgentTimelineItem[];
   sendPrompt: (
@@ -319,9 +321,13 @@ export function useAgentWorkspace(
 
   const openConversation = useCallback(
     async (input: OpenConversationInput) => {
-      const session = manager.sessions.get(input.sessionId);
-      if (!session) return null;
-      const serverUrl = normalizeServerUrl(session.gatewayUrl);
+      let session = manager.sessions.get(input.sessionId);
+      if (!session && input.serverUrl) {
+        manager.connectToSession(input.sessionId, input.serverUrl);
+        session = manager.sessions.get(input.sessionId);
+      }
+      const serverUrl = normalizeServerUrl(session?.gatewayUrl ?? input.serverUrl ?? "");
+      if (!serverUrl) return null;
       const conversationId = makeAgentConversationId({
         serverUrl,
         sessionId: input.sessionId,
@@ -346,7 +352,7 @@ export function useAgentWorkspace(
       };
       await persistConversation(record);
       setActiveConversationId(conversationId);
-      manager.setActiveSessionId(input.sessionId);
+      if (session) manager.setActiveSessionId(input.sessionId);
       manager.sendAgentWorkspaceEnvelope(
         input.sessionId,
         "agent.v2.conversation.open",
@@ -366,13 +372,54 @@ export function useAgentWorkspace(
   );
 
   const openProject = useCallback(
-    (record: ProjectRecord) =>
-      openConversation({
+    (record: ProjectRecord) => {
+      if (!manager.sessions.has(record.sessionId)) {
+        manager.connectToSession(record.sessionId, record.serverUrl);
+      } else {
+        manager.setActiveSessionId(record.sessionId);
+      }
+      return openConversation({
         sessionId: record.sessionId,
+        serverUrl: record.serverUrl,
         cwd: record.cwd,
         title: record.projectName,
-      }),
-    [openConversation],
+      });
+    },
+    [manager, openConversation],
+  );
+
+  const resumeConversation = useCallback(
+    async (conversationId: string) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation) return null;
+      if (!manager.sessions.has(conversation.sessionId)) {
+        manager.connectToSession(conversation.sessionId, conversation.serverUrl);
+      } else {
+        manager.setActiveSessionId(conversation.sessionId);
+      }
+      await persistConversation({
+        ...conversation,
+        archived: false,
+        lastActivityAt: Date.now(),
+      });
+      manager.sendAgentWorkspaceEnvelope(
+        conversation.sessionId,
+        "agent.v2.conversation.open",
+        {
+          conversationId: conversation.id,
+          agentSessionId: conversation.agentSessionId,
+          cwd: conversation.cwd,
+          model: conversation.model,
+          reasoningEffort: conversation.reasoningEffort,
+          permissionMode: conversation.permissionMode,
+          title: conversation.title,
+        },
+        { queue: true, dedupeKey: `agent-v2-open:${conversation.id}` },
+      );
+      setActiveConversationId(conversation.id);
+      return conversation.id;
+    },
+    [manager, persistConversation],
   );
 
   const sendPrompt = useCallback(
@@ -469,6 +516,7 @@ export function useAgentWorkspace(
     requestCapabilities,
     openConversation,
     openProject,
+    resumeConversation,
     getConversation: (conversationId) =>
       conversationsRef.current.find((item) => item.id === conversationId),
     getTimeline: (conversationId) => timelineRef.current.get(conversationId) ?? [],
