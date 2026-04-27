@@ -1178,6 +1178,12 @@ const AgentStage = memo(function AgentStage({
     tools.length > 0 ||
     agent.plan.length > 0 ||
     agent.pendingPermissions.length > 0;
+  const providerLabel = formatAgentProvider(agent.capabilities?.provider);
+  const permissionLabel = hasControl
+    ? agent.capabilities?.supportsPermission
+      ? "权限按需确认"
+      : "可发送消息"
+    : "只读模式";
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: 16 }}>
@@ -1459,81 +1465,136 @@ const AgentStage = memo(function AgentStage({
         style={{
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: theme.separator,
-          padding: 10,
-          gap: 8,
+          paddingHorizontal: 10,
+          paddingTop: 8,
+          paddingBottom: 10,
           backgroundColor: theme.bg,
         }}
       >
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {["继续", "解释", "修复", "写测试", "总结当前改动"].map((chip) => (
-            <Pressable
-              key={chip}
-              disabled={disabled}
-              onPress={() => setText(chip)}
-              style={({ pressed }) => ({
-                borderRadius: 999,
-                paddingHorizontal: 10,
-                paddingVertical: 6,
-                backgroundColor: pressed ? theme.bgInput : theme.bgCard,
-                opacity: disabled ? 0.5 : 1,
-              })}
-            >
-              <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{chip}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View
+          style={{
+            borderRadius: 18,
+            borderCurve: "continuous",
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: theme.separator,
+            backgroundColor: theme.bgCard,
+            paddingHorizontal: 10,
+            paddingTop: 8,
+            paddingBottom: 8,
+            gap: 8,
+          }}
+        >
           <TextInput
             value={text}
             onChangeText={setText}
             editable={!disabled}
-            placeholder={hasControl ? "给 Agent 发送消息" : "先获取控制权"}
+            placeholder={hasControl ? "给 Agent 发送消息" : "先获取控制权后发送"}
             placeholderTextColor={theme.textTertiary}
             multiline
             style={{
-              flex: 1,
-              minHeight: 42,
-              maxHeight: 120,
-              borderRadius: 10,
-              borderCurve: "continuous",
-              paddingHorizontal: 12,
-              paddingVertical: 10,
-              backgroundColor: theme.bgInput,
+              minHeight: 54,
+              maxHeight: 132,
+              paddingHorizontal: 4,
+              paddingVertical: 4,
               color: theme.text,
               fontSize: 15,
+              lineHeight: 21,
             }}
           />
-          {running ? (
-            <Pressable
-              onPress={onCancel}
-              style={({ pressed }) => ({
-                width: 42,
-                height: 42,
-                borderRadius: 10,
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View
+              style={{
+                flexDirection: "row",
                 alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: pressed ? theme.errorLight : theme.bgCard,
-              })}
+                gap: 6,
+                borderRadius: 999,
+                paddingHorizontal: 9,
+                paddingVertical: 6,
+                backgroundColor: hasControl ? theme.accentLight : theme.bgInput,
+                maxWidth: "48%",
+              }}
             >
-              <AppSymbol name="stop.circle.fill" size={20} color={theme.error} />
-            </Pressable>
-          ) : (
-            <Pressable
-              onPress={send}
-              disabled={disabled || !text.trim()}
-              style={({ pressed }) => ({
-                width: 42,
-                height: 42,
-                borderRadius: 10,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: pressed ? theme.accentSecondary : theme.accent,
-                opacity: disabled || !text.trim() ? 0.45 : 1,
-              })}
+              <AppSymbol
+                name={hasControl ? "lock.open.fill" : "eye.fill"}
+                size={13}
+                color={hasControl ? theme.warning : theme.textTertiary}
+              />
+              <Text
+                style={{
+                  color: hasControl ? theme.warning : theme.textTertiary,
+                  fontSize: 12,
+                  fontWeight: "700",
+                }}
+                numberOfLines={1}
+              >
+                {permissionLabel}
+              </Text>
+            </View>
+
+            <View style={{ flex: 1 }} />
+
+            {running ? (
+              <ActivityIndicator size="small" color={theme.textTertiary} />
+            ) : null}
+
+            <View
+              style={{
+                borderRadius: 999,
+                paddingHorizontal: 9,
+                paddingVertical: 6,
+                backgroundColor: theme.bgInput,
+                maxWidth: 92,
+              }}
             >
-              <AppSymbol name="paperplane.fill" size={18} color="#fff" />
-            </Pressable>
-          )}
+              <Text
+                style={{
+                  color: theme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+                numberOfLines={1}
+              >
+                {providerLabel}
+              </Text>
+            </View>
+
+            {running ? (
+              <Pressable
+                onPress={onCancel}
+                style={({ pressed }) => ({
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: pressed ? theme.errorLight : theme.bgInput,
+                })}
+                accessibilityRole="button"
+                accessibilityLabel="停止 Agent"
+              >
+                <AppSymbol name="stop.circle.fill" size={20} color={theme.error} />
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={send}
+                disabled={disabled || !text.trim()}
+                style={({ pressed }) => ({
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+                  opacity: disabled || !text.trim() ? 0.45 : 1,
+                })}
+                accessibilityRole="button"
+                accessibilityLabel="发送给 Agent"
+              >
+                <AppSymbol name="arrow.up" size={18} color="#fff" />
+              </Pressable>
+            )}
+          </View>
         </View>
       </View>
     </View>
@@ -1599,6 +1660,12 @@ function agentStatusMeta(status: AgentState["status"], theme: Theme) {
     default:
       return { label: "不可用", color: theme.textTertiary, bg: theme.bgInput };
   }
+}
+
+function formatAgentProvider(provider?: string | null): string {
+  if (provider === "claude") return "Claude";
+  if (provider === "custom") return "Custom";
+  return "Codex";
 }
 
 function planStepMeta(status: "pending" | "in_progress" | "completed", theme: Theme) {
