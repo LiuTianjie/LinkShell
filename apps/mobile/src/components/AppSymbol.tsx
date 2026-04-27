@@ -8,6 +8,7 @@ const FALLBACK_ICONS: Record<string, React.ComponentProps<typeof MaterialCommuni
   "arrow.clockwise": "refresh",
   "arrow.counterclockwise.circle.fill": "backup-restore",
   "arrow.down.right.and.arrow.up.left": "arrow-collapse",
+  "arrow.up.forward.app": "open-in-new",
   "arrow.up.left.and.arrow.down.right": "arrow-expand",
   "camera.fill": "camera",
   "chevron.left": "chevron-left",

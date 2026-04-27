@@ -37,6 +37,8 @@ import { SessionListScreen } from "./src/screens/SessionListScreen";
 import { SessionScreen } from "./src/screens/SessionScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { addToHistory, enrichHistory } from "./src/storage/history";
+import type { ProjectRecord } from "./src/storage/projects";
+import { touchProject, upsertProject } from "./src/storage/projects";
 import { addServer } from "./src/storage/servers";
 import { ThemeProvider, useTheme } from "./src/theme";
 import { fetchWithTimeout } from "./src/utils/fetch-with-timeout";
@@ -85,10 +87,15 @@ function AppInner() {
   const [gatewayListVisible, setGatewayListVisible] = useState(false);
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
   const [folderPickerVisible, setFolderPickerVisible] = useState(false);
+  const [pendingProjectOpen, setPendingProjectOpen] = useState<{
+    sessionId: string;
+    cwd: string;
+  } | null>(null);
   const gatewaySlideAnim = useRef(
     new Animated.Value(Dimensions.get("window").width),
   ).current;
   const lastSavedSessionsRef = useRef(new Set<string>());
+  const lastProjectSyncRef = useRef(new Map<string, string>());
 
   const manager = useSessionManager();
 
@@ -239,6 +246,73 @@ function AppInner() {
         )
         .catch(() => {});
     }
+  }, [manager.sessions]);
+
+  // Sync session/terminal cwd metadata into project storage for the homepage.
+  useEffect(() => {
+    const pending: Promise<unknown>[] = [];
+
+    for (const [sid, info] of manager.sessions) {
+      const base = {
+        serverUrl: info.gatewayUrl,
+        sessionId: sid,
+        hostname: info.hostname ?? undefined,
+        platform: undefined,
+        provider: info.provider ?? undefined,
+      };
+
+      const queueProjectSync = (project: {
+        cwd: string | null;
+        projectName?: string | null;
+        provider?: string | null;
+        terminalId?: string | null;
+      }) => {
+        const cwd = project.cwd?.trim();
+        if (!cwd) return;
+        const signature = [
+          base.serverUrl,
+          base.sessionId,
+          cwd,
+          project.projectName ?? "",
+          base.hostname ?? "",
+          project.provider ?? base.provider ?? "",
+          project.terminalId ?? "",
+        ].join("\u0000");
+        const key = `${base.serverUrl}:${base.sessionId}:${cwd}`;
+        if (lastProjectSyncRef.current.get(key) === signature) return;
+        lastProjectSyncRef.current.set(key, signature);
+        pending.push(
+          upsertProject({
+            ...base,
+            cwd,
+            projectName: project.projectName ?? undefined,
+            provider: project.provider ?? base.provider,
+            lastTerminalId: project.terminalId ?? undefined,
+          }),
+        );
+      };
+
+      queueProjectSync({
+        cwd: info.cwd,
+        projectName: info.projectName,
+        provider: info.provider,
+        terminalId: info.activeTerminalId,
+      });
+
+      for (const terminal of info.terminals.values()) {
+        queueProjectSync({
+          cwd: terminal.cwd,
+          projectName: terminal.projectName,
+          provider: terminal.provider,
+          terminalId: terminal.terminalId,
+        });
+      }
+    }
+
+    if (pending.length === 0) return;
+    Promise.all(pending)
+      .then(() => setSessionRefreshKey((key) => key + 1))
+      .catch(() => {});
   }, [manager.sessions]);
 
   // Live Activity: track ALL sessions, not just active one
@@ -610,6 +684,62 @@ function AppInner() {
     [gatewayBaseUrl, manager],
   );
 
+  const handleOpenRecentProject = useCallback(
+    (record: ProjectRecord) => {
+      if (!record.cwd) return;
+      const target = record.serverUrl ?? gatewayBaseUrl;
+      if (target !== gatewayBaseUrl) setGatewayBaseUrl(target);
+      setConnectionSheetVisible(false);
+      setActiveScreen("terminal");
+      manager.connectToSession(record.sessionId, target);
+      setPendingProjectOpen({ sessionId: record.sessionId, cwd: record.cwd });
+      touchProject({
+        serverUrl: target,
+        sessionId: record.sessionId,
+        cwd: record.cwd,
+        lastTerminalId: record.lastTerminalId,
+      })
+        .then(() => setSessionRefreshKey((key) => key + 1))
+        .catch(() => {});
+    },
+    [gatewayBaseUrl, manager],
+  );
+
+  useEffect(() => {
+    if (!pendingProjectOpen) return;
+    const info = manager.sessions.get(pendingProjectOpen.sessionId);
+    if (!info) return;
+    if (manager.activeSessionId !== pendingProjectOpen.sessionId) {
+      manager.setActiveSessionId(pendingProjectOpen.sessionId);
+      return;
+    }
+    if (
+      info.status === "idle" ||
+      info.status === "claiming" ||
+      info.status === "connecting" ||
+      info.status === "reconnecting"
+    ) {
+      return;
+    }
+    if (info.status === "connected") {
+      const existingTerminal = [...info.terminals.values()].find(
+        (terminal) =>
+          terminal.cwd === pendingProjectOpen.cwd &&
+          terminal.status === "running",
+      );
+      manager.spawnTerminal(pendingProjectOpen.cwd);
+      touchProject({
+        serverUrl: info.gatewayUrl,
+        sessionId: pendingProjectOpen.sessionId,
+        cwd: pendingProjectOpen.cwd,
+        lastTerminalId: existingTerminal?.terminalId ?? info.activeTerminalId ?? undefined,
+      })
+        .then(() => setSessionRefreshKey((key) => key + 1))
+        .catch(() => {});
+    }
+    setPendingProjectOpen(null);
+  }, [manager, manager.activeSessionId, manager.sessions, pendingProjectOpen]);
+
   const handleDisconnectSession = useCallback(
     (sessionId: string) => {
       manager.disconnectSession(sessionId);
@@ -803,6 +933,7 @@ function AppInner() {
                 connectionDetail={activeSession?.connectionDetail ?? null}
                 onOpenConnectionSheet={() => setConnectionSheetVisible(true)}
                 onConnectSession={handleConnectSession}
+                onOpenRecentProject={handleOpenRecentProject}
                 refreshKey={sessionRefreshKey}
               />
             )}

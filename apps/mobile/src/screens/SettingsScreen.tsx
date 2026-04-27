@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { useTheme } from "../theme";
 import { clearHistory, loadHistory } from "../storage/history";
+import { clearProjects, removeProjectsByServerUrl } from "../storage/projects";
 import { getDefaultServer, loadServers } from "../storage/servers";
 import {
   loadSession,
@@ -94,7 +95,7 @@ export function SettingsScreen({
           text: "清除",
           style: "destructive",
           onPress: async () => {
-            await clearHistory();
+            await Promise.all([clearHistory(), clearProjects()]);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             setHistoryCount(0);
           },
@@ -182,7 +183,10 @@ export function SettingsScreen({
                         await signOut();
                         // Clean up history for official gateways
                         for (const url of officialUrls) {
-                          await removeByServerUrl(url);
+                          await Promise.all([
+                            removeByServerUrl(url),
+                            removeProjectsByServerUrl(url),
+                          ]);
                         }
                         setAuthSession(null);
                         onAuthChanged?.();

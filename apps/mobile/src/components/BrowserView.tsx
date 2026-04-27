@@ -1,7 +1,9 @@
 import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -73,6 +75,13 @@ export function BrowserView({
   const handleRefresh = useCallback(() => {
     webViewRef.current?.reload();
   }, []);
+
+  const handleOpenExternal = useCallback(() => {
+    if (!tunnelUrl) return;
+    Linking.openURL(tunnelUrl).catch(() => {
+      Alert.alert("无法打开系统浏览器", "请稍后重试，或检查当前预览地址是否有效。");
+    });
+  }, [tunnelUrl]);
 
   const handleGoBack = useCallback(() => {
     webViewRef.current?.goBack();
@@ -358,6 +367,21 @@ export function BrowserView({
             color={theme.textSecondary}
           />
         </Pressable>
+
+        {/* Open in system browser */}
+        {tunnelUrl && (
+          <Pressable
+            onPress={handleOpenExternal}
+            style={styles.navBtn}
+            accessibilityLabel="在系统浏览器打开"
+          >
+            <AppSymbol
+              name="arrow.up.forward.app"
+              size={15}
+              color={theme.textSecondary}
+            />
+          </Pressable>
+        )}
 
         {/* Fullscreen */}
         {onToggleFullscreen && tunnelUrl && (

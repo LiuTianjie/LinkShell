@@ -64,7 +64,9 @@ export async function removeServerWithHistory(
   url: string,
 ): Promise<SavedServer[]> {
   const { removeByServerUrl } = await import("./history");
+  const { removeProjectsByServerUrl } = await import("./projects");
   await removeByServerUrl(url);
+  await removeProjectsByServerUrl(url);
   return removeServer(url);
 }
 
