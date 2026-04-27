@@ -365,6 +365,47 @@ describe("Control ownership", () => {
     client1.close();
     client2.close();
   });
+
+  it("rejects agent prompt from non-controller clients", async () => {
+    const { body } = await postJson("/pairings", {});
+    const sessionId = body.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-agent-ctrl");
+    await waitForMessage(host);
+
+    const client1 = await connectWs(sessionId, "client", "client-agent-ctrl-a");
+    await waitForMessage(client1);
+
+    const client2 = await connectWs(sessionId, "client", "client-agent-ctrl-b");
+    await waitForMessage(client2);
+
+    client2.send(serializeEnvelope(createEnvelope({
+      type: "agent.prompt",
+      sessionId,
+      payload: {
+        clientMessageId: "test-message",
+        contentBlocks: [{ type: "text", text: "hello" }],
+      },
+    })));
+
+    const error = await waitForMessage(client2);
+    expect(error.type).toBe("session.error");
+    expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
+
+    client2.send(serializeEnvelope(createEnvelope({
+      type: "agent.session.new",
+      sessionId,
+      payload: { cwd: "/tmp" },
+    })));
+
+    const sessionError = await waitForMessage(client2);
+    expect(sessionError.type).toBe("session.error");
+    expect((sessionError.payload as Record<string, unknown>).code).toBe("control_conflict");
+
+    host.close();
+    client1.close();
+    client2.close();
+  });
 });
 
 describe("Session list", () => {

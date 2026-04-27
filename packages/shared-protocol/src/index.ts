@@ -313,6 +313,120 @@ export const terminalHistoryResponsePayloadSchema = z.object({
   shell: z.string().optional(),
 });
 
+// ── Agent GUI / ACP payloads ───────────────────────────────────────
+
+export const agentProviderSchema = z.enum(["codex", "claude", "custom"]);
+
+export const agentContentBlockSchema = z.object({
+  type: z.enum(["text", "image"]),
+  text: z.string().optional(),
+  data: z.string().optional(),
+  mimeType: z.string().optional(),
+});
+
+export const agentMessageSchema = z.object({
+  id: z.string().min(1),
+  role: z.enum(["user", "assistant", "system"]),
+  content: z.string(),
+  createdAt: z.number(),
+  isStreaming: z.boolean().optional(),
+});
+
+export const agentToolCallSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  input: z.string().optional(),
+  output: z.string().optional(),
+  status: z.enum(["pending", "running", "completed", "failed"]).default("pending"),
+});
+
+export const agentPermissionSchema = z.object({
+  requestId: z.string().min(1),
+  toolName: z.string().optional(),
+  toolInput: z.string().optional(),
+  context: z.string().optional(),
+  options: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    kind: z.enum(["allow", "deny", "other"]).default("other"),
+  })).default([]),
+});
+
+export const agentCapabilitiesPayloadSchema = z.object({
+  enabled: z.boolean(),
+  provider: agentProviderSchema.optional(),
+  protocolVersion: z.number().int().optional(),
+  error: z.string().optional(),
+  supportsSessionList: z.boolean().default(false),
+  supportsSessionLoad: z.boolean().default(false),
+  supportsImages: z.boolean().default(false),
+  supportsAudio: z.boolean().default(false),
+  supportsPermission: z.boolean().default(false),
+  supportsPlan: z.boolean().default(false),
+  supportsCancel: z.boolean().default(false),
+});
+
+export const agentInitializePayloadSchema = z.object({});
+
+export const agentSessionNewPayloadSchema = z.object({
+  cwd: z.string().optional(),
+  provider: agentProviderSchema.optional(),
+  mcpServers: z.record(z.unknown()).optional(),
+});
+
+export const agentSessionLoadPayloadSchema = z.object({
+  agentSessionId: z.string().min(1),
+  cwd: z.string().optional(),
+});
+
+export const agentSessionListPayloadSchema = z.object({});
+
+export const agentPromptPayloadSchema = z.object({
+  agentSessionId: z.string().optional(),
+  clientMessageId: z.string().min(1),
+  contentBlocks: z.array(agentContentBlockSchema).min(1),
+});
+
+export const agentCancelPayloadSchema = z.object({
+  agentSessionId: z.string().optional(),
+});
+
+export const agentUpdatePayloadSchema = z.object({
+  agentSessionId: z.string().optional(),
+  kind: z.enum(["message", "message_delta", "tool_call", "tool_result", "plan", "status", "error"]),
+  message: agentMessageSchema.optional(),
+  delta: z.string().optional(),
+  toolCall: agentToolCallSchema.optional(),
+  plan: z.array(z.object({
+    id: z.string().min(1),
+    text: z.string().min(1),
+    status: z.enum(["pending", "in_progress", "completed"]),
+  })).optional(),
+  status: z.enum(["idle", "running", "waiting_permission", "error"]).optional(),
+  error: z.string().optional(),
+});
+
+export const agentPermissionRequestPayloadSchema = agentPermissionSchema.extend({
+  agentSessionId: z.string().optional(),
+});
+
+export const agentPermissionResponsePayloadSchema = z.object({
+  agentSessionId: z.string().optional(),
+  requestId: z.string().min(1),
+  outcome: z.enum(["allow", "deny", "cancelled"]),
+  optionId: z.string().optional(),
+});
+
+export const agentSnapshotPayloadSchema = z.object({
+  agentSessionId: z.string().optional(),
+  capabilities: agentCapabilitiesPayloadSchema.optional(),
+  messages: z.array(agentMessageSchema).default([]),
+  toolCalls: z.array(agentToolCallSchema).default([]),
+  pendingPermissions: z.array(agentPermissionSchema).default([]),
+  status: z.enum(["unavailable", "idle", "running", "waiting_permission", "error"]).default("unavailable"),
+  error: z.string().optional(),
+});
+
 // ── Protocol message type registry ──────────────────────────────────
 
 export const protocolMessageSchemas = {
@@ -357,6 +471,17 @@ export const protocolMessageSchemas = {
   "tunnel.ws.close": tunnelWsClosePayloadSchema,
   "terminal.history.request": terminalHistoryRequestPayloadSchema,
   "terminal.history.response": terminalHistoryResponsePayloadSchema,
+  "agent.initialize": agentInitializePayloadSchema,
+  "agent.capabilities": agentCapabilitiesPayloadSchema,
+  "agent.session.new": agentSessionNewPayloadSchema,
+  "agent.session.load": agentSessionLoadPayloadSchema,
+  "agent.session.list": agentSessionListPayloadSchema,
+  "agent.prompt": agentPromptPayloadSchema,
+  "agent.cancel": agentCancelPayloadSchema,
+  "agent.update": agentUpdatePayloadSchema,
+  "agent.permission.request": agentPermissionRequestPayloadSchema,
+  "agent.permission.response": agentPermissionResponsePayloadSchema,
+  "agent.snapshot": agentSnapshotPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

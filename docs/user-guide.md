@@ -104,6 +104,9 @@ linkshell start --provider claude
 # 桥接 Codex
 linkshell start --daemon --provider codex
 
+# 实验性 Agent GUI（ACP，对话 / tool call / 权限请求）
+linkshell start --daemon --provider codex --agent-ui
+
 # 桥接任意命令
 linkshell start --daemon --provider custom --command bash
 
@@ -149,6 +152,25 @@ linkshell stop
 - 输入命令
 - 使用特殊键（Esc、Tab、Ctrl+C 等）
 - 断开后自动重连
+
+## Agent GUI（实验性）
+
+Agent GUI 是 Terminal 之外的结构化对话界面。开启后，App 的会话菜单里会出现 Agent 标签，可以发送 prompt，查看 assistant 消息、tool call 卡片、权限请求，并在需要时取消当前 turn。
+
+第一版优先面向 Codex 兼容 ACP agent：
+
+```bash
+linkshell start --daemon --provider codex --agent-ui
+```
+
+如果本机 agent 的 ACP 启动命令不是默认值，或者你在接入 Claude / 自定义适配器，可以使用：
+
+```bash
+linkshell start --daemon --provider codex --agent-ui --agent-command "codex app-server --listen stdio://"
+linkshell start --daemon --provider claude --agent-ui --agent-provider claude --agent-command "<your-acp-adapter>"
+```
+
+Agent GUI 不替代 Terminal。若 ACP agent 不可用，App 会显示不可用说明，终端、远程桌面和浏览器预览仍会照常工作。
 
 ## 所有命令
 

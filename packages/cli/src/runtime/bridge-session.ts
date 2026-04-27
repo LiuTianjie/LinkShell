@@ -19,6 +19,8 @@ import { ScreenFallback } from "./screen-fallback.js";
 import { ScreenShare } from "./screen-share.js";
 import { getLanIp } from "../utils/lan-ip.js";
 import { startKeepAwake, type KeepAwakeHandle } from "../utils/keep-awake.js";
+import { AgentSessionProxy } from "./acp/agent-session.js";
+import type { AgentProvider } from "./acp/provider-resolver.js";
 
 export interface BridgeSessionOptions {
   gatewayUrl: string;
@@ -34,6 +36,9 @@ export interface BridgeSessionOptions {
   providerConfig: ProviderConfig;
   authToken?: string;
   keepAwake?: boolean;
+  agentUi?: boolean;
+  agentProvider?: AgentProvider;
+  agentCommand?: string;
 }
 
 const HEARTBEAT_INTERVAL = 15_000;
@@ -128,6 +133,13 @@ function resolvePairingGateway(
   }
 }
 
+function normalizeAgentProvider(provider: unknown): AgentProvider {
+  if (provider === "claude" || provider === "custom") {
+    return provider;
+  }
+  return "codex";
+}
+
 export class BridgeSession {
   private readonly options: BridgeSessionOptions;
   private socket: WebSocket | undefined;
@@ -153,6 +165,7 @@ export class BridgeSession {
   private screenShare: ScreenShare | undefined;
   private tunnelSockets = new Map<string, WebSocket>();
   private keepAwake: KeepAwakeHandle | undefined;
+  private agentSession: AgentSessionProxy | undefined;
 
   constructor(options: BridgeSessionOptions) {
     this.options = options;
@@ -176,6 +189,20 @@ export class BridgeSession {
       this.keepAwake = startKeepAwake();
     } else {
       process.stderr.write("[bridge] keep-awake disabled\n");
+    }
+    if (this.options.agentUi) {
+      const agentProvider = normalizeAgentProvider(
+        this.options.agentProvider ?? this.options.providerConfig.provider,
+      );
+      this.agentSession = new AgentSessionProxy({
+        sessionId: this.sessionId,
+        cwd: process.cwd(),
+        provider: agentProvider,
+        command: this.options.agentCommand,
+        verbose: this.options.verbose,
+        send: (envelope) => this.send(envelope),
+      });
+      process.stderr.write("[bridge] agent GUI channel enabled\n");
     }
     await this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
     this.connectGateway();
@@ -515,6 +542,39 @@ export class BridgeSession {
       case "screen.ice": {
         const p = parseTypedPayload("screen.ice", envelope.payload);
         this.screenShare?.handleIceCandidate(p.candidate, p.sdpMid, p.sdpMLineIndex);
+        break;
+      }
+      case "agent.initialize":
+      case "agent.session.new":
+      case "agent.session.load":
+      case "agent.session.list":
+      case "agent.prompt":
+      case "agent.cancel":
+      case "agent.permission.response": {
+        if (!this.agentSession) {
+          this.send(
+            createEnvelope({
+              type: "agent.capabilities",
+              sessionId: this.sessionId,
+              payload: {
+                enabled: false,
+                provider: normalizeAgentProvider(
+                  this.options.agentProvider ?? this.options.providerConfig.provider,
+                ),
+                error: "Agent GUI is not enabled. Start CLI with --agent-ui.",
+                supportsSessionList: false,
+                supportsSessionLoad: false,
+                supportsImages: false,
+                supportsAudio: false,
+                supportsPermission: false,
+                supportsPlan: false,
+                supportsCancel: false,
+              },
+            }),
+          );
+          break;
+        }
+        await this.agentSession.handleEnvelope(envelope);
         break;
       }
       case "file.upload": {
@@ -1630,6 +1690,8 @@ export class BridgeSession {
     this.exited = true;
     this.stopHeartbeat();
     this.stopScreenCapture();
+    this.agentSession?.stop();
+    this.agentSession = undefined;
     this.keepAwake?.stop();
     this.keepAwake = undefined;
     if (this.reconnectTimer) {

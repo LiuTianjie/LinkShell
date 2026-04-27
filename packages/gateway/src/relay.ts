@@ -119,6 +119,11 @@ function handleHostMessage(
     case "screen.status":
     case "screen.offer":
     case "screen.ice":
+    // Agent GUI: host → clients
+    case "agent.capabilities":
+    case "agent.update":
+    case "agent.permission.request":
+    case "agent.snapshot":
     // Multi-terminal: host → clients
     case "terminal.spawned":
     case "terminal.list":
@@ -235,6 +240,11 @@ function handleClientMessage(
     case "screen.stop":
     case "screen.answer":
     case "screen.ice":
+    case "agent.session.new":
+    case "agent.session.load":
+    case "agent.prompt":
+    case "agent.cancel":
+    case "agent.permission.response":
     // Multi-terminal: client → host
     case "terminal.spawn":
     case "terminal.kill":
@@ -245,6 +255,10 @@ function handleClientMessage(
     case "file.upload":
     case "permission.decision":
       if (!requireController()) return;
+      sendToHost(session, envelope);
+      break;
+    case "agent.initialize":
+    case "agent.session.list":
       sendToHost(session, envelope);
       break;
     default:

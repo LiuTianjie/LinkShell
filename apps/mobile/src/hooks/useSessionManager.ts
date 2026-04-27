@@ -54,6 +54,54 @@ export interface BrowseResult {
   error?: string;
 }
 
+export interface AgentCapabilities {
+  enabled: boolean;
+  provider?: "codex" | "claude" | "custom";
+  protocolVersion?: number;
+  error?: string;
+  supportsSessionList: boolean;
+  supportsSessionLoad: boolean;
+  supportsImages: boolean;
+  supportsAudio: boolean;
+  supportsPermission: boolean;
+  supportsPlan: boolean;
+  supportsCancel: boolean;
+}
+
+export interface AgentMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: number;
+  isStreaming?: boolean;
+}
+
+export interface AgentToolCall {
+  id: string;
+  name: string;
+  input?: string;
+  output?: string;
+  status: "pending" | "running" | "completed" | "failed";
+}
+
+export interface AgentPermission {
+  requestId: string;
+  toolName?: string;
+  toolInput?: string;
+  context?: string;
+  options: { id: string; label: string; kind: "allow" | "deny" | "other" }[];
+}
+
+export interface AgentState {
+  capabilities: AgentCapabilities | null;
+  activeAgentSessionId: string | null;
+  messages: AgentMessage[];
+  toolCalls: AgentToolCall[];
+  pendingPermissions: AgentPermission[];
+  status: "unavailable" | "idle" | "running" | "waiting_permission" | "error";
+  error?: string | null;
+}
+
 export interface SessionInfo {
   sessionId: string;
   gatewayUrl: string;
@@ -86,6 +134,7 @@ export interface SessionInfo {
     sdpMLineIndex?: number | null;
   }[];
   browseResult: BrowseResult | null;
+  agent: AgentState;
 }
 
 export interface SessionManagerHandle {
@@ -144,6 +193,14 @@ export interface SessionManagerHandle {
   requestHistory: () => void;
   /** Shell history entries from the host */
   historyEntries: string[];
+  initializeAgent: () => void;
+  sendAgentPrompt: (text: string) => void;
+  cancelAgent: () => void;
+  sendAgentPermissionResponse: (
+    requestId: string,
+    outcome: "allow" | "deny" | "cancelled",
+    optionId?: string,
+  ) => void;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -250,6 +307,7 @@ interface InternalSession {
     height: number;
   } | null;
   browseResult: BrowseResult | null;
+  agent: AgentState;
 }
 
 const OUTBOUND_QUEUE_LIMIT = 100;
@@ -339,6 +397,15 @@ function createInternalSession(
     pendingStatusByTerminal: new Map(),
     chunkBuf: null,
     browseResult: null,
+    agent: {
+      capabilities: null,
+      activeAgentSessionId: null,
+      messages: [],
+      toolCalls: [],
+      pendingPermissions: [],
+      status: "unavailable",
+      error: null,
+    },
   };
 }
 
@@ -378,6 +445,12 @@ function toSessionInfo(s: InternalSession): SessionInfo {
     pendingOffer: s.pendingOffer,
     pendingIceCandidates: s.pendingIceCandidates,
     browseResult: s.browseResult,
+    agent: {
+      ...s.agent,
+      messages: [...s.agent.messages],
+      toolCalls: [...s.agent.toolCalls],
+      pendingPermissions: [...s.agent.pendingPermissions],
+    },
   };
 }
 
@@ -677,7 +750,7 @@ export function useSessionManager(): SessionManagerHandle {
         return;
       }
 
-      switch (envelope.type) {
+      switch (envelope.type as string) {
         case "terminal.output": {
           if (s.status === "connecting" || s.status === "reconnecting") {
             s.status = "connected";
@@ -763,6 +836,64 @@ export function useSessionManager(): SessionManagerHandle {
               snapshot: { sessionId: s.sessionId, chunks: [] },
             });
           }
+          tick();
+          break;
+        }
+        case "agent.capabilities": {
+          const p = parseTypedPayload("agent.capabilities" as any, envelope.payload) as any;
+          s.agent.capabilities = p as AgentCapabilities;
+          s.agent.status = p.enabled ? "idle" : "unavailable";
+          s.agent.error = p.error ?? null;
+          tick();
+          break;
+        }
+        case "agent.snapshot": {
+          const p = parseTypedPayload("agent.snapshot" as any, envelope.payload) as any;
+          s.agent.activeAgentSessionId = p.agentSessionId ?? null;
+          s.agent.capabilities = (p.capabilities as AgentCapabilities | undefined) ?? s.agent.capabilities;
+          s.agent.messages = p.messages as AgentMessage[];
+          s.agent.toolCalls = p.toolCalls as AgentToolCall[];
+          s.agent.pendingPermissions = p.pendingPermissions as AgentPermission[];
+          s.agent.status = p.status;
+          s.agent.error = p.error ?? null;
+          tick();
+          break;
+        }
+        case "agent.update": {
+          const p = parseTypedPayload("agent.update" as any, envelope.payload) as any;
+          s.agent.activeAgentSessionId = p.agentSessionId ?? s.agent.activeAgentSessionId;
+          if (p.status) s.agent.status = p.status;
+          if (p.error) s.agent.error = p.error;
+          if (p.message) {
+            const existing = s.agent.messages.findIndex((m) => m.id === p.message!.id);
+            if (existing >= 0) s.agent.messages[existing] = p.message as AgentMessage;
+            else s.agent.messages.push(p.message as AgentMessage);
+            if (s.agent.messages.length > 100) s.agent.messages.shift();
+          }
+          if (p.toolCall) {
+            const existing = s.agent.toolCalls.findIndex((t) => t.id === p.toolCall!.id);
+            if (existing >= 0) s.agent.toolCalls[existing] = p.toolCall as AgentToolCall;
+            else s.agent.toolCalls.push(p.toolCall as AgentToolCall);
+          }
+          tick();
+          break;
+        }
+        case "agent.permission.request": {
+          const p = parseTypedPayload("agent.permission.request" as any, envelope.payload) as any;
+          s.agent.activeAgentSessionId = p.agentSessionId ?? s.agent.activeAgentSessionId;
+          s.agent.status = "waiting_permission";
+          const next = {
+            requestId: p.requestId,
+            toolName: p.toolName,
+            toolInput: p.toolInput,
+            context: p.context,
+            options: p.options,
+          } as AgentPermission;
+          const existing = s.agent.pendingPermissions.findIndex(
+            (perm) => perm.requestId === next.requestId,
+          );
+          if (existing >= 0) s.agent.pendingPermissions[existing] = next;
+          else s.agent.pendingPermissions.push(next);
           tick();
           break;
         }
@@ -1363,6 +1494,88 @@ export function useSessionManager(): SessionManagerHandle {
     );
   }, [getActive]);
 
+  const initializeAgentFn = useCallback(() => {
+    const s = getActive();
+    if (!s) return;
+    sendRaw(
+      s,
+      createEnvelope({
+        type: "agent.initialize" as any,
+        sessionId: s.sessionId,
+        deviceId: s.deviceId,
+        payload: {},
+      }),
+      { queue: true, dedupeKey: "agent:init" },
+    );
+  }, [getActive]);
+
+  const sendAgentPromptFn = useCallback(
+    (text: string) => {
+      const s = getActive();
+      const trimmed = text.trim();
+      if (!s || !trimmed) return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "agent.prompt" as any,
+          sessionId: s.sessionId,
+          deviceId: s.deviceId,
+          payload: {
+            agentSessionId: s.agent.activeAgentSessionId ?? undefined,
+            clientMessageId: generateId(),
+            contentBlocks: [{ type: "text", text: trimmed }],
+          },
+        }),
+        { queue: true },
+      );
+      s.agent.status = "running";
+      tick();
+    },
+    [getActive, tick],
+  );
+
+  const cancelAgentFn = useCallback(() => {
+    const s = getActive();
+    if (!s) return;
+    sendRaw(
+      s,
+      createEnvelope({
+        type: "agent.cancel" as any,
+        sessionId: s.sessionId,
+        deviceId: s.deviceId,
+        payload: { agentSessionId: s.agent.activeAgentSessionId ?? undefined },
+      }),
+      { queue: true },
+    );
+  }, [getActive]);
+
+  const sendAgentPermissionResponseFn = useCallback(
+    (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => {
+      const s = getActive();
+      if (!s) return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "agent.permission.response" as any,
+          sessionId: s.sessionId,
+          deviceId: s.deviceId,
+          payload: {
+            agentSessionId: s.agent.activeAgentSessionId ?? undefined,
+            requestId,
+            outcome,
+            optionId,
+          },
+        }),
+        { queue: true, dedupeKey: `agent-permission:${requestId}` },
+      );
+      s.agent.pendingPermissions = s.agent.pendingPermissions.filter(
+        (perm) => perm.requestId !== requestId,
+      );
+      tick();
+    },
+    [getActive, tick],
+  );
+
   const killTerminalFn = useCallback(
     (terminalId: string) => {
       const s = getActive();
@@ -1502,5 +1715,9 @@ export function useSessionManager(): SessionManagerHandle {
     deviceToken: deviceTokenRef.current,
     requestHistory: requestHistoryFn,
     historyEntries,
+    initializeAgent: initializeAgentFn,
+    sendAgentPrompt: sendAgentPromptFn,
+    cancelAgent: cancelAgentFn,
+    sendAgentPermissionResponse: sendAgentPermissionResponseFn,
   };
 }

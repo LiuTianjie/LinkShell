@@ -88,6 +88,7 @@ The CLI starts a built-in Gateway + terminal bridge in the background, then prin
 linkshell start --daemon --provider claude   # Start in background (built-in Gateway + bridge)
 linkshell start --daemon --provider claude --no-keep-awake  # macOS: allow idle sleep
 linkshell start --provider claude             # Start in foreground
+linkshell start --daemon --provider codex --agent-ui  # Experimental Agent GUI via ACP
 linkshell status                              # Check running status
 linkshell stop                                # Stop all background processes
 tail -f ~/.linkshell/bridge.log               # View logs
@@ -171,6 +172,23 @@ With `--screen`, the app can switch to the Desktop tab to view your computer scr
 > ```
 >
 > Once installed, the CLI auto-detects screen devices and starts H.264 encoding. If [werift](https://github.com/nicktomlin/werift) is also installed (`npm i -g werift`), WebRTC low-latency transport is preferred; otherwise it falls back to screenshot streaming.
+
+### Agent GUI (Experimental)
+
+LinkShell can expose an ACP-based Agent tab next to Terminal, Desktop, and Browser. The first pass targets Codex-compatible ACP agents; Terminal remains the fallback.
+
+```bash
+linkshell start --daemon --provider codex --agent-ui
+```
+
+If your agent uses a custom ACP command, pass it explicitly:
+
+```bash
+linkshell start --daemon --provider codex --agent-ui --agent-command "codex app-server --listen stdio://"
+linkshell start --daemon --provider claude --agent-ui --agent-provider claude --agent-command "<your-acp-adapter>"
+```
+
+When the local ACP agent is unavailable, the app shows a disabled Agent tab and the terminal session continues normally.
 
 ### Port Forwarding (Preview Dev Server)
 

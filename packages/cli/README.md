@@ -50,6 +50,9 @@ linkshell start --provider claude
 # 桥接 Codex
 linkshell start --daemon --provider codex
 
+# 实验性 Agent GUI（ACP）
+linkshell start --daemon --provider codex --agent-ui
+
 # 桥接任意命令
 linkshell start --daemon --provider custom --command bash
 

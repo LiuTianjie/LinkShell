@@ -67,6 +67,15 @@ program
   .option("--rows <rows>", "Initial terminal rows", String(config.rows ?? 36))
   .option("--screen", "Enable screen sharing capability")
   .option("--no-keep-awake", "Disable macOS keep-awake while bridge is running")
+  .option("--agent-ui", "Enable experimental ACP Agent GUI channel")
+  .option(
+    "--agent-provider <provider>",
+    "Agent GUI provider: codex | claude | custom",
+  )
+  .option(
+    "--agent-command <command>",
+    "ACP agent command (required for claude/custom, optional for codex)",
+  )
   .option("--daemon", "Run in background (detached)")
   .option("--verbose", "Enable verbose logging")
   .option("--_foreground-bridge", undefined) // internal
@@ -99,6 +108,11 @@ program
       if (options.verbose) childArgs.push("--verbose");
       if (options.screen) childArgs.push("--screen");
       if (!keepAwake) childArgs.push("--no-keep-awake");
+      if (options.agentUi) childArgs.push("--agent-ui");
+      if (options.agentProvider)
+        childArgs.push("--agent-provider", options.agentProvider);
+      if (options.agentCommand)
+        childArgs.push("--agent-command", options.agentCommand);
       if (options.sessionId) childArgs.push("--session-id", options.sessionId);
       // Pass through extra args
       const extra = command.args.filter((v: string) => v !== "--");
@@ -191,6 +205,9 @@ program
       providerConfig,
       authToken,
       keepAwake,
+      agentUi: Boolean(options.agentUi),
+      agentProvider: options.agentProvider ?? options.provider,
+      agentCommand: options.agentCommand,
     });
 
     const cleanup = async () => {

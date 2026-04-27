@@ -30,7 +30,7 @@ import type { TerminalViewHandle } from "../components/TerminalView";
 import { ScreenView } from "../components/ScreenView";
 import { BrowserView } from "../components/BrowserView";
 import type { ConnectionStatus, TerminalStream } from "../hooks/useSession";
-import type { TerminalInfo } from "../hooks/useSessionManager";
+import type { AgentState, TerminalInfo } from "../hooks/useSessionManager";
 import { useTheme } from "../theme";
 import type { Theme } from "../theme";
 
@@ -119,6 +119,15 @@ interface SessionScreenProps {
   // Shell history
   historyEntries?: string[];
   onRequestHistory?: () => void;
+  agent: AgentState;
+  onInitializeAgent: () => void;
+  onSendAgentPrompt: (text: string) => void;
+  onCancelAgent: () => void;
+  onSendAgentPermissionResponse: (
+    requestId: string,
+    outcome: "allow" | "deny",
+    optionId?: string,
+  ) => void;
 }
 
 export function SessionScreen({
@@ -158,6 +167,11 @@ export function SessionScreen({
   authToken,
   historyEntries,
   onRequestHistory,
+  agent,
+  onInitializeAgent,
+  onSendAgentPrompt,
+  onCancelAgent,
+  onSendAgentPermissionResponse,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -189,7 +203,7 @@ export function SessionScreen({
   const [zoomPercent, setZoomPercent] = useState(100);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [activeTab, setActiveTab] = useState<
-    "terminal" | "desktop" | "browser"
+    "terminal" | "desktop" | "browser" | "agent"
   >("terminal");
   const [showTerminalGrid, setShowTerminalGrid] = useState(false);
   const [browserFullscreen, setBrowserFullscreen] = useState(false);
@@ -213,6 +227,13 @@ export function SessionScreen({
     Keyboard.dismiss();
     termRef.current?.blurCursor();
   }, []);
+
+  const switchToAgent = useCallback(() => {
+    setActiveTab("agent");
+    Keyboard.dismiss();
+    termRef.current?.blurCursor();
+    onInitializeAgent();
+  }, [onInitializeAgent]);
 
   const hasControl = controllerId === deviceId;
   const isControlledByOther = Boolean(
@@ -529,6 +550,28 @@ export function SessionScreen({
             </View>
           ) : null}
 
+          <View
+            pointerEvents={activeTab === "agent" ? "auto" : "none"}
+            style={[
+              StyleSheet.absoluteFillObject,
+              {
+                top: insets.top + 40,
+                bottom: stageBottomInset,
+                opacity: activeTab === "agent" ? 1 : 0,
+              },
+            ]}
+          >
+            <AgentStage
+              agent={agent}
+              hasControl={hasControl}
+              onInitialize={onInitializeAgent}
+              onSendPrompt={onSendAgentPrompt}
+              onCancel={onCancelAgent}
+              onPermissionResponse={onSendAgentPermissionResponse}
+              theme={theme}
+            />
+          </View>
+
           {showFullOverlay ? (
             <SessionOverlay
               connectionDetail={connectionDetail}
@@ -557,6 +600,7 @@ export function SessionScreen({
             onSwitchDesktop={switchToDesktop}
             onSwitchTerminal={switchToTerminal}
             onSwitchBrowser={switchToBrowser}
+            onSwitchAgent={switchToAgent}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onZoomReset={handleZoomReset}
@@ -693,6 +737,7 @@ const SessionHeader = memo(function SessionHeader({
   onSwitchDesktop,
   onSwitchTerminal,
   onSwitchBrowser,
+  onSwitchAgent,
   onZoomIn,
   onZoomOut,
   onZoomReset,
@@ -705,7 +750,7 @@ const SessionHeader = memo(function SessionHeader({
   activeTerminalLabel,
   onShowTerminalGrid,
 }: {
-  activeTab: "terminal" | "desktop" | "browser";
+  activeTab: "terminal" | "desktop" | "browser" | "agent";
   hasControl: boolean;
   isControlledByOther: boolean;
   onClaimControl: () => void;
@@ -714,6 +759,7 @@ const SessionHeader = memo(function SessionHeader({
   onSwitchDesktop: () => void;
   onSwitchTerminal: () => void;
   onSwitchBrowser: () => void;
+  onSwitchAgent: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
@@ -786,6 +832,13 @@ const SessionHeader = memo(function SessionHeader({
       id: "switch-browser",
       title: "浏览器",
       image: Platform.select({ ios: "globe" }),
+    });
+  }
+  if (activeTab !== "agent") {
+    switchActions.push({
+      id: "switch-agent",
+      title: "Agent",
+      image: Platform.select({ ios: "sparkles" }),
     });
   }
   if (activeTab !== "terminal") {
@@ -1040,6 +1093,9 @@ const SessionHeader = memo(function SessionHeader({
                 case "switch-browser":
                   onSwitchBrowser();
                   break;
+                case "switch-agent":
+                  onSwitchAgent();
+                  break;
                 case "switch-terminal":
                   onSwitchTerminal();
                   break;
@@ -1075,6 +1131,307 @@ const SessionHeader = memo(function SessionHeader({
 });
 
 const CANCEL_THRESHOLD = -80; // drag up 80pt to cancel
+
+const AgentStage = memo(function AgentStage({
+  agent,
+  hasControl,
+  onInitialize,
+  onSendPrompt,
+  onCancel,
+  onPermissionResponse,
+  theme,
+}: {
+  agent: AgentState;
+  hasControl: boolean;
+  onInitialize: () => void;
+  onSendPrompt: (text: string) => void;
+  onCancel: () => void;
+  onPermissionResponse: (
+    requestId: string,
+    outcome: "allow" | "deny",
+    optionId?: string,
+  ) => void;
+  theme: Theme;
+}) {
+  const [text, setText] = useState("");
+  const disabled = !hasControl || agent.status === "unavailable";
+  const running = agent.status === "running" || agent.status === "waiting_permission";
+
+  const send = useCallback(() => {
+    const value = text.trim();
+    if (!value || disabled) return;
+    onSendPrompt(value);
+    setText("");
+  }, [disabled, onSendPrompt, text]);
+
+  useEffect(() => {
+    if (!agent.capabilities) onInitialize();
+  }, [agent.capabilities, onInitialize]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: 16 }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingBottom: 16,
+          gap: 10,
+        }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View
+          style={{
+            borderRadius: 12,
+            borderCurve: "continuous",
+            backgroundColor: theme.bgCard,
+            padding: 12,
+            gap: 6,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <AppSymbol
+              name="sparkles"
+              size={16}
+              color={agent.capabilities?.enabled ? theme.accent : theme.textTertiary}
+            />
+            <Text style={{ color: theme.text, fontSize: 15, fontWeight: "600" }}>
+              Agent GUI
+            </Text>
+            <Text
+              style={{
+                marginLeft: "auto",
+                color: theme.textTertiary,
+                fontSize: 12,
+                textTransform: "uppercase",
+              }}
+            >
+              {agent.status}
+            </Text>
+          </View>
+          {!agent.capabilities?.enabled ? (
+            <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18 }}>
+              {agent.error ||
+                agent.capabilities?.error ||
+                "当前 CLI 未启用 Agent GUI。使用 linkshell start --daemon --provider codex --agent-ui 启动。"}
+            </Text>
+          ) : (
+            <Text style={{ color: theme.textTertiary, fontSize: 13 }}>
+              {agent.capabilities.provider ?? "agent"} · ACP GUI 已连接
+            </Text>
+          )}
+        </View>
+
+        {agent.pendingPermissions.map((permission) => (
+          (() => {
+            const denyOption =
+              permission.options.find((option) => option.kind === "deny") ??
+              permission.options.find((option) => option.id === "deny");
+            const allowOption =
+              permission.options.find((option) => option.kind === "allow") ??
+              permission.options.find((option) => option.id === "allow");
+            return (
+              <View
+                key={permission.requestId}
+                style={{
+                  borderRadius: 12,
+                  borderCurve: "continuous",
+                  backgroundColor: theme.accentLight,
+                  padding: 12,
+                  gap: 8,
+                }}
+              >
+                <Text style={{ color: theme.warning, fontSize: 15, fontWeight: "700" }}>
+                  需要授权{permission.toolName ? ` · ${permission.toolName}` : ""}
+                </Text>
+                {permission.context ? (
+                  <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
+                    {permission.context}
+                  </Text>
+                ) : null}
+                {permission.toolInput ? (
+                  <Text
+                    style={{
+                      color: theme.textTertiary,
+                      fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+                      fontSize: 12,
+                    }}
+                    numberOfLines={4}
+                  >
+                    {permission.toolInput}
+                  </Text>
+                ) : null}
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Pressable
+                    onPress={() => onPermissionResponse(permission.requestId, "deny", denyOption?.id)}
+                    style={({ pressed }) => ({
+                      flex: 1,
+                      borderRadius: 8,
+                      paddingVertical: 10,
+                      alignItems: "center",
+                      backgroundColor: pressed ? theme.bgInput : theme.bgCard,
+                    })}
+                  >
+                    <Text style={{ color: theme.error, fontWeight: "600" }}>
+                      {denyOption?.label ?? "拒绝"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => onPermissionResponse(permission.requestId, "allow", allowOption?.id)}
+                    style={({ pressed }) => ({
+                      flex: 1,
+                      borderRadius: 8,
+                      paddingVertical: 10,
+                      alignItems: "center",
+                      backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+                    })}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "600" }}>
+                      {allowOption?.label ?? "允许"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })()
+        ))}
+
+        {agent.messages.map((message) => (
+          <View
+            key={message.id}
+            style={{
+              alignSelf: message.role === "user" ? "flex-end" : "stretch",
+              maxWidth: message.role === "user" ? "88%" : "100%",
+              borderRadius: 12,
+              borderCurve: "continuous",
+              backgroundColor:
+                message.role === "user" ? theme.accent : theme.bgCard,
+              paddingVertical: 10,
+              paddingHorizontal: 12,
+            }}
+          >
+            <Text
+              style={{
+                color: message.role === "user" ? "#fff" : theme.text,
+                fontSize: 14,
+                lineHeight: 20,
+              }}
+            >
+              {message.content}
+            </Text>
+          </View>
+        ))}
+
+        {agent.toolCalls.map((tool) => (
+          <View
+            key={tool.id}
+            style={{
+              borderRadius: 12,
+              borderCurve: "continuous",
+              backgroundColor: theme.bgCard,
+              padding: 12,
+              gap: 6,
+            }}
+          >
+            <Text style={{ color: theme.text, fontSize: 14, fontWeight: "600" }}>
+              {tool.name} · {tool.status}
+            </Text>
+            {tool.input ? (
+              <Text style={{ color: theme.textTertiary, fontSize: 12 }} numberOfLines={4}>
+                {tool.input}
+              </Text>
+            ) : null}
+            {tool.output ? (
+              <Text style={{ color: theme.textSecondary, fontSize: 12 }} numberOfLines={4}>
+                {tool.output}
+              </Text>
+            ) : null}
+          </View>
+        ))}
+      </ScrollView>
+
+      <View
+        style={{
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.separator,
+          padding: 10,
+          gap: 8,
+          backgroundColor: theme.bg,
+        }}
+      >
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {["继续", "解释", "修复", "写测试", "总结当前改动"].map((chip) => (
+            <Pressable
+              key={chip}
+              disabled={disabled}
+              onPress={() => setText(chip)}
+              style={({ pressed }) => ({
+                borderRadius: 999,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                backgroundColor: pressed ? theme.bgInput : theme.bgCard,
+                opacity: disabled ? 0.5 : 1,
+              })}
+            >
+              <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{chip}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <TextInput
+            value={text}
+            onChangeText={setText}
+            editable={!disabled}
+            placeholder={hasControl ? "给 Agent 发送消息" : "先获取控制权"}
+            placeholderTextColor={theme.textTertiary}
+            multiline
+            style={{
+              flex: 1,
+              minHeight: 42,
+              maxHeight: 120,
+              borderRadius: 10,
+              borderCurve: "continuous",
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              backgroundColor: theme.bgInput,
+              color: theme.text,
+              fontSize: 15,
+            }}
+          />
+          {running ? (
+            <Pressable
+              onPress={onCancel}
+              style={({ pressed }) => ({
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed ? theme.errorLight : theme.bgCard,
+              })}
+            >
+              <AppSymbol name="stop.circle.fill" size={20} color={theme.error} />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={send}
+              disabled={disabled || !text.trim()}
+              style={({ pressed }) => ({
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+                opacity: disabled || !text.trim() ? 0.45 : 1,
+              })}
+            >
+              <AppSymbol name="paperplane.fill" size={18} color="#fff" />
+            </Pressable>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+});
 
 const VoiceBar = memo(function VoiceBar({
   bottomInset,
