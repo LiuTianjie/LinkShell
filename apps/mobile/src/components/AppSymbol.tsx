@@ -5,6 +5,7 @@ import React from "react";
 const FALLBACK_ICONS: Record<string, React.ComponentProps<typeof MaterialCommunityIcons>["name"]> = {
   "app.badge.fill": "apps",
   "apple.logo": "apple",
+  archivebox: "archive-outline",
   "arrow.clockwise": "refresh",
   "arrow.counterclockwise.circle.fill": "backup-restore",
   "arrow.down.right.and.arrow.up.left": "arrow-collapse",

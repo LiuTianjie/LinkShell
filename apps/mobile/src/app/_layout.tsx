@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionSheet } from "../components/ConnectionSheet";
 import { AppProvider, type AppContextValue } from "../contexts/AppContext";
 import { useAppState } from "../hooks/useAppState";
+import { useAgentWorkspace } from "../hooks/useAgentWorkspace";
 import { useSessionManager } from "../hooks/useSessionManager";
 import type { SessionInfo } from "../hooks/useSessionManager";
 import { addToHistory, enrichHistory } from "../storage/history";
@@ -52,6 +53,7 @@ function AppInner() {
   const lastProjectSyncRef = useRef(new Map<string, string>());
 
   const manager = useSessionManager();
+  const agentWorkspace = useAgentWorkspace(manager);
 
   const activeSession: SessionInfo | undefined = manager.activeSessionId
     ? manager.sessions.get(manager.activeSessionId)
@@ -344,6 +346,7 @@ function AppInner() {
     gatewayBaseUrl,
     setGatewayBaseUrl,
     manager,
+    agentWorkspace,
     activeSession,
     displayStatus,
     sessionRefreshKey,

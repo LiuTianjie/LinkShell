@@ -1,0 +1,334 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
+import * as Haptics from "expo-haptics";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppSymbol } from "../components/AppSymbol";
+import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
+import { loadProjects, type ProjectRecord } from "../storage/projects";
+import { useTheme, type Theme } from "../theme";
+
+interface AgentWorkspaceScreenProps {
+  workspace: AgentWorkspaceHandle;
+  onOpenConnectionSheet: () => void;
+  onOpenConversation: (conversationId: string) => void;
+}
+
+function statusMeta(status: string, theme: Theme) {
+  switch (status) {
+    case "running":
+      return { label: "运行中", color: theme.accent, bg: theme.accentLight };
+    case "waiting_permission":
+      return { label: "待授权", color: theme.warning, bg: theme.accentLight };
+    case "error":
+      return { label: "错误", color: theme.error, bg: theme.errorLight };
+    case "idle":
+      return { label: "空闲", color: theme.success, bg: theme.accentLight };
+    default:
+      return { label: "不可用", color: theme.textTertiary, bg: theme.bgInput };
+  }
+}
+
+function shortPath(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 3) return path;
+  return `…/${parts.slice(-3).join("/")}`;
+}
+
+function SectionTitle({ children, theme }: { children: React.ReactNode; theme: Theme }) {
+  return (
+    <Text
+      style={{
+        color: theme.textTertiary,
+        fontSize: 12,
+        fontWeight: "700",
+        textTransform: "uppercase",
+        paddingHorizontal: 20,
+      }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+export function AgentWorkspaceScreen({
+  workspace,
+  onOpenConnectionSheet,
+  onOpenConversation,
+}: AgentWorkspaceScreenProps) {
+  const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
+
+  useEffect(() => {
+    loadProjects().then((items) => setProjects(items.slice(0, 6))).catch(() => {});
+  }, [workspace.conversations.length]);
+
+  const connectedSessionIds = useMemo(
+    () => new Set(workspace.connectedSessions.map((session) => session.sessionId)),
+    [workspace.connectedSessions],
+  );
+
+  const visibleConversations = showArchived
+    ? workspace.archivedConversations
+    : workspace.conversations;
+  const connectedProjects = projects.filter((project) => connectedSessionIds.has(project.sessionId));
+
+  const openProject = useCallback(
+    async (project: ProjectRecord) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const id = await workspace.openProject(project);
+      if (id) onOpenConversation(id);
+    },
+    [onOpenConversation, workspace],
+  );
+
+  const openConversation = useCallback(
+    (conversationId: string) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onOpenConversation(conversationId);
+    },
+    [onOpenConversation],
+  );
+
+  const startFromSession = useCallback(async () => {
+    const session = workspace.connectedSessions[0];
+    if (!session) {
+      onOpenConnectionSheet();
+      return;
+    }
+    const cwd = session.cwd || [...session.terminals.values()][0]?.cwd || "~";
+    const id = await workspace.openConversation({
+      sessionId: session.sessionId,
+      cwd,
+      title: session.projectName || session.hostname || "Agent",
+    });
+    if (id) onOpenConversation(id);
+  }, [onOpenConnectionSheet, onOpenConversation, workspace]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingTop: insets.top + 12,
+          paddingBottom: Math.max(insets.bottom, 18) + 12,
+          gap: 18,
+        }}
+        contentInsetAdjustmentBehavior="automatic"
+      >
+        <View style={{ paddingHorizontal: 20, gap: 6 }}>
+          <Text style={{ color: theme.text, fontSize: 34, fontWeight: "800" }}>
+            Agent
+          </Text>
+          <Text style={{ color: theme.textTertiary, fontSize: 14, lineHeight: 20 }}>
+            像 Codex 客户端一样管理远程 Agent 对话。
+          </Text>
+        </View>
+
+        <View style={{ paddingHorizontal: 20 }}>
+          <Pressable
+            onPress={startFromSession}
+            style={({ pressed }) => ({
+              borderRadius: 14,
+              borderCurve: "continuous",
+              backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+              padding: 16,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 12,
+            })}
+          >
+            <View
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 10,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: "rgba(255,255,255,0.16)",
+              }}
+            >
+              {workspace.connectedSessions.length > 0 ? (
+                <AppSymbol name="sparkles" size={17} color="#fff" />
+              ) : (
+                <AppSymbol name="plus" size={17} color="#fff" />
+              )}
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700" }}>
+                {workspace.connectedSessions.length > 0 ? "新建 Agent 对话" : "连接 Mac"}
+              </Text>
+              <Text style={{ color: "rgba(255,255,255,0.78)", fontSize: 13, marginTop: 2 }} numberOfLines={1}>
+                {workspace.connectedSessions.length > 0
+                  ? `${workspace.connectedSessions[0]?.hostname ?? "本机"} · ${workspace.connectedSessions.length} 个在线会话`
+                  : "先连接 CLI，再使用 Agent Workspace"}
+              </Text>
+            </View>
+            <AppSymbol name="chevron.right" size={16} color="rgba(255,255,255,0.9)" />
+          </Pressable>
+        </View>
+
+        {workspace.connectedSessions.length > 0 ? (
+          <View style={{ gap: 8 }}>
+            <SectionTitle theme={theme}>在线 Mac</SectionTitle>
+            <View style={{ paddingHorizontal: 20, gap: 8 }}>
+              {workspace.connectedSessions.map((session) => {
+                const caps = workspace.capabilitiesBySessionId.get(session.sessionId);
+                const meta = statusMeta(caps?.enabled ? "idle" : "unavailable", theme);
+                return (
+                  <View
+                    key={session.sessionId}
+                    style={{
+                      borderRadius: 12,
+                      borderCurve: "continuous",
+                      backgroundColor: theme.bgCard,
+                      padding: 12,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 5,
+                        backgroundColor: caps?.enabled ? theme.success : theme.textTertiary,
+                      }}
+                    />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }} numberOfLines={1}>
+                        {session.hostname || session.projectName || session.sessionId.slice(0, 8)}
+                      </Text>
+                      <Text style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                        {caps?.enabled ? `${caps.provider ?? "agent"} · Workspace 已连接` : caps?.error ?? "等待 Agent 能力"}
+                      </Text>
+                    </View>
+                    {!caps ? <ActivityIndicator size="small" color={theme.textTertiary} /> : (
+                      <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
+                        <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {connectedProjects.length > 0 ? (
+          <View style={{ gap: 8 }}>
+            <SectionTitle theme={theme}>最近项目</SectionTitle>
+            <View style={{ paddingHorizontal: 20, gap: 8 }}>
+              {connectedProjects.slice(0, 4).map((project) => (
+                <Pressable
+                  key={project.id}
+                  onPress={() => openProject(project)}
+                  style={({ pressed }) => ({
+                    borderRadius: 12,
+                    borderCurve: "continuous",
+                    backgroundColor: pressed ? theme.bgInput : theme.bgCard,
+                    padding: 12,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                  })}
+                >
+                  <AppSymbol name="folder.fill" size={18} color={theme.accent} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }} numberOfLines={1}>
+                      {project.projectName || project.cwd.split("/").filter(Boolean).pop() || project.cwd}
+                    </Text>
+                    <Text style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                      {[project.hostname, shortPath(project.cwd)].filter(Boolean).join(" · ")}
+                    </Text>
+                  </View>
+                  <AppSymbol name="chevron.right" size={14} color={theme.textTertiary} />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        <View style={{ gap: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20 }}>
+            <Text
+              style={{
+                color: theme.textTertiary,
+                fontSize: 12,
+                fontWeight: "700",
+                textTransform: "uppercase",
+              }}
+            >
+              {showArchived ? "已归档" : "最近对话"}
+            </Text>
+            <View style={{ flex: 1 }} />
+            <Pressable onPress={() => setShowArchived((value) => !value)} hitSlop={8}>
+              <Text style={{ color: theme.accent, fontSize: 13, fontWeight: "700" }}>
+                {showArchived ? "返回最近" : "查看归档"}
+              </Text>
+            </Pressable>
+          </View>
+          <View style={{ paddingHorizontal: 20, gap: 8 }}>
+            {visibleConversations.length === 0 ? (
+              <View
+                style={{
+                  borderRadius: 12,
+                  borderCurve: "continuous",
+                  backgroundColor: theme.bgCard,
+                  padding: 18,
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <AppSymbol name="bubble.left.and.text.bubble.right" size={24} color={theme.accent} />
+                <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }}>
+                  还没有 Agent 对话
+                </Text>
+                <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
+                  从在线 Mac 或最近项目新建一个对话，工具调用和代码输出会在这里保留入口。
+                </Text>
+              </View>
+            ) : visibleConversations.map((conversation) => {
+              const meta = statusMeta(conversation.status, theme);
+              return (
+                <Pressable
+                  key={conversation.id}
+                  onPress={() => openConversation(conversation.id)}
+                  style={({ pressed }) => ({
+                    borderRadius: 12,
+                    borderCurve: "continuous",
+                    backgroundColor: pressed ? theme.bgInput : theme.bgCard,
+                    padding: 12,
+                    gap: 8,
+                  })}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text style={{ flex: 1, color: theme.text, fontSize: 16, fontWeight: "700" }} numberOfLines={1}>
+                      {conversation.title || conversation.cwd.split("/").filter(Boolean).pop() || "Agent"}
+                    </Text>
+                    <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
+                      <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
+                    </View>
+                  </View>
+                  <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }} numberOfLines={2}>
+                    {conversation.lastMessagePreview || "新的 Agent 对话"}
+                  </Text>
+                  <Text style={{ color: theme.textTertiary, fontSize: 12 }} numberOfLines={1}>
+                    {[conversation.provider, shortPath(conversation.cwd)].filter(Boolean).join(" · ")}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}

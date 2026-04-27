@@ -217,7 +217,7 @@ export function SessionScreen({
   const [zoomPercent, setZoomPercent] = useState(100);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [activeTab, setActiveTab] = useState<
-    "terminal" | "desktop" | "browser" | "agent"
+    "terminal" | "desktop" | "browser"
   >("terminal");
   const [showTerminalGrid, setShowTerminalGrid] = useState(false);
   const [browserFullscreen, setBrowserFullscreen] = useState(false);
@@ -241,13 +241,6 @@ export function SessionScreen({
     Keyboard.dismiss();
     termRef.current?.blurCursor();
   }, []);
-
-  const switchToAgent = useCallback(() => {
-    setActiveTab("agent");
-    Keyboard.dismiss();
-    termRef.current?.blurCursor();
-    onInitializeAgent();
-  }, [onInitializeAgent]);
 
   const hasControl = controllerId === deviceId;
   const isControlledByOther = Boolean(
@@ -564,28 +557,6 @@ export function SessionScreen({
             </View>
           ) : null}
 
-          <View
-            pointerEvents={activeTab === "agent" ? "auto" : "none"}
-            style={[
-              StyleSheet.absoluteFillObject,
-              {
-                top: insets.top + 40,
-                bottom: stageBottomInset,
-                opacity: activeTab === "agent" ? 1 : 0,
-              },
-            ]}
-          >
-            <AgentStage
-              agent={agent}
-              hasControl={hasControl}
-              onInitialize={onInitializeAgent}
-              onSendPrompt={onSendAgentPrompt}
-              onCancel={onCancelAgent}
-              onPermissionResponse={onSendAgentPermissionResponse}
-              theme={theme}
-            />
-          </View>
-
           {showFullOverlay ? (
             <SessionOverlay
               connectionDetail={connectionDetail}
@@ -614,7 +585,6 @@ export function SessionScreen({
             onSwitchDesktop={switchToDesktop}
             onSwitchTerminal={switchToTerminal}
             onSwitchBrowser={switchToBrowser}
-            onSwitchAgent={switchToAgent}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onZoomReset={handleZoomReset}
@@ -751,7 +721,6 @@ const SessionHeader = memo(function SessionHeader({
   onSwitchDesktop,
   onSwitchTerminal,
   onSwitchBrowser,
-  onSwitchAgent,
   onZoomIn,
   onZoomOut,
   onZoomReset,
@@ -764,7 +733,7 @@ const SessionHeader = memo(function SessionHeader({
   activeTerminalLabel,
   onShowTerminalGrid,
 }: {
-  activeTab: "terminal" | "desktop" | "browser" | "agent";
+  activeTab: "terminal" | "desktop" | "browser";
   hasControl: boolean;
   isControlledByOther: boolean;
   onClaimControl: () => void;
@@ -773,7 +742,6 @@ const SessionHeader = memo(function SessionHeader({
   onSwitchDesktop: () => void;
   onSwitchTerminal: () => void;
   onSwitchBrowser: () => void;
-  onSwitchAgent: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
@@ -846,13 +814,6 @@ const SessionHeader = memo(function SessionHeader({
       id: "switch-browser",
       title: "浏览器",
       image: Platform.select({ ios: "globe" }),
-    });
-  }
-  if (activeTab !== "agent") {
-    switchActions.push({
-      id: "switch-agent",
-      title: "Agent",
-      image: Platform.select({ ios: "sparkles" }),
     });
   }
   if (activeTab !== "terminal") {
@@ -1106,9 +1067,6 @@ const SessionHeader = memo(function SessionHeader({
                   break;
                 case "switch-browser":
                   onSwitchBrowser();
-                  break;
-                case "switch-agent":
-                  onSwitchAgent();
                   break;
                 case "switch-terminal":
                   onSwitchTerminal();

@@ -124,6 +124,12 @@ function handleHostMessage(
     case "agent.update":
     case "agent.permission.request":
     case "agent.snapshot":
+    case "agent.v2.capabilities":
+    case "agent.v2.conversation.opened":
+    case "agent.v2.conversation.list.result":
+    case "agent.v2.event":
+    case "agent.v2.snapshot":
+    case "agent.v2.permission.request":
     // Multi-terminal: host → clients
     case "terminal.spawned":
     case "terminal.list":
@@ -245,6 +251,10 @@ function handleClientMessage(
     case "agent.prompt":
     case "agent.cancel":
     case "agent.permission.response":
+    case "agent.v2.conversation.open":
+    case "agent.v2.prompt":
+    case "agent.v2.cancel":
+    case "agent.v2.permission.respond":
     // Multi-terminal: client → host
     case "terminal.spawn":
     case "terminal.kill":
@@ -259,6 +269,9 @@ function handleClientMessage(
       break;
     case "agent.initialize":
     case "agent.session.list":
+    case "agent.v2.capabilities.request":
+    case "agent.v2.conversation.list":
+    case "agent.v2.snapshot.request":
       sendToHost(session, envelope);
       break;
     default:

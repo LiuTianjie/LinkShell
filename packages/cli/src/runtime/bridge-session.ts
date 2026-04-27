@@ -20,6 +20,7 @@ import { ScreenShare } from "./screen-share.js";
 import { getLanIp } from "../utils/lan-ip.js";
 import { startKeepAwake, type KeepAwakeHandle } from "../utils/keep-awake.js";
 import { AgentSessionProxy } from "./acp/agent-session.js";
+import { AgentWorkspaceProxy } from "./acp/agent-workspace.js";
 import type { AgentProvider } from "./acp/provider-resolver.js";
 
 export interface BridgeSessionOptions {
@@ -166,6 +167,7 @@ export class BridgeSession {
   private tunnelSockets = new Map<string, WebSocket>();
   private keepAwake: KeepAwakeHandle | undefined;
   private agentSession: AgentSessionProxy | undefined;
+  private agentWorkspace: AgentWorkspaceProxy | undefined;
 
   constructor(options: BridgeSessionOptions) {
     this.options = options;
@@ -194,15 +196,21 @@ export class BridgeSession {
       const agentProvider = normalizeAgentProvider(
         this.options.agentProvider ?? this.options.providerConfig.provider,
       );
-      this.agentSession = new AgentSessionProxy({
+      const agentOptions = {
         sessionId: this.sessionId,
         cwd: process.cwd(),
         provider: agentProvider,
         command: this.options.agentCommand,
         verbose: this.options.verbose,
-        send: (envelope) => this.send(envelope),
+        send: (envelope: Envelope) => this.send(envelope),
+      };
+      this.agentSession = new AgentSessionProxy({
+        ...agentOptions,
       });
-      process.stderr.write("[bridge] agent GUI channel enabled\n");
+      this.agentWorkspace = new AgentWorkspaceProxy({
+        ...agentOptions,
+      });
+      process.stderr.write("[bridge] agent workspace channel enabled\n");
     }
     await this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
     this.connectGateway();
@@ -575,6 +583,40 @@ export class BridgeSession {
           break;
         }
         await this.agentSession.handleEnvelope(envelope);
+        break;
+      }
+      case "agent.v2.capabilities.request":
+      case "agent.v2.conversation.open":
+      case "agent.v2.conversation.list":
+      case "agent.v2.prompt":
+      case "agent.v2.cancel":
+      case "agent.v2.permission.respond":
+      case "agent.v2.snapshot.request": {
+        if (!this.agentWorkspace) {
+          this.send(
+            createEnvelope({
+              type: "agent.v2.capabilities",
+              sessionId: this.sessionId,
+              payload: {
+                enabled: false,
+                provider: normalizeAgentProvider(
+                  this.options.agentProvider ?? this.options.providerConfig.provider,
+                ),
+                workspaceProtocolVersion: 2,
+                error: "Agent Workspace is not enabled. Start CLI with --agent-ui.",
+                supportsSessionList: false,
+                supportsSessionLoad: false,
+                supportsImages: false,
+                supportsAudio: false,
+                supportsPermission: false,
+                supportsPlan: false,
+                supportsCancel: false,
+              },
+            }),
+          );
+          break;
+        }
+        await this.agentWorkspace.handleEnvelope(envelope);
         break;
       }
       case "file.upload": {
@@ -1692,6 +1734,8 @@ export class BridgeSession {
     this.stopScreenCapture();
     this.agentSession?.stop();
     this.agentSession = undefined;
+    this.agentWorkspace?.stop();
+    this.agentWorkspace = undefined;
     this.keepAwake?.stop();
     this.keepAwake = undefined;
     if (this.reconnectTimer) {

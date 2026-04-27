@@ -5,7 +5,7 @@ import {
   parseTypedPayload,
   serializeEnvelope,
 } from "@linkshell/protocol";
-import type { Envelope } from "@linkshell/protocol";
+import type { Envelope, ProtocolMessageType } from "@linkshell/protocol";
 import type {
   ConnectionStatus,
   TerminalStream,
@@ -230,6 +230,13 @@ export interface SessionManagerHandle {
     outcome: "allow" | "deny" | "cancelled",
     optionId?: string,
   ) => void;
+  sendAgentWorkspaceEnvelope: (
+    sessionId: string,
+    type: ProtocolMessageType,
+    payload: unknown,
+    options?: { queue?: boolean; dedupeKey?: string },
+  ) => void;
+  onAgentWorkspaceEnvelope: (cb: ((envelope: Envelope) => void) | null) => void;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -532,6 +539,7 @@ export function useSessionManager(): SessionManagerHandle {
       ) => void)
     | null
   >(null);
+  const agentWorkspaceCbRef = useRef<((envelope: Envelope) => void) | null>(null);
 
   useEffect(() => {
     ensureDeviceToken().then((token) => {
@@ -971,6 +979,14 @@ export function useSessionManager(): SessionManagerHandle {
           tick();
           break;
         }
+        case "agent.v2.capabilities":
+        case "agent.v2.conversation.opened":
+        case "agent.v2.conversation.list.result":
+        case "agent.v2.event":
+        case "agent.v2.snapshot":
+        case "agent.v2.permission.request":
+          agentWorkspaceCbRef.current?.(envelope);
+          break;
         case "terminal.list": {
           const p = parseTypedPayload("terminal.list", envelope.payload);
           for (const info of p.terminals) {
@@ -1806,5 +1822,27 @@ export function useSessionManager(): SessionManagerHandle {
     sendAgentPrompt: sendAgentPromptFn,
     cancelAgent: cancelAgentFn,
     sendAgentPermissionResponse: sendAgentPermissionResponseFn,
+    sendAgentWorkspaceEnvelope: (
+      sessionId: string,
+      type: ProtocolMessageType,
+      payload: unknown,
+      options?: { queue?: boolean; dedupeKey?: string },
+    ) => {
+      const s = sessionsRef.current.get(sessionId);
+      if (!s) return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type,
+          sessionId,
+          deviceId: s.deviceId,
+          payload,
+        }),
+        options,
+      );
+    },
+    onAgentWorkspaceEnvelope: (cb) => {
+      agentWorkspaceCbRef.current = cb;
+    },
   };
 }

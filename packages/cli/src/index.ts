@@ -67,7 +67,8 @@ program
   .option("--rows <rows>", "Initial terminal rows", String(config.rows ?? 36))
   .option("--screen", "Enable screen sharing capability")
   .option("--no-keep-awake", "Disable macOS keep-awake while bridge is running")
-  .option("--agent-ui", "Enable experimental ACP Agent GUI channel")
+  .option("--agent-ui", "Enable ACP Agent Workspace channel", true)
+  .option("--no-agent-ui", "Disable ACP Agent Workspace channel")
   .option(
     "--agent-provider <provider>",
     "Agent GUI provider: codex | claude | custom",

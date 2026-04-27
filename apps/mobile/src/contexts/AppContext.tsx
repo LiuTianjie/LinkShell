@@ -1,6 +1,7 @@
 import React, { createContext, useContext } from "react";
 import type { SessionInfo } from "../hooks/useSessionManager";
 import type { SessionManagerHandle } from "../hooks/useSessionManager";
+import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
 import type { SessionTab, TerminalTab } from "../screens/SessionScreen";
 import type { ProjectRecord } from "../storage/projects";
 
@@ -10,6 +11,7 @@ export interface AppContextValue {
   setGatewayBaseUrl: (url: string) => void;
   // Session manager
   manager: SessionManagerHandle;
+  agentWorkspace: AgentWorkspaceHandle;
   activeSession: SessionInfo | undefined;
   // Display
   displayStatus: string;

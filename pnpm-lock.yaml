@@ -170,11 +170,11 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: ^0.2.28
-        version: 0.2.28
+        specifier: ^0.2.29
+        version: 0.2.29
       '@linkshell/protocol':
-        specifier: ^0.2.24
-        version: 0.2.24
+        specifier: ^0.2.25
+        version: 0.2.25
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -205,8 +205,8 @@ importers:
   packages/gateway:
     dependencies:
       '@linkshell/protocol':
-        specifier: ^0.2.21
-        version: 0.2.21
+        specifier: ^0.2.25
+        version: 0.2.25
       ws:
         specifier: ^8.18.1
         version: 8.20.0
@@ -1288,14 +1288,11 @@ packages:
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
 
-  '@linkshell/gateway@0.2.28':
-    resolution: {integrity: sha512-xDHoduDOuLT/FoyLfueXtwyhINelbsMeiXm2Trjm/7LvLKw5V722Ea00d5aPCnaG4bOonrgIx1PHJH852AMXSg==}
+  '@linkshell/gateway@0.2.29':
+    resolution: {integrity: sha512-RumhpX5hdG/qBnqRsexiBDmZ/FRPAXVP7U4rQFVFMsFvEdt2ZStaEXx76LCUxZAjhG8v0fvmzkxngMxz7EiDow==}
 
-  '@linkshell/protocol@0.2.21':
-    resolution: {integrity: sha512-ojQ4qPhs9nUZ1RKcjiY5stHUFn+Qqtn+0gTNlg0q9D1v+ZCW7S/V1GdIWhuwEu8d5s5mG8p/mdqY7tpzdnyigQ==}
-
-  '@linkshell/protocol@0.2.24':
-    resolution: {integrity: sha512-B5VCd5KQGag+fJIlNznirOLb9QQTh5XXaI3mf9MIL+sS3ZFxss0SIux7umZSw8zGlwzsVFEg1bSTVn8WWnf6jA==}
+  '@linkshell/protocol@0.2.25':
+    resolution: {integrity: sha512-UHafpX+HNeF1ElVEIGh4+Jl2o6C++8AuNmEOTz2NB+KAOMllYG2hY3gsNcaI1QcSqlTYX2ci/6lwBD+BX/C5og==}
 
   '@minhducsun2002/leb128@1.0.0':
     resolution: {integrity: sha512-eFrYUPDVHeuwWHluTG1kwNQUEUcFjVKYwPkU8z9DR1JH3AW7JtJsG9cRVGmwz809kKtGfwGJj58juCZxEvnI/g==}
@@ -6077,20 +6074,16 @@ snapshots:
   '@leichtgewicht/ip-codec@2.0.5':
     optional: true
 
-  '@linkshell/gateway@0.2.28':
+  '@linkshell/gateway@0.2.29':
     dependencies:
-      '@linkshell/protocol': 0.2.24
+      '@linkshell/protocol': 0.2.25
       ws: 8.20.0
       zod: 3.25.76
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@linkshell/protocol@0.2.21':
-    dependencies:
-      zod: 3.25.76
-
-  '@linkshell/protocol@0.2.24':
+  '@linkshell/protocol@0.2.25':
     dependencies:
       zod: 3.25.76
 

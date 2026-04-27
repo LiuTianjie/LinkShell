@@ -444,6 +444,133 @@ export const agentSnapshotPayloadSchema = z.object({
   error: z.string().optional(),
 });
 
+// ── Agent Workspace v2 payloads ────────────────────────────────────
+
+export const agentV2StatusSchema = z.enum([
+  "unavailable",
+  "idle",
+  "running",
+  "waiting_permission",
+  "error",
+]);
+
+export const agentV2TimelineItemSchema = z.object({
+  id: z.string().min(1),
+  conversationId: z.string().min(1),
+  type: z.enum(["message", "tool_call", "plan", "permission", "status", "error"]),
+  role: z.enum(["user", "assistant", "system"]).optional(),
+  content: z.array(agentContentBlockSchema).optional(),
+  text: z.string().optional(),
+  toolCall: agentToolCallSchema.optional(),
+  plan: z.array(z.object({
+    id: z.string().min(1),
+    text: z.string().min(1),
+    status: z.enum(["pending", "in_progress", "completed"]),
+  })).optional(),
+  permission: agentPermissionSchema.optional(),
+  status: agentV2StatusSchema.optional(),
+  error: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  createdAt: z.number(),
+  updatedAt: z.number().optional(),
+  isStreaming: z.boolean().optional(),
+});
+
+export const agentV2ConversationSchema = z.object({
+  id: z.string().min(1),
+  agentSessionId: z.string().optional(),
+  provider: agentProviderSchema.default("codex"),
+  cwd: z.string(),
+  title: z.string().optional(),
+  model: z.string().optional(),
+  reasoningEffort: agentReasoningEffortSchema.optional(),
+  permissionMode: agentPermissionModeSchema.optional(),
+  status: agentV2StatusSchema.default("idle"),
+  archived: z.boolean().default(false),
+  lastMessagePreview: z.string().optional(),
+  lastActivityAt: z.number(),
+  createdAt: z.number(),
+});
+
+export const agentV2CapabilitiesRequestPayloadSchema = z.object({});
+
+export const agentV2CapabilitiesPayloadSchema = agentCapabilitiesPayloadSchema.extend({
+  workspaceProtocolVersion: z.number().int().default(2),
+});
+
+export const agentV2ConversationOpenPayloadSchema = z.object({
+  conversationId: z.string().optional(),
+  agentSessionId: z.string().optional(),
+  cwd: z.string().optional(),
+  provider: agentProviderSchema.optional(),
+  model: z.string().optional(),
+  reasoningEffort: agentReasoningEffortSchema.optional(),
+  permissionMode: agentPermissionModeSchema.optional(),
+  title: z.string().optional(),
+});
+
+export const agentV2ConversationOpenedPayloadSchema = z.object({
+  conversation: agentV2ConversationSchema,
+  snapshot: z.array(agentV2TimelineItemSchema).default([]),
+});
+
+export const agentV2ConversationListPayloadSchema = z.object({
+  includeArchived: z.boolean().optional().default(false),
+});
+
+export const agentV2ConversationListResultPayloadSchema = z.object({
+  conversations: z.array(agentV2ConversationSchema),
+});
+
+export const agentV2PromptPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  clientMessageId: z.string().min(1),
+  contentBlocks: z.array(agentContentBlockSchema).min(1),
+  model: z.string().min(1).optional(),
+  reasoningEffort: agentReasoningEffortSchema.optional(),
+  permissionMode: agentPermissionModeSchema.optional(),
+});
+
+export const agentV2CancelPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+});
+
+export const agentV2PermissionRespondPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  requestId: z.string().min(1),
+  outcome: z.enum(["allow", "deny", "cancelled"]),
+  optionId: z.string().optional(),
+});
+
+export const agentV2SnapshotRequestPayloadSchema = z.object({
+  conversationId: z.string().optional(),
+});
+
+export const agentV2SnapshotPayloadSchema = z.object({
+  conversations: z.array(agentV2ConversationSchema).default([]),
+  activeConversationId: z.string().optional(),
+  items: z.array(agentV2TimelineItemSchema).default([]),
+});
+
+export const agentV2EventPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  conversation: agentV2ConversationSchema.optional(),
+  item: agentV2TimelineItemSchema.optional(),
+  patch: z.object({
+    itemId: z.string().min(1),
+    textDelta: z.string().optional(),
+    status: agentV2StatusSchema.optional(),
+    toolCall: agentToolCallSchema.optional(),
+    updatedAt: z.number().optional(),
+    isStreaming: z.boolean().optional(),
+  }).optional(),
+});
+
+export const agentV2PermissionRequestPayloadSchema = agentPermissionSchema.extend({
+  conversationId: z.string().min(1),
+  item: agentV2TimelineItemSchema.optional(),
+});
+
 // ── Protocol message type registry ──────────────────────────────────
 
 export const protocolMessageSchemas = {
@@ -499,6 +626,19 @@ export const protocolMessageSchemas = {
   "agent.permission.request": agentPermissionRequestPayloadSchema,
   "agent.permission.response": agentPermissionResponsePayloadSchema,
   "agent.snapshot": agentSnapshotPayloadSchema,
+  "agent.v2.capabilities.request": agentV2CapabilitiesRequestPayloadSchema,
+  "agent.v2.capabilities": agentV2CapabilitiesPayloadSchema,
+  "agent.v2.conversation.open": agentV2ConversationOpenPayloadSchema,
+  "agent.v2.conversation.opened": agentV2ConversationOpenedPayloadSchema,
+  "agent.v2.conversation.list": agentV2ConversationListPayloadSchema,
+  "agent.v2.conversation.list.result": agentV2ConversationListResultPayloadSchema,
+  "agent.v2.prompt": agentV2PromptPayloadSchema,
+  "agent.v2.cancel": agentV2CancelPayloadSchema,
+  "agent.v2.permission.respond": agentV2PermissionRespondPayloadSchema,
+  "agent.v2.permission.request": agentV2PermissionRequestPayloadSchema,
+  "agent.v2.snapshot.request": agentV2SnapshotRequestPayloadSchema,
+  "agent.v2.snapshot": agentV2SnapshotPayloadSchema,
+  "agent.v2.event": agentV2EventPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

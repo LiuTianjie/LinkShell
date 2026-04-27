@@ -18,6 +18,13 @@ export default function TabLayout() {
         />
         <Label>会话</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="agent">
+        <Icon
+          sf={{ default: "sparkles", selected: "sparkles" }}
+          androidSrc={<VectorIcon family={MaterialCommunityIcons} name="creation" />}
+        />
+        <Label>Agent</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <Icon
           sf={{ default: "gearshape", selected: "gearshape.fill" }}
