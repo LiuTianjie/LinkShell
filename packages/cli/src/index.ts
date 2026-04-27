@@ -483,21 +483,31 @@ program
       return;
     }
 
+    const provider = config.provider ?? "claude";
     const childArgs = [
       "start",
       "--_foreground-bridge",
       "--gateway", gwWsUrl,
-      "--provider", config.provider ?? "claude",
+      "--provider", provider,
       "--client-name", config.clientName ?? "local-cli",
       "--cols", String(config.cols ?? 120),
       "--rows", String(config.rows ?? 36),
+      "--screen",
+      "--agent-ui",
+      "--agent-provider", "codex",
     ];
+    if (config.command) childArgs.push("--command", config.command);
+    if (config.hostname) childArgs.push("--hostname", config.hostname);
+    if (!keepAwake) childArgs.push("--no-keep-awake");
 
     const pid = daemon.spawnDaemon("bridge", childArgs);
     daemon.saveMetadata("bridge", { keepAwake, startedAt: Date.now() });
     process.stderr.write(`\n  \x1b[32m✓\x1b[0m Bridge started in background (PID ${pid})\n`);
     process.stderr.write(`    Gateway: ${chosen.name}\n`);
+    process.stderr.write(`    Provider: ${provider}\n`);
     process.stderr.write(`    Keep awake: ${keepAwake ? "enabled" : "disabled"}\n`);
+    process.stderr.write(`    Desktop: enabled\n`);
+    process.stderr.write(`    Agent GUI: enabled (Codex app-server)\n`);
     process.stderr.write(`    Open the LinkShell app on your phone to connect.\n\n`);
     process.stderr.write(`    Stop:   linkshell stop\n`);
     process.stderr.write(`    Status: linkshell status\n`);
