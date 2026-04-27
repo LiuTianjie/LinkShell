@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -1196,6 +1196,7 @@ const AgentStage = memo(function AgentStage({
   const tools = agent.toolCalls.filter(
     (tool) => tool.input?.trim() || tool.output?.trim() || tool.name.trim(),
   );
+  const timelineItems = useMemo(() => buildAgentTimeline(messages, tools), [messages, tools]);
   const statusMeta = agentStatusMeta(agent.status, theme);
   const hasAgentContent =
     messages.length > 0 ||
@@ -1456,61 +1457,13 @@ const AgentStage = memo(function AgentStage({
           </View>
         ) : null}
 
-        {messages.map((message) => (
-          <View
-            key={message.id}
-            style={{
-              alignSelf: message.role === "user" ? "flex-end" : "stretch",
-              maxWidth: message.role === "user" ? "88%" : "100%",
-              borderRadius: 12,
-              borderCurve: "continuous",
-              backgroundColor:
-                message.role === "user"
-                  ? theme.accent
-                  : message.role === "system"
-                    ? theme.accentLight
-                    : theme.bgCard,
-              paddingVertical: 10,
-              paddingHorizontal: 12,
-              gap: 6,
-            }}
-          >
-            {message.role !== "user" ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <AppSymbol
-                  name={message.role === "system" ? "info.circle" : "sparkles"}
-                  size={13}
-                  color={theme.textTertiary}
-                />
-                <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
-                  {message.role === "system" ? "系统" : "Agent"}
-                  {message.isStreaming ? " 正在输入" : ""}
-                </Text>
-              </View>
-            ) : null}
-            <Text
-              selectable
-              style={{
-                color: message.role === "user" ? "#fff" : theme.text,
-                fontSize: 14,
-                lineHeight: 20,
-              }}
-            >
-              {message.content}
-            </Text>
-          </View>
-        ))}
-
-        {tools.length > 0 ? (
-          <View style={{ gap: 8 }}>
-            <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
-              工具活动
-            </Text>
-            {tools.map((tool) => (
-              <AgentToolCard key={tool.id} tool={tool} theme={theme} />
-            ))}
-          </View>
-        ) : null}
+        {timelineItems.map((item) =>
+          item.type === "message" ? (
+            <AgentMessageBubble key={`message-${item.message.id}`} message={item.message} theme={theme} />
+          ) : (
+            <AgentToolCard key={`tool-${item.tool.id}`} tool={item.tool} theme={theme} />
+          ),
+        )}
       </ScrollView>
 
       <View
@@ -1553,143 +1506,143 @@ const AgentStage = memo(function AgentStage({
               lineHeight: 21,
             }}
           />
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Pressable
-              onPress={showPermissionPicker}
-              disabled={running && hasControl}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                borderRadius: 999,
-                paddingHorizontal: 9,
-                paddingVertical: 6,
-                backgroundColor: pressed
-                  ? theme.bgInput
-                  : hasControl
-                    ? permissionMeta.bg
-                    : theme.bgInput,
-                maxWidth: "42%",
-                opacity: running && hasControl ? 0.55 : 1,
-              })}
-              accessibilityRole="button"
-              accessibilityLabel="切换 Agent 权限"
-            >
-              <AppSymbol
-                name={hasControl ? permissionMeta.icon : "eye.fill"}
-                size={13}
-                color={hasControl ? permissionMeta.color : theme.textTertiary}
-              />
-              <Text
-                style={{
-                  color: hasControl ? permissionMeta.color : theme.textTertiary,
-                  fontSize: 12,
-                  fontWeight: "700",
-                }}
-                numberOfLines={1}
-              >
-                {hasControl ? permissionMeta.label : "只读模式"}
-              </Text>
-              <AppSymbol name="chevron.down" size={10} color={hasControl ? permissionMeta.color : theme.textTertiary} />
-            </Pressable>
-
-            <View style={{ flex: 1 }} />
-
-            {running ? (
-              <ActivityIndicator size="small" color={theme.textTertiary} />
-            ) : null}
-
-            <Pressable
-              onPress={showModelPicker}
-              disabled={running}
-              style={({ pressed }) => ({
-                borderRadius: 999,
-                paddingHorizontal: 9,
-                paddingVertical: 6,
-                backgroundColor: pressed ? theme.accentLight : theme.bgInput,
-                maxWidth: 96,
-                opacity: running ? 0.55 : 1,
-              })}
-              accessibilityRole="button"
-              accessibilityLabel="切换 Agent 模型"
-            >
-              <Text
-                style={{
-                  color: theme.textSecondary,
-                  fontSize: 12,
-                  fontWeight: "700",
-                }}
-                numberOfLines={1}
-              >
-                {modelLabel}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={showEffortPicker}
-              disabled={running}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 4,
-                borderRadius: 999,
-                paddingHorizontal: 9,
-                paddingVertical: 6,
-                backgroundColor: pressed ? theme.accentLight : theme.bgInput,
-                maxWidth: 82,
-                opacity: running ? 0.55 : 1,
-              })}
-              accessibilityRole="button"
-              accessibilityLabel="切换 Agent 推理强度"
-            >
-              <Text
-                style={{
-                  color: theme.textSecondary,
-                  fontSize: 12,
-                  fontWeight: "700",
-                }}
-                numberOfLines={1}
-              >
-                {effortLabel}
-              </Text>
-              <AppSymbol name="chevron.down" size={10} color={theme.textTertiary} />
-            </Pressable>
-
-            {running ? (
+          <View style={{ gap: 7 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Pressable
-                onPress={onCancel}
+                onPress={showPermissionPicker}
                 style={({ pressed }) => ({
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
+                  flexDirection: "row",
                   alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: pressed ? theme.errorLight : theme.bgInput,
+                  gap: 6,
+                  borderRadius: 999,
+                  paddingHorizontal: 9,
+                  paddingVertical: 6,
+                  backgroundColor: pressed
+                    ? theme.bgInput
+                    : hasControl
+                      ? permissionMeta.bg
+                      : theme.bgInput,
+                  maxWidth: "72%",
                 })}
                 accessibilityRole="button"
-                accessibilityLabel="停止 Agent"
+                accessibilityLabel="切换 Agent 权限"
               >
-                <AppSymbol name="stop.circle.fill" size={20} color={theme.error} />
+                <AppSymbol
+                  name={hasControl ? permissionMeta.icon : "eye.fill"}
+                  size={13}
+                  color={hasControl ? permissionMeta.color : theme.textTertiary}
+                />
+                <Text
+                  style={{
+                    color: hasControl ? permissionMeta.color : theme.textTertiary,
+                    fontSize: 12,
+                    fontWeight: "700",
+                  }}
+                  numberOfLines={1}
+                >
+                  {hasControl ? permissionMeta.label : "只读模式"}
+                </Text>
+                <AppSymbol name="chevron.down" size={10} color={hasControl ? permissionMeta.color : theme.textTertiary} />
               </Pressable>
-            ) : (
+
+              <View style={{ flex: 1 }} />
+
+              {running ? (
+                <ActivityIndicator size="small" color={theme.textTertiary} />
+              ) : null}
+
+              {running ? (
+                <Pressable
+                  onPress={onCancel}
+                  style={({ pressed }) => ({
+                    width: 38,
+                    height: 38,
+                    borderRadius: 19,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: pressed ? theme.errorLight : theme.bgInput,
+                  })}
+                  accessibilityRole="button"
+                  accessibilityLabel="停止 Agent"
+                >
+                  <AppSymbol name="stop.circle.fill" size={20} color={theme.error} />
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={send}
+                  disabled={disabled || !text.trim()}
+                  style={({ pressed }) => ({
+                    width: 38,
+                    height: 38,
+                    borderRadius: 19,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+                    opacity: disabled || !text.trim() ? 0.45 : 1,
+                  })}
+                  accessibilityRole="button"
+                  accessibilityLabel="发送给 Agent"
+                >
+                  <AppSymbol name="arrow.up" size={18} color="#fff" />
+                </Pressable>
+              )}
+            </View>
+
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Pressable
-                onPress={send}
-                disabled={disabled || !text.trim()}
+                onPress={showModelPicker}
                 style={({ pressed }) => ({
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: pressed ? theme.accentSecondary : theme.accent,
-                  opacity: disabled || !text.trim() ? 0.45 : 1,
+                  flex: 1,
+                  minWidth: 0,
+                  borderRadius: 999,
+                  paddingHorizontal: 9,
+                  paddingVertical: 6,
+                  backgroundColor: pressed ? theme.accentLight : theme.bgInput,
                 })}
                 accessibilityRole="button"
-                accessibilityLabel="发送给 Agent"
+                accessibilityLabel="切换 Agent 模型"
               >
-                <AppSymbol name="arrow.up" size={18} color="#fff" />
+                <Text
+                  style={{
+                    color: theme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: "700",
+                  }}
+                  numberOfLines={1}
+                >
+                  {modelLabel}
+                </Text>
               </Pressable>
-            )}
+
+              <Pressable
+                onPress={showEffortPicker}
+                style={({ pressed }) => ({
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 4,
+                  borderRadius: 999,
+                  paddingHorizontal: 9,
+                  paddingVertical: 6,
+                  backgroundColor: pressed ? theme.accentLight : theme.bgInput,
+                  minWidth: 78,
+                })}
+                accessibilityRole="button"
+                accessibilityLabel="切换 Agent 推理强度"
+              >
+                <Text
+                  style={{
+                    color: theme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: "700",
+                  }}
+                  numberOfLines={1}
+                >
+                  {effortLabel}
+                </Text>
+                <AppSymbol name="chevron.down" size={10} color={theme.textTertiary} />
+              </Pressable>
+            </View>
           </View>
         </View>
       </View>
@@ -1764,28 +1717,40 @@ function showAgentOptionSheet<T extends string>({
 function compactAgentMessages(messages: AgentMessage[]): AgentMessage[] {
   const compacted: AgentMessage[] = [];
   for (const message of messages) {
-    const content = message.content.trim();
-    if (!content || isProtocolNoise(content)) continue;
-
-    const previous = compacted[compacted.length - 1];
-    const canMergeAssistantFragment =
-      message.role === "assistant" &&
-      previous?.role === "assistant" &&
-      !previous.content.includes("\n\n") &&
-      (message.isStreaming || previous.isStreaming || content.length <= 10);
-
-    if (canMergeAssistantFragment) {
-      compacted[compacted.length - 1] = {
-        ...previous,
-        content: `${previous.content}${content}`,
-        isStreaming: previous.isStreaming || message.isStreaming,
-      };
-      continue;
-    }
-
-    compacted.push({ ...message, content });
+    const trimmed = message.content.trim();
+    if (!trimmed || isProtocolNoise(trimmed)) continue;
+    compacted.push(message);
   }
   return compacted;
+}
+
+type AgentTimelineItem =
+  | { type: "message"; message: AgentMessage; createdAt: number; order: number }
+  | { type: "tool"; tool: AgentToolCall; createdAt: number; order: number };
+
+function buildAgentTimeline(
+  messages: AgentMessage[],
+  tools: AgentToolCall[],
+): AgentTimelineItem[] {
+  const lastMessageTime = messages[messages.length - 1]?.createdAt ?? Date.now();
+  const items: AgentTimelineItem[] = [
+    ...messages.map((message, index) => ({
+      type: "message" as const,
+      message,
+      createdAt: message.createdAt,
+      order: index * 2,
+    })),
+    ...tools.map((tool, index) => ({
+      type: "tool" as const,
+      tool,
+      createdAt: tool.createdAt ?? lastMessageTime + index + 0.5,
+      order: index * 2 + 1,
+    })),
+  ];
+  return items.sort((a, b) => {
+    if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+    return a.order - b.order;
+  });
 }
 
 function isProtocolNoise(content: string): boolean {
@@ -1913,6 +1878,240 @@ function compactToolText(value: string | undefined, maxLength: number): string |
   return `${text.slice(0, maxLength - 1)}…`;
 }
 
+type MessagePart =
+  | { type: "text"; text: string }
+  | { type: "code"; language?: string; code: string };
+
+function parseMessageParts(content: string): MessagePart[] {
+  const parts: MessagePart[] = [];
+  const fencePattern = /```([^\n`]*)\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = fencePattern.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: "text", text: content.slice(lastIndex, match.index) });
+    }
+    const language = match[1]?.trim() || undefined;
+    parts.push({ type: "code", language, code: match[2] ?? "" });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < content.length) {
+    parts.push({ type: "text", text: content.slice(lastIndex) });
+  }
+  return parts.length > 0 ? parts : [{ type: "text", text: content }];
+}
+
+function copyToClipboard(value: string): void {
+  Clipboard.setString(value);
+  Haptics.selectionAsync().catch(() => {});
+}
+
+function InlineRichText({
+  text,
+  color,
+  theme,
+  inverse = false,
+}: {
+  text: string;
+  color: string;
+  theme: Theme;
+  inverse?: boolean;
+}) {
+  const chunks = text.split(/(`[^`\n]+`)/g);
+  return (
+    <Text selectable style={{ color, fontSize: 14, lineHeight: 21 }}>
+      {chunks.map((chunk, index) => {
+        const isInlineCode = chunk.startsWith("`") && chunk.endsWith("`") && chunk.length > 1;
+        if (!isInlineCode) return <Text key={index}>{chunk}</Text>;
+        return (
+          <Text
+            key={index}
+            style={{
+              color,
+              fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+              fontSize: 13,
+              backgroundColor: inverse ? "rgba(255,255,255,0.18)" : theme.bgInput,
+            }}
+          >
+            {chunk.slice(1, -1)}
+          </Text>
+        );
+      })}
+    </Text>
+  );
+}
+
+function CodeBlock({
+  title,
+  language,
+  code,
+  copyValue,
+  theme,
+  inverse = false,
+  maxLines,
+}: {
+  title?: string;
+  language?: string;
+  code: string;
+  copyValue?: string;
+  theme: Theme;
+  inverse?: boolean;
+  maxLines?: number;
+}) {
+  const label = title && language ? `${title} · ${language}` : language || title || "代码";
+  const bg = inverse ? "rgba(0,0,0,0.22)" : theme.bgInput;
+  const borderColor = inverse ? "rgba(255,255,255,0.16)" : theme.separator;
+  const textColor = inverse ? "#fff" : theme.textSecondary;
+  const mutedColor = inverse ? "rgba(255,255,255,0.72)" : theme.textTertiary;
+
+  return (
+    <View
+      style={{
+        borderRadius: 10,
+        borderCurve: "continuous",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor,
+        backgroundColor: bg,
+        overflow: "hidden",
+      }}
+    >
+      <View
+        style={{
+          minHeight: 30,
+          paddingHorizontal: 10,
+          flexDirection: "row",
+          alignItems: "center",
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: borderColor,
+        }}
+      >
+        <Text
+          style={{
+            flex: 1,
+            color: mutedColor,
+            fontSize: 11,
+            fontWeight: "700",
+          }}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+        <Pressable
+          onPress={() => copyToClipboard(copyValue ?? code)}
+          hitSlop={8}
+          style={({ pressed }) => ({
+            opacity: pressed ? 0.55 : 1,
+            paddingHorizontal: 4,
+            paddingVertical: 3,
+          })}
+          accessibilityRole="button"
+          accessibilityLabel={`复制${label}`}
+        >
+          <AppSymbol name="doc.on.doc" size={13} color={mutedColor} />
+        </Pressable>
+      </View>
+      <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator={false}>
+        <Text
+          selectable
+          numberOfLines={maxLines}
+          style={{
+            minWidth: "100%",
+            paddingHorizontal: 10,
+            paddingVertical: 9,
+            color: textColor,
+            fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+            fontSize: 12,
+            lineHeight: 17,
+          }}
+        >
+          {code}
+        </Text>
+      </ScrollView>
+    </View>
+  );
+}
+
+function AgentMessageContent({
+  content,
+  role,
+  theme,
+}: {
+  content: string;
+  role: AgentMessage["role"];
+  theme: Theme;
+}) {
+  const inverse = role === "user";
+  const color = inverse ? "#fff" : theme.text;
+  const parts = parseMessageParts(content);
+  return (
+    <View style={{ gap: 8 }}>
+      {parts.map((part, index) =>
+        part.type === "code" ? (
+          <CodeBlock
+            key={`code-${index}`}
+            language={part.language}
+            code={part.code}
+            theme={theme}
+            inverse={inverse}
+          />
+        ) : part.text.length > 0 ? (
+          <InlineRichText
+            key={`text-${index}`}
+            text={part.text}
+            color={color}
+            theme={theme}
+            inverse={inverse}
+          />
+        ) : null,
+      )}
+    </View>
+  );
+}
+
+const AgentMessageBubble = memo(function AgentMessageBubble({
+  message,
+  theme,
+}: {
+  message: AgentMessage;
+  theme: Theme;
+}) {
+  const isUser = message.role === "user";
+  return (
+    <View
+      style={{
+        alignSelf: isUser ? "flex-end" : "stretch",
+        maxWidth: isUser ? "88%" : "100%",
+        borderRadius: 12,
+        borderCurve: "continuous",
+        backgroundColor:
+          message.role === "user"
+            ? theme.accent
+            : message.role === "system"
+              ? theme.accentLight
+              : theme.bgCard,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        gap: 7,
+      }}
+    >
+      {!isUser ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <AppSymbol
+            name={message.role === "system" ? "info.circle" : "sparkles"}
+            size={13}
+            color={theme.textTertiary}
+          />
+          <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
+            {message.role === "system" ? "系统" : "Agent"}
+            {message.isStreaming ? " 正在输入" : ""}
+          </Text>
+        </View>
+      ) : null}
+      <AgentMessageContent content={message.content} role={message.role} theme={theme} />
+    </View>
+  );
+});
+
 const AgentToolCard = memo(function AgentToolCard({
   tool,
   theme,
@@ -1920,9 +2119,20 @@ const AgentToolCard = memo(function AgentToolCard({
   tool: AgentToolCall;
   theme: Theme;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const status = toolStatusMeta(tool.status, theme);
-  const input = compactToolText(tool.input, 900);
-  const output = compactToolText(tool.output, 1200);
+  const rawInput = tool.input?.trim();
+  const rawOutput = tool.output?.trim();
+  const hasLongInput = Boolean(rawInput && (rawInput.length > 900 || rawInput.split("\n").length > 6));
+  const hasLongOutput = Boolean(rawOutput && (rawOutput.length > 1200 || rawOutput.split("\n").length > 8));
+  const hasExpandableContent = hasLongInput || hasLongOutput;
+  const input = compactToolText(rawInput, expanded ? 4000 : 900);
+  const output = compactToolText(rawOutput, expanded ? 6000 : 1200);
+  const toolLanguage = tool.name.includes("命令") || tool.name.toLowerCase().includes("command")
+    ? "shell"
+    : tool.name.includes("文件") || tool.name.toLowerCase().includes("file")
+      ? "diff"
+      : undefined;
 
   return (
     <View
@@ -1934,7 +2144,13 @@ const AgentToolCard = memo(function AgentToolCard({
         gap: 10,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 9 }}>
+      <Pressable
+        onPress={() => hasExpandableContent && setExpanded((value) => !value)}
+        disabled={!hasExpandableContent}
+        style={{ flexDirection: "row", alignItems: "center", gap: 9 }}
+        accessibilityRole={hasExpandableContent ? "button" : undefined}
+        accessibilityLabel={hasExpandableContent ? `${expanded ? "收起" : "展开"}工具调用` : undefined}
+      >
         <View
           style={{
             width: 30,
@@ -1954,6 +2170,13 @@ const AgentToolCard = memo(function AgentToolCard({
         >
           {tool.name}
         </Text>
+        {hasExpandableContent ? (
+          <AppSymbol
+            name={expanded ? "chevron.down" : "chevron.right"}
+            size={13}
+            color={theme.textTertiary}
+          />
+        ) : null}
         <View
           style={{
             flexDirection: "row",
@@ -1970,46 +2193,47 @@ const AgentToolCard = memo(function AgentToolCard({
             {status.label}
           </Text>
         </View>
-      </View>
+      </Pressable>
 
       {input ? (
         <View style={{ gap: 4 }}>
-          <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
-            输入
-          </Text>
-          <Text
-            selectable
-            style={{
-              color: theme.textSecondary,
-              fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
-              fontSize: 12,
-              lineHeight: 17,
-            }}
-            numberOfLines={6}
-          >
-            {input}
-          </Text>
+          <CodeBlock
+            title="输入"
+            language={toolLanguage}
+            code={input}
+            copyValue={rawInput}
+            theme={theme}
+            maxLines={expanded ? 24 : 6}
+          />
         </View>
       ) : null}
 
       {output ? (
         <View style={{ gap: 4 }}>
-          <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
-            输出
-          </Text>
-          <Text
-            selectable
-            style={{
-              color: theme.textSecondary,
-              fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
-              fontSize: 12,
-              lineHeight: 17,
-            }}
-            numberOfLines={8}
-          >
-            {output}
-          </Text>
+          <CodeBlock
+            title="输出"
+            language={toolLanguage}
+            code={output}
+            copyValue={rawOutput}
+            theme={theme}
+            maxLines={expanded ? 28 : 8}
+          />
         </View>
+      ) : null}
+      {hasExpandableContent ? (
+        <Pressable
+          onPress={() => setExpanded((value) => !value)}
+          style={({ pressed }) => ({
+            alignSelf: "flex-start",
+            opacity: pressed ? 0.6 : 1,
+          })}
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? "收起工具内容" : "展开工具内容"}
+        >
+          <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "700" }}>
+            {expanded ? "收起" : "展开更多"}
+          </Text>
+        </Pressable>
       ) : null}
     </View>
   );

@@ -81,6 +81,7 @@ export interface AgentToolCall {
   name: string;
   input?: string;
   output?: string;
+  createdAt?: number;
   status: "pending" | "running" | "completed" | "failed";
 }
 

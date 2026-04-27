@@ -22,6 +22,7 @@ interface AgentToolCall {
   name: string;
   input?: string;
   output?: string;
+  createdAt?: number;
   status: "pending" | "running" | "completed" | "failed";
 }
 
@@ -631,7 +632,7 @@ export class AgentSessionProxy {
       return;
     }
 
-    const toolCall = this.toolCallFromItem(item, "running");
+    const toolCall = this.withToolCreatedAt(this.toolCallFromItem(item, "running"));
     if (!toolCall) return;
     this.toolCalls.set(toolCall.id, toolCall);
     this.sendUpdate({ kind: "tool_call", toolCall, status: "running" });
@@ -659,7 +660,9 @@ export class AgentSessionProxy {
       return;
     }
 
-    const toolCall = this.toolCallFromItem(item, normalizeToolStatus(item.status, true));
+    const toolCall = this.withToolCreatedAt(
+      this.toolCallFromItem(item, normalizeToolStatus(item.status, true)),
+    );
     if (!toolCall) return;
     const bufferedOutput = this.toolOutputBuffers.get(toolCall.id);
     if (bufferedOutput && !toolCall.output) toolCall.output = bufferedOutput;
@@ -681,6 +684,7 @@ export class AgentSessionProxy {
       name: existing?.name ?? nameFromToolMethod(method),
       input: existing?.input,
       output,
+      createdAt: existing?.createdAt ?? Date.now(),
       status: "running",
     };
     this.toolCalls.set(itemId, toolCall);
@@ -699,6 +703,7 @@ export class AgentSessionProxy {
       name: existing?.name ?? "文件修改",
       input: existing?.input,
       output: output || existing?.output,
+      createdAt: existing?.createdAt ?? Date.now(),
       status: existing?.status ?? "running",
     };
     this.toolCalls.set(itemId, toolCall);
@@ -721,6 +726,7 @@ export class AgentSessionProxy {
       name: existing?.name ?? "命令输出",
       input: existing?.input,
       output,
+      createdAt: existing?.createdAt ?? Date.now(),
       status: "running",
     };
     this.toolCalls.set(processId, toolCall);
@@ -764,6 +770,7 @@ export class AgentSessionProxy {
       name: name ?? itemType ?? "tool",
       input: toolInputFromItem(item),
       output: output ?? bufferedOutput,
+      createdAt: Date.now(),
       status: normalizeToolStatus(item.status, fallbackStatus === "completed"),
     };
   }
@@ -784,12 +791,15 @@ export class AgentSessionProxy {
         name: firstString(raw, ["toolName", "tool", "name"]) ?? "tool",
         input: stringify(raw.input ?? raw.toolInput ?? ""),
         output: stringify(raw.output ?? raw.result ?? ""),
+        createdAt: Date.now(),
         status: raw.status === "completed" || raw.status === "failed" || raw.status === "running"
           ? raw.status
           : "running",
       };
-      this.toolCalls.set(toolCall.id, toolCall);
-      this.sendUpdate({ kind: "tool_call", toolCall, status: "running" });
+      const nextToolCall = this.withToolCreatedAt(toolCall);
+      if (!nextToolCall) return;
+      this.toolCalls.set(nextToolCall.id, nextToolCall);
+      this.sendUpdate({ kind: "tool_call", toolCall: nextToolCall, status: "running" });
       return;
     }
 
@@ -836,6 +846,15 @@ export class AgentSessionProxy {
     if (existing >= 0) this.messages[existing] = message;
     else this.messages.push(message);
     if (this.messages.length > 100) this.messages.shift();
+  }
+
+  private withToolCreatedAt(toolCall: AgentToolCall | undefined): AgentToolCall | undefined {
+    if (!toolCall) return undefined;
+    const existing = this.toolCalls.get(toolCall.id);
+    return {
+      ...toolCall,
+      createdAt: existing?.createdAt ?? toolCall.createdAt ?? Date.now(),
+    };
   }
 
   private sendCapabilities(): void {

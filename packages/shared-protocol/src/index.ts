@@ -350,6 +350,7 @@ export const agentToolCallSchema = z.object({
   name: z.string().min(1),
   input: z.string().optional(),
   output: z.string().optional(),
+  createdAt: z.number().optional(),
   status: z.enum(["pending", "running", "completed", "failed"]).default("pending"),
 });
 

@@ -173,8 +173,8 @@ importers:
         specifier: ^0.2.28
         version: 0.2.28
       '@linkshell/protocol':
-        specifier: ^0.2.21
-        version: 0.2.21
+        specifier: ^0.2.24
+        version: 0.2.24
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -1293,6 +1293,9 @@ packages:
 
   '@linkshell/protocol@0.2.21':
     resolution: {integrity: sha512-ojQ4qPhs9nUZ1RKcjiY5stHUFn+Qqtn+0gTNlg0q9D1v+ZCW7S/V1GdIWhuwEu8d5s5mG8p/mdqY7tpzdnyigQ==}
+
+  '@linkshell/protocol@0.2.24':
+    resolution: {integrity: sha512-B5VCd5KQGag+fJIlNznirOLb9QQTh5XXaI3mf9MIL+sS3ZFxss0SIux7umZSw8zGlwzsVFEg1bSTVn8WWnf6jA==}
 
   '@minhducsun2002/leb128@1.0.0':
     resolution: {integrity: sha512-eFrYUPDVHeuwWHluTG1kwNQUEUcFjVKYwPkU8z9DR1JH3AW7JtJsG9cRVGmwz809kKtGfwGJj58juCZxEvnI/g==}
@@ -6076,7 +6079,7 @@ snapshots:
 
   '@linkshell/gateway@0.2.28':
     dependencies:
-      '@linkshell/protocol': 0.2.21
+      '@linkshell/protocol': 0.2.24
       ws: 8.20.0
       zod: 3.25.76
     transitivePeerDependencies:
@@ -6084,6 +6087,10 @@ snapshots:
       - utf-8-validate
 
   '@linkshell/protocol@0.2.21':
+    dependencies:
+      zod: 3.25.76
+
+  '@linkshell/protocol@0.2.24':
     dependencies:
       zod: 3.25.76
 
