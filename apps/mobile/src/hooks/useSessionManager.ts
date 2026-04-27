@@ -84,6 +84,12 @@ export interface AgentToolCall {
   status: "pending" | "running" | "completed" | "failed";
 }
 
+export interface AgentPlanStep {
+  id: string;
+  text: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
 export interface AgentPermission {
   requestId: string;
   toolName?: string;
@@ -97,6 +103,7 @@ export interface AgentState {
   activeAgentSessionId: string | null;
   messages: AgentMessage[];
   toolCalls: AgentToolCall[];
+  plan: AgentPlanStep[];
   pendingPermissions: AgentPermission[];
   status: "unavailable" | "idle" | "running" | "waiting_permission" | "error";
   error?: string | null;
@@ -402,6 +409,7 @@ function createInternalSession(
       activeAgentSessionId: null,
       messages: [],
       toolCalls: [],
+      plan: [],
       pendingPermissions: [],
       status: "unavailable",
       error: null,
@@ -449,6 +457,7 @@ function toSessionInfo(s: InternalSession): SessionInfo {
       ...s.agent,
       messages: [...s.agent.messages],
       toolCalls: [...s.agent.toolCalls],
+      plan: [...s.agent.plan],
       pendingPermissions: [...s.agent.pendingPermissions],
     },
   };
@@ -853,6 +862,7 @@ export function useSessionManager(): SessionManagerHandle {
           s.agent.capabilities = (p.capabilities as AgentCapabilities | undefined) ?? s.agent.capabilities;
           s.agent.messages = p.messages as AgentMessage[];
           s.agent.toolCalls = p.toolCalls as AgentToolCall[];
+          s.agent.plan = Array.isArray(p.plan) ? (p.plan as AgentPlanStep[]) : [];
           s.agent.pendingPermissions = p.pendingPermissions as AgentPermission[];
           s.agent.status = p.status;
           s.agent.error = p.error ?? null;
@@ -874,6 +884,9 @@ export function useSessionManager(): SessionManagerHandle {
             const existing = s.agent.toolCalls.findIndex((t) => t.id === p.toolCall!.id);
             if (existing >= 0) s.agent.toolCalls[existing] = p.toolCall as AgentToolCall;
             else s.agent.toolCalls.push(p.toolCall as AgentToolCall);
+          }
+          if (p.plan) {
+            s.agent.plan = p.plan as AgentPlanStep[];
           }
           tick();
           break;

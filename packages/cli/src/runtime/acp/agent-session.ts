@@ -25,6 +25,12 @@ interface AgentToolCall {
   status: "pending" | "running" | "completed" | "failed";
 }
 
+interface AgentPlanStep {
+  id: string;
+  text: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
 interface AgentPermission {
   requestId: string;
   toolName?: string;
@@ -61,6 +67,118 @@ function firstString(value: Record<string, unknown>, keys: string[]): string | u
   return undefined;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value ? value as Record<string, unknown> : undefined;
+}
+
+function extractItem(value: unknown): Record<string, unknown> | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  return asRecord(raw.item) ?? raw;
+}
+
+function stringifyDefined(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  return stringify(value);
+}
+
+function appendCapped(current: string | undefined, delta: string, maxLength: number): string {
+  const next = `${current ?? ""}${delta}`;
+  if (next.length <= maxLength) return next;
+  return next.slice(next.length - maxLength);
+}
+
+function decodeBase64(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    return Buffer.from(value, "base64").toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeToolStatus(value: unknown, completedFallback = false): AgentToolCall["status"] {
+  if (value === "completed" || value === "succeeded" || value === "success" || value === "applied") {
+    return "completed";
+  }
+  if (value === "failed" || value === "error" || value === "declined" || value === "cancelled") {
+    return "failed";
+  }
+  if (value === "pending" || value === "queued") return "pending";
+  if (value === "running" || value === "inProgress" || value === "executing") return "running";
+  return completedFallback ? "completed" : "running";
+}
+
+function normalizePlanStatus(value: unknown): AgentPlanStep["status"] {
+  if (value === "completed" || value === "done") return "completed";
+  if (value === "inProgress" || value === "running" || value === "active") return "in_progress";
+  return "pending";
+}
+
+function planStepFromItem(item: Record<string, unknown>): AgentPlanStep | undefined {
+  const text = firstString(item, ["text", "title", "description", "message"]);
+  if (!text) return undefined;
+  return {
+    id: firstString(item, ["id", "itemId"]) ?? id("plan"),
+    text,
+    status: normalizePlanStatus(item.status),
+  };
+}
+
+function nameFromToolMethod(method: string): string {
+  if (method.includes("commandExecution")) return "命令";
+  if (method.includes("fileChange")) return "文件修改";
+  if (method.includes("mcpToolCall")) return "MCP 工具";
+  return "工具";
+}
+
+function toolNameFromItem(item: Record<string, unknown>): string | undefined {
+  const itemType = firstString(item, ["type"]);
+  if (itemType === "commandExecution") return "命令";
+  if (itemType === "fileChange") return "文件修改";
+  if (itemType === "mcpToolCall") {
+    const server = firstString(item, ["server"]);
+    const tool = firstString(item, ["tool", "toolName", "name"]);
+    return [server, tool].filter(Boolean).join(" · ") || "MCP 工具";
+  }
+  if (itemType === "dynamicToolCall") {
+    const namespace = firstString(item, ["namespace"]);
+    const tool = firstString(item, ["tool", "toolName", "name"]);
+    return [namespace, tool].filter(Boolean).join(" · ") || "工具";
+  }
+  return firstString(item, ["toolName", "tool", "name", "title"]) ?? itemType;
+}
+
+function toolInputFromItem(item: Record<string, unknown>): string | undefined {
+  const itemType = firstString(item, ["type"]);
+  if (itemType === "commandExecution") {
+    const command = firstString(item, ["command"]);
+    const cwd = firstString(item, ["cwd"]);
+    if (command && cwd) return `${command}\n\ncwd: ${cwd}`;
+    return command ?? cwd;
+  }
+  if (itemType === "fileChange") {
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    return summarizeFileChanges(changes);
+  }
+  return stringifyDefined(item.arguments ?? item.input ?? item.toolInput);
+}
+
+function summarizeFileChanges(changes: unknown[]): string | undefined {
+  const lines = changes
+    .map((change) => {
+      const raw = asRecord(change);
+      if (!raw) return undefined;
+      const path =
+        firstString(raw, ["path", "file", "filePath", "absolutePath", "relativePath"]) ??
+        firstString(asRecord(raw.update) ?? {}, ["path", "file", "filePath"]);
+      const kind = firstString(raw, ["kind", "type", "operation", "action"]);
+      return [kind, path].filter(Boolean).join(" ");
+    })
+    .filter((line): line is string => Boolean(line));
+  return lines.length > 0 ? lines.slice(0, 8).join("\n") : undefined;
+}
+
 export class AgentSessionProxy {
   private client: AcpClient | undefined;
   private agentSessionId: string | undefined;
@@ -70,6 +188,9 @@ export class AgentSessionProxy {
   private currentTurnId: string | undefined;
   private messages: AgentMessage[] = [];
   private toolCalls = new Map<string, AgentToolCall>();
+  private toolOutputBuffers = new Map<string, string>();
+  private plan: AgentPlanStep[] = [];
+  private planDeltaBuffers = new Map<string, string>();
   private pendingPermissions = new Map<string, AgentPermission>();
   private permissionWaiters = new Map<string, PendingPermissionWaiter>();
   private permissionSources = new Map<string, string>();
@@ -313,7 +434,12 @@ export class AgentSessionProxy {
     if (
       method === "initialized" ||
       method.startsWith("account/") ||
-      method.startsWith("mcpServer/startupStatus/")
+      method.startsWith("mcpServer/startupStatus/") ||
+      method === "thread/status/changed" ||
+      method === "thread/tokenUsage/updated" ||
+      method === "turn/diff/updated" ||
+      method === "serverRequest/resolved" ||
+      method === "mcpServer/oauthLogin/completed"
     ) {
       return;
     }
@@ -339,11 +465,48 @@ export class AgentSessionProxy {
       this.handlePermission(params, false, method);
       return;
     }
-    if (method === "session/update" || method.startsWith("item/")) {
+
+    switch (method) {
+      case "item/agentMessage/delta":
+        this.handleAgentMessageDelta(params);
+        return;
+      case "turn/plan/updated":
+        this.handlePlanUpdated(params);
+        return;
+      case "item/plan/delta":
+        this.handlePlanDelta(params);
+        return;
+      case "item/started":
+        this.handleItemStarted(params);
+        return;
+      case "item/completed":
+        this.handleItemCompleted(params);
+        return;
+      case "item/commandExecution/outputDelta":
+      case "item/fileChange/outputDelta":
+      case "item/mcpToolCall/progress":
+        this.handleToolDelta(method, params);
+        return;
+      case "item/fileChange/patchUpdated":
+        this.handleFilePatchUpdated(params);
+        return;
+      case "command/exec/outputDelta":
+        this.handleCommandExecDelta(params);
+        return;
+      case "item/autoApprovalReview/started":
+      case "item/autoApprovalReview/completed":
+      case "item/commandExecution/terminalInteraction":
+        return;
+    }
+
+    if (method === "session/update") {
       this.handleUpdate(params);
       return;
     }
-    this.handleUpdate({ method, params });
+
+    if (this.input.verbose) {
+      process.stderr.write(`[agent] ignored ${method}\n`);
+    }
   }
 
   private handlePermission(
@@ -386,13 +549,226 @@ export class AgentSessionProxy {
     });
   }
 
+  private handleAgentMessageDelta(params: unknown): void {
+    const raw = asRecord(params);
+    if (!raw) return;
+    const itemId = firstString(raw, ["itemId", "id", "messageId"]) ?? id("msg");
+    const delta = firstString(raw, ["delta", "text", "content"]);
+    if (!delta) return;
+    const current = this.messages.find((message) => message.id === itemId);
+    const message: AgentMessage = {
+      id: itemId,
+      role: "assistant",
+      content: `${current?.content ?? ""}${delta}`,
+      createdAt: current?.createdAt ?? Date.now(),
+      isStreaming: true,
+    };
+    this.upsertMessage(message);
+    this.status = "running";
+    this.sendUpdate({ kind: "message_delta", message, delta, status: "running" });
+  }
+
+  private handlePlanUpdated(params: unknown): void {
+    const raw = asRecord(params);
+    const plan = Array.isArray(raw?.plan) ? raw.plan : [];
+    this.plan = plan
+      .map((entry, index) => {
+        const step = asRecord(entry);
+        const text = firstString(step ?? {}, ["text", "title", "description", "message"]);
+        if (!text) return undefined;
+        return {
+          id: firstString(step ?? {}, ["id"]) ?? `plan-${index + 1}`,
+          text,
+          status: normalizePlanStatus(step?.status),
+        } satisfies AgentPlanStep;
+      })
+      .filter((step): step is AgentPlanStep => Boolean(step));
+    if (this.plan.length > 0) {
+      this.sendUpdate({ kind: "plan", plan: this.plan, status: "running" });
+    }
+  }
+
+  private handlePlanDelta(params: unknown): void {
+    const raw = asRecord(params);
+    if (!raw) return;
+    const itemId = firstString(raw, ["itemId", "id"]) ?? id("plan");
+    const delta = firstString(raw, ["delta", "text"]);
+    if (!delta) return;
+    const text = `${this.planDeltaBuffers.get(itemId) ?? ""}${delta}`;
+    this.planDeltaBuffers.set(itemId, text);
+    const existing = this.plan.findIndex((step) => step.id === itemId);
+    const step: AgentPlanStep = { id: itemId, text, status: "in_progress" };
+    if (existing >= 0) this.plan[existing] = step;
+    else this.plan.push(step);
+    this.sendUpdate({ kind: "plan", plan: this.plan, status: "running" });
+  }
+
+  private handleItemStarted(params: unknown): void {
+    const item = extractItem(params);
+    if (!item) return;
+    const itemType = firstString(item, ["type"]);
+
+    if (itemType === "agentMessage" || itemType === "assistantMessage") {
+      this.handleCompletedMessageItem(item, true);
+      return;
+    }
+
+    if (itemType === "plan") {
+      const planStep = planStepFromItem(item);
+      if (planStep) {
+        const existing = this.plan.findIndex((step) => step.id === planStep.id);
+        if (existing >= 0) this.plan[existing] = planStep;
+        else this.plan.push(planStep);
+        this.sendUpdate({ kind: "plan", plan: this.plan, status: "running" });
+      }
+      return;
+    }
+
+    const toolCall = this.toolCallFromItem(item, "running");
+    if (!toolCall) return;
+    this.toolCalls.set(toolCall.id, toolCall);
+    this.sendUpdate({ kind: "tool_call", toolCall, status: "running" });
+  }
+
+  private handleItemCompleted(params: unknown): void {
+    const item = extractItem(params);
+    if (!item) return;
+    const itemType = firstString(item, ["type"]);
+
+    if (itemType === "agentMessage" || itemType === "assistantMessage") {
+      this.handleCompletedMessageItem(item, false);
+      return;
+    }
+
+    if (itemType === "plan") {
+      const planStep = planStepFromItem(item);
+      if (planStep) {
+        const existing = this.plan.findIndex((step) => step.id === planStep.id);
+        const completed = { ...planStep, status: "completed" as const };
+        if (existing >= 0) this.plan[existing] = completed;
+        else this.plan.push(completed);
+        this.sendUpdate({ kind: "plan", plan: this.plan, status: this.status === "running" ? "running" : "idle" });
+      }
+      return;
+    }
+
+    const toolCall = this.toolCallFromItem(item, normalizeToolStatus(item.status, true));
+    if (!toolCall) return;
+    const bufferedOutput = this.toolOutputBuffers.get(toolCall.id);
+    if (bufferedOutput && !toolCall.output) toolCall.output = bufferedOutput;
+    this.toolCalls.set(toolCall.id, toolCall);
+    this.sendUpdate({ kind: "tool_result", toolCall, status: this.status === "running" ? "running" : "idle" });
+  }
+
+  private handleToolDelta(method: string, params: unknown): void {
+    const raw = asRecord(params);
+    if (!raw) return;
+    const itemId = firstString(raw, ["itemId", "id", "toolCallId"]) ?? id("tool");
+    const delta = firstString(raw, ["delta", "message", "text"]);
+    if (!delta) return;
+    const output = appendCapped(this.toolOutputBuffers.get(itemId), delta, 6000);
+    this.toolOutputBuffers.set(itemId, output);
+    const existing = this.toolCalls.get(itemId);
+    const toolCall: AgentToolCall = {
+      id: itemId,
+      name: existing?.name ?? nameFromToolMethod(method),
+      input: existing?.input,
+      output,
+      status: "running",
+    };
+    this.toolCalls.set(itemId, toolCall);
+    this.sendUpdate({ kind: "tool_call", toolCall, status: "running" });
+  }
+
+  private handleFilePatchUpdated(params: unknown): void {
+    const raw = asRecord(params);
+    if (!raw) return;
+    const itemId = firstString(raw, ["itemId", "id"]) ?? id("file");
+    const changes = Array.isArray(raw.changes) ? raw.changes : [];
+    const output = summarizeFileChanges(changes);
+    const existing = this.toolCalls.get(itemId);
+    const toolCall: AgentToolCall = {
+      id: itemId,
+      name: existing?.name ?? "文件修改",
+      input: existing?.input,
+      output: output || existing?.output,
+      status: existing?.status ?? "running",
+    };
+    this.toolCalls.set(itemId, toolCall);
+    this.sendUpdate({ kind: "tool_call", toolCall, status: "running" });
+  }
+
+  private handleCommandExecDelta(params: unknown): void {
+    const raw = asRecord(params);
+    if (!raw) return;
+    const processId = firstString(raw, ["processId", "id"]) ?? id("exec");
+    const delta =
+      firstString(raw, ["delta", "text"]) ??
+      decodeBase64(firstString(raw, ["deltaBase64"]));
+    if (!delta) return;
+    const output = appendCapped(this.toolOutputBuffers.get(processId), delta, 6000);
+    this.toolOutputBuffers.set(processId, output);
+    const existing = this.toolCalls.get(processId);
+    const toolCall: AgentToolCall = {
+      id: processId,
+      name: existing?.name ?? "命令输出",
+      input: existing?.input,
+      output,
+      status: "running",
+    };
+    this.toolCalls.set(processId, toolCall);
+    this.sendUpdate({ kind: "tool_call", toolCall, status: "running" });
+  }
+
+  private handleCompletedMessageItem(item: Record<string, unknown>, streaming: boolean): void {
+    const itemId = firstString(item, ["id"]) ?? id("msg");
+    const existing = this.messages.find((message) => message.id === itemId);
+    const content = firstString(item, ["text", "content", "message"]) ?? existing?.content;
+    if (!content) return;
+    const message: AgentMessage = {
+      id: itemId,
+      role: "assistant",
+      content,
+      createdAt: existing?.createdAt ?? Date.now(),
+      isStreaming: streaming,
+    };
+    this.upsertMessage(message);
+    this.sendUpdate({
+      kind: streaming ? "message_delta" : "message",
+      message,
+      status: this.status === "running" ? "running" : "idle",
+    });
+  }
+
+  private toolCallFromItem(
+    item: Record<string, unknown>,
+    fallbackStatus: AgentToolCall["status"],
+  ): AgentToolCall | undefined {
+    const itemId = firstString(item, ["id", "itemId", "toolCallId"]);
+    if (!itemId) return undefined;
+    const itemType = firstString(item, ["type"]);
+    const name = toolNameFromItem(item);
+    const output =
+      firstString(item, ["aggregatedOutput", "output", "stdout", "stderr"]) ??
+      stringifyDefined(item.result ?? item.error ?? item.contentItems);
+    const bufferedOutput = this.toolOutputBuffers.get(itemId);
+    return {
+      id: itemId,
+      name: name ?? itemType ?? "tool",
+      input: toolInputFromItem(item),
+      output: output ?? bufferedOutput,
+      status: normalizeToolStatus(item.status, fallbackStatus === "completed"),
+    };
+  }
+
   private handleUpdate(params: unknown): void {
     const raw = typeof params === "object" && params ? params as Record<string, unknown> : {};
     const nested = typeof raw.params === "object" && raw.params ? raw.params as Record<string, unknown> : {};
     const text =
       firstString(raw, ["delta", "text", "content", "message"]) ??
       firstString(nested, ["delta", "text", "content", "message"]) ??
-      stringify(raw.update ?? raw.params ?? params);
+      undefined;
+    if (!text) return;
     const role = raw.role === "user" || raw.role === "system" ? raw.role : "assistant";
 
     if (firstString(raw, ["toolName", "tool", "name"])) {
@@ -417,8 +793,7 @@ export class AgentSessionProxy {
       createdAt: Date.now(),
       isStreaming: raw.done === false || raw.isStreaming === true,
     };
-    this.messages.push(message);
-    if (this.messages.length > 100) this.messages.shift();
+    this.upsertMessage(message);
     this.status = raw.done === true ? "idle" : "running";
     this.sendUpdate({
       kind: "message",
@@ -449,6 +824,13 @@ export class AgentSessionProxy {
     this.permissionWaiters.clear();
   }
 
+  private upsertMessage(message: AgentMessage): void {
+    const existing = this.messages.findIndex((entry) => entry.id === message.id);
+    if (existing >= 0) this.messages[existing] = message;
+    else this.messages.push(message);
+    if (this.messages.length > 100) this.messages.shift();
+  }
+
   private sendCapabilities(): void {
     const enabled = Boolean(this.client && this.initialized && !this.error);
     this.input.send(createEnvelope({
@@ -464,7 +846,7 @@ export class AgentSessionProxy {
         supportsImages: false,
         supportsAudio: false,
         supportsPermission: enabled,
-        supportsPlan: false,
+        supportsPlan: enabled,
         supportsCancel: enabled,
       },
     }));
@@ -490,6 +872,7 @@ export class AgentSessionProxy {
     message?: AgentMessage;
     delta?: string;
     toolCall?: AgentToolCall;
+    plan?: AgentPlanStep[];
     status?: "idle" | "running" | "waiting_permission" | "error";
     error?: string;
   }): void {

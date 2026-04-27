@@ -30,7 +30,7 @@ import type { TerminalViewHandle } from "../components/TerminalView";
 import { ScreenView } from "../components/ScreenView";
 import { BrowserView } from "../components/BrowserView";
 import type { ConnectionStatus, TerminalStream } from "../hooks/useSession";
-import type { AgentState, TerminalInfo } from "../hooks/useSessionManager";
+import type { AgentMessage, AgentState, AgentToolCall, TerminalInfo } from "../hooks/useSessionManager";
 import { useTheme } from "../theme";
 import type { Theme } from "../theme";
 
@@ -1168,6 +1168,17 @@ const AgentStage = memo(function AgentStage({
     if (!agent.capabilities) onInitialize();
   }, [agent.capabilities, onInitialize]);
 
+  const messages = compactAgentMessages(agent.messages);
+  const tools = agent.toolCalls.filter(
+    (tool) => tool.input?.trim() || tool.output?.trim() || tool.name.trim(),
+  );
+  const statusMeta = agentStatusMeta(agent.status, theme);
+  const hasAgentContent =
+    messages.length > 0 ||
+    tools.length > 0 ||
+    agent.plan.length > 0 ||
+    agent.pendingPermissions.length > 0;
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: 16 }}>
       <ScrollView
@@ -1184,41 +1195,112 @@ const AgentStage = memo(function AgentStage({
             borderCurve: "continuous",
             backgroundColor: theme.bgCard,
             padding: 12,
-            gap: 6,
+            gap: 10,
           }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <AppSymbol
-              name="sparkles"
-              size={16}
-              color={agent.capabilities?.enabled ? theme.accent : theme.textTertiary}
-            />
-            <Text style={{ color: theme.text, fontSize: 15, fontWeight: "600" }}>
-              Agent GUI
-            </Text>
-            <Text
+            <View
               style={{
-                marginLeft: "auto",
-                color: theme.textTertiary,
-                fontSize: 12,
-                textTransform: "uppercase",
+                width: 30,
+                height: 30,
+                borderRadius: 9,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: agent.capabilities?.enabled
+                  ? theme.accentLight
+                  : theme.bgInput,
               }}
             >
-              {agent.status}
-            </Text>
+              <AppSymbol
+                name="sparkles"
+                size={16}
+                color={agent.capabilities?.enabled ? theme.accent : theme.textTertiary}
+              />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }}>
+                Agent GUI
+              </Text>
+              <Text
+                style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }}
+                numberOfLines={1}
+              >
+                {agent.capabilities?.enabled
+                  ? `${agent.capabilities.provider ?? "agent"} · ACP GUI 已连接`
+                  : "未连接"}
+              </Text>
+            </View>
+            <View
+              style={{
+                borderRadius: 999,
+                paddingHorizontal: 9,
+                paddingVertical: 5,
+                backgroundColor: statusMeta.bg,
+              }}
+            >
+              <Text style={{ color: statusMeta.color, fontSize: 11, fontWeight: "700" }}>
+                {statusMeta.label}
+              </Text>
+            </View>
           </View>
           {!agent.capabilities?.enabled ? (
-            <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18 }}>
+            <Text selectable style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18 }}>
               {agent.error ||
                 agent.capabilities?.error ||
                 "当前 CLI 未启用 Agent GUI。使用 linkshell start --daemon --provider codex --agent-ui 启动。"}
             </Text>
-          ) : (
-            <Text style={{ color: theme.textTertiary, fontSize: 13 }}>
-              {agent.capabilities.provider ?? "agent"} · ACP GUI 已连接
-            </Text>
-          )}
+          ) : null}
         </View>
+
+        {agent.plan.length > 0 ? (
+          <View
+            style={{
+              borderRadius: 12,
+              borderCurve: "continuous",
+              backgroundColor: theme.bgCard,
+              padding: 12,
+              gap: 10,
+            }}
+          >
+            <Text style={{ color: theme.text, fontSize: 14, fontWeight: "700" }}>
+              执行计划
+            </Text>
+            {agent.plan.map((step) => {
+              const meta = planStepMeta(step.status, theme);
+              return (
+                <View
+                  key={step.id}
+                  style={{ flexDirection: "row", alignItems: "flex-start", gap: 9 }}
+                >
+                  <View
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: meta.bg,
+                      marginTop: 1,
+                    }}
+                  >
+                    <AppSymbol name={meta.icon} size={12} color={meta.color} />
+                  </View>
+                  <Text
+                    selectable
+                    style={{
+                      flex: 1,
+                      color: step.status === "completed" ? theme.textTertiary : theme.text,
+                      fontSize: 13,
+                      lineHeight: 19,
+                    }}
+                  >
+                    {step.text}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
 
         {agent.pendingPermissions.map((permission) => (
           (() => {
@@ -1243,12 +1325,13 @@ const AgentStage = memo(function AgentStage({
                   需要授权{permission.toolName ? ` · ${permission.toolName}` : ""}
                 </Text>
                 {permission.context ? (
-                  <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
+                  <Text selectable style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
                     {permission.context}
                   </Text>
                 ) : null}
                 {permission.toolInput ? (
                   <Text
+                    selectable
                     style={{
                       color: theme.textTertiary,
                       fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
@@ -1294,7 +1377,28 @@ const AgentStage = memo(function AgentStage({
           })()
         ))}
 
-        {agent.messages.map((message) => (
+        {!hasAgentContent && agent.capabilities?.enabled ? (
+          <View
+            style={{
+              borderRadius: 12,
+              borderCurve: "continuous",
+              backgroundColor: theme.bgCard,
+              padding: 16,
+              gap: 8,
+              alignItems: "center",
+            }}
+          >
+            <AppSymbol name="bubble.left.and.text.bubble.right" size={22} color={theme.accent} />
+            <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }}>
+              像聊天一样使用 Codex
+            </Text>
+            <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
+              回复会在这里流式展示；命令、文件修改和 MCP 调用会自动整理成工具卡片。
+            </Text>
+          </View>
+        ) : null}
+
+        {messages.map((message) => (
           <View
             key={message.id}
             style={{
@@ -1303,12 +1407,31 @@ const AgentStage = memo(function AgentStage({
               borderRadius: 12,
               borderCurve: "continuous",
               backgroundColor:
-                message.role === "user" ? theme.accent : theme.bgCard,
+                message.role === "user"
+                  ? theme.accent
+                  : message.role === "system"
+                    ? theme.accentLight
+                    : theme.bgCard,
               paddingVertical: 10,
               paddingHorizontal: 12,
+              gap: 6,
             }}
           >
+            {message.role !== "user" ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <AppSymbol
+                  name={message.role === "system" ? "info.circle" : "sparkles"}
+                  size={13}
+                  color={theme.textTertiary}
+                />
+                <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
+                  {message.role === "system" ? "系统" : "Agent"}
+                  {message.isStreaming ? " 正在输入" : ""}
+                </Text>
+              </View>
+            ) : null}
             <Text
+              selectable
               style={{
                 color: message.role === "user" ? "#fff" : theme.text,
                 fontSize: 14,
@@ -1320,32 +1443,16 @@ const AgentStage = memo(function AgentStage({
           </View>
         ))}
 
-        {agent.toolCalls.map((tool) => (
-          <View
-            key={tool.id}
-            style={{
-              borderRadius: 12,
-              borderCurve: "continuous",
-              backgroundColor: theme.bgCard,
-              padding: 12,
-              gap: 6,
-            }}
-          >
-            <Text style={{ color: theme.text, fontSize: 14, fontWeight: "600" }}>
-              {tool.name} · {tool.status}
+        {tools.length > 0 ? (
+          <View style={{ gap: 8 }}>
+            <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
+              工具活动
             </Text>
-            {tool.input ? (
-              <Text style={{ color: theme.textTertiary, fontSize: 12 }} numberOfLines={4}>
-                {tool.input}
-              </Text>
-            ) : null}
-            {tool.output ? (
-              <Text style={{ color: theme.textSecondary, fontSize: 12 }} numberOfLines={4}>
-                {tool.output}
-              </Text>
-            ) : null}
+            {tools.map((tool) => (
+              <AgentToolCard key={tool.id} tool={tool} theme={theme} />
+            ))}
           </View>
-        ))}
+        ) : null}
       </ScrollView>
 
       <View
@@ -1429,6 +1536,210 @@ const AgentStage = memo(function AgentStage({
           )}
         </View>
       </View>
+    </View>
+  );
+});
+
+function compactAgentMessages(messages: AgentMessage[]): AgentMessage[] {
+  const compacted: AgentMessage[] = [];
+  for (const message of messages) {
+    const content = message.content.trim();
+    if (!content || isProtocolNoise(content)) continue;
+
+    const previous = compacted[compacted.length - 1];
+    const canMergeAssistantFragment =
+      message.role === "assistant" &&
+      previous?.role === "assistant" &&
+      !previous.content.includes("\n\n") &&
+      (message.isStreaming || previous.isStreaming || content.length <= 10);
+
+    if (canMergeAssistantFragment) {
+      compacted[compacted.length - 1] = {
+        ...previous,
+        content: `${previous.content}${content}`,
+        isStreaming: previous.isStreaming || message.isStreaming,
+      };
+      continue;
+    }
+
+    compacted.push({ ...message, content });
+  }
+  return compacted;
+}
+
+function isProtocolNoise(content: string): boolean {
+  if (!content.startsWith("{")) return false;
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const eventName = typeof parsed.eventName === "string" ? parsed.eventName : "";
+    const method = typeof parsed.method === "string" ? parsed.method : "";
+    return Boolean(
+      parsed.threadId ||
+        eventName === "sessionStart" ||
+        method.startsWith("thread/") ||
+        method.startsWith("turn/") ||
+        method.startsWith("item/"),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function agentStatusMeta(status: AgentState["status"], theme: Theme) {
+  switch (status) {
+    case "running":
+      return { label: "运行中", color: theme.accent, bg: theme.accentLight };
+    case "waiting_permission":
+      return { label: "待授权", color: theme.warning, bg: theme.accentLight };
+    case "error":
+      return { label: "错误", color: theme.error, bg: theme.errorLight };
+    case "idle":
+      return { label: "空闲", color: theme.success, bg: theme.accentLight };
+    case "unavailable":
+    default:
+      return { label: "不可用", color: theme.textTertiary, bg: theme.bgInput };
+  }
+}
+
+function planStepMeta(status: "pending" | "in_progress" | "completed", theme: Theme) {
+  if (status === "completed") {
+    return { icon: "checkmark.circle.fill", color: theme.success, bg: theme.accentLight };
+  }
+  if (status === "in_progress") {
+    return { icon: "clock", color: theme.accent, bg: theme.accentLight };
+  }
+  return { icon: "circle", color: theme.textTertiary, bg: theme.bgInput };
+}
+
+function toolStatusMeta(status: AgentToolCall["status"], theme: Theme) {
+  switch (status) {
+    case "completed":
+      return { label: "完成", icon: "checkmark.circle.fill", color: theme.success, bg: theme.accentLight };
+    case "failed":
+      return { label: "失败", icon: "xmark.circle.fill", color: theme.error, bg: theme.errorLight };
+    case "pending":
+      return { label: "等待", icon: "clock", color: theme.textTertiary, bg: theme.bgInput };
+    case "running":
+    default:
+      return { label: "运行中", icon: "terminal.fill", color: theme.accent, bg: theme.accentLight };
+  }
+}
+
+function toolIconName(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes("文件") || lower.includes("file")) return "doc.text";
+  if (lower.includes("mcp")) return "server.rack";
+  if (lower.includes("命令") || lower.includes("command") || lower.includes("shell")) {
+    return "terminal.fill";
+  }
+  return "gearshape.fill";
+}
+
+function compactToolText(value: string | undefined, maxLength: number): string | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+const AgentToolCard = memo(function AgentToolCard({
+  tool,
+  theme,
+}: {
+  tool: AgentToolCall;
+  theme: Theme;
+}) {
+  const status = toolStatusMeta(tool.status, theme);
+  const input = compactToolText(tool.input, 900);
+  const output = compactToolText(tool.output, 1200);
+
+  return (
+    <View
+      style={{
+        borderRadius: 12,
+        borderCurve: "continuous",
+        backgroundColor: theme.bgCard,
+        padding: 12,
+        gap: 10,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 9 }}>
+        <View
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 9,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: theme.bgInput,
+          }}
+        >
+          <AppSymbol name={toolIconName(tool.name)} size={15} color={theme.accent} />
+        </View>
+        <Text
+          selectable
+          style={{ flex: 1, color: theme.text, fontSize: 14, fontWeight: "700" }}
+          numberOfLines={1}
+        >
+          {tool.name}
+        </Text>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            borderRadius: 999,
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            backgroundColor: status.bg,
+          }}
+        >
+          <AppSymbol name={status.icon} size={11} color={status.color} />
+          <Text style={{ color: status.color, fontSize: 11, fontWeight: "700" }}>
+            {status.label}
+          </Text>
+        </View>
+      </View>
+
+      {input ? (
+        <View style={{ gap: 4 }}>
+          <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
+            输入
+          </Text>
+          <Text
+            selectable
+            style={{
+              color: theme.textSecondary,
+              fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+              fontSize: 12,
+              lineHeight: 17,
+            }}
+            numberOfLines={6}
+          >
+            {input}
+          </Text>
+        </View>
+      ) : null}
+
+      {output ? (
+        <View style={{ gap: 4 }}>
+          <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
+            输出
+          </Text>
+          <Text
+            selectable
+            style={{
+              color: theme.textSecondary,
+              fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+              fontSize: 12,
+              lineHeight: 17,
+            }}
+            numberOfLines={8}
+          >
+            {output}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 });
