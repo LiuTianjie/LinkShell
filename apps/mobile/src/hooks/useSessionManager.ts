@@ -92,6 +92,12 @@ export type AgentReasoningEffort =
   | "high"
   | "xhigh";
 
+export type AgentPermissionMode =
+  | "default"
+  | "read_only"
+  | "workspace_write"
+  | "full_access";
+
 export interface AgentPlanStep {
   id: string;
   text: string;
@@ -211,7 +217,11 @@ export interface SessionManagerHandle {
   initializeAgent: () => void;
   sendAgentPrompt: (
     text: string,
-    options?: { model?: string; reasoningEffort?: AgentReasoningEffort },
+    options?: {
+      model?: string;
+      reasoningEffort?: AgentReasoningEffort;
+      permissionMode?: AgentPermissionMode;
+    },
   ) => void;
   cancelAgent: () => void;
   sendAgentPermissionResponse: (
@@ -1536,7 +1546,11 @@ export function useSessionManager(): SessionManagerHandle {
   const sendAgentPromptFn = useCallback(
     (
       text: string,
-      options?: { model?: string; reasoningEffort?: AgentReasoningEffort },
+      options?: {
+        model?: string;
+        reasoningEffort?: AgentReasoningEffort;
+        permissionMode?: AgentPermissionMode;
+      },
     ) => {
       const s = getActive();
       const trimmed = text.trim();
@@ -1553,6 +1567,10 @@ export function useSessionManager(): SessionManagerHandle {
             contentBlocks: [{ type: "text", text: trimmed }],
             model: options?.model,
             reasoningEffort: options?.reasoningEffort,
+            permissionMode:
+              options?.permissionMode && options.permissionMode !== "default"
+                ? options.permissionMode
+                : undefined,
           },
         }),
         { queue: true },

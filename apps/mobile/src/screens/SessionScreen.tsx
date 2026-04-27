@@ -32,6 +32,7 @@ import { BrowserView } from "../components/BrowserView";
 import type { ConnectionStatus, TerminalStream } from "../hooks/useSession";
 import type {
   AgentMessage,
+  AgentPermissionMode,
   AgentReasoningEffort,
   AgentState,
   AgentToolCall,
@@ -129,7 +130,11 @@ interface SessionScreenProps {
   onInitializeAgent: () => void;
   onSendAgentPrompt: (
     text: string,
-    options?: { model?: string; reasoningEffort?: AgentReasoningEffort },
+    options?: {
+      model?: string;
+      reasoningEffort?: AgentReasoningEffort;
+      permissionMode?: AgentPermissionMode;
+    },
   ) => void;
   onCancelAgent: () => void;
   onSendAgentPermissionResponse: (
@@ -1155,7 +1160,11 @@ const AgentStage = memo(function AgentStage({
   onInitialize: () => void;
   onSendPrompt: (
     text: string,
-    options?: { model?: string; reasoningEffort?: AgentReasoningEffort },
+    options?: {
+      model?: string;
+      reasoningEffort?: AgentReasoningEffort;
+      permissionMode?: AgentPermissionMode;
+    },
   ) => void;
   onCancel: () => void;
   onPermissionResponse: (
@@ -1168,15 +1177,16 @@ const AgentStage = memo(function AgentStage({
   const [text, setText] = useState("");
   const [model, setModel] = useState<string | undefined>();
   const [reasoningEffort, setReasoningEffort] = useState<AgentReasoningEffort | undefined>();
+  const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>("default");
   const disabled = !hasControl || agent.status === "unavailable";
   const running = agent.status === "running" || agent.status === "waiting_permission";
 
   const send = useCallback(() => {
     const value = text.trim();
     if (!value || disabled) return;
-    onSendPrompt(value, { model, reasoningEffort });
+    onSendPrompt(value, { model, reasoningEffort, permissionMode });
     setText("");
-  }, [disabled, model, onSendPrompt, reasoningEffort, text]);
+  }, [disabled, model, onSendPrompt, permissionMode, reasoningEffort, text]);
 
   useEffect(() => {
     if (!agent.capabilities) onInitialize();
@@ -1194,19 +1204,22 @@ const AgentStage = memo(function AgentStage({
     agent.pendingPermissions.length > 0;
   const modelLabel = formatAgentModel(model);
   const effortLabel = formatAgentEffort(reasoningEffort);
-  const permissionLabel = hasControl
-    ? agent.capabilities?.supportsPermission
-      ? "权限按需确认"
-      : "可发送消息"
-    : "只读模式";
-  const showPermissionInfo = useCallback(() => {
-    Alert.alert(
-      hasControl ? "Agent 权限" : "只读模式",
-      hasControl
-        ? "这里显示当前 Agent 权限策略。Codex 发起命令、文件修改或 MCP 调用需要确认时，会在对话里出现授权卡片。"
-        : "当前设备没有控制权，只能查看 Agent 输出。先获取控制权后才能发送消息或处理授权。",
-    );
-  }, [hasControl]);
+  const permissionMeta = permissionModeMeta(permissionMode, theme);
+  const showPermissionPicker = useCallback(() => {
+    if (!hasControl) {
+      Alert.alert(
+        "只读模式",
+        "当前设备没有控制权，只能查看 Agent 输出。先获取控制权后才能发送消息或切换权限。",
+      );
+      return;
+    }
+    showAgentOptionSheet({
+      title: "Agent 权限",
+      options: AGENT_PERMISSION_OPTIONS,
+      currentValue: permissionMode,
+      onSelect: (value) => setPermissionMode(value ?? "default"),
+    });
+  }, [hasControl, permissionMode]);
   const showModelPicker = useCallback(() => {
     showAgentOptionSheet({
       title: "选择模型",
@@ -1542,7 +1555,8 @@ const AgentStage = memo(function AgentStage({
           />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <Pressable
-              onPress={showPermissionInfo}
+              onPress={showPermissionPicker}
+              disabled={running && hasControl}
               style={({ pressed }) => ({
                 flexDirection: "row",
                 alignItems: "center",
@@ -1553,29 +1567,30 @@ const AgentStage = memo(function AgentStage({
                 backgroundColor: pressed
                   ? theme.bgInput
                   : hasControl
-                    ? theme.accentLight
+                    ? permissionMeta.bg
                     : theme.bgInput,
                 maxWidth: "42%",
+                opacity: running && hasControl ? 0.55 : 1,
               })}
               accessibilityRole="button"
-              accessibilityLabel="查看 Agent 权限状态"
+              accessibilityLabel="切换 Agent 权限"
             >
               <AppSymbol
-                name={hasControl ? "lock.open.fill" : "eye.fill"}
+                name={hasControl ? permissionMeta.icon : "eye.fill"}
                 size={13}
-                color={hasControl ? theme.warning : theme.textTertiary}
+                color={hasControl ? permissionMeta.color : theme.textTertiary}
               />
               <Text
                 style={{
-                  color: hasControl ? theme.warning : theme.textTertiary,
+                  color: hasControl ? permissionMeta.color : theme.textTertiary,
                   fontSize: 12,
                   fontWeight: "700",
                 }}
                 numberOfLines={1}
               >
-                {permissionLabel}
+                {hasControl ? permissionMeta.label : "只读模式"}
               </Text>
-              <AppSymbol name="chevron.down" size={10} color={hasControl ? theme.warning : theme.textTertiary} />
+              <AppSymbol name="chevron.down" size={10} color={hasControl ? permissionMeta.color : theme.textTertiary} />
             </Pressable>
 
             <View style={{ flex: 1 }} />
@@ -1698,6 +1713,13 @@ const AGENT_EFFORT_OPTIONS: Array<{ label: string; value?: AgentReasoningEffort 
   { label: "超高", value: "xhigh" },
 ];
 
+const AGENT_PERMISSION_OPTIONS: Array<{ label: string; value?: AgentPermissionMode }> = [
+  { label: "默认权限", value: "default" },
+  { label: "只读", value: "read_only" },
+  { label: "工作区写入", value: "workspace_write" },
+  { label: "完全访问", value: "full_access" },
+];
+
 function showAgentOptionSheet<T extends string>({
   title,
   options,
@@ -1814,6 +1836,40 @@ function formatAgentEffort(effort?: AgentReasoningEffort): string {
   if (effort === "low") return "低";
   if (effort === "minimal") return "极低";
   return "无";
+}
+
+function permissionModeMeta(mode: AgentPermissionMode, theme: Theme) {
+  switch (mode) {
+    case "read_only":
+      return {
+        label: "只读",
+        icon: "eye.fill",
+        color: theme.textTertiary,
+        bg: theme.bgInput,
+      };
+    case "workspace_write":
+      return {
+        label: "工作区写入",
+        icon: "folder.fill",
+        color: theme.accent,
+        bg: theme.accentLight,
+      };
+    case "full_access":
+      return {
+        label: "完全访问",
+        icon: "lock.open.fill",
+        color: theme.warning,
+        bg: theme.accentLight,
+      };
+    case "default":
+    default:
+      return {
+        label: "默认权限",
+        icon: "lock.shield.fill",
+        color: theme.textSecondary,
+        bg: theme.bgInput,
+      };
+  }
 }
 
 function planStepMeta(status: "pending" | "in_progress" | "completed", theme: Theme) {

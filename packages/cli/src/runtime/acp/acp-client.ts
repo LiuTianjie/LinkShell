@@ -1,6 +1,8 @@
 import { JsonRpcStdioTransport } from "./json-rpc.js";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
+type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
+
 function normalizeMcpServers(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (!value || typeof value !== "object") return [];
@@ -10,6 +12,28 @@ function normalizeMcpServers(value: unknown): unknown[] {
     }
     return { name, config };
   });
+}
+
+function permissionProfileForMode(
+  mode: AgentPermissionMode | undefined,
+  cwd: string,
+): unknown | undefined {
+  if (!mode) return undefined;
+  if (mode === "full_access") return { type: "disabled" };
+
+  return {
+    type: "managed",
+    network: { enabled: false },
+    fileSystem: {
+      type: "restricted",
+      entries: [
+        {
+          path: { type: "path", path: cwd },
+          access: mode === "workspace_write" ? "write" : "read",
+        },
+      ],
+    },
+  };
 }
 
 export class AcpClient {
@@ -88,12 +112,15 @@ export class AcpClient {
     clientMessageId: string;
     model?: string;
     reasoningEffort?: string;
+    permissionMode?: AgentPermissionMode;
+    cwd: string;
   }): Promise<unknown> {
     if (this.protocol === "codex-app-server") {
       return this.transport.request("turn/start", {
         threadId: input.sessionId,
         model: input.model,
         effort: input.reasoningEffort,
+        permissionProfile: permissionProfileForMode(input.permissionMode, input.cwd),
         input: input.content.map((block) => {
           const raw = block as { type?: string; text?: string; data?: string };
           if (raw.type === "image" && raw.data) {
@@ -110,6 +137,7 @@ export class AcpClient {
         linkshellClientMessageId: input.clientMessageId,
         model: input.model,
         reasoningEffort: input.reasoningEffort,
+        permissionMode: input.permissionMode,
       },
     }, 60_000);
   }

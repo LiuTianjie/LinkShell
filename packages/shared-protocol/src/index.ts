@@ -324,6 +324,11 @@ export const agentReasoningEffortSchema = z.enum([
   "high",
   "xhigh",
 ]);
+export const agentPermissionModeSchema = z.enum([
+  "read_only",
+  "workspace_write",
+  "full_access",
+]);
 
 export const agentContentBlockSchema = z.object({
   type: z.enum(["text", "image"]),
@@ -395,6 +400,7 @@ export const agentPromptPayloadSchema = z.object({
   contentBlocks: z.array(agentContentBlockSchema).min(1),
   model: z.string().min(1).optional(),
   reasoningEffort: agentReasoningEffortSchema.optional(),
+  permissionMode: agentPermissionModeSchema.optional(),
 });
 
 export const agentCancelPayloadSchema = z.object({
