@@ -239,6 +239,32 @@ const RECONNECT_MAX_DELAY = 15_000;
 const RECONNECT_MAX_ATTEMPTS = 15;
 const TERMINAL_REPLAY_LIMIT = 100;
 
+function mergeAgentMessages(
+  current: AgentMessage[],
+  incoming: AgentMessage[] | undefined,
+): AgentMessage[] {
+  if (!incoming?.length) return current;
+  const map = new Map(current.map((message) => [message.id, message]));
+  for (const message of incoming) {
+    map.set(message.id, message);
+  }
+  return [...map.values()]
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .slice(-100);
+}
+
+function mergeAgentToolCalls(
+  current: AgentToolCall[],
+  incoming: AgentToolCall[] | undefined,
+): AgentToolCall[] {
+  if (!incoming?.length) return current;
+  const map = new Map(current.map((tool) => [tool.id, tool]));
+  for (const tool of incoming) {
+    map.set(tool.id, tool);
+  }
+  return [...map.values()];
+}
+
 function generateId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") {
     return globalThis.crypto.randomUUID();
@@ -879,11 +905,24 @@ export function useSessionManager(): SessionManagerHandle {
         }
         case "agent.snapshot": {
           const p = parseTypedPayload("agent.snapshot" as any, envelope.payload) as any;
-          s.agent.activeAgentSessionId = p.agentSessionId ?? null;
+          const incomingAgentSessionId = p.agentSessionId ?? null;
+          const sameAgentSession =
+            !s.agent.activeAgentSessionId ||
+            !incomingAgentSessionId ||
+            s.agent.activeAgentSessionId === incomingAgentSessionId;
+          s.agent.activeAgentSessionId = incomingAgentSessionId ?? s.agent.activeAgentSessionId;
           s.agent.capabilities = (p.capabilities as AgentCapabilities | undefined) ?? s.agent.capabilities;
-          s.agent.messages = p.messages as AgentMessage[];
-          s.agent.toolCalls = p.toolCalls as AgentToolCall[];
-          s.agent.plan = Array.isArray(p.plan) ? (p.plan as AgentPlanStep[]) : [];
+          s.agent.messages = sameAgentSession
+            ? mergeAgentMessages(s.agent.messages, p.messages as AgentMessage[] | undefined)
+            : (p.messages as AgentMessage[]);
+          s.agent.toolCalls = sameAgentSession
+            ? mergeAgentToolCalls(s.agent.toolCalls, p.toolCalls as AgentToolCall[] | undefined)
+            : (p.toolCalls as AgentToolCall[]);
+          s.agent.plan = Array.isArray(p.plan)
+            ? (p.plan as AgentPlanStep[])
+            : sameAgentSession
+              ? s.agent.plan
+              : [];
           s.agent.pendingPermissions = p.pendingPermissions as AgentPermission[];
           s.agent.status = p.status;
           s.agent.error = p.error ?? null;

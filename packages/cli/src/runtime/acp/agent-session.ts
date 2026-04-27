@@ -453,7 +453,7 @@ export class AgentSessionProxy {
     if (method === "thread/started") {
       this.agentSessionId = this.extractSessionId(params) ?? this.agentSessionId;
       this.status = "idle";
-      this.sendSnapshot();
+      this.sendUpdate({ kind: "status", status: "idle" });
       return;
     }
     if (method === "turn/started") {
