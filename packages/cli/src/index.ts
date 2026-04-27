@@ -9,6 +9,7 @@ import { runUpgrade } from "./commands/upgrade.js";
 import { runLogin } from "./commands/login.js";
 import { runLogout } from "./commands/logout.js";
 import { getLanIp } from "./utils/lan-ip.js";
+import { shouldKeepAwake } from "./utils/keep-awake.js";
 
 import { createRequire } from "node:module";
 
@@ -65,12 +66,14 @@ program
   )
   .option("--rows <rows>", "Initial terminal rows", String(config.rows ?? 36))
   .option("--screen", "Enable screen sharing capability")
+  .option("--no-keep-awake", "Disable macOS keep-awake while bridge is running")
   .option("--daemon", "Run in background (detached)")
   .option("--verbose", "Enable verbose logging")
   .option("--_foreground-bridge", undefined) // internal
   .allowUnknownOption(true)
   .action(async (options, command) => {
     const daemon = await import("./utils/daemon.js");
+    const keepAwake = shouldKeepAwake(options.keepAwake);
 
     // Daemon mode: spawn detached child and exit
     if (options.daemon && !options._foregroundBridge) {
@@ -95,15 +98,20 @@ program
       childArgs.push("--rows", String(options.rows));
       if (options.verbose) childArgs.push("--verbose");
       if (options.screen) childArgs.push("--screen");
+      if (!keepAwake) childArgs.push("--no-keep-awake");
       if (options.sessionId) childArgs.push("--session-id", options.sessionId);
       // Pass through extra args
       const extra = command.args.filter((v: string) => v !== "--");
       if (extra.length) childArgs.push("--", ...extra);
 
       const pid = daemon.spawnDaemon("bridge", childArgs);
+      daemon.saveMetadata("bridge", { keepAwake, startedAt: Date.now() });
       process.stderr.write(`\n  LinkShell bridge started in background\n`);
       process.stderr.write(`  PID: ${pid}\n`);
       process.stderr.write(`  Provider: ${options.provider}\n`);
+      process.stderr.write(
+        `  Keep awake: ${keepAwake ? "enabled (use --no-keep-awake to disable)" : "disabled"}\n`,
+      );
       process.stderr.write(`  Log: ${daemon.getLogFile("bridge")}\n\n`);
       process.stderr.write(`  Stop:   linkshell stop\n`);
       process.stderr.write(`  Status: linkshell status\n`);
@@ -160,6 +168,7 @@ program
 
     // Save PID for status/stop
     daemon.savePid("bridge", process.pid);
+    daemon.saveMetadata("bridge", { keepAwake, startedAt: Date.now() });
 
     // Load auth token if logged in
     let authToken: string | undefined;
@@ -181,9 +190,11 @@ program
       screen: Boolean(options.screen),
       providerConfig,
       authToken,
+      keepAwake,
     });
 
     const cleanup = async () => {
+      session.stop(0);
       daemon.removePid("bridge");
       if (embeddedGatewayHandle) await embeddedGatewayHandle.close();
     };
@@ -326,13 +337,19 @@ program
   .command("status")
   .description("Show status of all LinkShell processes")
   .action(async () => {
-    const { readPid, getLogFile } = await import("./utils/daemon.js");
+    const { readPid, getLogFile, readMetadata } = await import(
+      "./utils/daemon.js"
+    );
     const bridgePid = readPid("bridge");
     const gatewayPid = readPid("gateway");
+    const bridgeMeta = bridgePid ? readMetadata("bridge") : null;
 
     process.stderr.write("\n");
     if (bridgePid) {
       process.stderr.write(`  Bridge:  running (PID ${bridgePid})\n`);
+      process.stderr.write(
+        `           Keep awake: ${bridgeMeta?.keepAwake ? "enabled" : "disabled"}\n`,
+      );
       process.stderr.write(`           Log: ${getLogFile("bridge")}\n`);
     } else {
       process.stderr.write("  Bridge:  not running\n");
@@ -440,6 +457,7 @@ program
 
     // Start daemon with the chosen gateway
     const daemon = await import("./utils/daemon.js");
+    const keepAwake = shouldKeepAwake(undefined);
     const existingPid = daemon.readPid("bridge");
     if (existingPid) {
       process.stderr.write(
@@ -459,8 +477,10 @@ program
     ];
 
     const pid = daemon.spawnDaemon("bridge", childArgs);
+    daemon.saveMetadata("bridge", { keepAwake, startedAt: Date.now() });
     process.stderr.write(`\n  \x1b[32m✓\x1b[0m Bridge started in background (PID ${pid})\n`);
     process.stderr.write(`    Gateway: ${chosen.name}\n`);
+    process.stderr.write(`    Keep awake: ${keepAwake ? "enabled" : "disabled"}\n`);
     process.stderr.write(`    Open the LinkShell app on your phone to connect.\n\n`);
     process.stderr.write(`    Stop:   linkshell stop\n`);
     process.stderr.write(`    Status: linkshell status\n`);

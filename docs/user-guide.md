@@ -92,6 +92,9 @@ linkshell doctor
 # 后台启动（推荐）
 linkshell start --daemon --provider claude
 
+# macOS：允许闲置睡眠（默认会阻止睡眠，避免锁屏后断连）
+linkshell start --daemon --provider claude --no-keep-awake
+
 # 启用远程桌面查看（需要 ffmpeg）
 linkshell start --daemon --provider claude --screen
 
@@ -164,6 +167,20 @@ linkshell stop
 | `linkshell logout` | 退出登录 |
 
 ## 常见问题
+
+### Mac 锁屏后会断开吗？
+
+默认不会因为闲置睡眠而断开。`linkshell start` 在 macOS 上会自动开启保活，等价于在 bridge 进程运行期间执行 `caffeinate -i -w <bridge-pid>`：系统不会进入 idle sleep，但屏幕仍然可以熄灭，电脑也仍然可以锁屏。
+
+如果你想省电、允许系统睡眠，可以用：
+
+```bash
+linkshell start --daemon --provider claude --no-keep-awake
+# 或
+LINKSHELL_KEEP_AWAKE=0 linkshell start --daemon --provider claude
+```
+
+如果是手动合盖、断网或系统强制休眠，连接仍可能中断；电脑唤醒后 CLI 会继续按现有重连策略恢复。
 
 ### 直接 `linkshell start` 就行吗？不需要部署 Gateway？
 

@@ -21,7 +21,6 @@ import { useTheme, type Theme } from "../theme";
 import { loadServers, type SavedServer } from "../storage/servers";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 import {
-  loadSession,
   fetchOfficialGateways,
   fetchMySessions,
   getValidSession,
@@ -55,6 +54,8 @@ interface GatewayGroup {
   loading: boolean;
   error: string | null;
 }
+
+const PRO_SESSION_REFRESH_INTERVAL_MS = 5_000;
 
 interface SessionListScreenProps {
   gatewayBaseUrl: string;
@@ -505,18 +506,21 @@ export function SessionListScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
 
-  const fetchAllGateways = useCallback(async () => {
+  const fetchAllGateways = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
     const servers = await loadServers();
 
     // Set loading skeleton for all gateways
-    setGroups(
-      servers.map((s) => ({
-        server: s,
-        sessions: [],
-        loading: true,
-        error: null,
-      })),
-    );
+    if (!silent) {
+      setGroups(
+        servers.map((s) => ({
+          server: s,
+          sessions: [],
+          loading: true,
+          error: null,
+        })),
+      );
+    }
 
     // Fetch all in parallel
     const authHeaders: Record<string, string> = {};
@@ -538,12 +542,17 @@ export function SessionListScreen({
         server,
         sessions: result.status === "fulfilled" ? result.value : [],
         loading: false,
-        error: null,
+        error:
+          result.status === "fulfilled"
+            ? null
+            : result.reason instanceof Error
+              ? result.reason.message
+              : "无法加载会话",
       };
     });
 
     // Fetch official gateway sessions for Pro users
-    const session = await loadSession();
+    const session = await getValidSession();
     const officialUrls = new Set<string>();
     if (session && session.user.plan === "pro") {
       try {
@@ -571,7 +580,12 @@ export function SessionListScreen({
             },
             sessions,
             loading: false,
-            error: null,
+            error:
+              result.status === "fulfilled"
+                ? null
+                : result.reason instanceof Error
+                  ? result.reason.message
+                  : "无法加载官方网关会话",
           });
         }
       } catch {}
@@ -587,7 +601,9 @@ export function SessionListScreen({
       }
     }
 
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (!silent) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    }
     setGroups(finalGroups);
     setInitialLoad(false);
   }, [gatewayBaseUrl, deviceToken]);
@@ -600,6 +616,10 @@ export function SessionListScreen({
   useFocusEffect(
     useCallback(() => {
       fetchAllGateways();
+      const timer = setInterval(() => {
+        fetchAllGateways({ silent: true });
+      }, PRO_SESSION_REFRESH_INTERVAL_MS);
+      return () => clearInterval(timer);
     }, [fetchAllGateways]),
   );
 

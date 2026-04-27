@@ -7,12 +7,21 @@ const LINKSHELL_DIR = join(homedir(), ".linkshell");
 
 type ServiceName = "gateway" | "bridge";
 
+export interface ServiceMetadata {
+  keepAwake?: boolean;
+  startedAt?: number;
+}
+
 function pidFile(service: ServiceName): string {
   return join(LINKSHELL_DIR, `${service}.pid`);
 }
 
 function logFile(service: ServiceName): string {
   return join(LINKSHELL_DIR, `${service}.log`);
+}
+
+function metadataFile(service: ServiceName): string {
+  return join(LINKSHELL_DIR, `${service}.json`);
 }
 
 export function savePid(service: ServiceName, pid: number): void {
@@ -40,6 +49,7 @@ export function readPid(service: ServiceName): number | null {
 
 export function removePid(service: ServiceName): void {
   try { unlinkSync(pidFile(service)); } catch {}
+  try { unlinkSync(metadataFile(service)); } catch {}
 }
 
 export function getLogFile(service: ServiceName): string {
@@ -48,6 +58,24 @@ export function getLogFile(service: ServiceName): string {
 
 export function getPidFile(service: ServiceName): string {
   return pidFile(service);
+}
+
+export function saveMetadata(
+  service: ServiceName,
+  metadata: ServiceMetadata,
+): void {
+  mkdirSync(LINKSHELL_DIR, { recursive: true });
+  writeFileSync(metadataFile(service), JSON.stringify(metadata), "utf8");
+}
+
+export function readMetadata(service: ServiceName): ServiceMetadata | null {
+  try {
+    const file = metadataFile(service);
+    if (!existsSync(file)) return null;
+    return JSON.parse(readFileSync(file, "utf8")) as ServiceMetadata;
+  } catch {
+    return null;
+  }
 }
 
 export function spawnDaemon(service: ServiceName, args: string[]): number {

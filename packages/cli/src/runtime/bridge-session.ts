@@ -18,6 +18,7 @@ import { ScrollbackBuffer } from "./scrollback.js";
 import { ScreenFallback } from "./screen-fallback.js";
 import { ScreenShare } from "./screen-share.js";
 import { getLanIp } from "../utils/lan-ip.js";
+import { startKeepAwake, type KeepAwakeHandle } from "../utils/keep-awake.js";
 
 export interface BridgeSessionOptions {
   gatewayUrl: string;
@@ -32,6 +33,7 @@ export interface BridgeSessionOptions {
   screen?: boolean;
   providerConfig: ProviderConfig;
   authToken?: string;
+  keepAwake?: boolean;
 }
 
 const HEARTBEAT_INTERVAL = 15_000;
@@ -150,6 +152,7 @@ export class BridgeSession {
   private screenCapture: ScreenFallback | undefined;
   private screenShare: ScreenShare | undefined;
   private tunnelSockets = new Map<string, WebSocket>();
+  private keepAwake: KeepAwakeHandle | undefined;
 
   constructor(options: BridgeSessionOptions) {
     this.options = options;
@@ -168,6 +171,11 @@ export class BridgeSession {
     );
     if (!this.sessionId) {
       await this.createPairing();
+    }
+    if (this.options.keepAwake) {
+      this.keepAwake = startKeepAwake();
+    } else {
+      process.stderr.write("[bridge] keep-awake disabled\n");
     }
     await this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
     this.connectGateway();
@@ -1622,6 +1630,8 @@ export class BridgeSession {
     this.exited = true;
     this.stopHeartbeat();
     this.stopScreenCapture();
+    this.keepAwake?.stop();
+    this.keepAwake = undefined;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;

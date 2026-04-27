@@ -272,23 +272,21 @@ export async function fetchMySessions(
     clientCount: number;
     provider: string | null;
     hostname: string | null;
+    platform: string | null;
     projectName: string | null;
+    cwd: string | null;
     lastActivity: number;
   }[]
 > {
   const session = await getValidSession();
-  if (!session) return [];
+  if (!session) throw new Error("Not signed in");
 
-  try {
-    const res = await fetchWithTimeout(`${gatewayUrl}/sessions/mine`, {
-      headers: {
-        Authorization: `Bearer ${session.accessToken}`,
-      },
-    }, 5_000);
-    if (res.ok) {
-      const body = (await res.json()) as { sessions: any[] };
-      return body.sessions ?? [];
-    }
-  } catch {}
-  return [];
+  const res = await fetchWithTimeout(`${gatewayUrl}/sessions/mine`, {
+    headers: {
+      Authorization: `Bearer ${session.accessToken}`,
+    },
+  }, 5_000);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = (await res.json()) as { sessions: any[] };
+  return body.sessions ?? [];
 }

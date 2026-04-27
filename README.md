@@ -80,12 +80,13 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 linkshell start --daemon --provider claude
 ```
 
-The CLI starts a built-in Gateway + terminal bridge in the background, then prints a pairing code and QR code. Scan to connect. Disconnecting the app does not affect the background process.
+The CLI starts a built-in Gateway + terminal bridge in the background, then prints a pairing code and QR code. Scan to connect. Disconnecting the app does not affect the background process. On macOS, the bridge prevents idle system sleep by default so locking the screen does not usually drop the session.
 
 ## Commands
 
 ```bash
 linkshell start --daemon --provider claude   # Start in background (built-in Gateway + bridge)
+linkshell start --daemon --provider claude --no-keep-awake  # macOS: allow idle sleep
 linkshell start --provider claude             # Start in foreground
 linkshell status                              # Check running status
 linkshell stop                                # Stop all background processes
@@ -131,6 +132,22 @@ linkshell start --daemon --provider claude
 ```
 
 With your phone and computer on the same WiFi, the CLI auto-detects the LAN IP and generates a QR code.
+
+### macOS Lock Screen / Sleep
+
+`linkshell start` enables macOS keep-awake by default while the bridge is running. This uses `caffeinate -i -w <bridge-pid>` to prevent idle system sleep without keeping the display on or unlocking the screen.
+
+```bash
+linkshell start --daemon --provider claude
+```
+
+To favor battery life and allow idle sleep:
+
+```bash
+linkshell start --daemon --provider claude --no-keep-awake
+# or
+LINKSHELL_KEEP_AWAKE=0 linkshell start --daemon --provider claude
+```
 
 ### Remote Desktop Viewing
 

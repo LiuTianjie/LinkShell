@@ -80,12 +80,13 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 linkshell start --daemon --provider claude
 ```
 
-CLI 会在后台启动内置 Gateway + 终端桥接，打印配对码和 QR 码。手机扫码即连。App 断开不影响后台进程。
+CLI 会在后台启动内置 Gateway + 终端桥接，打印配对码和 QR 码。手机扫码即连。App 断开不影响后台进程。macOS 上会默认阻止系统闲置睡眠，所以锁屏后一般不会掉线。
 
 ## 命令一览
 
 ```bash
 linkshell start --daemon --provider claude   # 后台启动（内置 Gateway + 桥接）
+linkshell start --daemon --provider claude --no-keep-awake  # macOS：允许闲置睡眠
 linkshell start --provider claude             # 前台启动
 linkshell status                              # 查看运行状态
 linkshell stop                                # 停止所有后台进程
@@ -131,6 +132,22 @@ linkshell start --daemon --provider claude
 ```
 
 手机和电脑在同一 WiFi，CLI 自动检测局域网 IP 生成 QR 码。
+
+### macOS 锁屏 / 睡眠
+
+`linkshell start` 会在 bridge 运行期间默认开启 macOS 保活。内部使用 `caffeinate -i -w <bridge-pid>` 阻止系统闲置睡眠，但不会强制点亮屏幕，也不会解锁电脑。
+
+```bash
+linkshell start --daemon --provider claude
+```
+
+如果更在意电量，希望允许系统闲置睡眠：
+
+```bash
+linkshell start --daemon --provider claude --no-keep-awake
+# 或
+LINKSHELL_KEEP_AWAKE=0 linkshell start --daemon --provider claude
+```
 
 ### 远程桌面查看
 
