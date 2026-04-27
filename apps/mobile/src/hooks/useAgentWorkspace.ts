@@ -345,7 +345,7 @@ export function useAgentWorkspace(
         model: input.model,
         reasoningEffort: input.reasoningEffort,
         permissionMode: input.permissionMode,
-        status: "running",
+        status: "idle",
         archived: false,
         lastActivityAt: now,
         createdAt: conversationsRef.current.find((item) => item.id === conversationId)?.createdAt ?? now,

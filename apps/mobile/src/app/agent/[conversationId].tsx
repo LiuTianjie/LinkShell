@@ -10,7 +10,7 @@ export default function AgentConversationRoute() {
 
   return (
     <AgentConversationScreen
-      conversationId={decodeURIComponent(conversationId ?? "")}
+      conversationId={conversationId ?? ""}
       workspace={ctx.agentWorkspace}
       onBack={() => router.back()}
     />

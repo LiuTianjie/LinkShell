@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
 import type { SessionInfo } from "../hooks/useSessionManager";
+import type { AgentConversationRecord } from "../storage/agent-workspace";
 import { loadProjects, type ProjectRecord } from "../storage/projects";
 import { useTheme, type Theme } from "../theme";
 
@@ -41,6 +42,68 @@ function shortPath(path: string): string {
   const parts = path.split("/").filter(Boolean);
   if (parts.length <= 3) return path;
   return `…/${parts.slice(-3).join("/")}`;
+}
+
+function conversationGroupKey(conversation: AgentConversationRecord): string {
+  return [
+    conversation.serverUrl.replace(/\/+$/, ""),
+    conversation.sessionId,
+    conversation.cwd || conversation.agentSessionId || conversation.id,
+  ].join("\u0000");
+}
+
+function conversationRank(
+  conversation: AgentConversationRecord,
+  timelineLength: number,
+): number {
+  const statusRank =
+    conversation.status === "waiting_permission" ? 60 :
+    conversation.status === "running" ? 50 :
+    conversation.status === "idle" ? 20 :
+    conversation.status === "error" ? 10 :
+    0;
+  return (
+    timelineLength * 1000 +
+    (conversation.agentSessionId ? 200 : 0) +
+    (conversation.lastMessagePreview ? 100 : 0) +
+    statusRank
+  );
+}
+
+function collapseDuplicateConversations(
+  conversations: AgentConversationRecord[],
+  getTimelineLength: (conversationId: string) => number,
+): AgentConversationRecord[] {
+  const bestByKey = new Map<string, AgentConversationRecord>();
+  for (const conversation of conversations) {
+    const key = conversationGroupKey(conversation);
+    const current = bestByKey.get(key);
+    if (!current) {
+      bestByKey.set(key, conversation);
+      continue;
+    }
+    const currentRank = conversationRank(current, getTimelineLength(current.id));
+    const nextRank = conversationRank(conversation, getTimelineLength(conversation.id));
+    if (
+      nextRank > currentRank ||
+      (nextRank === currentRank && conversation.lastActivityAt > current.lastActivityAt)
+    ) {
+      bestByKey.set(key, conversation);
+    }
+  }
+  return [...bestByKey.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+}
+
+function isEmptyFallbackConversation(
+  conversation: AgentConversationRecord,
+  timelineLength: number,
+): boolean {
+  return (
+    conversation.cwd === "~" &&
+    !conversation.agentSessionId &&
+    !conversation.lastMessagePreview &&
+    timelineLength === 0
+  );
 }
 
 function SectionTitle({ children, theme }: { children: React.ReactNode; theme: Theme }) {
@@ -102,11 +165,18 @@ export function AgentWorkspaceScreen({
     [availableSessions],
   );
 
-  const visibleConversations = showArchived
-    ? workspace.archivedConversations
-    : workspace.conversations;
+  const visibleConversations = useMemo(
+    () =>
+      collapseDuplicateConversations(
+        showArchived ? workspace.archivedConversations : workspace.conversations,
+        (conversationId) => workspace.getTimeline(conversationId).length,
+      ).filter((conversation) =>
+        !isEmptyFallbackConversation(conversation, workspace.getTimeline(conversation.id).length),
+      ),
+    [showArchived, workspace],
+  );
   const recentProjects = projects.slice(0, 6);
-  const hasResumeTarget = recentProjects.length > 0 || workspace.conversations.length > 0;
+  const hasResumeTarget = recentProjects.length > 0 || visibleConversations.length > 0;
 
   const openProject = useCallback(
     async (project: ProjectRecord) => {
@@ -135,7 +205,7 @@ export function AgentWorkspaceScreen({
         if (id) onOpenConversation(id);
         return;
       }
-      const conversation = workspace.conversations[0];
+      const conversation = visibleConversations[0];
       if (conversation) {
         const id = await workspace.resumeConversation(conversation.id);
         if (id) onOpenConversation(id);
@@ -144,14 +214,16 @@ export function AgentWorkspaceScreen({
       onOpenConnectionSheet();
       return;
     }
-    const cwd = session.cwd || [...session.terminals.values()][0]?.cwd || "~";
+    const project = recentProjects.find((item) => item.sessionId === session.sessionId);
+    const cwd = session.cwd || [...session.terminals.values()][0]?.cwd || project?.cwd || "~";
     const id = await workspace.openConversation({
       sessionId: session.sessionId,
+      serverUrl: session.gatewayUrl,
       cwd,
-      title: session.projectName || session.hostname || "Agent",
+      title: session.projectName || project?.projectName || session.hostname || "Agent",
     });
     if (id) onOpenConversation(id);
-  }, [availableSessions, onOpenConnectionSheet, onOpenConversation, recentProjects, workspace]);
+  }, [availableSessions, onOpenConnectionSheet, onOpenConversation, recentProjects, visibleConversations, workspace]);
 
   const primaryTitle =
     availableSessions.length > 0

@@ -389,11 +389,14 @@ export class AgentWorkspaceProxy {
 
     const cwd = payload.cwd ?? this.input.cwd;
     let agentSessionId = payload.agentSessionId;
-    const existingConversation =
+    let existingConversation =
       (payload.conversationId ? this.conversations.get(payload.conversationId) : undefined) ??
       (agentSessionId ? this.conversations.get(this.conversationByAgentSessionId.get(agentSessionId) ?? "") : undefined);
 
     if (existingConversation) {
+      if (payload.conversationId && existingConversation.id !== payload.conversationId) {
+        existingConversation = this.adoptConversationId(existingConversation.id, payload.conversationId);
+      }
       this.activeConversationId = existingConversation.id;
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.opened",
@@ -1032,6 +1035,60 @@ export class AgentWorkspaceProxy {
       entry.type === "tool_call" && entry.toolCall?.id === toolId,
     );
     return item?.toolCall;
+  }
+
+  private adoptConversationId(oldId: string, newId: string): AgentConversation {
+    const conversation = this.conversations.get(oldId);
+    if (!conversation) {
+      const existing = this.conversations.get(newId);
+      if (!existing) throw new Error(`Unknown agent conversation ${oldId}`);
+      return existing;
+    }
+
+    const target = this.conversations.get(newId);
+    const oldTimeline = this.timelines.get(oldId) ?? [];
+    const newTimeline = this.timelines.get(newId) ?? [];
+    const mergedTimeline = new Map<string, AgentTimelineItem>();
+    for (const item of [...newTimeline, ...oldTimeline]) {
+      mergedTimeline.set(item.id, { ...item, conversationId: newId });
+    }
+
+    if (target && target !== conversation) {
+      conversation.agentSessionId = conversation.agentSessionId ?? target.agentSessionId;
+      conversation.title = conversation.title ?? target.title;
+      conversation.model = conversation.model ?? target.model;
+      conversation.reasoningEffort = conversation.reasoningEffort ?? target.reasoningEffort;
+      conversation.permissionMode = conversation.permissionMode ?? target.permissionMode;
+      conversation.lastMessagePreview = conversation.lastMessagePreview ?? target.lastMessagePreview;
+      conversation.createdAt = Math.min(conversation.createdAt, target.createdAt);
+      conversation.lastActivityAt = Math.max(conversation.lastActivityAt, target.lastActivityAt);
+    }
+
+    this.conversations.delete(oldId);
+    conversation.id = newId;
+    this.conversations.set(newId, conversation);
+    this.timelines.delete(oldId);
+    this.timelines.set(
+      newId,
+      [...mergedTimeline.values()]
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(-MAX_TIMELINE_ITEMS),
+    );
+
+    for (const [agentSessionId, conversationId] of this.conversationByAgentSessionId) {
+      if (conversationId === oldId) {
+        this.conversationByAgentSessionId.set(agentSessionId, newId);
+      }
+    }
+    for (const [toolId, conversationId] of this.toolConversationIds) {
+      if (conversationId === oldId) {
+        this.toolConversationIds.set(toolId, newId);
+      }
+    }
+    if (this.activeConversationId === oldId) {
+      this.activeConversationId = newId;
+    }
+    return conversation;
   }
 
   private emitItem(conversationId: string, item: AgentTimelineItem): void {

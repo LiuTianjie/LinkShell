@@ -13,7 +13,12 @@ export default function AgentTab() {
       sessions={[...ctx.manager.sessions.values()]}
       refreshKey={ctx.sessionRefreshKey}
       onOpenConnectionSheet={() => ctx.setConnectionSheetVisible(true)}
-      onOpenConversation={(conversationId) => router.push(`/agent/${encodeURIComponent(conversationId)}`)}
+      onOpenConversation={(conversationId) =>
+        router.push({
+          pathname: "/agent/[conversationId]",
+          params: { conversationId },
+        })
+      }
     />
   );
 }
