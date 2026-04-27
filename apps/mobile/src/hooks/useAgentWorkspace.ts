@@ -125,7 +125,8 @@ export function useAgentWorkspace(
       [...manager.sessions.values()].filter((session) =>
         session.status === "connected" ||
         session.status === "reconnecting" ||
-        session.status === "connecting",
+        session.status === "connecting" ||
+        session.status === "host_disconnected",
       ),
     [manager.sessions],
   );

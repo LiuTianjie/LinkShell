@@ -10,6 +10,8 @@ export default function AgentTab() {
   return (
     <AgentWorkspaceScreen
       workspace={ctx.agentWorkspace}
+      sessions={[...ctx.manager.sessions.values()]}
+      refreshKey={ctx.sessionRefreshKey}
       onOpenConnectionSheet={() => ctx.setConnectionSheetVisible(true)}
       onOpenConversation={(conversationId) => router.push(`/agent/${encodeURIComponent(conversationId)}`)}
     />

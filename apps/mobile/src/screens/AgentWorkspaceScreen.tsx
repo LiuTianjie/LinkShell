@@ -10,11 +10,14 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
+import type { SessionInfo } from "../hooks/useSessionManager";
 import { loadProjects, type ProjectRecord } from "../storage/projects";
 import { useTheme, type Theme } from "../theme";
 
 interface AgentWorkspaceScreenProps {
   workspace: AgentWorkspaceHandle;
+  sessions?: SessionInfo[];
+  refreshKey?: number;
   onOpenConnectionSheet: () => void;
   onOpenConversation: (conversationId: string) => void;
 }
@@ -58,6 +61,8 @@ function SectionTitle({ children, theme }: { children: React.ReactNode; theme: T
 
 export function AgentWorkspaceScreen({
   workspace,
+  sessions,
+  refreshKey,
   onOpenConnectionSheet,
   onOpenConversation,
 }: AgentWorkspaceScreenProps) {
@@ -66,13 +71,35 @@ export function AgentWorkspaceScreen({
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [showArchived, setShowArchived] = useState(false);
 
+  const availableSessions = useMemo(
+    () =>
+      (sessions ?? workspace.connectedSessions).filter((session) =>
+        session.status === "connected" ||
+        session.status === "connecting" ||
+        session.status === "reconnecting" ||
+        session.status === "host_disconnected",
+      ),
+    [sessions, workspace.connectedSessions],
+  );
+
+  const sessionSignature = useMemo(
+    () => availableSessions.map((session) => `${session.sessionId}:${session.status}`).join("|"),
+    [availableSessions],
+  );
+
   useEffect(() => {
     loadProjects().then((items) => setProjects(items.slice(0, 6))).catch(() => {});
-  }, [workspace.conversations.length]);
+  }, [workspace.conversations.length, refreshKey, sessionSignature]);
+
+  useEffect(() => {
+    for (const session of availableSessions) {
+      workspace.requestCapabilities(session.sessionId);
+    }
+  }, [sessionSignature, workspace.requestCapabilities]);
 
   const connectedSessionIds = useMemo(
-    () => new Set(workspace.connectedSessions.map((session) => session.sessionId)),
-    [workspace.connectedSessions],
+    () => new Set(availableSessions.map((session) => session.sessionId)),
+    [availableSessions],
   );
 
   const visibleConversations = showArchived
@@ -100,7 +127,7 @@ export function AgentWorkspaceScreen({
   );
 
   const startFromSession = useCallback(async () => {
-    const session = workspace.connectedSessions[0];
+    const session = availableSessions[0];
     if (!session) {
       const project = recentProjects[0];
       if (project) {
@@ -124,17 +151,17 @@ export function AgentWorkspaceScreen({
       title: session.projectName || session.hostname || "Agent",
     });
     if (id) onOpenConversation(id);
-  }, [onOpenConnectionSheet, onOpenConversation, recentProjects, workspace]);
+  }, [availableSessions, onOpenConnectionSheet, onOpenConversation, recentProjects, workspace]);
 
   const primaryTitle =
-    workspace.connectedSessions.length > 0
+    availableSessions.length > 0
       ? "新建 Agent 对话"
       : hasResumeTarget
         ? "继续 Agent 对话"
         : "连接 Mac";
   const primarySubtitle =
-    workspace.connectedSessions.length > 0
-      ? `${workspace.connectedSessions[0]?.hostname ?? "本机"} · ${workspace.connectedSessions.length} 个在线会话`
+    availableSessions.length > 0
+      ? `${availableSessions[0]?.hostname ?? "本机"} · ${availableSessions.length} 个可用会话`
       : hasResumeTarget
         ? "复用已有配对恢复会话，无需重新扫码"
         : "首次使用需要连接 CLI";
@@ -181,7 +208,7 @@ export function AgentWorkspaceScreen({
                 backgroundColor: "rgba(255,255,255,0.16)",
               }}
             >
-              {workspace.connectedSessions.length > 0 ? (
+              {availableSessions.length > 0 ? (
                 <AppSymbol name="sparkles" size={17} color="#fff" />
               ) : hasResumeTarget ? (
                 <AppSymbol name="arrow.clockwise" size={17} color="#fff" />
@@ -201,13 +228,20 @@ export function AgentWorkspaceScreen({
           </Pressable>
         </View>
 
-        {workspace.connectedSessions.length > 0 ? (
+        {availableSessions.length > 0 ? (
           <View style={{ gap: 8 }}>
             <SectionTitle theme={theme}>在线 Mac</SectionTitle>
             <View style={{ paddingHorizontal: 20, gap: 8 }}>
-              {workspace.connectedSessions.map((session) => {
+              {availableSessions.map((session) => {
                 const caps = workspace.capabilitiesBySessionId.get(session.sessionId);
-                const meta = statusMeta(caps?.enabled ? "idle" : "unavailable", theme);
+                const meta = statusMeta(
+                  caps?.enabled
+                    ? "idle"
+                    : session.status === "host_disconnected"
+                      ? "unavailable"
+                      : "running",
+                  theme,
+                );
                 return (
                   <View
                     key={session.sessionId}
