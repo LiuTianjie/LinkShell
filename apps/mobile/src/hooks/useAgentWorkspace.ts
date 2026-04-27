@@ -48,6 +48,7 @@ export interface AgentWorkspaceHandle {
       model?: string;
       reasoningEffort?: AgentReasoningEffort;
       permissionMode?: AgentPermissionMode;
+      attachments?: AgentContentBlock[];
     },
   ) => void;
   cancel: (conversationId: string) => void;
@@ -382,19 +383,25 @@ export function useAgentWorkspace(
         model?: string;
         reasoningEffort?: AgentReasoningEffort;
         permissionMode?: AgentPermissionMode;
+        attachments?: AgentContentBlock[];
       },
     ) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
       const trimmed = text.trim();
-      if (!conversation || !trimmed) return;
+      const attachments = (options?.attachments ?? []).filter((block) => block.type === "image" && block.data);
+      if (!conversation || (!trimmed && attachments.length === 0)) return;
       const clientMessageId = `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const contentBlocks: AgentContentBlock[] = [
+        ...(trimmed ? [{ type: "text" as const, text: trimmed }] : []),
+        ...attachments,
+      ];
       manager.sendAgentWorkspaceEnvelope(
         conversation.sessionId,
         "agent.v2.prompt",
         {
           conversationId,
           clientMessageId,
-          contentBlocks: [{ type: "text", text: trimmed }],
+          contentBlocks,
           model: options?.model,
           reasoningEffort: options?.reasoningEffort,
           permissionMode: options?.permissionMode,

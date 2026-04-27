@@ -5,7 +5,7 @@ import {
   type Envelope,
 } from "@linkshell/protocol";
 import { AcpClient } from "./acp-client.js";
-import type { AgentProvider } from "./provider-resolver.js";
+import type { AgentProtocol, AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
 
 type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
@@ -237,6 +237,7 @@ export class AgentWorkspaceProxy {
   private permissionWaiters = new Map<string, PendingPermissionWaiter>();
   private permissionSources = new Map<string, string>();
   private toolConversationIds = new Map<string, string>();
+  private agentProtocol: AgentProtocol | undefined;
 
   constructor(
     private readonly input: {
@@ -327,6 +328,7 @@ export class AgentWorkspaceProxy {
     }
 
     try {
+      this.agentProtocol = resolved.protocol;
       this.client = new AcpClient({
         command: resolved.command,
         protocol: resolved.protocol,
@@ -350,6 +352,7 @@ export class AgentWorkspaceProxy {
 
   private sendCapabilities(): void {
     const enabled = Boolean(this.client && this.initialized && !this.error);
+    const supportsImages = enabled && this.agentProtocol === "codex-app-server";
     this.input.send(createEnvelope({
       type: "agent.v2.capabilities",
       sessionId: this.input.sessionId,
@@ -361,7 +364,7 @@ export class AgentWorkspaceProxy {
         error: enabled ? undefined : this.error,
         supportsSessionList: enabled,
         supportsSessionLoad: enabled,
-        supportsImages: false,
+        supportsImages,
         supportsAudio: false,
         supportsPermission: enabled,
         supportsPlan: enabled,
@@ -484,6 +487,20 @@ export class AgentWorkspaceProxy {
       this.conversations.get(payload.conversationId) ??
       await this.openConversation({ conversationId: payload.conversationId });
     if (!conversation || !this.client || !conversation.agentSessionId) return;
+
+    if (payload.contentBlocks.some((block) => block.type === "image") && this.agentProtocol !== "codex-app-server") {
+      conversation.status = "idle";
+      conversation.lastActivityAt = Date.now();
+      this.emitConversation(conversation);
+      this.addItem(conversation.id, {
+        id: id("error"),
+        conversationId: conversation.id,
+        type: "error",
+        error: "当前 Agent provider 暂不支持图片输入，请升级 CLI 或切换到 Codex。",
+        createdAt: Date.now(),
+      });
+      return;
+    }
 
     conversation.model = payload.model ?? conversation.model;
     conversation.reasoningEffort = payload.reasoningEffort ?? conversation.reasoningEffort;

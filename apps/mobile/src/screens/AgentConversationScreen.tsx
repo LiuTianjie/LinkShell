@@ -13,11 +13,14 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { MenuView } from "@react-native-menu/menu";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
 import type {
+  AgentContentBlock,
   AgentConversationRecord,
   AgentPermissionMode,
   AgentReasoningEffort,
@@ -57,6 +60,8 @@ const PERMISSION_OPTIONS: Option<AgentPermissionMode>[] = [
 ];
 
 const PROMPT_CHIPS = ["继续", "解释", "修复", "写测试", "总结当前改动"];
+const MAX_IMAGE_ATTACHMENTS = 3;
+const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
 
 function showOptionSheet<T extends string>(
   title: string,
@@ -135,6 +140,17 @@ function copy(value: string): void {
   Haptics.selectionAsync().catch(() => {});
 }
 
+function imageBlockFromAsset(asset: ImagePicker.ImagePickerAsset): AgentContentBlock | null {
+  if (!asset.base64) return null;
+  const mimeType = asset.mimeType || "image/jpeg";
+  return {
+    type: "image",
+    data: `data:${mimeType};base64,${asset.base64}`,
+    mimeType,
+    text: asset.fileName || "图片附件",
+  };
+}
+
 type MessagePart =
   | { type: "text"; text: string }
   | { type: "code"; language?: string; code: string };
@@ -209,6 +225,65 @@ function CodeBlock({
           {code}
         </Text>
       </ScrollView>
+    </View>
+  );
+}
+
+function MessageContent({
+  blocks,
+  fallbackText,
+  theme,
+  inverse = false,
+}: {
+  blocks?: AgentContentBlock[];
+  fallbackText?: string;
+  theme: Theme;
+  inverse?: boolean;
+}) {
+  const normalized = blocks?.length
+    ? blocks
+    : fallbackText
+      ? [{ type: "text" as const, text: fallbackText }]
+      : [];
+
+  return (
+    <View style={{ gap: 9 }}>
+      {normalized.map((block, index) => {
+        if (block.type === "image") {
+          return (
+            <View
+              key={`image-${index}`}
+              style={{
+                borderRadius: 12,
+                borderCurve: "continuous",
+                overflow: "hidden",
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: inverse ? "rgba(255,255,255,0.28)" : theme.separator,
+                backgroundColor: inverse ? "rgba(255,255,255,0.12)" : theme.bgInput,
+              }}
+            >
+              {block.data ? (
+                <Image
+                  source={{ uri: block.data }}
+                  contentFit="cover"
+                  style={{ width: 220, maxWidth: "100%", aspectRatio: 4 / 3 }}
+                />
+              ) : (
+                <View style={{ width: 220, maxWidth: "100%", aspectRatio: 4 / 3, alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  <AppSymbol name="photo" size={22} color={inverse ? "rgba(255,255,255,0.78)" : theme.textTertiary} />
+                  <Text style={{ color: inverse ? "rgba(255,255,255,0.78)" : theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
+                    图片附件
+                  </Text>
+                </View>
+              )}
+            </View>
+          );
+        }
+
+        return block.text ? (
+          <RichText key={`text-${index}`} text={block.text} theme={theme} inverse={inverse} />
+        ) : null;
+      })}
     </View>
   );
 }
@@ -313,7 +388,7 @@ function TimelineItemView({
             </Text>
           </View>
         ) : null}
-        <RichText text={text} theme={theme} inverse={isUser} />
+        <MessageContent blocks={item.content} fallbackText={text} theme={theme} inverse={isUser} />
       </View>
     );
   }
@@ -414,20 +489,122 @@ export function AgentConversationScreen({
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode | undefined>(
     conversation?.permissionMode ?? "read_only",
   );
+  const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
+  const capabilities = conversation ? workspace.capabilitiesBySessionId.get(conversation.sessionId) : undefined;
+  const supportsImages = Boolean(capabilities?.enabled && capabilities.supportsImages);
   const running = conversation?.status === "running" || conversation?.status === "waiting_permission";
   const meta = statusMeta(conversation?.status ?? "unavailable", theme);
   const permission = permissionMeta(permissionMode, theme);
+  const canSend = Boolean(text.trim() || attachments.length > 0);
 
   const send = useCallback(() => {
     const value = text.trim();
-    if (!value || !conversation) return;
-    workspace.sendPrompt(conversation.id, value, { model, reasoningEffort: effort, permissionMode });
+    if (!canSend || !conversation) return;
+    workspace.sendPrompt(conversation.id, value, {
+      model,
+      reasoningEffort: effort,
+      permissionMode,
+      attachments,
+    });
     setText("");
-  }, [conversation, effort, model, permissionMode, text, workspace]);
+    setAttachments([]);
+  }, [attachments, canSend, conversation, effort, model, permissionMode, text, workspace]);
 
   const sendChip = useCallback((value: string) => {
     setText((current) => current ? `${current}\n${value}` : value);
   }, []);
+
+  const appendImageBlocks = useCallback((assets: ImagePicker.ImagePickerAsset[]) => {
+    const blocks = assets
+      .map(imageBlockFromAsset)
+      .filter((block): block is AgentContentBlock => Boolean(block));
+    if (blocks.length === 0) {
+      Alert.alert("无法添加图片", "没有读取到图片数据，请换一张图片再试。");
+      return;
+    }
+
+    const oversized = blocks.find((block) => (block.data?.length ?? 0) > MAX_IMAGE_DATA_URL_LENGTH);
+    if (oversized) {
+      Alert.alert("图片太大", "请选择较小的截图或照片。");
+      return;
+    }
+
+    setAttachments((current) => {
+      const room = MAX_IMAGE_ATTACHMENTS - current.length;
+      if (room <= 0) {
+        Alert.alert("图片已满", `一次最多发送 ${MAX_IMAGE_ATTACHMENTS} 张图片。`);
+        return current;
+      }
+      return [...current, ...blocks.slice(0, room)];
+    });
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+
+  const pickImages = useCallback(async (source: "camera" | "library") => {
+    if (!supportsImages) {
+      Alert.alert("当前 Agent 不支持图片", "请升级 CLI 或切换到支持图片输入的 Codex Agent。");
+      return;
+    }
+    if (attachments.length >= MAX_IMAGE_ATTACHMENTS) {
+      Alert.alert("图片已满", `一次最多发送 ${MAX_IMAGE_ATTACHMENTS} 张图片。`);
+      return;
+    }
+
+    try {
+      if (source === "camera") {
+        const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permissionResult.granted) {
+          Alert.alert("需要相机权限", "允许访问相机后才能拍照发送。");
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ["images"],
+          base64: true,
+          quality: 0.55,
+        });
+        if (!result.canceled) appendImageBlocks(result.assets.slice(0, 1));
+        return;
+      }
+
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert("需要相册权限", "允许访问相册后才能选择图片发送。");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        base64: true,
+        quality: 0.55,
+        allowsMultipleSelection: true,
+        selectionLimit: Math.max(1, MAX_IMAGE_ATTACHMENTS - attachments.length),
+      });
+      if (!result.canceled) appendImageBlocks(result.assets);
+    } catch (error) {
+      Alert.alert("无法添加图片", error instanceof Error ? error.message : "图片选择失败");
+    }
+  }, [appendImageBlocks, attachments.length, supportsImages]);
+
+  const showAttachSheet = useCallback(() => {
+    if (!supportsImages) {
+      Alert.alert("当前 Agent 不支持图片", "请升级 CLI 或切换到支持图片输入的 Codex Agent。");
+      return;
+    }
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: ["取消", "拍照", "从相册选择"], cancelButtonIndex: 0 },
+        (index) => {
+          if (index === 1) pickImages("camera").catch(() => {});
+          if (index === 2) pickImages("library").catch(() => {});
+        },
+      );
+      return;
+    }
+    Alert.alert("添加图片", undefined, [
+      { text: "取消", style: "cancel" },
+      { text: "拍照", onPress: () => pickImages("camera").catch(() => {}) },
+      { text: "从相册选择", onPress: () => pickImages("library").catch(() => {}) },
+    ]);
+  }, [pickImages, supportsImages]);
 
   if (!conversation) {
     return (
@@ -555,6 +732,46 @@ export function AgentConversationScreen({
               ))}
             </View>
           </ScrollView>
+          {attachments.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {attachments.map((attachment, index) => (
+                  <View
+                    key={`${attachment.mimeType}-${index}`}
+                    style={{
+                      width: 70,
+                      height: 70,
+                      borderRadius: 12,
+                      borderCurve: "continuous",
+                      overflow: "hidden",
+                      backgroundColor: theme.bgInput,
+                    }}
+                  >
+                    {attachment.data ? (
+                      <Image source={{ uri: attachment.data }} contentFit="cover" style={{ width: "100%", height: "100%" }} />
+                    ) : null}
+                    <Pressable
+                      onPress={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                      hitSlop={8}
+                      style={{
+                        position: "absolute",
+                        top: 4,
+                        right: 4,
+                        width: 22,
+                        height: 22,
+                        borderRadius: 11,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: "rgba(0,0,0,0.55)",
+                      }}
+                    >
+                      <AppSymbol name="xmark" size={12} color="#fff" />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+          ) : null}
           <TextInput
             value={text}
             onChangeText={setText}
@@ -573,6 +790,21 @@ export function AgentConversationScreen({
           />
           <View style={{ gap: 7 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              {supportsImages ? (
+                <Pressable
+                  onPress={showAttachSheet}
+                  style={({ pressed }) => ({
+                    width: 34,
+                    height: 34,
+                    borderRadius: 17,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: pressed ? theme.accentLight : theme.bgInput,
+                  })}
+                >
+                  <AppSymbol name="photo" size={17} color={theme.textSecondary} />
+                </Pressable>
+              ) : null}
               <Pressable
                 onPress={() => showOptionSheet("Agent 权限", PERMISSION_OPTIONS, permissionMode, setPermissionMode)}
                 style={({ pressed }) => ({
@@ -610,7 +842,7 @@ export function AgentConversationScreen({
               ) : (
                 <Pressable
                   onPress={send}
-                  disabled={!text.trim()}
+                  disabled={!canSend}
                   style={({ pressed }) => ({
                     width: 38,
                     height: 38,
@@ -618,7 +850,7 @@ export function AgentConversationScreen({
                     alignItems: "center",
                     justifyContent: "center",
                     backgroundColor: pressed ? theme.accentSecondary : theme.accent,
-                    opacity: text.trim() ? 1 : 0.45,
+                    opacity: canSend ? 1 : 0.45,
                   })}
                 >
                   <AppSymbol name="arrow.up" size={18} color="#fff" />

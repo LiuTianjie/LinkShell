@@ -42,6 +42,7 @@ const FALLBACK_ICONS: Record<string, React.ComponentProps<typeof MaterialCommuni
   "mic.fill": "microphone",
   "mic.slash.fill": "microphone-off",
   "moon.fill": "moon-waning-crescent",
+  paperclip: "paperclip",
   pc: "microsoft-windows",
   photo: "image-outline",
   plus: "plus",

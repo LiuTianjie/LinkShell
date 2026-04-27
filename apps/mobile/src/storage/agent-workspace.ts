@@ -190,6 +190,21 @@ export async function saveAgentTimeline(
     .sort((a, b) => a.createdAt - b.createdAt)
     .slice(-MAX_TIMELINE_ITEMS);
   let serialized = JSON.stringify(next);
+  if (serialized.length > MAX_TIMELINE_BYTES) {
+    next = next.map((item) =>
+      item.type === "message" && item.content
+        ? {
+            ...item,
+            content: item.content.map((block) =>
+              block.type === "image"
+                ? { ...block, data: undefined, text: block.text || "图片附件" }
+                : block,
+            ),
+          }
+        : item,
+    );
+    serialized = JSON.stringify(next);
+  }
   while (serialized.length > MAX_TIMELINE_BYTES && next.length > 20) {
     next = next.slice(10);
     serialized = JSON.stringify(next);
