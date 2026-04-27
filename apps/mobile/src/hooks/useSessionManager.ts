@@ -84,6 +84,14 @@ export interface AgentToolCall {
   status: "pending" | "running" | "completed" | "failed";
 }
 
+export type AgentReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
+
 export interface AgentPlanStep {
   id: string;
   text: string;
@@ -201,7 +209,10 @@ export interface SessionManagerHandle {
   /** Shell history entries from the host */
   historyEntries: string[];
   initializeAgent: () => void;
-  sendAgentPrompt: (text: string) => void;
+  sendAgentPrompt: (
+    text: string,
+    options?: { model?: string; reasoningEffort?: AgentReasoningEffort },
+  ) => void;
   cancelAgent: () => void;
   sendAgentPermissionResponse: (
     requestId: string,
@@ -1523,7 +1534,10 @@ export function useSessionManager(): SessionManagerHandle {
   }, [getActive]);
 
   const sendAgentPromptFn = useCallback(
-    (text: string) => {
+    (
+      text: string,
+      options?: { model?: string; reasoningEffort?: AgentReasoningEffort },
+    ) => {
       const s = getActive();
       const trimmed = text.trim();
       if (!s || !trimmed) return;
@@ -1537,6 +1551,8 @@ export function useSessionManager(): SessionManagerHandle {
             agentSessionId: s.agent.activeAgentSessionId ?? undefined,
             clientMessageId: generateId(),
             contentBlocks: [{ type: "text", text: trimmed }],
+            model: options?.model,
+            reasoningEffort: options?.reasoningEffort,
           },
         }),
         { queue: true },

@@ -357,6 +357,8 @@ export class AgentSessionProxy {
     agentSessionId?: string;
     clientMessageId: string;
     contentBlocks: { type: "text" | "image"; text?: string; data?: string; mimeType?: string }[];
+    model?: string;
+    reasoningEffort?: string;
   }): Promise<void> {
     await this.ensureSession(this.input.cwd);
     if (!this.client || !this.agentSessionId) return;
@@ -380,6 +382,8 @@ export class AgentSessionProxy {
         sessionId: payload.agentSessionId ?? this.agentSessionId,
         content: payload.contentBlocks,
         clientMessageId: payload.clientMessageId,
+        model: payload.model,
+        reasoningEffort: payload.reasoningEffort,
       });
       this.currentTurnId = this.extractTurnId(result) ?? this.currentTurnId;
       if (this.status === "running") {

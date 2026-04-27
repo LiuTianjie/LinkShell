@@ -316,6 +316,14 @@ export const terminalHistoryResponsePayloadSchema = z.object({
 // ── Agent GUI / ACP payloads ───────────────────────────────────────
 
 export const agentProviderSchema = z.enum(["codex", "claude", "custom"]);
+export const agentReasoningEffortSchema = z.enum([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
 
 export const agentContentBlockSchema = z.object({
   type: z.enum(["text", "image"]),
@@ -385,6 +393,8 @@ export const agentPromptPayloadSchema = z.object({
   agentSessionId: z.string().optional(),
   clientMessageId: z.string().min(1),
   contentBlocks: z.array(agentContentBlockSchema).min(1),
+  model: z.string().min(1).optional(),
+  reasoningEffort: agentReasoningEffortSchema.optional(),
 });
 
 export const agentCancelPayloadSchema = z.object({

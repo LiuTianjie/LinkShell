@@ -30,7 +30,13 @@ import type { TerminalViewHandle } from "../components/TerminalView";
 import { ScreenView } from "../components/ScreenView";
 import { BrowserView } from "../components/BrowserView";
 import type { ConnectionStatus, TerminalStream } from "../hooks/useSession";
-import type { AgentMessage, AgentState, AgentToolCall, TerminalInfo } from "../hooks/useSessionManager";
+import type {
+  AgentMessage,
+  AgentReasoningEffort,
+  AgentState,
+  AgentToolCall,
+  TerminalInfo,
+} from "../hooks/useSessionManager";
 import { useTheme } from "../theme";
 import type { Theme } from "../theme";
 
@@ -121,7 +127,10 @@ interface SessionScreenProps {
   onRequestHistory?: () => void;
   agent: AgentState;
   onInitializeAgent: () => void;
-  onSendAgentPrompt: (text: string) => void;
+  onSendAgentPrompt: (
+    text: string,
+    options?: { model?: string; reasoningEffort?: AgentReasoningEffort },
+  ) => void;
   onCancelAgent: () => void;
   onSendAgentPermissionResponse: (
     requestId: string,
@@ -1144,7 +1153,10 @@ const AgentStage = memo(function AgentStage({
   agent: AgentState;
   hasControl: boolean;
   onInitialize: () => void;
-  onSendPrompt: (text: string) => void;
+  onSendPrompt: (
+    text: string,
+    options?: { model?: string; reasoningEffort?: AgentReasoningEffort },
+  ) => void;
   onCancel: () => void;
   onPermissionResponse: (
     requestId: string,
@@ -1154,15 +1166,17 @@ const AgentStage = memo(function AgentStage({
   theme: Theme;
 }) {
   const [text, setText] = useState("");
+  const [model, setModel] = useState<string | undefined>();
+  const [reasoningEffort, setReasoningEffort] = useState<AgentReasoningEffort | undefined>();
   const disabled = !hasControl || agent.status === "unavailable";
   const running = agent.status === "running" || agent.status === "waiting_permission";
 
   const send = useCallback(() => {
     const value = text.trim();
     if (!value || disabled) return;
-    onSendPrompt(value);
+    onSendPrompt(value, { model, reasoningEffort });
     setText("");
-  }, [disabled, onSendPrompt, text]);
+  }, [disabled, model, onSendPrompt, reasoningEffort, text]);
 
   useEffect(() => {
     if (!agent.capabilities) onInitialize();
@@ -1178,12 +1192,37 @@ const AgentStage = memo(function AgentStage({
     tools.length > 0 ||
     agent.plan.length > 0 ||
     agent.pendingPermissions.length > 0;
-  const providerLabel = formatAgentProvider(agent.capabilities?.provider);
+  const modelLabel = formatAgentModel(model);
+  const effortLabel = formatAgentEffort(reasoningEffort);
   const permissionLabel = hasControl
     ? agent.capabilities?.supportsPermission
       ? "权限按需确认"
       : "可发送消息"
     : "只读模式";
+  const showPermissionInfo = useCallback(() => {
+    Alert.alert(
+      hasControl ? "Agent 权限" : "只读模式",
+      hasControl
+        ? "这里显示当前 Agent 权限策略。Codex 发起命令、文件修改或 MCP 调用需要确认时，会在对话里出现授权卡片。"
+        : "当前设备没有控制权，只能查看 Agent 输出。先获取控制权后才能发送消息或处理授权。",
+    );
+  }, [hasControl]);
+  const showModelPicker = useCallback(() => {
+    showAgentOptionSheet({
+      title: "选择模型",
+      options: AGENT_MODEL_OPTIONS,
+      currentValue: model,
+      onSelect: setModel,
+    });
+  }, [model]);
+  const showEffortPicker = useCallback(() => {
+    showAgentOptionSheet({
+      title: "推理强度",
+      options: AGENT_EFFORT_OPTIONS,
+      currentValue: reasoningEffort,
+      onSelect: setReasoningEffort,
+    });
+  }, [reasoningEffort]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: 16 }}>
@@ -1502,17 +1541,24 @@ const AgentStage = memo(function AgentStage({
             }}
           />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View
-              style={{
+            <Pressable
+              onPress={showPermissionInfo}
+              style={({ pressed }) => ({
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 6,
                 borderRadius: 999,
                 paddingHorizontal: 9,
                 paddingVertical: 6,
-                backgroundColor: hasControl ? theme.accentLight : theme.bgInput,
-                maxWidth: "48%",
-              }}
+                backgroundColor: pressed
+                  ? theme.bgInput
+                  : hasControl
+                    ? theme.accentLight
+                    : theme.bgInput,
+                maxWidth: "42%",
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="查看 Agent 权限状态"
             >
               <AppSymbol
                 name={hasControl ? "lock.open.fill" : "eye.fill"}
@@ -1529,7 +1575,8 @@ const AgentStage = memo(function AgentStage({
               >
                 {permissionLabel}
               </Text>
-            </View>
+              <AppSymbol name="chevron.down" size={10} color={hasControl ? theme.warning : theme.textTertiary} />
+            </Pressable>
 
             <View style={{ flex: 1 }} />
 
@@ -1537,27 +1584,61 @@ const AgentStage = memo(function AgentStage({
               <ActivityIndicator size="small" color={theme.textTertiary} />
             ) : null}
 
-            <View
-              style={{
+            <Pressable
+              onPress={showModelPicker}
+              disabled={running}
+              style={({ pressed }) => ({
                 borderRadius: 999,
                 paddingHorizontal: 9,
                 paddingVertical: 6,
-                backgroundColor: theme.bgInput,
-                maxWidth: 92,
-              }}
+                backgroundColor: pressed ? theme.accentLight : theme.bgInput,
+                maxWidth: 96,
+                opacity: running ? 0.55 : 1,
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="切换 Agent 模型"
             >
               <Text
                 style={{
                   color: theme.textSecondary,
                   fontSize: 12,
                   fontWeight: "700",
-                  textTransform: "uppercase",
                 }}
                 numberOfLines={1}
               >
-                {providerLabel}
+                {modelLabel}
               </Text>
-            </View>
+            </Pressable>
+
+            <Pressable
+              onPress={showEffortPicker}
+              disabled={running}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                borderRadius: 999,
+                paddingHorizontal: 9,
+                paddingVertical: 6,
+                backgroundColor: pressed ? theme.accentLight : theme.bgInput,
+                maxWidth: 82,
+                opacity: running ? 0.55 : 1,
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="切换 Agent 推理强度"
+            >
+              <Text
+                style={{
+                  color: theme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: "700",
+                }}
+                numberOfLines={1}
+              >
+                {effortLabel}
+              </Text>
+              <AppSymbol name="chevron.down" size={10} color={theme.textTertiary} />
+            </Pressable>
 
             {running ? (
               <Pressable
@@ -1600,6 +1681,63 @@ const AgentStage = memo(function AgentStage({
     </View>
   );
 });
+
+const AGENT_MODEL_OPTIONS: Array<{ label: string; value?: string }> = [
+  { label: "默认模型", value: undefined },
+  { label: "GPT-5.5", value: "gpt-5.5" },
+  { label: "GPT-5.4", value: "gpt-5.4" },
+  { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
+  { label: "GPT-5.3 Codex", value: "gpt-5.3-codex" },
+];
+
+const AGENT_EFFORT_OPTIONS: Array<{ label: string; value?: AgentReasoningEffort }> = [
+  { label: "默认强度", value: undefined },
+  { label: "低", value: "low" },
+  { label: "中", value: "medium" },
+  { label: "高", value: "high" },
+  { label: "超高", value: "xhigh" },
+];
+
+function showAgentOptionSheet<T extends string>({
+  title,
+  options,
+  currentValue,
+  onSelect,
+}: {
+  title: string;
+  options: Array<{ label: string; value?: T }>;
+  currentValue?: T;
+  onSelect: (value: T | undefined) => void;
+}) {
+  const labels = options.map((option) =>
+    option.value === currentValue ? `${option.label} ✓` : option.label,
+  );
+  if (Platform.OS === "ios") {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title,
+        options: ["取消", ...labels],
+        cancelButtonIndex: 0,
+      },
+      (index) => {
+        if (index <= 0) return;
+        onSelect(options[index - 1]?.value);
+      },
+    );
+    return;
+  }
+  Alert.alert(
+    title,
+    undefined,
+    [
+      { text: "取消", style: "cancel" },
+      ...options.map((option, index) => ({
+        text: labels[index],
+        onPress: () => onSelect(option.value),
+      })),
+    ],
+  );
+}
 
 function compactAgentMessages(messages: AgentMessage[]): AgentMessage[] {
   const compacted: AgentMessage[] = [];
@@ -1662,10 +1800,20 @@ function agentStatusMeta(status: AgentState["status"], theme: Theme) {
   }
 }
 
-function formatAgentProvider(provider?: string | null): string {
-  if (provider === "claude") return "Claude";
-  if (provider === "custom") return "Custom";
-  return "Codex";
+function formatAgentModel(model?: string): string {
+  if (!model) return "默认模型";
+  const option = AGENT_MODEL_OPTIONS.find((item) => item.value === model);
+  return option?.label ?? model;
+}
+
+function formatAgentEffort(effort?: AgentReasoningEffort): string {
+  if (!effort) return "默认";
+  if (effort === "xhigh") return "超高";
+  if (effort === "high") return "高";
+  if (effort === "medium") return "中";
+  if (effort === "low") return "低";
+  if (effort === "minimal") return "极低";
+  return "无";
 }
 
 function planStepMeta(status: "pending" | "in_progress" | "completed", theme: Theme) {

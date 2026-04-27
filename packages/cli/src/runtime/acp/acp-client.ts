@@ -86,10 +86,14 @@ export class AcpClient {
     sessionId: string;
     content: unknown[];
     clientMessageId: string;
+    model?: string;
+    reasoningEffort?: string;
   }): Promise<unknown> {
     if (this.protocol === "codex-app-server") {
       return this.transport.request("turn/start", {
         threadId: input.sessionId,
+        model: input.model,
+        effort: input.reasoningEffort,
         input: input.content.map((block) => {
           const raw = block as { type?: string; text?: string; data?: string };
           if (raw.type === "image" && raw.data) {
@@ -102,7 +106,11 @@ export class AcpClient {
     return this.transport.request("session/prompt", {
       sessionId: input.sessionId,
       prompt: input.content,
-      _meta: { linkshellClientMessageId: input.clientMessageId },
+      _meta: {
+        linkshellClientMessageId: input.clientMessageId,
+        model: input.model,
+        reasoningEffort: input.reasoningEffort,
+      },
     }, 60_000);
   }
 

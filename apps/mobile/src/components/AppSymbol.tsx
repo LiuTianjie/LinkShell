@@ -14,6 +14,7 @@ const FALLBACK_ICONS: Record<string, React.ComponentProps<typeof MaterialCommuni
   "bubble.left.and.text.bubble.right": "message-text-outline",
   "camera.fill": "camera",
   "checkmark.circle.fill": "check-circle",
+  "chevron.down": "chevron-down",
   "chevron.left": "chevron-left",
   "chevron.right": "chevron-right",
   circle: "circle-outline",
