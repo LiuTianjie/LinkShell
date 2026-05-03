@@ -139,7 +139,7 @@ interface SessionScreenProps {
   onCancelAgent: () => void;
   onSendAgentPermissionResponse: (
     requestId: string,
-    outcome: "allow" | "deny",
+    outcome: "allow" | "deny" | "cancelled",
     optionId?: string,
   ) => void;
 }
@@ -1127,7 +1127,7 @@ const AgentStage = memo(function AgentStage({
   onCancel: () => void;
   onPermissionResponse: (
     requestId: string,
-    outcome: "allow" | "deny",
+    outcome: "allow" | "deny" | "cancelled",
     optionId?: string,
   ) => void;
   theme: Theme;
@@ -1319,80 +1319,76 @@ const AgentStage = memo(function AgentStage({
           </View>
         ) : null}
 
-        {agent.pendingPermissions.map((permission) => (
-          (() => {
-            const denyOption =
-              permission.options.find((option) => option.kind === "deny") ??
-              permission.options.find((option) => option.id === "deny");
-            const allowOption =
-              permission.options.find((option) => option.kind === "allow") ??
-              permission.options.find((option) => option.id === "allow");
-            return (
-              <View
-                key={permission.requestId}
-                style={{
-                  borderRadius: 12,
-                  borderCurve: "continuous",
-                  backgroundColor: theme.accentLight,
-                  padding: 12,
-                  gap: 8,
-                }}
-              >
-                <Text style={{ color: theme.warning, fontSize: 15, fontWeight: "700" }}>
-                  需要授权{permission.toolName ? ` · ${permission.toolName}` : ""}
+        {agent.pendingPermissions.map((permission) => {
+          const options = permission.options.length > 0
+            ? permission.options
+            : [
+                { id: "deny", label: "拒绝", kind: "deny" as const },
+                { id: "allow_once", label: "允许一次", kind: "allow" as const },
+              ];
+          return (
+            <View
+              key={permission.requestId}
+              style={{
+                borderRadius: 12,
+                borderCurve: "continuous",
+                backgroundColor: theme.accentLight,
+                padding: 12,
+                gap: 8,
+              }}
+            >
+              <Text style={{ color: theme.warning, fontSize: 15, fontWeight: "700" }}>
+                需要授权{permission.toolName ? ` · ${permission.toolName}` : ""}
+              </Text>
+              {permission.context ? (
+                <Text selectable style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
+                  {permission.context}
                 </Text>
-                {permission.context ? (
-                  <Text selectable style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
-                    {permission.context}
-                  </Text>
-                ) : null}
-                {permission.toolInput ? (
-                  <Text
-                    selectable
-                    style={{
-                      color: theme.textTertiary,
-                      fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
-                      fontSize: 12,
-                    }}
-                    numberOfLines={4}
-                  >
-                    {permission.toolInput}
-                  </Text>
-                ) : null}
-                <View style={{ flexDirection: "row", gap: 8 }}>
-                  <Pressable
-                    onPress={() => onPermissionResponse(permission.requestId, "deny", denyOption?.id)}
-                    style={({ pressed }) => ({
-                      flex: 1,
-                      borderRadius: 8,
-                      paddingVertical: 10,
-                      alignItems: "center",
-                      backgroundColor: pressed ? theme.bgInput : theme.bgCard,
-                    })}
-                  >
-                    <Text style={{ color: theme.error, fontWeight: "600" }}>
-                      {denyOption?.label ?? "拒绝"}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => onPermissionResponse(permission.requestId, "allow", allowOption?.id)}
-                    style={({ pressed }) => ({
-                      flex: 1,
-                      borderRadius: 8,
-                      paddingVertical: 10,
-                      alignItems: "center",
-                      backgroundColor: pressed ? theme.accentSecondary : theme.accent,
-                    })}
-                  >
-                    <Text style={{ color: "#fff", fontWeight: "600" }}>
-                      {allowOption?.label ?? "允许"}
-                    </Text>
-                  </Pressable>
-                </View>
+              ) : null}
+              {permission.toolInput ? (
+                <Text
+                  selectable
+                  style={{
+                    color: theme.textTertiary,
+                    fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+                    fontSize: 12,
+                  }}
+                  numberOfLines={4}
+                >
+                  {permission.toolInput}
+                </Text>
+              ) : null}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {options.map((option) => {
+                  const outcome = option.kind === "allow" ? "allow" : option.kind === "deny" ? "deny" : "cancelled";
+                  const isAllow = option.kind === "allow";
+                  const isDeny = option.kind === "deny";
+                  return (
+                    <Pressable
+                      key={option.id}
+                      onPress={() => onPermissionResponse(permission.requestId, outcome, option.id)}
+                      style={({ pressed }) => ({
+                        minWidth: options.length > 2 ? "47%" : undefined,
+                        flexGrow: 1,
+                        borderRadius: 8,
+                        paddingVertical: 10,
+                        paddingHorizontal: 12,
+                        alignItems: "center",
+                        backgroundColor: isAllow
+                          ? pressed ? theme.accentSecondary : theme.accent
+                          : pressed ? theme.bgInput : theme.bgCard,
+                      })}
+                    >
+                      <Text style={{ color: isAllow ? "#fff" : isDeny ? theme.error : theme.textSecondary, fontWeight: "600" }}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
-            );
-          })()
-        ))}
+            </View>
+          );
+        })}
 
         {!hasAgentContent && agent.capabilities?.enabled ? (
           <View

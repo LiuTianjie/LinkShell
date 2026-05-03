@@ -433,7 +433,7 @@ export function useAgentWorkspace(
             context: topPermission.permissionRequest,
             options: [
               { id: "deny", label: "拒绝", kind: "deny" },
-              { id: "allow", label: "允许", kind: "allow" },
+              { id: "allow_once", label: "允许一次", kind: "allow" },
             ],
           },
           metadata: {

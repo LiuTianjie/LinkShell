@@ -390,7 +390,7 @@ function TimelineItemView({
 }: {
   item: AgentTimelineItem;
   theme: Theme;
-  onPermission: (requestId: string, outcome: "allow" | "deny", optionId?: string) => void;
+  onPermission: (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => void;
 }) {
   if (item.type === "message") {
     const isUser = item.role === "user";
@@ -446,9 +446,14 @@ function TimelineItemView({
   }
 
   if (item.type === "permission" && item.permission) {
-    const allow = item.permission.options.find((option) => option.kind === "allow");
-    const deny = item.permission.options.find((option) => option.kind === "deny");
     const outcome = item.metadata?.permissionOutcome;
+    const selectedOptionId = item.metadata?.optionId;
+    const options = item.permission.options.length > 0
+      ? item.permission.options
+      : [
+          { id: "deny", label: "拒绝", kind: "deny" as const },
+          { id: "allow_once", label: "允许一次", kind: "allow" as const },
+        ];
     return (
       <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.accentLight, padding: 12, gap: 8 }}>
         <Text style={{ color: theme.warning, fontSize: 15, fontWeight: "700" }}>
@@ -462,35 +467,38 @@ function TimelineItemView({
         {item.permission.toolInput ? <CodeBlock label="请求内容" code={item.permission.toolInput} theme={theme} maxLines={5} /> : null}
         {outcome ? (
           <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
-            {outcome === "allow" ? "已允许" : outcome === "deny" ? "已拒绝" : "已取消"}
+            {options.find((option) => option.id === selectedOptionId)?.label ??
+              (outcome === "allow" ? "已允许" : outcome === "deny" ? "已拒绝" : "已取消")}
           </Text>
         ) : (
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Pressable
-            onPress={() => onPermission(item.permission!.requestId, "deny", deny?.id)}
-            style={({ pressed }) => ({
-              flex: 1,
-              borderRadius: 9,
-              paddingVertical: 10,
-              alignItems: "center",
-              backgroundColor: pressed ? theme.bgInput : theme.bgCard,
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {options.map((option) => {
+              const optionOutcome = option.kind === "allow" ? "allow" : option.kind === "deny" ? "deny" : "cancelled";
+              const isAllow = option.kind === "allow";
+              const isDeny = option.kind === "deny";
+              return (
+                <Pressable
+                  key={option.id}
+                  onPress={() => onPermission(item.permission!.requestId, optionOutcome, option.id)}
+                  style={({ pressed }) => ({
+                    minWidth: options.length > 2 ? "47%" : undefined,
+                    flexGrow: 1,
+                    borderRadius: 9,
+                    paddingVertical: 10,
+                    paddingHorizontal: 12,
+                    alignItems: "center",
+                    backgroundColor: isAllow
+                      ? pressed ? theme.accentSecondary : theme.accent
+                      : pressed ? theme.bgInput : theme.bgCard,
+                  })}
+                >
+                  <Text style={{ color: isAllow ? "#fff" : isDeny ? theme.error : theme.textSecondary, fontWeight: "700" }}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
             })}
-          >
-            <Text style={{ color: theme.error, fontWeight: "700" }}>{deny?.label ?? "拒绝"}</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => onPermission(item.permission!.requestId, "allow", allow?.id)}
-            style={({ pressed }) => ({
-              flex: 1,
-              borderRadius: 9,
-              paddingVertical: 10,
-              alignItems: "center",
-              backgroundColor: pressed ? theme.accentSecondary : theme.accent,
-            })}
-          >
-            <Text style={{ color: "#fff", fontWeight: "700" }}>{allow?.label ?? "允许"}</Text>
-          </Pressable>
-        </View>
+          </View>
         )}
       </View>
     );

@@ -71,12 +71,69 @@ interface TerminalInstance {
 interface PendingPermission {
   terminalId: string;
   timeout: ReturnType<typeof setTimeout>;
-  resolve: (decision: "allow" | "deny") => void;
+  permissionSuggestions: unknown[];
+  resolve: (decision: HookPermissionDecision) => void;
 }
+
+interface HookPermissionDecision {
+  behavior: "allow" | "deny";
+  updatedPermissions?: unknown[];
+  message?: string;
+  interrupt?: boolean;
+}
+
+type HookPermissionChoice =
+  | "allow"
+  | "deny"
+  | {
+      outcome: "allow" | "deny" | "cancelled";
+      optionId?: string;
+    };
 
 function isLinkShellHookEntry(entry: unknown, marker: string): boolean {
   const raw = JSON.stringify(entry);
   return raw.includes(`/hook?m=${marker}`);
+}
+
+function stringifyHookInput(value: unknown): string {
+  if (typeof value === "string") return value.slice(0, 1200);
+  if (typeof value === "object" && value) {
+    try {
+      return JSON.stringify(value, null, 2).slice(0, 1200);
+    } catch {
+      return String(value).slice(0, 1200);
+    }
+  }
+  return "";
+}
+
+function hookPermissionSuggestions(event: Record<string, unknown>): unknown[] {
+  if (isCodexPermissionRequest(event)) return [];
+  const snake = event.permission_suggestions;
+  const camel = event.permissionSuggestions;
+  if (Array.isArray(snake)) return snake;
+  if (Array.isArray(camel)) return camel;
+  return [];
+}
+
+function isCodexPermissionRequest(event: Record<string, unknown>): boolean {
+  if (typeof event.turn_id === "string" || typeof event.turnId === "string") return true;
+  const transcriptPath = event.transcript_path ?? event.transcriptPath;
+  return typeof transcriptPath === "string" && transcriptPath.includes("/.codex/");
+}
+
+function hookPermissionOptions(suggestions: unknown[]): Array<{
+  id: string;
+  label: string;
+  kind: "allow" | "deny" | "other";
+}> {
+  return [
+    { id: "deny", label: "拒绝", kind: "deny" },
+    { id: "allow_once", label: "允许一次", kind: "allow" },
+    ...(suggestions.length > 0
+      ? [{ id: "allow_always" as const, label: "始终允许", kind: "allow" as const }]
+      : []),
+  ];
 }
 
 function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
@@ -593,9 +650,11 @@ export class BridgeSession {
       }
       case "agent.permission.response": {
         const p = parseTypedPayload("agent.permission.response", envelope.payload);
-        const decision = p.outcome === "allow" ? "allow" : "deny";
-        if (this.resolvePendingPermission(p.requestId, decision)) {
-          this.log(`agent permission response for hook ${p.requestId}: ${decision}`);
+        if (this.resolvePendingPermission(p.requestId, {
+          outcome: p.outcome,
+          optionId: p.optionId,
+        })) {
+          this.log(`agent permission response for hook ${p.requestId}: ${p.outcome}:${p.optionId ?? "default"}`);
           break;
         }
         if (!this.agentSession) {
@@ -1073,6 +1132,7 @@ export class BridgeSession {
           // PermissionRequest: hold connection, wait for user decision from mobile app
           if (hookName === "PermissionRequest") {
             const requestId = `pr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const permissionSuggestions = hookPermissionSuggestions(event);
             const timeout = setTimeout(() => {
               if (this.resolvePendingPermission(requestId, "deny")) {
                 this.log(`permission request ${requestId} timed out`);
@@ -1082,12 +1142,13 @@ export class BridgeSession {
             this.pendingPermissions.set(requestId, {
               terminalId,
               timeout,
+              permissionSuggestions,
               resolve: (decision) => {
                 if (res.writableEnded) return;
                 const responseJson = JSON.stringify({
                   hookSpecificOutput: {
                     hookEventName: "PermissionRequest",
-                    decision: { behavior: decision },
+                    decision,
                   },
                 });
                 res.writeHead(200, { "Content-Type": "application/json" });
@@ -1482,16 +1543,8 @@ export class BridgeSession {
     requestId: string,
   ): void {
     const toolName = (event.tool_name ?? event.toolName) as string | undefined;
-    const toolInput =
-      typeof event.tool_input === "object" && event.tool_input
-        ? JSON.stringify(event.tool_input).slice(0, 1200)
-        : typeof event.toolInput === "object" && event.toolInput
-          ? JSON.stringify(event.toolInput).slice(0, 1200)
-          : typeof event.tool_input === "string"
-            ? event.tool_input.slice(0, 1200)
-            : typeof event.toolInput === "string"
-              ? event.toolInput.slice(0, 1200)
-              : "";
+    const toolInput = stringifyHookInput(event.tool_input ?? event.toolInput);
+    const suggestions = hookPermissionSuggestions(event);
     const context =
       typeof event.permission_prompt === "string"
         ? event.permission_prompt
@@ -1507,10 +1560,7 @@ export class BridgeSession {
         toolName,
         toolInput,
         context,
-        options: [
-          { id: "deny", label: "拒绝", kind: "deny" },
-          { id: "allow", label: "允许", kind: "allow" },
-        ],
+        options: hookPermissionOptions(suggestions),
       },
     }));
   }
@@ -1592,12 +1642,12 @@ export class BridgeSession {
     }
   }
 
-  private resolvePendingPermission(requestId: string, decision: "allow" | "deny"): boolean {
+  private resolvePendingPermission(requestId: string, choice: HookPermissionChoice): boolean {
     const pending = this.pendingPermissions.get(requestId);
     if (!pending) return false;
     this.pendingPermissions.delete(requestId);
     clearTimeout(pending.timeout);
-    pending.resolve(decision);
+    pending.resolve(this.formatHookPermissionDecision(pending, choice));
 
     const stack = this.permissionStacks.get(pending.terminalId);
     if (stack) {
@@ -1606,6 +1656,26 @@ export class BridgeSession {
       if (stack.length === 0) this.permissionStacks.delete(pending.terminalId);
     }
     return true;
+  }
+
+  private formatHookPermissionDecision(
+    permission: PendingPermission,
+    choice: HookPermissionChoice,
+  ): HookPermissionDecision {
+    const outcome = typeof choice === "string" ? choice : choice.outcome;
+    const optionId = typeof choice === "string" ? undefined : choice.optionId;
+    if (outcome === "allow") {
+      return {
+        behavior: "allow",
+        ...(optionId === "allow_always" && permission.permissionSuggestions.length > 0
+          ? { updatedPermissions: permission.permissionSuggestions }
+          : {}),
+      };
+    }
+    return {
+      behavior: "deny",
+      message: outcome === "cancelled" ? "Permission request cancelled." : "Permission denied by user.",
+    };
   }
 
   private sendPermissionSnapshot(
