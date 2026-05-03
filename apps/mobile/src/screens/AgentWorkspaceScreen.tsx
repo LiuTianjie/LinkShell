@@ -21,7 +21,6 @@ import type {
   AgentProvider,
   AgentProviderCapability,
 } from "../storage/agent-workspace";
-import { loadHistory, type ConnectionRecord } from "../storage/history";
 import { loadProjects, touchProject, type ProjectRecord } from "../storage/projects";
 import { useTheme, type Theme } from "../theme";
 
@@ -39,7 +38,7 @@ interface AgentTarget {
   hostname?: string;
   cwd?: string;
   projectName?: string;
-  status: "online" | "recoverable";
+  status: "online";
 }
 
 const PROVIDER_META: Record<AgentProvider, { label: string; subtitle: string }> = {
@@ -196,7 +195,6 @@ export function AgentWorkspaceScreen({
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [history, setHistory] = useState<ConnectionRecord[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -222,11 +220,8 @@ export function AgentWorkspaceScreen({
   );
 
   useEffect(() => {
-    Promise.all([loadProjects(), loadHistory()])
-      .then(([projectItems, historyItems]) => {
-        setProjects(projectItems);
-        setHistory(historyItems);
-      })
+    loadProjects()
+      .then((projectItems) => setProjects(projectItems))
       .catch(() => {});
   }, [workspace.conversations.length, refreshKey, sessionSignature]);
 
@@ -257,33 +252,12 @@ export function AgentWorkspaceScreen({
           cwd: existing.cwd ?? project.cwd,
           projectName: existing.projectName ?? project.projectName,
         });
-        continue;
       }
-      bySession.set(project.sessionId, {
-        sessionId: project.sessionId,
-        serverUrl: project.serverUrl,
-        hostname: project.hostname ?? project.sessionId.slice(0, 8),
-        cwd: project.cwd,
-        projectName: project.projectName,
-        status: "recoverable",
-      });
-    }
-    for (const record of history) {
-      if (bySession.has(record.sessionId)) continue;
-      bySession.set(record.sessionId, {
-        sessionId: record.sessionId,
-        serverUrl: record.serverUrl,
-        hostname: record.hostname ?? record.sessionId.slice(0, 8),
-        cwd: record.cwd || "~",
-        projectName: record.projectName,
-        status: "recoverable",
-      });
     }
     return [...bySession.values()].sort((a, b) => {
-      if (a.status !== b.status) return a.status === "online" ? -1 : 1;
       return (a.hostname ?? "").localeCompare(b.hostname ?? "");
     });
-  }, [history, onlineSessions, projects]);
+  }, [onlineSessions, projects]);
 
   const selectedTarget = useMemo(
     () => targets.find((target) => target.sessionId === selectedSessionId) ?? targets[0],
@@ -354,22 +328,16 @@ export function AgentWorkspaceScreen({
     [showArchived, workspace],
   );
 
-  const openCreate = useCallback((project?: ProjectRecord) => {
-    if (targets.length === 0 && !project) {
+  const openCreate = useCallback((targetOverride?: AgentTarget) => {
+    if (targets.length === 0) {
       onOpenConnectionSheet();
       return;
     }
-    if (project) {
-      setSelectedSessionId(project.sessionId);
-      setSelectedProjectId(project.id);
-      setCustomCwd(project.cwd);
-    } else {
-      const target = selectedTarget ?? targets[0];
-      setSelectedSessionId(target?.sessionId ?? null);
-      const projectForTarget = projects.find((item) => item.sessionId === target?.sessionId);
-      setSelectedProjectId(projectForTarget?.id ?? null);
-      setCustomCwd(projectForTarget?.cwd ?? target?.cwd ?? "");
-    }
+    const target = targetOverride ?? selectedTarget ?? targets[0];
+    setSelectedSessionId(target?.sessionId ?? null);
+    const projectForTarget = projects.find((item) => item.sessionId === target?.sessionId);
+    setSelectedProjectId(projectForTarget?.id ?? null);
+    setCustomCwd(projectForTarget?.cwd ?? target?.cwd ?? "");
     setSelectedProvider("codex");
     setCreateVisible(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -385,7 +353,7 @@ export function AgentWorkspaceScreen({
       return;
     }
     if (!effectiveCwd) {
-      Alert.alert("请选择工作目录", "可以从最近项目选择，也可以手动输入一个目录。");
+      Alert.alert("请选择工作目录", "可以使用当前目录，也可以手动输入一个目录。");
       return;
     }
     setCreating(true);
@@ -430,12 +398,14 @@ export function AgentWorkspaceScreen({
     async (conversationId: string) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       const id = await workspace.resumeConversation(conversationId);
-      if (id) onOpenConversation(id);
+      if (id) {
+        onOpenConversation(id);
+      } else {
+        Alert.alert("无法恢复 Agent 对话", "请确认 Mac 端会话在线，并且 Agent GUI 已启用。");
+      }
     },
     [onOpenConversation, workspace],
   );
-
-  const recentProjects = projects.slice(0, 6);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -495,15 +465,14 @@ export function AgentWorkspaceScreen({
 
         {targets.length > 0 ? (
           <View style={{ gap: 8 }}>
-            <SectionTitle theme={theme}>可用 Mac</SectionTitle>
+            <SectionTitle theme={theme}>在线 Mac</SectionTitle>
             <View style={{ paddingHorizontal: 20, gap: 8 }}>
               {targets.map((target) => {
                 const caps = workspace.capabilitiesBySessionId.get(target.sessionId);
-                const online = target.status === "online";
                 return (
                   <Pressable
                     key={`${target.serverUrl}:${target.sessionId}`}
-                    onPress={() => openCreate(projects.find((project) => project.sessionId === target.sessionId))}
+                    onPress={() => openCreate(target)}
                     style={({ pressed }) => ({
                       borderRadius: 12,
                       borderCurve: "continuous",
@@ -519,7 +488,7 @@ export function AgentWorkspaceScreen({
                         width: 10,
                         height: 10,
                         borderRadius: 5,
-                        backgroundColor: online ? theme.success : theme.textTertiary,
+                        backgroundColor: caps?.enabled ? theme.success : theme.textTertiary,
                       }}
                     />
                     <View style={{ flex: 1, minWidth: 0 }}>
@@ -527,51 +496,12 @@ export function AgentWorkspaceScreen({
                         {target.hostname || target.sessionId.slice(0, 8)}
                       </Text>
                       <Text style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-                        {online
-                          ? caps?.enabled
-                            ? `${caps.provider ?? "codex"} · Agent 已就绪`
-                            : caps?.error ?? "连接中，创建时会自动确认能力"
-                          : `${shortPath(target.cwd ?? "~")} · 可恢复，无需重新扫码`}
+                        {caps?.enabled
+                          ? `${caps.provider ?? "codex"} · ${shortPath(target.cwd ?? "~")}`
+                          : caps?.error ?? "正在确认 Agent 能力"}
                       </Text>
                     </View>
-                    {online && !caps ? <ActivityIndicator size="small" color={theme.textTertiary} /> : null}
-                    <AppSymbol name="chevron.right" size={14} color={theme.textTertiary} />
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        ) : null}
-
-        {recentProjects.length > 0 ? (
-          <View style={{ gap: 8 }}>
-            <SectionTitle theme={theme}>最近项目</SectionTitle>
-            <View style={{ paddingHorizontal: 20, gap: 8 }}>
-              {recentProjects.map((project) => {
-                const online = onlineSessions.some((session) => session.sessionId === project.sessionId);
-                return (
-                  <Pressable
-                    key={project.id}
-                    onPress={() => openCreate(project)}
-                    style={({ pressed }) => ({
-                      borderRadius: 12,
-                      borderCurve: "continuous",
-                      backgroundColor: pressed ? theme.bgInput : theme.bgCard,
-                      padding: 12,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
-                    })}
-                  >
-                    <AppSymbol name="folder.fill" size={18} color={theme.accent} />
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }} numberOfLines={1}>
-                        {project.projectName || titleFromCwd(project.cwd)}
-                      </Text>
-                      <Text style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-                        {[project.hostname, shortPath(project.cwd), online ? "在线" : "可恢复"].filter(Boolean).join(" · ")}
-                      </Text>
-                    </View>
+                    {!caps ? <ActivityIndicator size="small" color={theme.textTertiary} /> : null}
                     <AppSymbol name="chevron.right" size={14} color={theme.textTertiary} />
                   </Pressable>
                 );
@@ -728,7 +658,7 @@ export function AgentWorkspaceScreen({
                         width: 9,
                         height: 9,
                         borderRadius: 5,
-                        backgroundColor: target.status === "online" ? theme.success : theme.textTertiary,
+                        backgroundColor: theme.success,
                       }}
                     />
                     <View style={{ flex: 1, minWidth: 0 }}>
@@ -736,7 +666,7 @@ export function AgentWorkspaceScreen({
                         {target.hostname || target.sessionId.slice(0, 8)}
                       </Text>
                       <Text style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-                        {target.status === "online" ? "在线" : "可恢复"} · {shortPath(target.cwd ?? "~")}
+                        在线 · {shortPath(target.cwd ?? "~")}
                       </Text>
                     </View>
                     {selected ? <AppSymbol name="checkmark.circle.fill" size={18} color={theme.accent} /> : null}

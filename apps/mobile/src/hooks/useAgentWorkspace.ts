@@ -22,6 +22,8 @@ import {
 } from "../storage/agent-workspace";
 
 interface OpenConversationInput {
+  conversationId?: string;
+  agentSessionId?: string;
   sessionId: string;
   serverUrl?: string;
   cwd: string;
@@ -355,11 +357,14 @@ export function useAgentWorkspace(
       if (!serverUrl) {
         return { conversationId: null, error: "缺少 gateway 地址，无法连接这个会话。" };
       }
-      const conversationId = makeAgentConversationId({
-        serverUrl,
-        sessionId: input.sessionId,
-        cwd: input.cwd,
-      });
+      const conversationId =
+        input.conversationId ??
+        makeAgentConversationId({
+          serverUrl,
+          sessionId: input.sessionId,
+          agentSessionId: input.agentSessionId,
+          cwd: input.cwd,
+        });
       setActiveConversationId(conversationId);
       if (session) manager.setActiveSessionId(input.sessionId);
       return await new Promise<OpenConversationResult>((resolve) => {
@@ -376,6 +381,7 @@ export function useAgentWorkspace(
           "agent.v2.conversation.open",
           {
             conversationId,
+            agentSessionId: input.agentSessionId,
             cwd: input.cwd,
             provider: input.provider ?? "codex",
             model: input.model,
@@ -424,25 +430,21 @@ export function useAgentWorkspace(
         archived: false,
         lastActivityAt: Date.now(),
       });
-      manager.sendAgentWorkspaceEnvelope(
-        conversation.sessionId,
-        "agent.v2.conversation.open",
-        {
-          conversationId: conversation.id,
-          agentSessionId: conversation.agentSessionId,
-          cwd: conversation.cwd,
-          provider: conversation.provider,
-          model: conversation.model,
-          reasoningEffort: conversation.reasoningEffort,
-          permissionMode: conversation.permissionMode,
-          title: conversation.title,
-        },
-        { queue: true, dedupeKey: `agent-v2-open:${conversation.id}` },
-      );
-      setActiveConversationId(conversation.id);
-      return conversation.id;
+      const result = await openConversation({
+        conversationId: conversation.id,
+        agentSessionId: conversation.agentSessionId,
+        sessionId: conversation.sessionId,
+        serverUrl: conversation.serverUrl,
+        cwd: conversation.cwd,
+        provider: conversation.provider,
+        model: conversation.model,
+        reasoningEffort: conversation.reasoningEffort,
+        permissionMode: conversation.permissionMode,
+        title: conversation.title,
+      });
+      return result.conversationId;
     },
-    [manager, persistConversation],
+    [manager, openConversation, persistConversation],
   );
 
   const sendPrompt = useCallback(

@@ -442,7 +442,7 @@ export class AgentWorkspaceProxy {
       (payload.conversationId ? this.conversations.get(payload.conversationId) : undefined) ??
       (agentSessionId ? this.conversations.get(this.conversationByAgentSessionId.get(agentSessionId) ?? "") : undefined);
 
-    if (existingConversation) {
+    if (existingConversation && existingConversation.status !== "error") {
       if (payload.conversationId && existingConversation.id !== payload.conversationId) {
         existingConversation = this.adoptConversationId(existingConversation.id, payload.conversationId);
       }
@@ -466,18 +466,20 @@ export class AgentWorkspaceProxy {
       const now = Date.now();
       const conversationId = payload.conversationId ?? `agent:${agentSessionId}`;
       const conversation: AgentConversation = {
+        ...existingConversation,
         id: conversationId,
         agentSessionId,
         provider: payload.provider ?? this.input.provider,
         cwd,
-        title: payload.title ?? titleFromCwd(cwd),
-        model: payload.model,
-        reasoningEffort: payload.reasoningEffort,
-        permissionMode: payload.permissionMode,
+        title: payload.title ?? existingConversation?.title ?? titleFromCwd(cwd),
+        model: payload.model ?? existingConversation?.model,
+        reasoningEffort: payload.reasoningEffort ?? existingConversation?.reasoningEffort,
+        permissionMode: payload.permissionMode ?? existingConversation?.permissionMode,
         status: "idle",
-        archived: false,
+        archived: existingConversation?.archived ?? false,
+        lastMessagePreview: existingConversation?.status === "error" ? undefined : existingConversation?.lastMessagePreview,
         lastActivityAt: now,
-        createdAt: now,
+        createdAt: existingConversation?.createdAt ?? now,
       };
       this.conversations.set(conversation.id, conversation);
       this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
