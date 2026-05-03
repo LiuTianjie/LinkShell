@@ -1174,12 +1174,21 @@ export class BridgeSession {
 
     const hooksPath = join(codexDir, "hooks.json");
     const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
-    const hookEvents: Record<string, typeof hookEntry> = {
+    const permissionEntry = {
+      matcher: "",
+      hooks: [{
+        type: "command",
+        command: curlCmd,
+        timeout: Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000),
+      }],
+    };
+    const hookEvents: Record<string, typeof hookEntry | typeof permissionEntry> = {
       SessionStart: hookEntry,
       PreToolUse: hookEntry,
       PostToolUse: hookEntry,
       UserPromptSubmit: hookEntry,
       Stop: hookEntry,
+      PermissionRequest: permissionEntry,
     };
 
     // Read existing and append
