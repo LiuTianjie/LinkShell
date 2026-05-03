@@ -617,12 +617,7 @@ export class AgentWorkspaceProxy {
   }
 
   private handleRequest(method: string, params: unknown): Promise<unknown> | unknown {
-    if (
-      method === "session/request_permission" ||
-      method.endsWith("/requestApproval") ||
-      method === "mcpServer/elicitation/request" ||
-      method === "item/tool/requestUserInput"
-    ) {
+    if (isPermissionRequestMethod(method)) {
       return this.handlePermission(params, true, method);
     }
     if (this.input.verbose) {
@@ -649,6 +644,10 @@ export class AgentWorkspaceProxy {
     }
 
     const conversationId = this.conversationIdFromParams(params) ?? this.activeConversationId;
+    if (isPermissionRequestMethod(method)) {
+      this.handlePermission(params, false, method);
+      return;
+    }
     if (method === "thread/started") {
       const agentSessionId = this.extractSessionId(params);
       if (agentSessionId && conversationId) {
@@ -1333,6 +1332,15 @@ function selectPermissionOption(
   if (outcome === "cancelled") return "cancelled";
   const option = permission?.options.find((item) => item.kind === outcome);
   return option?.id ?? outcome;
+}
+
+function isPermissionRequestMethod(method: string): boolean {
+  return (
+    method === "session/request_permission" ||
+    method.endsWith("/requestApproval") ||
+    method === "mcpServer/elicitation/request" ||
+    method === "item/tool/requestUserInput"
+  );
 }
 
 function formatPermissionResponse(

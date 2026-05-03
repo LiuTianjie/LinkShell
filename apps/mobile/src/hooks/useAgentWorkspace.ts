@@ -396,6 +396,61 @@ export function useAgentWorkspace(
           lastActivityAt: Date.now(),
         }).catch(() => {});
       }
+
+      if (envelope.type === "terminal.status") {
+        const payload = envelope.payload as {
+          phase?: string;
+          topPermission?: {
+            requestId?: string;
+            toolName?: string;
+            toolInput?: string;
+            permissionRequest?: string;
+            timestamp?: number;
+          };
+        };
+        const topPermission = payload.topPermission;
+        if (!topPermission?.requestId) return;
+        const terminalId = typeof (envelope as any).terminalId === "string"
+          ? (envelope as any).terminalId
+          : "default";
+        const conversation =
+          conversationsRef.current.find((item) => item.id === activeConversationId && item.sessionId === envelope.sessionId) ??
+          conversationsRef.current.find((item) =>
+            item.sessionId === envelope.sessionId &&
+            !item.archived &&
+            (item.status === "running" || item.status === "waiting_permission"),
+          ) ??
+          conversationsRef.current.find((item) => item.sessionId === envelope.sessionId && !item.archived);
+        if (!conversation) return;
+        const permissionItem: AgentTimelineItem = {
+          id: `permission:${topPermission.requestId}`,
+          conversationId: conversation.id,
+          type: "permission",
+          permission: {
+            requestId: topPermission.requestId,
+            toolName: topPermission.toolName,
+            toolInput: topPermission.toolInput || topPermission.permissionRequest,
+            context: topPermission.permissionRequest,
+            options: [
+              { id: "deny", label: "拒绝", kind: "deny" },
+              { id: "allow", label: "允许", kind: "allow" },
+            ],
+          },
+          metadata: {
+            protocol: "terminal",
+            terminalId,
+          },
+          createdAt: topPermission.timestamp ?? Date.now(),
+          updatedAt: Date.now(),
+        };
+        persistTimelineItem(permissionItem).catch(() => {});
+        persistConversation({
+          ...conversation,
+          status: "waiting_permission",
+          lastMessagePreview: previewFromItem(permissionItem) ?? "需要授权",
+          lastActivityAt: Date.now(),
+        }).catch(() => {});
+      }
     },
     [activeConversationId, persistConversation, persistTimelineItem],
   );
@@ -569,7 +624,17 @@ export function useAgentWorkspace(
       const permissionItem = timelineRef.current
         .get(conversationId)
         ?.find((item) => item.type === "permission" && item.permission?.requestId === requestId);
-      if (permissionItem?.metadata?.protocol === "legacy") {
+      if (permissionItem?.metadata?.protocol === "terminal") {
+        const terminalId = typeof permissionItem.metadata.terminalId === "string"
+          ? permissionItem.metadata.terminalId
+          : "default";
+        manager.sendPermissionDecision(
+          conversation.sessionId,
+          terminalId,
+          requestId,
+          outcome === "allow" ? "allow" : "deny",
+        );
+      } else if (permissionItem?.metadata?.protocol === "legacy") {
         manager.sendAgentWorkspaceEnvelope(
           conversation.sessionId,
           "agent.permission.response" as any,
@@ -608,8 +673,13 @@ export function useAgentWorkspace(
         next.set(conversationId, nextItems);
         return next;
       });
+      persistConversation({
+        ...conversation,
+        status: "running",
+        lastActivityAt: Date.now(),
+      }).catch(() => {});
     },
-    [manager],
+    [manager, persistConversation],
   );
 
   const archive = useCallback(async (conversationId: string, archived: boolean) => {

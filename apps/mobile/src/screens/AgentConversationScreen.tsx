@@ -55,7 +55,7 @@ const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
 ];
 
 const PERMISSION_OPTIONS: Option<AgentPermissionMode>[] = [
-  { label: "默认权限", value: "read_only", image: "hand.raised.fill" },
+  { label: "默认权限", value: undefined, image: "hand.raised.fill" },
   { label: "自动审查", value: "workspace_write", image: "lock.shield.fill" },
   { label: "完全访问权限", value: "full_access", image: "lock.open.fill" },
 ];
@@ -92,6 +92,19 @@ function statusMeta(status: string, theme: Theme) {
   }
 }
 
+function visibleConversationStatus(status: string | undefined, theme: Theme) {
+  if (status === "running" || status === "waiting_permission" || status === "error") {
+    return statusMeta(status, theme);
+  }
+  return null;
+}
+
+function toolStatusMeta(status: AgentToolCall["status"], theme: Theme) {
+  if (status === "running") return { label: "运行中", color: theme.accent, bg: theme.accentLight };
+  if (status === "failed") return { label: "失败", color: theme.error, bg: theme.errorLight };
+  return null;
+}
+
 function permissionMeta(mode: AgentPermissionMode | undefined, theme: Theme) {
   if (mode === "full_access") {
     return { label: "完全访问权限", icon: "lock.open.fill", color: theme.warning, bg: theme.accentLight };
@@ -121,9 +134,15 @@ function shortPath(path: string): string {
   return `…/${parts.slice(-3).join("/")}`;
 }
 
-function copy(value: string): void {
-  Clipboard.setString(value);
-  Haptics.selectionAsync().catch(() => {});
+async function copy(value: string): Promise<boolean> {
+  try {
+    Clipboard.setString(value);
+    const copied = typeof Clipboard.getString === "function" ? await Clipboard.getString() : value;
+    Haptics.selectionAsync().catch(() => {});
+    return copied === value || copied.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function imageBlockFromAsset(asset: ImagePicker.ImagePickerAsset): AgentContentBlock | null {
@@ -166,6 +185,20 @@ function CodeBlock({
   theme: Theme;
   maxLines?: number;
 }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = useCallback(() => {
+    copy(code).then((ok) => {
+      if (!ok) {
+        Alert.alert("复制失败", "系统剪贴板暂不可用，请长按文本手动复制。");
+        return;
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }).catch(() => {
+      Alert.alert("复制失败", "系统剪贴板暂不可用，请长按文本手动复制。");
+    });
+  }, [code]);
+
   return (
     <View
       style={{
@@ -190,8 +223,15 @@ function CodeBlock({
         <Text style={{ flex: 1, color: theme.textTertiary, fontSize: 11, fontWeight: "700" }} numberOfLines={1}>
           {label}
         </Text>
-        <Pressable onPress={() => copy(code)} hitSlop={8}>
-          <AppSymbol name="doc.on.doc" size={13} color={theme.textTertiary} />
+        <Pressable
+          onPress={onCopy}
+          hitSlop={8}
+          style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 2 }}
+        >
+          <AppSymbol name={copied ? "checkmark" : "doc.on.doc"} size={12} color={theme.textTertiary} />
+          <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
+            {copied ? "已复制" : "复制"}
+          </Text>
         </Pressable>
       </View>
       <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator={false}>
@@ -309,7 +349,7 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
   const input = tool.input?.trim();
   const output = tool.output?.trim();
   const long = Boolean((input && input.length > 900) || (output && output.length > 1200));
-  const meta = statusMeta(tool.status, theme);
+  const meta = toolStatusMeta(tool.status, theme);
   const language = tool.name.includes("命令") ? "shell" : tool.name.includes("文件") ? "diff" : "text";
 
   return (
@@ -324,9 +364,11 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
           {tool.name}
         </Text>
         {long ? <AppSymbol name={expanded ? "chevron.down" : "chevron.right"} size={13} color={theme.textTertiary} /> : null}
-        <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
-          <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
-        </View>
+        {meta ? (
+          <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
+            <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
+          </View>
+        ) : null}
       </Pressable>
       {input ? <CodeBlock label={`输入 · ${language}`} code={expanded ? input : input.slice(0, 900)} theme={theme} maxLines={expanded ? 24 : 6} /> : null}
       {output ? <CodeBlock label={`输出 · ${language}`} code={expanded ? output : output.slice(0, 1200)} theme={theme} maxLines={expanded ? 28 : 8} /> : null}
@@ -481,13 +523,13 @@ export function AgentConversationScreen({
   const [model, setModel] = useState<string | undefined>(conversation?.model);
   const [effort, setEffort] = useState<AgentReasoningEffort | undefined>(conversation?.reasoningEffort);
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode | undefined>(
-    conversation?.permissionMode ?? "read_only",
+    conversation?.permissionMode,
   );
   const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
   const capabilities = conversation ? workspace.capabilitiesBySessionId.get(conversation.sessionId) : undefined;
   const supportsImages = Boolean(capabilities?.enabled && capabilities.supportsImages);
   const running = conversation?.status === "running" || conversation?.status === "waiting_permission";
-  const meta = statusMeta(conversation?.status ?? "unavailable", theme);
+  const meta = visibleConversationStatus(conversation?.status, theme);
   const permission = permissionMeta(permissionMode, theme);
   const canSend = Boolean(text.trim() || attachments.length > 0);
 
@@ -638,9 +680,11 @@ export function AgentConversationScreen({
           </Text>
         </View>
         {running ? <ActivityIndicator size="small" color={theme.accent} /> : null}
-        <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
-          <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
-        </View>
+        {meta ? (
+          <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
+            <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
+          </View>
+        ) : null}
         <MenuView
           actions={[
             { id: "refresh", title: "刷新快照", image: "arrow.clockwise" },

@@ -1227,6 +1227,9 @@ export function useSessionManager(): SessionManagerHandle {
             // Terminal not yet recreated (reconnect) — buffer for later
             s.pendingStatusByTerminal.set(tid, statusData);
           }
+          if (p.topPermission) {
+            agentWorkspaceCbRef.current?.(envelope);
+          }
           tick();
           break;
         }
