@@ -15,6 +15,7 @@ import {
   type AgentCapabilities,
   type AgentContentBlock,
   type AgentConversationRecord,
+  type AgentProvider,
   type AgentPermissionMode,
   type AgentReasoningEffort,
   type AgentTimelineItem,
@@ -24,10 +25,17 @@ interface OpenConversationInput {
   sessionId: string;
   serverUrl?: string;
   cwd: string;
+  provider?: AgentProvider;
   title?: string;
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
   permissionMode?: AgentPermissionMode;
+}
+
+export interface OpenConversationResult {
+  conversationId: string | null;
+  status?: AgentConversationRecord["status"];
+  error?: string;
 }
 
 export interface AgentWorkspaceHandle {
@@ -38,7 +46,7 @@ export interface AgentWorkspaceHandle {
   connectedSessions: SessionInfo[];
   refresh: () => Promise<void>;
   requestCapabilities: (sessionId?: string) => void;
-  openConversation: (input: OpenConversationInput) => Promise<string | null>;
+  openConversation: (input: OpenConversationInput) => Promise<OpenConversationResult>;
   openProject: (record: ProjectRecord) => Promise<string | null>;
   resumeConversation: (conversationId: string) => Promise<string | null>;
   getConversation: (conversationId: string) => AgentConversationRecord | undefined;
@@ -107,6 +115,10 @@ export function useAgentWorkspace(
   const managerRef = useRef(manager);
   const conversationsRef = useRef(conversations);
   const timelineRef = useRef(timelineById);
+  const pendingOpenRef = useRef(new Map<string, {
+    resolve: (result: OpenConversationResult) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>());
 
   useEffect(() => {
     managerRef.current = manager;
@@ -240,6 +252,18 @@ export function useAgentWorkspace(
         const record = toRecord(payload.conversation);
         persistConversation(record).catch(() => {});
         setActiveConversationId(record.id);
+        const pending = pendingOpenRef.current.get(record.id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingOpenRef.current.delete(record.id);
+          pending.resolve({
+            conversationId: record.status === "error" ? null : record.id,
+            status: record.status,
+            error: record.status === "error"
+              ? record.lastMessagePreview || "Agent 对话创建失败。"
+              : undefined,
+          });
+        }
         const items = (payload.snapshot ?? []) as AgentTimelineItem[];
         if (items.length > 0) {
           saveAgentTimeline(record.id, items).catch(() => {});
@@ -328,48 +352,42 @@ export function useAgentWorkspace(
         session = manager.sessions.get(input.sessionId);
       }
       const serverUrl = normalizeServerUrl(session?.gatewayUrl ?? input.serverUrl ?? "");
-      if (!serverUrl) return null;
+      if (!serverUrl) {
+        return { conversationId: null, error: "缺少 gateway 地址，无法连接这个会话。" };
+      }
       const conversationId = makeAgentConversationId({
         serverUrl,
         sessionId: input.sessionId,
         cwd: input.cwd,
       });
-      const now = Date.now();
-      const record: AgentConversationRecord = {
-        id: conversationId,
-        serverUrl,
-        sessionId: input.sessionId,
-        provider: "codex",
-        cwd: input.cwd,
-        title: input.title || input.cwd.split("/").filter(Boolean).pop() || "Agent",
-        model: input.model,
-        reasoningEffort: input.reasoningEffort,
-        permissionMode: input.permissionMode,
-        status: "idle",
-        archived: false,
-        lastActivityAt: now,
-        createdAt: conversationsRef.current.find((item) => item.id === conversationId)?.createdAt ?? now,
-        schemaVersion: 1,
-      };
-      await persistConversation(record);
       setActiveConversationId(conversationId);
       if (session) manager.setActiveSessionId(input.sessionId);
-      manager.sendAgentWorkspaceEnvelope(
-        input.sessionId,
-        "agent.v2.conversation.open",
-        {
-          conversationId,
-          cwd: input.cwd,
-          model: input.model,
-          reasoningEffort: input.reasoningEffort,
-          permissionMode: input.permissionMode,
-          title: record.title,
-        },
-        { queue: true, dedupeKey: `agent-v2-open:${conversationId}` },
-      );
-      return conversationId;
+      return await new Promise<OpenConversationResult>((resolve) => {
+        const timer = setTimeout(() => {
+          pendingOpenRef.current.delete(conversationId);
+          resolve({
+            conversationId: null,
+            error: "CLI 没有在 12 秒内确认对话，请确认 Mac 端 linkshell 仍在线。",
+          });
+        }, 12_000);
+        pendingOpenRef.current.set(conversationId, { resolve, timer });
+        manager.sendAgentWorkspaceEnvelope(
+          input.sessionId,
+          "agent.v2.conversation.open",
+          {
+            conversationId,
+            cwd: input.cwd,
+            provider: input.provider ?? "codex",
+            model: input.model,
+            reasoningEffort: input.reasoningEffort,
+            permissionMode: input.permissionMode,
+            title: input.title || input.cwd.split("/").filter(Boolean).pop() || "Agent",
+          },
+          { queue: true, dedupeKey: `agent-v2-open:${conversationId}` },
+        );
+      });
     },
-    [manager, persistConversation],
+    [manager],
   );
 
   const openProject = useCallback(
@@ -383,8 +401,11 @@ export function useAgentWorkspace(
         sessionId: record.sessionId,
         serverUrl: record.serverUrl,
         cwd: record.cwd,
+        provider: (record.provider === "claude" || record.provider === "codex" || record.provider === "custom")
+          ? record.provider
+          : "codex",
         title: record.projectName,
-      });
+      }).then((result) => result.conversationId);
     },
     [manager, openConversation],
   );
@@ -410,6 +431,7 @@ export function useAgentWorkspace(
           conversationId: conversation.id,
           agentSessionId: conversation.agentSessionId,
           cwd: conversation.cwd,
+          provider: conversation.provider,
           model: conversation.model,
           reasoningEffort: conversation.reasoningEffort,
           permissionMode: conversation.permissionMode,

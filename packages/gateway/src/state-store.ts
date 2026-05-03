@@ -23,6 +23,7 @@ export interface GatewayStateStore {
 
 const TOKEN_TABLE = process.env.SUPABASE_GATEWAY_TOKEN_TABLE ?? "linkshell_gateway_tokens";
 const PAIRING_TABLE = process.env.SUPABASE_GATEWAY_PAIRING_TABLE ?? "linkshell_gateway_pairings";
+const STORE_TIMEOUT_MS = Number(process.env.SUPABASE_STATE_TIMEOUT_MS ?? 3_000);
 
 function msToIso(ms: number): string {
   return new Date(ms).toISOString();
@@ -48,6 +49,7 @@ export function createSupabaseStateStore(): GatewayStateStore | undefined {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await fetch(`${url}/rest/v1/${path}`, {
       ...init,
+      signal: init?.signal ?? AbortSignal.timeout(STORE_TIMEOUT_MS),
       headers: {
         ...headers,
         ...(init?.headers ?? {}),

@@ -75,6 +75,7 @@ export interface AgentTimelineItem {
 export interface AgentCapabilities {
   enabled: boolean;
   provider?: AgentProvider;
+  providers?: AgentProviderCapability[];
   protocolVersion?: number;
   workspaceProtocolVersion?: number;
   error?: string;
@@ -85,6 +86,17 @@ export interface AgentCapabilities {
   supportsPermission: boolean;
   supportsPlan: boolean;
   supportsCancel: boolean;
+}
+
+export interface AgentProviderCapability {
+  id: AgentProvider;
+  label: string;
+  enabled: boolean;
+  reason?: string;
+  supportsImages?: boolean;
+  supportsPermission?: boolean;
+  supportsPlan?: boolean;
+  supportsCancel?: boolean;
 }
 
 const CONVERSATIONS_KEY = "@linkshell/agent-conversations:v1";
@@ -107,13 +119,10 @@ export function makeAgentConversationId(input: {
   agentSessionId?: string;
   cwd: string;
 }): string {
-  return [
-    normalizeServerUrl(input.serverUrl),
-    input.sessionId,
-    input.agentSessionId || input.cwd,
-  ]
-    .map(encodeURIComponent)
-    .join(":");
+  const stableSuffix = input.agentSessionId
+    ? `remote-${input.agentSessionId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `agent-${stableSuffix}`;
 }
 
 async function saveConversations(items: AgentConversationRecord[]): Promise<void> {

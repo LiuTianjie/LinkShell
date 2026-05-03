@@ -194,7 +194,7 @@ export class BridgeSession {
     }
     if (this.options.agentUi) {
       const agentProvider = normalizeAgentProvider(
-        this.options.agentProvider ?? this.options.providerConfig.provider,
+        this.options.agentProvider ?? "codex",
       );
       const agentOptions = {
         sessionId: this.sessionId,
@@ -567,7 +567,7 @@ export class BridgeSession {
               payload: {
                 enabled: false,
                 provider: normalizeAgentProvider(
-                  this.options.agentProvider ?? this.options.providerConfig.provider,
+                  this.options.agentProvider ?? "codex",
                 ),
                 error: "Agent GUI is not enabled. Start CLI with --agent-ui.",
                 supportsSessionList: false,
@@ -600,7 +600,7 @@ export class BridgeSession {
               payload: {
                 enabled: false,
                 provider: normalizeAgentProvider(
-                  this.options.agentProvider ?? this.options.providerConfig.provider,
+                  this.options.agentProvider ?? "codex",
                 ),
                 workspaceProtocolVersion: 2,
                 error: "Agent Workspace is not enabled. Start CLI with --agent-ui.",

@@ -370,6 +370,7 @@ function AppInner() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="session" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="agent/[conversationId]" options={{ gestureEnabled: true }} />
         <Stack.Screen name="scanner" options={{ presentation: "modal" }} />
         <Stack.Screen name="gateway-list" />
       </Stack>

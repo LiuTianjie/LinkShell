@@ -128,7 +128,7 @@ export class AcpClient {
           }
           return { type: "text", text: raw.text ?? "" };
         }),
-      }, 60_000);
+      }, null);
     }
     return this.transport.request("session/prompt", {
       sessionId: input.sessionId,

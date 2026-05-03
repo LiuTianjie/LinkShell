@@ -369,6 +369,16 @@ export const agentPermissionSchema = z.object({
 export const agentCapabilitiesPayloadSchema = z.object({
   enabled: z.boolean(),
   provider: agentProviderSchema.optional(),
+  providers: z.array(z.object({
+    id: agentProviderSchema,
+    label: z.string().min(1),
+    enabled: z.boolean(),
+    reason: z.string().optional(),
+    supportsImages: z.boolean().optional(),
+    supportsPermission: z.boolean().optional(),
+    supportsPlan: z.boolean().optional(),
+    supportsCancel: z.boolean().optional(),
+  })).optional(),
   protocolVersion: z.number().int().optional(),
   error: z.string().optional(),
   supportsSessionList: z.boolean().default(false),

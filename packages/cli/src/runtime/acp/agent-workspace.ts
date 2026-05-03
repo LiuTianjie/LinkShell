@@ -222,6 +222,25 @@ function previewText(text: string): string {
   return text.replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
+function providerLabel(provider: AgentProvider): string {
+  if (provider === "codex") return "Codex";
+  if (provider === "claude") return "Claude";
+  return "Custom";
+}
+
+function providerSetupReason(provider: AgentProvider, activeProvider: AgentProvider, error?: string): string {
+  if (provider === activeProvider) {
+    return error ?? `${providerLabel(provider)} Agent 正在初始化或不可用。`;
+  }
+  if (provider === "codex") {
+    return `当前 CLI 启用的是 ${providerLabel(activeProvider)} Agent。`;
+  }
+  if (provider === "claude") {
+    return "Claude ACP adapter 尚未启用，请用 --agent-provider claude --agent-command 配置。";
+  }
+  return "Custom Agent 需要用 --agent-provider custom --agent-command 配置后才能使用。";
+}
+
 export class AgentWorkspaceProxy {
   private client: AcpClient | undefined;
   private initialized = false;
@@ -353,12 +372,31 @@ export class AgentWorkspaceProxy {
   private sendCapabilities(): void {
     const enabled = Boolean(this.client && this.initialized && !this.error);
     const supportsImages = enabled && this.agentProtocol === "codex-app-server";
+    const activeProvider = this.input.provider;
+    const providerIds: AgentProvider[] = ["codex", "claude"];
+    if (activeProvider === "custom") providerIds.push("custom");
     this.input.send(createEnvelope({
       type: "agent.v2.capabilities",
       sessionId: this.input.sessionId,
       payload: {
         enabled,
-        provider: this.input.provider,
+        provider: activeProvider,
+        providers: providerIds.map((provider) => {
+          const isActive = provider === activeProvider;
+          const canUse = isActive && enabled;
+          return {
+            id: provider,
+            label: providerLabel(provider),
+            enabled: canUse,
+            reason: canUse
+              ? undefined
+              : providerSetupReason(provider, activeProvider, isActive ? this.error : undefined),
+            supportsImages: canUse && supportsImages,
+            supportsPermission: canUse,
+            supportsPlan: canUse,
+            supportsCancel: canUse,
+          };
+        }),
         protocolVersion: 1,
         workspaceProtocolVersion: 2,
         error: enabled ? undefined : this.error,
@@ -385,7 +423,18 @@ export class AgentWorkspaceProxy {
   }): Promise<AgentConversation | undefined> {
     await this.ensureClient();
     this.sendCapabilities();
-    if (!this.client) return undefined;
+    if (payload.provider && payload.provider !== this.input.provider) {
+      return this.openFailure(
+        payload,
+        `当前 CLI 只启用了 ${providerLabel(this.input.provider)} Agent，不能在这个会话里启动 ${providerLabel(payload.provider)}。`,
+      );
+    }
+    if (!this.client) {
+      return this.openFailure(
+        payload,
+        this.error ?? "Agent Workspace 不可用，请确认 CLI 已使用 --agent-ui 启动。",
+      );
+    }
 
     const cwd = payload.cwd ?? this.input.cwd;
     let agentSessionId = payload.agentSessionId;
@@ -442,40 +491,54 @@ export class AgentWorkspaceProxy {
       return conversation;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.status = "error";
-      this.error = message;
-      const fallbackId = payload.conversationId ?? id("agent-conversation");
-      const now = Date.now();
-      const conversation: AgentConversation = {
-        id: fallbackId,
-        provider: payload.provider ?? this.input.provider,
-        cwd,
-        title: payload.title ?? titleFromCwd(cwd),
-        model: payload.model,
-        reasoningEffort: payload.reasoningEffort,
-        permissionMode: payload.permissionMode,
-        status: "error",
-        archived: false,
-        lastMessagePreview: message,
-        lastActivityAt: now,
-        createdAt: now,
-      };
-      this.conversations.set(conversation.id, conversation);
-      this.activeConversationId = conversation.id;
-      this.addItem(conversation.id, {
-        id: id("error"),
-        conversationId: conversation.id,
-        type: "error",
-        error: message,
-        createdAt: now,
-      });
-      this.input.send(createEnvelope({
-        type: "agent.v2.conversation.opened",
-        sessionId: this.input.sessionId,
-        payload: { conversation, snapshot: this.timelines.get(conversation.id) ?? [] },
-      }));
-      return conversation;
+      return this.openFailure(payload, message, cwd);
     }
+  }
+
+  private openFailure(
+    payload: {
+      conversationId?: string;
+      cwd?: string;
+      provider?: AgentProvider;
+      model?: string;
+      reasoningEffort?: string;
+      permissionMode?: AgentPermissionMode;
+      title?: string;
+    },
+    message: string,
+    cwd = payload.cwd ?? this.input.cwd,
+  ): AgentConversation {
+    const fallbackId = payload.conversationId ?? id("agent-conversation");
+    const now = Date.now();
+    const conversation: AgentConversation = {
+      id: fallbackId,
+      provider: payload.provider ?? this.input.provider,
+      cwd,
+      title: payload.title ?? titleFromCwd(cwd),
+      model: payload.model,
+      reasoningEffort: payload.reasoningEffort,
+      permissionMode: payload.permissionMode,
+      status: "error",
+      archived: false,
+      lastMessagePreview: message,
+      lastActivityAt: now,
+      createdAt: now,
+    };
+    this.conversations.set(conversation.id, conversation);
+    this.activeConversationId = conversation.id;
+    this.addItem(conversation.id, {
+      id: id("error"),
+      conversationId: conversation.id,
+      type: "error",
+      error: message,
+      createdAt: now,
+    });
+    this.input.send(createEnvelope({
+      type: "agent.v2.conversation.opened",
+      sessionId: this.input.sessionId,
+      payload: { conversation, snapshot: this.timelines.get(conversation.id) ?? [] },
+    }));
+    return conversation;
   }
 
   private async sendPrompt(payload: {

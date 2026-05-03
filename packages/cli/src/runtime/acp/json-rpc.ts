@@ -31,7 +31,7 @@ export class JsonRpcStdioTransport {
     {
       resolve: (value: unknown) => void;
       reject: (error: Error) => void;
-      timer: ReturnType<typeof setTimeout>;
+      timer?: ReturnType<typeof setTimeout>;
     }
   >();
   private buffer = "";
@@ -65,17 +65,19 @@ export class JsonRpcStdioTransport {
     });
   }
 
-  request(method: string, params?: unknown, timeoutMs = 30_000): Promise<unknown> {
+  request(method: string, params?: unknown, timeoutMs: number | null = 30_000): Promise<unknown> {
     if (!this.child || this.child.stdin.destroyed) {
       return Promise.reject(new Error("ACP agent is not running"));
     }
     const id = this.nextId++;
     const message: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`ACP request timed out: ${method}`));
-      }, timeoutMs);
+      const timer = timeoutMs && timeoutMs > 0
+        ? setTimeout(() => {
+            this.pending.delete(id);
+            reject(new Error(`ACP request timed out: ${method}`));
+          }, timeoutMs)
+        : undefined;
       this.pending.set(id, { resolve, reject, timer });
       this.write(message);
     });
@@ -138,7 +140,7 @@ export class JsonRpcStdioTransport {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
-      clearTimeout(pending.timer);
+      if (pending.timer) clearTimeout(pending.timer);
       const response = message as JsonRpcResponse;
       if (response.error) pending.reject(new Error(response.error.message));
       else pending.resolve(response.result);
@@ -169,7 +171,7 @@ export class JsonRpcStdioTransport {
   private failAll(message: string): void {
     this.onExit(message);
     for (const [, pending] of this.pending) {
-      clearTimeout(pending.timer);
+      if (pending.timer) clearTimeout(pending.timer);
       pending.reject(new Error(message));
     }
     this.pending.clear();

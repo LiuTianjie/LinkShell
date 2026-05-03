@@ -207,7 +207,7 @@ program
       authToken,
       keepAwake,
       agentUi: Boolean(options.agentUi),
-      agentProvider: options.agentProvider ?? options.provider,
+      agentProvider: options.agentProvider ?? "codex",
       agentCommand: options.agentCommand,
     });
 
