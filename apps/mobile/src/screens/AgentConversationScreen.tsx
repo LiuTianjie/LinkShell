@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Clipboard,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -59,36 +60,20 @@ const PERMISSION_OPTIONS: Option<AgentPermissionMode>[] = [
   { label: "完全访问", value: "full_access" },
 ];
 
-const PROMPT_CHIPS = ["继续", "解释", "修复", "写测试", "总结当前改动"];
 const MAX_IMAGE_ATTACHMENTS = 3;
 const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
+const DEFAULT_OPTION_ID = "__default__";
 
-function showOptionSheet<T extends string>(
-  title: string,
-  options: Option<T>[],
-  currentValue: T | undefined,
-  onSelect: (value: T | undefined) => void,
-) {
-  const labels = options.map((option) =>
-    option.value === currentValue ? `${option.label} ✓` : option.label,
-  );
-  if (Platform.OS === "ios") {
-    ActionSheetIOS.showActionSheetWithOptions(
-      { title, options: ["取消", ...labels], cancelButtonIndex: 0 },
-      (index) => {
-        if (index <= 0) return;
-        onSelect(options[index - 1]?.value);
-      },
-    );
-    return;
-  }
-  Alert.alert(title, undefined, [
-    { text: "取消", style: "cancel" },
-    ...options.map((option, index) => ({
-      text: labels[index],
-      onPress: () => onSelect(option.value),
-    })),
-  ]);
+function menuActions<T extends string>(options: Option<T>[], currentValue: T | undefined) {
+  return options.map((option) => ({
+    id: option.value ?? DEFAULT_OPTION_ID,
+    title: option.label,
+    state: option.value === currentValue ? "on" as const : "off" as const,
+  }));
+}
+
+function valueFromMenuId<T extends string>(id: string): T | undefined {
+  return id === DEFAULT_OPTION_ID ? undefined : id as T;
 }
 
 function statusMeta(status: string, theme: Theme) {
@@ -510,10 +495,6 @@ export function AgentConversationScreen({
     setAttachments([]);
   }, [attachments, canSend, conversation, effort, model, permissionMode, text, workspace]);
 
-  const sendChip = useCallback((value: string) => {
-    setText((current) => current ? `${current}\n${value}` : value);
-  }, []);
-
   const appendImageBlocks = useCallback((assets: ImagePicker.ImagePickerAsset[]) => {
     const blocks = assets
       .map(imageBlockFromAsset)
@@ -618,7 +599,11 @@ export function AgentConversationScreen({
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={0}
+      style={{ flex: 1, backgroundColor: theme.bg }}
+    >
       <View
         style={{
           paddingTop: insets.top + 8,
@@ -669,6 +654,7 @@ export function AgentConversationScreen({
 
       <ScrollView
         contentContainerStyle={{ padding: 14, gap: 10, paddingBottom: 16 }}
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps="handled"
       >
         {timeline.length === 0 ? (
@@ -711,27 +697,9 @@ export function AgentConversationScreen({
             paddingHorizontal: 10,
             paddingTop: 8,
             paddingBottom: 8,
-            gap: 8,
+            gap: 7,
           }}
         >
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <View style={{ flexDirection: "row", gap: 6 }}>
-              {PROMPT_CHIPS.map((chip) => (
-                <Pressable
-                  key={chip}
-                  onPress={() => sendChip(chip)}
-                  style={({ pressed }) => ({
-                    borderRadius: 999,
-                    paddingHorizontal: 9,
-                    paddingVertical: 5,
-                    backgroundColor: pressed ? theme.accentLight : theme.bgInput,
-                  })}
-                >
-                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700" }}>{chip}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
           {attachments.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <View style={{ flexDirection: "row", gap: 8 }}>
@@ -778,8 +746,15 @@ export function AgentConversationScreen({
             placeholder="给 Agent 发送消息"
             placeholderTextColor={theme.textTertiary}
             multiline
+            keyboardType="default"
+            textContentType="none"
+            autoCapitalize="sentences"
+            autoCorrect
+            spellCheck={false}
+            returnKeyType="default"
+            blurOnSubmit={false}
             style={{
-              minHeight: 54,
+              minHeight: 48,
               maxHeight: 132,
               color: theme.text,
               fontSize: 15,
@@ -788,114 +763,122 @@ export function AgentConversationScreen({
               paddingVertical: 4,
             }}
           />
-          <View style={{ gap: 7 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              {supportsImages ? (
-                <Pressable
-                  onPress={showAttachSheet}
-                  style={({ pressed }) => ({
-                    width: 34,
-                    height: 34,
-                    borderRadius: 17,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: pressed ? theme.accentLight : theme.bgInput,
-                  })}
-                >
-                  <AppSymbol name="photo" size={17} color={theme.textSecondary} />
-                </Pressable>
-              ) : null}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {supportsImages ? (
               <Pressable
-                onPress={() => showOptionSheet("Agent 权限", PERMISSION_OPTIONS, permissionMode, setPermissionMode)}
+                onPress={showAttachSheet}
                 style={({ pressed }) => ({
-                  flexDirection: "row",
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
                   alignItems: "center",
-                  gap: 6,
-                  borderRadius: 999,
-                  paddingHorizontal: 9,
-                  paddingVertical: 6,
-                  backgroundColor: pressed ? theme.bgInput : permission.bg,
-                  maxWidth: "72%",
-                })}
-              >
-                <AppSymbol name={permission.icon} size={13} color={permission.color} />
-                <Text style={{ color: permission.color, fontSize: 12, fontWeight: "700" }} numberOfLines={1}>
-                  {permission.label}
-                </Text>
-                <AppSymbol name="chevron.down" size={10} color={permission.color} />
-              </Pressable>
-              <View style={{ flex: 1 }} />
-              {running ? (
-                <Pressable
-                  onPress={() => workspace.cancel(conversation.id)}
-                  style={({ pressed }) => ({
-                    width: 38,
-                    height: 38,
-                    borderRadius: 19,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: pressed ? theme.errorLight : theme.bgInput,
-                  })}
-                >
-                  <AppSymbol name="stop.circle.fill" size={20} color={theme.error} />
-                </Pressable>
-              ) : (
-                <Pressable
-                  onPress={send}
-                  disabled={!canSend}
-                  style={({ pressed }) => ({
-                    width: 38,
-                    height: 38,
-                    borderRadius: 19,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: pressed ? theme.accentSecondary : theme.accent,
-                    opacity: canSend ? 1 : 0.45,
-                  })}
-                >
-                  <AppSymbol name="arrow.up" size={18} color="#fff" />
-                </Pressable>
-              )}
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Pressable
-                onPress={() => showOptionSheet("选择模型", MODEL_OPTIONS, model, setModel)}
-                style={({ pressed }) => ({
-                  flex: 1,
-                  minWidth: 0,
-                  borderRadius: 999,
-                  paddingHorizontal: 9,
-                  paddingVertical: 6,
+                  justifyContent: "center",
                   backgroundColor: pressed ? theme.accentLight : theme.bgInput,
                 })}
+              >
+                <AppSymbol name="photo" size={17} color={theme.textSecondary} />
+              </Pressable>
+            ) : null}
+            <MenuView
+              actions={menuActions(PERMISSION_OPTIONS, permissionMode)}
+              onPressAction={({ nativeEvent }) =>
+                setPermissionMode(valueFromMenuId<AgentPermissionMode>(nativeEvent.event))
+              }
+            >
+              <View
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 999,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: permission.bg,
+                }}
+              >
+                <AppSymbol name={permission.icon} size={13} color={permission.color} />
+              </View>
+            </MenuView>
+            <MenuView
+              actions={menuActions(MODEL_OPTIONS, model)}
+              onPressAction={({ nativeEvent }) => setModel(valueFromMenuId<string>(nativeEvent.event))}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  borderRadius: 999,
+                  paddingHorizontal: 9,
+                  paddingVertical: 7,
+                  backgroundColor: theme.bgInput,
+                  width: 86,
+                }}
               >
                 <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700" }} numberOfLines={1}>
                   {formatModel(model)}
                 </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => showOptionSheet("推理强度", EFFORT_OPTIONS, effort, setEffort)}
-                style={({ pressed }) => ({
+                <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
+              </View>
+            </MenuView>
+            <MenuView
+              actions={menuActions(EFFORT_OPTIONS, effort)}
+              onPressAction={({ nativeEvent }) =>
+                setEffort(valueFromMenuId<AgentReasoningEffort>(nativeEvent.event))
+              }
+            >
+              <View
+                style={{
                   flexDirection: "row",
                   alignItems: "center",
-                  justifyContent: "center",
                   gap: 4,
                   borderRadius: 999,
                   paddingHorizontal: 9,
-                  paddingVertical: 6,
-                  minWidth: 78,
-                  backgroundColor: pressed ? theme.accentLight : theme.bgInput,
-                })}
+                  paddingVertical: 7,
+                  backgroundColor: theme.bgInput,
+                  width: 58,
+                }}
               >
                 <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700" }} numberOfLines={1}>
                   {formatEffort(effort)}
                 </Text>
-                <AppSymbol name="chevron.down" size={10} color={theme.textTertiary} />
+                <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
+              </View>
+            </MenuView>
+            <View style={{ flex: 1 }} />
+            {running ? (
+              <Pressable
+                onPress={() => workspace.cancel(conversation.id)}
+                style={({ pressed }) => ({
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: pressed ? theme.errorLight : theme.bgInput,
+                })}
+              >
+                <AppSymbol name="stop.circle.fill" size={20} color={theme.error} />
               </Pressable>
-            </View>
+            ) : (
+              <Pressable
+                onPress={send}
+                disabled={!canSend}
+                style={({ pressed }) => ({
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+                  opacity: canSend ? 1 : 0.45,
+                })}
+              >
+                <AppSymbol name="arrow.up" size={18} color="#fff" />
+              </Pressable>
+            )}
           </View>
         </View>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
