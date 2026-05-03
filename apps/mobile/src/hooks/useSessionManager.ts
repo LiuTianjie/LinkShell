@@ -544,8 +544,9 @@ export function useSessionManager(): SessionManagerHandle {
   useEffect(() => {
     ensureDeviceToken().then((token) => {
       deviceTokenRef.current = token;
+      tick();
     });
-  }, []);
+  }, [tick]);
 
   // ── Helpers ────────────────────────────────────────────────────
 

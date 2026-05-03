@@ -23,6 +23,7 @@ import type {
 } from "../storage/agent-workspace";
 import { loadProjects, removeProject, touchProject, type ProjectRecord } from "../storage/projects";
 import { loadServers, type SavedServer } from "../storage/servers";
+import { getDeviceToken } from "../storage/device-token";
 import { useTheme, type Theme } from "../theme";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 
@@ -165,7 +166,10 @@ function projectKey(serverUrl: string, sessionId: string, cwd: string): string {
   return [normalizeServerUrl(serverUrl), sessionId, cwd.trim()].join("\u0000");
 }
 
-function uniqueServers(saved: SavedServer[], gatewayBaseUrl?: string): SavedServer[] {
+function uniqueServers(
+  saved: SavedServer[],
+  urls: (string | undefined | null)[],
+): SavedServer[] {
   const byUrl = new Map<string, SavedServer>();
   for (const server of saved) {
     byUrl.set(normalizeServerUrl(server.url), {
@@ -173,9 +177,9 @@ function uniqueServers(saved: SavedServer[], gatewayBaseUrl?: string): SavedServ
       url: normalizeServerUrl(server.url),
     });
   }
-  const current = gatewayBaseUrl?.trim();
-  if (current) {
-    const url = normalizeServerUrl(current);
+  for (const current of urls) {
+    if (!current?.trim()) continue;
+    const url = normalizeServerUrl(current.trim());
     if (!byUrl.has(url)) {
       byUrl.set(url, {
         url,
@@ -205,6 +209,7 @@ export function AgentWorkspaceScreen({
 }: AgentWorkspaceScreenProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const allSessions = sessions ?? workspace.connectedSessions;
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [createVisible, setCreateVisible] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -213,22 +218,29 @@ export function AgentWorkspaceScreen({
   const [customCwd, setCustomCwd] = useState("");
   const [creating, setCreating] = useState(false);
   const [gatewayHosts, setGatewayHosts] = useState<GatewayHostSession[]>([]);
+  const [loadingGatewayHosts, setLoadingGatewayHosts] = useState(false);
+  const [knownGatewayCount, setKnownGatewayCount] = useState(0);
   const [hiddenProjectKeys, setHiddenProjectKeys] = useState<Set<string>>(() => new Set());
 
   const onlineSessions = useMemo(
     () =>
-      (sessions ?? workspace.connectedSessions).filter((session) =>
+      allSessions.filter((session) =>
         session.status === "connected" ||
         session.status === "connecting" ||
         session.status === "reconnecting" ||
+        session.status === "disconnected" ||
         session.status === "host_disconnected",
       ),
-    [sessions, workspace.connectedSessions],
+    [allSessions],
   );
 
   const sessionSignature = useMemo(
     () => onlineSessions.map((session) => `${session.sessionId}:${session.status}`).join("|"),
     [onlineSessions],
+  );
+  const gatewaySignature = useMemo(
+    () => allSessions.map((session) => session.gatewayUrl).sort().join("|"),
+    [allSessions],
   );
 
   useEffect(() => {
@@ -245,11 +257,17 @@ export function AgentWorkspaceScreen({
 
   useEffect(() => {
     let cancelled = false;
+    setLoadingGatewayHosts(true);
     loadServers()
       .then(async (savedServers) => {
-        const servers = uniqueServers(savedServers, gatewayBaseUrl);
+        const servers = uniqueServers(savedServers, [
+          gatewayBaseUrl,
+          ...allSessions.map((session) => session.gatewayUrl),
+        ]);
+        if (!cancelled) setKnownGatewayCount(servers.length);
+        const token = deviceToken ?? (await getDeviceToken());
         const headers: Record<string, string> = {};
-        if (deviceToken) headers.Authorization = `Bearer ${deviceToken}`;
+        if (token) headers.Authorization = `Bearer ${token}`;
         const results = await Promise.allSettled(
           servers.map(async (server) => {
             const response = await fetchWithTimeout(`${server.url}/sessions`, { headers });
@@ -272,11 +290,14 @@ export function AgentWorkspaceScreen({
       })
       .catch(() => {
         if (!cancelled) setGatewayHosts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingGatewayHosts(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [deviceToken, gatewayBaseUrl, refreshKey, sessionSignature]);
+  }, [allSessions, deviceToken, gatewayBaseUrl, gatewaySignature, refreshKey, sessionSignature]);
 
   const targets = useMemo(() => {
     const bySession = new Map<string, AgentTarget>();
@@ -456,6 +477,15 @@ export function AgentWorkspaceScreen({
 
   const openCreate = useCallback((targetOverride?: AgentTarget, projectOverride?: AgentProjectItem) => {
     if (targets.length === 0) {
+      if (knownGatewayCount > 0) {
+        Alert.alert(
+          loadingGatewayHosts ? "正在加载网关会话" : "没有可用 Mac",
+          loadingGatewayHosts
+            ? "正在从已连接的网关读取可用 Mac，请稍候再试。"
+            : "当前网关没有可用的 Mac host。请确认 Mac 端 linkshell 仍在运行。",
+        );
+        return;
+      }
       onOpenConnectionSheet();
       return;
     }
@@ -468,7 +498,7 @@ export function AgentWorkspaceScreen({
     setSelectedProvider(target?.provider ?? "codex");
     setCreateVisible(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-  }, [onOpenConnectionSheet, projects, selectedTarget, targets]);
+  }, [knownGatewayCount, loadingGatewayHosts, onOpenConnectionSheet, projects, selectedTarget, targets]);
 
   const createConversation = useCallback(async () => {
     if (!selectedTarget) {
@@ -613,14 +643,18 @@ export function AgentWorkspaceScreen({
                 backgroundColor: "rgba(255,255,255,0.16)",
               }}
             >
-              <AppSymbol name={targets.length > 0 ? "sparkles" : "plus"} size={17} color="#fff" />
+              <AppSymbol name={targets.length > 0 || knownGatewayCount > 0 ? "sparkles" : "plus"} size={17} color="#fff" />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700" }}>
-                {targets.length > 0 ? "新建 Agent 对话" : "连接网关"}
+                {targets.length > 0 || knownGatewayCount > 0 ? "新建 Agent 对话" : "连接网关"}
               </Text>
               <Text style={{ color: "rgba(255,255,255,0.78)", fontSize: 13, marginTop: 2 }} numberOfLines={1}>
-                {targets.length > 0 ? "选择网关里的 Mac、Agent 和工作目录" : "没有可用 Mac 时再扫码或输入连接"}
+                {targets.length > 0
+                  ? "选择网关里的 Mac、Agent 和工作目录"
+                  : knownGatewayCount > 0
+                    ? "正在从网关确认可用 Mac"
+                    : "没有可用网关时再扫码或输入连接"}
               </Text>
             </View>
             <AppSymbol name="chevron.right" size={16} color="rgba(255,255,255,0.9)" />
