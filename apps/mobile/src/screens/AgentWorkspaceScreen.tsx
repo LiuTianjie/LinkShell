@@ -619,16 +619,29 @@ export function AgentWorkspaceScreen({
         Alert.alert("Mac 不在线", "请先在这个项目所在的 Mac 上启动 linkshell，再继续使用 Agent。");
         return;
       }
-      if (!project.latestConversation || project.latestConversation.sessionId !== project.sessionId) {
+      const latest = project.latestConversation;
+      if (!latest) {
         openCreate(project.target, project);
         return;
       }
-      const id = await workspace.resumeConversation(project.latestConversation.id);
-      if (id) {
-        onOpenConversation(id);
+
+      const result = await workspace.openConversation({
+        conversationId: latest.id,
+        agentSessionId: latest.agentSessionId,
+        sessionId: project.target.sessionId,
+        serverUrl: project.target.serverUrl,
+        cwd: project.cwd,
+        provider: latest.provider ?? project.target.provider ?? "codex",
+        model: latest.model,
+        reasoningEffort: latest.reasoningEffort,
+        permissionMode: latest.permissionMode,
+        title: latest.title || project.title,
+      });
+      if (result.conversationId) {
+        onOpenConversation(result.conversationId);
         return;
       }
-      Alert.alert("无法恢复 Agent 对话", "请确认 Mac 端会话在线，并且 Agent GUI 已启用。");
+      Alert.alert("无法恢复 Agent 对话", result.error ?? "请确认 Mac 端会话在线，并且 Agent GUI 已启用。");
     },
     [onOpenConversation, openCreate, workspace],
   );
