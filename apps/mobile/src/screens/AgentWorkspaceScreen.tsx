@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Modal,
   Pressable,
   ScrollView,
@@ -11,6 +12,7 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import { Swipeable } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
@@ -24,6 +26,7 @@ import type {
 import { loadProjects, removeProject, touchProject, type ProjectRecord } from "../storage/projects";
 import { loadServers, type SavedServer } from "../storage/servers";
 import { getDeviceToken } from "../storage/device-token";
+import { fetchMySessions, fetchOfficialGateways, getValidSession } from "../lib/supabase";
 import { useTheme, type Theme } from "../theme";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 
@@ -166,6 +169,10 @@ function projectKey(serverUrl: string, sessionId: string, cwd: string): string {
   return [normalizeServerUrl(serverUrl), sessionId, cwd.trim()].join("\u0000");
 }
 
+function projectPathKey(serverUrl: string, cwd: string): string {
+  return [normalizeServerUrl(serverUrl), cwd.trim()].join("\u0000");
+}
+
 function uniqueServers(
   saved: SavedServer[],
   urls: (string | undefined | null)[],
@@ -221,6 +228,7 @@ export function AgentWorkspaceScreen({
   const [loadingGatewayHosts, setLoadingGatewayHosts] = useState(false);
   const [knownGatewayCount, setKnownGatewayCount] = useState(0);
   const [hiddenProjectKeys, setHiddenProjectKeys] = useState<Set<string>>(() => new Set());
+  const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
 
   const onlineSessions = useMemo(
     () =>
@@ -264,11 +272,15 @@ export function AgentWorkspaceScreen({
           gatewayBaseUrl,
           ...allSessions.map((session) => session.gatewayUrl),
         ]);
-        if (!cancelled) setKnownGatewayCount(servers.length);
+        const authSession = await getValidSession();
+        const officialGateways = authSession?.user.plan === "pro"
+          ? await fetchOfficialGateways()
+          : [];
+        if (!cancelled) setKnownGatewayCount(servers.length + officialGateways.length);
         const token = deviceToken ?? (await getDeviceToken());
         const headers: Record<string, string> = {};
         if (token) headers.Authorization = `Bearer ${token}`;
-        const results = await Promise.allSettled(
+        const deviceResults = await Promise.allSettled(
           servers.map(async (server) => {
             const response = await fetchWithTimeout(`${server.url}/sessions`, { headers });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -279,14 +291,26 @@ export function AgentWorkspaceScreen({
             }));
           }),
         );
+        const officialResults = await Promise.allSettled(
+          officialGateways.map(async (gateway) => {
+            const sessions = await fetchMySessions(gateway.url);
+            return sessions.map((session) => ({
+              ...session,
+              serverUrl: gateway.url,
+            }));
+          }),
+        );
         if (cancelled) return;
-        setGatewayHosts(
-          results.flatMap((result) =>
+        const nextHosts = [...deviceResults, ...officialResults].flatMap((result) =>
             result.status === "fulfilled"
               ? result.value.filter((session) => session.id && session.hasHost !== false)
               : [],
-          ),
         );
+        const byKey = new Map<string, GatewayHostSession>();
+        for (const session of nextHosts) {
+          byKey.set(`${normalizeServerUrl(session.serverUrl)}:${session.id}`, session);
+        }
+        setGatewayHosts([...byKey.values()]);
       })
       .catch(() => {
         if (!cancelled) setGatewayHosts([]);
@@ -341,6 +365,10 @@ export function AgentWorkspaceScreen({
 
   const projectItems = useMemo(() => {
     const targetBySession = new Map(targets.map((target) => [target.sessionId, target]));
+    const targetByPath = new Map<string, AgentTarget>();
+    for (const target of targets) {
+      if (target.cwd) targetByPath.set(projectPathKey(target.serverUrl, target.cwd), target);
+    }
     const latestByProject = new Map<string, AgentConversationRecord>();
     for (const conversation of workspace.conversations) {
       if (conversation.archived || !conversation.cwd) continue;
@@ -355,17 +383,21 @@ export function AgentWorkspaceScreen({
     for (const project of projects) {
       const key = projectKey(project.serverUrl, project.sessionId, project.cwd);
       if (hiddenProjectKeys.has(key)) continue;
-      const target = targetBySession.get(project.sessionId);
+      const target = targetBySession.get(project.sessionId) ??
+        targetByPath.get(projectPathKey(project.serverUrl, project.cwd));
+      const latestConversation = target && target.sessionId !== project.sessionId
+        ? undefined
+        : latestByProject.get(key);
       byProject.set(key, {
         id: key,
-        serverUrl: project.serverUrl,
-        sessionId: project.sessionId,
+        serverUrl: target?.serverUrl ?? project.serverUrl,
+        sessionId: target?.sessionId ?? project.sessionId,
         cwd: project.cwd,
         title: project.projectName || titleFromCwd(project.cwd),
         hostname: target?.hostname ?? project.hostname,
         target,
         project,
-        latestConversation: latestByProject.get(key),
+        latestConversation,
       });
     }
 
@@ -373,18 +405,33 @@ export function AgentWorkspaceScreen({
       if (!target.cwd) continue;
       const key = projectKey(target.serverUrl, target.sessionId, target.cwd);
       if (hiddenProjectKeys.has(key)) continue;
-      const existing = byProject.get(key);
-      byProject.set(key, {
-        id: key,
-        serverUrl: existing?.serverUrl ?? target.serverUrl,
-        sessionId: existing?.sessionId ?? target.sessionId,
-        cwd: existing?.cwd ?? target.cwd,
-        title: existing?.title ?? target.projectName ?? titleFromCwd(target.cwd),
-        hostname: target.hostname ?? existing?.hostname,
-        target,
-        project: existing?.project,
-        latestConversation: existing?.latestConversation ?? latestByProject.get(key),
-      });
+      const pathKey = projectPathKey(target.serverUrl, target.cwd);
+      const existing =
+        byProject.get(key) ??
+        [...byProject.values()].find((item) => projectPathKey(item.serverUrl, item.cwd) === pathKey);
+      if (existing) {
+        byProject.set(existing.id, {
+          ...existing,
+          serverUrl: target.serverUrl,
+          sessionId: target.sessionId,
+          hostname: target.hostname ?? existing.hostname,
+          target,
+          latestConversation: existing.sessionId === target.sessionId
+            ? existing.latestConversation ?? latestByProject.get(key)
+            : latestByProject.get(key),
+        });
+      } else {
+        byProject.set(key, {
+          id: key,
+          serverUrl: target.serverUrl,
+          sessionId: target.sessionId,
+          cwd: target.cwd,
+          title: target.projectName ?? titleFromCwd(target.cwd),
+          hostname: target.hostname,
+          target,
+          latestConversation: latestByProject.get(key),
+        });
+      }
     }
 
     for (const [key, conversation] of latestByProject) {
@@ -583,13 +630,15 @@ export function AgentWorkspaceScreen({
           style: "destructive",
           onPress: () => {
             const key = projectKey(project.serverUrl, project.sessionId, project.cwd);
+            const pathKey = projectPathKey(project.serverUrl, project.cwd);
             setHiddenProjectKeys((prev) => new Set(prev).add(key));
             setProjects((prev) => prev.filter((item) => item.id !== project.project?.id));
             const tasks: Promise<unknown>[] = [];
             if (project.project) tasks.push(removeProject(project.project.id));
             for (const conversation of workspace.conversations) {
               if (
-                projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd) === key
+                projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd) === key ||
+                projectPathKey(conversation.serverUrl, conversation.cwd) === pathKey
               ) {
                 tasks.push(workspace.archive(conversation.id, true));
               }
@@ -605,17 +654,23 @@ export function AgentWorkspaceScreen({
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + 12,
-          paddingBottom: Math.max(insets.bottom, 18) + 12,
-          gap: 18,
+          paddingBottom: Math.max(insets.bottom, 20) + 60,
+          gap: 16,
         }}
         contentInsetAdjustmentBehavior="automatic"
       >
-        <View style={{ paddingHorizontal: 20, gap: 6 }}>
-          <Text style={{ color: theme.text, fontSize: 34, fontWeight: "800" }}>
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingTop: insets.top + 2,
+            paddingBottom: 8,
+            gap: 2,
+          }}
+        >
+          <Text style={{ color: theme.text, fontSize: 34, fontWeight: "700", letterSpacing: 0.37 }}>
             Agent
           </Text>
-          <Text style={{ color: theme.textTertiary, fontSize: 14, lineHeight: 20 }}>
+          <Text style={{ color: theme.textTertiary, fontSize: 13 }}>
             按项目进入 Agent。在线项目会继续最近的对话，没有对话则新建。
           </Text>
         </View>
@@ -688,66 +743,92 @@ export function AgentWorkspaceScreen({
               const caps = project.target ? workspace.capabilitiesBySessionId.get(project.target.sessionId) : undefined;
               const canUseAgent = online && caps?.enabled;
               return (
-                <Pressable
+                <Swipeable
                   key={project.id}
-                  onPress={() => openProject(project)}
-                  style={({ pressed }) => ({
-                    borderRadius: 12,
-                    borderCurve: "continuous",
-                    backgroundColor: pressed ? theme.bgInput : theme.bgCard,
-                    padding: 12,
-                    gap: 8,
-                  })}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <AppSymbol name="folder.fill" size={18} color={online ? theme.accent : theme.textTertiary} />
-                    <Text style={{ flex: 1, color: theme.text, fontSize: 16, fontWeight: "700" }} numberOfLines={1}>
-                      {project.title}
-                    </Text>
-                    <Pressable
-                      hitSlop={10}
-                      onPress={(event) => {
-                        event.stopPropagation();
-                        deleteProject(project);
-                      }}
-                      style={({ pressed }) => ({
-                        width: 30,
-                        height: 30,
-                        borderRadius: 15,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor: pressed ? theme.errorLight : theme.bgInput,
-                      })}
-                    >
-                      <AppSymbol name="trash.fill" size={13} color={theme.textTertiary} />
-                    </Pressable>
-                    <View
-                      style={{
-                        borderRadius: 999,
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        backgroundColor: canUseAgent ? theme.accentLight : theme.bgInput,
-                      }}
-                    >
-                      <Text
+                  ref={(ref) => {
+                    if (ref) swipeableRefs.current.set(project.id, ref);
+                    else swipeableRefs.current.delete(project.id);
+                  }}
+                  overshootRight={false}
+                  onSwipeableWillOpen={() => {
+                    swipeableRefs.current.forEach((swipeable, id) => {
+                      if (id !== project.id) swipeable.close();
+                    });
+                  }}
+                  renderRightActions={(
+                    _progress: Animated.AnimatedInterpolation<number>,
+                    dragX: Animated.AnimatedInterpolation<number>,
+                  ) => {
+                    const scale = dragX.interpolate({
+                      inputRange: [-80, 0],
+                      outputRange: [1, 0.5],
+                      extrapolate: "clamp",
+                    });
+                    return (
+                      <Pressable
+                        onPress={() => deleteProject(project)}
                         style={{
-                          color: canUseAgent ? theme.success : theme.textTertiary,
-                          fontSize: 11,
-                          fontWeight: "700",
+                          width: 80,
+                          borderRadius: 12,
+                          borderCurve: "continuous",
+                          backgroundColor: theme.error,
+                          alignItems: "center",
+                          justifyContent: "center",
                         }}
                       >
-                        {online ? (caps ? (caps.enabled ? "在线" : "不可用") : "可用") : "离线"}
+                        <Animated.View style={{ alignItems: "center", transform: [{ scale }] }}>
+                          <AppSymbol name="trash.fill" size={18} color="#fff" />
+                          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700", marginTop: 2 }}>
+                            删除
+                          </Text>
+                        </Animated.View>
+                      </Pressable>
+                    );
+                  }}
+                >
+                  <Pressable
+                    onPress={() => openProject(project)}
+                    style={({ pressed }) => ({
+                      borderRadius: 12,
+                      borderCurve: "continuous",
+                      backgroundColor: pressed ? theme.bgInput : theme.bgCard,
+                      padding: 12,
+                      gap: 8,
+                    })}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <AppSymbol name="folder.fill" size={18} color={online ? theme.accent : theme.textTertiary} />
+                      <Text style={{ flex: 1, color: theme.text, fontSize: 16, fontWeight: "700" }} numberOfLines={1}>
+                        {project.title}
                       </Text>
+                      <View
+                        style={{
+                          borderRadius: 999,
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          backgroundColor: canUseAgent ? theme.accentLight : theme.bgInput,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: canUseAgent ? theme.success : theme.textTertiary,
+                            fontSize: 11,
+                            fontWeight: "700",
+                          }}
+                        >
+                          {online ? (caps ? (caps.enabled ? "在线" : "不可用") : "可用") : "离线"}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                  <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }} numberOfLines={2}>
-                    {project.latestConversation?.lastMessagePreview ||
-                      (project.latestConversation ? "继续这个项目的 Agent 对话" : "还没有 Agent 对话")}
-                  </Text>
-                  <Text style={{ color: theme.textTertiary, fontSize: 12 }} numberOfLines={1}>
-                    {[project.hostname, shortPath(project.cwd)].filter(Boolean).join(" · ")}
-                  </Text>
-                </Pressable>
+                    <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }} numberOfLines={2}>
+                      {project.latestConversation?.lastMessagePreview ||
+                        (project.latestConversation ? "继续这个项目的 Agent 对话" : "还没有 Agent 对话")}
+                    </Text>
+                    <Text style={{ color: theme.textTertiary, fontSize: 12 }} numberOfLines={1}>
+                      {[project.hostname, shortPath(project.cwd)].filter(Boolean).join(" · ")}
+                    </Text>
+                  </Pressable>
+                </Swipeable>
               );
             })}
           </View>
