@@ -133,6 +133,15 @@ function nameFromToolMethod(method: string): string {
   return "工具";
 }
 
+function isToolItemType(itemType: string | undefined): boolean {
+  return (
+    itemType === "commandExecution" ||
+    itemType === "fileChange" ||
+    itemType === "mcpToolCall" ||
+    itemType === "dynamicToolCall"
+  );
+}
+
 function toolNameFromItem(item: Record<string, unknown>): string | undefined {
   const itemType = firstString(item, ["type"]);
   if (itemType === "commandExecution") return "命令";
@@ -147,7 +156,7 @@ function toolNameFromItem(item: Record<string, unknown>): string | undefined {
     const tool = firstString(item, ["tool", "toolName", "name"]);
     return [namespace, tool].filter(Boolean).join(" · ") || "工具";
   }
-  return firstString(item, ["toolName", "tool", "name", "title"]) ?? itemType;
+  return firstString(item, ["toolName", "tool", "name", "title"]);
 }
 
 function toolInputFromItem(item: Record<string, unknown>): string | undefined {
@@ -756,13 +765,14 @@ export class AgentSessionProxy {
     if (!itemId) return undefined;
     const itemType = firstString(item, ["type"]);
     const name = toolNameFromItem(item);
+    if (!name && !isToolItemType(itemType)) return undefined;
     const output =
       firstString(item, ["aggregatedOutput", "output", "stdout", "stderr"]) ??
       stringifyDefined(item.result ?? item.error ?? item.contentItems);
     const bufferedOutput = this.toolOutputBuffers.get(itemId);
     return {
       id: itemId,
-      name: name ?? itemType ?? "tool",
+      name: name ?? "工具",
       input: toolInputFromItem(item),
       output: output ?? bufferedOutput,
       createdAt: Date.now(),

@@ -160,6 +160,15 @@ function nameFromToolMethod(method: string): string {
   return "工具";
 }
 
+function isToolItemType(itemType: string | undefined): boolean {
+  return (
+    itemType === "commandExecution" ||
+    itemType === "fileChange" ||
+    itemType === "mcpToolCall" ||
+    itemType === "dynamicToolCall"
+  );
+}
+
 function toolNameFromItem(item: Record<string, unknown>): string | undefined {
   const itemType = firstString(item, ["type"]);
   if (itemType === "commandExecution") return "命令";
@@ -174,7 +183,7 @@ function toolNameFromItem(item: Record<string, unknown>): string | undefined {
     const tool = firstString(item, ["tool", "toolName", "name"]);
     return [namespace, tool].filter(Boolean).join(" · ") || "工具";
   }
-  return firstString(item, ["toolName", "tool", "name", "title"]) ?? itemType;
+  return firstString(item, ["toolName", "tool", "name", "title"]);
 }
 
 function summarizeFileChanges(changes: unknown[]): string | undefined {
@@ -957,12 +966,14 @@ export class AgentWorkspaceProxy {
     const itemId = firstString(item, ["id", "itemId", "toolCallId"]);
     if (!itemId) return undefined;
     const itemType = firstString(item, ["type"]);
+    const name = toolNameFromItem(item);
+    if (!name && !isToolItemType(itemType)) return undefined;
     const output =
       firstString(item, ["aggregatedOutput", "output", "stdout", "stderr"]) ??
       stringifyDefined(item.result ?? item.error ?? item.contentItems);
     return {
       id: itemId,
-      name: toolNameFromItem(item) ?? itemType ?? "tool",
+      name: name ?? "工具",
       input: toolInputFromItem(item),
       output: output ?? this.toolOutputBuffers.get(itemId),
       createdAt: Date.now(),

@@ -369,27 +369,39 @@ export function AgentWorkspaceScreen({
     for (const target of targets) {
       if (target.cwd) targetByPath.set(projectPathKey(target.serverUrl, target.cwd), target);
     }
-    const latestByProject = new Map<string, AgentConversationRecord>();
+    const latestByExactProject = new Map<string, AgentConversationRecord>();
+    const latestByPath = new Map<string, AgentConversationRecord>();
     for (const conversation of workspace.conversations) {
       if (conversation.archived || !conversation.cwd) continue;
-      const key = projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd);
-      const current = latestByProject.get(key);
+      const exactKey = projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd);
+      const current = latestByExactProject.get(exactKey);
       if (!current || conversation.lastActivityAt > current.lastActivityAt) {
-        latestByProject.set(key, conversation);
+        latestByExactProject.set(exactKey, conversation);
+      }
+      const pathKey = projectPathKey(conversation.serverUrl, conversation.cwd);
+      const currentByPath = latestByPath.get(pathKey);
+      if (!currentByPath || conversation.lastActivityAt > currentByPath.lastActivityAt) {
+        latestByPath.set(pathKey, conversation);
       }
     }
 
     const byProject = new Map<string, AgentProjectItem>();
     for (const project of projects) {
-      const key = projectKey(project.serverUrl, project.sessionId, project.cwd);
-      if (hiddenProjectKeys.has(key)) continue;
+      const exactKey = projectKey(project.serverUrl, project.sessionId, project.cwd);
+      const pathKey = projectPathKey(project.serverUrl, project.cwd);
+      if (hiddenProjectKeys.has(exactKey) || hiddenProjectKeys.has(pathKey)) continue;
       const target = targetBySession.get(project.sessionId) ??
-        targetByPath.get(projectPathKey(project.serverUrl, project.cwd));
-      const latestConversation = target && target.sessionId !== project.sessionId
-        ? undefined
-        : latestByProject.get(key);
-      byProject.set(key, {
-        id: key,
+        targetByPath.get(pathKey);
+      const currentExactKey = projectKey(
+        target?.serverUrl ?? project.serverUrl,
+        target?.sessionId ?? project.sessionId,
+        project.cwd,
+      );
+      const latestConversation =
+        latestByExactProject.get(currentExactKey) ??
+        latestByPath.get(pathKey);
+      byProject.set(pathKey, {
+        id: pathKey,
         serverUrl: target?.serverUrl ?? project.serverUrl,
         sessionId: target?.sessionId ?? project.sessionId,
         cwd: project.cwd,
@@ -403,43 +415,45 @@ export function AgentWorkspaceScreen({
 
     for (const target of targets) {
       if (!target.cwd) continue;
-      const key = projectKey(target.serverUrl, target.sessionId, target.cwd);
-      if (hiddenProjectKeys.has(key)) continue;
       const pathKey = projectPathKey(target.serverUrl, target.cwd);
-      const existing =
-        byProject.get(key) ??
-        [...byProject.values()].find((item) => projectPathKey(item.serverUrl, item.cwd) === pathKey);
+      const exactKey = projectKey(target.serverUrl, target.sessionId, target.cwd);
+      if (hiddenProjectKeys.has(exactKey) || hiddenProjectKeys.has(pathKey)) continue;
+      const existing = byProject.get(pathKey);
+      const latestConversation =
+        latestByExactProject.get(exactKey) ??
+        existing?.latestConversation ??
+        latestByPath.get(pathKey);
       if (existing) {
-        byProject.set(existing.id, {
+        byProject.set(pathKey, {
           ...existing,
+          id: pathKey,
           serverUrl: target.serverUrl,
           sessionId: target.sessionId,
           hostname: target.hostname ?? existing.hostname,
           target,
-          latestConversation: existing.sessionId === target.sessionId
-            ? existing.latestConversation ?? latestByProject.get(key)
-            : latestByProject.get(key),
+          latestConversation,
         });
       } else {
-        byProject.set(key, {
-          id: key,
+        byProject.set(pathKey, {
+          id: pathKey,
           serverUrl: target.serverUrl,
           sessionId: target.sessionId,
           cwd: target.cwd,
           title: target.projectName ?? titleFromCwd(target.cwd),
           hostname: target.hostname,
           target,
-          latestConversation: latestByProject.get(key),
+          latestConversation,
         });
       }
     }
 
-    for (const [key, conversation] of latestByProject) {
-      if (hiddenProjectKeys.has(key)) continue;
-      if (byProject.has(key)) continue;
+    for (const [pathKey, conversation] of latestByPath) {
+      const exactKey = projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd);
+      if (hiddenProjectKeys.has(exactKey) || hiddenProjectKeys.has(pathKey)) continue;
+      if (byProject.has(pathKey)) continue;
       const target = targetBySession.get(conversation.sessionId);
-      byProject.set(key, {
-        id: key,
+      byProject.set(pathKey, {
+        id: pathKey,
         serverUrl: conversation.serverUrl,
         sessionId: conversation.sessionId,
         cwd: conversation.cwd,
@@ -605,7 +619,7 @@ export function AgentWorkspaceScreen({
         Alert.alert("Mac 不在线", "请先在这个项目所在的 Mac 上启动 linkshell，再继续使用 Agent。");
         return;
       }
-      if (!project.latestConversation) {
+      if (!project.latestConversation || project.latestConversation.sessionId !== project.sessionId) {
         openCreate(project.target, project);
         return;
       }
@@ -631,7 +645,7 @@ export function AgentWorkspaceScreen({
           onPress: () => {
             const key = projectKey(project.serverUrl, project.sessionId, project.cwd);
             const pathKey = projectPathKey(project.serverUrl, project.cwd);
-            setHiddenProjectKeys((prev) => new Set(prev).add(key));
+            setHiddenProjectKeys((prev) => new Set(prev).add(key).add(pathKey));
             setProjects((prev) => prev.filter((item) => item.id !== project.project?.id));
             const tasks: Promise<unknown>[] = [];
             if (project.project) tasks.push(removeProject(project.project.id));
