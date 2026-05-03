@@ -564,8 +564,40 @@ export class BridgeSession {
       case "agent.session.load":
       case "agent.session.list":
       case "agent.prompt":
-      case "agent.cancel":
+      case "agent.cancel": {
+        if (!this.agentSession) {
+          this.send(
+            createEnvelope({
+              type: "agent.capabilities",
+              sessionId: this.sessionId,
+              payload: {
+                enabled: false,
+                provider: normalizeAgentProvider(
+                  this.options.agentProvider ?? "codex",
+                ),
+                error: "Agent GUI is not enabled. Start CLI with --agent-ui.",
+                supportsSessionList: false,
+                supportsSessionLoad: false,
+                supportsImages: false,
+                supportsAudio: false,
+                supportsPermission: false,
+                supportsPlan: false,
+                supportsCancel: false,
+              },
+            }),
+          );
+          break;
+        }
+        await this.agentSession.handleEnvelope(envelope);
+        break;
+      }
       case "agent.permission.response": {
+        const p = parseTypedPayload("agent.permission.response", envelope.payload);
+        const decision = p.outcome === "allow" ? "allow" : "deny";
+        if (this.resolvePendingPermission(p.requestId, decision)) {
+          this.log(`agent permission response for hook ${p.requestId}: ${decision}`);
+          break;
+        }
         if (!this.agentSession) {
           this.send(
             createEnvelope({
@@ -1064,6 +1096,7 @@ export class BridgeSession {
             });
             // Send status with requestId so app can route decision back
             this.handleHookEvent(terminalId, event, provider, requestId);
+            this.sendHookPermissionRequest(terminalId, event, requestId);
           } else {
             // All other hooks: respond immediately
             res.writeHead(200);
@@ -1439,6 +1472,45 @@ export class BridgeSession {
         ...(summary && { summary }),
         ...(topPermission && { topPermission }),
         ...(pendingPermissionCount > 0 && { pendingPermissionCount }),
+      },
+    }));
+  }
+
+  private sendHookPermissionRequest(
+    terminalId: string,
+    event: Record<string, unknown>,
+    requestId: string,
+  ): void {
+    const toolName = (event.tool_name ?? event.toolName) as string | undefined;
+    const toolInput =
+      typeof event.tool_input === "object" && event.tool_input
+        ? JSON.stringify(event.tool_input).slice(0, 1200)
+        : typeof event.toolInput === "object" && event.toolInput
+          ? JSON.stringify(event.toolInput).slice(0, 1200)
+          : typeof event.tool_input === "string"
+            ? event.tool_input.slice(0, 1200)
+            : typeof event.toolInput === "string"
+              ? event.toolInput.slice(0, 1200)
+              : "";
+    const context =
+      typeof event.permission_prompt === "string"
+        ? event.permission_prompt
+        : typeof event.message === "string"
+          ? event.message
+          : undefined;
+    this.send(createEnvelope({
+      type: "agent.permission.request",
+      sessionId: this.sessionId,
+      terminalId,
+      payload: {
+        requestId,
+        toolName,
+        toolInput,
+        context,
+        options: [
+          { id: "deny", label: "拒绝", kind: "deny" },
+          { id: "allow", label: "允许", kind: "allow" },
+        ],
       },
     }));
   }
