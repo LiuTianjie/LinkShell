@@ -978,6 +978,7 @@ export function useSessionManager(): SessionManagerHandle {
           if (existing >= 0) s.agent.pendingPermissions[existing] = next;
           else s.agent.pendingPermissions.push(next);
           tick();
+          agentWorkspaceCbRef.current?.(envelope);
           break;
         }
         case "agent.v2.capabilities":

@@ -358,8 +358,46 @@ export function useAgentWorkspace(
           }).catch(() => {});
         }
       }
+
+      if (envelope.type === "agent.permission.request") {
+        const payload = parseTypedPayload("agent.permission.request" as any, envelope.payload) as any;
+        const conversation =
+          conversationsRef.current.find((item) =>
+            item.sessionId === envelope.sessionId &&
+            item.agentSessionId &&
+            item.agentSessionId === payload.agentSessionId,
+          ) ??
+          conversationsRef.current.find((item) => item.id === activeConversationId && item.sessionId === envelope.sessionId) ??
+          conversationsRef.current.find((item) => item.sessionId === envelope.sessionId && !item.archived);
+        if (!conversation) return;
+        const permissionItem: AgentTimelineItem = {
+          id: `permission:${payload.requestId}`,
+          conversationId: conversation.id,
+          type: "permission",
+          permission: {
+            requestId: payload.requestId,
+            toolName: payload.toolName,
+            toolInput: payload.toolInput,
+            context: payload.context,
+            options: payload.options ?? [],
+          },
+          metadata: {
+            protocol: "legacy",
+            agentSessionId: payload.agentSessionId,
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        persistTimelineItem(permissionItem).catch(() => {});
+        persistConversation({
+          ...conversation,
+          status: "waiting_permission",
+          lastMessagePreview: previewFromItem(permissionItem) ?? "需要授权",
+          lastActivityAt: Date.now(),
+        }).catch(() => {});
+      }
     },
-    [persistConversation, persistTimelineItem],
+    [activeConversationId, persistConversation, persistTimelineItem],
   );
 
   useEffect(() => {
@@ -528,12 +566,31 @@ export function useAgentWorkspace(
     ) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
       if (!conversation) return;
-      manager.sendAgentWorkspaceEnvelope(
-        conversation.sessionId,
-        "agent.v2.permission.respond",
-        { conversationId, requestId, outcome, optionId },
-        { queue: true, dedupeKey: `agent-v2-permission:${requestId}` },
-      );
+      const permissionItem = timelineRef.current
+        .get(conversationId)
+        ?.find((item) => item.type === "permission" && item.permission?.requestId === requestId);
+      if (permissionItem?.metadata?.protocol === "legacy") {
+        manager.sendAgentWorkspaceEnvelope(
+          conversation.sessionId,
+          "agent.permission.response" as any,
+          {
+            agentSessionId: typeof permissionItem.metadata.agentSessionId === "string"
+              ? permissionItem.metadata.agentSessionId
+              : conversation.agentSessionId,
+            requestId,
+            outcome,
+            optionId,
+          },
+          { queue: true, dedupeKey: `agent-permission:${requestId}` },
+        );
+      } else {
+        manager.sendAgentWorkspaceEnvelope(
+          conversation.sessionId,
+          "agent.v2.permission.respond",
+          { conversationId, requestId, outcome, optionId },
+          { queue: true, dedupeKey: `agent-v2-permission:${requestId}` },
+        );
+      }
       setTimelineById((prev) => {
         const items = prev.get(conversationId);
         if (!items) return prev;

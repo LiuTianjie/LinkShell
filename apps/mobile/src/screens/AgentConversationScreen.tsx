@@ -36,7 +36,7 @@ interface AgentConversationScreenProps {
   onBack: () => void;
 }
 
-type Option<T extends string> = { label: string; value?: T };
+type Option<T extends string> = { label: string; value?: T; image?: string };
 
 const MODEL_OPTIONS: Option<string>[] = [
   { label: "默认模型", value: undefined },
@@ -55,9 +55,9 @@ const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
 ];
 
 const PERMISSION_OPTIONS: Option<AgentPermissionMode>[] = [
-  { label: "只读", value: "read_only" },
-  { label: "工作区写入", value: "workspace_write" },
-  { label: "完全访问", value: "full_access" },
+  { label: "默认权限", value: "read_only", image: "hand.raised.fill" },
+  { label: "自动审查", value: "workspace_write", image: "lock.shield.fill" },
+  { label: "完全访问权限", value: "full_access", image: "lock.open.fill" },
 ];
 
 const MAX_IMAGE_ATTACHMENTS = 3;
@@ -68,6 +68,7 @@ function menuActions<T extends string>(options: Option<T>[], currentValue: T | u
   return options.map((option) => ({
     id: option.value ?? DEFAULT_OPTION_ID,
     title: option.label,
+    image: option.image,
     state: option.value === currentValue ? "on" as const : "off" as const,
   }));
 }
@@ -93,12 +94,12 @@ function statusMeta(status: string, theme: Theme) {
 
 function permissionMeta(mode: AgentPermissionMode | undefined, theme: Theme) {
   if (mode === "full_access") {
-    return { label: "完全访问", icon: "lock.open.fill", color: theme.warning, bg: theme.accentLight };
+    return { label: "完全访问权限", icon: "lock.open.fill", color: theme.warning, bg: theme.accentLight };
   }
   if (mode === "workspace_write") {
-    return { label: "工作区写入", icon: "folder.fill", color: theme.accent, bg: theme.accentLight };
+    return { label: "自动审查", icon: "lock.shield.fill", color: theme.accent, bg: theme.accentLight };
   }
-  return { label: "只读", icon: "eye.fill", color: theme.textTertiary, bg: theme.bgInput };
+  return { label: "默认权限", icon: "hand.raised.fill", color: theme.textSecondary, bg: theme.bgInput };
 }
 
 function formatModel(model?: string): string {
