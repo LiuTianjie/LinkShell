@@ -5,7 +5,7 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start --dev-client",
-    "start:lan": "expo start --dev-client --host lan",
+    "start:lan": "node scripts/start-lan.mjs",
     "start:expo": "expo start",
     "prebuild-terminal": "node scripts/build-terminal-html.mjs",
     "devbuild": "node scripts/dev-build.mjs",
