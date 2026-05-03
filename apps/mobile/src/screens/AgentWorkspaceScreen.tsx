@@ -657,7 +657,7 @@ export function AgentWorkspaceScreen({
           paddingBottom: Math.max(insets.bottom, 20) + 60,
           gap: 16,
         }}
-        contentInsetAdjustmentBehavior="automatic"
+        contentInsetAdjustmentBehavior="never"
       >
         <View
           style={{
@@ -843,7 +843,7 @@ export function AgentWorkspaceScreen({
       >
         <View style={{ flex: 1, backgroundColor: theme.bg }}>
           <ScrollView
-            contentInsetAdjustmentBehavior="automatic"
+            contentInsetAdjustmentBehavior="never"
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{
               paddingTop: insets.top + 18,
