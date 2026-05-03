@@ -47,6 +47,18 @@ const PROVIDER_META: Record<AgentProvider, { label: string; subtitle: string }> 
   custom: { label: "Custom", subtitle: "自定义 ACP adapter" },
 };
 
+interface AgentProjectItem {
+  id: string;
+  serverUrl: string;
+  sessionId: string;
+  cwd: string;
+  title: string;
+  hostname?: string;
+  target?: AgentTarget;
+  project?: ProjectRecord;
+  latestConversation?: AgentConversationRecord;
+}
+
 function normalizeServerUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
@@ -59,21 +71,6 @@ function shortPath(path: string): string {
 
 function titleFromCwd(cwd: string): string {
   return cwd.split("/").filter(Boolean).pop() || cwd || "Agent";
-}
-
-function statusMeta(status: string, theme: Theme) {
-  switch (status) {
-    case "running":
-      return { label: "运行中", color: theme.accent, bg: theme.accentLight };
-    case "waiting_permission":
-      return { label: "待授权", color: theme.warning, bg: theme.accentLight };
-    case "error":
-      return { label: "错误", color: theme.error, bg: theme.errorLight };
-    case "idle":
-      return { label: "空闲", color: theme.success, bg: theme.accentLight };
-    default:
-      return { label: "不可用", color: theme.textTertiary, bg: theme.bgInput };
-  }
 }
 
 function SectionTitle({ children, theme }: { children: React.ReactNode; theme: Theme }) {
@@ -90,50 +87,6 @@ function SectionTitle({ children, theme }: { children: React.ReactNode; theme: T
       {children}
     </Text>
   );
-}
-
-function conversationGroupKey(conversation: AgentConversationRecord): string {
-  return [
-    normalizeServerUrl(conversation.serverUrl),
-    conversation.sessionId,
-    conversation.agentSessionId || conversation.cwd || conversation.id,
-  ].join("\u0000");
-}
-
-function collapseDuplicateConversations(
-  conversations: AgentConversationRecord[],
-  getTimelineLength: (conversationId: string) => number,
-): AgentConversationRecord[] {
-  const bestByKey = new Map<string, AgentConversationRecord>();
-  for (const conversation of conversations) {
-    const timelineLength = getTimelineLength(conversation.id);
-    if (
-      !conversation.agentSessionId &&
-      !conversation.lastMessagePreview &&
-      timelineLength === 0
-    ) {
-      continue;
-    }
-
-    const key = conversationGroupKey(conversation);
-    const current = bestByKey.get(key);
-    if (!current) {
-      bestByKey.set(key, conversation);
-      continue;
-    }
-    const currentScore =
-      getTimelineLength(current.id) * 1000 +
-      (current.agentSessionId ? 200 : 0) +
-      (current.lastMessagePreview ? 100 : 0);
-    const nextScore =
-      timelineLength * 1000 +
-      (conversation.agentSessionId ? 200 : 0) +
-      (conversation.lastMessagePreview ? 100 : 0);
-    if (nextScore > currentScore || conversation.lastActivityAt > current.lastActivityAt) {
-      bestByKey.set(key, conversation);
-    }
-  }
-  return [...bestByKey.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 }
 
 function providerCapability(
@@ -185,6 +138,10 @@ function providerReason(
   return capabilities?.error;
 }
 
+function projectKey(serverUrl: string, sessionId: string, cwd: string): string {
+  return [normalizeServerUrl(serverUrl), sessionId, cwd.trim()].join("\u0000");
+}
+
 export function AgentWorkspaceScreen({
   workspace,
   sessions,
@@ -195,7 +152,6 @@ export function AgentWorkspaceScreen({
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [showArchived, setShowArchived] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<AgentProvider>("codex");
@@ -259,6 +215,76 @@ export function AgentWorkspaceScreen({
     });
   }, [onlineSessions, projects]);
 
+  const projectItems = useMemo(() => {
+    const targetBySession = new Map(targets.map((target) => [target.sessionId, target]));
+    const latestByProject = new Map<string, AgentConversationRecord>();
+    for (const conversation of workspace.conversations) {
+      if (conversation.archived || !conversation.cwd) continue;
+      const key = projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd);
+      const current = latestByProject.get(key);
+      if (!current || conversation.lastActivityAt > current.lastActivityAt) {
+        latestByProject.set(key, conversation);
+      }
+    }
+
+    const byProject = new Map<string, AgentProjectItem>();
+    for (const project of projects) {
+      const key = projectKey(project.serverUrl, project.sessionId, project.cwd);
+      const target = targetBySession.get(project.sessionId);
+      byProject.set(key, {
+        id: key,
+        serverUrl: project.serverUrl,
+        sessionId: project.sessionId,
+        cwd: project.cwd,
+        title: project.projectName || titleFromCwd(project.cwd),
+        hostname: target?.hostname ?? project.hostname,
+        target,
+        project,
+        latestConversation: latestByProject.get(key),
+      });
+    }
+
+    for (const target of targets) {
+      if (!target.cwd) continue;
+      const key = projectKey(target.serverUrl, target.sessionId, target.cwd);
+      const existing = byProject.get(key);
+      byProject.set(key, {
+        id: key,
+        serverUrl: existing?.serverUrl ?? target.serverUrl,
+        sessionId: existing?.sessionId ?? target.sessionId,
+        cwd: existing?.cwd ?? target.cwd,
+        title: existing?.title ?? target.projectName ?? titleFromCwd(target.cwd),
+        hostname: target.hostname ?? existing?.hostname,
+        target,
+        project: existing?.project,
+        latestConversation: existing?.latestConversation ?? latestByProject.get(key),
+      });
+    }
+
+    for (const [key, conversation] of latestByProject) {
+      if (byProject.has(key)) continue;
+      const target = targetBySession.get(conversation.sessionId);
+      byProject.set(key, {
+        id: key,
+        serverUrl: conversation.serverUrl,
+        sessionId: conversation.sessionId,
+        cwd: conversation.cwd,
+        title: conversation.title || titleFromCwd(conversation.cwd),
+        hostname: target?.hostname,
+        target,
+        latestConversation: conversation,
+      });
+    }
+
+    return [...byProject.values()].sort((a, b) => {
+      if (Boolean(a.target) !== Boolean(b.target)) return a.target ? -1 : 1;
+      const aTime = a.latestConversation?.lastActivityAt ?? a.project?.lastOpenedAt ?? 0;
+      const bTime = b.latestConversation?.lastActivityAt ?? b.project?.lastOpenedAt ?? 0;
+      if (aTime !== bTime) return bTime - aTime;
+      return a.title.localeCompare(b.title);
+    });
+  }, [projects, targets, workspace.conversations]);
+
   const selectedTarget = useMemo(
     () => targets.find((target) => target.sessionId === selectedSessionId) ?? targets[0],
     [selectedSessionId, targets],
@@ -319,25 +345,17 @@ export function AgentWorkspaceScreen({
     targets,
   ]);
 
-  const visibleConversations = useMemo(
-    () =>
-      collapseDuplicateConversations(
-        showArchived ? workspace.archivedConversations : workspace.conversations,
-        (conversationId) => workspace.getTimeline(conversationId).length,
-      ),
-    [showArchived, workspace],
-  );
-
-  const openCreate = useCallback((targetOverride?: AgentTarget) => {
+  const openCreate = useCallback((targetOverride?: AgentTarget, projectOverride?: AgentProjectItem) => {
     if (targets.length === 0) {
       onOpenConnectionSheet();
       return;
     }
     const target = targetOverride ?? selectedTarget ?? targets[0];
     setSelectedSessionId(target?.sessionId ?? null);
-    const projectForTarget = projects.find((item) => item.sessionId === target?.sessionId);
+    const projectForTarget =
+      projectOverride?.project ?? projects.find((item) => item.sessionId === target?.sessionId);
     setSelectedProjectId(projectForTarget?.id ?? null);
-    setCustomCwd(projectForTarget?.cwd ?? target?.cwd ?? "");
+    setCustomCwd(projectOverride?.cwd ?? projectForTarget?.cwd ?? target?.cwd ?? "");
     setSelectedProvider("codex");
     setCreateVisible(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -394,17 +412,25 @@ export function AgentWorkspaceScreen({
     workspace,
   ]);
 
-  const openConversation = useCallback(
-    async (conversationId: string) => {
+  const openProject = useCallback(
+    async (project: AgentProjectItem) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      const id = await workspace.resumeConversation(conversationId);
+      if (!project.target) {
+        Alert.alert("Mac 不在线", "请先在这个项目所在的 Mac 上启动 linkshell，再继续使用 Agent。");
+        return;
+      }
+      if (!project.latestConversation) {
+        openCreate(project.target, project);
+        return;
+      }
+      const id = await workspace.resumeConversation(project.latestConversation.id);
       if (id) {
         onOpenConversation(id);
-      } else {
-        Alert.alert("无法恢复 Agent 对话", "请确认 Mac 端会话在线，并且 Agent GUI 已启用。");
+        return;
       }
+      Alert.alert("无法恢复 Agent 对话", "请确认 Mac 端会话在线，并且 Agent GUI 已启用。");
     },
-    [onOpenConversation, workspace],
+    [onOpenConversation, openCreate, workspace],
   );
 
   return (
@@ -422,7 +448,7 @@ export function AgentWorkspaceScreen({
             Agent
           </Text>
           <Text style={{ color: theme.textTertiary, fontSize: 14, lineHeight: 20 }}>
-            选择 Agent 和工作目录，在已连接的 Mac 上开始可视化对话。
+            按项目进入 Agent。在线项目会继续最近的对话，没有对话则新建。
           </Text>
         </View>
 
@@ -456,81 +482,17 @@ export function AgentWorkspaceScreen({
                 {targets.length > 0 ? "新建 Agent 对话" : "连接 Mac"}
               </Text>
               <Text style={{ color: "rgba(255,255,255,0.78)", fontSize: 13, marginTop: 2 }} numberOfLines={1}>
-                {targets.length > 0 ? "选择 Codex / Claude 和工作目录" : "首次使用需要先配对 CLI"}
+                {targets.length > 0 ? "选择 Mac、Agent 和工作目录" : "首次使用需要先配对 CLI"}
               </Text>
             </View>
             <AppSymbol name="chevron.right" size={16} color="rgba(255,255,255,0.9)" />
           </Pressable>
         </View>
 
-        {targets.length > 0 ? (
-          <View style={{ gap: 8 }}>
-            <SectionTitle theme={theme}>在线 Mac</SectionTitle>
-            <View style={{ paddingHorizontal: 20, gap: 8 }}>
-              {targets.map((target) => {
-                const caps = workspace.capabilitiesBySessionId.get(target.sessionId);
-                return (
-                  <Pressable
-                    key={`${target.serverUrl}:${target.sessionId}`}
-                    onPress={() => openCreate(target)}
-                    style={({ pressed }) => ({
-                      borderRadius: 12,
-                      borderCurve: "continuous",
-                      backgroundColor: pressed ? theme.bgInput : theme.bgCard,
-                      padding: 12,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
-                    })}
-                  >
-                    <View
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: 5,
-                        backgroundColor: caps?.enabled ? theme.success : theme.textTertiary,
-                      }}
-                    />
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }} numberOfLines={1}>
-                        {target.hostname || target.sessionId.slice(0, 8)}
-                      </Text>
-                      <Text style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-                        {caps?.enabled
-                          ? `${caps.provider ?? "codex"} · ${shortPath(target.cwd ?? "~")}`
-                          : caps?.error ?? "正在确认 Agent 能力"}
-                      </Text>
-                    </View>
-                    {!caps ? <ActivityIndicator size="small" color={theme.textTertiary} /> : null}
-                    <AppSymbol name="chevron.right" size={14} color={theme.textTertiary} />
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        ) : null}
-
         <View style={{ gap: 8 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20 }}>
-            <Text
-              style={{
-                color: theme.textTertiary,
-                fontSize: 12,
-                fontWeight: "700",
-                textTransform: "uppercase",
-              }}
-            >
-              {showArchived ? "已归档" : "最近对话"}
-            </Text>
-            <View style={{ flex: 1 }} />
-            <Pressable onPress={() => setShowArchived((value) => !value)} hitSlop={8}>
-              <Text style={{ color: theme.accent, fontSize: 13, fontWeight: "700" }}>
-                {showArchived ? "返回最近" : "查看归档"}
-              </Text>
-            </Pressable>
-          </View>
+          <SectionTitle theme={theme}>项目</SectionTitle>
           <View style={{ paddingHorizontal: 20, gap: 8 }}>
-            {visibleConversations.length === 0 ? (
+            {projectItems.length === 0 ? (
               <View
                 style={{
                   borderRadius: 12,
@@ -541,20 +503,22 @@ export function AgentWorkspaceScreen({
                   gap: 8,
                 }}
               >
-                <AppSymbol name="bubble.left.and.text.bubble.right" size={24} color={theme.accent} />
+                  <AppSymbol name="bubble.left.and.text.bubble.right" size={24} color={theme.accent} />
                 <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }}>
-                  还没有 Agent 对话
+                  还没有项目
                 </Text>
                 <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
-                  新建对话时先选 Agent 和工作目录，确认创建后才会出现在这里。
+                  连接 Mac 后会自动显示当前工作目录，也可以从上方手动新建。
                 </Text>
               </View>
-            ) : visibleConversations.map((conversation) => {
-              const meta = statusMeta(conversation.status, theme);
+            ) : projectItems.map((project) => {
+              const online = Boolean(project.target);
+              const caps = project.target ? workspace.capabilitiesBySessionId.get(project.target.sessionId) : undefined;
+              const canUseAgent = online && caps?.enabled;
               return (
                 <Pressable
-                  key={conversation.id}
-                  onPress={() => openConversation(conversation.id)}
+                  key={project.id}
+                  onPress={() => openProject(project)}
                   style={({ pressed }) => ({
                     borderRadius: 12,
                     borderCurve: "continuous",
@@ -564,18 +528,35 @@ export function AgentWorkspaceScreen({
                   })}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <AppSymbol name="folder.fill" size={18} color={online ? theme.accent : theme.textTertiary} />
                     <Text style={{ flex: 1, color: theme.text, fontSize: 16, fontWeight: "700" }} numberOfLines={1}>
-                      {conversation.title || titleFromCwd(conversation.cwd)}
+                      {project.title}
                     </Text>
-                    <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
-                      <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
+                    <View
+                      style={{
+                        borderRadius: 999,
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        backgroundColor: canUseAgent ? theme.accentLight : theme.bgInput,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: canUseAgent ? theme.success : theme.textTertiary,
+                          fontSize: 11,
+                          fontWeight: "700",
+                        }}
+                      >
+                        {online ? (caps ? (caps.enabled ? "在线" : "不可用") : "确认中") : "离线"}
+                      </Text>
                     </View>
                   </View>
                   <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }} numberOfLines={2}>
-                    {conversation.lastMessagePreview || "新的 Agent 对话"}
+                    {project.latestConversation?.lastMessagePreview ||
+                      (project.latestConversation ? "继续这个项目的 Agent 对话" : "还没有 Agent 对话")}
                   </Text>
                   <Text style={{ color: theme.textTertiary, fontSize: 12 }} numberOfLines={1}>
-                    {[conversation.provider, shortPath(conversation.cwd)].filter(Boolean).join(" · ")}
+                    {[project.hostname, shortPath(project.cwd)].filter(Boolean).join(" · ")}
                   </Text>
                 </Pressable>
               );
