@@ -11,6 +11,8 @@ export default function AgentTab() {
     <AgentWorkspaceScreen
       workspace={ctx.agentWorkspace}
       sessions={[...ctx.manager.sessions.values()]}
+      gatewayBaseUrl={ctx.gatewayBaseUrl}
+      deviceToken={ctx.manager.deviceToken}
       refreshKey={ctx.sessionRefreshKey}
       onOpenConnectionSheet={() => ctx.setConnectionSheetVisible(true)}
       onOpenConversation={(conversationId) =>

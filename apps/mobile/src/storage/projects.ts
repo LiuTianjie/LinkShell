@@ -161,6 +161,11 @@ export async function removeProjectsBySessionId(
   await saveProjects(projects.filter((item) => item.sessionId !== sessionId));
 }
 
+export async function removeProject(id: string): Promise<void> {
+  const projects = await loadProjects();
+  await saveProjects(projects.filter((item) => item.id !== id));
+}
+
 export async function removeProjectsByServerUrl(
   serverUrl: string,
 ): Promise<void> {
