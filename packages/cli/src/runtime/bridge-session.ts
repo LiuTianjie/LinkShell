@@ -64,6 +64,7 @@ interface TerminalInstance {
   status: "running" | "exited";
   hookServer?: http.Server;
   hookPort?: number;
+  hookMarker: string;
   hookConfigPaths: string[];
 }
 
@@ -73,9 +74,9 @@ interface PendingPermission {
   resolve: (decision: "allow" | "deny") => void;
 }
 
-function isLinkShellHookEntry(entry: unknown): boolean {
+function isLinkShellHookEntry(entry: unknown, marker: string): boolean {
   const raw = JSON.stringify(entry);
-  return /\/hook\?m=lsh-[^"'\s]+/.test(raw);
+  return raw.includes(`/hook?m=${marker}`);
 }
 
 function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
@@ -180,6 +181,11 @@ export class BridgeSession {
     }
   }
 
+  private terminalHookMarker(terminalId: string): string {
+    const safeTerminalId = terminalId.replace(/[^a-zA-Z0-9_-]+/g, "-");
+    return `${this.hookMarker}-${safeTerminalId}`;
+  }
+
   async start(): Promise<void> {
     this.log(
       `starting session (gateway=${this.options.gatewayUrl}, provider=${this.options.providerConfig.provider})`,
@@ -193,6 +199,7 @@ export class BridgeSession {
       process.stderr.write("[bridge] keep-awake disabled\n");
     }
     if (this.options.agentUi) {
+      process.env.LINKSHELL_ID = this.terminalHookMarker(DEFAULT_TERMINAL_ID);
       const agentProvider = normalizeAgentProvider(
         this.options.agentProvider ?? "codex",
       );
@@ -887,8 +894,9 @@ export class BridgeSession {
     for (const [k, v] of Object.entries(this.options.providerConfig.env)) {
       if (v !== undefined) cleanEnv[k] = v;
     }
+    const hookMarker = this.terminalHookMarker(terminalId);
     // Inject marker so child CLIs' hook commands carry our identity
-    cleanEnv["LINKSHELL_ID"] = this.hookMarker;
+    cleanEnv["LINKSHELL_ID"] = hookMarker;
 
     const provider = providerOverride ?? this.options.providerConfig.provider;
     const args = [...this.options.providerConfig.args];
@@ -900,17 +908,17 @@ export class BridgeSession {
     const hookConfigPaths: string[] = [];
 
     if (provider === "custom") {
-      const result = await this.setupHookServer(terminalId, args, "claude");
+      const result = await this.setupHookServer(terminalId, args, "claude", hookMarker);
       hookServer = result.server;
       hookPort = result.port;
       hookConfigPaths.push(result.configPath);
       // Also set up hooks for other providers (curlCmd already has marker from setupHookServer)
-      const curlCmd = `curl -s -X POST "http://127.0.0.1:${result.port}/hook?m=${this.hookMarker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @-`;
-      hookConfigPaths.push(this.setupCodexHooks(terminalId, curlCmd));
-      hookConfigPaths.push(this.setupGeminiHooks(terminalId, curlCmd));
-      hookConfigPaths.push(this.setupCopilotHooks(terminalId, curlCmd));
+      const curlCmd = `curl -s -X POST "http://127.0.0.1:${result.port}/hook?m=${hookMarker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @-`;
+      hookConfigPaths.push(this.setupCodexHooks(terminalId, curlCmd, hookMarker));
+      hookConfigPaths.push(this.setupGeminiHooks(terminalId, curlCmd, hookMarker));
+      hookConfigPaths.push(this.setupCopilotHooks(terminalId, curlCmd, hookMarker));
     } else if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "copilot") {
-      const result = await this.setupHookServer(terminalId, args, provider);
+      const result = await this.setupHookServer(terminalId, args, provider, hookMarker);
       hookServer = result.server;
       hookPort = result.port;
       hookConfigPaths.push(result.configPath);
@@ -938,6 +946,7 @@ export class BridgeSession {
       status: "running",
       hookServer,
       hookPort,
+      hookMarker,
       hookConfigPaths,
     };
 
@@ -987,12 +996,11 @@ export class BridgeSession {
     this.log(`spawned terminal ${terminalId} in ${cwd}`);
   }
 
-  private async setupHookServer(terminalId: string, args: string[], provider: string): Promise<{
+  private async setupHookServer(terminalId: string, args: string[], provider: string, marker: string): Promise<{
     server: http.Server;
     port: number;
     configPath: string;
   }> {
-    const marker = this.hookMarker;
     const server = http.createServer((req, res) => {
       this.log(`hook server received: ${req.method} ${req.url}`);
       const reqUrl = new URL(req.url ?? "/", "http://localhost");
@@ -1084,20 +1092,20 @@ export class BridgeSession {
     let configPath: string;
 
     if (provider === "codex") {
-      configPath = this.setupCodexHooks(terminalId, curlCmd);
+      configPath = this.setupCodexHooks(terminalId, curlCmd, marker);
     } else if (provider === "gemini") {
-      configPath = this.setupGeminiHooks(terminalId, curlCmd);
+      configPath = this.setupGeminiHooks(terminalId, curlCmd, marker);
     } else if (provider === "copilot") {
-      configPath = this.setupCopilotHooks(terminalId, curlCmd);
+      configPath = this.setupCopilotHooks(terminalId, curlCmd, marker);
     } else {
       // Claude (default)
-      configPath = this.setupClaudeHooks(terminalId, curlCmd, args);
+      configPath = this.setupClaudeHooks(terminalId, curlCmd, args, marker);
     }
 
     return { server, port, configPath };
   }
 
-  private setupClaudeHooks(terminalId: string, curlCmd: string, args: string[]): string {
+  private setupClaudeHooks(terminalId: string, curlCmd: string, args: string[], marker: string): string {
     // Write hooks to ~/.claude/settings.json — Claude Code reads hooks from here
     const claudeDir = join(homedir(), ".claude");
     if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
@@ -1133,7 +1141,7 @@ export class BridgeSession {
     for (const [eventName, entry] of Object.entries(hookEvents)) {
       let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
       // Remove any dead linkshell hook entries (from previous instances)
-      arr = arr.filter((e) => !isLinkShellHookEntry(e));
+      arr = arr.filter((e) => !isLinkShellHookEntry(e, marker));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -1145,7 +1153,7 @@ export class BridgeSession {
     return settingsPath;
   }
 
-  private setupCodexHooks(terminalId: string, curlCmd: string): string {
+  private setupCodexHooks(terminalId: string, curlCmd: string, marker: string): string {
     // Codex uses ~/.codex/hooks.json — same format as Claude (with matcher)
     const codexDir = join(homedir(), ".codex");
     if (!existsSync(codexDir)) mkdirSync(codexDir, { recursive: true });
@@ -1197,17 +1205,17 @@ export class BridgeSession {
     const existingHooks = existing.hooks ?? {};
     for (const [eventName, entry] of Object.entries(hookEvents)) {
       let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      arr = arr.filter((e) => !isLinkShellHookEntry(e));
+      arr = arr.filter((e) => !isLinkShellHookEntry(e, marker));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
 
-    writeFileSync(hooksPath, JSON.stringify({ hooks: existingHooks }, null, 2));
+    writeFileSync(hooksPath, JSON.stringify({ ...existing, hooks: existingHooks }, null, 2));
     this.log(`codex hooks appended to ${hooksPath}`);
     return hooksPath;
   }
 
-  private setupGeminiHooks(terminalId: string, curlCmd: string): string {
+  private setupGeminiHooks(terminalId: string, curlCmd: string, marker: string): string {
     // Gemini uses ~/.gemini/settings.json — same format as Claude (with matcher)
     const geminiDir = join(homedir(), ".gemini");
     if (!existsSync(geminiDir)) mkdirSync(geminiDir, { recursive: true });
@@ -1230,7 +1238,7 @@ export class BridgeSession {
     const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
     for (const [eventName, entry] of Object.entries(hookEvents)) {
       let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      arr = arr.filter((e) => !isLinkShellHookEntry(e));
+      arr = arr.filter((e) => !isLinkShellHookEntry(e, marker));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -1241,7 +1249,7 @@ export class BridgeSession {
     return settingsPath;
   }
 
-  private setupCopilotHooks(terminalId: string, curlCmd: string): string {
+  private setupCopilotHooks(terminalId: string, curlCmd: string, marker: string): string {
     // Copilot loads hooks from CWD as hooks.json
     const cwd = this.terminals.get(terminalId)?.cwd ?? process.cwd();
     const hooksPath = join(cwd, "hooks.json");
@@ -1265,7 +1273,7 @@ export class BridgeSession {
     const existingHooks = existing.hooks ?? {};
     for (const [eventName, entry] of Object.entries(hookEvents)) {
       let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      arr = arr.filter((e) => !isLinkShellHookEntry(e));
+      arr = arr.filter((e) => !isLinkShellHookEntry(e, marker));
       arr.push(entry);
       existingHooks[eventName] = arr;
     }
@@ -1454,6 +1462,7 @@ export class BridgeSession {
         case "PostToolUse": case "postToolUse": return "PostToolUse";
         case "SessionStart": case "sessionStart": return "SessionStart";
         case "UserPromptSubmit": return "UserPromptSubmit";
+        case "PermissionRequest": return "PermissionRequest";
         case "Stop": return "Stop";
         default: return undefined;
       }
@@ -1559,7 +1568,7 @@ export class BridgeSession {
       term.hookServer = undefined;
       this.log(`hook server closed for ${term.id}`);
     }
-    const marker = this.hookMarker;
+    const marker = term.hookMarker;
     for (const configPath of term.hookConfigPaths) {
       try {
         // Copilot: per-instance file — just delete it
