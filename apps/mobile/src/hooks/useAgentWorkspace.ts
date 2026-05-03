@@ -333,8 +333,29 @@ export function useAgentWorkspace(
 
       if (envelope.type === "agent.v2.permission.request") {
         const payload = parseTypedPayload("agent.v2.permission.request", envelope.payload) as any;
-        if (payload.item) {
-          persistTimelineItem(payload.item as AgentTimelineItem).catch(() => {});
+        const permissionItem = (payload.item ?? {
+          id: `permission:${payload.requestId}`,
+          conversationId: payload.conversationId,
+          type: "permission",
+          permission: {
+            requestId: payload.requestId,
+            toolName: payload.toolName,
+            toolInput: payload.toolInput,
+            context: payload.context,
+            options: payload.options ?? [],
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }) as AgentTimelineItem;
+        persistTimelineItem(permissionItem).catch(() => {});
+        const existing = conversationsRef.current.find((item) => item.id === payload.conversationId);
+        if (existing) {
+          persistConversation({
+            ...existing,
+            status: "waiting_permission",
+            lastMessagePreview: previewFromItem(permissionItem) ?? "需要授权",
+            lastActivityAt: Date.now(),
+          }).catch(() => {});
         }
       }
     },
@@ -513,6 +534,23 @@ export function useAgentWorkspace(
         { conversationId, requestId, outcome, optionId },
         { queue: true, dedupeKey: `agent-v2-permission:${requestId}` },
       );
+      setTimelineById((prev) => {
+        const items = prev.get(conversationId);
+        if (!items) return prev;
+        const nextItems = items.map((item) =>
+          item.type === "permission" && item.permission?.requestId === requestId
+            ? {
+                ...item,
+                metadata: { ...(item.metadata ?? {}), permissionOutcome: outcome, optionId },
+                updatedAt: Date.now(),
+              }
+            : item,
+        );
+        saveAgentTimeline(conversationId, nextItems).catch(() => {});
+        const next = new Map(prev);
+        next.set(conversationId, nextItems);
+        return next;
+      });
     },
     [manager],
   );

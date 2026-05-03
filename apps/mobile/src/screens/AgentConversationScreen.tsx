@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useMemo, useState } from "react";
+import React, { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -405,10 +405,11 @@ function TimelineItemView({
   if (item.type === "permission" && item.permission) {
     const allow = item.permission.options.find((option) => option.kind === "allow");
     const deny = item.permission.options.find((option) => option.kind === "deny");
+    const outcome = item.metadata?.permissionOutcome;
     return (
       <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.accentLight, padding: 12, gap: 8 }}>
         <Text style={{ color: theme.warning, fontSize: 15, fontWeight: "700" }}>
-          需要授权{item.permission.toolName ? ` · ${item.permission.toolName}` : ""}
+          {outcome ? "已处理授权" : "需要授权"}{item.permission.toolName ? ` · ${item.permission.toolName}` : ""}
         </Text>
         {item.permission.context ? (
           <Text selectable style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
@@ -416,6 +417,11 @@ function TimelineItemView({
           </Text>
         ) : null}
         {item.permission.toolInput ? <CodeBlock label="请求内容" code={item.permission.toolInput} theme={theme} maxLines={5} /> : null}
+        {outcome ? (
+          <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
+            {outcome === "allow" ? "已允许" : outcome === "deny" ? "已拒绝" : "已取消"}
+          </Text>
+        ) : (
         <View style={{ flexDirection: "row", gap: 8 }}>
           <Pressable
             onPress={() => onPermission(item.permission!.requestId, "deny", deny?.id)}
@@ -442,6 +448,7 @@ function TimelineItemView({
             <Text style={{ color: "#fff", fontWeight: "700" }}>{allow?.label ?? "允许"}</Text>
           </Pressable>
         </View>
+        )}
       </View>
     );
   }
@@ -468,6 +475,7 @@ export function AgentConversationScreen({
   const insets = useSafeAreaInsets();
   const conversation = workspace.getConversation(conversationId);
   const timeline = workspace.getTimeline(conversationId);
+  const timelineRef = useRef<ScrollView>(null);
   const [text, setText] = useState("");
   const [model, setModel] = useState<string | undefined>(conversation?.model);
   const [effort, setEffort] = useState<AgentReasoningEffort | undefined>(conversation?.reasoningEffort);
@@ -653,9 +661,11 @@ export function AgentConversationScreen({
       </View>
 
       <ScrollView
+        ref={timelineRef}
         contentContainerStyle={{ padding: 14, gap: 10, paddingBottom: 16 }}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => timelineRef.current?.scrollToEnd({ animated: true })}
       >
         {timeline.length === 0 ? (
           <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.bgCard, padding: 18, alignItems: "center", gap: 8 }}>
