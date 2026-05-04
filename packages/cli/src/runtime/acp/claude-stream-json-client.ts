@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { readdirSync, existsSync } from "node:fs";
-import { join, basename, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
@@ -48,7 +48,6 @@ export class ClaudeStreamJsonClient {
   private child: ChildProcessWithoutNullStreams | undefined;
   private claudeSessionId: string | undefined;
   private pendingCancel = false;
-  private messageBuffer = "";
 
   constructor(
     private readonly input: {
@@ -111,13 +110,12 @@ export class ClaudeStreamJsonClient {
       "--permission-mode", "bypassPermissions",
     ];
 
-    // Use stored session for --continue or --resume
-    if (input.sessionId || this.claudeSessionId) {
-      const sid = input.sessionId ?? this.claudeSessionId;
-      if (sid) {
-        args.push("--resume", sid);
-      }
+    // Use stored session for --resume (only when we have a real session ID from system.init)
+    if (this.claudeSessionId) {
+      args.push("--resume", this.claudeSessionId);
     }
+    // Prevent autonomous multi-turn tool loops in headless mode
+    args.push("--max-turns", "1");
 
     if (input.model) {
       args.push("--model", input.model);
@@ -155,9 +153,13 @@ export class ClaudeStreamJsonClient {
       const finish = (err: Error | null, result: unknown) => {
         if (settled) return;
         settled = true;
-        this.child = undefined;
+        // Only clear reference if this child is still the active one
+        if (this.child === child) {
+          this.child = undefined;
+        }
         if (err) {
-          this.input.onExit(err.message);
+          // Don't call onExit for per-prompt failures — the client can still accept new prompts.
+          // onExit is reserved for fatal errors (e.g. binary not found in initialize()).
           reject(err);
         } else {
           resolve(result);
@@ -165,12 +167,19 @@ export class ClaudeStreamJsonClient {
       };
 
       // Send the prompt
-      child.stdin.write(JSON.stringify(userMessage) + "\n");
-      child.stdin.end();
+      try {
+        child.stdin.write(JSON.stringify(userMessage) + "\n");
+        child.stdin.end();
+      } catch (err) {
+        child.kill("SIGTERM");
+        finish(err instanceof Error ? err : new Error(String(err)), undefined);
+        return child;
+      }
 
       // Read stdout line by line (stream-json is newline-delimited)
       const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
       let currentToolId: string | undefined;
+      let currentToolName: string | undefined;
 
       rl.on("line", (line: string) => {
         if (this.pendingCancel) {
@@ -192,9 +201,15 @@ export class ClaudeStreamJsonClient {
               if (event.session_id) {
                 this.claudeSessionId = event.session_id;
               }
-              // Send as initialized notification — workspace needs this
+              // Emit thread/started so workspace/session proxies update their agentSessionId
+              this.input.onNotification("thread/started", {
+                sessionId: event.session_id,
+                threadId: event.session_id,
+              });
+              // Also send initialized with full metadata
               const initParams: Record<string, unknown> = {
                 sessionId: event.session_id,
+                threadId: event.session_id,
                 cwd: event.cwd ?? cwd,
                 model: event.model,
               };
@@ -235,6 +250,7 @@ export class ClaudeStreamJsonClient {
 
                 case "tool_use": {
                   currentToolId = block.id;
+                  currentToolName = block.name ?? "tool";
                   const toolName = block.name ?? "tool";
                   this.input.onNotification("item/started", {
                     sessionId: this.claudeSessionId,
@@ -275,6 +291,8 @@ export class ClaudeStreamJsonClient {
                   item: {
                     id: toolId ?? id("tool"),
                     type: "toolCall",
+                    toolName: currentToolName,
+                    tool: currentToolName,
                     status: isError ? "failed" : "completed",
                     output: typeof block.content === "string" ? block.content : JSON.stringify(block.content),
                     aggregatedOutput: typeof block.content === "string" ? block.content : undefined,

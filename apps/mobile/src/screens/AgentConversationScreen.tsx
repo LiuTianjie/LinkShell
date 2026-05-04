@@ -40,12 +40,19 @@ interface AgentConversationScreenProps {
 
 type Option<T extends string> = { label: string; value?: T; image?: string };
 
-const MODEL_OPTIONS: Option<string>[] = [
+const CODEX_MODEL_OPTIONS: Option<string>[] = [
   { label: "默认模型", value: undefined },
   { label: "GPT-5.5", value: "gpt-5.5" },
   { label: "GPT-5.4", value: "gpt-5.4" },
   { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
   { label: "GPT-5.3 Codex", value: "gpt-5.3-codex" },
+];
+
+const CLAUDE_MODEL_OPTIONS: Option<string>[] = [
+  { label: "默认模型", value: undefined },
+  { label: "Opus 4.5", value: "opus" },
+  { label: "Sonnet 4.5", value: "sonnet" },
+  { label: "Haiku 4.5", value: "haiku" },
 ];
 
 const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
@@ -117,8 +124,12 @@ function permissionMeta(mode: AgentPermissionMode | undefined, theme: Theme) {
   return { label: "默认权限", icon: "hand.raised.fill", color: theme.textSecondary, bg: theme.bgInput };
 }
 
-function formatModel(model?: string): string {
-  return MODEL_OPTIONS.find((item) => item.value === model)?.label ?? model ?? "默认模型";
+function modelOptionsFor(provider: AgentConversationRecord["provider"]): Option<string>[] {
+  return provider === "claude" ? CLAUDE_MODEL_OPTIONS : CODEX_MODEL_OPTIONS;
+}
+
+function formatModel(model: string | undefined, provider: AgentConversationRecord["provider"]): string {
+  return modelOptionsFor(provider).find((item) => item.value === model)?.label ?? model ?? "默认模型";
 }
 
 function formatEffort(effort?: AgentReasoningEffort): string {
@@ -130,8 +141,8 @@ function formatEffort(effort?: AgentReasoningEffort): string {
   return "极低";
 }
 
-function formatRuntime(model?: string, effort?: AgentReasoningEffort): string {
-  const modelLabel = formatModel(model).replace(/^GPT-/, "");
+function formatRuntime(model: string | undefined, effort: AgentReasoningEffort | undefined, provider: AgentConversationRecord["provider"]): string {
+  const modelLabel = formatModel(model, provider).replace(/^GPT-/, "");
   return `${modelLabel} · ${formatEffort(effort)}`;
 }
 
@@ -1430,7 +1441,7 @@ export function AgentConversationScreen({
   const canSend = Boolean(text.trim() || attachments.length > 0);
   const runtimeMenuActions = useMemo(
     () => [
-      ...MODEL_OPTIONS.map((option) => ({
+      ...modelOptionsFor(conversation?.provider ?? "codex").map((option) => ({
         id: `model:${option.value ?? DEFAULT_OPTION_ID}`,
         title: `模型 · ${option.label}`,
         image: "square.stack.3d.up",
@@ -1443,7 +1454,7 @@ export function AgentConversationScreen({
         state: option.value === effort ? "on" as const : "off" as const,
       })),
     ],
-    [effort, model],
+    [conversation?.provider, effort, model],
   );
   const timelineAutoScrollKey = useMemo(
     () =>
@@ -1817,7 +1828,7 @@ export function AgentConversationScreen({
                 }}
               >
                 <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
-                  {formatRuntime(model, effort)}
+                  {formatRuntime(model, effort, conversation?.provider ?? "codex")}
                 </Text>
                 <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
               </View>

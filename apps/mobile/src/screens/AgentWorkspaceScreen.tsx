@@ -8,7 +8,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -16,6 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Swipeable } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
+import { FolderPickerModal } from "../components/FolderPickerModal";
 import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
 import type { SessionInfo } from "../hooks/useSessionManager";
 import type {
@@ -39,6 +39,9 @@ interface AgentWorkspaceScreenProps {
   refreshKey?: number;
   onOpenConnectionSheet: () => void;
   onOpenConversation: (conversationId: string) => void;
+  onBrowseDirectory?: (sessionId: string, path: string) => void;
+  onMkdirRemote?: (sessionId: string, path: string) => void;
+  onConnectSession?: (sessionId: string, gatewayUrl: string) => void;
 }
 
 interface AgentTarget {
@@ -64,9 +67,9 @@ interface GatewayHostSession {
 }
 
 const PROVIDER_META: Record<AgentProvider, { label: string; subtitle: string }> = {
-  codex: { label: "Codex", subtitle: "默认可视化 Agent" },
-  claude: { label: "Claude", subtitle: "需要 CLI ACP adapter" },
-  custom: { label: "Custom", subtitle: "自定义 ACP adapter" },
+  codex: { label: "Codex", subtitle: "OpenAI Agent" },
+  claude: { label: "Claude", subtitle: "Anthropic Agent" },
+  custom: { label: "Custom", subtitle: "自定义 Agent 命令" },
 };
 
 const HIDDEN_AGENT_PROJECT_KEYS = "@linkshell/agent-hidden-projects:v1";
@@ -167,8 +170,7 @@ function providerReason(
       ? "正在确认 Agent 能力，请稍候。"
       : "需要先连接 Mac 并确认 Agent 能力。";
   }
-  if (provider === "claude") return "Claude 需要在 CLI 侧配置 ACP command 后才能使用。";
-  if (provider === "custom") return "Custom Agent 需要在 CLI 侧配置 ACP command 后才能使用。";
+  if (provider === "custom") return "Custom Agent 需要在 CLI 侧配置 --agent-command 后才能使用。";
   return capabilities?.error;
 }
 
@@ -236,6 +238,9 @@ export function AgentWorkspaceScreen({
   refreshKey,
   onOpenConnectionSheet,
   onOpenConversation,
+  onBrowseDirectory,
+  onMkdirRemote,
+  onConnectSession,
 }: AgentWorkspaceScreenProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -246,6 +251,7 @@ export function AgentWorkspaceScreen({
   const [selectedProvider, setSelectedProvider] = useState<AgentProvider>("codex");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [customCwd, setCustomCwd] = useState("");
+  const [folderPickerVisible, setFolderPickerVisible] = useState(false);
   const [creating, setCreating] = useState(false);
   const [gatewayHosts, setGatewayHosts] = useState<GatewayHostSession[]>([]);
   const [loadingGatewayHosts, setLoadingGatewayHosts] = useState(false);
@@ -271,6 +277,11 @@ export function AgentWorkspaceScreen({
         session.status === "connected",
       ),
     [allSessions],
+  );
+
+  const selectedSession = useMemo(
+    () => allSessions.find((s) => s.sessionId === selectedSessionId) ?? null,
+    [allSessions, selectedSessionId],
   );
 
   const sessionSignature = useMemo(
@@ -544,8 +555,14 @@ export function AgentWorkspaceScreen({
     selectedProviderChoice?.reason ??
     providerReason(selectedCapabilities, selectedProvider, selectedTarget?.status);
 
+  const didAutoSelectRef = useRef(false);
+
   useEffect(() => {
-    if (!createVisible) return;
+    if (!createVisible) {
+      didAutoSelectRef.current = false;
+      return;
+    }
+    if (didAutoSelectRef.current) return;
     const nextTarget = selectedTarget ?? targets[0];
     if (nextTarget && selectedSessionId !== nextTarget.sessionId) {
       setSelectedSessionId(nextTarget.sessionId);
@@ -557,6 +574,7 @@ export function AgentWorkspaceScreen({
     const selectedStillExists = providerChoices.some((provider) => provider.id === selectedProvider);
     const nextProvider = enabledProvider?.id ?? (selectedStillExists ? selectedProvider : providerChoices[0]?.id);
     if (nextProvider && nextProvider !== selectedProvider) setSelectedProvider(nextProvider);
+    didAutoSelectRef.current = true;
   }, [
     createVisible,
     customCwd,
@@ -922,7 +940,7 @@ export function AgentWorkspaceScreen({
             contentInsetAdjustmentBehavior="never"
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{
-              paddingTop: insets.top + 18,
+              paddingTop: 20,
               paddingHorizontal: 20,
               paddingBottom: Math.max(insets.bottom, 18) + 20,
               gap: 18,
@@ -1077,28 +1095,40 @@ export function AgentWorkspaceScreen({
                   </View>
                 </ScrollView>
               ) : null}
-              <TextInput
-                value={customCwd}
-                onChangeText={(value) => {
-                  setCustomCwd(value);
-                  setSelectedProjectId(null);
+              <Pressable
+                onPress={() => {
+                  if (!selectedSession && selectedSessionId && onConnectSession) {
+                    const target = targets.find(t => t.sessionId === selectedSessionId);
+                    if (target) onConnectSession(selectedSessionId, target.serverUrl);
+                  }
+                  setFolderPickerVisible(true);
                 }}
-                placeholder="/Users/you/project"
-                placeholderTextColor={theme.textTertiary}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={{
+                style={({ pressed }) => ({
                   borderRadius: 12,
                   borderCurve: "continuous",
                   borderWidth: StyleSheet.hairlineWidth,
                   borderColor: theme.separator,
-                  backgroundColor: theme.bgCard,
-                  color: theme.text,
-                  fontSize: 14,
+                  backgroundColor: pressed ? theme.bgInput : theme.bgCard,
                   paddingHorizontal: 12,
                   paddingVertical: 12,
-                }}
-              />
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                })}
+              >
+                <AppSymbol name="folder" size={14} color={theme.textSecondary} />
+                <Text
+                  style={{
+                    color: customCwd ? theme.text : theme.textTertiary,
+                    fontSize: 14,
+                    flex: 1,
+                  }}
+                  numberOfLines={1}
+                >
+                  {customCwd || "选择工作目录..."}
+                </Text>
+                <AppSymbol name="chevron.right" size={12} color={theme.textTertiary} />
+              </Pressable>
             </View>
 
             {!selectedProviderEnabled ? (
@@ -1142,6 +1172,27 @@ export function AgentWorkspaceScreen({
               </Pressable>
             </View>
           </ScrollView>
+          <FolderPickerModal
+            visible={folderPickerVisible}
+            browseResult={selectedSession?.browseResult ?? null}
+            terminals={selectedSession?.terminals ?? new Map()}
+            initialPath={customCwd || undefined}
+            selectLabel="选择此目录"
+            switchLabel="选择此目录"
+            onBrowse={(path) => {
+              if (selectedSessionId && onBrowseDirectory) {
+                onBrowseDirectory(selectedSessionId, path);
+              }
+            }}
+            onSelect={(path) => {
+              setCustomCwd(path);
+              setSelectedProjectId(null);
+              setFolderPickerVisible(false);
+            }}
+            onMkdir={onMkdirRemote && selectedSessionId ? (path: string) => onMkdirRemote(selectedSessionId!, path) : undefined}
+            onClose={() => setFolderPickerVisible(false)}
+            theme={theme}
+          />
         </View>
       </Modal>
     </View>
