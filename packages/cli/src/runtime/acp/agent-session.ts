@@ -235,6 +235,7 @@ function summarizeFileChanges(changes: unknown[]): string | undefined {
 
 export class AgentSessionProxy {
   private client: AcpClient | undefined;
+  private activeProvider: AgentProvider | undefined;
   private agentSessionId: string | undefined;
   private status: AgentStatus = "unavailable";
   private error: string | undefined;
@@ -253,7 +254,7 @@ export class AgentSessionProxy {
     private readonly input: {
       sessionId: string;
       cwd: string;
-      provider: AgentProvider;
+      availableProviders: AgentProvider[];
       command?: string;
       send: (envelope: Envelope) => void;
       verbose?: boolean;
@@ -347,45 +348,53 @@ export class AgentSessionProxy {
       this.sendCapabilities();
       return;
     }
-    await this.ensureClient();
+    await this.tryStartFirstAvailable();
+  }
+
+  private async tryStartFirstAvailable(): Promise<void> {
+    if (this.client) return;
+
+    for (const provider of this.input.availableProviders) {
+      const resolved = resolveAgentCommand({
+        provider,
+        command: this.input.command,
+      });
+      if (!resolved) continue;
+
+      try {
+        this.client = new AcpClient({
+          command: resolved.command,
+          protocol: resolved.protocol,
+          framing: resolved.framing,
+          cwd: this.input.cwd,
+          onNotification: (method, params) => this.handleNotification(method, params),
+          onRequest: (method, params) => this.handleRequest(method, params),
+          onExit: (message) => this.handleExit(message),
+        });
+        await this.client.initialize();
+        this.activeProvider = provider;
+        this.initialized = true;
+        this.status = "idle";
+        this.error = undefined;
+        this.sendCapabilities();
+        return;
+      } catch (error) {
+        this.client?.stop();
+        this.client = undefined;
+        if (this.input.verbose) {
+          process.stderr.write(`[agent] failed to start ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      }
+    }
+
+    this.status = "unavailable";
+    this.error = "没有可用的 Agent provider。请安装 Claude Code 或 Codex CLI。";
+    this.sendCapabilities();
   }
 
   private async ensureClient(): Promise<void> {
     if (this.client) return;
-
-    const resolved = resolveAgentCommand({
-      provider: this.input.provider,
-      command: this.input.command,
-    });
-    if (!resolved) {
-      this.status = "unavailable";
-      this.error = `Agent GUI requires --agent-command for ${this.input.provider}`;
-      this.sendCapabilities();
-      return;
-    }
-
-    try {
-      this.client = new AcpClient({
-        command: resolved.command,
-        protocol: resolved.protocol,
-        framing: resolved.framing,
-        cwd: this.input.cwd,
-        onNotification: (method, params) => this.handleNotification(method, params),
-        onRequest: (method, params) => this.handleRequest(method, params),
-        onExit: (message) => this.handleExit(message),
-      });
-      await this.client.initialize();
-      this.initialized = true;
-      this.status = "idle";
-      this.error = undefined;
-      this.sendCapabilities();
-    } catch (error) {
-      this.client?.stop();
-      this.client = undefined;
-      this.status = "error";
-      this.error = error instanceof Error ? error.message : String(error);
-      this.sendCapabilities();
-    }
+    await this.tryStartFirstAvailable();
   }
 
   private async ensureSession(
@@ -950,12 +959,13 @@ export class AgentSessionProxy {
 
   private sendCapabilities(): void {
     const enabled = Boolean(this.client && this.initialized && !this.error);
+    const activeProvider = this.activeProvider ?? this.input.availableProviders[0];
     this.input.send(createEnvelope({
       type: "agent.capabilities",
       sessionId: this.input.sessionId,
       payload: {
         enabled,
-        provider: this.input.provider,
+        provider: activeProvider ?? "codex",
         protocolVersion: 1,
         error: enabled ? undefined : this.error,
         supportsSessionList: enabled,

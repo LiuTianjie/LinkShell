@@ -207,7 +207,7 @@ program
       authToken,
       keepAwake,
       agentUi: Boolean(options.agentUi),
-      agentProvider: options.agentProvider ?? "codex",
+      agentProvider: options.agentProvider,
       agentCommand: options.agentCommand,
     });
 
@@ -495,7 +495,6 @@ program
       "--rows", String(config.rows ?? 36),
       "--screen",
       "--agent-ui",
-      "--agent-provider", "codex",
     ];
     if (config.command) childArgs.push("--command", config.command);
     if (config.hostname) childArgs.push("--hostname", config.hostname);

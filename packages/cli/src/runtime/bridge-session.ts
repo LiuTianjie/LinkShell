@@ -21,7 +21,7 @@ import { getLanIp } from "../utils/lan-ip.js";
 import { startKeepAwake, type KeepAwakeHandle } from "../utils/keep-awake.js";
 import { AgentSessionProxy } from "./acp/agent-session.js";
 import { AgentWorkspaceProxy } from "./acp/agent-workspace.js";
-import type { AgentProvider } from "./acp/provider-resolver.js";
+import { detectAvailableProviders, type AgentProvider } from "./acp/provider-resolver.js";
 
 export interface BridgeSessionOptions {
   gatewayUrl: string;
@@ -330,13 +330,16 @@ export class BridgeSession {
     }
     if (this.options.agentUi) {
       process.env.LINKSHELL_ID = this.terminalHookMarker(DEFAULT_TERMINAL_ID);
-      const agentProvider = normalizeAgentProvider(
-        this.options.agentProvider ?? "codex",
-      );
+      const availableProviders = this.options.agentProvider
+        ? [normalizeAgentProvider(this.options.agentProvider)]
+        : detectAvailableProviders();
+      if (availableProviders.length === 0) {
+        availableProviders.push("codex"); // last-resort fallback
+      }
       const agentOptions = {
         sessionId: this.sessionId,
         cwd: process.cwd(),
-        provider: agentProvider,
+        availableProviders,
         command: this.options.agentCommand,
         verbose: this.options.verbose,
         send: (envelope: Envelope) => this.send(envelope),
@@ -347,7 +350,7 @@ export class BridgeSession {
       this.agentWorkspace = new AgentWorkspaceProxy({
         ...agentOptions,
       });
-      process.stderr.write("[bridge] agent workspace channel enabled\n");
+      process.stderr.write(`[bridge] agent workspace channel enabled (providers: ${availableProviders.join(", ")})\n`);
     }
     await this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
     this.connectGateway();
@@ -1274,13 +1277,15 @@ export class BridgeSession {
     if (!term?.hookPort) return;
     const marker = term.hookMarker;
     const curlCmd = `curl -s -X POST "http://127.0.0.1:${term.hookPort}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @-`;
-    const agentProvider = normalizeAgentProvider(this.options.agentProvider ?? "codex");
+    const providers = this.options.agentProvider
+      ? [normalizeAgentProvider(this.options.agentProvider)]
+      : detectAvailableProviders();
     try {
-      if (agentProvider === "claude") {
-        this.setupClaudeHooks(DEFAULT_TERMINAL_ID, curlCmd, [], marker);
-      } else {
-        this.setupCodexHooks(DEFAULT_TERMINAL_ID, curlCmd, marker);
-        if (agentProvider === "custom") {
+      for (const provider of providers) {
+        if (provider === "codex") {
+          this.setupCodexHooks(DEFAULT_TERMINAL_ID, curlCmd, marker);
+        } else {
+          // claude, custom
           this.setupClaudeHooks(DEFAULT_TERMINAL_ID, curlCmd, [], marker);
         }
       }

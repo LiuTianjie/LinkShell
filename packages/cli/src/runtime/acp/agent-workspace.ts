@@ -656,21 +656,9 @@ function providerLabel(provider: AgentProvider): string {
   return "Custom";
 }
 
-function providerSetupReason(provider: AgentProvider, activeProvider: AgentProvider, error?: string): string {
-  if (provider === activeProvider) {
-    return error ?? `${providerLabel(provider)} Agent 正在初始化或不可用。`;
-  }
-  if (provider === "codex") {
-    return `当前 CLI 启用的是 ${providerLabel(activeProvider)} Agent。`;
-  }
-  if (provider === "claude") {
-    return "Claude ACP adapter 尚未启用，请用 --agent-provider claude --agent-command 配置。";
-  }
-  return "Custom Agent 需要用 --agent-provider custom --agent-command 配置后才能使用。";
-}
-
 export class AgentWorkspaceProxy {
-  private client: AcpClient | undefined;
+  private clients = new Map<AgentProvider, AcpClient>();
+  private agentProtocols = new Map<AgentProvider, AgentProtocol>();
   private initialized = false;
   private status: AgentStatus = "unavailable";
   private error: string | undefined;
@@ -686,13 +674,12 @@ export class AgentWorkspaceProxy {
   private pendingStructuredInputs = new Map<string, { conversationId: string; input: AgentStructuredInput }>();
   private structuredInputWaiters = new Map<string, PendingStructuredInputWaiter>();
   private toolConversationIds = new Map<string, string>();
-  private agentProtocol: AgentProtocol | undefined;
 
   constructor(
     private readonly input: {
       sessionId: string;
       cwd: string;
-      provider: AgentProvider;
+      availableProviders: AgentProvider[];
       command?: string;
       send: (envelope: Envelope) => void;
       verbose?: boolean;
@@ -736,7 +723,8 @@ export class AgentWorkspaceProxy {
         const payload = parseTypedPayload("agent.v2.cancel", envelope.payload);
         const conversation = this.conversations.get(payload.conversationId);
         this.cancelPendingPermissions(payload.conversationId);
-        this.client?.cancel({
+        const cancelClient = conversation ? this.clientForProvider(conversation.provider) : undefined;
+        cancelClient?.cancel({
           sessionId: conversation?.agentSessionId,
           turnId: this.currentTurnId,
         });
@@ -759,89 +747,104 @@ export class AgentWorkspaceProxy {
   }
 
   stop(): void {
-    this.client?.stop();
-    this.client = undefined;
+    for (const client of this.clients.values()) {
+      client.stop();
+    }
+    this.clients.clear();
+  }
+
+  private clientForProvider(provider: AgentProvider): AcpClient | undefined {
+    return this.clients.get(provider);
+  }
+
+  private protocolForProvider(provider: AgentProvider): AgentProtocol | undefined {
+    return this.agentProtocols.get(provider);
   }
 
   private async initialize(): Promise<void> {
     if (this.initialized) return;
-    await this.ensureClient();
+    // trigger capability report immediately, lazy-start providers on first use
+    this.initialized = true;
+    this.status = "idle";
+    this.error = undefined;
+    this.sendCapabilities();
   }
 
-  private async ensureClient(): Promise<void> {
-    if (this.client) return;
+  private async ensureProviderClient(provider: AgentProvider): Promise<AcpClient | undefined> {
+    const existing = this.clients.get(provider);
+    if (existing) return existing;
 
     const resolved = resolveAgentCommand({
-      provider: this.input.provider,
+      provider,
       command: this.input.command,
     });
     if (!resolved) {
-      this.status = "unavailable";
-      this.error = `Agent Workspace requires --agent-command for ${this.input.provider}`;
-      return;
+      if (this.input.verbose) {
+        process.stderr.write(`[agent:v2] no command for provider ${provider}\n`);
+      }
+      return undefined;
     }
 
     try {
-      this.agentProtocol = resolved.protocol;
-      this.client = new AcpClient({
+      this.agentProtocols.set(provider, resolved.protocol);
+      const client = new AcpClient({
         command: resolved.command,
         protocol: resolved.protocol,
         framing: resolved.framing,
         cwd: this.input.cwd,
         onNotification: (method, params) => this.handleNotification(method, params),
         onRequest: (method, params) => this.handleRequest(method, params),
-        onExit: (message) => this.handleExit(message),
+        onExit: (message) => this.handleProviderExit(provider, message),
       });
-      await this.client.initialize();
-      this.initialized = true;
+      await client.initialize();
+      this.clients.set(provider, client);
       this.status = "idle";
       this.error = undefined;
+      this.sendCapabilities();
+      return client;
     } catch (error) {
-      this.client?.stop();
-      this.client = undefined;
-      this.status = "error";
-      this.error = error instanceof Error ? error.message : String(error);
+      if (this.input.verbose) {
+        process.stderr.write(`[agent:v2] failed to start ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+      return undefined;
     }
   }
 
   private sendCapabilities(): void {
-    const enabled = Boolean(this.client && this.initialized && !this.error);
-    const supportsImages = enabled && this.agentProtocol === "codex-app-server";
-    const activeProvider = this.input.provider;
-    const providerIds: AgentProvider[] = ["codex", "claude"];
-    if (activeProvider === "custom") providerIds.push("custom");
+    const providers = this.input.availableProviders.map((provider) => {
+      const client = this.clients.get(provider);
+      const protocol = this.agentProtocols.get(provider);
+      const enabled = Boolean(client);
+      const supportsImages = enabled && protocol === "codex-app-server";
+      return {
+        id: provider,
+        label: providerLabel(provider),
+        enabled,
+        reason: enabled ? undefined : `${providerLabel(provider)} 未安装或启动失败`,
+        supportsImages,
+        supportsPermission: enabled,
+        supportsPlan: enabled,
+        supportsCancel: enabled,
+      };
+    });
+    const anyEnabled = providers.some((p) => p.enabled);
     this.input.send(createEnvelope({
       type: "agent.v2.capabilities",
       sessionId: this.input.sessionId,
       payload: {
-        enabled,
-        provider: activeProvider,
-        providers: providerIds.map((provider) => {
-          const isActive = provider === activeProvider;
-          const canUse = isActive && enabled;
-          return {
-            id: provider,
-            label: providerLabel(provider),
-            enabled: canUse,
-            reason: canUse
-              ? undefined
-              : providerSetupReason(provider, activeProvider, isActive ? this.error : undefined),
-            supportsImages: canUse && supportsImages,
-            supportsPermission: canUse,
-            supportsPlan: canUse,
-            supportsCancel: canUse,
-          };
-        }),
+        enabled: anyEnabled,
+        provider: this.input.availableProviders[0] ?? "codex",
+        providers,
         protocolVersion: 1,
         workspaceProtocolVersion: 2,
-        error: enabled ? undefined : this.error,
-        supportsSessionList: enabled,
-        supportsSessionLoad: enabled,
-        supportsImages,
+        error: anyEnabled ? undefined : "没有可用的 Agent provider。请安装 Claude Code 或 Codex CLI。",
+        supportsSessionList: anyEnabled,
+        supportsSessionLoad: anyEnabled,
+        supportsImages: providers.some((p) => p.supportsImages),
         supportsAudio: false,
-        supportsPermission: enabled,
-        supportsPlan: enabled,
-        supportsCancel: enabled,
+        supportsPermission: anyEnabled,
+        supportsPlan: anyEnabled,
+        supportsCancel: anyEnabled,
       },
     }));
   }
@@ -856,18 +859,22 @@ export class AgentWorkspaceProxy {
     permissionMode?: AgentPermissionMode;
     title?: string;
   }): Promise<AgentConversation | undefined> {
-    await this.ensureClient();
-    this.sendCapabilities();
-    if (payload.provider && payload.provider !== this.input.provider) {
+    const provider = payload.provider ?? this.input.availableProviders[0];
+    if (!provider) {
+      return this.openFailure(payload, "没有可用的 Agent provider。");
+    }
+    if (!this.input.availableProviders.includes(provider)) {
       return this.openFailure(
         payload,
-        `当前 CLI 只启用了 ${providerLabel(this.input.provider)} Agent，不能在这个会话里启动 ${providerLabel(payload.provider)}。`,
+        `${providerLabel(provider)} 未安装或不可用。`,
       );
     }
-    if (!this.client) {
+
+    const client = await this.ensureProviderClient(provider);
+    if (!client) {
       return this.openFailure(
         payload,
-        this.error ?? "Agent Workspace 不可用，请确认 CLI 已使用 --agent-ui 启动。",
+        `${providerLabel(provider)} 启动失败。请确认 CLI 已安装并可用。`,
       );
     }
 
@@ -895,8 +902,8 @@ export class AgentWorkspaceProxy {
 
     try {
       const result = agentSessionId
-        ? await this.client.loadSession({ sessionId: agentSessionId, cwd })
-        : await this.client.newSession({ cwd });
+        ? await client.loadSession({ sessionId: agentSessionId, cwd })
+        : await client.newSession({ cwd });
       agentSessionId = this.extractSessionId(result) ?? agentSessionId ?? id("agent-session");
       const now = Date.now();
       const conversationId = payload.conversationId ?? `agent:${agentSessionId}`;
@@ -904,7 +911,7 @@ export class AgentWorkspaceProxy {
         ...existingConversation,
         id: conversationId,
         agentSessionId,
-        provider: payload.provider ?? this.input.provider,
+        provider,
         cwd,
         title: payload.title ?? existingConversation?.title ?? titleFromCwd(cwd),
         model: payload.model ?? existingConversation?.model,
@@ -949,7 +956,7 @@ export class AgentWorkspaceProxy {
     const now = Date.now();
     const conversation: AgentConversation = {
       id: fallbackId,
-      provider: payload.provider ?? this.input.provider,
+      provider: payload.provider ?? this.input.availableProviders[0] ?? "codex",
       cwd,
       title: payload.title ?? titleFromCwd(cwd),
       model: payload.model,
@@ -989,9 +996,12 @@ export class AgentWorkspaceProxy {
     const conversation =
       this.conversations.get(payload.conversationId) ??
       await this.openConversation({ conversationId: payload.conversationId });
-    if (!conversation || !this.client || !conversation.agentSessionId) return;
+    if (!conversation || !conversation.agentSessionId) return;
+    const client = this.clientForProvider(conversation.provider);
+    if (!client) return;
 
-    if (payload.contentBlocks.some((block) => block.type === "image") && this.agentProtocol !== "codex-app-server") {
+    const protocol = this.protocolForProvider(conversation.provider);
+    if (payload.contentBlocks.some((block) => block.type === "image") && protocol !== "codex-app-server") {
       conversation.status = "idle";
       conversation.lastActivityAt = Date.now();
       this.emitConversation(conversation);
@@ -1025,7 +1035,7 @@ export class AgentWorkspaceProxy {
     this.emitConversation(conversation);
 
     try {
-      const result = await this.client.prompt({
+      const result = await client.prompt({
         sessionId: conversation.agentSessionId,
         content: payload.contentBlocks,
         clientMessageId: payload.clientMessageId,
@@ -1651,8 +1661,10 @@ export class AgentWorkspaceProxy {
       ));
       this.permissionSources.delete(payload.requestId);
     } else {
-      this.client?.respondPermission({
-        sessionId: this.conversations.get(payload.conversationId)?.agentSessionId,
+      const conversation = this.conversations.get(payload.conversationId);
+      const respondClient = conversation ? this.clientForProvider(conversation.provider) : undefined;
+      respondClient?.respondPermission({
+        sessionId: conversation?.agentSessionId,
         requestId: payload.requestId,
         outcome: payload.outcome === "cancelled" ? "deny" : payload.outcome,
         optionId: selectedOptionId,
@@ -1919,12 +1931,12 @@ export class AgentWorkspaceProxy {
     return undefined;
   }
 
-  private handleExit(message: string): void {
+  private handleProviderExit(provider: AgentProvider, message: string): void {
+    this.clients.delete(provider);
+    this.agentProtocols.delete(provider);
     this.cancelPendingPermissions();
-    this.status = "error";
-    this.error = message;
-    this.client = undefined;
     for (const conversation of this.conversations.values()) {
+      if (conversation.provider !== provider) continue;
       conversation.status = "error";
       conversation.lastMessagePreview = message;
       conversation.lastActivityAt = Date.now();
@@ -1937,6 +1949,7 @@ export class AgentWorkspaceProxy {
         createdAt: Date.now(),
       });
     }
+    this.sendCapabilities();
   }
 
   private cancelPendingPermissions(conversationId?: string): void {

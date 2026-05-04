@@ -1,3 +1,5 @@
+import { execSync } from "node:child_process";
+
 export type AgentProvider = "codex" | "claude" | "custom";
 export type AgentProtocol = "acp" | "codex-app-server";
 export type AgentFraming = "content-length" | "newline";
@@ -33,5 +35,32 @@ export function resolveAgentCommand(input: {
     };
   }
 
+  if (input.provider === "claude") {
+    return {
+      provider: "claude",
+      command: "claude --acp",
+      protocol: "acp",
+      framing: "content-length",
+    };
+  }
+
+  // custom: caller must provide --agent-command
   return null;
+}
+
+export function detectAvailableProviders(): AgentProvider[] {
+  const available: AgentProvider[] = [];
+  const bins = [
+    ["claude", "claude"] as const,
+    ["codex", "codex"] as const,
+  ];
+  for (const [, bin] of bins) {
+    try {
+      execSync(`which ${bin}`, { stdio: "ignore" });
+      available.push(bin as AgentProvider);
+    } catch {
+      // not installed
+    }
+  }
+  return available.length > 0 ? available : [];
 }
