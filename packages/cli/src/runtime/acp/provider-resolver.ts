@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 
 export type AgentProvider = "codex" | "claude" | "custom";
-export type AgentProtocol = "acp" | "codex-app-server";
+export type AgentProtocol = "acp" | "codex-app-server" | "claude-stream-json";
 export type AgentFraming = "content-length" | "newline";
 
 export interface AgentCommandConfig {
@@ -40,9 +40,9 @@ export function resolveAgentCommand(input: {
   if (input.provider === "claude") {
     return {
       provider: "claude",
-      command: "claude --acp",
-      protocol: "acp",
-      framing: "content-length",
+      command: "claude --print --output-format stream-json --input-format stream-json --verbose --permission-mode bypassPermissions",
+      protocol: "claude-stream-json",
+      framing: "newline",
     };
   }
 
@@ -81,34 +81,9 @@ function resolveBinary(bin: string): string | null {
   return null;
 }
 
-function supportsAcpFlag(bin: string): boolean {
-  try {
-    const result = execSync(`${bin} --acp 2>&1 || true`, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 5000,
-    });
-    // If stderr contains "unknown option", this version doesn't support --acp
-    return !result.includes("unknown option");
-  } catch {
-    // Timeout or other error — assume not supported
-    return false;
-  }
-}
-
 export function detectAvailableProviders(): AgentProvider[] {
   const available: AgentProvider[] = [];
-  const claudeBin = resolveBinary("claude");
-  if (claudeBin) {
-    if (supportsAcpFlag(claudeBin)) {
-      available.push("claude");
-    } else {
-      process.stderr.write(`[provider] Claude Code detected but --acp flag not supported (version too old?)\n`);
-    }
-  }
+  if (resolveBinary("claude")) available.push("claude");
   if (resolveBinary("codex")) available.push("codex");
-  if (available.length === 0) {
-    process.stderr.write(`[provider] no agent providers detected\n`);
-  }
   return available;
 }

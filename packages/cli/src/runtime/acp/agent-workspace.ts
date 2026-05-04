@@ -5,6 +5,7 @@ import {
   type Envelope,
 } from "@linkshell/protocol";
 import { AcpClient } from "./acp-client.js";
+import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
 import type { AgentProtocol, AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
 
@@ -657,7 +658,7 @@ function providerLabel(provider: AgentProvider): string {
 }
 
 export class AgentWorkspaceProxy {
-  private clients = new Map<AgentProvider, AcpClient>();
+  private clients = new Map<AgentProvider, AcpClient | ClaudeStreamJsonClient>();
   private agentProtocols = new Map<AgentProvider, AgentProtocol>();
   private initialized = false;
   private status: AgentStatus = "unavailable";
@@ -753,7 +754,7 @@ export class AgentWorkspaceProxy {
     this.clients.clear();
   }
 
-  private clientForProvider(provider: AgentProvider): AcpClient | undefined {
+  private clientForProvider(provider: AgentProvider): AcpClient | ClaudeStreamJsonClient | undefined {
     return this.clients.get(provider);
   }
 
@@ -772,7 +773,7 @@ export class AgentWorkspaceProxy {
     this.sendCapabilities();
   }
 
-  private async ensureProviderClient(provider: AgentProvider): Promise<AcpClient | undefined> {
+  private async ensureProviderClient(provider: AgentProvider): Promise<AcpClient | ClaudeStreamJsonClient | undefined> {
     const existing = this.clients.get(provider);
     if (existing) return existing;
 
@@ -789,15 +790,26 @@ export class AgentWorkspaceProxy {
 
     try {
       this.agentProtocols.set(provider, resolved.protocol);
-      const client = new AcpClient({
-        command: resolved.command,
-        protocol: resolved.protocol,
-        framing: resolved.framing,
-        cwd: this.input.cwd,
-        onNotification: (method, params) => this.handleNotification(method, params),
-        onRequest: (method, params) => this.handleRequest(method, params),
-        onExit: (message) => this.handleProviderExit(provider, message),
-      });
+      const isClaudeStreamJson = resolved.protocol === "claude-stream-json";
+      const client = isClaudeStreamJson
+        ? new ClaudeStreamJsonClient({
+            command: resolved.command,
+            protocol: resolved.protocol,
+            framing: resolved.framing,
+            cwd: this.input.cwd,
+            onNotification: (method, params) => this.handleNotification(method, params),
+            onRequest: (method, params) => this.handleRequest(method, params),
+            onExit: (message) => this.handleProviderExit(provider, message),
+          })
+        : new AcpClient({
+            command: resolved.command,
+            protocol: resolved.protocol,
+            framing: resolved.framing,
+            cwd: this.input.cwd,
+            onNotification: (method, params) => this.handleNotification(method, params),
+            onRequest: (method, params) => this.handleRequest(method, params),
+            onExit: (message) => this.handleProviderExit(provider, message),
+          });
       await client.initialize();
       this.clients.set(provider, client);
       this.status = "idle";

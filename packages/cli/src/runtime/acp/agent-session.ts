@@ -4,6 +4,7 @@ import {
   type Envelope,
 } from "@linkshell/protocol";
 import { AcpClient } from "./acp-client.js";
+import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
 import type { AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
 
@@ -234,7 +235,7 @@ function summarizeFileChanges(changes: unknown[]): string | undefined {
 }
 
 export class AgentSessionProxy {
-  private client: AcpClient | undefined;
+  private client: AcpClient | ClaudeStreamJsonClient | undefined;
   private activeProvider: AgentProvider | undefined;
   private agentSessionId: string | undefined;
   private status: AgentStatus = "unavailable";
@@ -362,15 +363,26 @@ export class AgentSessionProxy {
       if (!resolved) continue;
 
       try {
-        this.client = new AcpClient({
-          command: resolved.command,
-          protocol: resolved.protocol,
-          framing: resolved.framing,
-          cwd: this.input.cwd,
-          onNotification: (method, params) => this.handleNotification(method, params),
-          onRequest: (method, params) => this.handleRequest(method, params),
-          onExit: (message) => this.handleExit(message),
-        });
+        const isClaudeStreamJson = resolved.protocol === "claude-stream-json";
+        this.client = isClaudeStreamJson
+          ? new ClaudeStreamJsonClient({
+              command: resolved.command,
+              protocol: resolved.protocol,
+              framing: resolved.framing,
+              cwd: this.input.cwd,
+              onNotification: (method, params) => this.handleNotification(method, params),
+              onRequest: (method, params) => this.handleRequest(method, params),
+              onExit: (message) => this.handleExit(message),
+            })
+          : new AcpClient({
+              command: resolved.command,
+              protocol: resolved.protocol,
+              framing: resolved.framing,
+              cwd: this.input.cwd,
+              onNotification: (method, params) => this.handleNotification(method, params),
+              onRequest: (method, params) => this.handleRequest(method, params),
+              onExit: (message) => this.handleExit(message),
+            });
         await this.client.initialize();
         this.activeProvider = provider;
         this.initialized = true;
