@@ -671,11 +671,16 @@ function providerModels(provider: AgentProvider): AgentModelOption[] {
       { id: "haiku", label: "Haiku 4.5" },
     ];
   }
-  // Codex / custom — the mobile app can still use its own list as fallback,
-  // but we provide a minimal default set here.
-  return [
-    { id: "default", label: "默认模型" },
-  ];
+  if (provider === "codex") {
+    return [
+      { id: "default", label: "默认模型" },
+      { id: "gpt-5.5", label: "GPT-5.5" },
+      { id: "gpt-5.4", label: "GPT-5.4" },
+      { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+      { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+    ];
+  }
+  return [{ id: "default", label: "默认模型" }];
 }
 
 export class AgentWorkspaceProxy {
