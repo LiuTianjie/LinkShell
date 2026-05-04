@@ -333,9 +333,6 @@ export class BridgeSession {
       const availableProviders = this.options.agentProvider
         ? [normalizeAgentProvider(this.options.agentProvider)]
         : detectAvailableProviders();
-      if (availableProviders.length === 0) {
-        availableProviders.push("codex"); // last-resort fallback
-      }
       const agentOptions = {
         sessionId: this.sessionId,
         cwd: process.cwd(),
@@ -350,7 +347,7 @@ export class BridgeSession {
       this.agentWorkspace = new AgentWorkspaceProxy({
         ...agentOptions,
       });
-      process.stderr.write(`[bridge] agent workspace channel enabled (providers: ${availableProviders.join(", ")})\n`);
+      process.stderr.write(`[bridge] agent workspace channel enabled (providers: ${availableProviders.join(", ") || "none"})\n`);
     }
     await this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
     this.connectGateway();

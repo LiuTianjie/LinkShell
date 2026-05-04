@@ -1,4 +1,6 @@
 import { execSync } from "node:child_process";
+import { homedir } from "node:os";
+import { existsSync } from "node:fs";
 
 export type AgentProvider = "codex" | "claude" | "custom";
 export type AgentProtocol = "acp" | "codex-app-server";
@@ -48,19 +50,40 @@ export function resolveAgentCommand(input: {
   return null;
 }
 
-export function detectAvailableProviders(): AgentProvider[] {
-  const available: AgentProvider[] = [];
-  const bins = [
-    ["claude", "claude"] as const,
-    ["codex", "codex"] as const,
+function resolveBinary(bin: string): string | null {
+  // 1. Try which (PATH lookup)
+  try {
+    const path = execSync(`which ${bin}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (path && existsSync(path)) return path;
+  } catch { /* not in PATH */ }
+
+  // 2. Common install locations (daemon may have a stripped PATH)
+  const home = homedir();
+  const candidates = [
+    `${home}/.npm-global/bin/${bin}`,
+    `${home}/.local/bin/${bin}`,
+    `/opt/homebrew/bin/${bin}`,
+    `/usr/local/bin/${bin}`,
+    `${home}/.nvm/versions/node/*/bin/${bin}`,
   ];
-  for (const [, bin] of bins) {
-    try {
-      execSync(`which ${bin}`, { stdio: "ignore" });
-      available.push(bin as AgentProvider);
-    } catch {
-      // not installed
+  for (const candidate of candidates) {
+    // expand glob if present
+    if (candidate.includes("*")) {
+      try {
+        const expanded = execSync(`ls ${candidate} 2>/dev/null`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n")[0];
+        if (expanded && existsSync(expanded)) return expanded;
+      } catch { continue; }
+    } else if (existsSync(candidate)) {
+      return candidate;
     }
   }
-  return available.length > 0 ? available : [];
+
+  return null;
+}
+
+export function detectAvailableProviders(): AgentProvider[] {
+  const available: AgentProvider[] = [];
+  if (resolveBinary("claude")) available.push("claude");
+  if (resolveBinary("codex")) available.push("codex");
+  return available;
 }
