@@ -81,9 +81,34 @@ function resolveBinary(bin: string): string | null {
   return null;
 }
 
+function supportsAcpFlag(bin: string): boolean {
+  try {
+    const result = execSync(`${bin} --acp 2>&1 || true`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5000,
+    });
+    // If stderr contains "unknown option", this version doesn't support --acp
+    return !result.includes("unknown option");
+  } catch {
+    // Timeout or other error — assume not supported
+    return false;
+  }
+}
+
 export function detectAvailableProviders(): AgentProvider[] {
   const available: AgentProvider[] = [];
-  if (resolveBinary("claude")) available.push("claude");
+  const claudeBin = resolveBinary("claude");
+  if (claudeBin) {
+    if (supportsAcpFlag(claudeBin)) {
+      available.push("claude");
+    } else {
+      process.stderr.write(`[provider] Claude Code detected but --acp flag not supported (version too old?)\n`);
+    }
+  }
   if (resolveBinary("codex")) available.push("codex");
+  if (available.length === 0) {
+    process.stderr.write(`[provider] no agent providers detected\n`);
+  }
   return available;
 }
