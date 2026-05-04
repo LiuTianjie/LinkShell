@@ -40,20 +40,6 @@ interface AgentConversationScreenProps {
 
 type Option<T extends string> = { label: string; value?: T; image?: string };
 
-const CODEX_MODEL_OPTIONS: Option<string>[] = [
-  { label: "默认模型", value: undefined },
-  { label: "GPT-5.5", value: "gpt-5.5" },
-  { label: "GPT-5.4", value: "gpt-5.4" },
-  { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
-  { label: "GPT-5.3 Codex", value: "gpt-5.3-codex" },
-];
-
-const CLAUDE_MODEL_OPTIONS: Option<string>[] = [
-  { label: "默认模型", value: undefined },
-  { label: "Opus 4.5", value: "opus" },
-  { label: "Sonnet 4.5", value: "sonnet" },
-  { label: "Haiku 4.5", value: "haiku" },
-];
 
 const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
   { label: "默认强度", value: undefined },
@@ -124,12 +110,34 @@ function permissionMeta(mode: AgentPermissionMode | undefined, theme: Theme) {
   return { label: "默认权限", icon: "hand.raised.fill", color: theme.textSecondary, bg: theme.bgInput };
 }
 
-function modelOptionsFor(provider: AgentConversationRecord["provider"]): Option<string>[] {
-  return provider === "claude" ? CLAUDE_MODEL_OPTIONS : CODEX_MODEL_OPTIONS;
-}
-
-function formatModel(model: string | undefined, provider: AgentConversationRecord["provider"]): string {
-  return modelOptionsFor(provider).find((item) => item.value === model)?.label ?? model ?? "默认模型";
+function modelOptionsFor(
+  provider: AgentConversationRecord["provider"],
+  capabilities: { providers?: { id: string; models?: { id: string; label: string }[] }[] } | undefined,
+): Option<string>[] {
+  // Prefer dynamic models from CLI capabilities
+  const dynamicModels = capabilities?.providers?.find((p) => p.id === provider)?.models;
+  if (dynamicModels?.length) {
+    return dynamicModels.map((m) => ({
+      label: m.label,
+      value: m.id === "default" ? undefined : m.id,
+    }));
+  }
+  // Fallbacks if CLI is older and doesn't send models
+  if (provider === "claude") {
+    return [
+      { label: "默认模型", value: undefined },
+      { label: "Opus 4.7", value: "opus" },
+      { label: "Sonnet 4.6", value: "sonnet" },
+      { label: "Haiku 4.5", value: "haiku" },
+    ];
+  }
+  return [
+    { label: "默认模型", value: undefined },
+    { label: "GPT-5.5", value: "gpt-5.5" },
+    { label: "GPT-5.4", value: "gpt-5.4" },
+    { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
+    { label: "GPT-5.3 Codex", value: "gpt-5.3-codex" },
+  ];
 }
 
 function formatEffort(effort?: AgentReasoningEffort): string {
@@ -141,9 +149,9 @@ function formatEffort(effort?: AgentReasoningEffort): string {
   return "极低";
 }
 
-function formatRuntime(model: string | undefined, effort: AgentReasoningEffort | undefined, provider: AgentConversationRecord["provider"]): string {
-  const modelLabel = formatModel(model, provider).replace(/^GPT-/, "");
-  return `${modelLabel} · ${formatEffort(effort)}`;
+function formatRuntime(model: string | undefined, effort: AgentReasoningEffort | undefined, modelOptions: Option<string>[]): string {
+  const modelLabel = modelOptions.find((item) => item.value === model)?.label ?? model ?? "默认模型";
+  return `${modelLabel.replace(/^GPT-/, "")} · ${formatEffort(effort)}`;
 }
 
 function shortPath(path: string): string {
@@ -1439,9 +1447,14 @@ export function AgentConversationScreen({
   const meta = visibleConversationStatus(conversation?.status, theme);
   const permission = permissionMeta(permissionMode, theme);
   const canSend = Boolean(text.trim() || attachments.length > 0);
+  const modelOpts = useMemo(
+    () => modelOptionsFor(conversation?.provider ?? "codex", capabilities),
+    [capabilities, conversation?.provider],
+  );
+
   const runtimeMenuActions = useMemo(
     () => [
-      ...modelOptionsFor(conversation?.provider ?? "codex").map((option) => ({
+      ...modelOpts.map((option) => ({
         id: `model:${option.value ?? DEFAULT_OPTION_ID}`,
         title: `模型 · ${option.label}`,
         image: "square.stack.3d.up",
@@ -1454,7 +1467,7 @@ export function AgentConversationScreen({
         state: option.value === effort ? "on" as const : "off" as const,
       })),
     ],
-    [conversation?.provider, effort, model],
+    [modelOpts, effort, model],
   );
   const timelineAutoScrollKey = useMemo(
     () =>
@@ -1828,7 +1841,7 @@ export function AgentConversationScreen({
                 }}
               >
                 <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
-                  {formatRuntime(model, effort, conversation?.provider ?? "codex")}
+                  {formatRuntime(model, effort, modelOpts)}
                 </Text>
                 <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
               </View>

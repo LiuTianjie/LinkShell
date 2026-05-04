@@ -657,6 +657,27 @@ function providerLabel(provider: AgentProvider): string {
   return "Custom";
 }
 
+interface AgentModelOption {
+  id: string;
+  label: string;
+}
+
+function providerModels(provider: AgentProvider): AgentModelOption[] {
+  if (provider === "claude") {
+    return [
+      { id: "default", label: "默认模型" },
+      { id: "opus", label: "Opus 4.7" },
+      { id: "sonnet", label: "Sonnet 4.6" },
+      { id: "haiku", label: "Haiku 4.5" },
+    ];
+  }
+  // Codex / custom — the mobile app can still use its own list as fallback,
+  // but we provide a minimal default set here.
+  return [
+    { id: "default", label: "默认模型" },
+  ];
+}
+
 export class AgentWorkspaceProxy {
   private clients = new Map<AgentProvider, AcpClient | ClaudeStreamJsonClient>();
   private agentProtocols = new Map<AgentProvider, AgentProtocol>();
@@ -839,6 +860,7 @@ export class AgentWorkspaceProxy {
         supportsPermission: enabled,
         supportsPlan: enabled,
         supportsCancel: enabled,
+        models: providerModels(provider),
       };
     });
     const anyEnabled = providers.some((p) => p.enabled);

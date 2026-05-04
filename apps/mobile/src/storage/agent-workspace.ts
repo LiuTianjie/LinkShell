@@ -175,6 +175,11 @@ export interface AgentCapabilities {
   supportsCancel: boolean;
 }
 
+export interface AgentModelOption {
+  id: string;
+  label: string;
+}
+
 export interface AgentProviderCapability {
   id: AgentProvider;
   label: string;
@@ -184,6 +189,7 @@ export interface AgentProviderCapability {
   supportsPermission?: boolean;
   supportsPlan?: boolean;
   supportsCancel?: boolean;
+  models?: AgentModelOption[];
 }
 
 const CONVERSATIONS_KEY = "@linkshell/agent-conversations:v1";
