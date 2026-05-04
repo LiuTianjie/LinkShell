@@ -70,6 +70,11 @@ export interface AgentWorkspaceHandle {
     outcome: "allow" | "deny" | "cancelled",
     optionId?: string,
   ) => void;
+  respondStructuredInput: (
+    conversationId: string,
+    requestId: string,
+    answers: Record<string, string[]>,
+  ) => void;
   archive: (conversationId: string, archived: boolean) => Promise<void>;
   rename: (conversationId: string, title: string) => Promise<void>;
 }
@@ -87,6 +92,14 @@ function textFromBlocks(blocks: AgentContentBlock[] | undefined): string {
 
 function previewFromItem(item: AgentTimelineItem): string | undefined {
   if (item.error) return item.error;
+  if (item.kind === "subagent_action" && item.subagent) {
+    const count = Math.max(1, item.subagent.receiverThreadIds.length, item.subagent.receiverAgents.length);
+    return count === 1 ? "子 Agent 活动" : `${count} 个子 Agent 活动`;
+  }
+  if (item.kind === "user_input_prompt") return "Agent 需要补充信息";
+  if (item.kind === "thinking") return "正在思考";
+  if (item.kind === "review") return "正在审查";
+  if (item.kind === "context_compaction") return "正在压缩上下文";
   if (item.text) return item.text.replace(/\s+/g, " ").trim().slice(0, 160);
   if (item.type === "message") return textFromBlocks(item.content).replace(/\s+/g, " ").trim().slice(0, 160);
   if (item.toolCall) return `${item.toolCall.name} · ${item.toolCall.status}`;
@@ -161,11 +174,14 @@ export function useAgentWorkspace(
     refresh().catch(() => {});
   }, [refresh]);
 
-  const persistConversation = useCallback(async (record: AgentConversationRecord) => {
-    await upsertAgentConversation(record);
+  const persistConversation = useCallback(async (
+    record: AgentConversationRecord,
+    options?: { preserveLocalArchived?: boolean },
+  ) => {
+    const saved = await upsertAgentConversation(record, options);
     setConversations((prev) => {
-      const next = prev.filter((item) => item.id !== record.id);
-      next.unshift(record);
+      const next = prev.filter((item) => item.id !== saved.id);
+      next.unshift(saved);
       return next.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
     });
   }, []);
@@ -333,7 +349,7 @@ export function useAgentWorkspace(
 
       if (envelope.type === "agent.v2.permission.request") {
         const payload = parseTypedPayload("agent.v2.permission.request", envelope.payload) as any;
-        const permissionItem = (payload.item ?? {
+        const rawPermissionItem = (payload.item ?? {
           id: `permission:${payload.requestId}`,
           conversationId: payload.conversationId,
           type: "permission",
@@ -347,6 +363,14 @@ export function useAgentWorkspace(
           createdAt: Date.now(),
           updatedAt: Date.now(),
         }) as AgentTimelineItem;
+        const permissionItem: AgentTimelineItem = {
+          ...rawPermissionItem,
+          metadata: {
+            ...(rawPermissionItem.metadata ?? {}),
+            protocol: "v2",
+            sessionId: envelope.sessionId,
+          },
+        };
         persistTimelineItem(permissionItem).catch(() => {});
         const existing = conversationsRef.current.find((item) => item.id === payload.conversationId);
         if (existing) {
@@ -383,6 +407,7 @@ export function useAgentWorkspace(
           },
           metadata: {
             protocol: "legacy",
+            sessionId: envelope.sessionId,
             agentSessionId: payload.agentSessionId,
           },
           createdAt: Date.now(),
@@ -438,6 +463,7 @@ export function useAgentWorkspace(
           },
           metadata: {
             protocol: "terminal",
+            sessionId: envelope.sessionId,
             terminalId,
           },
           createdAt: topPermission.timestamp ?? Date.now(),
@@ -543,7 +569,7 @@ export function useAgentWorkspace(
         ...conversation,
         archived: false,
         lastActivityAt: Date.now(),
-      });
+      }, { preserveLocalArchived: false });
       const result = await openConversation({
         conversationId: conversation.id,
         agentSessionId: conversation.agentSessionId,
@@ -612,6 +638,84 @@ export function useAgentWorkspace(
     [manager],
   );
 
+  const resolvePermissionSessionId = useCallback(
+    (
+      conversation: AgentConversationRecord,
+      permissionItem: AgentTimelineItem | undefined,
+    ): string | null => {
+      const metadataSessionId = typeof permissionItem?.metadata?.sessionId === "string"
+        ? permissionItem.metadata.sessionId
+        : undefined;
+      if (metadataSessionId && manager.sessions.has(metadataSessionId)) return metadataSessionId;
+      if (manager.sessions.has(conversation.sessionId)) return conversation.sessionId;
+
+      const serverUrl = normalizeServerUrl(conversation.serverUrl);
+      const candidates = [...manager.sessions.values()].filter((session) =>
+        normalizeServerUrl(session.gatewayUrl) === serverUrl
+      );
+      const cwdMatch = candidates.find((session) =>
+        session.cwd === conversation.cwd ||
+        [...session.terminals.values()].some((terminal) => terminal.cwd === conversation.cwd)
+      );
+      return cwdMatch?.sessionId ?? candidates[0]?.sessionId ?? null;
+    },
+    [manager.sessions],
+  );
+
+  const updatePermissionMetadata = useCallback(
+    (
+      conversationId: string,
+      requestId: string,
+      metadata: Record<string, unknown>,
+    ) => {
+      setTimelineById((prev) => {
+        const items = prev.get(conversationId);
+        if (!items) return prev;
+        const nextItems = items.map((item) =>
+          item.type === "permission" && item.permission?.requestId === requestId
+            ? {
+                ...item,
+                metadata: { ...(item.metadata ?? {}), ...metadata },
+                updatedAt: Date.now(),
+              }
+            : item,
+        );
+        saveAgentTimeline(conversationId, nextItems).catch(() => {});
+        const next = new Map(prev);
+        next.set(conversationId, nextItems);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const updateTimelineItemMetadata = useCallback(
+    (
+      conversationId: string,
+      itemId: string,
+      metadata: Record<string, unknown>,
+    ) => {
+      setTimelineById((prev) => {
+        const items = prev.get(conversationId);
+        if (!items) return prev;
+        const nextItems = items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                metadata: { ...(item.metadata ?? {}), ...metadata },
+                updatedAt: Date.now(),
+              }
+            : item,
+        );
+        saveAgentTimeline(conversationId, nextItems).catch(() => {});
+        const next = new Map(prev);
+        next.set(conversationId, nextItems);
+        return next;
+      });
+    },
+    [],
+  );
+
   const respondPermission = useCallback(
     (
       conversationId: string,
@@ -624,19 +728,27 @@ export function useAgentWorkspace(
       const permissionItem = timelineRef.current
         .get(conversationId)
         ?.find((item) => item.type === "permission" && item.permission?.requestId === requestId);
+      const sourceSessionId = resolvePermissionSessionId(conversation, permissionItem);
+      if (!sourceSessionId) {
+        updatePermissionMetadata(conversationId, requestId, {
+          permissionError: "授权未发送：设备连接已失效，请重新打开会话。",
+        });
+        return;
+      }
+      let accepted = false;
       if (permissionItem?.metadata?.protocol === "terminal") {
         const terminalId = typeof permissionItem.metadata.terminalId === "string"
           ? permissionItem.metadata.terminalId
           : "default";
-        manager.sendPermissionDecision(
-          conversation.sessionId,
+        accepted = manager.sendPermissionDecision(
+          sourceSessionId,
           terminalId,
           requestId,
           outcome === "allow" ? "allow" : "deny",
         );
       } else if (permissionItem?.metadata?.protocol === "legacy") {
-        manager.sendAgentWorkspaceEnvelope(
-          conversation.sessionId,
+        accepted = manager.sendAgentWorkspaceEnvelope(
+          sourceSessionId,
           "agent.permission.response" as any,
           {
             agentSessionId: typeof permissionItem.metadata.agentSessionId === "string"
@@ -646,32 +758,26 @@ export function useAgentWorkspace(
             outcome,
             optionId,
           },
-          { queue: true, dedupeKey: `agent-permission:${requestId}` },
+          { queue: true, dedupeKey: `agent-permission:${requestId}`, claimControl: true },
         );
       } else {
-        manager.sendAgentWorkspaceEnvelope(
-          conversation.sessionId,
+        accepted = manager.sendAgentWorkspaceEnvelope(
+          sourceSessionId,
           "agent.v2.permission.respond",
           { conversationId, requestId, outcome, optionId },
-          { queue: true, dedupeKey: `agent-v2-permission:${requestId}` },
+          { queue: true, dedupeKey: `agent-v2-permission:${requestId}`, claimControl: true },
         );
       }
-      setTimelineById((prev) => {
-        const items = prev.get(conversationId);
-        if (!items) return prev;
-        const nextItems = items.map((item) =>
-          item.type === "permission" && item.permission?.requestId === requestId
-            ? {
-                ...item,
-                metadata: { ...(item.metadata ?? {}), permissionOutcome: outcome, optionId },
-                updatedAt: Date.now(),
-              }
-            : item,
-        );
-        saveAgentTimeline(conversationId, nextItems).catch(() => {});
-        const next = new Map(prev);
-        next.set(conversationId, nextItems);
-        return next;
+      if (!accepted) {
+        updatePermissionMetadata(conversationId, requestId, {
+          permissionError: "授权未发送：连接未就绪，请稍后重试。",
+        });
+        return;
+      }
+      updatePermissionMetadata(conversationId, requestId, {
+        permissionOutcome: outcome,
+        optionId,
+        permissionError: undefined,
       });
       persistConversation({
         ...conversation,
@@ -679,7 +785,28 @@ export function useAgentWorkspace(
         lastActivityAt: Date.now(),
       }).catch(() => {});
     },
-    [manager, persistConversation],
+    [manager, persistConversation, resolvePermissionSessionId, updatePermissionMetadata],
+  );
+
+  const respondStructuredInput = useCallback(
+    (
+      conversationId: string,
+      requestId: string,
+      answers: Record<string, string[]>,
+    ) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation) return;
+      const accepted = manager.sendAgentWorkspaceEnvelope(
+        conversation.sessionId,
+        "agent.v2.structured_input.respond" as any,
+        { conversationId, requestId, answers },
+        { queue: true, dedupeKey: `agent-v2-input:${requestId}`, claimControl: true },
+      );
+      updateTimelineItemMetadata(conversationId, `input:${requestId}`, accepted
+        ? { inputPending: false, inputSubmitted: true, inputError: undefined, answers }
+        : { inputError: "回答未发送：连接未就绪，请稍后重试。" });
+    },
+    [manager, updateTimelineItemMetadata],
   );
 
   const archive = useCallback(async (conversationId: string, archived: boolean) => {
@@ -713,6 +840,7 @@ export function useAgentWorkspace(
     sendPrompt,
     cancel,
     respondPermission,
+    respondStructuredInput,
     archive,
     rename,
   };

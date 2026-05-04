@@ -51,6 +51,7 @@ const HOOK_BODY_LIMIT = 256 * 1024;
 const PERMISSION_REQUEST_TIMEOUT_MS = Number(
   process.env.LINKSHELL_PERMISSION_TIMEOUT_MS ?? 5 * 60_000,
 );
+const LINKSHELL_PERMISSION_GUARD_MARKER = "LINKSHELL_PERMISSION_GUARD";
 
 interface TerminalInstance {
   id: string;
@@ -90,9 +91,81 @@ type HookPermissionChoice =
       optionId?: string;
     };
 
-function isLinkShellHookEntry(entry: unknown, marker: string): boolean {
-  const raw = JSON.stringify(entry);
-  return raw.includes(`/hook?m=${marker}`);
+function isLinkShellHookEntry(entry: unknown, marker?: string): boolean {
+  let raw = "";
+  try {
+    raw = JSON.stringify(entry);
+  } catch {
+    raw = String(entry);
+  }
+  return (
+    (marker ? raw.includes(`/hook?m=${marker}`) : false) ||
+    raw.includes("/hook?m=lsh-") ||
+    (raw.includes("/hook?m=") && raw.includes("LINKSHELL_ID"))
+  );
+}
+
+function withLinkShellHookEntry<T>(
+  entries: unknown[] | undefined,
+  entry: T,
+  priority: "first" | "last",
+): unknown[] {
+  const cleaned = (Array.isArray(entries) ? entries : []).filter((item) => !isLinkShellHookEntry(item));
+  return priority === "first" ? [entry, ...cleaned] : [...cleaned, entry];
+}
+
+function guardPermissionCommandForLinkShell(command: unknown): unknown {
+  if (typeof command !== "string") return command;
+  if (command.includes(LINKSHELL_PERMISSION_GUARD_MARKER)) return command;
+  return [
+    `case "\${LINKSHELL_ID:-}" in lsh-*) exit 0 ;; esac`,
+    `# ${LINKSHELL_PERMISSION_GUARD_MARKER}`,
+    command,
+  ].join("\n");
+}
+
+function guardPermissionHookObjectForLinkShell(
+  hook: Record<string, unknown>,
+): Record<string, unknown> {
+  if (isLinkShellHookEntry(hook)) return hook;
+  const next: Record<string, unknown> = { ...hook };
+  if (typeof next.command === "string") {
+    next.command = guardPermissionCommandForLinkShell(next.command);
+  }
+  if (typeof next.bash === "string") {
+    next.bash = guardPermissionCommandForLinkShell(next.bash);
+  }
+  return next;
+}
+
+function guardPermissionHookEntryForLinkShell(entry: unknown): unknown {
+  if (isLinkShellHookEntry(entry)) return entry;
+  if (typeof entry === "string") return guardPermissionCommandForLinkShell(entry);
+  if (Array.isArray(entry)) return entry.map(guardPermissionHookEntryForLinkShell);
+  if (!entry || typeof entry !== "object") return entry;
+
+  const next = { ...(entry as Record<string, unknown>) };
+  if (Array.isArray(next.hooks)) {
+    next.hooks = next.hooks.map((hook) =>
+      hook && typeof hook === "object" && !Array.isArray(hook)
+        ? guardPermissionHookObjectForLinkShell(hook as Record<string, unknown>)
+        : guardPermissionHookEntryForLinkShell(hook),
+    );
+  }
+  if (typeof next.command === "string" || typeof next.bash === "string") {
+    return guardPermissionHookObjectForLinkShell(next);
+  }
+  return next;
+}
+
+function withBlockingLinkShellPermissionEntry<T>(
+  entries: unknown[] | undefined,
+  entry: T,
+): unknown[] {
+  const cleaned = (Array.isArray(entries) ? entries : [])
+    .filter((item) => !isLinkShellHookEntry(item))
+    .map(guardPermissionHookEntryForLinkShell);
+  return [entry, ...cleaned];
 }
 
 function stringifyHookInput(value: unknown): string {
@@ -645,6 +718,7 @@ export class BridgeSession {
           );
           break;
         }
+        if (envelope.type === "agent.prompt") this.refreshAgentPermissionHooks();
         await this.agentSession.handleEnvelope(envelope);
         break;
       }
@@ -653,8 +727,7 @@ export class BridgeSession {
         if (this.resolvePendingPermission(p.requestId, {
           outcome: p.outcome,
           optionId: p.optionId,
-        })) {
-          this.log(`agent permission response for hook ${p.requestId}: ${p.outcome}:${p.optionId ?? "default"}`);
+        }, "agent.permission.response")) {
           break;
         }
         if (!this.agentSession) {
@@ -714,6 +787,7 @@ export class BridgeSession {
           );
           break;
         }
+        if (envelope.type === "agent.v2.prompt") this.refreshAgentPermissionHooks();
         await this.agentWorkspace.handleEnvelope(envelope);
         break;
       }
@@ -731,11 +805,7 @@ export class BridgeSession {
       }
       case "permission.decision": {
         const p = envelope.payload as { requestId: string; decision: "allow" | "deny" };
-        if (this.resolvePendingPermission(p.requestId, p.decision)) {
-          this.log(`permission decision for ${p.requestId}: ${p.decision}`);
-        } else {
-          this.log(`no pending permission for ${p.requestId}`);
-        }
+        this.resolvePendingPermission(p.requestId, p.decision, "permission.decision");
         break;
       }
       case "tunnel.request": {
@@ -1134,7 +1204,7 @@ export class BridgeSession {
             const requestId = `pr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
             const permissionSuggestions = hookPermissionSuggestions(event);
             const timeout = setTimeout(() => {
-              if (this.resolvePendingPermission(requestId, "deny")) {
+              if (this.resolvePendingPermission(requestId, "deny", "permission.timeout")) {
                 this.log(`permission request ${requestId} timed out`);
                 this.sendPermissionSnapshot(terminalId, "thinking", "permission timed out");
               }
@@ -1199,6 +1269,26 @@ export class BridgeSession {
     return { server, port, configPath };
   }
 
+  private refreshAgentPermissionHooks(): void {
+    const term = this.terminals.get(DEFAULT_TERMINAL_ID);
+    if (!term?.hookPort) return;
+    const marker = term.hookMarker;
+    const curlCmd = `curl -s -X POST "http://127.0.0.1:${term.hookPort}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @-`;
+    const agentProvider = normalizeAgentProvider(this.options.agentProvider ?? "codex");
+    try {
+      if (agentProvider === "claude") {
+        this.setupClaudeHooks(DEFAULT_TERMINAL_ID, curlCmd, [], marker);
+      } else {
+        this.setupCodexHooks(DEFAULT_TERMINAL_ID, curlCmd, marker);
+        if (agentProvider === "custom") {
+          this.setupClaudeHooks(DEFAULT_TERMINAL_ID, curlCmd, [], marker);
+        }
+      }
+    } catch (error) {
+      this.log(`failed to refresh agent permission hooks: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private setupClaudeHooks(terminalId: string, curlCmd: string, args: string[], marker: string): string {
     // Write hooks to ~/.claude/settings.json — Claude Code reads hooks from here
     const claudeDir = join(homedir(), ".claude");
@@ -1233,11 +1323,9 @@ export class BridgeSession {
     // Append our entries to existing hooks (first remove stale linkshell entries)
     const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
     for (const [eventName, entry] of Object.entries(hookEvents)) {
-      let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      // Remove any dead linkshell hook entries (from previous instances)
-      arr = arr.filter((e) => !isLinkShellHookEntry(e, marker));
-      arr.push(entry);
-      existingHooks[eventName] = arr;
+      existingHooks[eventName] = eventName === "PermissionRequest"
+        ? withBlockingLinkShellPermissionEntry(existingHooks[eventName], entry)
+        : withLinkShellHookEntry(existingHooks[eventName], entry, "last");
     }
 
     const merged = { ...existing, hooks: existingHooks };
@@ -1298,10 +1386,9 @@ export class BridgeSession {
     try { existing = JSON.parse(readFileSync(hooksPath, "utf8")); } catch { /* doesn't exist yet */ }
     const existingHooks = existing.hooks ?? {};
     for (const [eventName, entry] of Object.entries(hookEvents)) {
-      let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      arr = arr.filter((e) => !isLinkShellHookEntry(e, marker));
-      arr.push(entry);
-      existingHooks[eventName] = arr;
+      existingHooks[eventName] = eventName === "PermissionRequest"
+        ? withBlockingLinkShellPermissionEntry(existingHooks[eventName], entry)
+        : withLinkShellHookEntry(existingHooks[eventName], entry, "last");
     }
 
     writeFileSync(hooksPath, JSON.stringify({ ...existing, hooks: existingHooks }, null, 2));
@@ -1331,10 +1418,7 @@ export class BridgeSession {
 
     const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
     for (const [eventName, entry] of Object.entries(hookEvents)) {
-      let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      arr = arr.filter((e) => !isLinkShellHookEntry(e, marker));
-      arr.push(entry);
-      existingHooks[eventName] = arr;
+      existingHooks[eventName] = withLinkShellHookEntry(existingHooks[eventName], entry, "last");
     }
 
     existing.hooks = existingHooks;
@@ -1366,10 +1450,7 @@ export class BridgeSession {
     try { existing = JSON.parse(readFileSync(hooksPath, "utf8")); } catch { /* doesn't exist yet */ }
     const existingHooks = existing.hooks ?? {};
     for (const [eventName, entry] of Object.entries(hookEvents)) {
-      let arr = Array.isArray(existingHooks[eventName]) ? existingHooks[eventName] : [];
-      arr = arr.filter((e) => !isLinkShellHookEntry(e, marker));
-      arr.push(entry);
-      existingHooks[eventName] = arr;
+      existingHooks[eventName] = withLinkShellHookEntry(existingHooks[eventName], entry, "last");
     }
 
     writeFileSync(hooksPath, JSON.stringify({ version: 1, hooks: existingHooks }, null, 2));
@@ -1626,7 +1707,7 @@ export class BridgeSession {
 
   /** Auto-resolve a single pending permission (user acted in terminal) */
   private autoResolvePending(requestId: string): void {
-    if (this.resolvePendingPermission(requestId, "allow")) {
+    if (this.resolvePendingPermission(requestId, "allow", "terminal.auto")) {
       this.log(`auto-resolved pending permission ${requestId} (user acted in terminal)`);
     }
   }
@@ -1636,15 +1717,24 @@ export class BridgeSession {
     const stack = this.permissionStacks.get(terminalId);
     if (!stack) return;
     for (const entry of [...stack]) {
-      if (this.resolvePendingPermission(entry.requestId, "deny")) {
+      if (this.resolvePendingPermission(entry.requestId, "deny", "terminal.drain")) {
         this.log(`drained pending permission ${entry.requestId}`);
       }
     }
   }
 
-  private resolvePendingPermission(requestId: string, choice: HookPermissionChoice): boolean {
+  private resolvePendingPermission(
+    requestId: string,
+    choice: HookPermissionChoice,
+    source = "unknown",
+  ): boolean {
     const pending = this.pendingPermissions.get(requestId);
-    if (!pending) return false;
+    const outcome = typeof choice === "string" ? choice : choice.outcome;
+    const optionId = typeof choice === "string" ? undefined : choice.optionId;
+    if (!pending) {
+      this.log(`no pending permission for ${requestId} via ${source}: ${outcome}:${optionId ?? "default"}`);
+      return false;
+    }
     this.pendingPermissions.delete(requestId);
     clearTimeout(pending.timeout);
     pending.resolve(this.formatHookPermissionDecision(pending, choice));
@@ -1655,6 +1745,12 @@ export class BridgeSession {
       if (idx >= 0) stack.splice(idx, 1);
       if (stack.length === 0) this.permissionStacks.delete(pending.terminalId);
     }
+    this.log(`resolved permission ${requestId} via ${source}: ${outcome}:${optionId ?? "default"}`);
+    this.sendPermissionSnapshot(
+      pending.terminalId,
+      "thinking",
+      outcome === "allow" ? "permission allowed" : "permission denied",
+    );
     return true;
   }
 

@@ -11,7 +11,6 @@ export default function HomeTab() {
       connectionDetail={ctx.activeSession?.connectionDetail ?? null}
       onOpenConnectionSheet={() => ctx.setConnectionSheetVisible(true)}
       onConnectSession={ctx.handleConnectSession}
-      onOpenRecentProject={ctx.handleOpenRecentProject}
       refreshKey={ctx.sessionRefreshKey}
     />
   );

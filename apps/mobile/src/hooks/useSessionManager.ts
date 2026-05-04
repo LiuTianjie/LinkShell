@@ -209,7 +209,7 @@ export interface SessionManagerHandle {
     terminalId: string,
     requestId: string,
     decision: "allow" | "deny",
-  ) => void;
+  ) => boolean;
   deviceToken: string | null;
   /** Request shell history from the host */
   requestHistory: () => void;
@@ -229,13 +229,13 @@ export interface SessionManagerHandle {
     requestId: string,
     outcome: "allow" | "deny" | "cancelled",
     optionId?: string,
-  ) => void;
+  ) => boolean;
   sendAgentWorkspaceEnvelope: (
     sessionId: string,
     type: ProtocolMessageType,
     payload: unknown,
-    options?: { queue?: boolean; dedupeKey?: string },
-  ) => void;
+    options?: { queue?: boolean; dedupeKey?: string; claimControl?: boolean },
+  ) => boolean;
   onAgentWorkspaceEnvelope: (cb: ((envelope: Envelope) => void) | null) => void;
 }
 
@@ -333,6 +333,7 @@ interface InternalSession {
   lastAckedSeqByTerminal: Map<string, number>;
   pendingOutbound: Array<{ envelope: Envelope; dedupeKey?: string }>;
   outboundDedupeKeys: Set<string>;
+  pendingPermissionResponseIds: Set<string>;
   manualDisconnect: boolean;
   // Multi-terminal
   terminals: Map<string, InternalTerminal>;
@@ -435,6 +436,7 @@ function createInternalSession(
     lastAckedSeqByTerminal: new Map(),
     pendingOutbound: [],
     outboundDedupeKeys: new Set(),
+    pendingPermissionResponseIds: new Set(),
     manualDisconnect: false,
     terminals: new Map(),
     activeTerminalId: null,
@@ -668,6 +670,34 @@ export function useSessionManager(): SessionManagerHandle {
         payload: { deviceId: s.deviceId },
       }),
     );
+  };
+
+  const sendRawWithControl = (
+    s: InternalSession,
+    envelope: Envelope,
+    options?: { queue?: boolean; dedupeKey?: string },
+  ): boolean => {
+    const requestId = (envelope.payload as { requestId?: unknown } | undefined)?.requestId;
+    const claimAccepted = sendRaw(
+      s,
+      createEnvelope({
+        type: "control.claim",
+        sessionId: s.sessionId,
+        payload: { deviceId: s.deviceId },
+      }),
+      {
+        queue: options?.queue,
+        dedupeKey: options?.dedupeKey ? `control:${options.dedupeKey}` : undefined,
+      },
+    );
+    const accepted = sendRaw(s, envelope, options);
+    if (accepted && typeof requestId === "string") {
+      s.pendingPermissionResponseIds.add(requestId);
+      setTimeout(() => {
+        s.pendingPermissionResponseIds.delete(requestId);
+      }, 5_000);
+    }
+    return claimAccepted && accepted;
   };
 
   const cleanupSession = (s: InternalSession) => {
@@ -1073,7 +1103,13 @@ export function useSessionManager(): SessionManagerHandle {
         case "session.error": {
           const p = parseTypedPayload("session.error", envelope.payload);
           if (p.code === "control_conflict") {
-            s.connectionDetail = null;
+            if (s.pendingPermissionResponseIds.size > 0) {
+              s.pendingPermissionResponseIds.clear();
+              s.connectionDetail = "未获得控制权，授权未发送。";
+              tick();
+            } else {
+              s.connectionDetail = null;
+            }
             break;
           }
           s.connectionDetail = p.message;
@@ -1660,8 +1696,8 @@ export function useSessionManager(): SessionManagerHandle {
   const sendAgentPermissionResponseFn = useCallback(
     (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => {
       const s = getActive();
-      if (!s) return;
-      sendRaw(
+      if (!s) return false;
+      const accepted = sendRawWithControl(
         s,
         createEnvelope({
           type: "agent.permission.response" as any,
@@ -1676,10 +1712,12 @@ export function useSessionManager(): SessionManagerHandle {
         }),
         { queue: true, dedupeKey: `agent-permission:${requestId}` },
       );
+      if (!accepted) return false;
       s.agent.pendingPermissions = s.agent.pendingPermissions.filter(
         (perm) => perm.requestId !== requestId,
       );
       tick();
+      return true;
     },
     [getActive, tick],
   );
@@ -1794,8 +1832,8 @@ export function useSessionManager(): SessionManagerHandle {
       decision: "allow" | "deny",
     ) => {
       const s = sessionsRef.current.get(sessionId);
-      if (!s) return;
-      const accepted = sendRaw(
+      if (!s) return false;
+      const accepted = sendRawWithControl(
         s,
         createEnvelope({
           type: "permission.decision",
@@ -1806,7 +1844,7 @@ export function useSessionManager(): SessionManagerHandle {
         }),
         { queue: true, dedupeKey: `permission:${requestId}` },
       );
-      if (!accepted) return;
+      if (!accepted) return false;
       // Clear topPermission from structuredStatus so buildState
       // doesn't re-add the permission to the Live Activity
       const term = s.terminals.get(terminalId);
@@ -1819,6 +1857,7 @@ export function useSessionManager(): SessionManagerHandle {
         }
         tick();
       }
+      return true;
     },
     deviceToken: deviceTokenRef.current,
     requestHistory: requestHistoryFn,
@@ -1831,11 +1870,15 @@ export function useSessionManager(): SessionManagerHandle {
       sessionId: string,
       type: ProtocolMessageType,
       payload: unknown,
-      options?: { queue?: boolean; dedupeKey?: string },
+      options?: { queue?: boolean; dedupeKey?: string; claimControl?: boolean },
     ) => {
       const s = sessionsRef.current.get(sessionId);
-      if (!s) return;
-      sendRaw(
+      if (!s) return false;
+      const sender = options?.claimControl ? sendRawWithControl : sendRaw;
+      const sendOptions = options
+        ? { queue: options.queue, dedupeKey: options.dedupeKey }
+        : undefined;
+      return sender(
         s,
         createEnvelope({
           type,
@@ -1843,7 +1886,7 @@ export function useSessionManager(): SessionManagerHandle {
           deviceId: s.deviceId,
           payload,
         }),
-        options,
+        sendOptions,
       );
     },
     onAgentWorkspaceEnvelope: (cb) => {

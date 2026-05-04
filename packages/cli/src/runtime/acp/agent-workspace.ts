@@ -41,6 +41,87 @@ interface AgentPermission {
   options: { id: string; label: string; kind: "allow" | "deny" | "other" }[];
 }
 
+type AgentTimelineKind =
+  | "chat"
+  | "thinking"
+  | "tool_activity"
+  | "command_execution"
+  | "file_change"
+  | "subagent_action"
+  | "plan"
+  | "user_input_prompt"
+  | "review"
+  | "context_compaction";
+
+interface AgentFileChangeEntry {
+  path: string;
+  kind?: string;
+  added?: number;
+  removed?: number;
+}
+
+interface AgentFileChange {
+  entries: AgentFileChangeEntry[];
+  diff?: string;
+  summary?: string;
+  changeSetId?: string;
+  status?: AgentToolCall["status"];
+}
+
+interface AgentCommandExecution {
+  command?: string;
+  cwd?: string;
+  output?: string;
+  exitCode?: number | null;
+  status?: AgentToolCall["status"];
+}
+
+interface AgentStructuredInputOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+interface AgentStructuredInputQuestion {
+  id: string;
+  header?: string;
+  question: string;
+  isOther?: boolean;
+  isSecret?: boolean;
+  selectionLimit?: number;
+  options?: AgentStructuredInputOption[];
+}
+
+interface AgentStructuredInput {
+  requestId: string;
+  questions: AgentStructuredInputQuestion[];
+}
+
+interface AgentSubagentRef {
+  threadId: string;
+  agentId?: string;
+  nickname?: string;
+  role?: string;
+  model?: string;
+  prompt?: string;
+}
+
+interface AgentSubagentState {
+  threadId: string;
+  status: string;
+  message?: string;
+}
+
+interface AgentSubagentAction {
+  tool: string;
+  status: string;
+  prompt?: string;
+  model?: string;
+  receiverThreadIds: string[];
+  receiverAgents: AgentSubagentRef[];
+  agentStates: Record<string, AgentSubagentState>;
+}
+
 interface AgentConversation {
   id: string;
   agentSessionId?: string;
@@ -61,10 +142,17 @@ interface AgentTimelineItem {
   id: string;
   conversationId: string;
   type: "message" | "tool_call" | "plan" | "permission" | "status" | "error";
+  kind?: AgentTimelineKind;
+  turnId?: string;
+  itemId?: string;
   role?: "user" | "assistant" | "system";
   content?: AgentContentBlock[];
   text?: string;
   toolCall?: AgentToolCall;
+  commandExecution?: AgentCommandExecution;
+  fileChange?: AgentFileChange;
+  subagent?: AgentSubagentAction;
+  structuredInput?: AgentStructuredInput;
   plan?: AgentPlanStep[];
   permission?: AgentPermission;
   status?: AgentStatus;
@@ -76,6 +164,11 @@ interface AgentTimelineItem {
 }
 
 interface PendingPermissionWaiter {
+  resolve: (value: unknown) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface PendingStructuredInputWaiter {
   resolve: (value: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -107,6 +200,32 @@ function firstString(value: Record<string, unknown> | undefined, keys: string[])
     if (typeof next === "string" && next.length > 0) return next;
   }
   return undefined;
+}
+
+function normalizedIdentifier(value: string | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[_\-\s/]+/g, "");
+}
+
+function firstNumber(value: Record<string, unknown> | undefined, keys: string[]): number | undefined {
+  if (!value) return undefined;
+  for (const key of keys) {
+    const next = value[key];
+    if (typeof next === "number" && Number.isFinite(next)) return next;
+  }
+  return undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
+function arrayFromKeys(value: Record<string, unknown>, keys: string[]): unknown[] {
+  for (const key of keys) {
+    const next = value[key];
+    if (Array.isArray(next)) return next;
+  }
+  return [];
 }
 
 function extractItem(value: unknown): Record<string, unknown> | undefined {
@@ -161,24 +280,29 @@ function nameFromToolMethod(method: string): string {
 }
 
 function isToolItemType(itemType: string | undefined): boolean {
+  const normalized = normalizedIdentifier(itemType);
   return (
-    itemType === "commandExecution" ||
-    itemType === "fileChange" ||
-    itemType === "mcpToolCall" ||
-    itemType === "dynamicToolCall"
+    normalized === "commandexecution" ||
+    normalized === "filechange" ||
+    normalized === "diff" ||
+    normalized === "toolcall" ||
+    normalized === "mcptoolcall" ||
+    normalized === "dynamictoolcall"
   );
 }
 
 function toolNameFromItem(item: Record<string, unknown>): string | undefined {
   const itemType = firstString(item, ["type"]);
-  if (itemType === "commandExecution") return "命令";
-  if (itemType === "fileChange") return "文件修改";
-  if (itemType === "mcpToolCall") {
+  const normalized = normalizedIdentifier(itemType);
+  if (normalized === "commandexecution") return "命令";
+  if (normalized === "filechange" || normalized === "diff") return "文件修改";
+  if (normalized === "toolcall") return firstString(item, ["toolName", "tool", "name", "title"]) ?? "工具";
+  if (normalized === "mcptoolcall") {
     const server = firstString(item, ["server"]);
     const tool = firstString(item, ["tool", "toolName", "name"]);
     return [server, tool].filter(Boolean).join(" · ") || "MCP 工具";
   }
-  if (itemType === "dynamicToolCall") {
+  if (normalized === "dynamictoolcall") {
     const namespace = firstString(item, ["namespace"]);
     const tool = firstString(item, ["tool", "toolName", "name"]);
     return [namespace, tool].filter(Boolean).join(" · ") || "工具";
@@ -195,23 +319,157 @@ function summarizeFileChanges(changes: unknown[]): string | undefined {
         firstString(raw, ["path", "file", "filePath", "absolutePath", "relativePath"]) ??
         firstString(asRecord(raw.update), ["path", "file", "filePath"]);
       const kind = firstString(raw, ["kind", "type", "operation", "action"]);
-      return [kind, path].filter(Boolean).join(" ");
+      return [kind, path].filter(Boolean).join(" ") || path;
     })
     .filter((line): line is string => Boolean(line));
   return lines.length > 0 ? lines.slice(0, 8).join("\n") : undefined;
 }
 
+function fileChangeEntriesFromItem(item: Record<string, unknown>): AgentFileChangeEntry[] {
+  const changes = Array.isArray(item.changes) ? item.changes : [];
+  const entries: AgentFileChangeEntry[] = [];
+  for (const change of changes) {
+    const raw = asRecord(change);
+    if (!raw) continue;
+    const path =
+      firstString(raw, ["path", "file", "filePath", "absolutePath", "relativePath"]) ??
+      firstString(asRecord(raw.update), ["path", "file", "filePath"]);
+    if (!path) continue;
+    const totals = asRecord(raw.totals) ?? asRecord(raw.diffStats) ?? asRecord(raw.stats);
+    const entry: AgentFileChangeEntry = { path };
+    const kind = firstString(raw, ["kind", "type", "operation", "action"]);
+    const added = firstNumber(raw, ["added", "additions"]) ?? firstNumber(totals, ["added", "additions"]);
+    const removed = firstNumber(raw, ["removed", "deletions"]) ?? firstNumber(totals, ["removed", "deletions"]);
+    if (kind) entry.kind = kind;
+    if (added !== undefined) entry.added = added;
+    if (removed !== undefined) entry.removed = removed;
+    entries.push(entry);
+  }
+  const directPath = firstString(item, ["path", "file", "filePath", "absolutePath", "relativePath"]);
+  if (entries.length === 0 && directPath) {
+    const entry: AgentFileChangeEntry = { path: directPath };
+    const kind = firstString(item, ["kind", "type", "operation", "action"]);
+    if (kind) entry.kind = kind;
+    return [entry];
+  }
+  return entries;
+}
+
+function commandExecutionFromItem(
+  item: Record<string, unknown>,
+  status: AgentToolCall["status"],
+  output?: string,
+): AgentCommandExecution | undefined {
+  const command = firstString(item, ["command"]);
+  const cwd = firstString(item, ["cwd"]);
+  const exitCode = firstNumber(item, ["exitCode", "code"]);
+  if (!command && !cwd && !output && exitCode === undefined) return undefined;
+  return { command, cwd, output, exitCode: exitCode ?? undefined, status };
+}
+
+function fileChangeFromItem(
+  item: Record<string, unknown>,
+  status: AgentToolCall["status"],
+  diff?: string,
+): AgentFileChange | undefined {
+  const entries = fileChangeEntriesFromItem(item);
+  const summary = summarizeFileChanges(Array.isArray(item.changes) ? item.changes : []);
+  const changeSetId = firstString(item, ["changeSetId", "changesetId", "patchId"]);
+  if (entries.length === 0 && !diff && !summary && !changeSetId) return undefined;
+  return { entries, diff, summary, changeSetId, status };
+}
+
+function commandExecutionFromTool(toolCall: AgentToolCall): AgentCommandExecution | undefined {
+  const input = toolCall.input?.trim();
+  if (!input && !toolCall.output) return undefined;
+  const [commandPart, cwdPart] = input?.split(/\n\ncwd:\s*/i) ?? [];
+  return {
+    command: commandPart || input,
+    cwd: cwdPart,
+    output: toolCall.output,
+    status: toolCall.status,
+  };
+}
+
+function fileChangeFromTool(toolCall: AgentToolCall): AgentFileChange | undefined {
+  const diff = toolCall.output && looksLikeDiff(toolCall.output) ? toolCall.output : undefined;
+  const entries: AgentFileChangeEntry[] = (toolCall.input ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [kind, ...rest] = line.split(/\s+/);
+      const path = rest.length > 0 ? rest.join(" ") : kind;
+      const entry: AgentFileChangeEntry = { path: path ?? line };
+      if (rest.length > 0 && kind) entry.kind = kind;
+      return entry;
+    })
+    .filter((entry) => entry.path.length > 0);
+  if (entries.length === 0 && !diff && !toolCall.output) return undefined;
+  return {
+    entries,
+    diff,
+    summary: diff ? undefined : toolCall.output,
+    status: toolCall.status,
+  };
+}
+
+function looksLikeDiff(text: string): boolean {
+  const value = text.trim();
+  return (
+    value.startsWith("diff --git ") ||
+    value.startsWith("@@ ") ||
+    value.includes("\n@@ ") ||
+    (value.includes("\n--- ") && value.includes("\n+++ "))
+  );
+}
+
+function collectDiffStrings(value: unknown, depth = 0): string[] {
+  if (depth > 6 || value === undefined || value === null) return [];
+  if (typeof value === "string") return looksLikeDiff(value) ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap((entry) => collectDiffStrings(entry, depth + 1));
+  const raw = asRecord(value);
+  if (!raw) return [];
+  const direct: string[] = [];
+  const nested: string[] = [];
+  for (const [key, entry] of Object.entries(raw)) {
+    const lowerKey = key.toLowerCase();
+    const isDiffField =
+      lowerKey.includes("diff") ||
+      lowerKey.includes("patch") ||
+      lowerKey.includes("unified");
+    if (typeof entry === "string" && isDiffField && entry.trim()) {
+      direct.push(entry);
+    } else if (typeof entry === "object" && entry) {
+      nested.push(...collectDiffStrings(entry, depth + 1));
+    }
+  }
+  return [...direct, ...nested].filter((entry) => looksLikeDiff(entry));
+}
+
+function extractDiffText(value: unknown): string | undefined {
+  const diffs = collectDiffStrings(value)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (diffs.length === 0) return undefined;
+  return diffs
+    .filter((entry, index, array) => array.indexOf(entry) === index)
+    .join("\n\n")
+    .slice(0, 24_000);
+}
+
 function toolInputFromItem(item: Record<string, unknown>): string | undefined {
   const itemType = firstString(item, ["type"]);
-  if (itemType === "commandExecution") {
+  const normalized = normalizedIdentifier(itemType);
+  if (normalized === "commandexecution") {
     const command = firstString(item, ["command"]);
     const cwd = firstString(item, ["cwd"]);
     if (command && cwd) return `${command}\n\ncwd: ${cwd}`;
     return command ?? cwd;
   }
-  if (itemType === "fileChange") {
+  if (normalized === "filechange" || normalized === "diff") {
     const changes = Array.isArray(item.changes) ? item.changes : [];
-    return summarizeFileChanges(changes);
+    return summarizeFileChanges(changes) ?? firstString(item, ["path", "file", "filePath", "absolutePath", "relativePath"]);
   }
   return stringifyDefined(item.arguments ?? item.input ?? item.toolInput);
 }
@@ -225,6 +483,167 @@ function textFromBlocks(blocks: AgentContentBlock[]): string {
     .map((block) => block.type === "text" ? block.text ?? "" : `[${block.mimeType ?? "image"} attachment]`)
     .filter(Boolean)
     .join("\n");
+}
+
+function isSubagentItemType(itemType: string | undefined): boolean {
+  const normalized = normalizedIdentifier(itemType);
+  return (
+    normalized === "collabagenttoolcall" ||
+    normalized === "collabtoolcall" ||
+    normalized.startsWith("collabagentspawn") ||
+    normalized.startsWith("collabwaiting") ||
+    normalized.startsWith("collabclose") ||
+    normalized.startsWith("collabresume") ||
+    normalized.startsWith("collabagentinteraction")
+  );
+}
+
+function parseSubagentRef(value: unknown): AgentSubagentRef | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  const threadId = firstString(raw, ["threadId", "threadID", "id", "sessionId"]);
+  if (!threadId) return undefined;
+  return {
+    threadId,
+    agentId: firstString(raw, ["agentId", "agentID"]),
+    nickname: firstString(raw, ["nickname", "name", "label"]),
+    role: firstString(raw, ["role", "kind"]),
+    model: firstString(raw, ["model", "modelName"]),
+    prompt: firstString(raw, ["prompt", "instructions", "message"]),
+  };
+}
+
+function parseSubagentStates(value: unknown): Record<string, AgentSubagentState> {
+  const result: Record<string, AgentSubagentState> = {};
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const raw = asRecord(entry);
+      const threadId = firstString(raw, ["threadId", "threadID", "id", "sessionId"]);
+      const status = firstString(raw, ["status", "state", "phase"]);
+      if (!threadId || !status) continue;
+      result[threadId] = {
+        threadId,
+        status,
+        message: firstString(raw, ["message", "summary", "text"]),
+      };
+    }
+    return result;
+  }
+  const raw = asRecord(value);
+  if (!raw) return result;
+  for (const [threadId, entry] of Object.entries(raw)) {
+    const state = asRecord(entry);
+    if (state) {
+      result[threadId] = {
+        threadId,
+        status: firstString(state, ["status", "state", "phase"]) ?? "running",
+        message: firstString(state, ["message", "summary", "text"]),
+      };
+    } else if (typeof entry === "string") {
+      result[threadId] = { threadId, status: entry };
+    }
+  }
+  return result;
+}
+
+function parseStructuredInputOption(value: unknown, index: number): AgentStructuredInputOption | undefined {
+  const raw = asRecord(value);
+  if (!raw) {
+    if (typeof value === "string" && value.trim()) {
+      return { id: `option-${index + 1}`, label: value.trim() };
+    }
+    return undefined;
+  }
+  const label = firstString(raw, ["label", "title", "text", "value"]);
+  if (!label) return undefined;
+  return {
+    id: firstString(raw, ["id", "optionId", "value"]) ?? `option-${index + 1}`,
+    label,
+    description: firstString(raw, ["description", "detail", "subtitle"]),
+  };
+}
+
+function parseStructuredInputQuestion(value: unknown, index: number): AgentStructuredInputQuestion | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  const question = firstString(raw, ["question", "prompt", "text", "message", "label"]);
+  if (!question) return undefined;
+  const options = arrayFromKeys(raw, ["options", "choices", "items"])
+    .map(parseStructuredInputOption)
+    .filter((option): option is AgentStructuredInputOption => Boolean(option));
+  return {
+    id: firstString(raw, ["id", "questionId", "key"]) ?? `question-${index + 1}`,
+    header: firstString(raw, ["header", "title"]),
+    question,
+    isOther: raw.isOther === true,
+    isSecret: raw.isSecret === true || raw.secret === true,
+    selectionLimit: firstNumber(raw, ["selectionLimit", "maxSelections"]),
+    options: options.length > 0 ? options : undefined,
+  };
+}
+
+function decodeStructuredInput(value: unknown): AgentStructuredInput | undefined {
+  const raw = asRecord(value) ?? {};
+  const questions = arrayFromKeys(raw, ["questions", "items", "prompts"])
+    .map(parseStructuredInputQuestion)
+    .filter((question): question is AgentStructuredInputQuestion => Boolean(question));
+  if (questions.length === 0) {
+    const single = parseStructuredInputQuestion(raw, 0);
+    if (single) questions.push(single);
+  }
+  if (questions.length === 0) return undefined;
+  return {
+    requestId: firstString(raw, ["requestId", "id", "inputId"]) ?? id("input"),
+    questions,
+  };
+}
+
+function decodeSubagentAction(
+  item: Record<string, unknown>,
+  status: "running" | "completed" | "failed" | "pending",
+): AgentSubagentAction | undefined {
+  const nested = asRecord(item.action) ?? asRecord(item.toolCall) ?? asRecord(item.call) ?? {};
+  const receiverAgents = [
+    ...arrayFromKeys(item, ["receiverAgents", "agents", "subagents", "receivers"]).map(parseSubagentRef),
+    ...arrayFromKeys(nested, ["receiverAgents", "agents", "subagents", "receivers"]).map(parseSubagentRef),
+  ].filter((entry): entry is AgentSubagentRef => Boolean(entry));
+  const receiverThreadIds = [
+    ...stringArray(item.receiverThreadIds),
+    ...stringArray(item.threadIds),
+    ...stringArray(item.childThreadIds),
+    ...stringArray(item.agentThreadIds),
+    ...stringArray(nested.receiverThreadIds),
+    ...stringArray(nested.threadIds),
+    ...receiverAgents.map((agent) => agent.threadId),
+  ].filter((threadId, index, array) => array.indexOf(threadId) === index);
+  const agentStates = {
+    ...parseSubagentStates(item.agentStates ?? item.states ?? item.statusByThread),
+    ...parseSubagentStates(nested.agentStates ?? nested.states ?? nested.statusByThread),
+  };
+  if (receiverThreadIds.length === 0 && Object.keys(agentStates).length === 0) return undefined;
+  return {
+    tool: firstString(item, ["tool", "toolName", "name", "type"]) ??
+      firstString(nested, ["tool", "toolName", "name", "type"]) ??
+      "subagent",
+    status,
+    prompt: firstString(item, ["prompt", "instructions", "message"]) ??
+      firstString(nested, ["prompt", "instructions", "message"]),
+    model: firstString(item, ["model", "modelName"]) ?? firstString(nested, ["model", "modelName"]),
+    receiverThreadIds,
+    receiverAgents,
+    agentStates,
+  };
+}
+
+function summarizeSubagentAction(action: AgentSubagentAction): string {
+  const count = Math.max(1, action.receiverThreadIds.length, action.receiverAgents.length);
+  const normalized = normalizedIdentifier(action.tool);
+  if (normalized.includes("spawn")) return `启动 ${count} 个子 Agent`;
+  if (normalized.includes("wait")) return `等待 ${count} 个子 Agent`;
+  if (normalized.includes("resume")) return `恢复 ${count} 个子 Agent`;
+  if (normalized.includes("close")) return `关闭 ${count} 个子 Agent`;
+  if (normalized.includes("sendinput")) return `更新 ${count} 个子 Agent`;
+  return count === 1 ? "子 Agent 活动" : `${count} 个子 Agent 活动`;
 }
 
 function previewText(text: string): string {
@@ -264,6 +683,8 @@ export class AgentWorkspaceProxy {
   private pendingPermissions = new Map<string, AgentPermission>();
   private permissionWaiters = new Map<string, PendingPermissionWaiter>();
   private permissionSources = new Map<string, string>();
+  private pendingStructuredInputs = new Map<string, { conversationId: string; input: AgentStructuredInput }>();
+  private structuredInputWaiters = new Map<string, PendingStructuredInputWaiter>();
   private toolConversationIds = new Map<string, string>();
   private agentProtocol: AgentProtocol | undefined;
 
@@ -327,6 +748,11 @@ export class AgentWorkspaceProxy {
       case "agent.v2.permission.respond": {
         const payload = parseTypedPayload("agent.v2.permission.respond", envelope.payload);
         this.respondPermission(payload);
+        break;
+      }
+      case "agent.v2.structured_input.respond": {
+        const payload = parseTypedPayload("agent.v2.structured_input.respond", envelope.payload);
+        this.respondStructuredInput(payload);
         break;
       }
     }
@@ -626,6 +1052,9 @@ export class AgentWorkspaceProxy {
   }
 
   private handleRequest(method: string, params: unknown): Promise<unknown> | unknown {
+    if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") {
+      return this.handleStructuredInput(params, true);
+    }
     if (isPermissionRequestMethod(method)) {
       return this.handlePermission(params, true, method);
     }
@@ -645,7 +1074,6 @@ export class AgentWorkspaceProxy {
       method.startsWith("mcpServer/startupStatus/") ||
       method === "thread/status/changed" ||
       method === "thread/tokenUsage/updated" ||
-      method === "turn/diff/updated" ||
       method === "serverRequest/resolved" ||
       method === "mcpServer/oauthLogin/completed"
     ) {
@@ -653,6 +1081,10 @@ export class AgentWorkspaceProxy {
     }
 
     const conversationId = this.conversationIdFromParams(params) ?? this.activeConversationId;
+    if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") {
+      this.handleStructuredInput(params);
+      return;
+    }
     if (isPermissionRequestMethod(method)) {
       this.handlePermission(params, false, method);
       return;
@@ -704,6 +1136,9 @@ export class AgentWorkspaceProxy {
         return;
       case "item/fileChange/patchUpdated":
         this.handleFilePatchUpdated(params);
+        return;
+      case "turn/diff/updated":
+        this.handleTurnDiffUpdated(params);
         return;
       case "command/exec/outputDelta":
         this.handleCommandExecDelta(params);
@@ -799,14 +1234,20 @@ export class AgentWorkspaceProxy {
     const item = extractItem(params);
     if (!item) return;
     const itemType = firstString(item, ["type"]);
-    if (itemType === "agentMessage" || itemType === "assistantMessage") {
+    const normalizedItemType = normalizedIdentifier(itemType);
+    if (normalizedItemType === "agentmessage" || normalizedItemType === "assistantmessage") {
       this.handleCompletedMessageItem(item, true);
       return;
     }
-    if (itemType === "plan") {
+    if (normalizedItemType === "plan") {
       this.handlePlanUpdated({ plan: [item] });
       return;
     }
+    if (isSubagentItemType(itemType)) {
+      this.handleSubagentItem(item, "running", true);
+      return;
+    }
+    if (this.handleSemanticSystemItem(item, "running", true)) return;
     const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
     const toolCall = this.toolCallFromItem(item, "running");
     if (!conversationId || !toolCall) return;
@@ -818,10 +1259,20 @@ export class AgentWorkspaceProxy {
     const item = extractItem(params);
     if (!item) return;
     const itemType = firstString(item, ["type"]);
-    if (itemType === "agentMessage" || itemType === "assistantMessage") {
+    const normalizedItemType = normalizedIdentifier(itemType);
+    if (normalizedItemType === "agentmessage" || normalizedItemType === "assistantmessage") {
       this.handleCompletedMessageItem(item, false);
       return;
     }
+    if (normalizedItemType === "plan") {
+      this.handlePlanDelta({ ...item, delta: firstString(item, ["text", "content", "message"]) });
+      return;
+    }
+    if (isSubagentItemType(itemType)) {
+      this.handleSubagentItem(item, normalizeToolStatus(item.status, true), false);
+      return;
+    }
+    if (this.handleSemanticSystemItem(item, normalizeToolStatus(item.status, true), false)) return;
     const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
     const toolCall = this.toolCallFromItem(item, normalizeToolStatus(item.status, true));
     if (!conversationId || !toolCall) return;
@@ -863,13 +1314,37 @@ export class AgentWorkspaceProxy {
       this.toolConversationIds.get(itemId) ??
       this.activeConversationId;
     if (!conversationId) return;
-    const output = summarizeFileChanges(Array.isArray(raw.changes) ? raw.changes : []);
+    const output =
+      extractDiffText(raw) ??
+      summarizeFileChanges(Array.isArray(raw.changes) ? raw.changes : []);
     const existing = this.findTool(conversationId, itemId);
     this.upsertTool(conversationId, {
       id: itemId,
       name: existing?.name ?? "文件修改",
       input: existing?.input,
       output: output || existing?.output,
+      createdAt: existing?.createdAt ?? Date.now(),
+      status: existing?.status ?? "running",
+    });
+  }
+
+  private handleTurnDiffUpdated(params: unknown): void {
+    const raw = asRecord(params);
+    if (!raw) return;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    if (!conversationId) return;
+    const diff = extractDiffText(raw);
+    if (!diff) return;
+    const itemId =
+      firstString(raw, ["itemId", "id", "turnId"]) ??
+      `workspace-diff:${conversationId}`;
+    const existing = this.findTool(conversationId, itemId);
+    const changes = Array.isArray(raw.changes) ? raw.changes : [];
+    this.upsertTool(conversationId, {
+      id: itemId,
+      name: existing?.name ?? "文件修改",
+      input: existing?.input ?? summarizeFileChanges(changes),
+      output: diff,
       createdAt: existing?.createdAt ?? Date.now(),
       status: existing?.status ?? "running",
     });
@@ -959,6 +1434,127 @@ export class AgentWorkspaceProxy {
     this.updateConversationPreview(conversationId, text, raw.done === true ? "idle" : "running");
   }
 
+  private handleSemanticSystemItem(
+    item: Record<string, unknown>,
+    status: AgentToolCall["status"],
+    streaming: boolean,
+  ): boolean {
+    const itemType = firstString(item, ["type"]);
+    const normalized = normalizedIdentifier(itemType);
+    const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
+    if (!conversationId) return false;
+    const itemId = firstString(item, ["id", "itemId"]) ?? id("item");
+    const existing = this.findItem(conversationId, itemId);
+    const base = {
+      id: itemId,
+      conversationId,
+      type: "status" as const,
+      role: "system" as const,
+      turnId: this.extractTurnId(item) ?? this.currentTurnId,
+      itemId,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+      isStreaming: streaming,
+    };
+
+    if (normalized === "reasoning" || normalized === "thinking") {
+      const text = firstString(item, ["text", "content", "summary", "message"]) ??
+        stringifyDefined(item.contentItems ?? item.summary);
+      this.upsertItem(conversationId, {
+        ...base,
+        kind: "thinking",
+        text: text ?? (streaming ? "正在思考" : "完成思考"),
+      });
+      return true;
+    }
+
+    if (normalized === "enteredreviewmode") {
+      const target = firstString(item, ["review", "target", "label"]) ?? "changes";
+      this.upsertItem(conversationId, {
+        ...base,
+        kind: "review",
+        text: status === "completed" ? `已完成审查 ${target}` : `正在审查 ${target}`,
+      });
+      return true;
+    }
+
+    if (normalized === "contextcompaction") {
+      this.upsertItem(conversationId, {
+        ...base,
+        kind: "context_compaction",
+        text: status === "completed" ? "上下文已压缩" : "正在压缩上下文",
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  private handleSubagentItem(
+    item: Record<string, unknown>,
+    status: AgentToolCall["status"],
+    streaming: boolean,
+  ): void {
+    const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
+    if (!conversationId) return;
+    const subagent = decodeSubagentAction(item, status);
+    if (!subagent) return;
+    const itemId = firstString(item, ["id", "itemId"]) ?? id("subagent");
+    const text = summarizeSubagentAction(subagent);
+    const existing = this.findItem(conversationId, itemId);
+    this.upsertItem(conversationId, {
+      id: itemId,
+      conversationId,
+      type: "status",
+      kind: "subagent_action",
+      role: "system",
+      turnId: this.extractTurnId(item) ?? this.currentTurnId,
+      itemId,
+      text,
+      subagent,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+      isStreaming: streaming,
+    });
+    this.updateConversationPreview(conversationId, text, streaming ? "running" : "idle");
+  }
+
+  private handleStructuredInput(params: unknown, waitForResponse = false): Promise<unknown> | void {
+    const raw = asRecord(params) ?? {};
+    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    if (!conversationId) return waitForResponse ? Promise.resolve(formatStructuredInputResponse({})) : undefined;
+    const structuredInput = decodeStructuredInput(raw);
+    if (!structuredInput) return waitForResponse ? Promise.resolve(formatStructuredInputResponse({})) : undefined;
+    const text = structuredInput.questions.map((question) => question.question).join("\n");
+    this.pendingStructuredInputs.set(structuredInput.requestId, { conversationId, input: structuredInput });
+    this.upsertItem(conversationId, {
+      id: `input:${structuredInput.requestId}`,
+      conversationId,
+      type: "status",
+      kind: "user_input_prompt",
+      role: "system",
+      text,
+      structuredInput,
+      metadata: { inputPending: true },
+      createdAt: this.findItem(conversationId, `input:${structuredInput.requestId}`)?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+    });
+    this.updateConversationPreview(conversationId, "需要用户输入", "running");
+    if (!waitForResponse) return;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingStructuredInputs.delete(structuredInput.requestId);
+        this.structuredInputWaiters.delete(structuredInput.requestId);
+        resolve(formatStructuredInputResponse({}));
+        this.markStructuredInput(conversationId, structuredInput.requestId, {
+          inputPending: false,
+          inputError: "等待用户输入超时",
+        });
+      }, PERMISSION_TIMEOUT_MS);
+      this.structuredInputWaiters.set(structuredInput.requestId, { resolve, timer });
+    });
+  }
+
   private toolCallFromItem(
     item: Record<string, unknown>,
     fallbackStatus: AgentToolCall["status"],
@@ -966,16 +1562,21 @@ export class AgentWorkspaceProxy {
     const itemId = firstString(item, ["id", "itemId", "toolCallId"]);
     if (!itemId) return undefined;
     const itemType = firstString(item, ["type"]);
+    const normalizedItemType = normalizedIdentifier(itemType);
     const name = toolNameFromItem(item);
     if (!name && !isToolItemType(itemType)) return undefined;
-    const output =
+    const bufferedOutput = this.toolOutputBuffers.get(itemId);
+    const rawOutput =
       firstString(item, ["aggregatedOutput", "output", "stdout", "stderr"]) ??
       stringifyDefined(item.result ?? item.error ?? item.contentItems);
+    const output = normalizedItemType === "filechange" || normalizedItemType === "diff"
+      ? extractDiffText(item) ?? bufferedOutput ?? rawOutput
+      : rawOutput ?? bufferedOutput;
     return {
       id: itemId,
       name: name ?? "工具",
       input: toolInputFromItem(item),
-      output: output ?? this.toolOutputBuffers.get(itemId),
+      output,
       createdAt: Date.now(),
       status: normalizeToolStatus(item.status, fallbackStatus === "completed"),
     };
@@ -1060,6 +1661,41 @@ export class AgentWorkspaceProxy {
     this.updateConversationStatus(payload.conversationId, "running");
   }
 
+  private respondStructuredInput(payload: {
+    conversationId: string;
+    requestId: string;
+    answers: Record<string, string[]>;
+  }): void {
+    const pending = this.pendingStructuredInputs.get(payload.requestId);
+    this.pendingStructuredInputs.delete(payload.requestId);
+    const waiter = this.structuredInputWaiters.get(payload.requestId);
+    if (waiter) {
+      clearTimeout(waiter.timer);
+      this.structuredInputWaiters.delete(payload.requestId);
+      waiter.resolve(formatStructuredInputResponse(payload.answers));
+    }
+    this.markStructuredInput(payload.conversationId, payload.requestId, {
+      inputPending: false,
+      inputSubmitted: true,
+      answers: payload.answers,
+    });
+    this.updateConversationStatus(pending?.conversationId ?? payload.conversationId, "running");
+  }
+
+  private markStructuredInput(
+    conversationId: string,
+    requestId: string,
+    metadata: Record<string, unknown>,
+  ): void {
+    const item = this.findItem(conversationId, `input:${requestId}`);
+    if (!item) return;
+    this.upsertItem(conversationId, {
+      ...item,
+      metadata: { ...(item.metadata ?? {}), ...metadata },
+      updatedAt: Date.now(),
+    });
+  }
+
   private addItem(conversationId: string, item: AgentTimelineItem): void {
     const timeline = this.timelines.get(conversationId) ?? [];
     timeline.push(item);
@@ -1085,20 +1721,58 @@ export class AgentWorkspaceProxy {
   }
 
   private upsertTool(conversationId: string, toolCall: AgentToolCall): void {
-    const existing = this.findTool(conversationId, toolCall.id);
+    const duplicate = this.findDuplicateFileTool(conversationId, toolCall);
+    if (duplicate && duplicate.id !== toolCall.id) {
+      this.removeToolItem(conversationId, toolCall.id);
+    }
+    const targetToolId = duplicate?.id ?? toolCall.id;
+    const existing = this.findTool(conversationId, targetToolId);
     const nextToolCall = {
+      ...existing,
       ...toolCall,
+      id: targetToolId,
       createdAt: existing?.createdAt ?? toolCall.createdAt ?? Date.now(),
     };
+    this.toolConversationIds.set(toolCall.id, conversationId);
     this.toolConversationIds.set(nextToolCall.id, conversationId);
+    const kind: AgentTimelineKind = nextToolCall.name.includes("文件")
+      ? "file_change"
+      : nextToolCall.name.includes("命令")
+        ? "command_execution"
+        : "tool_activity";
     this.upsertItem(conversationId, {
       id: `tool:${nextToolCall.id}`,
       conversationId,
       type: "tool_call",
+      kind,
+      itemId: nextToolCall.id,
       toolCall: nextToolCall,
+      commandExecution: kind === "command_execution" ? commandExecutionFromTool(nextToolCall) : undefined,
+      fileChange: kind === "file_change" ? fileChangeFromTool(nextToolCall) : undefined,
       createdAt: nextToolCall.createdAt ?? Date.now(),
       updatedAt: Date.now(),
     });
+  }
+
+  private findDuplicateFileTool(
+    conversationId: string,
+    toolCall: AgentToolCall,
+  ): AgentToolCall | undefined {
+    const output = toolCall.output?.trim();
+    if (!toolCall.name.includes("文件") || !output) return undefined;
+    return this.timelines.get(conversationId)?.find((entry) =>
+      entry.type === "tool_call" &&
+      entry.toolCall?.id !== toolCall.id &&
+      entry.toolCall?.name.includes("文件") &&
+      entry.toolCall.output?.trim() === output
+    )?.toolCall;
+  }
+
+  private removeToolItem(conversationId: string, toolId: string): void {
+    const timeline = this.timelines.get(conversationId);
+    if (!timeline) return;
+    const index = timeline.findIndex((entry) => entry.id === `tool:${toolId}`);
+    if (index >= 0) timeline.splice(index, 1);
   }
 
   private findItem(conversationId: string, itemId: string): AgentTimelineItem | undefined {
@@ -1277,6 +1951,19 @@ export class AgentWorkspaceProxy {
       this.permissionSources.delete(requestId);
     }
     this.permissionWaiters.clear();
+    for (const [requestId, waiter] of this.structuredInputWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(formatStructuredInputResponse({}));
+      const pending = this.pendingStructuredInputs.get(requestId);
+      if (pending) {
+        this.markStructuredInput(pending.conversationId, requestId, {
+          inputPending: false,
+          inputError: "已停止",
+        });
+      }
+      this.pendingStructuredInputs.delete(requestId);
+    }
+    this.structuredInputWaiters.clear();
     if (conversationId) this.updateConversationStatus(conversationId, "idle");
   }
 
@@ -1349,9 +2036,19 @@ function isPermissionRequestMethod(method: string): boolean {
   return (
     method === "session/request_permission" ||
     method.endsWith("/requestApproval") ||
-    method === "mcpServer/elicitation/request" ||
-    method === "item/tool/requestUserInput"
+    method === "mcpServer/elicitation/request"
   );
+}
+
+function formatStructuredInputResponse(answers: Record<string, string[]>): unknown {
+  return {
+    answers: Object.fromEntries(
+      Object.entries(answers).map(([questionId, values]) => [
+        questionId,
+        { answers: values.map((value) => value.trim()).filter(Boolean) },
+      ]),
+    ),
+  };
 }
 
 function formatPermissionResponse(

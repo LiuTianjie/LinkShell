@@ -169,9 +169,53 @@ function toolInputFromItem(item: Record<string, unknown>): string | undefined {
   }
   if (itemType === "fileChange") {
     const changes = Array.isArray(item.changes) ? item.changes : [];
-    return summarizeFileChanges(changes);
+    return summarizeFileChanges(changes) ?? firstString(item, ["path", "file", "filePath", "absolutePath", "relativePath"]);
   }
   return stringifyDefined(item.arguments ?? item.input ?? item.toolInput);
+}
+
+function looksLikeDiff(text: string): boolean {
+  const value = text.trim();
+  return (
+    value.startsWith("diff --git ") ||
+    value.startsWith("@@ ") ||
+    value.includes("\n@@ ") ||
+    (value.includes("\n--- ") && value.includes("\n+++ "))
+  );
+}
+
+function collectDiffStrings(value: unknown, depth = 0): string[] {
+  if (depth > 6 || value === undefined || value === null) return [];
+  if (typeof value === "string") return looksLikeDiff(value) ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap((entry) => collectDiffStrings(entry, depth + 1));
+  const raw = asRecord(value);
+  if (!raw) return [];
+  const direct: string[] = [];
+  const nested: string[] = [];
+  for (const [key, entry] of Object.entries(raw)) {
+    const lowerKey = key.toLowerCase();
+    const isDiffField =
+      lowerKey.includes("diff") ||
+      lowerKey.includes("patch") ||
+      lowerKey.includes("unified");
+    if (typeof entry === "string" && isDiffField && entry.trim()) {
+      direct.push(entry);
+    } else if (typeof entry === "object" && entry) {
+      nested.push(...collectDiffStrings(entry, depth + 1));
+    }
+  }
+  return [...direct, ...nested].filter((entry) => looksLikeDiff(entry));
+}
+
+function extractDiffText(value: unknown): string | undefined {
+  const diffs = collectDiffStrings(value)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (diffs.length === 0) return undefined;
+  return diffs
+    .filter((entry, index, array) => array.indexOf(entry) === index)
+    .join("\n\n")
+    .slice(0, 24_000);
 }
 
 function summarizeFileChanges(changes: unknown[]): string | undefined {
@@ -183,7 +227,7 @@ function summarizeFileChanges(changes: unknown[]): string | undefined {
         firstString(raw, ["path", "file", "filePath", "absolutePath", "relativePath"]) ??
         firstString(asRecord(raw.update) ?? {}, ["path", "file", "filePath"]);
       const kind = firstString(raw, ["kind", "type", "operation", "action"]);
-      return [kind, path].filter(Boolean).join(" ");
+      return [kind, path].filter(Boolean).join(" ") || path;
     })
     .filter((line): line is string => Boolean(line));
   return lines.length > 0 ? lines.slice(0, 8).join("\n") : undefined;
@@ -449,7 +493,6 @@ export class AgentSessionProxy {
       method.startsWith("mcpServer/startupStatus/") ||
       method === "thread/status/changed" ||
       method === "thread/tokenUsage/updated" ||
-      method === "turn/diff/updated" ||
       method === "serverRequest/resolved" ||
       method === "mcpServer/oauthLogin/completed"
     ) {
@@ -501,6 +544,9 @@ export class AgentSessionProxy {
         return;
       case "item/fileChange/patchUpdated":
         this.handleFilePatchUpdated(params);
+        return;
+      case "turn/diff/updated":
+        this.handleTurnDiffUpdated(params);
         return;
       case "command/exec/outputDelta":
         this.handleCommandExecDelta(params);
@@ -700,17 +746,41 @@ export class AgentSessionProxy {
     if (!raw) return;
     const itemId = firstString(raw, ["itemId", "id"]) ?? id("file");
     const changes = Array.isArray(raw.changes) ? raw.changes : [];
-    const output = summarizeFileChanges(changes);
+    const output = extractDiffText(raw) ?? summarizeFileChanges(changes);
     const existing = this.toolCalls.get(itemId);
-    const toolCall: AgentToolCall = {
+    const toolCall = this.withToolCreatedAt({
       id: itemId,
       name: existing?.name ?? "文件修改",
       input: existing?.input,
       output: output || existing?.output,
       createdAt: existing?.createdAt ?? Date.now(),
       status: existing?.status ?? "running",
-    };
-    this.toolCalls.set(itemId, toolCall);
+    });
+    if (!toolCall) return;
+    if (toolCall.id !== itemId) this.toolCalls.delete(itemId);
+    this.toolCalls.set(toolCall.id, toolCall);
+    this.sendUpdate({ kind: "tool_call", toolCall, status: "running" });
+  }
+
+  private handleTurnDiffUpdated(params: unknown): void {
+    const raw = asRecord(params);
+    if (!raw) return;
+    const diff = extractDiffText(raw);
+    if (!diff) return;
+    const itemId = firstString(raw, ["itemId", "id", "turnId"]) ?? "workspace-diff";
+    const changes = Array.isArray(raw.changes) ? raw.changes : [];
+    const existing = this.toolCalls.get(itemId);
+    const toolCall = this.withToolCreatedAt({
+      id: itemId,
+      name: existing?.name ?? "文件修改",
+      input: existing?.input ?? summarizeFileChanges(changes),
+      output: diff,
+      createdAt: existing?.createdAt ?? Date.now(),
+      status: existing?.status ?? "running",
+    });
+    if (!toolCall) return;
+    if (toolCall.id !== itemId) this.toolCalls.delete(itemId);
+    this.toolCalls.set(toolCall.id, toolCall);
     this.sendUpdate({ kind: "tool_call", toolCall, status: "running" });
   }
 
@@ -766,15 +836,18 @@ export class AgentSessionProxy {
     const itemType = firstString(item, ["type"]);
     const name = toolNameFromItem(item);
     if (!name && !isToolItemType(itemType)) return undefined;
-    const output =
+    const bufferedOutput = this.toolOutputBuffers.get(itemId);
+    const rawOutput =
       firstString(item, ["aggregatedOutput", "output", "stdout", "stderr"]) ??
       stringifyDefined(item.result ?? item.error ?? item.contentItems);
-    const bufferedOutput = this.toolOutputBuffers.get(itemId);
+    const output = itemType === "fileChange"
+      ? extractDiffText(item) ?? bufferedOutput ?? rawOutput
+      : rawOutput ?? bufferedOutput;
     return {
       id: itemId,
       name: name ?? "工具",
       input: toolInputFromItem(item),
-      output: output ?? bufferedOutput,
+      output,
       createdAt: Date.now(),
       status: normalizeToolStatus(item.status, fallbackStatus === "completed"),
     };
@@ -855,11 +928,24 @@ export class AgentSessionProxy {
 
   private withToolCreatedAt(toolCall: AgentToolCall | undefined): AgentToolCall | undefined {
     if (!toolCall) return undefined;
-    const existing = this.toolCalls.get(toolCall.id);
+    const duplicate = this.findDuplicateFileTool(toolCall);
+    const existing = duplicate ?? this.toolCalls.get(toolCall.id);
     return {
+      ...existing,
       ...toolCall,
+      id: existing?.id ?? toolCall.id,
       createdAt: existing?.createdAt ?? toolCall.createdAt ?? Date.now(),
     };
+  }
+
+  private findDuplicateFileTool(toolCall: AgentToolCall): AgentToolCall | undefined {
+    const output = toolCall.output?.trim();
+    if (!toolCall.name.includes("文件") || !output) return undefined;
+    return [...this.toolCalls.values()].find((existing) =>
+      existing.id !== toolCall.id &&
+      existing.name.includes("文件") &&
+      existing.output?.trim() === output
+    );
   }
 
   private sendCapabilities(): void {

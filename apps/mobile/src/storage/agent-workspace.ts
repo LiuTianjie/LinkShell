@@ -4,6 +4,17 @@ export type AgentProvider = "codex" | "claude" | "custom";
 export type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
 export type AgentReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
+export type AgentTimelineKind =
+  | "chat"
+  | "thinking"
+  | "tool_activity"
+  | "command_execution"
+  | "file_change"
+  | "subagent_action"
+  | "plan"
+  | "user_input_prompt"
+  | "review"
+  | "context_compaction";
 
 export interface AgentContentBlock {
   type: "text" | "image";
@@ -35,6 +46,75 @@ export interface AgentPermission {
   options: { id: string; label: string; kind: "allow" | "deny" | "other" }[];
 }
 
+export interface AgentFileChangeEntry {
+  path: string;
+  kind?: string;
+  added?: number;
+  removed?: number;
+}
+
+export interface AgentFileChange {
+  entries: AgentFileChangeEntry[];
+  diff?: string;
+  summary?: string;
+  changeSetId?: string;
+  status?: AgentToolCall["status"];
+}
+
+export interface AgentCommandExecution {
+  command?: string;
+  cwd?: string;
+  output?: string;
+  exitCode?: number | null;
+  status?: AgentToolCall["status"];
+}
+
+export interface AgentStructuredInputOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface AgentStructuredInputQuestion {
+  id: string;
+  header?: string;
+  question: string;
+  isOther?: boolean;
+  isSecret?: boolean;
+  selectionLimit?: number;
+  options?: AgentStructuredInputOption[];
+}
+
+export interface AgentStructuredInput {
+  requestId: string;
+  questions: AgentStructuredInputQuestion[];
+}
+
+export interface AgentSubagentRef {
+  threadId: string;
+  agentId?: string;
+  nickname?: string;
+  role?: string;
+  model?: string;
+  prompt?: string;
+}
+
+export interface AgentSubagentState {
+  threadId: string;
+  status: string;
+  message?: string;
+}
+
+export interface AgentSubagentAction {
+  tool: string;
+  status: string;
+  prompt?: string;
+  model?: string;
+  receiverThreadIds: string[];
+  receiverAgents: AgentSubagentRef[];
+  agentStates: Record<string, AgentSubagentState>;
+}
+
 export interface AgentConversationRecord {
   id: string;
   serverUrl: string;
@@ -58,10 +138,17 @@ export interface AgentTimelineItem {
   id: string;
   conversationId: string;
   type: "message" | "tool_call" | "plan" | "permission" | "status" | "error";
+  kind?: AgentTimelineKind;
+  turnId?: string;
+  itemId?: string;
   role?: "user" | "assistant" | "system";
   content?: AgentContentBlock[];
   text?: string;
   toolCall?: AgentToolCall;
+  commandExecution?: AgentCommandExecution;
+  fileChange?: AgentFileChange;
+  subagent?: AgentSubagentAction;
+  structuredInput?: AgentStructuredInput;
   plan?: AgentPlanStep[];
   permission?: AgentPermission;
   status?: AgentStatus;
@@ -148,6 +235,7 @@ export async function loadAgentConversations(): Promise<AgentConversationRecord[
 
 export async function upsertAgentConversation(
   input: Omit<AgentConversationRecord, "schemaVersion"> & { schemaVersion?: 1 },
+  options: { preserveLocalArchived?: boolean } = {},
 ): Promise<AgentConversationRecord> {
   const conversations = await loadAgentConversations();
   const normalized: AgentConversationRecord = {
@@ -156,10 +244,20 @@ export async function upsertAgentConversation(
     schemaVersion: 1,
   };
   const index = conversations.findIndex((item) => item.id === normalized.id);
-  if (index >= 0) conversations[index] = { ...conversations[index], ...normalized };
-  else conversations.unshift(normalized);
+  const preserveLocalArchived = options.preserveLocalArchived ?? true;
+  const nextRecord = index >= 0
+    ? {
+        ...conversations[index],
+        ...normalized,
+        archived: preserveLocalArchived && conversations[index].archived && !normalized.archived
+          ? true
+          : normalized.archived,
+      }
+    : normalized;
+  if (index >= 0) conversations[index] = nextRecord;
+  else conversations.unshift(nextRecord);
   await saveConversations(conversations);
-  return normalized;
+  return nextRecord;
 }
 
 export async function archiveAgentConversation(id: string, archived: boolean): Promise<void> {

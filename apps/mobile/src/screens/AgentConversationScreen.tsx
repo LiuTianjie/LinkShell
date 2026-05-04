@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -25,6 +25,8 @@ import type {
   AgentConversationRecord,
   AgentPermissionMode,
   AgentReasoningEffort,
+  AgentStructuredInput,
+  AgentSubagentAction,
   AgentTimelineItem,
   AgentToolCall,
 } from "../storage/agent-workspace";
@@ -128,6 +130,11 @@ function formatEffort(effort?: AgentReasoningEffort): string {
   return "极低";
 }
 
+function formatRuntime(model?: string, effort?: AgentReasoningEffort): string {
+  const modelLabel = formatModel(model).replace(/^GPT-/, "");
+  return `${modelLabel} · ${formatEffort(effort)}`;
+}
+
 function shortPath(path: string): string {
   const parts = path.split("/").filter(Boolean);
   if (parts.length <= 3) return path;
@@ -160,6 +167,12 @@ type MessagePart =
   | { type: "text"; text: string }
   | { type: "code"; language?: string; code: string };
 
+type FileDiffEntry = {
+  path: string;
+  added: number;
+  removed: number;
+};
+
 function parseParts(content: string): MessagePart[] {
   const parts: MessagePart[] = [];
   const pattern = /```([^\n`]*)\n([\s\S]*?)```/g;
@@ -172,6 +185,265 @@ function parseParts(content: string): MessagePart[] {
   }
   if (lastIndex < content.length) parts.push({ type: "text", text: content.slice(lastIndex) });
   return parts.length > 0 ? parts : [{ type: "text", text: content }];
+}
+
+function displayProvider(provider: AgentConversationRecord["provider"]): string {
+  if (provider === "codex") return "Codex";
+  if (provider === "claude") return "Claude";
+  return "Custom";
+}
+
+function looksLikeDiff(text: string | undefined): boolean {
+  if (!text) return false;
+  const value = text.trim();
+  return (
+    value.startsWith("diff --git ") ||
+    value.startsWith("@@ ") ||
+    value.includes("\n@@ ") ||
+    (value.includes("\n--- ") && value.includes("\n+++ "))
+  );
+}
+
+function diffStats(diff: string, fallback?: string) {
+  const files = new Set<string>();
+  let added = 0;
+  let removed = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+      if (match?.[2]) files.add(match[2]);
+    } else if (line.startsWith("+++ ") && !line.startsWith("+++ /dev/null")) {
+      files.add(line.replace(/^\+\+\+ b?\//, "").trim());
+    } else if (line.startsWith("+") && !line.startsWith("+++")) {
+      added += 1;
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      removed += 1;
+    }
+  }
+  if (files.size === 0 && fallback) {
+    fallback
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .forEach((line) => files.add(line.replace(/^(modify|create|delete|update|add)\s+/i, "")));
+  }
+  return { files: [...files].slice(0, 4), added, removed };
+}
+
+function diffEntries(diff: string, fallback?: string): FileDiffEntry[] {
+  const entries: FileDiffEntry[] = [];
+  let current: FileDiffEntry | null = null;
+
+  const flush = () => {
+    if (current && (current.path || current.added > 0 || current.removed > 0)) {
+      const existing = entries.find((entry) => entry.path === current!.path);
+      if (existing) {
+        existing.added += current.added;
+        existing.removed += current.removed;
+      } else {
+        entries.push(current);
+      }
+    }
+    current = null;
+  };
+
+  for (const rawLine of diff.split("\n")) {
+    if (rawLine.startsWith("diff --git ")) {
+      flush();
+      const match = rawLine.match(/^diff --git a\/(.+?) b\/(.+)$/);
+      current = { path: match?.[2] || rawLine.replace(/^diff --git\s+/, ""), added: 0, removed: 0 };
+      continue;
+    }
+    if (rawLine.startsWith("+++ ") && !rawLine.startsWith("+++ /dev/null")) {
+      const path = rawLine.replace(/^\+\+\+ b?\//, "").trim();
+      if (!current) current = { path, added: 0, removed: 0 };
+      else current.path = path;
+      continue;
+    }
+    if (rawLine.startsWith("+") && !rawLine.startsWith("+++")) {
+      if (!current) current = { path: "工作区 diff", added: 0, removed: 0 };
+      current.added += 1;
+      continue;
+    }
+    if (rawLine.startsWith("-") && !rawLine.startsWith("---")) {
+      if (!current) current = { path: "工作区 diff", added: 0, removed: 0 };
+      current.removed += 1;
+    }
+  }
+  flush();
+
+  if (entries.length > 0) return entries.slice(0, 12);
+
+  const fallbackEntries = (fallback ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => ({
+      path: line.replace(/^(modify|create|delete|update|add)\s+/i, ""),
+      added: 0,
+      removed: 0,
+    }));
+  return fallbackEntries.slice(0, 12);
+}
+
+function diffLineColors(line: string, theme: Theme) {
+  if (line.startsWith("+") && !line.startsWith("+++")) {
+    return { color: theme.success, backgroundColor: "rgba(52, 199, 89, 0.12)" };
+  }
+  if (line.startsWith("-") && !line.startsWith("---")) {
+    return { color: theme.error, backgroundColor: "rgba(255, 59, 48, 0.12)" };
+  }
+  if (line.startsWith("@@")) {
+    return { color: theme.accent, backgroundColor: theme.accentLight };
+  }
+  if (line.startsWith("diff --git") || line.startsWith("---") || line.startsWith("+++")) {
+    return { color: theme.textSecondary, backgroundColor: theme.bgInput };
+  }
+  return { color: theme.textSecondary, backgroundColor: "transparent" };
+}
+
+function commandLanguage(toolName: string): string {
+  return toolName.includes("命令") ? "shell" : "text";
+}
+
+function unwrapShell(raw: string): string {
+  let value = raw.trim();
+  const lower = value.toLowerCase();
+  const prefixes = [
+    "/usr/bin/zsh -lc ",
+    "/bin/zsh -lc ",
+    "zsh -lc ",
+    "/usr/bin/bash -lc ",
+    "/usr/bin/bash -c ",
+    "/bin/bash -lc ",
+    "/bin/bash -c ",
+    "bash -lc ",
+    "bash -c ",
+    "/bin/sh -c ",
+    "sh -c ",
+  ];
+
+  for (const prefix of prefixes) {
+    if (!lower.startsWith(prefix)) continue;
+    value = value.slice(prefix.length).trim();
+    if (
+      (value.startsWith("\"") && value.endsWith("\"")) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    const cdIndex = value.indexOf("&&");
+    if (cdIndex >= 0) value = value.slice(cdIndex + 2).trim();
+    break;
+  }
+
+  const pipeIndex = value.indexOf(" | ");
+  if (pipeIndex >= 0) value = value.slice(0, pipeIndex).trim();
+  return value;
+}
+
+function compactPath(value: string): string {
+  const cleaned = value.trim().replace(/^["']|["']$/g, "");
+  const parts = cleaned.split("/").filter(Boolean);
+  if (parts.length <= 2) return cleaned;
+  return parts.slice(-2).join("/");
+}
+
+function lastCommandTarget(args: string, fallback: string): string {
+  const tokens = args.split(/\s+/).filter(Boolean);
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const token = tokens[index].replace(/^["']|["']$/g, "");
+    if (!token || token.startsWith("-")) continue;
+    return compactPath(token);
+  }
+  return fallback;
+}
+
+function humanizeCommand(raw: string, running: boolean): { verb: string; target: string } {
+  const command = unwrapShell(raw);
+  const [toolRaw, ...rest] = command.split(/\s+/);
+  const tool = (toolRaw || command).split("/").pop()?.toLowerCase() || "";
+  const args = rest.join(" ");
+  switch (tool) {
+    case "cat":
+    case "nl":
+    case "head":
+    case "tail":
+    case "sed":
+    case "less":
+    case "more":
+      return { verb: running ? "正在读取" : "读取了", target: lastCommandTarget(args, "文件") };
+    case "rg":
+    case "grep":
+    case "ag":
+    case "ack":
+      return { verb: running ? "正在搜索" : "搜索了", target: args ? args.slice(0, 80) : "工作区" };
+    case "ls":
+    case "find":
+    case "fd":
+      return { verb: running ? "正在列出" : "列出了", target: lastCommandTarget(args, "文件") };
+    case "mkdir":
+      return { verb: running ? "正在创建" : "创建了", target: lastCommandTarget(args, "目录") };
+    case "rm":
+      return { verb: running ? "正在删除" : "删除了", target: lastCommandTarget(args, "文件") };
+    case "git":
+      return { verb: running ? "正在运行 git" : "运行了 git", target: args || "命令" };
+    default:
+      return { verb: running ? "正在运行" : "运行了", target: command || raw };
+  }
+}
+
+function normalizedToken(value: string | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[_\-\s/]+/g, "");
+}
+
+function subagentTitle(action: AgentSubagentAction): string {
+  const count = Math.max(1, action.receiverThreadIds.length, action.receiverAgents.length);
+  const token = normalizedToken(action.tool);
+  if (token.includes("spawn")) return `启动 ${count} 个子 Agent`;
+  if (token.includes("wait")) return `等待 ${count} 个子 Agent`;
+  if (token.includes("resume")) return `恢复 ${count} 个子 Agent`;
+  if (token.includes("close")) return `关闭 ${count} 个子 Agent`;
+  if (token.includes("sendinput")) return `更新 ${count} 个子 Agent`;
+  return count === 1 ? "子 Agent 活动" : `${count} 个子 Agent 活动`;
+}
+
+function subagentStatusLabel(status: string | undefined): string {
+  const token = normalizedToken(status);
+  if (token === "completed" || token === "done" || token === "success") return "完成";
+  if (token === "failed" || token === "error") return "失败";
+  if (token === "stopped" || token === "cancelled") return "已停止";
+  if (token === "queued" || token === "pending") return "排队中";
+  if (token === "running" || token === "inprogress") return "运行中";
+  return status || "未知";
+}
+
+function subagentDisplayName(agent: AgentSubagentAction["receiverAgents"][number], fallbackThreadId: string): string {
+  if (agent.nickname && agent.role) return `${agent.nickname} [${agent.role}]`;
+  if (agent.nickname) return agent.nickname;
+  if (agent.role) return agent.role;
+  return fallbackThreadId.length > 14 ? `Agent ${fallbackThreadId.slice(-8)}` : fallbackThreadId || "Agent";
+}
+
+function fileToolDedupeKey(item: AgentTimelineItem): string | null {
+  const tool = item.toolCall;
+  if (item.type !== "tool_call" || !tool?.name.includes("文件")) return null;
+  const output = tool.output?.trim();
+  if (output) return `file-output:${output}`;
+  const input = tool.input?.trim();
+  return input ? `file-input:${input}` : null;
+}
+
+function dedupeTimelineItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
+  const keepByKey = new Map<string, number>();
+  items.forEach((item, index) => {
+    const key = fileToolDedupeKey(item);
+    if (key) keepByKey.set(key, index);
+  });
+  return items.filter((item, index) => {
+    const key = fileToolDedupeKey(item);
+    return !key || keepByKey.get(key) === index;
+  });
 }
 
 function CodeBlock({
@@ -250,6 +522,70 @@ function CodeBlock({
         >
           {code}
         </Text>
+      </ScrollView>
+    </View>
+  );
+}
+
+function DiffBlock({
+  diff,
+  theme,
+  expanded,
+}: {
+  diff: string;
+  theme: Theme;
+  expanded: boolean;
+}) {
+  const lines = diff.split("\n");
+  const visibleLines = expanded ? lines.slice(0, 500) : lines.slice(0, 18);
+  return (
+    <View
+      style={{
+        borderRadius: 10,
+        borderCurve: "continuous",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.separator,
+        backgroundColor: theme.bgInput,
+        overflow: "hidden",
+      }}
+    >
+      <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator={false}>
+        <View style={{ minWidth: "100%", paddingVertical: 6 }}>
+          {visibleLines.map((line, index) => {
+            const colors = diffLineColors(line, theme);
+            return (
+              <Text
+                key={`${index}-${line.slice(0, 12)}`}
+                selectable
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 1,
+                  minWidth: "100%",
+                  color: colors.color,
+                  backgroundColor: colors.backgroundColor,
+                  fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+                  fontSize: 11,
+                  lineHeight: 16,
+                }}
+              >
+                {line || " "}
+              </Text>
+            );
+          })}
+          {visibleLines.length < lines.length ? (
+            <Text
+              style={{
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                color: theme.textTertiary,
+                fontSize: 11,
+                fontWeight: "700",
+              }}
+            >
+              还有 {lines.length - visibleLines.length} 行
+            </Text>
+          ) : null}
+        </View>
       </ScrollView>
     </View>
   );
@@ -344,38 +680,145 @@ function RichText({ text, theme, inverse = false }: { text: string; theme: Theme
   );
 }
 
-const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; theme: Theme }) {
+const FileChangeCard = memo(function FileChangeCard({ tool, theme }: { tool: AgentToolCall; theme: Theme }) {
   const [expanded, setExpanded] = useState(false);
   const input = tool.input?.trim();
   const output = tool.output?.trim();
-  const long = Boolean((input && input.length > 900) || (output && output.length > 1200));
+  const hasDiff = looksLikeDiff(output);
+  const diffLineCount = output ? output.split("\n").length : 0;
+  const stats = useMemo(() => hasDiff && output ? diffStats(output, input) : null, [hasDiff, input, output]);
+  const entries = useMemo(() => output ? diffEntries(output, input) : diffEntries("", input), [input, output]);
   const meta = toolStatusMeta(tool.status, theme);
-  const language = tool.name.includes("命令") ? "shell" : tool.name.includes("文件") ? "diff" : "text";
+  const canExpand = Boolean(output || input);
 
   return (
-    <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.bgCard, padding: 12, gap: 10 }}>
+    <View
+      style={{
+        borderRadius: 12,
+        borderCurve: "continuous",
+        backgroundColor: theme.bgCard,
+        overflow: "hidden",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.separator,
+      }}
+    >
       <Pressable
-        onPress={() => long && setExpanded((value) => !value)}
-        disabled={!long}
-        style={{ flexDirection: "row", alignItems: "center", gap: 9 }}
+        onPress={() => canExpand && setExpanded((value) => !value)}
+        disabled={!canExpand}
+        style={{
+          minHeight: 46,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 9,
+        }}
       >
-        <AppSymbol name={tool.name.includes("文件") ? "doc.text" : tool.name.includes("MCP") ? "server.rack" : "terminal.fill"} size={16} color={theme.accent} />
-        <Text selectable style={{ flex: 1, color: theme.text, fontSize: 14, fontWeight: "700" }} numberOfLines={1}>
-          {tool.name}
-        </Text>
-        {long ? <AppSymbol name={expanded ? "chevron.down" : "chevron.right"} size={13} color={theme.textTertiary} /> : null}
-        {meta ? (
+        <AppSymbol name="pencil.line" size={16} color={theme.textTertiary} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: theme.text, fontSize: 14, fontWeight: "800" }} numberOfLines={1}>
+            {entries.length > 1 ? `${entries.length} 个文件修改` : "文件修改"}
+          </Text>
+          {stats ? (
+            <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+              {stats.files.length > 0 ? stats.files.map(shortPath).join("、") : "工作区 diff"}
+            </Text>
+          ) : input ? (
+            <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+              {input.split("\n").map(shortPath).join("、")}
+            </Text>
+          ) : null}
+        </View>
+        {stats ? (
+          <View style={{ flexDirection: "row", gap: 4 }}>
+            <View style={{ borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: "rgba(52, 199, 89, 0.12)" }}>
+              <Text style={{ color: theme.success, fontSize: 11, fontWeight: "800" }}>+{stats.added}</Text>
+            </View>
+            <View style={{ borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: "rgba(255, 59, 48, 0.12)" }}>
+              <Text style={{ color: theme.error, fontSize: 11, fontWeight: "800" }}>-{stats.removed}</Text>
+            </View>
+          </View>
+        ) : meta ? (
           <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
             <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
           </View>
         ) : null}
+        {canExpand ? <AppSymbol name={expanded ? "chevron.down" : "chevron.right"} size={13} color={theme.textTertiary} /> : null}
       </Pressable>
-      {input ? <CodeBlock label={`输入 · ${language}`} code={expanded ? input : input.slice(0, 900)} theme={theme} maxLines={expanded ? 24 : 6} /> : null}
-      {output ? <CodeBlock label={`输出 · ${language}`} code={expanded ? output : output.slice(0, 1200)} theme={theme} maxLines={expanded ? 28 : 8} /> : null}
-      {long ? (
-        <Pressable onPress={() => setExpanded((value) => !value)} hitSlop={8}>
-          <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "700" }}>
-            {expanded ? "收起" : "展开更多"}
+
+      {entries.length > 0 ? (
+        <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.separator }}>
+          {entries.slice(0, expanded ? entries.length : 4).map((entry, index) => (
+            <View
+              key={`${entry.path}-${index}`}
+              style={{
+                minHeight: 38,
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
+                borderTopColor: theme.separator,
+              }}
+            >
+              <Text
+                selectable
+                style={{ flex: 1, color: theme.textSecondary, fontSize: 13 }}
+                numberOfLines={1}
+              >
+                {shortPath(entry.path)}
+              </Text>
+              {entry.added > 0 || entry.removed > 0 ? (
+                <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "800" }}>
+                  <Text style={{ color: theme.success }}>+{entry.added}</Text>
+                  <Text> </Text>
+                  <Text style={{ color: theme.error }}>-{entry.removed}</Text>
+                </Text>
+              ) : null}
+            </View>
+          ))}
+          {!expanded && entries.length > 4 ? (
+            <Text style={{ paddingHorizontal: 12, paddingBottom: 9, color: theme.textTertiary, fontSize: 12 }}>
+              还有 {entries.length - 4} 个文件
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {hasDiff && output && expanded ? (
+        <View style={{ padding: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.separator }}>
+          <DiffBlock diff={output} theme={theme} expanded />
+        </View>
+      ) : !hasDiff && output && expanded ? (
+        <View style={{ gap: 8, padding: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.separator }}>
+          <Text style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}>
+            这条历史事件没有携带 diff。升级后的 CLI 会优先展示补丁内容；旧记录只能显示工具返回摘要。
+          </Text>
+          <CodeBlock label="修改摘要" code={output} theme={theme} maxLines={6} />
+        </View>
+      ) : !output && input && expanded ? (
+        <View style={{ padding: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.separator }}>
+          <CodeBlock label="修改文件" code={input} theme={theme} maxLines={6} />
+        </View>
+      ) : null}
+
+      {canExpand ? (
+        <Pressable
+          onPress={() => setExpanded((value) => !value)}
+          hitSlop={8}
+          style={{
+            minHeight: 38,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.separator,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "800" }}>
+            {expanded
+              ? hasDiff ? "收起 diff" : "收起详情"
+              : hasDiff ? `查看 diff${diffLineCount > 0 ? `（${diffLineCount} 行）` : ""}` : "查看详情"}
           </Text>
         </Pressable>
       ) : null}
@@ -383,18 +826,441 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
   );
 });
 
+const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; theme: Theme }) {
+  const [expanded, setExpanded] = useState(false);
+  if (tool.name.includes("文件")) return <FileChangeCard tool={tool} theme={theme} />;
+  const input = tool.input?.trim();
+  const output = tool.output?.trim();
+  const meta = toolStatusMeta(tool.status, theme);
+  const language = commandLanguage(tool.name);
+  const canExpand = Boolean(input || output);
+  const isCommand = tool.name.includes("命令");
+  const commandSummary = isCommand && input ? humanizeCommand(input, tool.status === "running") : null;
+  const title = commandSummary ? commandSummary.verb : tool.name;
+  const subtitle = commandSummary ? commandSummary.target : input || output || "";
+
+  return (
+    <View
+      style={{
+        borderRadius: 12,
+        borderCurve: "continuous",
+        backgroundColor: theme.bgCard,
+        overflow: "hidden",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.separator,
+      }}
+    >
+      <Pressable
+        onPress={() => canExpand && setExpanded((value) => !value)}
+        disabled={!canExpand}
+        style={{
+          minHeight: 44,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 9,
+        }}
+      >
+        <AppSymbol name={tool.name.includes("MCP") ? "server.rack" : "terminal.fill"} size={15} color={theme.textTertiary} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text selectable style={{ color: theme.textSecondary, fontSize: 13, fontWeight: "700" }} numberOfLines={1}>
+            {title}
+          </Text>
+          {subtitle ? (
+            <Text selectable style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+        {meta ? (
+          <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
+            <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
+          </View>
+        ) : null}
+        {canExpand ? <AppSymbol name={expanded ? "chevron.down" : "chevron.right"} size={13} color={theme.textTertiary} /> : null}
+      </Pressable>
+      {expanded ? (
+        <View style={{ gap: 8, padding: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.separator }}>
+          {input ? <CodeBlock label={`输入 · ${language}`} code={input} theme={theme} maxLines={24} /> : null}
+          {output ? <CodeBlock label={`输出 · ${language}`} code={output} theme={theme} maxLines={28} /> : null}
+        </View>
+      ) : null}
+      {expanded && canExpand && (input?.length ?? 0) + (output?.length ?? 0) > 500 ? (
+        <Pressable
+          onPress={() => setExpanded((value) => !value)}
+          hitSlop={8}
+          style={{
+            minHeight: expanded ? 34 : 0,
+            alignItems: "center",
+            justifyContent: "center",
+            borderTopWidth: expanded ? StyleSheet.hairlineWidth : 0,
+            borderTopColor: theme.separator,
+          }}
+        >
+          <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "700" }}>
+            收起详情
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+});
+
+function SystemActivityCard({
+  icon,
+  title,
+  text,
+  theme,
+  running,
+}: {
+  icon: string;
+  title: string;
+  text?: string;
+  theme: Theme;
+  running?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const canExpand = Boolean(text && text.length > 120);
+  return (
+    <Pressable
+      onPress={() => canExpand && setExpanded((value) => !value)}
+      disabled={!canExpand}
+      style={{
+        paddingVertical: 4,
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 8,
+      }}
+    >
+      <AppSymbol name={icon} size={14} color={theme.textTertiary} />
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
+            {title}
+          </Text>
+          {running ? <ActivityIndicator size="small" color={theme.textTertiary} /> : null}
+        </View>
+        {text ? (
+          <Text
+            selectable
+            style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}
+            numberOfLines={expanded ? undefined : 2}
+          >
+            {text}
+          </Text>
+        ) : null}
+      </View>
+      {canExpand ? <AppSymbol name={expanded ? "chevron.down" : "chevron.right"} size={12} color={theme.textTertiary} /> : null}
+    </Pressable>
+  );
+}
+
+function SubagentCard({ action, theme, running }: { action: AgentSubagentAction; theme: Theme; running?: boolean }) {
+  const [expanded, setExpanded] = useState(true);
+  const rows = action.receiverThreadIds.length > 0
+    ? action.receiverThreadIds
+    : action.receiverAgents.map((agent) => agent.threadId);
+  const uniqueRows = [...new Set(rows)];
+  return (
+    <View
+      style={{
+        borderRadius: 12,
+        borderCurve: "continuous",
+        backgroundColor: theme.bgCard,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.separator,
+        padding: 12,
+        gap: 9,
+      }}
+    >
+      <Pressable onPress={() => setExpanded((value) => !value)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <AppSymbol name="person.2.fill" size={15} color={theme.accent} />
+        <Text style={{ flex: 1, color: theme.text, fontSize: 14, fontWeight: "800" }} numberOfLines={1}>
+          {subagentTitle(action)}
+        </Text>
+        {running ? <ActivityIndicator size="small" color={theme.accent} /> : null}
+        <AppSymbol name={expanded ? "chevron.down" : "chevron.right"} size={12} color={theme.textTertiary} />
+      </Pressable>
+      {action.prompt ? (
+        <Text selectable style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }} numberOfLines={expanded ? 4 : 1}>
+          {action.prompt}
+        </Text>
+      ) : null}
+      {expanded && uniqueRows.length > 0 ? (
+        <View style={{ gap: 6 }}>
+          {uniqueRows.map((threadId) => {
+            const agent = action.receiverAgents.find((entry) => entry.threadId === threadId);
+            const state = action.agentStates[threadId];
+            const status = subagentStatusLabel(state?.status ?? action.status);
+            return (
+              <View key={threadId} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: status === "失败" ? theme.error : status === "完成" ? theme.success : theme.accent }} />
+                <Text selectable style={{ flex: 1, color: theme.textSecondary, fontSize: 13 }} numberOfLines={1}>
+                  {agent ? subagentDisplayName(agent, threadId) : threadId}
+                </Text>
+                {agent?.model ? (
+                  <Text style={{ color: theme.textTertiary, fontSize: 11 }} numberOfLines={1}>
+                    {agent.model}
+                  </Text>
+                ) : null}
+                <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
+                  {status}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function StructuredInputCard({
+  input,
+  theme,
+  submitted,
+  error,
+  onSubmit,
+}: {
+  input: AgentStructuredInput;
+  theme: Theme;
+  submitted?: boolean;
+  error?: string;
+  onSubmit: (answers: Record<string, string[]>) => void;
+}) {
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [typed, setTyped] = useState<Record<string, string>>({});
+
+  const answers = useMemo(() => {
+    const next: Record<string, string[]> = {};
+    for (const question of input.questions) {
+      const typedAnswer = typed[question.id]?.trim();
+      const selectedAnswers = (selected[question.id] ?? [])
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const values = typedAnswer ? [...selectedAnswers, typedAnswer] : selectedAnswers;
+      if (values.length > 0) next[question.id] = values;
+    }
+    return next;
+  }, [input.questions, selected, typed]);
+
+  const canSubmit = input.questions.length > 0 &&
+    input.questions.every((question) => (answers[question.id] ?? []).length > 0) &&
+    !submitted;
+
+  const toggleOption = useCallback((questionId: string, label: string, limit?: number) => {
+    setSelected((current) => {
+      const max = Math.max(limit ?? 1, 1);
+      const existing = current[questionId] ?? [];
+      const hasValue = existing.includes(label);
+      const nextValues = hasValue
+        ? existing.filter((value) => value !== label)
+        : max === 1
+          ? [label]
+          : existing.length < max
+            ? [...existing, label]
+            : existing;
+      return { ...current, [questionId]: nextValues };
+    });
+  }, []);
+
+  return (
+    <View
+      style={{
+        borderRadius: 12,
+        borderCurve: "continuous",
+        backgroundColor: theme.bgCard,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.separator,
+        padding: 12,
+        gap: 10,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <AppSymbol name="questionmark.circle.fill" size={15} color={theme.accent} />
+        <Text style={{ color: theme.text, fontSize: 14, fontWeight: "800" }}>
+          {submitted ? "已发送补充信息" : "Agent 需要补充信息"}
+        </Text>
+      </View>
+      {input.questions.map((question) => (
+        <View key={question.id} style={{ gap: 6 }}>
+          {question.header ? (
+            <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
+              {question.header}
+            </Text>
+          ) : null}
+          <Text selectable style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
+            {question.question}
+          </Text>
+          {question.options?.length ? (
+            <View style={{ gap: 6 }}>
+              {question.options.map((option) => (
+                <Pressable
+                  key={option.id}
+                  disabled={submitted}
+                  onPress={() => toggleOption(question.id, option.label, question.selectionLimit)}
+                  style={{
+                    borderRadius: 10,
+                    borderCurve: "continuous",
+                    paddingHorizontal: 10,
+                    paddingVertical: 9,
+                    backgroundColor: (selected[question.id] ?? []).includes(option.label)
+                      ? theme.accentLight
+                      : theme.bgInput,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: (selected[question.id] ?? []).includes(option.label)
+                      ? theme.accent
+                      : theme.separator,
+                    opacity: submitted ? 0.65 : 1,
+                  }}
+                >
+                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "800" }}>
+                    {option.label}
+                  </Text>
+                  {option.description ? (
+                    <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2 }}>
+                      {option.description}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          {question.options?.length && !question.isOther ? null : (
+            <TextInput
+              value={typed[question.id] ?? ""}
+              onChangeText={(value) => setTyped((current) => ({ ...current, [question.id]: value }))}
+              editable={!submitted}
+              secureTextEntry={question.isSecret}
+              placeholder={question.isSecret ? "输入敏感信息" : "输入回答"}
+              placeholderTextColor={theme.textTertiary}
+              multiline={!question.isSecret}
+              style={{
+                minHeight: 42,
+                borderRadius: 10,
+                borderCurve: "continuous",
+                paddingHorizontal: 10,
+                paddingVertical: 9,
+                color: theme.text,
+                backgroundColor: theme.bgInput,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.separator,
+                fontSize: 13,
+              }}
+            />
+          )}
+        </View>
+      ))}
+      {error ? (
+        <Text style={{ color: theme.error, fontSize: 12, fontWeight: "700" }}>
+          {error}
+        </Text>
+      ) : null}
+      {!submitted ? (
+        <Pressable
+          disabled={!canSubmit}
+          onPress={() => {
+            Haptics.selectionAsync().catch(() => {});
+            onSubmit(answers);
+          }}
+          style={({ pressed }) => ({
+            minHeight: 40,
+            borderRadius: 10,
+            borderCurve: "continuous",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+            opacity: canSubmit ? 1 : 0.45,
+          })}
+        >
+          <Text style={{ color: "#fff", fontSize: 13, fontWeight: "800" }}>
+            发送回答
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function StreamingPill({ theme }: { theme: Theme }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 }}>
+      <ActivityIndicator size="small" color={theme.textTertiary} />
+      <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>正在生成</Text>
+    </View>
+  );
+}
+
 function TimelineItemView({
   item,
   theme,
   onPermission,
+  onStructuredInput,
 }: {
   item: AgentTimelineItem;
   theme: Theme;
   onPermission: (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => void;
+  onStructuredInput: (requestId: string, answers: Record<string, string[]>) => void;
 }) {
+  if (item.kind === "subagent_action" && item.subagent) {
+    return <SubagentCard action={item.subagent} theme={theme} running={item.isStreaming} />;
+  }
+
+  if (item.kind === "user_input_prompt" && item.structuredInput) {
+    return (
+      <StructuredInputCard
+        input={item.structuredInput}
+        theme={theme}
+        submitted={item.metadata?.inputSubmitted === true}
+        error={typeof item.metadata?.inputError === "string" ? item.metadata.inputError : undefined}
+        onSubmit={(answers) => onStructuredInput(item.structuredInput!.requestId, answers)}
+      />
+    );
+  }
+
+  if (item.kind === "thinking") {
+    return (
+      <SystemActivityCard
+        icon="brain.head.profile"
+        title={item.isStreaming ? "正在思考" : "思考"}
+        text={item.text}
+        theme={theme}
+        running={item.isStreaming}
+      />
+    );
+  }
+
+  if (item.kind === "review" || item.kind === "context_compaction" || item.kind === "tool_activity") {
+    const title =
+      item.kind === "review"
+        ? "审查"
+        : item.kind === "context_compaction"
+          ? "上下文压缩"
+          : "工具活动";
+    return (
+      <SystemActivityCard
+        icon={item.kind === "review" ? "doc.text.magnifyingglass" : item.kind === "context_compaction" ? "square.stack.3d.up" : "terminal.fill"}
+        title={title}
+        text={item.text}
+        theme={theme}
+        running={item.isStreaming}
+      />
+    );
+  }
+
   if (item.type === "message") {
     const isUser = item.role === "user";
     const text = item.text || (item.content ?? []).map((block) => block.text ?? "").join("\n");
+    if (item.role === "system") {
+      return text ? (
+        <View style={{ paddingVertical: 2 }}>
+          <Text selectable style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}>
+            {text}
+          </Text>
+        </View>
+      ) : null;
+    }
     return (
       <View
         style={{
@@ -402,21 +1268,18 @@ function TimelineItemView({
           maxWidth: isUser ? "88%" : "100%",
           borderRadius: 12,
           borderCurve: "continuous",
-          backgroundColor: isUser ? theme.accent : theme.bgCard,
-          paddingVertical: 10,
-          paddingHorizontal: 12,
-          gap: 7,
+          backgroundColor: isUser ? theme.accent : "transparent",
+          paddingVertical: isUser ? 10 : 2,
+          paddingHorizontal: isUser ? 12 : 0,
+          gap: 6,
         }}
       >
-        {!isUser ? (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <AppSymbol name="sparkles" size={13} color={theme.textTertiary} />
-            <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
-              Agent{item.isStreaming ? " 正在输入" : ""}
-            </Text>
-          </View>
+        {text || item.content?.length ? (
+          <MessageContent blocks={item.content} fallbackText={text} theme={theme} inverse={isUser} />
+        ) : item.isStreaming ? (
+          <StreamingPill theme={theme} />
         ) : null}
-        <MessageContent blocks={item.content} fallbackText={text} theme={theme} inverse={isUser} />
+        {!isUser && item.isStreaming && (text || item.content?.length) ? <StreamingPill theme={theme} /> : null}
       </View>
     );
   }
@@ -448,6 +1311,9 @@ function TimelineItemView({
   if (item.type === "permission" && item.permission) {
     const outcome = item.metadata?.permissionOutcome;
     const selectedOptionId = item.metadata?.optionId;
+    const permissionError = typeof item.metadata?.permissionError === "string"
+      ? item.metadata.permissionError
+      : undefined;
     const options = item.permission.options.length > 0
       ? item.permission.options
       : [
@@ -455,16 +1321,34 @@ function TimelineItemView({
           { id: "allow_once", label: "允许一次", kind: "allow" as const },
         ];
     return (
-      <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.accentLight, padding: 12, gap: 8 }}>
-        <Text style={{ color: theme.warning, fontSize: 15, fontWeight: "700" }}>
-          {outcome ? "已处理授权" : "需要授权"}{item.permission.toolName ? ` · ${item.permission.toolName}` : ""}
-        </Text>
+      <View
+        style={{
+          borderRadius: 14,
+          borderCurve: "continuous",
+          backgroundColor: theme.accentLight,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.separator,
+          padding: 12,
+          gap: 10,
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <AppSymbol name="checkmark.shield" size={16} color={theme.warning} />
+          <Text style={{ flex: 1, color: theme.text, fontSize: 15, fontWeight: "800" }} numberOfLines={1}>
+            {outcome ? "授权已处理" : "需要授权"}{item.permission.toolName ? ` · ${item.permission.toolName}` : ""}
+          </Text>
+        </View>
         {item.permission.context ? (
           <Text selectable style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
             {item.permission.context}
           </Text>
         ) : null}
         {item.permission.toolInput ? <CodeBlock label="请求内容" code={item.permission.toolInput} theme={theme} maxLines={5} /> : null}
+        {permissionError ? (
+          <Text style={{ color: theme.error, fontSize: 12, fontWeight: "700" }}>
+            {permissionError}
+          </Text>
+        ) : null}
         {outcome ? (
           <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
             {options.find((option) => option.id === selectedOptionId)?.label ??
@@ -483,13 +1367,16 @@ function TimelineItemView({
                   style={({ pressed }) => ({
                     minWidth: options.length > 2 ? "47%" : undefined,
                     flexGrow: 1,
-                    borderRadius: 9,
+                    borderRadius: 10,
+                    borderCurve: "continuous",
                     paddingVertical: 10,
                     paddingHorizontal: 12,
                     alignItems: "center",
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: isAllow ? "transparent" : isDeny ? theme.error : theme.separator,
                     backgroundColor: isAllow
                       ? pressed ? theme.accentSecondary : theme.accent
-                      : pressed ? theme.bgInput : theme.bgCard,
+                      : pressed ? theme.bgInput : theme.bg,
                   })}
                 >
                   <Text style={{ color: isAllow ? "#fff" : isDeny ? theme.error : theme.textSecondary, fontWeight: "700" }}>
@@ -526,6 +1413,7 @@ export function AgentConversationScreen({
   const insets = useSafeAreaInsets();
   const conversation = workspace.getConversation(conversationId);
   const timeline = workspace.getTimeline(conversationId);
+  const visibleTimeline = useMemo(() => dedupeTimelineItems(timeline), [timeline]);
   const timelineRef = useRef<ScrollView>(null);
   const [text, setText] = useState("");
   const [model, setModel] = useState<string | undefined>(conversation?.model);
@@ -540,6 +1428,46 @@ export function AgentConversationScreen({
   const meta = visibleConversationStatus(conversation?.status, theme);
   const permission = permissionMeta(permissionMode, theme);
   const canSend = Boolean(text.trim() || attachments.length > 0);
+  const runtimeMenuActions = useMemo(
+    () => [
+      ...MODEL_OPTIONS.map((option) => ({
+        id: `model:${option.value ?? DEFAULT_OPTION_ID}`,
+        title: `模型 · ${option.label}`,
+        image: "square.stack.3d.up",
+        state: option.value === model ? "on" as const : "off" as const,
+      })),
+      ...EFFORT_OPTIONS.map((option) => ({
+        id: `effort:${option.value ?? DEFAULT_OPTION_ID}`,
+        title: `推理强度 · ${option.label}`,
+        image: "textformat.size.larger",
+        state: option.value === effort ? "on" as const : "off" as const,
+      })),
+    ],
+    [effort, model],
+  );
+  const timelineAutoScrollKey = useMemo(
+    () =>
+      visibleTimeline
+        .map((item) => {
+          const tool = item.toolCall;
+          return [
+            item.id,
+            item.updatedAt ?? item.createdAt,
+            item.text?.length ?? 0,
+            tool?.output?.length ?? 0,
+            item.isStreaming ? 1 : 0,
+          ].join(":");
+        })
+        .join("|"),
+    [visibleTimeline],
+  );
+
+  useEffect(() => {
+    if (visibleTimeline.length === 0) return;
+    requestAnimationFrame(() => {
+      timelineRef.current?.scrollToEnd({ animated: true });
+    });
+  }, [timelineAutoScrollKey, visibleTimeline.length]);
 
   const send = useCallback(() => {
     const value = text.trim();
@@ -684,7 +1612,7 @@ export function AgentConversationScreen({
             {conversation.title || "Agent"}
           </Text>
           <Text style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-            {[conversation.provider, shortPath(conversation.cwd)].filter(Boolean).join(" · ")}
+            {[displayProvider(conversation.provider), shortPath(conversation.cwd)].filter(Boolean).join(" · ")}
           </Text>
         </View>
         {running ? <ActivityIndicator size="small" color={theme.accent} /> : null}
@@ -720,7 +1648,7 @@ export function AgentConversationScreen({
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => timelineRef.current?.scrollToEnd({ animated: true })}
       >
-        {timeline.length === 0 ? (
+        {visibleTimeline.length === 0 ? (
           <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.bgCard, padding: 18, alignItems: "center", gap: 8 }}>
             <AppSymbol name="sparkles" size={24} color={theme.accent} />
             <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }}>开始一个 Agent 对话</Text>
@@ -728,13 +1656,16 @@ export function AgentConversationScreen({
               发送 prompt 后，回复、代码、工具调用和权限请求都会在这里按时间线展示。
             </Text>
           </View>
-        ) : timeline.map((item) => (
+        ) : visibleTimeline.map((item) => (
           <TimelineItemView
             key={item.id}
             item={item}
             theme={theme}
             onPermission={(requestId, outcome, optionId) =>
               workspace.respondPermission(conversation.id, requestId, outcome, optionId)
+            }
+            onStructuredInput={(requestId, answers) =>
+              workspace.respondStructuredInput(conversation.id, requestId, answers)
             }
           />
         ))}
@@ -862,47 +1793,31 @@ export function AgentConversationScreen({
               </View>
             </MenuView>
             <MenuView
-              actions={menuActions(MODEL_OPTIONS, model)}
-              onPressAction={({ nativeEvent }) => setModel(valueFromMenuId<string>(nativeEvent.event))}
+              actions={runtimeMenuActions}
+              onPressAction={({ nativeEvent }) => {
+                const event = nativeEvent.event;
+                if (event.startsWith("model:")) {
+                  setModel(valueFromMenuId<string>(event.slice("model:".length)));
+                }
+                if (event.startsWith("effort:")) {
+                  setEffort(valueFromMenuId<AgentReasoningEffort>(event.slice("effort:".length)));
+                }
+              }}
             >
               <View
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
-                  gap: 5,
+                  gap: 6,
                   borderRadius: 999,
-                  paddingHorizontal: 9,
+                  paddingHorizontal: 10,
                   paddingVertical: 7,
                   backgroundColor: theme.bgInput,
-                  width: 86,
+                  maxWidth: 160,
                 }}
               >
-                <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700" }} numberOfLines={1}>
-                  {formatModel(model)}
-                </Text>
-                <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
-              </View>
-            </MenuView>
-            <MenuView
-              actions={menuActions(EFFORT_OPTIONS, effort)}
-              onPressAction={({ nativeEvent }) =>
-                setEffort(valueFromMenuId<AgentReasoningEffort>(nativeEvent.event))
-              }
-            >
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 4,
-                  borderRadius: 999,
-                  paddingHorizontal: 9,
-                  paddingVertical: 7,
-                  backgroundColor: theme.bgInput,
-                  width: 58,
-                }}
-              >
-                <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700" }} numberOfLines={1}>
-                  {formatEffort(effort)}
+                <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
+                  {formatRuntime(model, effort)}
                 </Text>
                 <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
               </View>

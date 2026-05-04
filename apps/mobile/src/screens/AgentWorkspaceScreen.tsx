@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Swipeable } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
@@ -68,6 +69,8 @@ const PROVIDER_META: Record<AgentProvider, { label: string; subtitle: string }> 
   custom: { label: "Custom", subtitle: "自定义 ACP adapter" },
 };
 
+const HIDDEN_AGENT_PROJECT_KEYS = "@linkshell/agent-hidden-projects:v1";
+
 interface AgentProjectItem {
   id: string;
   serverUrl: string;
@@ -98,6 +101,10 @@ function normalizeProvider(provider: string | null | undefined): AgentProvider |
   return provider === "codex" || provider === "claude" || provider === "custom"
     ? provider
     : undefined;
+}
+
+function isGatewayHostOnline(session: GatewayHostSession): boolean {
+  return session.hasHost === true && (!session.state || session.state === "active");
 }
 
 function SectionTitle({ children, theme }: { children: React.ReactNode; theme: Theme }) {
@@ -173,6 +180,22 @@ function projectPathKey(serverUrl: string, cwd: string): string {
   return [normalizeServerUrl(serverUrl), cwd.trim()].join("\u0000");
 }
 
+async function loadHiddenAgentProjectKeys(): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(HIDDEN_AGENT_PROJECT_KEYS);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((item): item is string => typeof item === "string" && item.length > 0));
+  } catch {
+    return new Set();
+  }
+}
+
+async function saveHiddenAgentProjectKeys(keys: Set<string>): Promise<void> {
+  await AsyncStorage.setItem(HIDDEN_AGENT_PROJECT_KEYS, JSON.stringify([...keys]));
+}
+
 function uniqueServers(
   saved: SavedServer[],
   urls: (string | undefined | null)[],
@@ -230,14 +253,22 @@ export function AgentWorkspaceScreen({
   const [hiddenProjectKeys, setHiddenProjectKeys] = useState<Set<string>>(() => new Set());
   const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
 
+  useEffect(() => {
+    let cancelled = false;
+    loadHiddenAgentProjectKeys()
+      .then((keys) => {
+        if (!cancelled) setHiddenProjectKeys(keys);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const onlineSessions = useMemo(
     () =>
       allSessions.filter((session) =>
-        session.status === "connected" ||
-        session.status === "connecting" ||
-        session.status === "reconnecting" ||
-        session.status === "disconnected" ||
-        session.status === "host_disconnected",
+        session.status === "connected",
       ),
     [allSessions],
   );
@@ -303,7 +334,7 @@ export function AgentWorkspaceScreen({
         if (cancelled) return;
         const nextHosts = [...deviceResults, ...officialResults].flatMap((result) =>
             result.status === "fulfilled"
-              ? result.value.filter((session) => session.id && session.hasHost !== false)
+              ? result.value.filter((session) => session.id && isGatewayHostOnline(session))
               : [],
         );
         const byKey = new Map<string, GatewayHostSession>();
@@ -400,6 +431,7 @@ export function AgentWorkspaceScreen({
       const latestConversation =
         latestByExactProject.get(currentExactKey) ??
         latestByPath.get(pathKey);
+      if (!latestConversation) continue;
       byProject.set(pathKey, {
         id: pathKey,
         serverUrl: target?.serverUrl ?? project.serverUrl,
@@ -434,6 +466,7 @@ export function AgentWorkspaceScreen({
           latestConversation,
         });
       } else {
+        if (!latestConversation) continue;
         byProject.set(pathKey, {
           id: pathKey,
           serverUrl: target.serverUrl,
@@ -592,6 +625,16 @@ export function AgentWorkspaceScreen({
         sessionId: selectedTarget.sessionId,
         cwd: effectiveCwd,
       }).catch(() => {});
+      const exactKey = projectKey(selectedTarget.serverUrl, selectedTarget.sessionId, effectiveCwd);
+      const pathKey = projectPathKey(selectedTarget.serverUrl, effectiveCwd);
+      setHiddenProjectKeys((prev) => {
+        if (!prev.has(exactKey) && !prev.has(pathKey)) return prev;
+        const next = new Set(prev);
+        next.delete(exactKey);
+        next.delete(pathKey);
+        saveHiddenAgentProjectKeys(next).catch(() => {});
+        return next;
+      });
       setCreateVisible(false);
       onOpenConversation(result.conversationId);
     } catch (error) {
@@ -658,7 +701,13 @@ export function AgentWorkspaceScreen({
           onPress: () => {
             const key = projectKey(project.serverUrl, project.sessionId, project.cwd);
             const pathKey = projectPathKey(project.serverUrl, project.cwd);
-            setHiddenProjectKeys((prev) => new Set(prev).add(key).add(pathKey));
+            setHiddenProjectKeys((prev) => {
+              const next = new Set(prev);
+              next.add(key);
+              next.add(pathKey);
+              saveHiddenAgentProjectKeys(next).catch(() => {});
+              return next;
+            });
             setProjects((prev) => prev.filter((item) => item.id !== project.project?.id));
             const tasks: Promise<unknown>[] = [];
             if (project.project) tasks.push(removeProject(project.project.id));
@@ -762,7 +811,7 @@ export function AgentWorkspaceScreen({
                   还没有项目
                 </Text>
                 <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
-                  连接 Mac 后会自动显示当前工作目录，也可以从上方手动新建。
+                  新建 Agent 对话后，这里会按项目显示最近的会话。
                 </Text>
               </View>
             ) : projectItems.map((project) => {

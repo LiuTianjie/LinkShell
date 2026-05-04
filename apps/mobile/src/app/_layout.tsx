@@ -13,8 +13,7 @@ import { useAgentWorkspace } from "../hooks/useAgentWorkspace";
 import { useSessionManager } from "../hooks/useSessionManager";
 import type { SessionInfo } from "../hooks/useSessionManager";
 import { addToHistory, enrichHistory } from "../storage/history";
-import type { ProjectRecord } from "../storage/projects";
-import { touchProject, upsertProject } from "../storage/projects";
+import { upsertProject } from "../storage/projects";
 import { addServer } from "../storage/servers";
 import { ThemeProvider, useTheme } from "../theme";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
@@ -45,10 +44,6 @@ function AppInner() {
   const [connectionSheetVisible, setConnectionSheetVisible] = useState(false);
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
   const [folderPickerVisible, setFolderPickerVisible] = useState(false);
-  const [pendingProjectOpen, setPendingProjectOpen] = useState<{
-    sessionId: string;
-    cwd: string;
-  } | null>(null);
   const lastSavedSessionsRef = useRef(new Set<string>());
   const lastProjectSyncRef = useRef(new Map<string, string>());
 
@@ -266,59 +261,6 @@ function AppInner() {
     router.push("/session");
   }, [gatewayBaseUrl, manager, router]);
 
-  const handleOpenRecentProject = useCallback((record: ProjectRecord) => {
-    if (!record.cwd) return;
-    const target = record.serverUrl ?? gatewayBaseUrl;
-    if (target !== gatewayBaseUrl) setGatewayBaseUrl(target);
-    setConnectionSheetVisible(false);
-    manager.connectToSession(record.sessionId, target);
-    setPendingProjectOpen({ sessionId: record.sessionId, cwd: record.cwd });
-    touchProject({
-      serverUrl: target,
-      sessionId: record.sessionId,
-      cwd: record.cwd,
-      lastTerminalId: record.lastTerminalId,
-    })
-      .then(() => setSessionRefreshKey((key) => key + 1))
-      .catch(() => {});
-    router.push("/session");
-  }, [gatewayBaseUrl, manager, router]);
-
-  useEffect(() => {
-    if (!pendingProjectOpen) return;
-    const info = manager.sessions.get(pendingProjectOpen.sessionId);
-    if (!info) return;
-    if (manager.activeSessionId !== pendingProjectOpen.sessionId) {
-      manager.setActiveSessionId(pendingProjectOpen.sessionId);
-      return;
-    }
-    if (
-      info.status === "idle" ||
-      info.status === "claiming" ||
-      info.status === "connecting" ||
-      info.status === "reconnecting"
-    ) {
-      return;
-    }
-    if (info.status === "connected") {
-      const existingTerminal = [...info.terminals.values()].find(
-        (terminal) =>
-          terminal.cwd === pendingProjectOpen.cwd &&
-          terminal.status === "running",
-      );
-      manager.spawnTerminal(pendingProjectOpen.cwd);
-      touchProject({
-        serverUrl: info.gatewayUrl,
-        sessionId: pendingProjectOpen.sessionId,
-        cwd: pendingProjectOpen.cwd,
-        lastTerminalId: existingTerminal?.terminalId ?? info.activeTerminalId ?? undefined,
-      })
-        .then(() => setSessionRefreshKey((key) => key + 1))
-        .catch(() => {});
-    }
-    setPendingProjectOpen(null);
-  }, [manager, manager.activeSessionId, manager.sessions, pendingProjectOpen]);
-
   const handleDisconnectSession = useCallback((sessionId: string) => {
     manager.disconnectSession(sessionId);
     if (manager.sessions.size <= 1) {
@@ -354,7 +296,6 @@ function AppInner() {
     terminalTabs,
     handleClaim,
     handleConnectSession,
-    handleOpenRecentProject,
     handleDisconnectSession,
     handlePairingScanned,
     navigateTo,

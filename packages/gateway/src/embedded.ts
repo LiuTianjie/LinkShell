@@ -167,7 +167,7 @@ export function startEmbeddedGateway(
           .map((s) => ({
             id: s.id,
             state: s.state,
-            hasHost: !!s.host,
+            hasHost: !!s.host && s.host.socket.readyState === s.host.socket.OPEN,
             clientCount: s.clients.size,
             controllerId: s.controllerId ?? null,
             lastActivity: s.lastActivity,

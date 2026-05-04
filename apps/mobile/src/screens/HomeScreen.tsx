@@ -26,8 +26,7 @@ import { AppSymbol } from "../components/AppSymbol";
 import { useTheme, type Theme } from "../theme";
 import type { ConnectionRecord } from "../storage/history";
 import { loadHistory, removeBySessionId } from "../storage/history";
-import type { ProjectRecord } from "../storage/projects";
-import { loadProjects, removeProjectsBySessionId } from "../storage/projects";
+import { removeProjectsBySessionId } from "../storage/projects";
 import { getDefaultServer, type SavedServer } from "../storage/servers";
 
 interface HomeScreenProps {
@@ -36,7 +35,6 @@ interface HomeScreenProps {
   connectionDetail?: string | null;
   onOpenConnectionSheet: () => void;
   onConnectSession: (sessionId: string, serverUrl?: string) => void;
-  onOpenRecentProject: (record: ProjectRecord) => void;
   refreshKey?: number;
 }
 
@@ -46,20 +44,17 @@ export function HomeScreen({
   connectionDetail,
   onOpenConnectionSheet,
   onConnectSession,
-  onOpenRecentProject,
   refreshKey,
 }: HomeScreenProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const [history, setHistory] = useState<ConnectionRecord[]>([]);
-  const [recentProjects, setRecentProjects] = useState<ProjectRecord[]>([]);
   const [defaultServer, setDefaultServer] = useState<SavedServer | undefined>();
   const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
 
   const refresh = useCallback(async () => {
-    const [recent, projects, server] = await Promise.all([
+    const [recent, server] = await Promise.all([
       loadHistory(),
-      loadProjects(),
       getDefaultServer(),
     ]);
     const seen = new Set<string>();
@@ -70,7 +65,6 @@ export function HomeScreen({
     });
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setHistory(deduped.slice(0, 5));
-    setRecentProjects(projects.slice(0, 3));
     setDefaultServer(server);
   }, []);
 
@@ -101,17 +95,8 @@ export function HomeScreen({
       removeProjectsBySessionId(sessionId),
     ]);
     setHistory((prev) => prev.filter((r) => r.sessionId !== sessionId));
-    setRecentProjects((prev) => prev.filter((r) => r.sessionId !== sessionId));
     swipeableRefs.current.delete(sessionId);
   }, []);
-
-  const handleOpenProject = useCallback(
-    (record: ProjectRecord) => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      onOpenRecentProject(record);
-    },
-    [onOpenRecentProject],
-  );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -355,53 +340,6 @@ export function HomeScreen({
           创建新连接或恢复最近的终端会话。
         </Text>
 
-        {/* Recent Projects */}
-        {recentProjects.length > 0 ? (
-          <>
-            <Text
-              style={{
-                fontSize: 13,
-                fontWeight: "400",
-                color: theme.textTertiary,
-                textTransform: "uppercase",
-                paddingHorizontal: 36,
-                paddingTop: 28,
-                paddingBottom: 6,
-              }}
-            >
-              最近项目
-            </Text>
-            <View
-              style={{
-                marginHorizontal: 20,
-                backgroundColor: theme.bgCard,
-                borderRadius: 12,
-                borderCurve: "continuous" as const,
-                overflow: "hidden",
-                ...(theme.mode === "light"
-                  ? {
-                      shadowColor: "#000",
-                      shadowOffset: { width: 0, height: 1 },
-                      shadowOpacity: 0.06,
-                      shadowRadius: 4,
-                      elevation: 2,
-                    }
-                  : {}),
-              }}
-            >
-              {recentProjects.map((item, index) => (
-                <ProjectRow
-                  key={`${item.serverUrl}:${item.sessionId}:${item.cwd}`}
-                  item={item}
-                  index={index}
-                  theme={theme}
-                  onPress={() => handleOpenProject(item)}
-                />
-              ))}
-            </View>
-          </>
-        ) : null}
-
         {/* Recent Sessions */}
         <Text
           style={{
@@ -500,71 +438,6 @@ export function HomeScreen({
         )}
       </ScrollView>
     </View>
-  );
-}
-
-function ProjectRow({
-  item,
-  index,
-  theme,
-  onPress,
-}: {
-  item: ProjectRecord;
-  index: number;
-  theme: Theme;
-  onPress: () => void;
-}) {
-  const cwd = item.cwd;
-  return (
-    <Pressable
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        gap: 12,
-        backgroundColor: pressed ? theme.bgInput : "transparent",
-        borderTopWidth: index > 0 ? StyleSheet.hairlineWidth : 0,
-        borderTopColor: theme.separator,
-      })}
-      onPress={onPress}
-    >
-      <View
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 7,
-          borderCurve: "continuous",
-          backgroundColor: theme.accentLight,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <AppSymbol name="folder.fill" size={16} color={theme.accent} />
-      </View>
-      <View style={{ flex: 1, gap: 2, minWidth: 0 }}>
-        <Text style={{ color: theme.text, fontSize: 15 }} numberOfLines={1}>
-          {item.projectName || pathName(cwd) || item.sessionId.slice(0, 8)}
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-          <Text
-            style={{ color: theme.textTertiary, fontSize: 13, flexShrink: 1 }}
-            numberOfLines={1}
-          >
-            {item.hostname ?? safeHost(item.serverUrl)}
-          </Text>
-          <Text style={{ color: theme.textTertiary, fontSize: 13 }}>·</Text>
-          <Text
-            style={{ color: theme.textTertiary, fontSize: 13, flex: 1 }}
-            numberOfLines={1}
-            ellipsizeMode="middle"
-          >
-            {shortPath(cwd)}
-          </Text>
-        </View>
-      </View>
-      <AppSymbol name="chevron.right" size={10} color={theme.textTertiary} />
-    </Pressable>
   );
 }
 
@@ -685,21 +558,6 @@ function safeHost(url: string): string {
   } catch {
     return url;
   }
-}
-
-function pathName(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
-  if (!trimmed || trimmed === "~" || trimmed === "/") return trimmed;
-  return trimmed.split("/").filter(Boolean).pop() ?? trimmed;
-}
-
-function shortPath(path: string): string {
-  if (path.length <= 42) return path;
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length < 3) return path;
-  const tail = parts.slice(-2).join("/");
-  if (path.startsWith("/")) return `/.../${tail}`;
-  return `.../${tail}`;
 }
 
 function platformIcon(platform: string | undefined): string {

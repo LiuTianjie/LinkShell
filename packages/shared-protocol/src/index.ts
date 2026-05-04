@@ -464,14 +464,103 @@ export const agentV2StatusSchema = z.enum([
   "error",
 ]);
 
+export const agentV2TimelineKindSchema = z.enum([
+  "chat",
+  "thinking",
+  "tool_activity",
+  "command_execution",
+  "file_change",
+  "subagent_action",
+  "plan",
+  "user_input_prompt",
+  "review",
+  "context_compaction",
+]);
+
+export const agentV2FileChangeEntrySchema = z.object({
+  path: z.string().min(1),
+  kind: z.string().optional(),
+  added: z.number().int().nonnegative().optional(),
+  removed: z.number().int().nonnegative().optional(),
+});
+
+export const agentV2FileChangeSchema = z.object({
+  entries: z.array(agentV2FileChangeEntrySchema).default([]),
+  diff: z.string().optional(),
+  summary: z.string().optional(),
+  changeSetId: z.string().optional(),
+  status: z.enum(["pending", "running", "completed", "failed"]).optional(),
+});
+
+export const agentV2CommandExecutionSchema = z.object({
+  command: z.string().optional(),
+  cwd: z.string().optional(),
+  output: z.string().optional(),
+  exitCode: z.number().int().nullable().optional(),
+  status: z.enum(["pending", "running", "completed", "failed"]).optional(),
+});
+
+export const agentV2StructuredInputOptionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string().optional(),
+});
+
+export const agentV2StructuredInputQuestionSchema = z.object({
+  id: z.string().min(1),
+  header: z.string().optional(),
+  question: z.string().min(1),
+  isOther: z.boolean().optional(),
+  isSecret: z.boolean().optional(),
+  selectionLimit: z.number().int().positive().optional(),
+  options: z.array(agentV2StructuredInputOptionSchema).optional(),
+});
+
+export const agentV2StructuredInputSchema = z.object({
+  requestId: z.string().min(1),
+  questions: z.array(agentV2StructuredInputQuestionSchema).default([]),
+});
+
+export const agentV2SubagentRefSchema = z.object({
+  threadId: z.string().min(1),
+  agentId: z.string().optional(),
+  nickname: z.string().optional(),
+  role: z.string().optional(),
+  model: z.string().optional(),
+  prompt: z.string().optional(),
+});
+
+export const agentV2SubagentStateSchema = z.object({
+  threadId: z.string().min(1),
+  status: z.string().min(1),
+  message: z.string().optional(),
+});
+
+export const agentV2SubagentActionSchema = z.object({
+  tool: z.string().min(1),
+  status: z.string().min(1),
+  prompt: z.string().optional(),
+  model: z.string().optional(),
+  receiverThreadIds: z.array(z.string().min(1)).default([]),
+  receiverAgents: z.array(agentV2SubagentRefSchema).default([]),
+  agentStates: z.record(agentV2SubagentStateSchema).default({}),
+});
+
 export const agentV2TimelineItemSchema = z.object({
   id: z.string().min(1),
   conversationId: z.string().min(1),
   type: z.enum(["message", "tool_call", "plan", "permission", "status", "error"]),
+  kind: agentV2TimelineKindSchema.optional(),
+  turnId: z.string().optional(),
+  itemId: z.string().optional(),
   role: z.enum(["user", "assistant", "system"]).optional(),
   content: z.array(agentContentBlockSchema).optional(),
   text: z.string().optional(),
   toolCall: agentToolCallSchema.optional(),
+  commandExecution: agentV2CommandExecutionSchema.optional(),
+  fileChange: agentV2FileChangeSchema.optional(),
+  subagent: agentV2SubagentActionSchema.optional(),
+  structuredInput: agentV2StructuredInputSchema.optional(),
   plan: z.array(z.object({
     id: z.string().min(1),
     text: z.string().min(1),
@@ -550,6 +639,12 @@ export const agentV2PermissionRespondPayloadSchema = z.object({
   requestId: z.string().min(1),
   outcome: z.enum(["allow", "deny", "cancelled"]),
   optionId: z.string().optional(),
+});
+
+export const agentV2StructuredInputRespondPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  requestId: z.string().min(1),
+  answers: z.record(z.array(z.string())),
 });
 
 export const agentV2SnapshotRequestPayloadSchema = z.object({
@@ -646,6 +741,7 @@ export const protocolMessageSchemas = {
   "agent.v2.cancel": agentV2CancelPayloadSchema,
   "agent.v2.permission.respond": agentV2PermissionRespondPayloadSchema,
   "agent.v2.permission.request": agentV2PermissionRequestPayloadSchema,
+  "agent.v2.structured_input.respond": agentV2StructuredInputRespondPayloadSchema,
   "agent.v2.snapshot.request": agentV2SnapshotRequestPayloadSchema,
   "agent.v2.snapshot": agentV2SnapshotPayloadSchema,
   "agent.v2.event": agentV2EventPayloadSchema,
