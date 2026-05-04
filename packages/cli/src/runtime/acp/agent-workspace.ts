@@ -763,8 +763,10 @@ export class AgentWorkspaceProxy {
 
   private async initialize(): Promise<void> {
     if (this.initialized) return;
-    // trigger capability report immediately, lazy-start providers on first use
     this.initialized = true;
+    // Eagerly start all detected providers so capabilities report real status
+    const startPromises = this.input.availableProviders.map((p) => this.ensureProviderClient(p));
+    await Promise.allSettled(startPromises);
     this.status = "idle";
     this.error = undefined;
     this.sendCapabilities();
