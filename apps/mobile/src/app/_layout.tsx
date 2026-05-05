@@ -75,7 +75,7 @@ function AppInner() {
         if (url.host === "agent") {
           const conversationId = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
           if (conversationId) {
-            router.push({
+            router.replace({
               pathname: "/agent/[conversationId]",
               params: { conversationId },
             });

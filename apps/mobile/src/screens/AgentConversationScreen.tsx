@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Alert,
   Clipboard,
-  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -2075,9 +2074,9 @@ export function AgentConversationScreen({
   const timelineViewportHeightRef = useRef(0);
   const initialScrollConversationRef = useRef<string | null>(null);
   const pendingInitialScrollConversationRef = useRef<string | null>(null);
-  const timelineScrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shouldStickToEndOnContentSizeRef = useRef(false);
+  const timelineScrollRetryTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [isTimelineNearBottom, setIsTimelineNearBottom] = useState(true);
-  const [isTimelineScrollable, setIsTimelineScrollable] = useState(false);
   const [hasNewOutput, setHasNewOutput] = useState(false);
   const [text, setText] = useState("");
   const [model, setModel] = useState<string | undefined>(conversation?.model);
@@ -2185,7 +2184,6 @@ export function AgentConversationScreen({
         .join("|"),
     [visibleTimeline],
   );
-
   const handleTimelineScroll = useCallback((event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     timelineContentHeightRef.current = contentSize.height;
@@ -2194,42 +2192,38 @@ export function AgentConversationScreen({
     const nearBottom = distanceFromBottom < 96;
     timelineNearBottomRef.current = nearBottom;
     setIsTimelineNearBottom(nearBottom);
-    if (nearBottom) setHasNewOutput(false);
-  }, []);
-
-  const updateTimelineScrollable = useCallback(() => {
-    const nextScrollable = timelineContentHeightRef.current > timelineViewportHeightRef.current + 1;
-    setIsTimelineScrollable((current) => current === nextScrollable ? current : nextScrollable);
-    return nextScrollable;
-  }, []);
-
-  const scrollTimelineToTop = useCallback(() => {
-    const list = timelineRef.current as unknown as { scrollToOffset?: (params: { offset: number; animated?: boolean }) => void };
-    list?.scrollToOffset?.({ offset: 0, animated: false });
+    if (nearBottom) {
+      shouldStickToEndOnContentSizeRef.current = false;
+      setHasNewOutput(false);
+    }
   }, []);
 
   const scrollTimelineToEnd = useCallback((animated = true, markNearBottom = true) => {
     if (markNearBottom) {
       timelineNearBottomRef.current = true;
+      shouldStickToEndOnContentSizeRef.current = true;
       setIsTimelineNearBottom(true);
       setHasNewOutput(false);
     }
-    if (timelineScrollSettleTimerRef.current) {
-      clearTimeout(timelineScrollSettleTimerRef.current);
-      timelineScrollSettleTimerRef.current = null;
+    timelineScrollRetryTimersRef.current.forEach(clearTimeout);
+    timelineScrollRetryTimersRef.current = [];
+    const scroll = (scrollAnimated: boolean) => timelineRef.current?.scrollToEnd({ animated: scrollAnimated });
+    requestAnimationFrame(() => {
+      scroll(animated);
+    });
+    if (markNearBottom) {
+      timelineScrollRetryTimersRef.current = [80, 180, 360].map((delay) =>
+        setTimeout(() => scroll(false), delay),
+      );
     }
-    if (!updateTimelineScrollable()) {
-      scrollTimelineToTop();
-    }
-    const scroll = (scrollAnimated: boolean) =>
-      timelineRef.current?.scrollToEnd({ animated: scrollAnimated });
-    requestAnimationFrame(() => scroll(animated));
-    InteractionManager.runAfterInteractions(() => scroll(false));
-    timelineScrollSettleTimerRef.current = setTimeout(() => {
-      scroll(false);
-      timelineScrollSettleTimerRef.current = null;
-    }, animated ? 260 : 80);
-  }, [scrollTimelineToTop, updateTimelineScrollable]);
+  }, []);
+
+  const cancelTimelineAutoScroll = useCallback(() => {
+    shouldStickToEndOnContentSizeRef.current = false;
+    pendingInitialScrollConversationRef.current = null;
+    timelineScrollRetryTimersRef.current.forEach(clearTimeout);
+    timelineScrollRetryTimersRef.current = [];
+  }, []);
 
   const renderTimelineItem = useCallback(({ item, index }: LegendListRenderItemProps<AgentTimelineItem>) => {
     const previous = visibleTimeline[index - 1];
@@ -2285,8 +2279,8 @@ export function AgentConversationScreen({
       return;
     }
     setHasNewOutput(false);
-    scrollTimelineToEnd(false);
-  }, [scrollTimelineToEnd, timelineAutoScrollKey, visibleTimeline.length]);
+    shouldStickToEndOnContentSizeRef.current = true;
+  }, [timelineAutoScrollKey, visibleTimeline.length]);
 
   useEffect(() => {
     if (!conversation || visibleTimeline.length === 0) return;
@@ -2294,24 +2288,10 @@ export function AgentConversationScreen({
     initialScrollConversationRef.current = conversation.id;
     pendingInitialScrollConversationRef.current = conversation.id;
     timelineNearBottomRef.current = true;
+    shouldStickToEndOnContentSizeRef.current = true;
     setIsTimelineNearBottom(true);
     setHasNewOutput(false);
-    const firstTimer = setTimeout(() => scrollTimelineToEnd(false), 0);
-    const secondTimer = setTimeout(() => scrollTimelineToEnd(false), 120);
-    const thirdTimer = setTimeout(() => scrollTimelineToEnd(false), 360);
-    const fourthTimer = setTimeout(() => {
-      scrollTimelineToEnd(false);
-      if (pendingInitialScrollConversationRef.current === conversation.id) {
-        pendingInitialScrollConversationRef.current = null;
-      }
-    }, 760);
-    return () => {
-      clearTimeout(firstTimer);
-      clearTimeout(secondTimer);
-      clearTimeout(thirdTimer);
-      clearTimeout(fourthTimer);
-    };
-  }, [conversation, scrollTimelineToEnd, visibleTimeline.length]);
+  }, [conversation, visibleTimeline.length]);
 
   const send = useCallback(() => {
     const value = text.trim();
@@ -2323,7 +2303,6 @@ export function AgentConversationScreen({
         setText("");
         setAttachments([]);
         scrollTimelineToEnd(true);
-        setTimeout(() => scrollTimelineToEnd(false), 320);
       };
       if (commandMatch.command.destructive) {
         Alert.alert(
@@ -2353,7 +2332,6 @@ export function AgentConversationScreen({
     setText("");
     setAttachments([]);
     scrollTimelineToEnd(true);
-    setTimeout(() => scrollTimelineToEnd(false), 320);
   }, [attachments, availableCommands, canSend, conversation, currentCollaborationMode, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToEnd, text, workspace]);
 
   const executeSlashCommand = useCallback((command: AgentCommandDescriptor, args = "") => {
@@ -2365,7 +2343,6 @@ export function AgentConversationScreen({
       setAttachments([]);
       Haptics.selectionAsync().catch(() => {});
       scrollTimelineToEnd(true);
-      setTimeout(() => scrollTimelineToEnd(false), 320);
     };
     if (command.destructive) {
       Alert.alert(
@@ -2663,39 +2640,34 @@ export function AgentConversationScreen({
         <LegendList
           ref={timelineRef}
           data={visibleTimeline}
+          style={{ flex: 1 }}
           keyExtractor={(item) => item.id}
           renderItem={renderTimelineItem}
           ListEmptyComponent={timelineEmpty}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
           contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16, paddingTop: insets.top + 60, paddingBottom: 18 }}
-          contentInsetAdjustmentBehavior="automatic"
+          contentInsetAdjustmentBehavior="never"
+          automaticallyAdjustContentInsets={false}
+          scrollIndicatorInsets={{ top: insets.top + 60, bottom: 18 }}
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
           onLayout={(event) => {
             timelineViewportHeightRef.current = event.nativeEvent.layout.height;
-            if (!updateTimelineScrollable()) scrollTimelineToTop();
           }}
           onScroll={handleTimelineScroll}
+          onTouchStart={cancelTimelineAutoScroll}
+          onScrollBeginDrag={cancelTimelineAutoScroll}
           scrollEventThrottle={16}
           estimatedItemSize={96}
           drawDistance={420}
           maintainVisibleContentPosition={false}
           onContentSizeChange={(_width, height) => {
             timelineContentHeightRef.current = height;
-            const shouldStickToEnd = timelineNearBottomRef.current;
-            const scrollable = updateTimelineScrollable();
-            if (!scrollable) {
-              scrollTimelineToTop();
-              if (conversation && pendingInitialScrollConversationRef.current === conversation.id) {
-                pendingInitialScrollConversationRef.current = null;
-              }
-              return;
-            }
-            if (conversation && pendingInitialScrollConversationRef.current === conversation.id) {
-              scrollTimelineToEnd(false);
-              return;
-            }
-            if (shouldStickToEnd) {
+            const shouldInitialScroll = Boolean(
+              conversation && pendingInitialScrollConversationRef.current === conversation.id,
+            );
+            if (shouldInitialScroll || shouldStickToEndOnContentSizeRef.current) {
+              if (shouldInitialScroll) pendingInitialScrollConversationRef.current = null;
               scrollTimelineToEnd(false);
             }
           }}

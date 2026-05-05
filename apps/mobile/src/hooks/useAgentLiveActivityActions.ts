@@ -37,14 +37,8 @@ export function useAgentLiveActivityActions(workspace: AgentWorkspaceHandle) {
       const key = actionKey(action);
       if (completedActionsRef.current.includes(key)) continue;
       const conversation = workspace.getConversation(action.conversationId);
-      const hasSourceSession = conversation
-        ? workspace.connectedSessions.some((session) =>
-            session.sessionId === action.sessionId ||
-            session.sessionId === conversation.sessionId,
-          )
-        : false;
 
-      if (!conversation || !hasSourceSession) {
+      if (!conversation || workspace.connectedSessions.length === 0) {
         if (now - action.queuedAt < ACTION_RETRY_TTL_MS) {
           remaining.push({ ...action, attempts: action.attempts + 1 });
         }
