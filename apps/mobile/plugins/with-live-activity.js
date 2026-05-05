@@ -83,6 +83,15 @@ function withLiveActivity(config) {
   <string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key>
   <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>LinkShell needs local network access to send Live Activity actions to your local gateway.</string>
   <key>NSExtension</key>
   <dict>
     <key>NSExtensionPointIdentifier</key>

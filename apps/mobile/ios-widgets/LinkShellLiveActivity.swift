@@ -56,7 +56,7 @@ struct LinkShellLiveActivity: Widget {
             } minimal: {
                 CompactStatusDot(status: state.status, hasPermission: state.hasPermission)
             }
-            .widgetURL(agentURL(state: state, ext: ext))
+            .widgetURL(state.hasPermission ? nil : agentURL(state: state, ext: ext))
         }
     }
 }
@@ -85,7 +85,7 @@ struct AgentLockScreenView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .widgetURL(agentURL(state: state, ext: ext))
+        .widgetURL(state.hasPermission ? nil : agentURL(state: state, ext: ext))
     }
 }
 

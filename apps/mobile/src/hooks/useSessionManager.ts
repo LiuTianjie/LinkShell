@@ -632,14 +632,14 @@ export function useSessionManager(): SessionManagerHandle {
 
   const flushControlOutbound = (s: InternalSession) => {
     if (!s.socket || s.socket.readyState !== WebSocket.OPEN) {
-      console.warn("[LiveActivityAction] session flushControl skipped socket not open", {
+      console.warn("[SessionControl] flush skipped socket not open", {
         sessionId: s.sessionId,
         pendingControlCount: s.pendingControlOutbound.length,
       });
       return;
     }
     if (s.controllerId !== s.deviceId) {
-      console.warn("[LiveActivityAction] session flushControl skipped not controller", {
+      console.warn("[SessionControl] flush skipped not controller", {
         sessionId: s.sessionId,
         deviceId: s.deviceId,
         controllerId: s.controllerId,
@@ -649,7 +649,7 @@ export function useSessionManager(): SessionManagerHandle {
     }
     const queued = s.pendingControlOutbound.splice(0);
     s.pendingControlDedupeKeys.clear();
-    console.log("[LiveActivityAction] session flushControl sending", {
+    if (queued.length > 0) console.log("[SessionControl] flush sending", {
       sessionId: s.sessionId,
       count: queued.length,
       types: queued.map((item) => item.envelope.type),
@@ -706,12 +706,6 @@ export function useSessionManager(): SessionManagerHandle {
   };
 
   const requestControl = (s: InternalSession) => {
-    console.log("[LiveActivityAction] session request control", {
-      sessionId: s.sessionId,
-      deviceId: s.deviceId,
-      controllerId: s.controllerId,
-      socketOpen: s.socket?.readyState === WebSocket.OPEN,
-    });
     sendRaw(
       s,
       createEnvelope({
@@ -1265,7 +1259,7 @@ export function useSessionManager(): SessionManagerHandle {
         case "control.grant": {
           const p = parseTypedPayload("control.grant", envelope.payload);
           s.controllerId = p.deviceId;
-          console.log("[LiveActivityAction] session control grant", {
+          if (p.deviceId === s.deviceId && s.pendingControlOutbound.length > 0) console.log("[SessionControl] control grant", {
             sessionId: s.sessionId,
             deviceId: s.deviceId,
             controllerId: p.deviceId,

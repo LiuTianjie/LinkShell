@@ -484,6 +484,11 @@ wss.on(
         socket.close(4001, "unauthorized");
         return;
       }
+      if (!tokenOwns && authOwns && token) {
+        tokenManager.register(token);
+        tokenManager.bind(token, sessionId);
+        log("info", `bound authenticated device token to session ${sessionId}`);
+      }
     }
 
     const device = {
