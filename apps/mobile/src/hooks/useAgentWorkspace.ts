@@ -769,7 +769,7 @@ export function useAgentWorkspace(
                     ...(outcome ? { permissionOutcome: outcome } : {}),
                     permissionError: delivered
                       ? undefined
-                      : "授权响应未写回 Agent，请重新打开会话确认状态。",
+                      : "授权没有送达 Agent：这条请求可能已经过期或被其它入口处理。",
                   },
                   updatedAt: Date.now(),
                 };

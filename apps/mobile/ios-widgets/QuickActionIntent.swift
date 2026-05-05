@@ -57,44 +57,22 @@ struct QuickActionIntent: AppIntent {
         }
 
         NSLog("[LiveActivityAction] gateway respond ok sessionId=%@ conversationId=%@ requestId=%@ outcome=%@ protocol=%@", sessionId, conversationId, requestId, outcome, extended.permissionProtocol ?? "v2")
-
-        clearStoredPermission(extended: extended)
-
-        // Show the Agent as running again while the normal timeline update catches up.
+        // Gateway acceptance only means the request was forwarded to the host.
+        // The Live Activity permission is cleared only after the CLI confirms
+        // the Agent permission response was actually delivered.
         var updatedCount = 0
         for activity in Activity<LinkShellAttributes>.activities {
             var state = activity.content.state
             if state.sessionId == sessionId || state.conversationId == conversationId {
-                state.status = "running"
-                state.phaseLabel = "运行中"
+                state.phaseLabel = "授权已发送，等待确认"
                 state.updatedAt = Date().timeIntervalSince1970 * 1000
-                if !requestId.isEmpty {
-                    state.hasPermission = false
-                    state.permissionCount = 0
-                }
                 await activity.update(ActivityContent(state: state, staleDate: nil))
                 updatedCount += 1
             }
         }
-        NSLog("[LiveActivityAction] cleared live activity permission sessionId=%@ conversationId=%@ requestId=%@ updated=%d", sessionId, conversationId, requestId, updatedCount)
+        NSLog("[LiveActivityAction] marked live activity permission sent sessionId=%@ conversationId=%@ requestId=%@ updated=%d", sessionId, conversationId, requestId, updatedCount)
 
         return .result()
-    }
-
-    private func clearStoredPermission(extended: ExtendedActivityData) {
-        guard !requestId.isEmpty else { return }
-        var ext = LiveActivityStore.readExtendedData() ?? extended
-        guard ext.permissionRequestId == requestId || ext.conversationId == conversationId else {
-            NSLog("[LiveActivityAction] skip clearing stored permission requestId=%@ current=%@ conversationId=%@ currentConversationId=%@", requestId, ext.permissionRequestId, conversationId, ext.conversationId)
-            return
-        }
-        ext.permissionTitle = ""
-        ext.currentToolName = ""
-        ext.currentToolInput = ""
-        ext.permissionContext = ""
-        ext.permissionRequestId = ""
-        ext.permissionOptions = []
-        LiveActivityStore.writeExtendedData(ext)
     }
 
     private func sendPermissionResponse(extended: ExtendedActivityData) async -> (ok: Bool, status: Int, message: String) {

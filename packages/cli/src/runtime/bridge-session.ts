@@ -837,6 +837,19 @@ export class BridgeSession {
       case "permission.decision": {
         const p = envelope.payload as { requestId: string; decision: "allow" | "deny" };
         const result = this.resolvePendingPermission(p.requestId, p.decision, "permission.decision");
+        if (!result.resolved) {
+          this.sendPermissionSnapshot(
+            tid,
+            "thinking",
+            "permission not pending",
+            {
+              requestId: p.requestId,
+              outcome: p.decision,
+              source: "permission.decision",
+              delivered: false,
+            },
+          );
+        }
         process.stderr.write(
           `[bridge] permission decision request=${p.requestId} decision=${p.decision} resolved=${result.resolved} delivered=${result.delivered}\n`,
         );
