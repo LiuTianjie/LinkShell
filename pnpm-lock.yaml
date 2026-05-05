@@ -217,7 +217,7 @@ importers:
   packages/gateway:
     dependencies:
       '@linkshell/protocol':
-        specifier: workspace:^0.2.29
+        specifier: ^0.2.29
         version: link:../shared-protocol
       ws:
         specifier: ^8.18.1
