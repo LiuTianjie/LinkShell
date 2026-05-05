@@ -373,6 +373,19 @@ export async function loadAgentTimeline(conversationId: string): Promise<AgentTi
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((item) => item.id && item.conversationId === conversationId)
+      .map((item) => {
+        if (item.type !== "permission" || item.metadata?.permissionOutcome) return item;
+        return {
+          ...item,
+          metadata: {
+            ...(item.metadata ?? {}),
+            permissionLive: false,
+            permissionPending: false,
+            permissionExpired: true,
+            permissionError: undefined,
+          },
+        };
+      })
       .sort((a, b) => a.createdAt - b.createdAt)
       .slice(-MAX_TIMELINE_ITEMS);
   } catch {

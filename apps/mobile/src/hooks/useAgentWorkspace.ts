@@ -64,6 +64,14 @@ export interface AgentWorkspaceHandle {
       attachments?: AgentContentBlock[];
     },
   ) => void;
+  updateConversationSettings: (
+    conversationId: string,
+    settings: {
+      model?: string;
+      reasoningEffort?: AgentReasoningEffort;
+      permissionMode?: AgentPermissionMode;
+    },
+  ) => Promise<void>;
   cancel: (conversationId: string) => void;
   respondPermission: (
     conversationId: string,
@@ -128,7 +136,9 @@ function normalizeSnapshotItems(items: AgentTimelineItem[]): AgentTimelineItem[]
         ...item,
         metadata: {
           ...(item.metadata ?? {}),
+          permissionLive: false,
           permissionPending: false,
+          permissionExpired: true,
           permissionError: undefined,
         },
       };
@@ -544,6 +554,9 @@ export function useAgentWorkspace(
             ...(rawPermissionItem.metadata ?? {}),
             protocol: "v2",
             sessionId: envelope.sessionId,
+            permissionLive: true,
+            permissionExpired: false,
+            permissionPending: false,
           },
         };
         persistTimelineItem(permissionItem).catch(() => {});
@@ -584,6 +597,9 @@ export function useAgentWorkspace(
             protocol: "legacy",
             sessionId: envelope.sessionId,
             agentSessionId: payload.agentSessionId,
+            permissionLive: true,
+            permissionExpired: false,
+            permissionPending: false,
           },
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -640,6 +656,9 @@ export function useAgentWorkspace(
             protocol: "terminal",
             sessionId: envelope.sessionId,
             terminalId,
+            permissionLive: true,
+            permissionExpired: false,
+            permissionPending: false,
           },
           createdAt: topPermission.timestamp ?? Date.now(),
           updatedAt: Date.now(),
@@ -815,6 +834,31 @@ export function useAgentWorkspace(
     [manager],
   );
 
+  const updateConversationSettings = useCallback(
+    async (
+      conversationId: string,
+      settings: {
+        model?: string;
+        reasoningEffort?: AgentReasoningEffort;
+        permissionMode?: AgentPermissionMode;
+      },
+    ) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation) return;
+      const hasModel = Object.prototype.hasOwnProperty.call(settings, "model");
+      const hasEffort = Object.prototype.hasOwnProperty.call(settings, "reasoningEffort");
+      const hasPermission = Object.prototype.hasOwnProperty.call(settings, "permissionMode");
+      await persistConversation({
+        ...conversation,
+        model: hasModel ? settings.model : conversation.model,
+        reasoningEffort: hasEffort ? settings.reasoningEffort : conversation.reasoningEffort,
+        permissionMode: hasPermission ? settings.permissionMode : conversation.permissionMode,
+        lastActivityAt: conversation.lastActivityAt,
+      });
+    },
+    [persistConversation],
+  );
+
   const cancel = useCallback(
     (conversationId: string) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
@@ -925,6 +969,9 @@ export function useAgentWorkspace(
       const sourceSessionId = resolvePermissionSessionId(conversation, permissionItem);
       if (!sourceSessionId) {
         updatePermissionMetadata(conversationId, requestId, {
+          permissionLive: false,
+          permissionExpired: true,
+          permissionPending: false,
           permissionError: "授权未发送：设备连接已失效，请重新打开会话。",
         });
         return;
@@ -971,6 +1018,8 @@ export function useAgentWorkspace(
       }
       updatePermissionMetadata(conversationId, requestId, {
         permissionPending: true,
+        permissionLive: true,
+        permissionExpired: false,
         pendingOutcome: outcome,
         optionId,
         permissionError: undefined,
@@ -1034,6 +1083,7 @@ export function useAgentWorkspace(
       conversationsRef.current.find((item) => item.id === conversationId),
     getTimeline: (conversationId) => timelineRef.current.get(conversationId) ?? [],
     sendPrompt,
+    updateConversationSettings,
     cancel,
     respondPermission,
     respondStructuredInput,

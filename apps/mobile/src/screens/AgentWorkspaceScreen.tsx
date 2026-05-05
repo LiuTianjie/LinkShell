@@ -27,7 +27,7 @@ import type {
   AgentProvider,
   AgentProviderCapability,
 } from "../storage/agent-workspace";
-import { loadProjects, touchProject, type ProjectRecord } from "../storage/projects";
+import { loadProjects, removeProject, touchProject, type ProjectRecord } from "../storage/projects";
 import { loadServers, type SavedServer } from "../storage/servers";
 import { getDeviceToken } from "../storage/device-token";
 import { fetchMySessions, fetchOfficialGateways, getValidSession } from "../lib/supabase";
@@ -225,6 +225,10 @@ function conversationHiddenKey(conversationId: string): string {
   return `conversation:${conversationId}`;
 }
 
+function projectHiddenKey(project: AgentProjectGroup): string {
+  return `project:${project.id}`;
+}
+
 function shortConversationId(conversation: AgentConversationRecord): string {
   return (conversation.agentSessionId || conversation.id).replace(/^agent-remote-/, "").slice(0, 8);
 }
@@ -373,6 +377,78 @@ function StatusPill({ label, color, bg }: { label: string; color: string; bg: st
       </Text>
     </View>
   );
+}
+
+function SpinningRing({ color }: { color: string }) {
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 900,
+        useNativeDriver: true,
+      }),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [rotation]);
+
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
+  return (
+    <Animated.View
+      style={{
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        borderWidth: 1.5,
+        borderColor: color,
+        borderTopColor: "transparent",
+        transform: [{ rotate }],
+      }}
+    />
+  );
+}
+
+function ConversationStateIndicator({
+  conversation,
+  theme,
+}: {
+  conversation: AgentConversationRecord;
+  theme: Theme;
+}) {
+  if (conversation.status === "running") {
+    return <SpinningRing color={theme.accent} />;
+  }
+  if (conversation.status === "waiting_permission") {
+    return (
+      <View
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: theme.warning,
+        }}
+      />
+    );
+  }
+  if (conversation.status === "error") {
+    return (
+      <View
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: theme.error,
+        }}
+      />
+    );
+  }
+  return null;
 }
 
 async function loadHiddenAgentProjectKeys(): Promise<Set<string>> {
@@ -679,6 +755,7 @@ export function AgentWorkspaceScreen({
       const id = target
         ? deviceProjectKey(conversation.cwd, target.machineId ?? target.hostname ?? target.projectName, target.serverUrl)
         : deviceKey;
+      if (hiddenProjectKeys.has(`project:${id}`)) continue;
       const existing = groups.get(id);
       if (existing) {
         existing.conversations.push(conversation);
@@ -705,6 +782,7 @@ export function AgentWorkspaceScreen({
     for (const target of targets) {
       if (!target.cwd) continue;
       const id = deviceProjectKey(target.cwd, target.machineId ?? target.hostname ?? target.projectName, target.serverUrl);
+      if (hiddenProjectKeys.has(`project:${id}`)) continue;
       const existing = groups.get(id);
       const project =
         projects.find((item) =>
@@ -994,6 +1072,42 @@ export function AgentWorkspaceScreen({
     );
   }, [workspace]);
 
+  const removeProjectFromHome = useCallback((project: AgentProjectGroup) => {
+    const conversationCount = project.conversations.length;
+    Alert.alert(
+      "移除项目",
+      conversationCount > 0
+        ? `确定从 Agent 首页移除“${project.title}”吗？该项目下 ${conversationCount} 条会话会移到归档，本地项目记录会被删除。`
+        : `确定删除“${project.title}”的本地项目记录吗？`,
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "移除",
+          style: "destructive",
+          onPress: () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+            setHiddenProjectKeys((prev) => {
+              const next = new Set(prev);
+              next.add(projectHiddenKey(project));
+              for (const conversation of project.conversations) {
+                next.add(conversationHiddenKey(conversation.id));
+              }
+              saveHiddenAgentProjectKeys(next).catch(() => {});
+              return next;
+            });
+            setProjects((prev) => prev.filter((item) => item.id !== project.project?.id));
+            if (project.project?.id) removeProject(project.project.id).catch(() => {});
+            Promise.all(project.conversations.map((conversation) =>
+              workspace.archive(conversation.id, true),
+            ))
+              .then(() => setManualRefreshToken((value) => value + 1))
+              .catch(() => {});
+          },
+        },
+      ],
+    );
+  }, [workspace]);
+
   const restoreArchivedConversation = useCallback(async (conversation: AgentConversationRecord) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setHiddenProjectKeys((prev) => {
@@ -1057,24 +1171,53 @@ export function AgentWorkspaceScreen({
           </Text>
         </View>
 
-        <View style={{ paddingHorizontal: 20 }}>
+        <View
+          style={{
+            marginHorizontal: 20,
+            backgroundColor: theme.bgCard,
+            borderRadius: 12,
+            borderCurve: "continuous",
+            overflow: "hidden",
+            ...(theme.mode === "light"
+              ? {
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.06,
+                  shadowRadius: 4,
+                  elevation: 2,
+                }
+              : {}),
+          }}
+        >
           <Pressable
             onPress={() => openCreate()}
             style={({ pressed }) => ({
-              borderRadius: 14,
-              borderCurve: "continuous",
-              backgroundColor: pressed ? theme.accentSecondary : theme.accent,
-              padding: 16,
               flexDirection: "row",
               alignItems: "center",
+              paddingVertical: 11,
+              paddingHorizontal: 16,
               gap: 12,
+              opacity: pressed ? 0.6 : 1,
             })}
           >
+            <View
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 7,
+                borderCurve: "continuous",
+                backgroundColor: theme.accent,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <AppSymbol name="plus.circle.fill" size={16} color="#fff" />
+            </View>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700" }}>
+              <Text style={{ color: theme.text, fontSize: 17 }}>
                 {targets.length > 0 || knownGatewayCount > 0 ? "新建 Agent 对话" : "连接网关"}
               </Text>
-              <Text style={{ color: "rgba(255,255,255,0.78)", fontSize: 13, marginTop: 2 }} numberOfLines={1}>
+              <Text style={{ color: theme.textTertiary, fontSize: 13, marginTop: 1 }} numberOfLines={1}>
                 {targets.length > 0
                   ? "选择网关里的主机、Agent 和工作目录"
                   : knownGatewayCount > 0
@@ -1082,13 +1225,13 @@ export function AgentWorkspaceScreen({
                     : "没有可用网关时再扫码或输入连接"}
               </Text>
             </View>
-            <AppSymbol name="chevron.right" size={16} color="rgba(255,255,255,0.9)" />
+            <AppSymbol name="chevron.right" size={13} color={theme.textTertiary} />
           </Pressable>
         </View>
 
         <View style={{ gap: 8 }}>
           <SectionTitle theme={theme}>项目</SectionTitle>
-          <View style={{ paddingHorizontal: 20, gap: 14 }}>
+          <View style={{ paddingHorizontal: 20, gap: 12 }}>
             {projectGroups.length === 0 ? (
               <View
                 style={{
@@ -1109,14 +1252,13 @@ export function AgentWorkspaceScreen({
               const online = Boolean(project.target);
               const groups = providerGroups(project.conversations);
               const collapsed = collapsedProjectKeys.has(project.id);
-              const latest = latestConversation(project.conversations);
               return (
                 <View
                   key={project.id}
                   style={{
                     borderBottomWidth: StyleSheet.hairlineWidth,
                     borderBottomColor: theme.separator,
-                    paddingBottom: 12,
+                    paddingBottom: 13,
                     gap: 8,
                   }}
                 >
@@ -1134,11 +1276,11 @@ export function AgentWorkspaceScreen({
                       });
                     }}
                     style={({ pressed }) => ({
-                      borderRadius: 8,
+                      borderRadius: 10,
                       borderCurve: "continuous",
-                      backgroundColor: pressed ? theme.bgInput : "transparent",
-                      paddingVertical: 4,
-                      paddingHorizontal: 2,
+                      backgroundColor: pressed ? "rgba(120,120,128,0.08)" : "transparent",
+                      paddingVertical: 5,
+                      paddingHorizontal: 0,
                       flexDirection: "row",
                       alignItems: "center",
                       gap: 8,
@@ -1161,49 +1303,39 @@ export function AgentWorkspaceScreen({
                       <AppSymbol name={collapsed ? "chevron.right" : "chevron.down"} size={12} color={theme.textTertiary} />
                     ) : null}
                     <Pressable
+                      onPress={() => removeProjectFromHome(project)}
+                      hitSlop={8}
+                      style={({ pressed }) => ({
+                        width: 28,
+                        height: 28,
+                        borderRadius: 14,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: pressed ? "rgba(120,120,128,0.12)" : "transparent",
+                      })}
+                    >
+                      <AppSymbol name="trash" size={13} color={online ? theme.textTertiary : theme.error} />
+                    </Pressable>
+                    <Pressable
                       onPress={() => openCreate(project.target, project)}
                       hitSlop={8}
                       style={({ pressed }) => ({
-                        width: 30,
-                        height: 30,
-                        borderRadius: 15,
+                        width: 28,
+                        height: 28,
+                        borderRadius: 14,
                         alignItems: "center",
                         justifyContent: "center",
-                        backgroundColor: pressed ? theme.bgInput : "transparent",
+                        backgroundColor: pressed ? "rgba(120,120,128,0.12)" : "transparent",
                       })}
                     >
-                      <AppSymbol name="square.and.pencil" size={14} color={theme.textTertiary} />
+                      <AppSymbol name="square.and.pencil" size={13} color={theme.textTertiary} />
                     </Pressable>
                   </Pressable>
-                  {collapsed && latest ? (
-                    <Pressable
-                      onPress={() => openProject(project, latest)}
-                      style={({ pressed }) => ({
-                        marginLeft: 26,
-                        minHeight: 32,
-                        borderRadius: 8,
-                        borderCurve: "continuous",
-                        backgroundColor: pressed ? theme.bgInput : "transparent",
-                        paddingVertical: 5,
-                        paddingHorizontal: 2,
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                      })}
-                    >
-                      <ProviderBadge provider={latest.provider} theme={theme} />
-                      <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 14 }} numberOfLines={1}>
-                        {conversationSummary(latest, workspace.getTimeline(latest.id))}
-                      </Text>
-                      <Text style={{ color: theme.textTertiary, fontSize: 12, minWidth: 42, textAlign: "right" }}>
-                        {relativeTime(latest.lastActivityAt)}
-                      </Text>
-                    </Pressable>
-                  ) : groups.length > 0 ? (
-                    <View style={{ paddingLeft: 26, gap: 8 }}>
+                  {!collapsed && groups.length > 0 ? (
+                    <View style={{ paddingLeft: 8, gap: 9 }}>
                       {groups.map(({ provider, conversations }) => (
                         <View key={`${project.id}:${provider}`} style={{ gap: 4 }}>
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingTop: 2 }}>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingTop: 2, paddingBottom: 1 }}>
                             <ProviderBadge provider={provider} theme={theme} />
                             <Text style={{ color: theme.textSecondary, fontSize: 13, fontWeight: "800" }}>
                               {PROVIDER_META[provider].label}
@@ -1258,10 +1390,11 @@ export function AgentWorkspaceScreen({
                                 <Pressable
                                   onPress={() => openProject(project, conversation)}
                                   style={({ pressed }) => ({
+                                    marginLeft: 34,
                                     minHeight: 32,
                                     borderRadius: 8,
                                     borderCurve: "continuous",
-                                    backgroundColor: pressed ? theme.bgInput : "transparent",
+                                    opacity: pressed ? 0.55 : 1,
                                     paddingVertical: 5,
                                     paddingHorizontal: 2,
                                     flexDirection: "row",
@@ -1272,6 +1405,7 @@ export function AgentWorkspaceScreen({
                                   <Text style={{ flex: 1, color: theme.text, fontSize: 14 }} numberOfLines={1}>
                                     {conversationSummary(conversation, workspace.getTimeline(conversation.id))}
                                   </Text>
+                                  <ConversationStateIndicator conversation={conversation} theme={theme} />
                                   <Text style={{ color: theme.textTertiary, fontSize: 12, minWidth: 42, textAlign: "right" }}>
                                     {relativeTime(conversation.lastActivityAt)}
                                   </Text>
@@ -1282,11 +1416,11 @@ export function AgentWorkspaceScreen({
                         </View>
                       ))}
                     </View>
-                  ) : (
+                  ) : !collapsed ? (
                     <Pressable
                       onPress={() => openCreate(project.target, project)}
                       style={({ pressed }) => ({
-                        marginLeft: 26,
+                        marginLeft: 34,
                         borderRadius: 8,
                         borderCurve: "continuous",
                         paddingVertical: 5,
@@ -1296,35 +1430,37 @@ export function AgentWorkspaceScreen({
                     >
                       <Text style={{ color: theme.textTertiary, fontSize: 14 }}>暂无对话</Text>
                     </Pressable>
-                  )}
+                  ) : null}
                 </View>
               );
             })}
           </View>
         </View>
         {workspace.archivedConversations.length > 0 ? (
-          <View style={{ gap: 8 }}>
+          <View style={{ gap: 6, paddingHorizontal: 20, paddingTop: 2 }}>
             <Pressable
               onPress={() => setArchivedExpanded((value) => !value)}
               style={({ pressed }) => ({
-                marginHorizontal: 20,
-                borderRadius: 8,
+                minHeight: 34,
+                borderRadius: 10,
                 borderCurve: "continuous",
-                backgroundColor: pressed ? theme.bgInput : "transparent",
-                paddingVertical: 6,
+                backgroundColor: pressed ? "rgba(120,120,128,0.08)" : "transparent",
+                paddingVertical: 7,
+                paddingHorizontal: 8,
+                marginHorizontal: -8,
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 8,
               })}
             >
-              <AppSymbol name="archivebox" size={15} color={theme.textTertiary} />
-              <Text style={{ flex: 1, color: theme.textTertiary, fontSize: 13, fontWeight: "800" }}>
+              <AppSymbol name="archivebox" size={14} color={theme.textTertiary} />
+              <Text style={{ flex: 1, color: theme.textTertiary, fontSize: 12, fontWeight: "800" }}>
                 已归档 · {workspace.archivedConversations.length}
               </Text>
               <AppSymbol name={archivedExpanded ? "chevron.down" : "chevron.right"} size={12} color={theme.textTertiary} />
             </Pressable>
             {archivedExpanded ? (
-              <View style={{ paddingHorizontal: 20, paddingLeft: 46, gap: 4 }}>
+              <View style={{ paddingLeft: 28, gap: 4 }}>
                 {archivedItems.map((conversation) => {
                   const target = targets.find((item) => item.sessionId === conversation.sessionId);
                   return (

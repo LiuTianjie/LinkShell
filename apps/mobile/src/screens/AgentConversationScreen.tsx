@@ -4,6 +4,8 @@ import {
   ActivityIndicator,
   Alert,
   Clipboard,
+  FlatList,
+  InteractionManager,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -21,6 +23,7 @@ import { MenuView } from "@react-native-menu/menu";
 import Markdown from "react-native-markdown-display";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
+import { GlassBar } from "../components/GlassBar";
 import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
 import type {
   AgentContentBlock,
@@ -64,6 +67,11 @@ const PERMISSION_OPTIONS: Option<AgentPermissionMode>[] = [
 const MAX_IMAGE_ATTACHMENTS = 3;
 const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
 const DEFAULT_OPTION_ID = "__default__";
+const MONO_FONT = Platform.select({ ios: "Menlo", android: "monospace" });
+
+function timelineSurface(theme: Theme): string {
+  return theme.mode === "light" ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.055)";
+}
 
 function menuActions<T extends string>(options: Option<T>[], currentValue: T | undefined) {
   return options.map((option) => ({
@@ -462,6 +470,20 @@ function normalizedToken(value: string | undefined): string {
   return (value ?? "").toLowerCase().replace(/[_\-\s/]+/g, "");
 }
 
+function isEmptyActivityText(value: string | undefined): boolean {
+  const text = value?.trim();
+  if (!text) return true;
+  if (text === "[]" || text === "{}" || text === "null" || text === "undefined") return true;
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed.length === 0;
+    if (parsed && typeof parsed === "object") return Object.keys(parsed).length === 0;
+  } catch {
+    // Non-JSON text is real activity content.
+  }
+  return false;
+}
+
 function subagentTitle(action: AgentSubagentAction): string {
   const count = Math.max(1, action.receiverThreadIds.length, action.receiverAgents.length);
   const token = normalizedToken(action.tool);
@@ -661,11 +683,13 @@ function MessageContent({
   fallbackText,
   theme,
   inverse = false,
+  monospace = true,
 }: {
   blocks?: AgentContentBlock[];
   fallbackText?: string;
   theme: Theme;
   inverse?: boolean;
+  monospace?: boolean;
 }) {
   const normalized = blocks?.length
     ? blocks
@@ -708,21 +732,100 @@ function MessageContent({
         }
 
         return block.text ? (
-          <MarkdownContent key={`text-${index}`} text={block.text} theme={theme} inverse={inverse} />
+          <MarkdownContent key={`text-${index}`} text={block.text} theme={theme} inverse={inverse} monospace={monospace} />
         ) : null;
       })}
     </View>
   );
 }
 
-function MarkdownContent({ text, theme, inverse = false }: { text: string; theme: Theme; inverse?: boolean }) {
+function UserMessageContent({
+  blocks,
+  fallbackText,
+  theme,
+}: {
+  blocks?: AgentContentBlock[];
+  fallbackText?: string;
+  theme: Theme;
+}) {
+  const normalized = blocks?.length
+    ? blocks
+    : fallbackText
+      ? [{ type: "text" as const, text: fallbackText }]
+      : [];
+
+  return (
+    <View style={{ gap: 8 }}>
+      {normalized.map((block, index) => {
+        if (block.type === "image") {
+          return (
+            <View
+              key={`image-${index}`}
+              style={{
+                borderRadius: 10,
+                borderCurve: "continuous",
+                overflow: "hidden",
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.separator,
+                backgroundColor: theme.bgInput,
+              }}
+            >
+              {block.data ? (
+                <Image
+                  source={{ uri: block.data }}
+                  contentFit="cover"
+                  style={{ width: 220, maxWidth: "100%", aspectRatio: 4 / 3 }}
+                />
+              ) : (
+                <View style={{ width: 220, maxWidth: "100%", aspectRatio: 4 / 3, alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  <AppSymbol name="photo" size={22} color={theme.textTertiary} />
+                  <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
+                    图片附件
+                  </Text>
+                </View>
+              )}
+            </View>
+          );
+        }
+
+        return block.text ? (
+          <Text
+            key={`text-${index}`}
+            selectable
+            style={{
+              color: theme.textSecondary,
+              fontSize: 14,
+              lineHeight: 20,
+              fontWeight: "500",
+            }}
+          >
+            {block.text.trim()}
+          </Text>
+        ) : null;
+      })}
+    </View>
+  );
+}
+
+function MarkdownContent({
+  text,
+  theme,
+  inverse = false,
+  monospace = true,
+}: {
+  text: string;
+  theme: Theme;
+  inverse?: boolean;
+  monospace?: boolean;
+}) {
   const color = inverse ? "#fff" : theme.text;
   const secondaryColor = inverse ? "rgba(255,255,255,0.82)" : theme.textSecondary;
   const markdownStyle = useMemo(() => ({
     body: {
       color,
-      fontSize: 14,
-      lineHeight: 21,
+      fontFamily: !inverse && monospace ? MONO_FONT : undefined,
+      fontSize: inverse ? 14 : 13,
+      lineHeight: inverse ? 21 : 20,
     },
     paragraph: {
       marginTop: 0,
@@ -730,24 +833,27 @@ function MarkdownContent({ text, theme, inverse = false }: { text: string; theme
     },
     heading1: {
       color,
-      fontSize: 18,
-      lineHeight: 25,
+      fontFamily: !inverse && monospace ? MONO_FONT : undefined,
+      fontSize: inverse ? 18 : 16,
+      lineHeight: inverse ? 25 : 23,
       fontWeight: "800" as const,
       marginTop: 6,
       marginBottom: 8,
     },
     heading2: {
       color,
-      fontSize: 16,
-      lineHeight: 23,
+      fontFamily: !inverse && monospace ? MONO_FONT : undefined,
+      fontSize: inverse ? 16 : 15,
+      lineHeight: inverse ? 23 : 22,
       fontWeight: "800" as const,
       marginTop: 6,
       marginBottom: 7,
     },
     heading3: {
       color,
-      fontSize: 15,
-      lineHeight: 22,
+      fontFamily: !inverse && monospace ? MONO_FONT : undefined,
+      fontSize: 14,
+      lineHeight: 21,
       fontWeight: "800" as const,
       marginTop: 4,
       marginBottom: 6,
@@ -838,7 +944,7 @@ function MarkdownContent({ text, theme, inverse = false }: { text: string; theme
       height: StyleSheet.hairlineWidth,
       marginVertical: 8,
     },
-  }), [color, inverse, secondaryColor, theme]);
+  }), [color, inverse, monospace, secondaryColor, theme]);
   const rules = useMemo(() => ({
     fence: (node: any) => (
       <CodeBlock
@@ -889,9 +995,9 @@ const FileChangeCard = memo(function FileChangeCard({ tool, theme }: { tool: Age
   return (
     <View
       style={{
-        borderRadius: 12,
+        borderRadius: 10,
         borderCurve: "continuous",
-        backgroundColor: theme.bgCard,
+        backgroundColor: timelineSurface(theme),
         overflow: "hidden",
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.separator,
@@ -1037,9 +1143,9 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
   return (
     <View
       style={{
-        borderRadius: 12,
+        borderRadius: 10,
         borderCurve: "continuous",
-        backgroundColor: theme.bgCard,
+        backgroundColor: timelineSurface(theme),
         overflow: "hidden",
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.separator,
@@ -1160,9 +1266,9 @@ function SubagentCard({ action, theme, running }: { action: AgentSubagentAction;
   return (
     <View
       style={{
-        borderRadius: 12,
+        borderRadius: 10,
         borderCurve: "continuous",
-        backgroundColor: theme.bgCard,
+        backgroundColor: timelineSurface(theme),
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.separator,
         padding: 12,
@@ -1266,9 +1372,9 @@ function StructuredInputCard({
   return (
     <View
       style={{
-        borderRadius: 12,
+        borderRadius: 10,
         borderCurve: "continuous",
-        backgroundColor: theme.bgCard,
+        backgroundColor: timelineSurface(theme),
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.separator,
         padding: 12,
@@ -1404,6 +1510,10 @@ function PermissionRequestCard({
 }) {
   const outcome = item.metadata?.permissionOutcome;
   const permissionPending = item.metadata?.permissionPending === true;
+  const permissionLive = item.metadata?.permissionLive === true;
+  const permissionExpired = !outcome && !permissionPending && (
+    item.metadata?.permissionExpired === true || !permissionLive
+  );
   const selectedOptionId = item.metadata?.optionId;
   const permissionError = typeof item.metadata?.permissionError === "string"
     ? item.metadata.permissionError
@@ -1420,20 +1530,24 @@ function PermissionRequestCard({
     ? selectedLabel ?? "授权已处理"
     : permissionPending
       ? "发送中"
-      : "等待处理";
+      : permissionExpired
+        ? "已失效"
+        : "等待处理";
   const statusColor = outcome === "deny" || outcome === "cancelled"
     ? theme.error
     : outcome === "allow"
       ? theme.success
-      : theme.warning;
+      : permissionExpired
+        ? theme.textTertiary
+        : theme.warning;
   const toolName = item.permission!.toolName || "工具调用";
 
   return (
     <View
       style={{
-        borderRadius: 12,
+        borderRadius: 10,
         borderCurve: "continuous",
-        backgroundColor: theme.bgCard,
+        backgroundColor: timelineSurface(theme),
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.separator,
         overflow: "hidden",
@@ -1443,7 +1557,7 @@ function PermissionRequestCard({
         style={{
           paddingHorizontal: 12,
           paddingVertical: 11,
-          backgroundColor: theme.bgInput,
+          backgroundColor: "transparent",
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.separator,
           flexDirection: "row",
@@ -1518,7 +1632,7 @@ function PermissionRequestCard({
           return (
             <Pressable
               key={option.id}
-              disabled={permissionPending || Boolean(outcome)}
+              disabled={permissionPending || permissionExpired || Boolean(outcome)}
               onPress={() => {
                 if (isElevated) {
                   Alert.alert(
@@ -1545,7 +1659,7 @@ function PermissionRequestCard({
                 borderLeftWidth: 3,
                 borderLeftColor: selected ? theme.text : "transparent",
                 backgroundColor: pressed ? theme.bgInput : "transparent",
-                opacity: inactive || permissionPending ? 0.45 : 1,
+                opacity: inactive || permissionPending || permissionExpired ? 0.45 : 1,
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 7,
@@ -1576,6 +1690,34 @@ function StreamingPill({ theme }: { theme: Theme }) {
   );
 }
 
+function AssistantMessage({
+  item,
+  text,
+  theme,
+}: {
+  item: AgentTimelineItem;
+  text: string;
+  theme: Theme;
+}) {
+  const hasBody = Boolean(text || item.content?.length);
+  return (
+    <View style={{ paddingVertical: 4 }}>
+      {hasBody ? (
+        <MessageContent blocks={item.content} fallbackText={text} theme={theme} />
+      ) : null}
+      {item.isStreaming ? <StreamingPill theme={theme} /> : null}
+    </View>
+  );
+}
+
+function AgentTimelineBlock({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={{ marginLeft: 0, marginRight: 0 }}>
+      {children}
+    </View>
+  );
+}
+
 function TimelineItemView({
   item,
   theme,
@@ -1588,24 +1730,30 @@ function TimelineItemView({
   onStructuredInput: (requestId: string, answers: Record<string, string[]>) => void;
 }) {
   if (item.kind === "subagent_action" && item.subagent) {
-    return <SubagentCard action={item.subagent} theme={theme} running={item.isStreaming} />;
+    return (
+      <AgentTimelineBlock>
+        <SubagentCard action={item.subagent} theme={theme} running={item.isStreaming} />
+      </AgentTimelineBlock>
+    );
   }
 
   if (item.kind === "user_input_prompt" && item.structuredInput) {
     return (
-      <StructuredInputCard
-        input={item.structuredInput}
-        theme={theme}
-        submitted={item.metadata?.inputSubmitted === true}
-        submitting={item.metadata?.inputSubmitting === true}
-        error={typeof item.metadata?.inputError === "string" ? item.metadata.inputError : undefined}
-        onSubmit={(answers) => onStructuredInput(item.structuredInput!.requestId, answers)}
-      />
+      <AgentTimelineBlock>
+        <StructuredInputCard
+          input={item.structuredInput}
+          theme={theme}
+          submitted={item.metadata?.inputSubmitted === true}
+          submitting={item.metadata?.inputSubmitting === true}
+          error={typeof item.metadata?.inputError === "string" ? item.metadata.inputError : undefined}
+          onSubmit={(answers) => onStructuredInput(item.structuredInput!.requestId, answers)}
+        />
+      </AgentTimelineBlock>
     );
   }
 
   if (item.kind === "thinking") {
-    if (!item.text?.trim()) return null;
+    if (isEmptyActivityText(item.text)) return null;
     return (
       <SystemActivityCard
         icon="brain.head.profile"
@@ -1647,51 +1795,59 @@ function TimelineItemView({
         </View>
       ) : null;
     }
+    if (!isUser) {
+      return <AssistantMessage item={item} text={text} theme={theme} />;
+    }
     return (
       <View
         style={{
-          alignSelf: isUser ? "flex-end" : "stretch",
-          maxWidth: isUser ? "88%" : "100%",
-          borderRadius: 12,
+          alignSelf: "flex-end",
+          maxWidth: "82%",
+          borderRadius: 14,
           borderCurve: "continuous",
-          backgroundColor: isUser ? theme.accent : theme.bgCard,
-          borderWidth: isUser ? 0 : StyleSheet.hairlineWidth,
-          borderColor: theme.separator,
-          paddingVertical: isUser ? 10 : 11,
-          paddingHorizontal: isUser ? 12 : 12,
+          backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.075)",
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.mode === "light" ? "rgba(60,60,67,0.12)" : "rgba(255,255,255,0.10)",
+          paddingVertical: 8,
+          paddingHorizontal: 11,
           gap: 6,
         }}
       >
         {text || item.content?.length ? (
-          <MessageContent blocks={item.content} fallbackText={text} theme={theme} inverse={isUser} />
+          <UserMessageContent blocks={item.content} fallbackText={text} theme={theme} />
         ) : item.isStreaming ? (
           <StreamingPill theme={theme} />
         ) : null}
-        {!isUser && item.isStreaming && (text || item.content?.length) ? <StreamingPill theme={theme} /> : null}
       </View>
     );
   }
 
   if (item.type === "tool_call" && item.toolCall && !item.commandExecution && !item.fileChange) {
-    return <ToolCard tool={item.toolCall} theme={theme} />;
+    return (
+      <AgentTimelineBlock>
+        <ToolCard tool={item.toolCall} theme={theme} />
+      </AgentTimelineBlock>
+    );
   }
 
   if (item.commandExecution) {
     return (
-      <ToolCard
-        tool={{
-          id: item.itemId ?? item.id,
-          name: "命令",
-          input: [
-            item.commandExecution.command,
-            item.commandExecution.cwd ? `cwd: ${item.commandExecution.cwd}` : undefined,
-          ].filter(Boolean).join("\n\n"),
-          output: item.commandExecution.output,
-          createdAt: item.createdAt,
-          status: item.commandExecution.status ?? "running",
-        }}
-        theme={theme}
-      />
+      <AgentTimelineBlock>
+        <ToolCard
+          tool={{
+            id: item.itemId ?? item.id,
+            name: "命令",
+            input: [
+              item.commandExecution.command,
+              item.commandExecution.cwd ? `cwd: ${item.commandExecution.cwd}` : undefined,
+            ].filter(Boolean).join("\n\n"),
+            output: item.commandExecution.output,
+            createdAt: item.createdAt,
+            status: item.commandExecution.status ?? "running",
+          }}
+          theme={theme}
+        />
+      </AgentTimelineBlock>
     );
   }
 
@@ -1700,51 +1856,61 @@ function TimelineItemView({
       .map((entry) => [entry.kind, entry.path].filter(Boolean).join(" ") || entry.path)
       .join("\n");
     return (
-      <FileChangeCard
-        tool={{
-          id: item.itemId ?? item.id,
-          name: "文件修改",
-          input: summary,
-          output: item.fileChange.diff ?? item.fileChange.summary,
-          createdAt: item.createdAt,
-          status: item.fileChange.status ?? "running",
-        }}
-        theme={theme}
-      />
+      <AgentTimelineBlock>
+        <FileChangeCard
+          tool={{
+            id: item.itemId ?? item.id,
+            name: "文件修改",
+            input: summary,
+            output: item.fileChange.diff ?? item.fileChange.summary,
+            createdAt: item.createdAt,
+            status: item.fileChange.status ?? "running",
+          }}
+          theme={theme}
+        />
+      </AgentTimelineBlock>
     );
   }
 
   if (item.type === "plan" && item.plan?.length) {
     return (
-      <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.bgCard, padding: 12, gap: 9 }}>
-        <Text style={{ color: theme.text, fontSize: 14, fontWeight: "700" }}>执行计划</Text>
-        {item.plan.map((step) => (
-          <View key={step.id} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
-            <AppSymbol
-              name={step.status === "completed" ? "checkmark.circle.fill" : step.status === "in_progress" ? "clock" : "circle"}
-              size={14}
-              color={step.status === "completed" ? theme.success : step.status === "in_progress" ? theme.accent : theme.textTertiary}
-            />
-            <Text selectable style={{ flex: 1, color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
-              {step.text}
-            </Text>
-          </View>
-        ))}
-      </View>
+      <AgentTimelineBlock>
+        <View style={{ borderRadius: 10, borderCurve: "continuous", backgroundColor: timelineSurface(theme), borderWidth: StyleSheet.hairlineWidth, borderColor: theme.separator, padding: 12, gap: 9 }}>
+          <Text style={{ color: theme.text, fontSize: 14, fontWeight: "700" }}>执行计划</Text>
+          {item.plan.map((step) => (
+            <View key={step.id} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+              <AppSymbol
+                name={step.status === "completed" ? "checkmark.circle.fill" : step.status === "in_progress" ? "clock" : "circle"}
+                size={14}
+                color={step.status === "completed" ? theme.success : step.status === "in_progress" ? theme.accent : theme.textTertiary}
+              />
+              <Text selectable style={{ flex: 1, color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
+                {step.text}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </AgentTimelineBlock>
     );
   }
 
   if (item.type === "permission" && item.permission) {
-    return <PermissionRequestCard item={item} theme={theme} onPermission={onPermission} />;
+    return (
+      <AgentTimelineBlock>
+        <PermissionRequestCard item={item} theme={theme} onPermission={onPermission} />
+      </AgentTimelineBlock>
+    );
   }
 
   if (item.type === "error") {
     return (
-      <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.errorLight, padding: 12 }}>
-        <Text selectable style={{ color: theme.error, fontSize: 13, lineHeight: 18 }}>
-          {item.error || item.text || "Agent 出错了"}
-        </Text>
-      </View>
+      <AgentTimelineBlock>
+        <View style={{ borderRadius: 10, borderCurve: "continuous", backgroundColor: theme.errorLight, padding: 12 }}>
+          <Text selectable style={{ color: theme.error, fontSize: 13, lineHeight: 18 }}>
+            {item.error || item.text || "Agent 出错了"}
+          </Text>
+        </View>
+      </AgentTimelineBlock>
     );
   }
 
@@ -1761,9 +1927,11 @@ export function AgentConversationScreen({
   const conversation = workspace.getConversation(conversationId);
   const timeline = workspace.getTimeline(conversationId);
   const visibleTimeline = useMemo(() => dedupeTimelineItems(timeline), [timeline]);
-  const timelineRef = useRef<ScrollView>(null);
+  const timelineRef = useRef<FlatList<AgentTimelineItem>>(null);
   const timelineNearBottomRef = useRef(true);
   const initialScrollConversationRef = useRef<string | null>(null);
+  const pendingInitialScrollConversationRef = useRef<string | null>(null);
+  const timelineScrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isTimelineNearBottom, setIsTimelineNearBottom] = useState(true);
   const [hasNewOutput, setHasNewOutput] = useState(false);
   const [text, setText] = useState("");
@@ -1774,7 +1942,10 @@ export function AgentConversationScreen({
   );
   const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
   const capabilities = conversation ? workspace.capabilitiesBySessionId.get(conversation.sessionId) : undefined;
-  const supportsImages = Boolean(capabilities?.enabled && capabilities.supportsImages);
+  const providerCapability = conversation ? providerCapabilityFor(conversation.provider, capabilities) : undefined;
+  const supportsImages = Boolean(
+    capabilities?.enabled && (providerCapability?.supportsImages ?? capabilities.supportsImages),
+  );
   const running = conversation?.status === "running" || conversation?.status === "waiting_permission";
   const meta = visibleConversationStatus(conversation?.status, theme);
   const permission = permissionMeta(permissionMode, theme);
@@ -1793,14 +1964,28 @@ export function AgentConversationScreen({
   );
 
   useEffect(() => {
-    if (effort && !effortOpts.some((option) => option.value === effort)) setEffort(undefined);
-  }, [effort, effortOpts]);
+    setModel(conversation?.model);
+    setEffort(conversation?.reasoningEffort);
+    setPermissionMode(conversation?.permissionMode);
+  }, [conversation?.id, conversation?.model, conversation?.permissionMode, conversation?.reasoningEffort]);
+
+  useEffect(() => {
+    if (effort && !effortOpts.some((option) => option.value === effort)) {
+      setEffort(undefined);
+      if (conversation) {
+        workspace.updateConversationSettings(conversation.id, { reasoningEffort: undefined }).catch(() => {});
+      }
+    }
+  }, [conversation, effort, effortOpts, workspace]);
 
   useEffect(() => {
     if (permissionMode && !permissionOpts.some((option) => option.value === permissionMode)) {
       setPermissionMode(undefined);
+      if (conversation) {
+        workspace.updateConversationSettings(conversation.id, { permissionMode: undefined }).catch(() => {});
+      }
     }
-  }, [permissionMode, permissionOpts]);
+  }, [conversation, permissionMode, permissionOpts, workspace]);
 
   const modelMenuActions = useMemo(
     () =>
@@ -1839,17 +2024,6 @@ export function AgentConversationScreen({
     [visibleTimeline],
   );
 
-  useEffect(() => {
-    if (visibleTimeline.length === 0) return;
-    if (!timelineNearBottomRef.current) {
-      setHasNewOutput(true);
-      return;
-    }
-    requestAnimationFrame(() => {
-      timelineRef.current?.scrollToEnd({ animated: true });
-    });
-  }, [timelineAutoScrollKey, visibleTimeline.length]);
-
   const handleTimelineScroll = useCallback((event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
@@ -1859,27 +2033,104 @@ export function AgentConversationScreen({
     if (nearBottom) setHasNewOutput(false);
   }, []);
 
-  const scrollTimelineToEnd = useCallback((animated = true) => {
-    timelineNearBottomRef.current = true;
-    setIsTimelineNearBottom(true);
-    setHasNewOutput(false);
-    requestAnimationFrame(() => {
-      timelineRef.current?.scrollToEnd({ animated });
-    });
+  const scrollTimelineToEnd = useCallback((animated = true, markNearBottom = true) => {
+    if (markNearBottom) {
+      timelineNearBottomRef.current = true;
+      setIsTimelineNearBottom(true);
+      setHasNewOutput(false);
+    }
+    if (timelineScrollSettleTimerRef.current) {
+      clearTimeout(timelineScrollSettleTimerRef.current);
+      timelineScrollSettleTimerRef.current = null;
+    }
+    const scroll = (scrollAnimated: boolean) =>
+      timelineRef.current?.scrollToEnd({ animated: scrollAnimated });
+    requestAnimationFrame(() => scroll(animated));
+    InteractionManager.runAfterInteractions(() => scroll(false));
+    timelineScrollSettleTimerRef.current = setTimeout(() => {
+      scroll(false);
+      timelineScrollSettleTimerRef.current = null;
+    }, animated ? 260 : 80);
   }, []);
+
+  const renderTimelineItem = useCallback(({ item, index }: { item: AgentTimelineItem; index: number }) => {
+    const previous = visibleTimeline[index - 1];
+    const startsTurn = Boolean(item.turnId && previous?.turnId && item.turnId !== previous.turnId);
+    return (
+      <View style={{ gap: 12 }}>
+        {startsTurn ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}>
+            <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
+            <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>新一轮</Text>
+            <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
+          </View>
+        ) : null}
+        <TimelineItemView
+          item={item}
+          theme={theme}
+          onPermission={(requestId, outcome, optionId) =>
+            workspace.respondPermission(conversationId, requestId, outcome, optionId)
+          }
+          onStructuredInput={(requestId, answers) =>
+            workspace.respondStructuredInput(conversationId, requestId, answers)
+          }
+        />
+      </View>
+    );
+  }, [conversationId, theme, visibleTimeline, workspace]);
+
+  const timelineEmpty = useMemo(() => (
+    <View style={{ paddingVertical: 36, alignItems: "center", gap: 9 }}>
+      <View
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: theme.accentLight,
+        }}
+      >
+        <AppSymbol name="sparkles" size={22} color={theme.accent} />
+      </View>
+      <Text style={{ color: theme.text, fontSize: 16, fontWeight: "800" }}>开始一个 Agent 对话</Text>
+      <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
+        发送 prompt 后，回复、代码、工具调用和权限请求都会在这里按时间线展示。
+      </Text>
+    </View>
+  ), [theme]);
+
+  useEffect(() => {
+    if (visibleTimeline.length === 0) return;
+    if (!timelineNearBottomRef.current) {
+      setHasNewOutput(true);
+      return;
+    }
+    scrollTimelineToEnd(true);
+  }, [scrollTimelineToEnd, timelineAutoScrollKey, visibleTimeline.length]);
 
   useEffect(() => {
     if (!conversation || visibleTimeline.length === 0) return;
     if (initialScrollConversationRef.current === conversation.id) return;
     initialScrollConversationRef.current = conversation.id;
+    pendingInitialScrollConversationRef.current = conversation.id;
     timelineNearBottomRef.current = true;
     setIsTimelineNearBottom(true);
     setHasNewOutput(false);
     const firstTimer = setTimeout(() => scrollTimelineToEnd(false), 0);
     const secondTimer = setTimeout(() => scrollTimelineToEnd(false), 120);
+    const thirdTimer = setTimeout(() => scrollTimelineToEnd(false), 360);
+    const fourthTimer = setTimeout(() => {
+      scrollTimelineToEnd(false);
+      if (pendingInitialScrollConversationRef.current === conversation.id) {
+        pendingInitialScrollConversationRef.current = null;
+      }
+    }, 760);
     return () => {
       clearTimeout(firstTimer);
       clearTimeout(secondTimer);
+      clearTimeout(thirdTimer);
+      clearTimeout(fourthTimer);
     };
   }, [conversation, scrollTimelineToEnd, visibleTimeline.length]);
 
@@ -1898,7 +2149,30 @@ export function AgentConversationScreen({
     });
     setText("");
     setAttachments([]);
-  }, [attachments, canSend, conversation, effort, effortOpts, model, permissionMode, permissionOpts, text, workspace]);
+    scrollTimelineToEnd(true);
+    setTimeout(() => scrollTimelineToEnd(false), 320);
+  }, [attachments, canSend, conversation, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToEnd, text, workspace]);
+
+  const commitModel = useCallback((nextModel: string | undefined) => {
+    setModel(nextModel);
+    if (conversation) {
+      workspace.updateConversationSettings(conversation.id, { model: nextModel }).catch(() => {});
+    }
+  }, [conversation, workspace]);
+
+  const commitEffort = useCallback((nextEffort: AgentReasoningEffort | undefined) => {
+    setEffort(nextEffort);
+    if (conversation) {
+      workspace.updateConversationSettings(conversation.id, { reasoningEffort: nextEffort }).catch(() => {});
+    }
+  }, [conversation, workspace]);
+
+  const commitPermissionMode = useCallback((nextMode: AgentPermissionMode | undefined) => {
+    setPermissionMode(nextMode);
+    if (conversation) {
+      workspace.updateConversationSettings(conversation.id, { permissionMode: nextMode }).catch(() => {});
+    }
+  }, [conversation, workspace]);
 
   const setPermissionModeWithGuard = useCallback((nextMode: AgentPermissionMode | undefined) => {
     if (nextMode === "full_access") {
@@ -1907,13 +2181,13 @@ export function AgentConversationScreen({
         "Agent 可能不再逐项请求文件或命令授权。只在你信任当前任务和工作区时使用。",
         [
           { text: "取消", style: "cancel" },
-          { text: "启用", onPress: () => setPermissionMode(nextMode) },
+          { text: "启用", onPress: () => commitPermissionMode(nextMode) },
         ],
       );
       return;
     }
-    setPermissionMode(nextMode);
-  }, []);
+    commitPermissionMode(nextMode);
+  }, [commitPermissionMode]);
 
   const cancelRunningTurn = useCallback(() => {
     if (!conversation) return;
@@ -2042,148 +2316,197 @@ export function AgentConversationScreen({
     >
       <View
         style={{
-          paddingTop: insets.top + 8,
-          paddingHorizontal: 12,
-          paddingBottom: 10,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: theme.separator,
-          backgroundColor: theme.bg,
+          position: "absolute",
+          top: insets.top + 4,
+          left: 12,
+          right: 12,
+          zIndex: 20,
           flexDirection: "row",
           alignItems: "center",
-          gap: 10,
+          gap: 8,
         }}
+        pointerEvents="box-none"
       >
-        <Pressable onPress={onBack} hitSlop={8} style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center" }}>
-          <AppSymbol name="chevron.left" size={20} color={theme.text} />
-        </Pressable>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ color: theme.text, fontSize: 16, fontWeight: "800" }} numberOfLines={1}>
-            {conversation.title || "Agent"}
-          </Text>
-          <Text style={{ color: theme.textTertiary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-            {[displayProvider(conversation.provider), shortPath(conversation.cwd)].filter(Boolean).join(" · ")}
-          </Text>
-        </View>
-        {running ? <ActivityIndicator size="small" color={theme.accent} /> : null}
-        {meta ? (
-          <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
-            <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
-          </View>
-        ) : null}
-        <MenuView
-          actions={[
-            { id: "refresh", title: "刷新快照", image: "arrow.clockwise" },
-            { id: "archive", title: conversation.archived ? "取消归档" : "归档", image: "archivebox" },
-          ]}
-          onPressAction={({ nativeEvent }) => {
-            if (nativeEvent.event === "refresh") {
-              workspace.requestCapabilities(conversation.sessionId);
-            }
-            if (nativeEvent.event === "archive") {
-              workspace.archive(conversation.id, !conversation.archived).then(onBack).catch(() => {});
-            }
+        <GlassBar
+          blurTint={theme.mode === "dark" ? "systemUltraThinMaterialDark" : "systemUltraThinMaterialLight"}
+          fallbackColor={theme.mode === "light" ? "rgba(250,250,250,0.62)" : "rgba(42,42,43,0.58)"}
+          style={{
+            borderRadius: 17,
+            borderCurve: "continuous",
           }}
         >
-          <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center" }}>
-            <AppSymbol name="ellipsis.circle" size={20} color={theme.textSecondary} />
+          <Pressable
+            onPress={onBack}
+            hitSlop={8}
+            style={({ pressed }) => ({
+              width: 34,
+              height: 34,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? "rgba(120,120,128,0.14)" : "transparent",
+            })}
+          >
+            <AppSymbol name="chevron.left" size={18} color={theme.text} />
+          </Pressable>
+        </GlassBar>
+        <GlassBar
+          blurTint={theme.mode === "dark" ? "systemUltraThinMaterialDark" : "systemUltraThinMaterialLight"}
+          fallbackColor={theme.mode === "light" ? "rgba(250,250,250,0.62)" : "rgba(42,42,43,0.58)"}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 38,
+            borderRadius: 19,
+            borderCurve: "continuous",
+            paddingHorizontal: 14,
+            justifyContent: "center",
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+            {meta ? (
+              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: meta.color }} />
+            ) : null}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: theme.text, fontSize: 14, fontWeight: "800", fontFamily: MONO_FONT }} numberOfLines={1}>
+                {conversation.title || "Agent"}
+              </Text>
+              <Text style={{ color: theme.textTertiary, fontSize: 10, marginTop: 2, fontWeight: "700", fontFamily: MONO_FONT }} numberOfLines={1}>
+                {[displayProvider(conversation.provider), shortPath(conversation.cwd)].filter(Boolean).join(" · ")}
+              </Text>
+            </View>
+            {running ? <ActivityIndicator size="small" color={theme.accent} /> : null}
           </View>
-        </MenuView>
+        </GlassBar>
+        <GlassBar
+          blurTint={theme.mode === "dark" ? "systemUltraThinMaterialDark" : "systemUltraThinMaterialLight"}
+          fallbackColor={theme.mode === "light" ? "rgba(250,250,250,0.62)" : "rgba(42,42,43,0.58)"}
+          style={{
+            borderRadius: 17,
+            borderCurve: "continuous",
+          }}
+        >
+          <MenuView
+            actions={[
+              { id: "refresh", title: "刷新快照", image: "arrow.clockwise" },
+              { id: "archive", title: conversation.archived ? "取消归档" : "归档", image: "archivebox" },
+            ]}
+            onPressAction={({ nativeEvent }) => {
+              if (nativeEvent.event === "refresh") {
+                workspace.requestCapabilities(conversation.sessionId);
+              }
+              if (nativeEvent.event === "archive") {
+                workspace.archive(conversation.id, !conversation.archived).then(onBack).catch(() => {});
+              }
+            }}
+          >
+            <View
+              style={{
+                width: 34,
+                height: 34,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <AppSymbol name="ellipsis.circle" size={20} color={theme.textSecondary} />
+            </View>
+          </MenuView>
+        </GlassBar>
       </View>
 
       <View style={{ flex: 1 }}>
-        <ScrollView
+        <FlatList
           ref={timelineRef}
-          contentContainerStyle={{ padding: 14, gap: 10, paddingBottom: 16 }}
+          data={visibleTimeline}
+          keyExtractor={(item) => item.id}
+          renderItem={renderTimelineItem}
+          ListEmptyComponent={timelineEmpty}
+          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: insets.top + 60, paddingBottom: 18 }}
+          contentInsetAdjustmentBehavior="automatic"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
           onScroll={handleTimelineScroll}
           scrollEventThrottle={16}
+          removeClippedSubviews={Platform.OS === "android"}
+          initialNumToRender={18}
+          maxToRenderPerBatch={12}
+          windowSize={9}
           onContentSizeChange={() => {
+            if (
+              conversation &&
+              pendingInitialScrollConversationRef.current === conversation.id
+            ) {
+              scrollTimelineToEnd(false);
+              return;
+            }
             if (isTimelineNearBottom || timelineNearBottomRef.current) {
               scrollTimelineToEnd(true);
             } else {
               setHasNewOutput(true);
             }
           }}
-        >
-          {visibleTimeline.length === 0 ? (
-            <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.bgCard, padding: 18, alignItems: "center", gap: 8 }}>
-              <AppSymbol name="sparkles" size={24} color={theme.accent} />
-              <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }}>开始一个 Agent 对话</Text>
-              <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
-                发送 prompt 后，回复、代码、工具调用和权限请求都会在这里按时间线展示。
-              </Text>
-            </View>
-          ) : visibleTimeline.map((item, index) => {
-            const previous = visibleTimeline[index - 1];
-            const startsTurn = Boolean(item.turnId && previous?.turnId && item.turnId !== previous.turnId);
-            return (
-              <React.Fragment key={item.id}>
-                {startsTurn ? (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 }}>
-                    <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
-                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>新一轮</Text>
-                    <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
-                  </View>
-                ) : null}
-                <TimelineItemView
-                  item={item}
-                  theme={theme}
-                  onPermission={(requestId, outcome, optionId) =>
-                    workspace.respondPermission(conversation.id, requestId, outcome, optionId)
-                  }
-                  onStructuredInput={(requestId, answers) =>
-                    workspace.respondStructuredInput(conversation.id, requestId, answers)
-                  }
-                />
-              </React.Fragment>
-            );
-          })}
-        </ScrollView>
-        {hasNewOutput ? (
-          <Pressable
-            onPress={() => scrollTimelineToEnd(true)}
-            style={({ pressed }) => ({
+        />
+        {!isTimelineNearBottom || hasNewOutput ? (
+          <View
+            pointerEvents="box-none"
+            style={{
               position: "absolute",
-              right: 14,
+              left: 0,
+              right: 0,
               bottom: 12,
-              borderRadius: 999,
-              borderCurve: "continuous",
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              backgroundColor: pressed ? theme.accentSecondary : theme.accent,
-              flexDirection: "row",
               alignItems: "center",
-              gap: 6,
-            })}
+            }}
           >
-            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>有新输出</Text>
-            <AppSymbol name="arrow.down" size={12} color="#fff" />
-          </Pressable>
+            <Pressable
+              onPress={() => scrollTimelineToEnd(true)}
+              hitSlop={10}
+              style={({ pressed }) => ({
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                borderCurve: "continuous",
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.separator,
+                backgroundColor: pressed ? theme.bgInput : theme.bgCard,
+                alignItems: "center",
+                justifyContent: "center",
+                shadowColor: "#000",
+                shadowOpacity: theme.mode === "dark" ? 0.22 : 0.08,
+                shadowRadius: 10,
+                shadowOffset: { width: 0, height: 4 },
+                elevation: 4,
+              })}
+            >
+              <AppSymbol name="arrow.down" size={16} color={theme.text} />
+            </Pressable>
+          </View>
         ) : null}
       </View>
 
       <View
         style={{
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: theme.separator,
-          paddingHorizontal: 10,
+          paddingHorizontal: 12,
           paddingTop: 8,
-          paddingBottom: Math.max(insets.bottom, 10),
+          paddingBottom: Math.max(insets.bottom + 2, 12),
           backgroundColor: theme.bg,
         }}
       >
         <View
           style={{
-            borderRadius: 18,
+            borderRadius: 24,
             borderCurve: "continuous",
             borderWidth: StyleSheet.hairlineWidth,
             borderColor: theme.separator,
             backgroundColor: theme.bgCard,
-            paddingHorizontal: 10,
-            paddingTop: 8,
-            paddingBottom: 8,
+            paddingHorizontal: 12,
+            paddingTop: 10,
+            paddingBottom: 10,
             gap: 7,
+            shadowColor: "#000",
+            shadowOpacity: theme.mode === "dark" ? 0.28 : 0.08,
+            shadowRadius: 24,
+            shadowOffset: { width: 0, height: 10 },
+            elevation: 8,
           }}
         >
           {attachments.length > 0 ? (
@@ -2240,11 +2563,11 @@ export function AgentConversationScreen({
             returnKeyType="default"
             blurOnSubmit={false}
             style={{
-              minHeight: 48,
+              minHeight: 44,
               maxHeight: 132,
               color: theme.text,
-              fontSize: 15,
-              lineHeight: 21,
+              fontSize: 14,
+              lineHeight: 20,
               paddingHorizontal: 4,
               paddingVertical: 4,
             }}
@@ -2304,7 +2627,7 @@ export function AgentConversationScreen({
               onPressAction={({ nativeEvent }) => {
                 const event = nativeEvent.event;
                 if (event.startsWith("model:")) {
-                  setModel(valueFromMenuId<string>(event.slice("model:".length)));
+                  commitModel(valueFromMenuId<string>(event.slice("model:".length)));
                 }
               }}
             >
@@ -2332,7 +2655,7 @@ export function AgentConversationScreen({
                 onPressAction={({ nativeEvent }) => {
                   const event = nativeEvent.event;
                   if (event.startsWith("effort:")) {
-                    setEffort(valueFromMenuId<AgentReasoningEffort>(event.slice("effort:".length)));
+                    commitEffort(valueFromMenuId<AgentReasoningEffort>(event.slice("effort:".length)));
                   }
                 }}
               >

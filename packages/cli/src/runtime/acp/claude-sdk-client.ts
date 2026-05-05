@@ -32,6 +32,13 @@ interface ClaudeSdkMessage {
 
 type ClaudeQuery = (input: Record<string, unknown>) => AsyncIterable<ClaudeSdkMessage>;
 
+type AgentInputContentBlock = {
+  type?: string;
+  text?: string;
+  data?: string;
+  mimeType?: string;
+};
+
 function id(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -62,6 +69,48 @@ function extractToolResultText(content: unknown): string {
     return (content as { text: string }).text;
   }
   return String(content ?? "");
+}
+
+function splitImageDataUrl(value: string, fallbackMimeType = "image/png"): { data: string; mimeType: string } {
+  const match = value.match(/^data:([^;,]+)?;base64,(.*)$/is);
+  if (!match) return { data: value, mimeType: fallbackMimeType };
+  return {
+    data: match[2] ?? "",
+    mimeType: match[1] || fallbackMimeType,
+  };
+}
+
+function toClaudeMessageContent(blocks: AgentInputContentBlock[]): Record<string, unknown>[] {
+  return blocks
+    .map((block) => {
+      if (block.type === "image" && block.data) {
+        const image = splitImageDataUrl(block.data, block.mimeType);
+        return {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: image.mimeType,
+            data: image.data,
+          },
+        };
+      }
+      return { type: "text", text: block.text ?? "" };
+    })
+    .filter((block) =>
+      block.type === "image" ||
+      (typeof block.text === "string" && block.text.trim().length > 0),
+    );
+}
+
+async function* singleUserMessage(content: Record<string, unknown>[]): AsyncIterable<Record<string, unknown>> {
+  yield {
+    type: "user",
+    message: {
+      role: "user",
+      content,
+    },
+    parent_tool_use_id: null,
+  };
 }
 
 function isRealClaudeSessionId(value: string | undefined): value is string {
@@ -168,7 +217,9 @@ export class ClaudeSdkClient {
     const abortController = new AbortController();
     this.abortController = abortController;
 
-    const prompt = (input.content as Array<{ type?: string; text?: string; data?: string; mimeType?: string }>)
+    const inputBlocks = input.content as AgentInputContentBlock[];
+    const hasImages = inputBlocks.some((block) => block.type === "image" && block.data);
+    const prompt = inputBlocks
       .map((block) => {
         if (block.type === "image") return `[${block.mimeType ?? "image"} attachment]`;
         return block.text ?? "";
@@ -221,7 +272,8 @@ export class ClaudeSdkClient {
     let currentMessageId: string | undefined;
 
     try {
-      for await (const message of this.query({ prompt, options: sdkOptions })) {
+      const queryPrompt = hasImages ? singleUserMessage(toClaudeMessageContent(inputBlocks)) : prompt;
+      for await (const message of this.query({ prompt: queryPrompt, options: sdkOptions })) {
         if (abortController.signal.aborted) break;
         this.handleSdkMessage(message, {
           cwd: input.cwd ?? this.input.cwd,

@@ -502,6 +502,12 @@ function textFromBlocks(blocks: AgentContentBlock[]): string {
     .join("\n");
 }
 
+function protocolSupportsImages(protocol: AgentProtocol | undefined): boolean {
+  return protocol === "codex-app-server" ||
+    protocol === "claude-agent-sdk" ||
+    protocol === "claude-stream-json";
+}
+
 function isSubagentItemType(itemType: string | undefined): boolean {
   const normalized = normalizedIdentifier(itemType);
   return (
@@ -1056,7 +1062,7 @@ export class AgentWorkspaceProxy {
       const protocol = this.agentProtocols.get(provider);
       const runtimeCapabilities = this.providerCapabilities.get(provider);
       const enabled = Boolean(client);
-      const supportsImages = enabled && protocol === "codex-app-server";
+      const supportsImages = enabled && protocolSupportsImages(protocol);
       const isClaudeFallback = protocol === "claude-stream-json";
       const supportsPermission = enabled && !isClaudeFallback;
       const supportsReasoningEffort = enabled && !isClaudeFallback;
@@ -1260,7 +1266,7 @@ export class AgentWorkspaceProxy {
     if (!client) return;
 
     const protocol = this.protocolForProvider(conversation.provider);
-    if (payload.contentBlocks.some((block) => block.type === "image") && protocol !== "codex-app-server") {
+    if (payload.contentBlocks.some((block) => block.type === "image") && !protocolSupportsImages(protocol)) {
       conversation.status = "idle";
       conversation.lastActivityAt = Date.now();
       this.emitConversation(conversation);

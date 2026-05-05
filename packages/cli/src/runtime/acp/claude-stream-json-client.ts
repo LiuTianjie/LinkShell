@@ -7,6 +7,13 @@ import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
 
+type AgentInputContentBlock = {
+  type?: string;
+  text?: string;
+  data?: string;
+  mimeType?: string;
+};
+
 interface ClaudeStreamEvent {
   type: string;
   subtype?: string;
@@ -63,6 +70,15 @@ function extractToolResultText(content: unknown): string {
     return (content as { text: string }).text;
   }
   return String(content ?? "");
+}
+
+function splitImageDataUrl(value: string, fallbackMimeType = "image/png"): { data: string; mimeType: string } {
+  const match = value.match(/^data:([^;,]+)?;base64,(.*)$/is);
+  if (!match) return { data: value, mimeType: fallbackMimeType };
+  return {
+    data: match[2] ?? "",
+    mimeType: match[1] || fallbackMimeType,
+  };
 }
 
 export class ClaudeStreamJsonClient {
@@ -145,10 +161,11 @@ export class ClaudeStreamJsonClient {
     }
 
     // Build the user message
-    const contentBlocks = (input.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>).map(
+    const contentBlocks = (input.content as AgentInputContentBlock[]).map(
       (block) => {
         if (block.type === "image" && block.data) {
-          return { type: "image", source: { type: "base64", media_type: block.mimeType ?? "image/png", data: block.data } };
+          const image = splitImageDataUrl(block.data, block.mimeType);
+          return { type: "image", source: { type: "base64", media_type: image.mimeType, data: image.data } };
         }
         return { type: "text", text: block.text ?? "" };
       },

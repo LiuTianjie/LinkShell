@@ -11,6 +11,12 @@ import { resolveAgentCommand } from "./provider-resolver.js";
 
 type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
 
+function protocolSupportsImages(protocol: AgentProtocol | undefined): boolean {
+  return protocol === "codex-app-server" ||
+    protocol === "claude-agent-sdk" ||
+    protocol === "claude-stream-json";
+}
+
 interface AgentMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -1032,7 +1038,7 @@ export class AgentSessionProxy {
         error: enabled ? undefined : this.error,
         supportsSessionList: enabled,
         supportsSessionLoad: enabled,
-        supportsImages: false,
+        supportsImages: enabled && protocolSupportsImages(this.activeProtocol),
         supportsAudio: false,
         supportsPermission,
         supportsPlan: enabled,
