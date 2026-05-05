@@ -296,8 +296,11 @@ async function handleRequest(
         lastActivity: s.lastActivity,
         createdAt: s.createdAt,
         provider: s.provider ?? null,
+        machineId: s.machineId ?? null,
         hostname: s.hostname ?? null,
         platform: s.platform ?? null,
+        cwd: s.cwd ?? null,
+        projectName: s.projectName ?? null,
       }));
     json(res, 200, { sessions });
     return;

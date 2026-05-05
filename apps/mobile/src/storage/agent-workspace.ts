@@ -119,6 +119,7 @@ export interface AgentConversationRecord {
   id: string;
   serverUrl: string;
   sessionId: string;
+  machineId?: string;
   agentSessionId?: string;
   provider: AgentProvider;
   cwd: string;
@@ -162,6 +163,7 @@ export interface AgentTimelineItem {
 export interface AgentCapabilities {
   enabled: boolean;
   provider?: AgentProvider;
+  machineId?: string;
   providers?: AgentProviderCapability[];
   protocolVersion?: number;
   workspaceProtocolVersion?: number;
@@ -217,6 +219,7 @@ function normalizeAgentIdSegment(value: string): string {
 export function makeAgentConversationId(input: {
   serverUrl: string;
   sessionId: string;
+  machineId?: string;
   agentSessionId?: string;
   cwd: string;
   provider?: AgentProvider;

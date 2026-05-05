@@ -5,6 +5,7 @@ export interface ProjectRecord {
   id: string;
   serverUrl: string;
   sessionId: string;
+  machineId?: string;
   cwd: string;
   projectName?: string;
   hostname?: string;
@@ -35,12 +36,12 @@ function normalizeCwd(cwd: string): string {
 
 export function makeProjectId(
   serverUrl: string,
-  sessionId: string,
+  machineIdOrSessionId: string,
   cwd: string,
 ): string {
   return [
     normalizeServerUrl(serverUrl),
-    sessionId,
+    machineIdOrSessionId,
     normalizeCwd(cwd),
   ]
     .map(encodeURIComponent)
@@ -65,13 +66,14 @@ async function migrateProjectsFromHistory(): Promise<ProjectRecord[]> {
     if (!cwd) continue;
 
     const serverUrl = normalizeServerUrl(record.serverUrl);
-    const id = makeProjectId(serverUrl, record.sessionId, cwd);
+    const id = makeProjectId(serverUrl, record.machineId ?? record.sessionId, cwd);
     if (projects.has(id)) continue;
 
     projects.set(id, {
       id,
       serverUrl,
       sessionId: record.sessionId,
+      machineId: record.machineId,
       cwd,
       projectName: record.projectName,
       hostname: record.hostname,
@@ -94,9 +96,19 @@ export async function loadProjects(): Promise<ProjectRecord[]> {
     if (!raw) return migrateProjectsFromHistory();
     const parsed = JSON.parse(raw) as ProjectRecord[];
     if (!Array.isArray(parsed)) return [];
-    return sortProjects(
-      parsed.filter((item) => item.serverUrl && item.sessionId && item.cwd),
-    );
+    const normalized = parsed
+      .filter((item) => item.serverUrl && item.sessionId && item.cwd)
+      .map((item) => {
+        const serverUrl = normalizeServerUrl(item.serverUrl);
+        const id = makeProjectId(serverUrl, item.machineId ?? item.sessionId, item.cwd);
+        return item.id === id && item.serverUrl === serverUrl
+          ? item
+          : { ...item, id, serverUrl };
+      });
+    if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
+      await saveProjects(normalized);
+    }
+    return sortProjects(normalized);
   } catch {
     return [];
   }
@@ -110,15 +122,28 @@ export async function upsertProject(
 
   const now = Date.now();
   const serverUrl = normalizeServerUrl(input.serverUrl);
-  const id = makeProjectId(serverUrl, input.sessionId, cwd);
+  const id = makeProjectId(serverUrl, input.machineId ?? input.sessionId, cwd);
   const projects = await loadProjects();
-  const existingIndex = projects.findIndex((item) => item.id === id);
+  const existingIndex = projects.findIndex((item) =>
+    item.id === id ||
+    (
+      input.machineId &&
+      !item.machineId &&
+      normalizeServerUrl(item.serverUrl) === serverUrl &&
+      item.cwd === cwd &&
+      (
+        item.sessionId === input.sessionId ||
+        (Boolean(input.hostname) && item.hostname === input.hostname)
+      )
+    )
+  );
   const existing = existingIndex >= 0 ? projects[existingIndex] : undefined;
 
   const next: ProjectRecord = {
     id,
     serverUrl,
     sessionId: input.sessionId,
+    machineId: input.machineId ?? existing?.machineId,
     cwd,
     projectName: input.projectName ?? existing?.projectName,
     hostname: input.hostname ?? existing?.hostname,
@@ -142,12 +167,14 @@ export async function upsertProject(
 export async function touchProject(input: {
   serverUrl: string;
   sessionId: string;
+  machineId?: string;
   cwd: string;
   lastTerminalId?: string;
 }): Promise<void> {
   await upsertProject({
     serverUrl: input.serverUrl,
     sessionId: input.sessionId,
+    machineId: input.machineId,
     cwd: input.cwd,
     lastTerminalId: input.lastTerminalId,
     lastOpenedAt: Date.now(),

@@ -50,6 +50,7 @@ interface AgentWorkspaceScreenProps {
 interface AgentTarget {
   sessionId: string;
   serverUrl: string;
+  machineId?: string;
   hostname?: string;
   cwd?: string;
   projectName?: string;
@@ -62,6 +63,7 @@ interface GatewayHostSession {
   serverUrl: string;
   state?: string | null;
   hasHost?: boolean;
+  machineId?: string | null;
   hostname?: string | null;
   projectName?: string | null;
   cwd?: string | null;
@@ -182,8 +184,8 @@ function providerReason(
   return capabilities?.error;
 }
 
-function projectKey(serverUrl: string, sessionId: string, cwd: string): string {
-  return [normalizeServerUrl(serverUrl), sessionId, cwd.trim()].join("\u0000");
+function projectKey(serverUrl: string, machineIdOrSessionId: string, cwd: string): string {
+  return [normalizeServerUrl(serverUrl), machineIdOrSessionId, cwd.trim()].join("\u0000");
 }
 
 function projectPathKey(serverUrl: string, cwd: string, provider?: string): string {
@@ -569,6 +571,7 @@ export function AgentWorkspaceScreen({
       bySession.set(session.id, {
         sessionId: session.id,
         serverUrl: session.serverUrl,
+        machineId: session.machineId ?? undefined,
         hostname: session.hostname ?? session.projectName ?? session.id.slice(0, 8),
         cwd: session.cwd ?? undefined,
         projectName: session.projectName ?? undefined,
@@ -580,6 +583,7 @@ export function AgentWorkspaceScreen({
       bySession.set(session.sessionId, {
         sessionId: session.sessionId,
         serverUrl: session.gatewayUrl,
+        machineId: session.machineId ?? undefined,
         hostname: session.hostname ?? session.projectName ?? session.sessionId.slice(0, 8),
         cwd: session.cwd || [...session.terminals.values()][0]?.cwd || undefined,
         projectName: session.projectName ?? undefined,
@@ -638,36 +642,42 @@ export function AgentWorkspaceScreen({
     for (const target of targets) {
       if (target.cwd) targetByPath.set(projectPathKey(target.serverUrl, target.cwd), target);
       if (target.cwd) {
-        setUniqueTarget(targetByDeviceProject, deviceProjectKey(target.cwd, target.hostname ?? target.projectName, target.serverUrl), target);
+        setUniqueTarget(targetByDeviceProject, deviceProjectKey(target.cwd, target.machineId ?? target.hostname ?? target.projectName, target.serverUrl), target);
         setUniqueTarget(targetByFolder, projectFolderKey(target.cwd), target);
       }
     }
     const projectByExact = new Map<string, ProjectRecord>();
     const projectByDeviceProject = new Map<string, ProjectRecord>();
     for (const project of projects) {
-      projectByExact.set(projectKey(project.serverUrl, project.sessionId, project.cwd), project);
-      projectByDeviceProject.set(deviceProjectKey(project.cwd, project.hostname ?? project.projectName, project.serverUrl), project);
+      projectByExact.set(projectKey(project.serverUrl, project.machineId ?? project.sessionId, project.cwd), project);
+      projectByDeviceProject.set(deviceProjectKey(project.cwd, project.machineId ?? project.hostname ?? project.projectName, project.serverUrl), project);
     }
 
     const groups = new Map<string, AgentProjectGroup>();
     for (const conversation of workspace.conversations) {
       if (conversation.archived || !conversation.cwd) continue;
       if (hiddenProjectKeys.has(conversationHiddenKey(conversation.id))) continue;
-      const exactProject = projectByExact.get(projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd));
+      const exactProject = projectByExact.get(projectKey(conversation.serverUrl, conversation.machineId ?? conversation.sessionId, conversation.cwd));
       const deviceKey = deviceProjectKey(
         conversation.cwd,
-        exactProject?.hostname ?? exactProject?.projectName,
+        conversation.machineId ?? exactProject?.machineId ?? exactProject?.hostname ?? exactProject?.projectName,
         conversation.serverUrl,
       );
       const target =
         targetBySession.get(conversation.sessionId) ??
+        (conversation.machineId
+          ? targets.find((item) =>
+              item.machineId === conversation.machineId &&
+              normalizeServerUrl(item.serverUrl) === normalizeServerUrl(conversation.serverUrl)
+            )
+          : undefined) ??
         targetByPath.get(projectPathKey(conversation.serverUrl, conversation.cwd)) ??
         targetByDeviceProject.get(deviceKey) ??
         targetByFolder.get(projectFolderKey(conversation.cwd)) ??
         undefined;
       const project = exactProject ?? projectByDeviceProject.get(deviceKey);
       const id = target
-        ? deviceProjectKey(conversation.cwd, target.hostname ?? target.projectName, target.serverUrl)
+        ? deviceProjectKey(conversation.cwd, target.machineId ?? target.hostname ?? target.projectName, target.serverUrl)
         : deviceKey;
       const existing = groups.get(id);
       if (existing) {
@@ -694,10 +704,13 @@ export function AgentWorkspaceScreen({
 
     for (const target of targets) {
       if (!target.cwd) continue;
-      const id = deviceProjectKey(target.cwd, target.hostname ?? target.projectName, target.serverUrl);
+      const id = deviceProjectKey(target.cwd, target.machineId ?? target.hostname ?? target.projectName, target.serverUrl);
       const existing = groups.get(id);
       const project =
-        projects.find((item) => item.sessionId === target.sessionId && item.cwd === target.cwd) ??
+        projects.find((item) =>
+          item.cwd === target.cwd &&
+          (item.machineId ? item.machineId === target.machineId : item.sessionId === target.sessionId)
+        ) ??
         projectByDeviceProject.get(id);
       if (existing) {
         existing.target = target;
@@ -891,9 +904,10 @@ export function AgentWorkspaceScreen({
       touchProject({
         serverUrl: selectedTarget.serverUrl,
         sessionId: selectedTarget.sessionId,
+        machineId: selectedTarget.machineId,
         cwd: effectiveCwd,
       }).catch(() => {});
-      const exactKey = projectKey(selectedTarget.serverUrl, selectedTarget.sessionId, effectiveCwd);
+      const exactKey = projectKey(selectedTarget.serverUrl, selectedTarget.machineId ?? selectedTarget.sessionId, effectiveCwd);
       const pathKey = projectPathKey(selectedTarget.serverUrl, effectiveCwd);
       setHiddenProjectKeys((prev) => {
         if (!prev.has(exactKey) && !prev.has(pathKey)) return prev;
@@ -940,6 +954,7 @@ export function AgentWorkspaceScreen({
         conversationId: latest.id,
         agentSessionId: latest.agentSessionId,
         sessionId: project.target.sessionId,
+        machineId: project.target.machineId,
         serverUrl: project.target.serverUrl,
         cwd: project.cwd,
         provider: latest.provider ?? project.target.provider ?? "codex",
@@ -988,7 +1003,11 @@ export function AgentWorkspaceScreen({
       return next;
     });
     const result = await workspace.resumeConversation(conversation.id);
-    if (result) onOpenConversation(result);
+    if (result) {
+      onOpenConversation(result);
+      return;
+    }
+    Alert.alert("设备离线", "这条历史会话所在的设备当前不在线。请先在该设备上启动 linkshell。");
   }, [onOpenConversation, workspace]);
 
   const refreshWorkspace = useCallback(async () => {

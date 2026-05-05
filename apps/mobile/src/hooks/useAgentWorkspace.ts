@@ -25,6 +25,7 @@ interface OpenConversationInput {
   conversationId?: string;
   agentSessionId?: string;
   sessionId: string;
+  machineId?: string;
   serverUrl?: string;
   cwd: string;
   provider?: AgentProvider;
@@ -225,10 +226,32 @@ export function useAgentWorkspace(
   const sessionForConversation = useCallback(
     (conversationId: string) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-      return conversation ? manager.sessions.get(conversation.sessionId) : undefined;
+      if (!conversation) return undefined;
+      return findSessionForConversation(conversation, manager.sessions);
     },
     [manager.sessions],
   );
+
+  function findSessionForConversation(
+    conversation: AgentConversationRecord,
+    sessions: Map<string, SessionInfo>,
+  ): SessionInfo | undefined {
+    const exact = sessions.get(conversation.sessionId);
+    if (exact && (!conversation.machineId || exact.machineId === conversation.machineId)) {
+      return exact;
+    }
+    const serverUrl = normalizeServerUrl(conversation.serverUrl);
+    const sameGateway = [...sessions.values()].filter((session) =>
+      normalizeServerUrl(session.gatewayUrl) === serverUrl
+    );
+    if (conversation.machineId) {
+      return sameGateway.find((session) => session.machineId === conversation.machineId);
+    }
+    return sameGateway.find((session) =>
+      session.cwd === conversation.cwd ||
+      [...session.terminals.values()].some((terminal) => terminal.cwd === conversation.cwd)
+    );
+  }
 
   const requestCapabilities = useCallback(
     (sessionId?: string) => {
@@ -267,6 +290,7 @@ export function useAgentWorkspace(
         id: conversation.id,
         serverUrl,
         sessionId: envelope.sessionId,
+        machineId: serverSession?.machineId ?? conversation.machineId,
         agentSessionId: conversation.agentSessionId,
         provider: conversation.provider ?? "codex",
         cwd: conversation.cwd ?? serverSession?.cwd ?? "",
@@ -284,6 +308,9 @@ export function useAgentWorkspace(
 
       if (envelope.type === "agent.v2.capabilities") {
         const payload = parseTypedPayload("agent.v2.capabilities", envelope.payload) as AgentCapabilities;
+        if (serverSession && typeof payload.machineId === "string") {
+          serverSession.machineId = payload.machineId;
+        }
         setCapabilitiesBySessionId((prev) => {
           const next = new Map(prev);
           next.set(envelope.sessionId, payload);
@@ -655,7 +682,7 @@ export function useAgentWorkspace(
           provider: input.provider,
         });
       setActiveConversationId(conversationId);
-      if (session) manager.setActiveSessionId(input.sessionId);
+      if (session) manager.setActiveSessionId(session.sessionId);
       return await new Promise<OpenConversationResult>((resolve) => {
         const timer = setTimeout(() => {
           pendingOpenRef.current.delete(conversationId);
@@ -666,7 +693,7 @@ export function useAgentWorkspace(
         }, 12_000);
         pendingOpenRef.current.set(conversationId, { resolve, timer });
         manager.sendAgentWorkspaceEnvelope(
-          input.sessionId,
+          session?.sessionId ?? input.sessionId,
           "agent.v2.conversation.open",
           {
             conversationId,
@@ -687,14 +714,24 @@ export function useAgentWorkspace(
 
   const openProject = useCallback(
     (record: ProjectRecord) => {
-      if (!manager.sessions.has(record.sessionId)) {
+      const session = record.machineId
+        ? [...manager.sessions.values()].find((item) =>
+            normalizeServerUrl(item.gatewayUrl) === normalizeServerUrl(record.serverUrl) &&
+            item.machineId === record.machineId
+          )
+        : manager.sessions.get(record.sessionId);
+      if (!session && record.machineId) {
+        return Promise.resolve(null);
+      }
+      if (!session) {
         manager.connectToSession(record.sessionId, record.serverUrl);
       } else {
-        manager.setActiveSessionId(record.sessionId);
+        manager.setActiveSessionId(session.sessionId);
       }
       return openConversation({
-        sessionId: record.sessionId,
-        serverUrl: record.serverUrl,
+        sessionId: session?.sessionId ?? record.sessionId,
+        machineId: session?.machineId ?? record.machineId,
+        serverUrl: session?.gatewayUrl ?? record.serverUrl,
         cwd: record.cwd,
         provider: (record.provider === "claude" || record.provider === "codex" || record.provider === "custom")
           ? record.provider
@@ -709,21 +746,24 @@ export function useAgentWorkspace(
     async (conversationId: string) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
       if (!conversation) return null;
-      if (!manager.sessions.has(conversation.sessionId)) {
-        manager.connectToSession(conversation.sessionId, conversation.serverUrl);
-      } else {
-        manager.setActiveSessionId(conversation.sessionId);
+      const session = findSessionForConversation(conversation, manager.sessions);
+      if (!session) {
+        return null;
       }
+      manager.setActiveSessionId(session.sessionId);
       await persistConversation({
         ...conversation,
+        sessionId: session.sessionId,
+        machineId: session.machineId ?? conversation.machineId,
         archived: false,
         lastActivityAt: Date.now(),
       }, { preserveLocalArchived: false });
       const result = await openConversation({
         conversationId: conversation.id,
         agentSessionId: conversation.agentSessionId,
-        sessionId: conversation.sessionId,
-        serverUrl: conversation.serverUrl,
+        sessionId: session.sessionId,
+        machineId: session.machineId ?? conversation.machineId,
+        serverUrl: session.gatewayUrl,
         cwd: conversation.cwd,
         provider: conversation.provider,
         model: conversation.model,
@@ -756,8 +796,10 @@ export function useAgentWorkspace(
         ...(trimmed ? [{ type: "text" as const, text: trimmed }] : []),
         ...attachments,
       ];
+      const session = findSessionForConversation(conversation, manager.sessions);
+      if (!session) return;
       manager.sendAgentWorkspaceEnvelope(
-        conversation.sessionId,
+        session.sessionId,
         "agent.v2.prompt",
         {
           conversationId,
@@ -777,8 +819,10 @@ export function useAgentWorkspace(
     (conversationId: string) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
       if (!conversation) return;
+      const session = findSessionForConversation(conversation, manager.sessions);
+      if (!session) return;
       manager.sendAgentWorkspaceEnvelope(
-        conversation.sessionId,
+        session.sessionId,
         "agent.v2.cancel",
         { conversationId },
         { queue: true, dedupeKey: `agent-v2-cancel:${conversationId}` },
@@ -796,7 +840,8 @@ export function useAgentWorkspace(
         ? permissionItem.metadata.sessionId
         : undefined;
       if (metadataSessionId && manager.sessions.has(metadataSessionId)) return metadataSessionId;
-      if (manager.sessions.has(conversation.sessionId)) return conversation.sessionId;
+      const resolved = findSessionForConversation(conversation, manager.sessions);
+      if (resolved) return resolved.sessionId;
 
       const serverUrl = normalizeServerUrl(conversation.serverUrl);
       const candidates = [...manager.sessions.values()].filter((session) =>

@@ -23,6 +23,7 @@ export interface Session {
   hostDisconnectedAt: number | undefined;
   // Metadata from host's session.connect
   provider: string | undefined;
+  machineId: string | undefined;
   hostname: string | undefined;
   platform: string | undefined;
   cwd: string | undefined;
@@ -58,6 +59,7 @@ export class SessionManager {
         lastStatusByTerminal: new Map(),
         hostDisconnectedAt: undefined,
         provider: undefined,
+        machineId: undefined,
         hostname: undefined,
         platform: undefined,
         cwd: undefined,
@@ -220,6 +222,7 @@ export class SessionManager {
       createdAt: session.createdAt,
       bufferSize: [...session.outputBuffers.values()].reduce((sum, buf) => sum + buf.length, 0),
       provider: session.provider ?? null,
+      machineId: session.machineId ?? null,
       hostname: session.hostname ?? null,
       platform: session.platform ?? null,
       cwd: session.cwd ?? null,
@@ -231,6 +234,7 @@ export class SessionManager {
   setMetadata(
     sessionId: string,
     provider?: string,
+    machineId?: string,
     hostname?: string,
     platform?: string,
     cwd?: string,
@@ -239,6 +243,7 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     if (provider) session.provider = provider;
+    if (machineId) session.machineId = machineId;
     if (hostname) session.hostname = hostname;
     if (platform) session.platform = platform;
     if (cwd) session.cwd = cwd;

@@ -38,6 +38,7 @@ export interface TerminalInfo {
       timestamp: number;
     };
     pendingPermissionCount?: number;
+    machineId?: string;
     updatedAt: number;
   };
 }
@@ -57,6 +58,7 @@ export interface BrowseResult {
 export interface AgentCapabilities {
   enabled: boolean;
   provider?: "codex" | "claude" | "custom";
+  machineId?: string;
   protocolVersion?: number;
   error?: string;
   supportsSessionList: boolean;
@@ -133,6 +135,7 @@ export interface SessionInfo {
   connectionDetail: string | null;
   projectName: string | null;
   cwd: string | null;
+  machineId: string | null;
   hostname: string | null;
   provider: string | null;
   terminals: Map<string, TerminalInfo>;
@@ -313,6 +316,7 @@ interface InternalTerminal {
       timestamp: number;
     };
     pendingPermissionCount?: number;
+    machineId?: string;
     updatedAt: number;
   };
 }
@@ -326,6 +330,7 @@ interface InternalSession {
   connectionDetail: string | null;
   projectName: string | null;
   cwd: string | null;
+  machineId: string | null;
   hostname: string | null;
   provider: string | null;
   socket: WebSocket | null;
@@ -429,6 +434,7 @@ function createInternalSession(
     connectionDetail: null,
     projectName: null,
     cwd: null,
+    machineId: null,
     hostname: null,
     provider: null,
     socket: null,
@@ -504,6 +510,7 @@ function toSessionInfo(s: InternalSession): SessionInfo {
     connectionDetail: s.connectionDetail,
     projectName: s.projectName,
     cwd: s.cwd,
+    machineId: s.machineId,
     hostname: s.hostname,
     provider: s.provider,
     terminals,
@@ -789,12 +796,14 @@ export function useSessionManager(): SessionManagerHandle {
             hasHost?: boolean;
             projectName?: string | null;
             cwd?: string | null;
+            machineId?: string | null;
             hostname?: string | null;
             provider?: string | null;
           };
           // Extract project metadata
           if (body.projectName) s.projectName = body.projectName;
           if (body.cwd) s.cwd = body.cwd;
+          if (body.machineId) s.machineId = body.machineId;
           if (body.hostname) s.hostname = body.hostname;
           if (body.provider) s.provider = body.provider;
 
@@ -942,6 +951,7 @@ export function useSessionManager(): SessionManagerHandle {
         case "agent.capabilities": {
           const p = parseTypedPayload("agent.capabilities" as any, envelope.payload) as any;
           s.agent.capabilities = p as AgentCapabilities;
+          if (typeof p.machineId === "string") s.machineId = p.machineId;
           s.agent.status = p.enabled ? "idle" : "unavailable";
           s.agent.error = p.error ?? null;
           tick();
@@ -956,6 +966,8 @@ export function useSessionManager(): SessionManagerHandle {
             s.agent.activeAgentSessionId === incomingAgentSessionId;
           s.agent.activeAgentSessionId = incomingAgentSessionId ?? s.agent.activeAgentSessionId;
           s.agent.capabilities = (p.capabilities as AgentCapabilities | undefined) ?? s.agent.capabilities;
+          if (typeof p.machineId === "string") s.machineId = p.machineId;
+          if (typeof p.capabilities?.machineId === "string") s.machineId = p.capabilities.machineId;
           s.agent.messages = sameAgentSession
             ? mergeAgentMessages(s.agent.messages, p.messages as AgentMessage[] | undefined)
             : (p.messages as AgentMessage[]);
@@ -1015,14 +1027,26 @@ export function useSessionManager(): SessionManagerHandle {
           agentWorkspaceCbRef.current?.(envelope);
           break;
         }
-        case "agent.v2.capabilities":
+        case "agent.v2.capabilities": {
+          const p = parseTypedPayload("agent.v2.capabilities", envelope.payload) as any;
+          if (typeof p.machineId === "string") s.machineId = p.machineId;
+          agentWorkspaceCbRef.current?.(envelope);
+          tick();
+          break;
+        }
         case "agent.v2.conversation.opened":
         case "agent.v2.conversation.list.result":
         case "agent.v2.event":
-        case "agent.v2.snapshot":
         case "agent.v2.permission.request":
           agentWorkspaceCbRef.current?.(envelope);
           break;
+        case "agent.v2.snapshot": {
+          const p = parseTypedPayload("agent.v2.snapshot", envelope.payload) as any;
+          if (typeof p.machineId === "string") s.machineId = p.machineId;
+          agentWorkspaceCbRef.current?.(envelope);
+          tick();
+          break;
+        }
         case "terminal.list": {
           const p = parseTypedPayload("terminal.list", envelope.payload);
           for (const info of p.terminals) {
@@ -1247,7 +1271,9 @@ export function useSessionManager(): SessionManagerHandle {
               timestamp: number;
             };
             pendingPermissionCount?: number;
+            machineId?: string;
           };
+          if (typeof p.machineId === "string") s.machineId = p.machineId;
           const term = s.terminals.get(tid);
           const existingSeq =
             term?.structuredStatus?.seq ??

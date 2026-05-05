@@ -70,10 +70,11 @@ function handleHostMessage(
     case "session.connect": {
       // Extract metadata from host's connect message
       const p = parseTypedPayload("session.connect", envelope.payload);
-      if (p.provider || p.hostname || p.platform || p.cwd || p.projectName) {
+      if (p.provider || p.machineId || p.hostname || p.platform || p.cwd || p.projectName) {
         sessions.setMetadata(
           session.id,
           p.provider ?? undefined,
+          p.machineId ?? undefined,
           p.hostname ?? undefined,
           p.platform ?? undefined,
           p.cwd ?? undefined,
@@ -214,8 +215,16 @@ function handleClientMessage(
       for (const statusMsg of statusReplay) {
         socket.send(serializeEnvelope(statusMsg));
       }
-      // Also forward resume to host so it can fill gaps beyond gateway buffer
-      sendToHost(session, envelope);
+      // Also forward resume to host so it can fill gaps beyond gateway buffer.
+      sendToHost(session, session.machineId
+        ? {
+            ...envelope,
+            payload: {
+              ...(envelope.payload as Record<string, unknown>),
+              machineId: session.machineId,
+            },
+          }
+        : envelope);
       break;
     }
     case "control.claim": {

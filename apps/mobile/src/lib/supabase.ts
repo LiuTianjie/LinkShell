@@ -271,6 +271,7 @@ export async function fetchMySessions(
     hasHost: boolean;
     clientCount: number;
     provider: string | null;
+    machineId: string | null;
     hostname: string | null;
     platform: string | null;
     projectName: string | null;

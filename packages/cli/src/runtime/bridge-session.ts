@@ -19,6 +19,7 @@ import { ScreenFallback } from "./screen-fallback.js";
 import { ScreenShare } from "./screen-share.js";
 import { getLanIp } from "../utils/lan-ip.js";
 import { startKeepAwake, type KeepAwakeHandle } from "../utils/keep-awake.js";
+import { loadOrCreateMachineIdentity, type MachineIdentity } from "../machine-id.js";
 import { AgentSessionProxy } from "./acp/agent-session.js";
 import { AgentWorkspaceProxy } from "./acp/agent-workspace.js";
 import { detectAvailableProviders, type AgentProvider } from "./acp/provider-resolver.js";
@@ -299,6 +300,7 @@ export class BridgeSession {
   private keepAwake: KeepAwakeHandle | undefined;
   private agentSession: AgentSessionProxy | undefined;
   private agentWorkspace: AgentWorkspaceProxy | undefined;
+  private machineIdentity: MachineIdentity | undefined;
 
   constructor(options: BridgeSessionOptions) {
     this.options = options;
@@ -320,6 +322,7 @@ export class BridgeSession {
     this.log(
       `starting session (gateway=${this.options.gatewayUrl}, provider=${this.options.providerConfig.provider})`,
     );
+    this.machineIdentity = loadOrCreateMachineIdentity();
     if (!this.sessionId) {
       await this.createPairing();
     }
@@ -445,6 +448,7 @@ export class BridgeSession {
             clientName: this.options.clientName,
             provider: this.options.providerConfig.provider,
             protocolVersion: PROTOCOL_VERSION,
+            machineId: this.machineIdentity?.machineId,
             hostname: this.options.hostname || hostname(),
             platform: platform(),
             cwd: process.cwd(),
@@ -705,6 +709,7 @@ export class BridgeSession {
                 provider: normalizeAgentProvider(
                   this.options.agentProvider ?? "codex",
                 ),
+                machineId: this.machineIdentity?.machineId,
                 error: "Agent GUI is not enabled. Start CLI with --agent-ui.",
                 supportsSessionList: false,
                 supportsSessionLoad: false,
@@ -740,6 +745,7 @@ export class BridgeSession {
                 provider: normalizeAgentProvider(
                   this.options.agentProvider ?? "codex",
                 ),
+                machineId: this.machineIdentity?.machineId,
                 error: "Agent GUI is not enabled. Start CLI with --agent-ui.",
                 supportsSessionList: false,
                 supportsSessionLoad: false,
@@ -774,6 +780,7 @@ export class BridgeSession {
                 provider: normalizeAgentProvider(
                   this.options.agentProvider ?? "codex",
                 ),
+                machineId: this.machineIdentity?.machineId,
                 workspaceProtocolVersion: 2,
                 error: "Agent Workspace is not enabled. Start CLI with --agent-ui.",
                 supportsSessionList: false,
@@ -1867,7 +1874,23 @@ export class BridgeSession {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       return;
     }
-    this.socket.send(serializeEnvelope(message));
+    const machineId = this.machineIdentity?.machineId;
+    const enriched = machineId && (
+      message.type === "terminal.status" ||
+      message.type === "agent.capabilities" ||
+      message.type === "agent.snapshot" ||
+      message.type === "agent.v2.capabilities" ||
+      message.type === "agent.v2.snapshot"
+    )
+      ? {
+          ...message,
+          payload: {
+            ...(message.payload as Record<string, unknown>),
+            machineId,
+          },
+        }
+      : message;
+    this.socket.send(serializeEnvelope(enriched));
   }
 
   private startHeartbeat(): void {

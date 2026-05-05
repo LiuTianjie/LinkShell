@@ -121,6 +121,11 @@ beforeAll(async () => {
         state: s.state,
         hasHost: !!s.host,
         clientCount: s.clients.size,
+        provider: s.provider ?? null,
+        machineId: s.machineId ?? null,
+        hostname: s.hostname ?? null,
+        cwd: s.cwd ?? null,
+        projectName: s.projectName ?? null,
       }));
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ sessions }));
@@ -226,6 +231,27 @@ describe("Protocol schemas", () => {
     expect(payload.providers?.[0]?.reasoningEfforts).toContain("minimal");
     expect(payload.providers?.[0]?.permissionModes).toContain("read_only");
     expect(payload.providers?.[0]?.features?.permissions).toBe(true);
+  });
+
+  it("accepts missing and present machineId fields", () => {
+    const legacyConnect = parseLocalTypedPayload("session.connect", {
+      role: "host",
+      clientName: "old-cli",
+    });
+    expect(legacyConnect.machineId).toBeUndefined();
+
+    const connect = parseLocalTypedPayload("session.connect", {
+      role: "host",
+      clientName: "new-cli",
+      machineId: "machine-123",
+    });
+    expect(connect.machineId).toBe("machine-123");
+
+    const status = parseLocalTypedPayload("terminal.status", {
+      phase: "idle",
+      machineId: "machine-123",
+    });
+    expect(status.machineId).toBe("machine-123");
   });
 
   it("keeps structured agent v2 patch fields", () => {
@@ -544,12 +570,24 @@ describe("Session list", () => {
 
     const host = await connectWs(sessionId, "host", "host-list");
     await waitForMessage(host);
+    sessionManager.setMetadata(
+      sessionId,
+      "codex",
+      "machine-list",
+      "workstation",
+      undefined,
+      "/repo",
+      "repo",
+    );
 
     const { body } = await getJson("/sessions");
     const sessions = body.sessions as Array<Record<string, unknown>>;
     const found = sessions.find((s) => s.id === sessionId);
     expect(found).toBeTruthy();
     expect(found!.hasHost).toBe(true);
+    expect(found!.machineId).toBe("machine-list");
+    expect(found!.hostname).toBe("workstation");
+    expect(found!.cwd).toBe("/repo");
 
     host.close();
   });

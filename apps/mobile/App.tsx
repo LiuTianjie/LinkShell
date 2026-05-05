@@ -226,6 +226,7 @@ function AppInner() {
             body: {
               sessions: Array<{
                 id: string;
+                machineId?: string;
                 hostname?: string;
                 provider?: string;
                 platform?: string;
@@ -251,6 +252,7 @@ function AppInner() {
       const base = {
         serverUrl: info.gatewayUrl,
         sessionId: sid,
+        machineId: info.machineId ?? undefined,
         hostname: info.hostname ?? undefined,
         platform: undefined,
         provider: info.provider ?? undefined,
@@ -266,14 +268,14 @@ function AppInner() {
         if (!cwd) return;
         const signature = [
           base.serverUrl,
-          base.sessionId,
+          base.machineId ?? base.sessionId,
           cwd,
           project.projectName ?? "",
           base.hostname ?? "",
           project.provider ?? base.provider ?? "",
           project.terminalId ?? "",
         ].join("\u0000");
-        const key = `${base.serverUrl}:${base.sessionId}:${cwd}`;
+        const key = `${base.serverUrl}:${base.machineId ?? base.sessionId}:${cwd}`;
         if (lastProjectSyncRef.current.get(key) === signature) return;
         lastProjectSyncRef.current.set(key, signature);
         pending.push(

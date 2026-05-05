@@ -42,6 +42,7 @@ interface SessionInfo {
   lastActivity: number;
   createdAt: number;
   provider: string | null;
+  machineId: string | null;
   hostname: string | null;
   platform: string | null;
   projectName: string | null;

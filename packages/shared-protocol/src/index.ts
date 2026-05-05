@@ -72,6 +72,7 @@ export const sessionConnectPayloadSchema = z.object({
   clientName: z.string().min(1),
   provider: z.enum(["claude", "codex", "custom"]).optional(),
   protocolVersion: z.number().int().optional(),
+  machineId: z.string().min(1).optional(),
   hostname: z.string().optional(),
   platform: z.string().optional(),
   cwd: z.string().optional(),
@@ -92,6 +93,7 @@ export const sessionResumePayloadSchema = z.object({
   lastAckedSeq: z.number().int().min(-1).optional().default(-1),
   // Multi-terminal resume cursor keyed by terminalId.
   lastAckedSeqByTerminal: z.record(z.number().int().min(-1)).optional().default({}),
+  machineId: z.string().min(1).optional(),
 });
 
 export const sessionHeartbeatPayloadSchema = z.object({
@@ -252,6 +254,7 @@ export const terminalStatusPayloadSchema = z.object({
     })
     .optional(),
   pendingPermissionCount: z.number().optional(),
+  machineId: z.string().min(1).optional(),
 });
 
 // ── File upload payloads ────────────────────────────────────────────
@@ -390,6 +393,7 @@ export const agentProviderCapabilitySchema = z.object({
 export const agentCapabilitiesPayloadSchema = z.object({
   enabled: z.boolean(),
   provider: agentProviderSchema.optional(),
+  machineId: z.string().min(1).optional(),
   providers: z.array(agentProviderCapabilitySchema).optional(),
   protocolVersion: z.number().int().optional(),
   error: z.string().optional(),
@@ -667,6 +671,7 @@ export const agentV2SnapshotPayloadSchema = z.object({
   conversations: z.array(agentV2ConversationSchema).default([]),
   activeConversationId: z.string().optional(),
   items: z.array(agentV2TimelineItemSchema).default([]),
+  machineId: z.string().min(1).optional(),
 });
 
 export const agentV2EventPayloadSchema = z.object({
