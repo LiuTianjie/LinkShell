@@ -707,6 +707,8 @@ export function useAgentWorkspace(
       if (envelope.type === "terminal.status") {
         const payload = envelope.payload as {
           phase?: string;
+          summary?: string;
+          pendingPermissionCount?: number;
           topPermission?: {
             requestId?: string;
             toolName?: string;
@@ -716,7 +718,6 @@ export function useAgentWorkspace(
           };
         };
         const topPermission = payload.topPermission;
-        if (!topPermission?.requestId) return;
         const terminalId = typeof (envelope as any).terminalId === "string"
           ? (envelope as any).terminalId
           : "default";
@@ -729,6 +730,62 @@ export function useAgentWorkspace(
           ) ??
           conversationsRef.current.find((item) => item.sessionId === envelope.sessionId && !item.archived);
         if (!conversation) return;
+        if (!topPermission?.requestId) {
+          const pendingCount = payload.pendingPermissionCount ?? 0;
+          const shouldClearPermissions =
+            pendingCount === 0 &&
+            (payload.phase !== "waiting" || payload.summary === "permission allowed" || payload.summary === "permission denied");
+          if (!shouldClearPermissions) return;
+          const outcome = payload.summary === "permission denied"
+            ? "deny"
+            : payload.summary === "permission allowed"
+              ? "allow"
+              : undefined;
+          setTimelineById((prev) => {
+            const items = prev.get(conversation.id);
+            if (!items) return prev;
+            let changed = false;
+            const nextItems = items.map((item) => {
+              if (
+                item.type === "permission" &&
+                item.metadata?.protocol === "terminal" &&
+                item.metadata?.sessionId === envelope.sessionId &&
+                (item.metadata?.terminalId ?? "default") === terminalId &&
+                item.metadata?.permissionLive === true &&
+                !item.metadata?.permissionOutcome
+              ) {
+                changed = true;
+                return {
+                  ...item,
+                  metadata: {
+                    ...(item.metadata ?? {}),
+                    permissionLive: false,
+                    permissionPending: false,
+                    permissionExpired: false,
+                    ...(outcome ? { permissionOutcome: outcome } : {}),
+                    permissionError: undefined,
+                  },
+                  updatedAt: Date.now(),
+                };
+              }
+              return item;
+            });
+            if (!changed) return prev;
+            saveAgentTimeline(conversation.id, nextItems).catch(() => {});
+            const next = new Map(prev);
+            next.set(conversation.id, nextItems);
+            return next;
+          });
+          if (conversation.status === "waiting_permission") {
+            persistConversation({
+              ...conversation,
+              status: "running",
+              lastMessagePreview: payload.summary ?? conversation.lastMessagePreview,
+              lastActivityAt: Date.now(),
+            }).catch(() => {});
+          }
+          return;
+        }
         const permissionItem: AgentTimelineItem = {
           id: `permission:${topPermission.requestId}`,
           conversationId: conversation.id,
