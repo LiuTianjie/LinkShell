@@ -1,604 +1,354 @@
 import ActivityKit
-import WidgetKit
+import AppIntents
 import SwiftUI
-
-// MARK: - Widget Entry
+import WidgetKit
 
 @available(iOS 16.2, *)
 struct LinkShellLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LinkShellAttributes.self) { context in
-            LockScreenView(context: context)
+            AgentLockScreenView(context: context)
+                .activityBackgroundTint(Color(red: 0.06, green: 0.07, blue: 0.08))
+                .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             let state = context.state
             let ext = LiveActivityStore.readExtendedData()
 
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(spacing: 8) {
-                        ProviderLogo(provider: state.provider, size: 24)
-                        Text(state.project)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                    }
+                    ProviderHeader(provider: state.provider, project: state.project, compact: true)
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
-                    HStack(spacing: 6) {
-                        PhasePill(phase: state.phase)
-                        if state.otherCount > 0 {
-                            Text("+\(state.otherCount)")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundColor(.white.opacity(0.5))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                        .fill(.white.opacity(0.1))
-                                )
-                        }
-                    }
+                    StatusBadge(status: state.status, permissionCount: state.permissionCount)
                 }
 
                 DynamicIslandExpandedRegion(.center) {
-                    HStack(spacing: 6) {
-                        if !state.tool.isEmpty {
-                            ToolBadge(name: state.tool, fontSize: 11)
-                        }
-                        Text(formatElapsed(state.elapsed))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.4))
-                    }
+                    Text(centerLabel(state: state, ext: ext))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 8) {
-                        if state.hasPermission, let ext = ext, !ext.permissionTool.isEmpty {
-                            // Permission: tool name + context + action list
-                            VStack(spacing: 6) {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "lock.shield")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.cyan)
-                                    Text(ext.permissionTool)
-                                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                                        .foregroundColor(.cyan)
-                                        .lineLimit(1)
-                                    Spacer()
-                                    if state.permCount > 1 {
-                                        Text("+\(state.permCount - 1)")
-                                            .font(.system(size: 10))
-                                            .foregroundColor(.white.opacity(0.35))
-                                    }
-                                }
-
-                                if !ext.permissionContext.isEmpty {
-                                    Text(ext.permissionContext)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundColor(.white.opacity(0.6))
-                                        .lineLimit(2)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                .fill(.white.opacity(0.06))
-                                        )
-                                }
-
-                                VStack(spacing: 0) {
-                                    ForEach(Array(ext.quickActions.prefix(2).enumerated()), id: \.offset) { idx, action in
-                                        if idx > 0 {
-                                            Divider().background(.white.opacity(0.1))
-                                        }
-                                        ActionRow(action: action, state: state, requestId: ext.permissionRequestId)
-                                    }
-                                }
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(.white.opacity(0.06))
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-                                if ext.quickActions.isEmpty {
-                                    Link(destination: URL(string: "linkshell://open?session=\(state.sid)")!) {
-                                        Text("打开查看")
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundColor(.blue)
-                                    }
-                                }
-                            }
-                            .padding(8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .strokeBorder(.orange.opacity(0.3), lineWidth: 0.5)
-                            )
-                        } else if let ext = ext, !ext.toolDescription.isEmpty {
-                            Text(ext.toolDescription)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.7))
-                                .lineLimit(3)
+                    VStack(alignment: .leading, spacing: 8) {
+                        if state.hasPermission, let ext {
+                            Text(trimmed(ext.permissionContext.isEmpty ? state.summary : ext.permissionContext, max: 150))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.72))
+                                .lineLimit(2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(.white.opacity(0.06))
-                                )
-                        } else if let ext = ext, !ext.contextLines.isEmpty {
-                            Text(ext.contextLines)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.6))
-                                .lineLimit(3)
+                            PermissionButtonRow(state: state, ext: ext, maxButtons: 2)
+                        } else {
+                            Text(state.summary.isEmpty ? state.phaseLabel : state.summary)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .lineLimit(2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(.white.opacity(0.06))
-                                )
-                        }
-
-                        // Secondary terminals
-                        if !state.hasPermission, let ext = ext, !ext.secondaryTerminals.isEmpty {
-                            HStack(spacing: 8) {
-                                ForEach(Array(ext.secondaryTerminals.prefix(4).enumerated()), id: \.offset) { _, t in
-                                    HStack(spacing: 4) {
-                                        ProviderLogo(provider: t.provider, size: 14)
-                                        PhaseDot(phase: t.phase, size: 6)
-                                    }
-                                }
-                                Spacer()
-                                Text("\(state.otherCount) 个终端运行中")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.white.opacity(0.55))
-                            }
                         }
                     }
                 }
             } compactLeading: {
-                ProviderLogo(provider: state.provider, size: 18)
+                ProviderMark(provider: state.provider, size: 18)
             } compactTrailing: {
-                HStack(spacing: 3) {
-                    PhaseDot(phase: state.phase, size: 6)
-                    if state.hasPermission {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(.orange)
-                    } else if !state.tool.isEmpty {
-                        Text(state.tool.prefix(4))
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.7))
-                            .lineLimit(1)
-                    } else if state.otherCount > 0 {
-                        Text("\(state.otherCount + 1)")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white)
-                            .contentTransition(.numericText())
-                    }
-                }
+                CompactStatusDot(status: state.status, hasPermission: state.hasPermission)
             } minimal: {
-                ZStack {
-                    ProviderLogo(provider: state.provider, size: 14)
-                    Circle()
-                        .strokeBorder(phaseColor(state.phase), lineWidth: 1.5)
-                        .frame(width: 20, height: 20)
-                }
+                CompactStatusDot(status: state.status, hasPermission: state.hasPermission)
             }
+            .widgetURL(agentURL(state: state, ext: ext))
         }
     }
 }
 
-// MARK: - Action Row (left desc, right "选择" button)
-
 @available(iOS 16.2, *)
-struct ActionRow: View {
-    let action: QuickAction
-    let state: LinkShellAttributes.ContentState
-    let requestId: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if let desc = action.desc, desc != action.label {
-                Text(desc)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.7))
-                    .lineLimit(1)
-            }
-            Spacer()
-            if #available(iOS 17.0, *) {
-                Button(intent: QuickActionIntent(
-                    sessionId: state.sid,
-                    terminalId: state.tid,
-                    inputData: action.input,
-                    requestId: requestId
-                )) {
-                    actionButton
-                }
-                .buttonStyle(.plain)
-            } else {
-                Link(destination: actionURL(state.sid, state.tid, action)) {
-                    actionButton
-                }
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-    }
-
-    private var actionButton: some View {
-        Text(action.label)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundColor(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(buttonColor.opacity(0.25))
-            )
-    }
-
-    private var buttonColor: Color {
-        let l = action.input.lowercased()
-        if l.contains("deny") || l.contains("no") { return .red }
-        if l.contains("allow") || l.contains("yes") { return .green }
-        return .blue
-    }
-}
-
-// MARK: - Lock Screen View
-
-@available(iOS 16.2, *)
-struct LockScreenView: View {
+struct AgentLockScreenView: View {
     let context: ActivityViewContext<LinkShellAttributes>
 
     var body: some View {
         let state = context.state
         let ext = LiveActivityStore.readExtendedData()
 
-        VStack(spacing: 8) {
-            // Header: agent logo + project + phase + elapsed
-            HStack(spacing: 8) {
-                ProviderLogo(provider: state.provider, size: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(state.project)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                    HStack(spacing: 6) {
-                        if !state.tool.isEmpty {
-                            ToolBadge(name: state.tool, fontSize: 10)
-                        }
-                        Text(formatElapsed(state.elapsed))
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.65))
-                    }
-                }
-                Spacer()
-                PhasePill(phase: state.phase)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ProviderHeader(provider: state.provider, project: state.project, compact: false)
+                Spacer(minLength: 8)
+                StatusBadge(status: state.status, permissionCount: state.permissionCount)
             }
 
-            // Content area
-            if !state.hasPermission {
-                // Tool description or context
-                if let ext = ext, !ext.toolDescription.isEmpty {
-                    Text(ext.toolDescription)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.75))
-                        .lineLimit(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(.white.opacity(0.05))
-                        )
-                } else if let ext = ext, !ext.contextLines.isEmpty {
-                    Text(ext.contextLines)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.65))
-                        .lineLimit(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(.white.opacity(0.05))
-                        )
-                }
-            }
-
-            // Permission area
-            if state.hasPermission, let ext = ext, !ext.permissionTool.isEmpty {
-                VStack(spacing: 6) {
-                    // Permission header
-                    HStack(spacing: 5) {
-                        Image(systemName: "lock.shield")
-                            .font(.system(size: 11))
-                            .foregroundColor(.cyan)
-                        Text(ext.permissionTool)
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.cyan)
-                            .lineLimit(1)
-                        Spacer()
-                        if state.permCount > 1 {
-                            Text("+\(state.permCount - 1)")
-                                .font(.system(size: 9))
-                                .foregroundColor(.white.opacity(0.35))
-                        }
-                    }
-
-                    // Permission context
-                    if !ext.permissionContext.isEmpty {
-                        Text(ext.permissionContext)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.65))
-                            .lineLimit(3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    // Action list: each row = left desc, right button
-                    VStack(spacing: 0) {
-                        ForEach(Array(ext.quickActions.enumerated()), id: \.offset) { idx, action in
-                            if idx > 0 {
-                                Divider().background(.white.opacity(0.1))
-                            }
-                            LockScreenActionRow(action: action, state: state, requestId: ext.permissionRequestId)
-                        }
-                    }
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(.white.opacity(0.05))
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .padding(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(.orange.opacity(0.3), lineWidth: 0.5)
-                )
-            }
-
-            // Non-permission quick actions
-            if !state.hasPermission, let ext = ext, !ext.quickActions.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(Array(ext.quickActions.prefix(6).enumerated()), id: \.offset) { idx, action in
-                        if idx > 0 {
-                            Divider().background(.white.opacity(0.1))
-                        }
-                        LockScreenActionRow(action: action, state: state, requestId: ext.permissionRequestId)
-                    }
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(.white.opacity(0.05))
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-
-            // Secondary terminals summary
-            if let ext = ext, !ext.secondaryTerminals.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(Array(ext.secondaryTerminals.prefix(4).enumerated()), id: \.offset) { _, t in
-                        HStack(spacing: 3) {
-                            ProviderLogo(provider: t.provider, size: 12)
-                            PhaseDot(phase: t.phase, size: 5)
-                        }
-                    }
-                    if state.otherCount > 4 {
-                        Text("+\(state.otherCount - 4)")
-                            .font(.system(size: 9))
-                            .foregroundColor(.white.opacity(0.35))
-                    }
-                    Spacer()
-                    Text("\(state.otherCount) 个终端运行中")
-                        .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.55))
-                }
+            if state.hasPermission, let ext {
+                PermissionSummary(state: state, ext: ext)
+                PermissionButtonRow(state: state, ext: ext, maxButtons: 3)
+            } else {
+                RunningSummary(state: state, ext: ext)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .activityBackgroundTint(.black.opacity(0.6))
+        .padding(16)
+        .widgetURL(agentURL(state: state, ext: ext))
     }
 }
 
-// MARK: - Lock Screen Action Row
-
 @available(iOS 16.2, *)
-struct LockScreenActionRow: View {
-    let action: QuickAction
+struct PermissionSummary: View {
     let state: LinkShellAttributes.ContentState
-    let requestId: String
+    let ext: ExtendedActivityData
 
     var body: some View {
-        HStack(spacing: 8) {
-            if let desc = action.desc, desc != action.label {
-                Text(desc)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.75))
-                    .lineLimit(2)
+        VStack(alignment: .leading, spacing: 7) {
+            Label(ext.permissionTitle.isEmpty ? "Agent 需要授权" : ext.permissionTitle, systemImage: "checkmark.shield")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+            if !ext.currentToolName.isEmpty {
+                Text(ext.currentToolName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(statusColor(state.status))
+                    .lineLimit(1)
             }
-            Spacer()
-            if #available(iOS 17.0, *) {
-                Button(intent: QuickActionIntent(
-                    sessionId: state.sid,
-                    terminalId: state.tid,
-                    inputData: action.input,
-                    requestId: requestId
-                )) {
-                    lockScreenButton
-                }
-                .buttonStyle(.plain)
-            } else {
-                Link(destination: actionURL(state.sid, state.tid, action)) {
-                    lockScreenButton
-                }
-            }
+
+            Text(trimmed(ext.permissionContext.isEmpty ? state.summary : ext.permissionContext, max: 220))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-    }
-
-    private var lockScreenButton: some View {
-        Text(action.label)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundColor(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(buttonColor.opacity(0.25))
-            )
-    }
-
-    private var buttonColor: Color {
-        let l = action.input.lowercased()
-        if l.contains("deny") || l.contains("no") { return .red }
-        if l.contains("allow") || l.contains("yes") { return .green }
-        return .blue
     }
 }
 
-// MARK: - Shared Components
+@available(iOS 16.2, *)
+struct RunningSummary: View {
+    let state: LinkShellAttributes.ContentState
+    let ext: ExtendedActivityData?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(state.phaseLabel.isEmpty ? statusLabel(state.status) : state.phaseLabel)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+            if let ext, !ext.currentToolName.isEmpty {
+                Text(ext.currentToolName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(1)
+            }
+
+            Text(trimmed(state.summary.isEmpty ? ext?.currentToolInput ?? "" : state.summary, max: 220))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
 
 @available(iOS 16.2, *)
-struct ProviderLogo: View {
+struct PermissionButtonRow: View {
+    let state: LinkShellAttributes.ContentState
+    let ext: ExtendedActivityData
+    let maxButtons: Int
+
+    var body: some View {
+        let options = normalizedOptions(ext.permissionOptions)
+        HStack(spacing: 8) {
+            ForEach(Array(options.prefix(maxButtons)), id: \.id) { option in
+                if #available(iOS 17.0, *) {
+                    Button(intent: QuickActionIntent(
+                        sessionId: state.sessionId,
+                        conversationId: state.conversationId,
+                        requestId: ext.permissionRequestId,
+                        outcome: outcome(for: option),
+                        optionId: option.id
+                    )) {
+                        Label(option.label, systemImage: icon(for: option))
+                            .font(.system(size: 12, weight: .bold))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(optionTint(for: option))
+                } else {
+                    Link(destination: agentURL(state: state, ext: ext)) {
+                        Label(option.label, systemImage: icon(for: option))
+                            .font(.system(size: 12, weight: .bold))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@available(iOS 16.2, *)
+struct ProviderHeader: View {
+    let provider: String
+    let project: String
+    let compact: Bool
+
+    var body: some View {
+        HStack(spacing: compact ? 7 : 9) {
+            ProviderMark(provider: provider, size: compact ? 22 : 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(providerLabel(provider))
+                    .font(.system(size: compact ? 11 : 12, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(1)
+                Text(project.isEmpty ? "Agent" : project)
+                    .font(.system(size: compact ? 13 : 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+@available(iOS 16.2, *)
+struct ProviderMark: View {
     let provider: String
     let size: CGFloat
 
     var body: some View {
-        Group {
-            if provider == "claude" {
-                Image("claudecode-logo")
-                    .resizable()
-                    .renderingMode(.original)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: size, height: size)
-                    .clipShape(Circle())
-            } else if provider == "codex" {
-                Image("codex-logo")
-                    .resizable()
-                    .renderingMode(.original)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: size, height: size)
-                    .clipShape(Circle())
-            } else if provider == "gemini" {
-                Image("gemini-logo")
-                    .resizable()
-                    .renderingMode(.original)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: size, height: size)
-                    .clipShape(Circle())
-            } else if provider == "copilot" {
-                Image("copilot-logo")
-                    .resizable()
-                    .renderingMode(.original)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: size, height: size)
-                    .clipShape(Circle())
-            } else {
-                Image(systemName: "terminal.fill")
-                    .font(.system(size: size * 0.5, weight: .bold))
-                    .foregroundColor(providerColor("custom"))
-            }
+        ZStack {
+            Circle().fill(providerColor(provider).opacity(0.25))
+            Text(providerInitial(provider))
+                .font(.system(size: size * 0.48, weight: .black))
+                .foregroundStyle(providerColor(provider))
         }
-        .contentTransition(.interpolate)
+        .frame(width: size, height: size)
     }
 }
 
 @available(iOS 16.2, *)
-struct PhasePill: View {
-    let phase: String
+struct StatusBadge: View {
+    let status: String
+    let permissionCount: Int
+
     var body: some View {
-        let (text, color) = phaseDisplay(phase)
-        Text(text)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundColor(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(color.opacity(0.15))
-            )
+        HStack(spacing: 5) {
+            Circle()
+                .fill(statusColor(status))
+                .frame(width: 7, height: 7)
+            Text(permissionCount > 1 ? "\(permissionCount) 个授权" : statusLabel(status))
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(statusColor(status).opacity(0.22))
+        )
     }
 }
 
 @available(iOS 16.2, *)
-struct PhaseDot: View {
-    let phase: String
-    let size: CGFloat
+struct CompactStatusDot: View {
+    let status: String
+    let hasPermission: Bool
+
     var body: some View {
-        Circle().fill(phaseColor(phase)).frame(width: size, height: size)
+        Image(systemName: hasPermission ? "exclamationmark.circle.fill" : "sparkles")
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(statusColor(status))
     }
 }
 
-@available(iOS 16.2, *)
-struct ToolBadge: View {
-    let name: String
-    let fontSize: CGFloat
-    var body: some View {
-        Text(name)
-            .font(.system(size: fontSize, weight: .medium, design: .monospaced))
-            .foregroundColor(.cyan)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(.cyan.opacity(0.12))
-            )
+func normalizedOptions(_ options: [AgentPermissionOption]) -> [AgentPermissionOption] {
+    if options.isEmpty {
+        return [
+            AgentPermissionOption(id: "deny", label: "拒绝", kind: "deny"),
+            AgentPermissionOption(id: "allow_once", label: "允许一次", kind: "allow"),
+        ]
+    }
+    let deny = options.filter { $0.kind == "deny" }
+    let allow = options.filter { $0.kind == "allow" }
+    let other = options.filter { $0.kind != "deny" && $0.kind != "allow" }
+    return deny + allow + other
+}
+
+func outcome(for option: AgentPermissionOption) -> String {
+    if option.kind == "allow" { return "allow" }
+    if option.kind == "deny" { return "deny" }
+    return "cancelled"
+}
+
+func icon(for option: AgentPermissionOption) -> String {
+    if option.kind == "allow" { return "checkmark.circle.fill" }
+    if option.kind == "deny" { return "xmark.circle.fill" }
+    return "ellipsis.circle.fill"
+}
+
+func optionTint(for option: AgentPermissionOption) -> Color {
+    if option.kind == "allow" { return Color(red: 0.18, green: 0.57, blue: 0.96) }
+    if option.kind == "deny" { return Color(red: 0.44, green: 0.45, blue: 0.48) }
+    return Color(red: 0.36, green: 0.36, blue: 0.42)
+}
+
+func centerLabel(state: LinkShellAttributes.ContentState, ext: ExtendedActivityData?) -> String {
+    if state.hasPermission {
+        return ext?.currentToolName.isEmpty == false ? ext!.currentToolName : "等待授权"
+    }
+    if let ext, !ext.currentToolName.isEmpty { return ext.currentToolName }
+    return state.phaseLabel.isEmpty ? statusLabel(state.status) : state.phaseLabel
+}
+
+func statusLabel(_ status: String) -> String {
+    switch status {
+    case "running": return "运行中"
+    case "waiting_permission": return "待授权"
+    case "error": return "出错"
+    default: return "空闲"
     }
 }
 
-// MARK: - Helpers
-
-func actionURL(_ sessionId: String, _ terminalId: String, _ action: QuickAction) -> URL {
-    var components = URLComponents()
-    components.scheme = "linkshell"
-    components.host = "input"
-    var items = [
-        URLQueryItem(name: "session", value: sessionId),
-        URLQueryItem(name: "terminal", value: terminalId),
-        URLQueryItem(name: "data", value: action.input),
-    ]
-    if !action.needsInput {
-        items.append(URLQueryItem(name: "bg", value: "1"))
+func statusColor(_ status: String) -> Color {
+    switch status {
+    case "running": return Color(red: 0.20, green: 0.74, blue: 0.47)
+    case "waiting_permission": return Color(red: 0.96, green: 0.63, blue: 0.20)
+    case "error": return Color(red: 0.98, green: 0.32, blue: 0.32)
+    default: return Color(red: 0.58, green: 0.62, blue: 0.68)
     }
-    components.queryItems = items
-    return components.url!
+}
+
+func providerLabel(_ provider: String) -> String {
+    switch provider.lowercased() {
+    case "codex": return "Codex"
+    case "claude": return "Claude"
+    default: return "Agent"
+    }
+}
+
+func providerInitial(_ provider: String) -> String {
+    switch provider.lowercased() {
+    case "codex": return "C"
+    case "claude": return "A"
+    default: return "L"
+    }
 }
 
 func providerColor(_ provider: String) -> Color {
-    switch provider {
-    case "claude": return Color(red: 0.82, green: 0.58, blue: 0.35)
-    case "codex": return Color(red: 0.4, green: 0.8, blue: 0.6)
-    case "gemini": return Color(red: 0.53, green: 0.55, blue: 1.0)
-    case "copilot": return Color(red: 0.9, green: 0.35, blue: 0.55)
-    default: return Color(red: 0.68, green: 0.78, blue: 1.0)
+    switch provider.lowercased() {
+    case "codex": return Color(red: 0.36, green: 0.76, blue: 0.98)
+    case "claude": return Color(red: 0.96, green: 0.68, blue: 0.40)
+    default: return Color(red: 0.58, green: 0.70, blue: 1.0)
     }
 }
 
-func phaseColor(_ phase: String) -> Color {
-    switch phase {
-    case "thinking": return .yellow
-    case "outputting": return .green
-    case "tool_use": return .cyan
-    case "waiting": return .orange
-    case "error": return .red
-    default: return .gray
-    }
+func trimmed(_ value: String, max: Int) -> String {
+    let clean = value
+        .replacingOccurrences(of: "\n", with: " ")
+        .replacingOccurrences(of: "\t", with: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if clean.count <= max { return clean }
+    let index = clean.index(clean.startIndex, offsetBy: max - 1)
+    return String(clean[..<index]) + "…"
 }
 
-func phaseDisplay(_ phase: String) -> (String, Color) {
-    switch phase {
-    case "thinking": return ("思考中", .yellow)
-    case "outputting": return ("输出中", .green)
-    case "tool_use": return ("执行工具", .cyan)
-    case "waiting": return ("等待输入", .orange)
-    case "error": return ("出错", .red)
-    default: return ("空闲", .gray)
+func agentURL(state: LinkShellAttributes.ContentState, ext: ExtendedActivityData?) -> URL {
+    if let raw = ext?.deepLink, let url = URL(string: raw) {
+        return url
     }
-}
-
-func formatElapsed(_ seconds: Int) -> String {
-    let m = seconds / 60
-    let s = seconds % 60
-    if m > 0 { return String(format: "%d:%02d", m, s) }
-    return "\(s)s"
+    return URL(string: "linkshell://agent/\(state.conversationId)")!
 }

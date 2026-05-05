@@ -76,14 +76,17 @@ class ActionBridgeModule: RCTEventEmitter {
 
         for action in queue {
             guard let sessionId = action["sessionId"],
-                  let terminalId = action["terminalId"],
-                  let input = action["input"] else { continue }
+                  let conversationId = action["conversationId"],
+                  let requestId = action["requestId"],
+                  let outcome = action["outcome"] else { continue }
 
             sendEvent(withName: "onQuickAction", body: [
+                "kind": "agent_permission",
                 "sessionId": sessionId,
-                "terminalId": terminalId,
-                "input": input,
-                "requestId": action["requestId"] ?? "",
+                "conversationId": conversationId,
+                "requestId": requestId,
+                "outcome": outcome,
+                "optionId": action["optionId"] ?? "",
             ])
         }
     }

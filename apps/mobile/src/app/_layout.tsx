@@ -18,8 +18,8 @@ import { addServer } from "../storage/servers";
 import { ThemeProvider, useTheme } from "../theme";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 import { parsePairingLink } from "../utils/pairing-link";
-import { useLiveActivity } from "../hooks/useLiveActivity";
-import { useLiveActivityLifecycle } from "../hooks/useLiveActivityLifecycle";
+import { useAgentLiveActivity } from "../hooks/useAgentLiveActivity";
+import { useAgentLiveActivityActions } from "../hooks/useAgentLiveActivityActions";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
 const LAST_SESSION_KEY = "@linkshell/last_session";
@@ -72,6 +72,16 @@ function AppInner() {
       if (!rawUrl) return;
       try {
         const url = new URL(rawUrl);
+        if (url.host === "agent") {
+          const conversationId = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+          if (conversationId) {
+            router.push({
+              pathname: "/agent/[conversationId]",
+              params: { conversationId },
+            });
+            return;
+          }
+        }
         if (url.host === "input" || url.pathname === "//input") {
           const sessionId = url.searchParams.get("session");
           const terminalId = url.searchParams.get("terminal");
@@ -218,9 +228,9 @@ function AppInner() {
       .catch(() => {});
   }, [manager.sessions]);
 
-  // Live Activity
-  useLiveActivity(manager);
-  useLiveActivityLifecycle(manager);
+  // Agent Live Activity
+  useAgentLiveActivity(agentWorkspace);
+  useAgentLiveActivityActions(agentWorkspace);
 
   // App state
   const handleForeground = useCallback(async () => {

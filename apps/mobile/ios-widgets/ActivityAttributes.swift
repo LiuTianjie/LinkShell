@@ -6,48 +6,38 @@ import SwiftUI
 
 struct LinkShellAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
-        var sid: String
-        var tid: String
-        var phase: String         // "thinking" | "outputting" | "tool_use" | "waiting" | "idle" | "error"
-        var project: String       // 项目名（截断 30 字符）
-        var provider: String      // "claude" | "codex" | "gemini" | "copilot" | "custom"
-        var tool: String          // 当前工具名，空串表示无
-        var elapsed: Int          // 秒
-        var hasPermission: Bool   // 是否有待处理权限
-        var permCount: Int        // 当前终端待处理权限数
-        var otherCount: Int       // 其他活跃终端数量
-        var totalPermCount: Int   // 所有终端权限总数
+        var conversationId: String
+        var sessionId: String
+        var provider: String
+        var project: String
+        var status: String          // "idle" | "running" | "waiting_permission" | "error"
+        var phaseLabel: String
+        var summary: String
+        var hasPermission: Bool
+        var permissionCount: Int
+        var updatedAt: Double
     }
+
     var startedAt: Date
 }
 
 // MARK: - Extended Data (stored in UserDefaults, read by widget)
 
 struct ExtendedActivityData: Codable {
-    var sid: String
-    var tid: String
-    var toolDescription: String       // 工具描述（截断 500 字符）
-    var contextLines: String          // 上下文（截断 500 字符）
-    var permissionTool: String        // 权限请求的工具名
-    var permissionContext: String     // 权限请求描述（截断 400 字符）
-    var permissionRequestId: String   // 用于 AppIntent 去重
-    var quickActions: [QuickAction]   // 最多 6 个
-    var secondaryTerminals: [SecondaryTerminal]
+    var conversationId: String
+    var permissionRequestId: String
+    var permissionTitle: String
+    var permissionContext: String
+    var permissionOptions: [AgentPermissionOption]
+    var currentToolName: String
+    var currentToolInput: String
+    var deepLink: String
 }
 
-struct SecondaryTerminal: Codable, Hashable {
-    var sid: String
-    var tid: String
-    var provider: String
-    var phase: String
-    var hasPermission: Bool
-}
-
-struct QuickAction: Codable, Hashable {
-    var label: String    // 按钮文本: "选择"
-    var input: String    // 实际发送的终端输入
-    var needsInput: Bool // true = 跳转 app, false = 后台发送
-    var desc: String?    // 左侧描述文字
+struct AgentPermissionOption: Codable, Hashable {
+    var id: String
+    var label: String
+    var kind: String?
 }
 
 // MARK: - UserDefaults Helpers
