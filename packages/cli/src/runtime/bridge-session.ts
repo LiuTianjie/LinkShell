@@ -20,6 +20,7 @@ import { ScreenShare } from "./screen-share.js";
 import { getLanIp } from "../utils/lan-ip.js";
 import { startKeepAwake, type KeepAwakeHandle } from "../utils/keep-awake.js";
 import { loadOrCreateMachineIdentity, type MachineIdentity } from "../machine-id.js";
+import { getValidToken } from "../auth.js";
 import { AgentSessionProxy } from "./acp/agent-session.js";
 import { AgentWorkspaceProxy } from "./acp/agent-workspace.js";
 import { detectAvailableProviders, type AgentProvider } from "./acp/provider-resolver.js";
@@ -353,13 +354,14 @@ export class BridgeSession {
       process.stderr.write(`[bridge] agent workspace channel enabled (providers: ${availableProviders.join(", ") || "none"})\n`);
     }
     await this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
-    this.connectGateway();
+    await this.connectGateway();
   }
 
   private async createPairing(): Promise<void> {
     const headers: Record<string, string> = { "content-type": "application/json" };
-    if (this.options.authToken) {
-      headers["Authorization"] = `Bearer ${this.options.authToken}`;
+    const authToken = await this.resolveAuthToken();
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
     }
     const res = await fetch(`${this.options.gatewayHttpUrl}/pairings`, {
       method: "POST",
@@ -417,7 +419,26 @@ export class BridgeSession {
     process.stderr.write(`  Deep link: ${deepLink}\n\n`);
   }
 
-  private connectGateway(): void {
+  private async resolveAuthToken(): Promise<string | undefined> {
+    if (!this.options.authToken) return undefined;
+    try {
+      const token = await getValidToken();
+      if (token) {
+        this.options.authToken = token;
+        return token;
+      }
+      process.stderr.write(
+        "[bridge] login token expired and refresh failed; run `linkshell login` if the gateway rejects the connection\n",
+      );
+      this.options.authToken = undefined;
+      return undefined;
+    } catch (error) {
+      this.log(`failed to refresh login token: ${error instanceof Error ? error.message : String(error)}`);
+      return this.options.authToken;
+    }
+  }
+
+  private async connectGateway(): Promise<void> {
     if (this.stopped) {
       return;
     }
@@ -425,8 +446,9 @@ export class BridgeSession {
     const url = new URL(this.options.gatewayUrl);
     url.searchParams.set("sessionId", this.sessionId);
     url.searchParams.set("role", "host");
-    if (this.options.authToken) {
-      url.searchParams.set("auth_token", this.options.authToken);
+    const authToken = await this.resolveAuthToken();
+    if (authToken) {
+      url.searchParams.set("auth_token", authToken);
     }
 
     this.socket = new WebSocket(url);
@@ -2001,7 +2023,7 @@ export class BridgeSession {
         return;
       }
       this.reconnecting = false;
-      this.connectGateway();
+      void this.connectGateway();
     }, delay);
   }
 

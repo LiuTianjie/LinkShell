@@ -614,8 +614,12 @@ if (AUTH_REQUIRED) {
   setInterval(async () => {
     for (const session of sessionManager.listActive()) {
       if (!session.userId || !session.host) continue;
-      const stillSubscribed = await checkSubscriptionByUserId(session.userId);
-      if (!stillSubscribed) {
+      const subscription = await checkSubscriptionByUserId(session.userId);
+      if (subscription.status === "unknown") {
+        log("warn", `subscription check unknown for user ${session.userId}, keeping session ${session.id}${subscription.reason ? ` (${subscription.reason})` : ""}`);
+        continue;
+      }
+      if (subscription.status === "inactive") {
         log("info", `subscription expired for user ${session.userId}, disconnecting session ${session.id}`);
         // Notify host
         try {

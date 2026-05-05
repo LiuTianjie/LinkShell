@@ -15,6 +15,11 @@ export interface AuthResult {
   subscribed?: boolean;
 }
 
+export interface SubscriptionCheckResult {
+  status: "active" | "inactive" | "unknown";
+  reason?: string;
+}
+
 /**
  * Validate a Supabase JWT and check subscription via iTool's profiles table.
  */
@@ -74,38 +79,44 @@ async function validateToken(token: string): Promise<AuthResult> {
 
 /**
  * Server-side subscription check using service role key (no user JWT needed).
+ * Returns "unknown" for configuration or network failures so active sessions
+ * are not disconnected because of a transient verification problem.
  */
 export async function checkSubscriptionByUserId(
   userId: string,
-): Promise<boolean> {
-  const key = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY;
-  if (!SUPABASE_URL || !key) return false;
+): Promise<SubscriptionCheckResult> {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    return { status: "unknown", reason: "missing_supabase_config" };
+  }
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    return { status: "unknown", reason: "missing_service_role_key" };
+  }
 
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=plan,plan_expires_at&limit=1`,
       {
         headers: {
-          Authorization: `Bearer ${key}`,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
           apikey: SUPABASE_ANON_KEY,
         },
         signal: AbortSignal.timeout(5_000),
       },
     );
-    if (!res.ok) return false;
+    if (!res.ok) return { status: "unknown", reason: `profile_lookup_http_${res.status}` };
     const profiles = (await res.json()) as {
       plan: string;
       plan_expires_at: string | null;
     }[];
-    if (profiles.length === 0) return false;
+    if (profiles.length === 0) return { status: "unknown", reason: "profile_not_found" };
     const p = profiles[0]!;
-    return (
+    const active =
       p.plan === "pro" &&
       !!p.plan_expires_at &&
-      new Date(p.plan_expires_at) > new Date()
-    );
+      new Date(p.plan_expires_at) > new Date();
+    return { status: active ? "active" : "inactive" };
   } catch {
-    return false;
+    return { status: "unknown", reason: "profile_lookup_failed" };
   }
 }
 

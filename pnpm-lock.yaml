@@ -176,7 +176,7 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: workspace:^0.2.35
+        specifier: workspace:^0.2.36
         version: link:../gateway
       '@linkshell/protocol':
         specifier: workspace:^0.2.29
