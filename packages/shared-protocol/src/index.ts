@@ -253,6 +253,14 @@ export const terminalStatusPayloadSchema = z.object({
       timestamp: z.number(),
     })
     .optional(),
+  permissionResolution: z
+    .object({
+      requestId: z.string(),
+      outcome: z.enum(["allow", "deny", "cancelled"]),
+      source: z.string().optional(),
+      delivered: z.boolean(),
+    })
+    .optional(),
   pendingPermissionCount: z.number().optional(),
   machineId: z.string().min(1).optional(),
 });

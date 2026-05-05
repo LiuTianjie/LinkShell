@@ -709,6 +709,12 @@ export function useAgentWorkspace(
           phase?: string;
           summary?: string;
           pendingPermissionCount?: number;
+          permissionResolution?: {
+            requestId?: string;
+            outcome?: "allow" | "deny" | "cancelled";
+            source?: string;
+            delivered?: boolean;
+          };
           topPermission?: {
             requestId?: string;
             toolName?: string;
@@ -718,10 +724,21 @@ export function useAgentWorkspace(
           };
         };
         const topPermission = payload.topPermission;
+        const permissionResolution = payload.permissionResolution;
         const terminalId = typeof (envelope as any).terminalId === "string"
           ? (envelope as any).terminalId
           : "default";
+        const resolvedConversation = permissionResolution?.requestId
+          ? conversationsRef.current.find((item) =>
+              timelineRef.current.get(item.id)?.some((timelineItem) =>
+                timelineItem.type === "permission" &&
+                timelineItem.permission?.requestId === permissionResolution.requestId &&
+                timelineItem.metadata?.sessionId === envelope.sessionId,
+              ),
+            )
+          : undefined;
         const conversation =
+          resolvedConversation ??
           conversationsRef.current.find((item) => item.id === activeConversationId && item.sessionId === envelope.sessionId) ??
           conversationsRef.current.find((item) =>
             item.sessionId === envelope.sessionId &&
@@ -730,6 +747,51 @@ export function useAgentWorkspace(
           ) ??
           conversationsRef.current.find((item) => item.sessionId === envelope.sessionId && !item.archived);
         if (!conversation) return;
+        if (permissionResolution?.requestId) {
+          const delivered = permissionResolution.delivered === true;
+          const outcome = permissionResolution.outcome;
+          setTimelineById((prev) => {
+            const items = prev.get(conversation.id);
+            if (!items) return prev;
+            let changed = false;
+            const nextItems = items.map((item) => {
+              if (item.type === "permission" && item.permission?.requestId === permissionResolution.requestId) {
+                changed = true;
+                return {
+                  ...item,
+                  metadata: {
+                    ...(item.metadata ?? {}),
+                    permissionLive: false,
+                    permissionPending: false,
+                    permissionExpired: false,
+                    permissionDelivered: delivered,
+                    permissionResolutionSource: permissionResolution.source,
+                    ...(outcome ? { permissionOutcome: outcome } : {}),
+                    permissionError: delivered
+                      ? undefined
+                      : "授权响应未写回 Agent，请重新打开会话确认状态。",
+                  },
+                  updatedAt: Date.now(),
+                };
+              }
+              return item;
+            });
+            if (!changed) return prev;
+            saveAgentTimeline(conversation.id, nextItems).catch(() => {});
+            const next = new Map(prev);
+            next.set(conversation.id, nextItems);
+            return next;
+          });
+          if (delivered && conversation.status === "waiting_permission") {
+            persistConversation({
+              ...conversation,
+              status: "running",
+              lastMessagePreview: payload.summary ?? conversation.lastMessagePreview,
+              lastActivityAt: Date.now(),
+            }).catch(() => {});
+          }
+          if (!topPermission?.requestId) return;
+        }
         if (!topPermission?.requestId) {
           const pendingCount = payload.pendingPermissionCount ?? 0;
           const shouldClearPermissions =

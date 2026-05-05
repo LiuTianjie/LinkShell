@@ -1376,6 +1376,12 @@ export function useSessionManager(): SessionManagerHandle {
             toolInput?: string;
             permissionRequest?: string;
             summary?: string;
+            permissionResolution?: {
+              requestId: string;
+              outcome: "allow" | "deny" | "cancelled";
+              source?: string;
+              delivered: boolean;
+            };
             topPermission?: {
               requestId: string;
               toolName: string;

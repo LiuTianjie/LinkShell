@@ -75,7 +75,7 @@ interface PendingPermission {
   terminalId: string;
   timeout: ReturnType<typeof setTimeout>;
   permissionSuggestions: unknown[];
-  resolve: (decision: HookPermissionDecision) => void;
+  resolve: (decision: HookPermissionDecision) => boolean;
 }
 
 interface HookPermissionDecision {
@@ -754,7 +754,7 @@ export class BridgeSession {
         if (this.resolvePendingPermission(p.requestId, {
           outcome: p.outcome,
           optionId: p.optionId,
-        }, "agent.permission.response")) {
+        }, "agent.permission.response").resolved) {
           break;
         }
         if (!this.agentSession) {
@@ -836,9 +836,9 @@ export class BridgeSession {
       }
       case "permission.decision": {
         const p = envelope.payload as { requestId: string; decision: "allow" | "deny" };
-        const resolved = this.resolvePendingPermission(p.requestId, p.decision, "permission.decision");
+        const result = this.resolvePendingPermission(p.requestId, p.decision, "permission.decision");
         process.stderr.write(
-          `[bridge] permission decision request=${p.requestId} decision=${p.decision} resolved=${resolved}\n`,
+          `[bridge] permission decision request=${p.requestId} decision=${p.decision} resolved=${result.resolved} delivered=${result.delivered}\n`,
         );
         break;
       }
@@ -1238,7 +1238,7 @@ export class BridgeSession {
             const requestId = `pr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
             const permissionSuggestions = hookPermissionSuggestions(event);
             const timeout = setTimeout(() => {
-              if (this.resolvePendingPermission(requestId, "deny", "permission.timeout")) {
+              if (this.resolvePendingPermission(requestId, "deny", "permission.timeout").resolved) {
                 this.log(`permission request ${requestId} timed out`);
                 this.sendPermissionSnapshot(terminalId, "thinking", "permission timed out");
               }
@@ -1248,7 +1248,7 @@ export class BridgeSession {
               timeout,
               permissionSuggestions,
               resolve: (decision) => {
-                if (res.writableEnded) return;
+                if (res.writableEnded) return false;
                 const responseJson = JSON.stringify({
                   hookSpecificOutput: {
                     hookEventName: "PermissionRequest",
@@ -1257,6 +1257,7 @@ export class BridgeSession {
                 });
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(responseJson);
+                return true;
               },
             });
             // Send status with requestId so app can route decision back
@@ -1743,7 +1744,7 @@ export class BridgeSession {
 
   /** Auto-resolve a single pending permission (user acted in terminal) */
   private autoResolvePending(requestId: string): void {
-    if (this.resolvePendingPermission(requestId, "allow", "terminal.auto")) {
+    if (this.resolvePendingPermission(requestId, "allow", "terminal.auto").resolved) {
       this.log(`auto-resolved pending permission ${requestId} (user acted in terminal)`);
     }
   }
@@ -1753,7 +1754,7 @@ export class BridgeSession {
     const stack = this.permissionStacks.get(terminalId);
     if (!stack) return;
     for (const entry of [...stack]) {
-      if (this.resolvePendingPermission(entry.requestId, "deny", "terminal.drain")) {
+      if (this.resolvePendingPermission(entry.requestId, "deny", "terminal.drain").resolved) {
         this.log(`drained pending permission ${entry.requestId}`);
       }
     }
@@ -1763,17 +1764,17 @@ export class BridgeSession {
     requestId: string,
     choice: HookPermissionChoice,
     source = "unknown",
-  ): boolean {
+  ): { resolved: boolean; delivered: boolean } {
     const pending = this.pendingPermissions.get(requestId);
     const outcome = typeof choice === "string" ? choice : choice.outcome;
     const optionId = typeof choice === "string" ? undefined : choice.optionId;
     if (!pending) {
       this.log(`no pending permission for ${requestId} via ${source}: ${outcome}:${optionId ?? "default"}`);
-      return false;
+      return { resolved: false, delivered: false };
     }
     this.pendingPermissions.delete(requestId);
     clearTimeout(pending.timeout);
-    pending.resolve(this.formatHookPermissionDecision(pending, choice));
+    const delivered = pending.resolve(this.formatHookPermissionDecision(pending, choice));
 
     const stack = this.permissionStacks.get(pending.terminalId);
     if (stack) {
@@ -1781,13 +1782,14 @@ export class BridgeSession {
       if (idx >= 0) stack.splice(idx, 1);
       if (stack.length === 0) this.permissionStacks.delete(pending.terminalId);
     }
-    this.log(`resolved permission ${requestId} via ${source}: ${outcome}:${optionId ?? "default"}`);
+    this.log(`resolved permission ${requestId} via ${source}: ${outcome}:${optionId ?? "default"} delivered=${delivered}`);
     this.sendPermissionSnapshot(
       pending.terminalId,
       "thinking",
       outcome === "allow" ? "permission allowed" : "permission denied",
+      { requestId, outcome, source, delivered },
     );
-    return true;
+    return { resolved: true, delivered };
   }
 
   private formatHookPermissionDecision(
@@ -1814,6 +1816,12 @@ export class BridgeSession {
     terminalId: string,
     phase: string,
     summary?: string,
+    permissionResolution?: {
+      requestId: string;
+      outcome: "allow" | "deny" | "cancelled";
+      source: string;
+      delivered: boolean;
+    },
   ): void {
     const stack = this.permissionStacks.get(terminalId);
     const topPermission = stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
@@ -1828,6 +1836,7 @@ export class BridgeSession {
         phase,
         seq,
         ...(summary && { summary }),
+        ...(permissionResolution && { permissionResolution }),
         ...(topPermission && { topPermission }),
         ...(pendingPermissionCount > 0 && { pendingPermissionCount }),
       },
