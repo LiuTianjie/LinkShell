@@ -271,8 +271,18 @@ export class ClaudeSdkClient {
     let currentToolId: string | undefined;
     let currentToolName: string | undefined;
     let currentMessageId: string | undefined;
+    const progressItemId = `claude-progress:${input.clientMessageId}`;
 
     try {
+      this.input.onNotification("item/started", {
+        sessionId: input.sessionId ?? this.claudeSessionId,
+        item: {
+          id: progressItemId,
+          type: "thinking",
+          text: "Claude 正在处理请求",
+          status: "running",
+        },
+      });
       const queryPrompt = hasImages ? singleUserMessage(toClaudeMessageContent(inputBlocks)) : prompt;
       for await (const message of this.query({ prompt: queryPrompt, options: sdkOptions })) {
         if (abortController.signal.aborted) break;
@@ -295,6 +305,15 @@ export class ClaudeSdkClient {
       }
       return { sessionId: this.claudeSessionId, status: abortController.signal.aborted ? "cancelled" : "completed" };
     } finally {
+      this.input.onNotification("item/completed", {
+        sessionId: this.claudeSessionId ?? input.sessionId,
+        item: {
+          id: progressItemId,
+          type: "thinking",
+          text: abortController.signal.aborted ? "Claude 已停止" : "Claude 已完成",
+          status: abortController.signal.aborted ? "failed" : "completed",
+        },
+      });
       if (this.abortController === abortController) this.abortController = undefined;
     }
   }

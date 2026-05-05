@@ -2053,7 +2053,11 @@ export class AgentWorkspaceProxy {
       if (agentSessionId && conversationId) {
         this.conversationByAgentSessionId.set(agentSessionId, conversationId);
         const conversation = this.conversations.get(conversationId);
-        if (conversation) conversation.agentSessionId = agentSessionId;
+        if (conversation) {
+          conversation.agentSessionId = agentSessionId;
+          conversation.lastActivityAt = Date.now();
+          this.emitConversation(conversation);
+        }
       }
       return;
     }

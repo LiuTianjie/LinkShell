@@ -222,9 +222,20 @@ export class ClaudeStreamJsonClient {
       let currentToolId: string | undefined;
       let currentToolName: string | undefined;
       let currentMessageId: string | undefined;
+      const progressItemId = `claude-progress:${input.clientMessageId}`;
       // Map tool_use_id → tool_name so tool_result can look up the correct name
       // even when multiple tools are in flight
       const toolNames = new Map<string, string>();
+
+      this.input.onNotification("item/started", {
+        sessionId: input.sessionId ?? this.claudeSessionId,
+        item: {
+          id: progressItemId,
+          type: "thinking",
+          text: "Claude 正在处理请求",
+          status: "running",
+        },
+      });
 
       rl.on("line", (line: string) => {
         if (this.pendingCancel) {
@@ -375,6 +386,16 @@ export class ClaudeStreamJsonClient {
           }
 
           case "result": {
+            const isError = event.subtype === "error" || event.is_error === true;
+            this.input.onNotification("item/completed", {
+              sessionId: this.claudeSessionId ?? input.sessionId,
+              item: {
+                id: progressItemId,
+                type: "thinking",
+                text: isError ? "Claude 运行出错" : "Claude 已完成",
+                status: isError ? "failed" : "completed",
+              },
+            });
             // Mark the last agent message as complete so isStreaming flips to false
             if (currentMessageId) {
               this.input.onNotification("item/completed", {
@@ -387,7 +408,6 @@ export class ClaudeStreamJsonClient {
               });
             }
             // Turn complete
-            const isError = event.subtype === "error" || event.is_error === true;
             this.input.onNotification("turn/completed", {
               sessionId: this.claudeSessionId,
               stopReason: event.stop_reason ?? (isError ? "error" : "end_turn"),
@@ -408,11 +428,29 @@ export class ClaudeStreamJsonClient {
       });
 
       child.on("error", (err) => {
+        this.input.onNotification("item/completed", {
+          sessionId: this.claudeSessionId ?? input.sessionId,
+          item: {
+            id: progressItemId,
+            type: "thinking",
+            text: "Claude 运行出错",
+            status: "failed",
+          },
+        });
         finish(err, undefined);
       });
 
       child.on("exit", (code, signal) => {
         if (!settled) {
+          this.input.onNotification("item/completed", {
+            sessionId: this.claudeSessionId ?? input.sessionId,
+            item: {
+              id: progressItemId,
+              type: "thinking",
+              text: this.pendingCancel ? "Claude 已停止" : "Claude 意外退出",
+              status: "failed",
+            },
+          });
           finish(
             new Error(`Claude exited unexpectedly (code=${code ?? "null"}, signal=${signal ?? "null"})`),
             undefined,

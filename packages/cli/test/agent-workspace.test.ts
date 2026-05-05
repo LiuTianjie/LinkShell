@@ -55,4 +55,16 @@ describe("AgentWorkspaceProxy event routing", () => {
     expect(sent[0].payload.item.text).toBe("hello");
     expect(sent[1].payload.conversationId).toBe("conversation-a");
   });
+
+  it("emits a conversation update when Claude reports the real session id", () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.get("conversation-a").agentSessionId = "agent-session-placeholder";
+    proxy.conversations.get("conversation-b").status = "idle";
+
+    proxy.handleNotification("thread/started", { sessionId: "claude-real-session" });
+
+    expect(proxy.conversationByAgentSessionId.get("claude-real-session")).toBe("conversation-a");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].payload.conversation.agentSessionId).toBe("claude-real-session");
+  });
 });
