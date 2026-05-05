@@ -200,7 +200,7 @@ export interface SessionManagerHandle {
   killTerminal: (terminalId: string) => void;
   /** Remove an exited terminal from the local map */
   removeTerminal: (terminalId: string) => void;
-  /** Register callback for terminal.status changes (for Live Activity fast path) */
+  /** Register callback for terminal.status changes */
   onStatusChange: (
     cb:
       | ((

@@ -42,16 +42,6 @@ import { addServer } from "./src/storage/servers";
 import { ThemeProvider, useTheme } from "./src/theme";
 import { fetchWithTimeout } from "./src/utils/fetch-with-timeout";
 import { parsePairingLink } from "./src/utils/pairing-link";
-import {
-  isLiveActivityAvailable,
-  startLiveActivity,
-  updateLiveActivity,
-  endLiveActivity,
-  type ActivityState,
-  type ExtendedActivityData,
-  type SecondaryTerminal,
-} from "./src/native/LiveActivity";
-import { ThrottledTerminalParser } from "./src/utils/terminal-parser";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
 const LAST_SESSION_KEY = "@linkshell/last_session";
@@ -115,12 +105,11 @@ function AppInner() {
 
   const currentScreen = isInSession ? "terminal" : activeScreen;
 
-  // Deep link handling (pairing + live activity quick actions)
+  // Deep link handling
   useEffect(() => {
     const applyLink = (rawUrl: string | null) => {
       if (!rawUrl) return;
 
-      // Handle live activity quick action: linkshell://input?session=X&terminal=T&data=Y&bg=1
       try {
         const url = new URL(rawUrl);
         if (url.host === "input" || url.pathname === "//input") {
@@ -312,318 +301,6 @@ function AppInner() {
       .catch(() => {});
   }, [manager.sessions]);
 
-  // Live Activity: track ALL sessions, not just active one
-  const liveActivityActiveRef = useRef(false);
-  const parsersRef = useRef(
-    new Map<
-      string,
-      {
-        parser: ThrottledTerminalParser;
-        unsub: () => void;
-        status: string;
-        lastLine: string;
-        contextLines: string;
-        quickActions: { label: string; input: string; needsInput: boolean; desc?: string }[];
-        provider: string;
-        connectedAt: number;
-      }
-    >(),
-  );
-  const sessionsRef = useRef(manager.sessions);
-  const activeSidRef = useRef(manager.activeSessionId);
-  sessionsRef.current = manager.sessions;
-  activeSidRef.current = manager.activeSessionId;
-
-  const pushLiveActivityUpdate = useCallback(() => {
-    if (!liveActivityActiveRef.current) return;
-    const currentSessions = sessionsRef.current;
-    const now = Date.now();
-
-    // Collect all terminal candidates
-    const candidates: {
-      sid: string;
-      tid: string;
-      phase: string;
-      project: string;
-      provider: string;
-      tool: string;
-      elapsed: number;
-      hasPermission: boolean;
-      permCount: number;
-      toolDescription: string;
-      contextLines: string;
-      permissionTool: string;
-      permissionContext: string;
-      permissionRequestId: string;
-      quickActions: { label: string; input: string; needsInput: boolean; desc?: string }[];
-    }[] = [];
-
-    for (const [sid, info] of currentSessions) {
-      if (info.status !== "connected") continue;
-      const entry = parsersRef.current.get(sid);
-
-      const activeTerm = info.activeTerminalId
-        ? info.terminals.get(info.activeTerminalId)
-        : undefined;
-      const ss = activeTerm?.structuredStatus;
-      const useStructured = ss && now - ss.updatedAt < 30_000;
-      const hasPermission = !!ss?.topPermission;
-
-      candidates.push({
-        sid,
-        tid: info.activeTerminalId || "default",
-        phase: useStructured ? ss.phase : (entry?.status ?? "idle"),
-        project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 30),
-        provider: (activeTerm?.provider && activeTerm.provider !== "custom" ? activeTerm.provider : null)
-          ?? (info.provider && info.provider !== "custom" ? info.provider : null)
-          ?? info.provider ?? "claude",
-        tool: ss?.toolName || "",
-        elapsed: Math.floor((now - (entry?.connectedAt ?? now)) / 1000),
-        hasPermission,
-        permCount: ss?.pendingPermissionCount ?? 0,
-        toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 500),
-        contextLines: (useStructured && ss.permissionRequest ? ss.permissionRequest : (entry?.contextLines ?? "")).slice(0, 500),
-        permissionTool: ss?.topPermission?.toolName || "",
-        permissionContext: (ss?.topPermission?.permissionRequest || ss?.topPermission?.toolInput || "").slice(0, 400),
-        permissionRequestId: ss?.topPermission?.requestId || "",
-        quickActions: hasPermission
-          ? [
-              { label: "允许", input: "allow", needsInput: false },
-              { label: "拒绝", input: "deny", needsInput: false },
-              ...(entry?.quickActions?.filter((a) => a.input !== "allow" && a.input !== "deny").map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
-            ]
-          : (entry?.quickActions?.map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
-      });
-    }
-
-    if (candidates.length === 0) return;
-
-    // Sort: hasPermission first, then by phase priority
-    const priority: Record<string, number> = {
-      error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5,
-    };
-    candidates.sort((a, b) => {
-      if (a.hasPermission !== b.hasPermission) return a.hasPermission ? -1 : 1;
-      return (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9);
-    });
-
-    const primary = candidates[0];
-    const totalPermCount = candidates.reduce((sum, c) => sum + c.permCount, 0);
-
-    const state: ActivityState = {
-      sid: primary.sid,
-      tid: primary.tid,
-      phase: primary.phase,
-      project: primary.project,
-      provider: primary.provider,
-      tool: primary.tool,
-      elapsed: primary.elapsed,
-      hasPermission: primary.hasPermission,
-      permCount: primary.permCount,
-      otherCount: candidates.length - 1,
-      totalPermCount,
-    };
-
-    const secondaryTerminals: SecondaryTerminal[] = candidates.slice(1, 6).map((c) => ({
-      sid: c.sid,
-      tid: c.tid,
-      provider: c.provider,
-      phase: c.phase,
-      hasPermission: c.hasPermission,
-    }));
-
-    const extended: ExtendedActivityData = {
-      sid: primary.sid,
-      tid: primary.tid,
-      toolDescription: primary.toolDescription,
-      contextLines: primary.contextLines,
-      permissionTool: primary.permissionTool,
-      permissionContext: primary.permissionContext,
-      permissionRequestId: primary.permissionRequestId,
-      quickActions: primary.quickActions,
-      secondaryTerminals,
-    };
-
-    const needsAlert = candidates.some((c) => c.hasPermission);
-    updateLiveActivity(state, extended, needsAlert);
-  }, []);
-
-  useEffect(() => {
-    const currentSessions = manager.sessions;
-
-    // Remove parsers for sessions that no longer exist
-    for (const [sid, entry] of parsersRef.current) {
-      if (!currentSessions.has(sid)) {
-        entry.parser.destroy();
-        entry.unsub();
-        parsersRef.current.delete(sid);
-      }
-    }
-
-    // Add parsers for new sessions
-    for (const [sid, info] of currentSessions) {
-      if (info.status !== "connected") continue;
-      if (parsersRef.current.has(sid)) continue;
-
-      const entry = {
-        parser: null as unknown as ThrottledTerminalParser,
-        unsub: null as unknown as () => void,
-        status: "idle",
-        lastLine: "",
-        contextLines: "",
-        quickActions: [] as {
-          label: string;
-          input: string;
-          needsInput: boolean;
-        }[],
-        provider: info.provider || "claude",
-        connectedAt: Date.now(),
-      };
-
-      entry.parser = new ThrottledTerminalParser((result) => {
-        entry.status = result.status;
-        entry.lastLine = result.lastLine;
-        entry.contextLines = result.contextLines;
-        entry.quickActions = result.quickActions;
-        pushLiveActivityUpdate();
-      }, 1000);
-
-      entry.unsub = info.terminalStream.subscribe((event) => {
-        if (event.type === "append") entry.parser.push(event.chunk);
-      });
-
-      parsersRef.current.set(sid, entry);
-    }
-
-    // Start or end live activity based on session count
-    const hasConnected = [...currentSessions.values()].some(
-      (s) => s.status === "connected",
-    );
-
-    if (hasConnected && !liveActivityActiveRef.current) {
-      isLiveActivityAvailable().then((ok) => {
-        if (!ok) return;
-        const now = Date.now();
-        const candidates: {
-          sid: string; tid: string; phase: string; project: string;
-          provider: string; tool: string; elapsed: number;
-          hasPermission: boolean; permCount: number;
-          toolDescription: string; contextLines: string;
-          permissionTool: string; permissionContext: string;
-          permissionRequestId: string;
-          quickActions: { label: string; input: string; needsInput: boolean; desc?: string }[];
-        }[] = [];
-
-        for (const [sid, info] of sessionsRef.current) {
-          if (info.status !== "connected") continue;
-          const e = parsersRef.current.get(sid);
-          const activeTerm = info.activeTerminalId
-            ? info.terminals.get(info.activeTerminalId)
-            : undefined;
-          const ss = activeTerm?.structuredStatus;
-          const hasPermission = !!ss?.topPermission;
-
-          candidates.push({
-            sid,
-            tid: info.activeTerminalId || "default",
-            phase: ss?.phase || (e?.status ?? "idle"),
-            project: (info.projectName || info.hostname || sid.slice(0, 8)).slice(0, 30),
-            provider: e?.provider ?? info.provider ?? "claude",
-            tool: ss?.toolName || "",
-            elapsed: Math.floor((now - (e?.connectedAt ?? now)) / 1000),
-            hasPermission,
-            permCount: ss?.pendingPermissionCount ?? 0,
-            toolDescription: (ss?.toolInput || ss?.summary || "").slice(0, 500),
-            contextLines: (e?.contextLines ?? "").slice(0, 500),
-            permissionTool: ss?.topPermission?.toolName || "",
-            permissionContext: (ss?.topPermission?.permissionRequest || ss?.topPermission?.toolInput || "").slice(0, 400),
-            permissionRequestId: ss?.topPermission?.requestId || "",
-            quickActions: hasPermission
-              ? [
-                  { label: "允许", input: "allow", needsInput: false, desc: "允许执行此操作" },
-                  { label: "拒绝", input: "deny", needsInput: false, desc: "拒绝此操作" },
-                ]
-              : (e?.quickActions?.map((a) => ({ ...a, desc: a.desc ?? a.label })) ?? []),
-          });
-        }
-        if (candidates.length === 0) return;
-
-        const priority: Record<string, number> = {
-          error: 0, waiting: 1, tool_use: 2, thinking: 3, outputting: 4, idle: 5,
-        };
-        candidates.sort((a, b) => {
-          if (a.hasPermission !== b.hasPermission) return a.hasPermission ? -1 : 1;
-          return (priority[a.phase] ?? 9) - (priority[b.phase] ?? 9);
-        });
-
-        const primary = candidates[0];
-        const totalPermCount = candidates.reduce((sum, c) => sum + c.permCount, 0);
-
-        const state: ActivityState = {
-          sid: primary.sid, tid: primary.tid, phase: primary.phase,
-          project: primary.project, provider: primary.provider,
-          tool: primary.tool, elapsed: primary.elapsed,
-          hasPermission: primary.hasPermission, permCount: primary.permCount,
-          otherCount: candidates.length - 1, totalPermCount,
-        };
-
-        const secondaryTerminals: SecondaryTerminal[] = candidates.slice(1, 6).map((c) => ({
-          sid: c.sid, tid: c.tid, provider: c.provider, phase: c.phase, hasPermission: c.hasPermission,
-        }));
-
-        const extended: ExtendedActivityData = {
-          sid: primary.sid, tid: primary.tid,
-          toolDescription: primary.toolDescription,
-          contextLines: primary.contextLines,
-          permissionTool: primary.permissionTool,
-          permissionContext: primary.permissionContext,
-          permissionRequestId: primary.permissionRequestId,
-          quickActions: primary.quickActions,
-          secondaryTerminals,
-        };
-
-        startLiveActivity(state, extended).then((id) => {
-          if (id) liveActivityActiveRef.current = true;
-        });
-      });
-    } else if (!hasConnected && liveActivityActiveRef.current) {
-      liveActivityActiveRef.current = false;
-      endLiveActivity();
-      for (const entry of parsersRef.current.values()) {
-        entry.parser.destroy();
-        entry.unsub();
-      }
-      parsersRef.current.clear();
-    } else if (hasConnected && liveActivityActiveRef.current) {
-      // Sessions changed (added/removed/switched) — push update
-      pushLiveActivityUpdate();
-    }
-  }, [manager.activeSessionId, manager.sessions, pushLiveActivityUpdate]);
-
-  // Periodic Live Activity refresh — ensures structured status updates
-  // (from hooks) are pushed even when there's no terminal output
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (liveActivityActiveRef.current) pushLiveActivityUpdate();
-    }, 2000);
-    return () => clearInterval(id);
-  }, [pushLiveActivityUpdate]);
-
-  // Cleanup on unmount only
-  useEffect(() => {
-    return () => {
-      if (liveActivityActiveRef.current) {
-        endLiveActivity();
-        liveActivityActiveRef.current = false;
-      }
-      for (const entry of parsersRef.current.values()) {
-        entry.parser.destroy();
-        entry.unsub();
-      }
-      parsersRef.current.clear();
-    };
-  }, []);
-
   // App state: foreground/background
   const handleForeground = useCallback(async () => {
     if (manager.sessions.size === 0) {
@@ -685,9 +362,6 @@ function AppInner() {
     (sessionId: string) => {
       manager.disconnectSession(sessionId);
       if (manager.sessions.size <= 1) {
-        // Last session being removed — effect will end live activity
-        liveActivityActiveRef.current = false;
-        endLiveActivity();
         AsyncStorage.removeItem(LAST_SESSION_KEY);
         setActiveScreen("tabs");
       }
@@ -696,13 +370,6 @@ function AppInner() {
   );
 
   const handleDisconnectAll = useCallback(() => {
-    liveActivityActiveRef.current = false;
-    endLiveActivity();
-    for (const entry of parsersRef.current.values()) {
-      entry.parser.destroy();
-      entry.unsub();
-    }
-    parsersRef.current.clear();
     manager.disconnectAll();
     AsyncStorage.removeItem(LAST_SESSION_KEY);
     setActiveScreen("tabs");

@@ -4,47 +4,42 @@ const { LiveActivityModule } = NativeModules;
 
 // ── Activity state (matches Swift ContentState) ──
 
+export type AgentActivityStatus =
+  | "idle"
+  | "running"
+  | "waiting_permission"
+  | "error";
+
 export interface ActivityState {
-  sid: string;
-  tid: string;
-  phase: string;
-  project: string;
+  conversationId: string;
+  sessionId: string;
   provider: string;
-  tool: string;
-  elapsed: number;
+  project: string;
+  status: AgentActivityStatus;
+  phaseLabel: string;
+  summary: string;
   hasPermission: boolean;
-  permCount: number;
-  otherCount: number;
-  totalPermCount: number;
+  permissionCount: number;
+  updatedAt: number;
 }
 
 // ── Extended data (single object, written to UserDefaults for widget) ──
 
 export interface ExtendedActivityData {
-  sid: string;
-  tid: string;
-  toolDescription: string;
-  contextLines: string;
-  permissionTool: string;
-  permissionContext: string;
+  conversationId: string;
   permissionRequestId: string;
-  quickActions: QuickAction[];
-  secondaryTerminals: SecondaryTerminal[];
+  permissionTitle: string;
+  permissionContext: string;
+  permissionOptions: AgentPermissionOption[];
+  currentToolName: string;
+  currentToolInput: string;
+  deepLink: string;
 }
 
-export interface SecondaryTerminal {
-  sid: string;
-  tid: string;
-  provider: string;
-  phase: string;
-  hasPermission: boolean;
-}
-
-export interface QuickAction {
+export interface AgentPermissionOption {
+  id: string;
   label: string;
-  input: string;
-  needsInput: boolean;
-  desc?: string;
+  kind?: "allow" | "deny" | "other";
 }
 
 // ── Native bridge ──

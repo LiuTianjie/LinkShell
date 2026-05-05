@@ -79,8 +79,8 @@ class LiveActivityModule: NSObject {
                         await activity.update(
                             content,
                             alertConfiguration: AlertConfiguration(
-                                title: "需要操作",
-                                body: "终端等待输入",
+                                title: "Agent 需要操作",
+                                body: "有新的权限请求等待处理",
                                 sound: .default
                             )
                         )
@@ -115,10 +115,16 @@ class LiveActivityModule: NSObject {
             for activity in Activity<LinkShellAttributes>.activities {
                 if activity.id == aid {
                     let finalState = LinkShellAttributes.ContentState(
-                        sid: "", tid: "", phase: "idle", project: "",
-                        provider: "custom", tool: "", elapsed: 0,
-                        hasPermission: false, permCount: 0,
-                        otherCount: 0, totalPermCount: 0
+                        conversationId: "",
+                        sessionId: "",
+                        provider: "custom",
+                        project: "",
+                        status: "idle",
+                        phaseLabel: "",
+                        summary: "",
+                        hasPermission: false,
+                        permissionCount: 0,
+                        updatedAt: Date().timeIntervalSince1970 * 1000
                     )
                     let content = ActivityContent(state: finalState, staleDate: nil)
                     await activity.end(content, dismissalPolicy: .after(.now + 5))
@@ -142,10 +148,12 @@ class LiveActivityModule: NSObject {
         }
 
         if ext.permissionRequestId == requestId {
-            ext.permissionTool = ""
+            ext.permissionTitle = ""
+            ext.currentToolName = ""
+            ext.currentToolInput = ""
             ext.permissionContext = ""
             ext.permissionRequestId = ""
-            ext.quickActions = []
+            ext.permissionOptions = []
             LiveActivityStore.writeExtendedData(ext)
             resolve(true)
         } else {
