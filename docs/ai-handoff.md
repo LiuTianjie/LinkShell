@@ -8,7 +8,7 @@ LinkShell 是一个三段式终端桥接系统：
 
 1. 本地 CLI：运行在用户电脑上，桥接真实 PTY 终端。
 2. Gateway：部署在公网，负责配对、会话和消息转发。
-3. Mobile App：Expo App，负责手机端查看和控制终端。
+3. Mobile App：Expo App，负责手机端查看终端、Agent Workspace、远程桌面和 Browser 预览。
 
 当前仓库已经具备可运行闭环，不是纯脚手架状态。
 
@@ -36,13 +36,13 @@ LinkShell 是一个三段式终端桥接系统：
 
 ### 3.1 Mobile App
 
-当前活跃开发重点在 apps/mobile。
+当前活跃开发重点在 apps/mobile，尤其是 Agent Workspace v2 与终端体验。
 
 技术栈：Expo SDK 54 + React Native 0.81.5 + React 19.1.0。
 
 已经完成的方向：
 
-1. 主导航为 首页 / 会话 / 设置 三个 Tab。
+1. 主导航为 首页 / 会话 / Agent / 设置。
 2. 新建连接入口收口到首页按钮 + ConnectionSheet（Modal，iOS sheet detents）。
 3. 首页：标题/副标题、新建连接按钮、继续上次会话、最近会话历史（Swipeable 左滑删除，LayoutAnimation 过渡）。
 4. 会话列表：按网关分组（并行拉取所有已保存网关的 /sessions），骨架加载动画、FadeIn 过渡、错误与空状态。
@@ -52,6 +52,7 @@ LinkShell 是一个三段式终端桥接系统：
 8. 集成 react-native-gesture-handler + react-native-reanimated。
 9. 页面语言全部中文化。
 10. 所有页面 safe area 修正完毕。
+11. Agent Workspace v2：provider 选择、动态模型/权限/推理强度、结构化 timeline、权限审批、结构化输入、子 Agent 活动、本地历史缓存。
 
 仍然最可能继续改的区域：
 
@@ -61,6 +62,9 @@ LinkShell 是一个三段式终端桥接系统：
 4. apps/mobile/src/components/ConnectionSheet.tsx
 5. apps/mobile/src/screens/HomeScreen.tsx
 6. apps/mobile/src/screens/SessionListScreen.tsx
+7. apps/mobile/src/hooks/useAgentWorkspace.ts
+8. apps/mobile/src/screens/AgentWorkspaceScreen.tsx
+9. apps/mobile/src/screens/AgentConversationScreen.tsx
 
 移动端更详细说明见 apps/mobile/README.md。
 
@@ -74,16 +78,19 @@ Gateway 现在已经能提供最小可用闭环：
 4. WebSocket host/client 转发。
 5. 控制权相关消息流。
 
-现阶段仍偏内存态实现，更适合开发和单实例部署。
+Gateway 不理解 Agent 业务语义，只透传 envelope；Agent Workspace v2 的 capabilities、snapshot、event、permission 和 structured input 都通过同一 WebSocket relay 转发。Gateway 仍以单实例内存态为主，可选 Supabase 持久化 device token 和 pairing 状态。
 
 ### 3.3 CLI
 
 CLI 当前已经能：
 
-1. 启动 provider 或 custom command。
+1. 启动 `claude`、`codex`、`gemini`、`copilot` 或 custom command。
 2. 连接 gateway。
 3. 打印 pairing code 和二维码。
 4. 发送终端输入、输出、尺寸变化。
+5. 默认启用 Agent Workspace channel，自动检测 Claude Code / Codex Agent provider。
+6. 向 App 下发 Agent capabilities（provider、模型、reasoning effort、permission mode、feature flags）。
+7. 对 Claude Code 支持 Claude Agent SDK 优先、stream-json fallback；对 Codex 支持 app-server newline protocol。
 
 后续如果要继续做稳定性，优先看 runtime 目录。
 
@@ -107,6 +114,10 @@ CLI 当前已经能：
 2. packages/cli/src/runtime/bridge-session.ts
 3. packages/cli/src/runtime/scrollback.ts
 4. packages/cli/src/providers.ts
+5. packages/cli/src/runtime/acp/agent-workspace.ts
+6. packages/cli/src/runtime/acp/provider-resolver.ts
+7. packages/cli/src/runtime/acp/claude-stream-json-client.ts
+8. packages/cli/src/runtime/acp/claude-sdk-client.ts
 
 ### Gateway
 
@@ -164,7 +175,17 @@ pnpm --filter @linkshell/app typecheck
 7. 所有组件使用 useTheme() 动态主题 token，不硬编码颜色。
 8. Expo/RN runtime 不支持 AbortSignal.timeout()，统一使用 src/utils/fetch-with-timeout.ts。
 
-## 7. 最近移动端 UI 调整摘要
+## 7. 最近 Agent / Provider 调整摘要
+
+1. 多 Agent provider 自动检测：CLI 启动时会检测 `claude` 与 `codex`，并把可用 provider 一起暴露给 App。
+2. Claude Code Agent 支持：优先使用 `@anthropic-ai/claude-agent-sdk`，也支持 `claude --print --output-format stream-json --input-format stream-json` fallback。
+3. 动态模型发现：CLI capabilities 会携带 provider 模型列表、默认模型、reasoning effort、permission mode，App 不再依赖静态模型枚举。
+4. Agent Workspace v2 timeline 支持 command execution、file change、subagent action、plan、user input prompt、context compaction 等类型。
+5. 权限和结构化输入现在有 pending/submitting 状态；遇到 control conflict 时 App 会在对应 timeline item 上显示错误。
+6. Provider-scoped 远端会话 ID：本地缓存会把旧的 `agent-remote-<id>` 迁移到 `agent-remote-<provider>-<id>`，避免不同 provider 会话冲突。
+7. Provider detection 覆盖 daemon PATH 较短的情况，并兼容带空格的 Windows 路径。
+
+## 8. 最近移动端 UI 调整摘要
 
 1. 首页重写：标题/副标题、新建连接按钮（带 loading 状态）、继续上次会话卡片、最近会话列表（react-native-gesture-handler Swipeable 左滑删除，LayoutAnimation 过渡）。
 2. 会话列表重写：按网关分组（并行拉取所有已保存网关），每组独立 loading 骨架（pulsing skeleton）、错误提示、空状态，FadeIn 动画 + LayoutAnimation 过渡。
@@ -177,12 +198,13 @@ pnpm --filter @linkshell/app typecheck
 9. 所有页面 safe area 修正（使用 useSafeAreaInsets + paddingTop: insets.top + 2）。
 10. useSession.ts 清理了调试用的 httpbin 诊断日志。
 
-## 8. 如果下一个 AI 要继续做什么
+## 9. 如果下一个 AI 要继续做什么
 
 推荐顺序：
 
 1. 先读 README.md。
 2. 再读 apps/mobile/README.md。
 3. 如果是改终端体验，再看 apps/mobile/src/screens/SessionScreen.tsx 和相关组件。
-4. 如果是改协议或稳定性，再看 packages/shared-protocol 和 packages/cli、packages/gateway 的 runtime。
-5. PRD.md 只在需要产品背景和长期方向时再读，不适合拿来做快速进入点。
+4. 如果是改 Agent 体验，看 useAgentWorkspace、AgentWorkspaceScreen、AgentConversationScreen 和 packages/cli/src/runtime/acp。
+5. 如果是改协议或稳定性，再看 packages/shared-protocol 和 packages/cli、packages/gateway 的 runtime。
+6. PRD.md 只在需要产品背景和长期方向时再读，不适合拿来做快速进入点。

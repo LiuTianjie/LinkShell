@@ -177,7 +177,7 @@ With `--screen`, the app can switch to the Desktop tab to view your computer scr
 >
 > Once installed, the CLI auto-detects screen devices and starts H.264 encoding. If [werift](https://github.com/nicktomlin/werift) is also installed (`npm i -g werift`), WebRTC low-latency transport is preferred; otherwise it falls back to screenshot streaming.
 
-### Agent GUI
+### Agent Workspace
 
 LinkShell exposes an Agent tab alongside Terminal, Desktop, and Browser. It auto-detects installed agent providers (Claude Code, Codex CLI), starts available providers, and reports provider capabilities to the app.
 

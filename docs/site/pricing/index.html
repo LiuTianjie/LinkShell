@@ -7,7 +7,7 @@
   <base href="../" />
   <title>LinkShell 定价 | Free 与 Pro 官方 Gateway</title>
   <meta name="description"
-    content="LinkShell 免费版包含终端桥接、二维码配对、Claude Code 与 OpenAI Codex 支持、远程桌面、端口转发和自建 Gateway；Pro 解锁官方托管 Gateway 和 App 自动发现会话。" />
+    content="LinkShell 免费版包含终端桥接、二维码配对、Claude Code、OpenAI Codex、Gemini、Copilot 支持、Agent Workspace、远程桌面、端口转发和自建 Gateway；Pro 解锁官方托管 Gateway 和 App 自动发现会话。" />
   <meta name="keywords"
     content="LinkShell, remote terminal, Claude Code, OpenAI Codex, Codex CLI, terminal bridge, mobile terminal, remote desktop, port forwarding, CLI gateway, WebSocket gateway, iOS terminal, Android terminal" />
   <meta name="author" content="LinkShell" />
@@ -78,7 +78,7 @@
           "@id": "https://liutianjie.github.io/LinkShell/#website",
           "url": "https://liutianjie.github.io/LinkShell/",
           "name": "LinkShell",
-          "description": "Remote terminal control for Claude Code, OpenAI Codex, and shell sessions from iOS and Android.",
+          "description": "Remote terminal and Agent Workspace control for Claude Code, OpenAI Codex, Gemini, Copilot, and shell sessions from iOS and Android.",
           "inLanguage": ["en", "zh-CN"],
           "publisher": {
             "@id": "https://liutianjie.github.io/LinkShell/#organization"
@@ -96,11 +96,12 @@
           "codeRepository": "https://github.com/LiuTianjie/LinkShell",
           "license": "https://github.com/LiuTianjie/LinkShell/blob/main/LICENSE",
           "image": "https://liutianjie.github.io/LinkShell/assets/adaptive-icon.png",
-          "description": "LinkShell bridges local Claude Code, OpenAI Codex, and shell terminal sessions to iOS and Android with a CLI gateway, QR pairing, remote desktop, and port forwarding.",
+          "description": "LinkShell bridges local Claude Code, OpenAI Codex, Gemini, Copilot, and shell terminal sessions to iOS and Android with a CLI gateway, Agent Workspace, QR pairing, remote desktop, and port forwarding.",
           "featureList": [
             "Remote PTY terminal bridge",
-            "Claude Code and OpenAI Codex session control",
+            "Claude Code, OpenAI Codex, Gemini, and Copilot terminal control",
             "QR code pairing",
+            "Agent Workspace for Claude Code and Codex",
             "Built-in and self-hosted WebSocket gateway",
             "Remote desktop streaming",
             "Port forwarding for dev server previews"
@@ -142,7 +143,7 @@
               "name": "Which AI agents does LinkShell support?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "LinkShell supports Claude Code, OpenAI Codex, and custom shell processes through the CLI provider option."
+                "text": "LinkShell terminal mode supports Claude Code, OpenAI Codex, Gemini, GitHub Copilot, and custom shell processes. Agent Workspace auto-detects Claude Code and Codex providers."
               }
             },
             {
@@ -852,7 +853,7 @@
         <h1 style="margin-bottom:16px"><span data-i18n="heroTitle1">终端漫游</span><span
             data-i18n="heroTitleSep">，</span><span data-i18n="heroTitle2">随时随地，自由接管</span></h1>
         <p style="color:var(--text-sec);margin-bottom:12px;max-width:600px" data-i18n="heroLead">
-          纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。</p>
+          本地终端桥接 + Agent Workspace。长耗时任务留在高性能桌面上，用手机接管 PTY、Claude Code 与 Codex 对话。</p>
         <p style="color:var(--warning);margin-bottom:12px;font-size:14px" data-i18n="heroGateway">🚀 Pro 订阅用户可直接使用官方
           Gateway，无需自建服务器。<a href="https://itool.tech" style="color:var(--warning)">了解更多 →</a></p>
         <p style="color:var(--green);margin-bottom:32px;font-size:14px"><span data-i18n="heroFreeGateway">🎉
@@ -913,7 +914,7 @@
 
       <div style="margin-bottom:48px">
         <h3 data-i18n="step2Title">[2] 启动桥接</h3>
-        <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step2Desc">一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。</p>
+        <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step2Desc">一条命令启动内置网关、桥接 AI 终端，并自动开放 Agent Workspace channel。</p>
 
         <div class="tabs">
           <button class="tab active" data-tab="qs-lan" data-i18n="tabLan">局域网</button>
@@ -1023,7 +1024,7 @@
       <div style="margin-bottom:24px">
         <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span
             data-i18n="f2Title">全平台客户端</span></p>
-        <p style="color:var(--text-sec)" data-i18n="f2Desc">支持 React Native / Expo 移动端与 Web 页面调试端。纯粹的单一协议，跨平台劫持终端流。</p>
+        <p style="color:var(--text-sec)" data-i18n="f2Desc">支持 React Native / Expo 移动端与 Web 页面调试端。统一协议同时承载终端、Agent、桌面和 Browser 预览。</p>
       </div>
       <div style="margin-bottom:24px">
         <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span
@@ -1055,25 +1056,24 @@
     </div>
   </section>
 
-  <!-- DYNAMIC ISLAND -->
+  <!-- AGENT WORKSPACE -->
   <section class="sec" data-page="home">
     <div class="c">
-      <h2 data-i18n="diSectionTitle">灵动岛，让 AI 触手可及</h2>
-      <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="diSectionDesc">iPhone 灵动岛实时展示 Claude
-        工作状态。识别到需要操作时，一键快速响应，无需切回 App。</p>
+      <h2 data-i18n="diSectionTitle">Agent Workspace，让 AI 触手可及</h2>
+      <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="diSectionDesc">Agent 标签结构化展示 Claude Code 与 Codex 对话。模型、权限、推理强度随 CLI capabilities 动态同步。</p>
 
-      <div class="term" style="margin-bottom:24px">┌─ compact ──────────────────────────────┐
-│ · · · │
-├─ expanded ─────────────────────────────┤
-│ <span class="ta">Claude Code</span> — Editing App.tsx... │
-├─ action ───────────────────────────────┤
-│ Run <span class="tc">`npm test`</span>? <span class="to">[deny]</span> <span class="ts">[approve]</span> │
+      <div class="term" style="margin-bottom:24px">┌─ Agent Workspace ───────────────────────┐
+│ <span class="ta">Claude Code</span> · Sonnet · workspace_write │
+├─ timeline ─────────────────────────────┤
+│ tool: npm test <span class="ts">PASS</span> · file: App.tsx +12 │
+├─ permission ───────────────────────────┤
+│ Run <span class="tc">`git push`</span>? <span class="to">[deny]</span> <span class="ts">[approve]</span> │
 └────────────────────────────────────────┘</div>
 
-      <div class="li g" data-i18n="diFeature1">实时状态 — 思考中、编码中、等待确认，一目了然</div>
-      <div class="li g" data-i18n="diFeature2">快捷操作 — Claude 请求执行命令时，灵动岛直接审批</div>
-      <div class="li g" data-i18n="diFeature3">智能摘要 — 长对话自动提炼关键信息到灵动岛</div>
-      <div class="li g" data-i18n="diFeature4">无感切换 — 从灵动岛一键跳转到完整会话</div>
+      <div class="li g" data-i18n="diFeature1">结构化时间线 — 消息、计划、tool call、命令执行和文件变更一屏呈现</div>
+      <div class="li g" data-i18n="diFeature2">权限审批 — 在手机上直接允许、拒绝或回复补充输入</div>
+      <div class="li g" data-i18n="diFeature3">动态能力 — provider 模型、权限模式和推理强度由 CLI 下发</div>
+      <div class="li g" data-i18n="diFeature4">恢复历史 — 本地缓存对话与 timeline，重连后自动同步快照</div>
     </div>
   </section>
 
@@ -1153,11 +1153,11 @@
 
         <div style="margin-bottom:32px">
           <p style="font-weight:700;margin-bottom:4px">linkshell start</p>
-          <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdStart">启动桥接会话。自动启动内置网关，桥接 AI
-            代理进程并生成配对二维码。</p>
+          <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdStart">启动桥接会话。自动启动内置网关，桥接 AI 终端，开放 Agent Workspace，并生成配对二维码。</p>
           <div class="term"><span class="tm">FLAGS</span>
 --daemon <span class="to" data-i18n="flagDaemon">后台守护模式运行</span>
---provider <span class="to" data-i18n="flagProvider">指定 AI 提供者 (claude / codex / custom)</span>
+--provider <span class="to" data-i18n="flagProvider">指定终端 provider (claude / codex / gemini / copilot / custom)</span>
+--agent-ui <span class="to" data-i18n="flagAgentUi">启用 Agent Workspace</span>
 --screen <span class="to" data-i18n="flagScreen">启用远程桌面共享</span>
 --port <span class="to" data-i18n="flagPort">指定网关端口 (默认 8787)</span></div>
         </div>
@@ -1331,7 +1331,7 @@
 
         <div class="stat-g">
           <div class="stat">
-            <div class="stat-v">16</div>
+            <div class="stat-v">40+</div>
             <div class="stat-l" data-i18n="docsProtoMsgTypes">消息类型 (Zod)</div>
           </div>
           <div class="stat">
@@ -1377,8 +1377,7 @@
         </div>
         <div style="margin-bottom:24px">
           <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq2Q">Q: 支持哪些 AI 代理？</p>
-          <p style="color:var(--text-sec)" data-i18n="docsFaq2A">目前支持 Claude Code、OpenAI Codex，以及任意自定义 Shell 进程。通过
-            --provider 参数指定。</p>
+          <p style="color:var(--text-sec)" data-i18n="docsFaq2A">终端模式支持 Claude Code、OpenAI Codex、Gemini、GitHub Copilot 和任意自定义 Shell 进程；Agent Workspace 会自动检测 Claude Code 与 Codex。</p>
         </div>
         <div style="margin-bottom:24px">
           <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq3Q">Q: 手机 App 在哪里下载？</p>
@@ -1419,7 +1418,7 @@
           <ul class="plan-features">
             <li data-i18n="pricingF1">内置网关（局域网直连）</li>
             <li data-i18n="pricingF2">终端桥接 + 二维码配对</li>
-            <li data-i18n="pricingF3">Claude / Codex / 自定义代理</li>
+            <li data-i18n="pricingF3">Claude / Codex / Gemini / Copilot / 自定义</li>
             <li data-i18n="pricingF4">远程桌面（WebRTC）</li>
             <li data-i18n="pricingF5">端口转发预览</li>
             <li data-i18n="pricingF6">自建网关部署</li>
@@ -1590,7 +1589,7 @@
         heroTitle1: "终端漫游",
         heroTitleSep: "，",
         heroTitle2: "随时随地，自由接管",
-        heroLead: "纯粹的终端桥接方案。长耗时任务留在高性能桌面上，用手机随时接管远端 PTY 会话。",
+        heroLead: "本地终端桥接 + Agent Workspace。长耗时任务留在高性能桌面上，用手机接管 PTY、Claude Code 与 Codex 对话。",
         heroGateway: "🚀 Pro 订阅用户可直接使用官方 Gateway，无需自建服务器。了解更多 →",
         btnStart: "立即部署",
         btnGithub: "查看仓库",
@@ -1600,7 +1599,7 @@
         step1Title: "[1] 安装 CLI",
         step1Desc: "一条命令全局安装。内置网关开箱即用，无需额外部署服务器。",
         step2Title: "[2] 启动桥接",
-        step2Desc: "一条命令启动内置网关并桥接 AI 代理进程，终端直接打印二维码。",
+        step2Desc: "一条命令启动内置网关、桥接 AI 终端，并自动开放 Agent Workspace channel。",
         qsLanDesc: "同一局域网内，CLI 内置网关直连，零配置。",
         qsPubDesc: "先在公网服务器部署网关，本地 CLI 连接远程网关。",
         step3Title: "[3] 手机扫码，即刻接管",
@@ -1609,19 +1608,19 @@
         f1Title: "本地 PTY 驱动",
         f1Desc: "繁重的计算过程完全依赖本地机器。保留颜色、光标、readline 输出及信号等完整终端语义。",
         f2Title: "全平台客户端",
-        f2Desc: "支持 React Native / Expo 移动端与 Web 页面调试端。纯粹的单一协议，跨平台劫持终端流。",
+        f2Desc: "支持 React Native / Expo 移动端与 Web 页面调试端。统一协议同时承载终端、Agent、桌面和 Browser 预览。",
         f3Title: "强一致性同步",
         f3Desc: "独有的单控制者防冲突模型。避免多端并抢焦点，画面精准对齐不串流。",
         f4Title: "远程桌面",
         f4Desc: "不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC 30fps 丝滑体验，自动降级到截图流兜底。",
         f5Title: "端口转发预览",
         f5Desc: "远程启动 dev server，手机直接预览页面。支持 CSS/JS/图片完整加载、HMR 热更新、PC/手机视图切换和全屏模式。",
-        diSectionTitle: "灵动岛，让 AI 触手可及",
-        diSectionDesc: "iPhone 灵动岛实时展示 Claude 工作状态。识别到需要操作时，一键快速响应，无需切回 App。",
-        diFeature1: "实时状态 — 思考中、编码中、等待确认，一目了然",
-        diFeature2: "快捷操作 — Claude 请求执行命令时，灵动岛直接审批",
-        diFeature3: "智能摘要 — 长对话自动提炼关键信息到灵动岛",
-        diFeature4: "无感切换 — 从灵动岛一键跳转到完整会话",
+        diSectionTitle: "Agent Workspace，让 AI 触手可及",
+        diSectionDesc: "Agent 标签结构化展示 Claude Code 与 Codex 对话。模型、权限、推理强度随 CLI capabilities 动态同步。",
+        diFeature1: "结构化时间线 — 消息、计划、tool call、命令执行和文件变更一屏呈现",
+        diFeature2: "权限审批 — 在手机上直接允许、拒绝或回复补充输入",
+        diFeature3: "动态能力 — provider 模型、权限模式和推理强度由 CLI 下发",
+        diFeature4: "恢复历史 — 本地缓存对话与 timeline，重连后自动同步快照",
         projSectionTitle: "项目空间，并行掌控",
         projSectionDesc: "每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。",
         projFeature1: "多项目并行 — 同一会话内切换不同项目目录",
@@ -1641,7 +1640,7 @@
         docsArchTitle: "架构概览",
         docsArchDesc: "LinkShell 采用三层架构：本地 CLI 捕获 PTY 输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。",
         docsCliTitle: "CLI 命令参考",
-        docsCmdStart: "启动桥接会话。自动启动内置网关，桥接 AI 代理进程并生成配对二维码。",
+        docsCmdStart: "启动桥接会话。自动启动内置网关，桥接 AI 终端，开放 Agent Workspace，并生成配对二维码。",
         docsCmdGateway: "单独启动网关服务器。适用于独立部署网关到远程服务器的场景。",
         docsCmdSetup: "交互式初始化配置。引导你完成网关地址、AI 提供者等基础设置。",
         docsCmdDoctor: "环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。",
@@ -1718,7 +1717,7 @@
         docsFaq1Q: "Q: 需要公网服务器吗？",
         docsFaq1A: "不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。",
         docsFaq2Q: "Q: 支持哪些 AI 代理？",
-        docsFaq2A: "目前支持 Claude Code、OpenAI Codex，以及任意自定义 Shell 进程。通过 --provider 参数指定。",
+        docsFaq2A: "终端模式支持 Claude Code、OpenAI Codex、Gemini、GitHub Copilot 和任意自定义 Shell 进程；Agent Workspace 会自动检测 Claude Code 与 Codex。",
         docsFaq3Q: "Q: 手机 App 在哪里下载？",
         docsFaq3A: "iOS 版本已上架 <a href=\"https://apps.apple.com/cn/app/linkshell/id6761547516\" target=\"_blank\" rel=\"noopener\">App Store</a>，Android 版本可从 GitHub Releases 下载 APK。",
         docsFaq4Q: "Q: 数据安全吗？会经过第三方服务器吗？",
@@ -1744,7 +1743,7 @@
         pricingFreeForever: "永久免费",
         pricingF1: "内置网关（局域网直连）",
         pricingF2: "终端桥接 + 二维码配对",
-        pricingF3: "Claude / Codex / 自定义代理",
+        pricingF3: "Claude / Codex / Gemini / Copilot / 自定义",
         pricingF4: "远程桌面（WebRTC）",
         pricingF5: "端口转发预览",
         pricingF6: "自建网关部署",
@@ -1782,7 +1781,8 @@
         tmStartDevServer: "# 远程终端启动 dev server",
         tmAppBrowserTab: "# App 切换到 Browser 标签，输入端口 3000，即可预览",
         flagDaemon: "后台守护模式运行",
-        flagProvider: "指定 AI 提供者 (claude / codex / custom)",
+        flagProvider: "指定终端 provider (claude / codex / gemini / copilot / custom)",
+        flagAgentUi: "启用 Agent Workspace",
         flagScreen: "启用远程桌面共享",
         flagPort: "指定网关端口 (默认 8787)",
         flagGwPort: "指定监听端口",
@@ -1804,7 +1804,7 @@
         heroTitle1: "Terminal Bridge",
         heroTitleSep: " — ",
         heroTitle2: "Take over anywhere.",
-        heroLead: "A pure Terminal Bridge architecture. Keep heavy workloads on your desktop, and claim the PTY session from your phone anywhere.",
+        heroLead: "A local terminal bridge plus Agent Workspace. Keep heavy workloads on your desktop, and control PTY, Claude Code, and Codex conversations from your phone.",
         heroGateway: "🚀 Pro subscribers get instant access to Official Gateway — no server setup needed. Learn more →",
         btnStart: "Deploy Now",
         btnGithub: "View Repo",
@@ -1814,7 +1814,7 @@
         step1Title: "[1] Install CLI",
         step1Desc: "One command to install globally. Built-in gateway works out of the box — no extra server needed.",
         step2Title: "[2] Start Bridge",
-        step2Desc: "One command to start the built-in gateway and bridge your AI agent process. QR code prints right in the terminal.",
+        step2Desc: "One command starts the built-in gateway, bridges your AI terminal, and exposes the Agent Workspace channel.",
         qsLanDesc: "Same LAN, built-in gateway, zero config.",
         qsPubDesc: "Deploy gateway on a public server first, then connect your local CLI.",
         step3Title: "[3] Scan & Take Over",
@@ -1823,7 +1823,7 @@
         f1Title: "Local PTY Driver",
         f1Desc: "Everything runs locally. We preserve full terminal semantics: ANSI colors, cursor movements, and raw readline signals.",
         f2Title: "Universal Connect",
-        f2Desc: "Supports React Native, Expo, and Web clients natively via a unified protocol. Instantly hijack the I/O stream.",
+        f2Desc: "Supports React Native, Expo, and Web clients via one protocol for terminal I/O, Agent Workspace, desktop, and Browser preview.",
         f3Title: "Strict State Sync",
         f3Desc: "Features a Single Controller locking model. Prevent multi-device input races and keep screens meticulously synchronized.",
         f4Title: "Remote Desktop",
@@ -1837,12 +1837,12 @@
         docsPortFwd3: "View Toggle — switch between PC / mobile views, desktop mode renders at 1024px width",
         docsPortFwd4: "Fullscreen — hide all UI for immersive page preview",
         docsPortFwdReq: "Requires linkshell-cli \u2265 0.2.53 / gateway \u2265 0.2.17",
-        diSectionTitle: "Dynamic Island, AI at Your Fingertips",
-        diSectionDesc: "iPhone Dynamic Island shows Claude's live status. One-tap quick actions when Claude needs your input — no need to switch back to the app.",
-        diFeature1: "Live Status — thinking, coding, awaiting confirmation at a glance",
-        diFeature2: "Quick Actions — approve Claude's commands right from the island",
-        diFeature3: "Smart Summary — long conversations distilled to key info",
-        diFeature4: "Seamless Jump — one tap from island to full session",
+        diSectionTitle: "Agent Workspace, AI at Your Fingertips",
+        diSectionDesc: "The Agent tab renders Claude Code and Codex conversations as structured timelines. Models, permissions, and reasoning controls follow CLI capabilities dynamically.",
+        diFeature1: "Structured Timeline — messages, plans, tool calls, commands, and file changes in one view",
+        diFeature2: "Permission Flow — approve, deny, or answer structured prompts from your phone",
+        diFeature3: "Dynamic Capabilities — provider models, permission modes, and reasoning controls come from the CLI",
+        diFeature4: "History Resume — conversations and timelines are cached locally and refreshed from snapshots",
         projSectionTitle: "Project Spaces, Parallel Control",
         projSectionDesc: "Multi-project parallel sessions. Pick a project folder, run commands independently, just like working locally.",
         projFeature1: "Parallel Projects — switch between project directories in one session",
@@ -1862,7 +1862,7 @@
         docsArchTitle: "Architecture Overview",
         docsArchDesc: "LinkShell uses a three-tier architecture: the local CLI captures PTY output, relays it through a gateway, and renders a full terminal on mobile. All computation stays local — your phone is just a remote window.",
         docsCliTitle: "CLI Command Reference",
-        docsCmdStart: "Start a bridge session. Auto-starts the built-in gateway, bridges the AI agent process, and generates a pairing QR code.",
+        docsCmdStart: "Start a bridge session. Auto-starts the built-in gateway, bridges the AI terminal, exposes Agent Workspace, and generates a pairing QR code.",
         docsCmdGateway: "Start the gateway server standalone. For deploying the gateway on a remote server independently.",
         docsCmdSetup: "Interactive configuration wizard. Guides you through gateway address, AI provider, and other basic settings.",
         docsCmdDoctor: "Environment diagnostic tool. Checks Node.js version, dependency integrity, network connectivity, and more.",
@@ -1932,7 +1932,7 @@
         docsFaq1Q: "Q: Do I need a public server?",
         docsFaq1A: "No. The CLI has a built-in gateway — your phone connects directly to your computer on the same LAN. You only need a public server for cross-network access.",
         docsFaq2Q: "Q: Which AI agents are supported?",
-        docsFaq2A: "Currently supports Claude Code, OpenAI Codex, and any custom shell process. Specify via the --provider flag.",
+        docsFaq2A: "Terminal mode supports Claude Code, OpenAI Codex, Gemini, GitHub Copilot, and custom shell processes. Agent Workspace auto-detects Claude Code and Codex.",
         docsFaq3Q: "Q: Where can I download the mobile app?",
         docsFaq3A: "iOS version is available on the <a href=\"https://apps.apple.com/cn/app/linkshell/id6761547516\" target=\"_blank\" rel=\"noopener\">App Store</a>, Android APK is available from GitHub Releases.",
         docsFaq4Q: "Q: Is my data secure? Does it pass through third-party servers?",
@@ -1958,7 +1958,7 @@
         pricingFreeForever: "Free forever",
         pricingF1: "Built-in gateway (LAN direct)",
         pricingF2: "Terminal bridge + QR pairing",
-        pricingF3: "Claude / Codex / custom agents",
+        pricingF3: "Claude / Codex / Gemini / Copilot / custom",
         pricingF4: "Remote desktop (WebRTC)",
         pricingF5: "Port forwarding preview",
         pricingF6: "Self-hosted gateway",
@@ -1996,7 +1996,8 @@
         tmStartDevServer: "# Start dev server remotely",
         tmAppBrowserTab: "# Switch to Browser tab in App, enter port 3000 to preview",
         flagDaemon: "Run in background daemon mode",
-        flagProvider: "Specify AI provider (claude / codex / custom)",
+        flagProvider: "Specify terminal provider (claude / codex / gemini / copilot / custom)",
+        flagAgentUi: "Enable Agent Workspace",
         flagScreen: "Enable remote desktop sharing",
         flagPort: "Specify gateway port (default 8787)",
         flagGwPort: "Specify listen port",
@@ -2017,14 +2018,14 @@
     const seoData = {
       en: {
         title: "LinkShell Pricing | Free and Pro Official Gateway",
-        description: "LinkShell Free includes terminal bridging, QR pairing, Claude Code and OpenAI Codex support, remote desktop, port forwarding, and self-hosted Gateway. Pro unlocks the official hosted Gateway and automatic app session discovery.",
+        description: "LinkShell Free includes terminal bridging, QR pairing, Claude Code, OpenAI Codex, Gemini, Copilot, Agent Workspace, remote desktop, port forwarding, and self-hosted Gateway. Pro unlocks the official hosted Gateway and automatic app session discovery.",
         socialDescription: "Use all core LinkShell features for free, or upgrade to Pro for the official hosted Gateway with no server setup.",
         twitterDescription: "Compare LinkShell Free and Pro official Gateway plans.",
         locale: "en_US"
       },
       zh: {
         title: "LinkShell 定价 | Free 与 Pro 官方 Gateway",
-        description: "LinkShell 免费版包含终端桥接、二维码配对、Claude Code 与 OpenAI Codex 支持、远程桌面、端口转发和自建 Gateway；Pro 解锁官方托管 Gateway 和 App 自动发现会话。",
+        description: "LinkShell 免费版包含终端桥接、二维码配对、Claude Code、OpenAI Codex、Gemini、Copilot 支持、Agent Workspace、远程桌面、端口转发和自建 Gateway；Pro 解锁官方托管 Gateway 和 App 自动发现会话。",
         socialDescription: "免费使用 LinkShell 全部核心功能。升级 Pro 后可使用官方托管 Gateway，无需自建服务器，App 自动发现会话。",
         twitterDescription: "LinkShell 免费版与 Pro 官方 Gateway 方案对比。",
         locale: "zh_CN"

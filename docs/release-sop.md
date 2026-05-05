@@ -7,6 +7,8 @@
 - Protocol: `@linkshell/protocol@x.y.z`
 - Docker tag: `gateway-vx.y.z`
 
+Protocol → Gateway → CLI 是依赖链。只改 CLI 时可以只发布 CLI；改 shared protocol 或 gateway relay/tunnel/agent envelope 时，按依赖链依次发。
+
 ## 1. 发版前检查
 
 ```bash
@@ -18,15 +20,18 @@ pnpm typecheck
 
 # 本地测试
 pnpm dev:cli start --provider custom --command bash
+
+# Agent Workspace smoke test（如果本机安装了 Claude Code 或 Codex）
+pnpm --filter linkshell-cli dev start --agent-ui --provider custom --command bash
 ```
 
 ## 2. 更新版本号
 
 ```bash
+# 更新 packages/shared-protocol/package.json 的 version（如果协议有改动）
+# 更新 packages/gateway/package.json 的 version（如果 gateway 或 protocol 依赖有改动）
 # 更新 packages/cli/package.json 的 version
-# 更新 packages/gateway/package.json 的 version
-# 更新 packages/shared-protocol/package.json 的 version
-# 如果有 breaking change，同步更新根 package.json
+# 同步更新根 package.json version，保持仓库级版本可追踪
 ```
 
 ## 3. 构建
@@ -130,6 +135,12 @@ gh release create vX.Y.Z \
 - bug fix 1"
 ```
 
+Release notes 建议单独标出：
+- Terminal provider 变化（claude/codex/gemini/copilot/custom）
+- Agent Workspace capability/model/permission 变化
+- Protocol 或 Gateway API 兼容性变化
+- 移动端最低版本要求
+
 如果有 Android APK，附加到 Release：
 
 ```bash
@@ -155,6 +166,14 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 
 # 验证 upgrade 命令
 linkshell upgrade
+
+# 验证 provider detection
+linkshell doctor
+linkshell start --provider claude --no-agent-ui
+linkshell start --provider codex --no-agent-ui
+
+# 验证 Agent Workspace capabilities（至少覆盖 Codex 或 Claude 其一）
+linkshell start --agent-ui --provider custom --command bash
 ```
 
 ## 快速发版 Checklist
@@ -167,3 +186,5 @@ linkshell upgrade
 - [ ] Homebrew formula 已更新 sha256
 - [ ] GitHub Release 已创建
 - [ ] 移动端已提交（如有改动）
+- [ ] README、README_CN、docs/site、包级 README 已同步新功能
+- [ ] Agent Workspace smoke test 已覆盖至少一个 provider（如有 Agent 改动）

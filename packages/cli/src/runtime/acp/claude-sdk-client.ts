@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { readdirSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
@@ -66,6 +66,29 @@ function extractToolResultText(content: unknown): string {
 
 function isRealClaudeSessionId(value: string | undefined): value is string {
   return Boolean(value && !value.startsWith("agent-session-"));
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function stringField(value: unknown, keys: string[]): string | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) return candidate;
+  }
+  return undefined;
+}
+
+function isInsideCwd(cwd: string, candidate: string): boolean {
+  const root = resolve(cwd);
+  const target = resolve(root, candidate);
+  const rel = relative(root, target);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 function outcomeFromPermissionResponse(value: unknown): "allow" | "deny" {
@@ -158,8 +181,17 @@ export class ClaudeSdkClient {
       abortController,
       canUseTool: async (toolName: string, toolInput: unknown) => {
         if (input.permissionMode === "full_access") return { behavior: "allow" };
+        if (["Read", "Glob", "Grep", "LS", "NotebookRead", "TodoRead"].includes(toolName)) {
+          return { behavior: "allow" };
+        }
         if (input.permissionMode === "read_only" && ["Write", "Edit", "MultiEdit", "Bash"].includes(toolName)) {
           return { behavior: "deny", message: "Read-only mode is active." };
+        }
+        if (input.permissionMode === "workspace_write" && ["Write", "Edit", "MultiEdit"].includes(toolName)) {
+          const filePath = stringField(toolInput, ["file_path", "path", "notebook_path"]);
+          if (filePath && isInsideCwd(input.cwd ?? this.input.cwd, filePath)) {
+            return { behavior: "allow" };
+          }
         }
         const requestId = id("claude-perm");
         const response = await this.input.onRequest("claude/requestApproval", {
@@ -246,6 +278,19 @@ export class ClaudeSdkClient {
       // Ignore unreadable Claude project storage.
     }
     return { sessions };
+  }
+
+  async listModels(): Promise<unknown> {
+    return {
+      defaultModel: "default",
+      models: [
+        { id: "sonnet", label: "Sonnet" },
+        { id: "opus", label: "Opus" },
+        { id: "haiku", label: "Haiku" },
+        { id: "sonnet[1m]", label: "Sonnet 1M" },
+        { id: "opusplan", label: "Opus Plan" },
+      ],
+    };
   }
 
   stop(): void {

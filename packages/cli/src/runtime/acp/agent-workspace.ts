@@ -997,9 +997,11 @@ export class AgentWorkspaceProxy {
     client: AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient,
     protocol: AgentProtocol,
   ): Promise<void> {
-    if (!(client instanceof AcpClient) || protocol !== "codex-app-server") return;
+    if (client instanceof AcpClient && protocol !== "codex-app-server") return;
+    const listModels = (client as { listModels?: () => Promise<unknown> }).listModels;
+    if (typeof listModels !== "function") return;
     try {
-      const result = await client.listModels();
+      const result = await listModels.call(client);
       const runtimeCapabilities = parseModelListCapabilities(result);
       if (runtimeCapabilities) this.providerCapabilities.set(provider, runtimeCapabilities);
     } catch (error) {

@@ -1,7 +1,7 @@
 {
   "name": "LinkShell",
   "short_name": "LinkShell",
-  "description": "Remote terminal control for Claude Code, OpenAI Codex, and shell sessions from iOS and Android.",
+  "description": "Remote terminal and Agent Workspace control for Claude Code, OpenAI Codex, Gemini, Copilot, and shell sessions from iOS and Android.",
   "start_url": "https://liutianjie.github.io/LinkShell/",
   "scope": "https://liutianjie.github.io/LinkShell/",
   "display": "standalone",

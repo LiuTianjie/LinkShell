@@ -443,6 +443,19 @@ export class ClaudeStreamJsonClient {
     return { sessions };
   }
 
+  async listModels(): Promise<unknown> {
+    return {
+      defaultModel: "default",
+      models: [
+        { id: "sonnet", label: "Sonnet" },
+        { id: "opus", label: "Opus" },
+        { id: "haiku", label: "Haiku" },
+        { id: "sonnet[1m]", label: "Sonnet 1M" },
+        { id: "opusplan", label: "Opus Plan" },
+      ],
+    };
+  }
+
   stop(): void {
     if (this.child && !this.child.killed) {
       this.child.kill("SIGTERM");

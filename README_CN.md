@@ -177,7 +177,7 @@ linkshell start --daemon --provider claude --screen
 >
 > 安装后 CLI 会自动检测屏幕设备并启动 H.264 编码流。如果同时安装了 [werift](https://github.com/nicktomlin/werift)（`npm i -g werift`），会优先使用 WebRTC 低延迟传输；否则回退到截图流模式。
 
-### Agent GUI
+### Agent Workspace
 
 LinkShell 在 Terminal、Desktop、Browser 之外提供 Agent 标签，用结构化卡片展示对话、工具调用和权限请求。CLI 启动时自动检测已安装的 Agent provider（Claude Code、Codex CLI），启动可用 provider，并把模型、权限、推理强度等能力同步给 App。
 

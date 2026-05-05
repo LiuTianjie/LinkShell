@@ -16,7 +16,9 @@ import {
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import * as Linking from "expo-linking";
 import { MenuView } from "@react-native-menu/menu";
+import Markdown from "react-native-markdown-display";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
@@ -190,6 +192,32 @@ function formatRuntime(model: string | undefined, effort: AgentReasoningEffort |
   return `${modelLabel.replace(/^GPT-/, "")} · ${formatEffort(effort)}`;
 }
 
+function formatModel(model: string | undefined, modelOptions: Option<string>[]): string {
+  const label = modelOptions.find((item) => item.value === model)?.label ?? model ?? "默认模型";
+  return label.replace(/^GPT-/, "");
+}
+
+function permissionModeNeedsAttention(mode: AgentPermissionMode | undefined): boolean {
+  return mode === "workspace_write" || mode === "full_access";
+}
+
+function isElevatedPermissionOption(option: { id: string; label: string; kind: "allow" | "deny" | "other" }): boolean {
+  if (option.kind !== "allow") return false;
+  const token = `${option.id} ${option.label}`.toLowerCase();
+  return (
+    token.includes("always") ||
+    token.includes("forever") ||
+    token.includes("session") ||
+    token.includes("profile") ||
+    token.includes("full") ||
+    token.includes("workspace") ||
+    token.includes("全部") ||
+    token.includes("总是") ||
+    token.includes("永久") ||
+    token.includes("会话")
+  );
+}
+
 function shortPath(path: string): string {
   const parts = path.split("/").filter(Boolean);
   if (parts.length <= 3) return path;
@@ -218,29 +246,11 @@ function imageBlockFromAsset(asset: ImagePicker.ImagePickerAsset): AgentContentB
   };
 }
 
-type MessagePart =
-  | { type: "text"; text: string }
-  | { type: "code"; language?: string; code: string };
-
 type FileDiffEntry = {
   path: string;
   added: number;
   removed: number;
 };
-
-function parseParts(content: string): MessagePart[] {
-  const parts: MessagePart[] = [];
-  const pattern = /```([^\n`]*)\n([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(content)) !== null) {
-    if (match.index > lastIndex) parts.push({ type: "text", text: content.slice(lastIndex, match.index) });
-    parts.push({ type: "code", language: match[1]?.trim() || undefined, code: match[2] ?? "" });
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < content.length) parts.push({ type: "text", text: content.slice(lastIndex) });
-  return parts.length > 0 ? parts : [{ type: "text", text: content }];
-}
 
 function displayProvider(provider: AgentConversationRecord["provider"]): string {
   if (provider === "codex") return "Codex";
@@ -698,39 +708,169 @@ function MessageContent({
         }
 
         return block.text ? (
-          <RichText key={`text-${index}`} text={block.text} theme={theme} inverse={inverse} />
+          <MarkdownContent key={`text-${index}`} text={block.text} theme={theme} inverse={inverse} />
         ) : null;
       })}
     </View>
   );
 }
 
-function RichText({ text, theme, inverse = false }: { text: string; theme: Theme; inverse?: boolean }) {
+function MarkdownContent({ text, theme, inverse = false }: { text: string; theme: Theme; inverse?: boolean }) {
   const color = inverse ? "#fff" : theme.text;
+  const secondaryColor = inverse ? "rgba(255,255,255,0.82)" : theme.textSecondary;
+  const markdownStyle = useMemo(() => ({
+    body: {
+      color,
+      fontSize: 14,
+      lineHeight: 21,
+    },
+    paragraph: {
+      marginTop: 0,
+      marginBottom: 8,
+    },
+    heading1: {
+      color,
+      fontSize: 18,
+      lineHeight: 25,
+      fontWeight: "800" as const,
+      marginTop: 6,
+      marginBottom: 8,
+    },
+    heading2: {
+      color,
+      fontSize: 16,
+      lineHeight: 23,
+      fontWeight: "800" as const,
+      marginTop: 6,
+      marginBottom: 7,
+    },
+    heading3: {
+      color,
+      fontSize: 15,
+      lineHeight: 22,
+      fontWeight: "800" as const,
+      marginTop: 4,
+      marginBottom: 6,
+    },
+    heading4: {
+      color,
+      fontSize: 14,
+      lineHeight: 21,
+      fontWeight: "800" as const,
+      marginTop: 4,
+      marginBottom: 5,
+    },
+    strong: {
+      color,
+      fontWeight: "800" as const,
+    },
+    em: {
+      color,
+      fontStyle: "italic" as const,
+    },
+    s: {
+      color: secondaryColor,
+      textDecorationLine: "line-through" as const,
+    },
+    link: {
+      color: inverse ? "#fff" : theme.accent,
+      textDecorationLine: "underline" as const,
+    },
+    blockquote: {
+      backgroundColor: "transparent",
+      borderLeftColor: inverse ? "rgba(255,255,255,0.4)" : theme.separator,
+      borderLeftWidth: 3,
+      paddingLeft: 10,
+      marginLeft: 0,
+      marginBottom: 8,
+    },
+    bullet_list: {
+      marginBottom: 8,
+    },
+    ordered_list: {
+      marginBottom: 8,
+    },
+    list_item: {
+      marginBottom: 3,
+    },
+    bullet_list_icon: {
+      color: secondaryColor,
+    },
+    ordered_list_icon: {
+      color: secondaryColor,
+    },
+    code_inline: {
+      color,
+      backgroundColor: inverse ? "rgba(255,255,255,0.18)" : theme.bgInput,
+      borderWidth: 0,
+      borderRadius: 5,
+      paddingHorizontal: 4,
+      fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+      fontSize: 13,
+    },
+    fence: {
+      backgroundColor: "transparent",
+    },
+    code_block: {
+      backgroundColor: "transparent",
+    },
+    table: {
+      borderColor: theme.separator,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: 8,
+      overflow: "hidden" as const,
+      marginBottom: 8,
+    },
+    th: {
+      backgroundColor: inverse ? "rgba(255,255,255,0.16)" : theme.bgInput,
+      borderColor: theme.separator,
+      padding: 8,
+    },
+    tr: {
+      borderColor: theme.separator,
+    },
+    td: {
+      borderColor: theme.separator,
+      padding: 8,
+    },
+    hr: {
+      backgroundColor: inverse ? "rgba(255,255,255,0.28)" : theme.separator,
+      height: StyleSheet.hairlineWidth,
+      marginVertical: 8,
+    },
+  }), [color, inverse, secondaryColor, theme]);
+  const rules = useMemo(() => ({
+    fence: (node: any) => (
+      <CodeBlock
+        key={node.key}
+        label={node.sourceInfo || "代码"}
+        code={node.content ?? ""}
+        theme={theme}
+      />
+    ),
+    code_block: (node: any) => (
+      <CodeBlock
+        key={node.key}
+        label="代码"
+        code={node.content ?? ""}
+        theme={theme}
+      />
+    ),
+  }), [theme]);
   return (
-    <View style={{ gap: 8 }}>
-      {parseParts(text).map((part, index) =>
-        part.type === "code" ? (
-          <CodeBlock key={`code-${index}`} label={part.language || "代码"} code={part.code} theme={theme} />
-        ) : (
-          <Text key={`text-${index}`} selectable style={{ color, fontSize: 14, lineHeight: 21 }}>
-            {part.text.split(/(`[^`\n]+`)/g).map((chunk, chunkIndex) => {
-              const isCode = chunk.startsWith("`") && chunk.endsWith("`") && chunk.length > 1;
-              return (
-                <Text
-                  key={chunkIndex}
-                  style={isCode ? {
-                    fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
-                    backgroundColor: inverse ? "rgba(255,255,255,0.18)" : theme.bgInput,
-                  } : undefined}
-                >
-                  {isCode ? chunk.slice(1, -1) : chunk}
-                </Text>
-              );
-            })}
-          </Text>
-        ),
-      )}
+    <View style={{ width: "100%" }}>
+      <Markdown
+        mergeStyle={false}
+        style={markdownStyle}
+        rules={rules}
+        onLinkPress={(url) => {
+          if (!/^https?:\/\//i.test(url)) return false;
+          Linking.openURL(url).catch(() => {});
+          return false;
+        }}
+      >
+        {text}
+      </Markdown>
     </View>
   );
 }
@@ -1107,17 +1247,17 @@ function StructuredInputCard({
     !submitted &&
     !submitting;
 
-  const toggleOption = useCallback((questionId: string, label: string, limit?: number) => {
+  const toggleOption = useCallback((questionId: string, optionId: string, limit?: number) => {
     setSelected((current) => {
       const max = Math.max(limit ?? 1, 1);
       const existing = current[questionId] ?? [];
-      const hasValue = existing.includes(label);
+      const hasValue = existing.includes(optionId);
       const nextValues = hasValue
-        ? existing.filter((value) => value !== label)
+        ? existing.filter((value) => value !== optionId)
         : max === 1
-          ? [label]
+          ? [optionId]
           : existing.length < max
-            ? [...existing, label]
+            ? [...existing, optionId]
             : existing;
       return { ...current, [questionId]: nextValues };
     });
@@ -1153,36 +1293,48 @@ function StructuredInputCard({
           </Text>
           {question.options?.length ? (
             <View style={{ gap: 6 }}>
-              {question.options.map((option) => (
-                <Pressable
-                  key={option.id}
-                  disabled={submitted || submitting}
-                  onPress={() => toggleOption(question.id, option.label, question.selectionLimit)}
-                  style={{
-                    borderRadius: 10,
-                    borderCurve: "continuous",
-                    paddingHorizontal: 10,
-                    paddingVertical: 9,
-                    backgroundColor: (selected[question.id] ?? []).includes(option.label)
-                      ? theme.accentLight
-                      : theme.bgInput,
-                    borderWidth: StyleSheet.hairlineWidth,
-                    borderColor: (selected[question.id] ?? []).includes(option.label)
-                      ? theme.accent
-                      : theme.separator,
-                    opacity: submitted || submitting ? 0.65 : 1,
-                  }}
-                >
-                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "800" }}>
-                    {option.label}
-                  </Text>
-                  {option.description ? (
-                    <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2 }}>
-                      {option.description}
-                    </Text>
-                  ) : null}
-                </Pressable>
-              ))}
+              {question.selectionLimit && question.selectionLimit > 1 ? (
+                <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }}>
+                  最多选择 {question.selectionLimit} 项
+                </Text>
+              ) : null}
+              {question.options.map((option) => {
+                const isSelected = (selected[question.id] ?? []).includes(option.id);
+                return (
+                  <Pressable
+                    key={option.id}
+                    disabled={submitted || submitting}
+                    onPress={() => toggleOption(question.id, option.id, question.selectionLimit)}
+                    style={{
+                      borderRadius: 10,
+                      borderCurve: "continuous",
+                      paddingHorizontal: 10,
+                      paddingVertical: 9,
+                      backgroundColor: isSelected
+                        ? theme.accentLight
+                        : theme.bgInput,
+                      borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: isSelected
+                        ? theme.accent
+                        : theme.separator,
+                      opacity: submitted || submitting ? 0.65 : 1,
+                      gap: 3,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 12, fontWeight: "800" }}>
+                        {option.label}
+                      </Text>
+                      {isSelected ? <AppSymbol name="checkmark.circle.fill" size={14} color={theme.accent} /> : null}
+                    </View>
+                    {option.description ? (
+                      <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2 }}>
+                        {option.description}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
             </View>
           ) : null}
           {question.options?.length && !question.isOther ? null : (
@@ -1237,6 +1389,180 @@ function StructuredInputCard({
           </Text>
         </Pressable>
       ) : null}
+    </View>
+  );
+}
+
+function PermissionRequestCard({
+  item,
+  theme,
+  onPermission,
+}: {
+  item: AgentTimelineItem;
+  theme: Theme;
+  onPermission: (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => void;
+}) {
+  const outcome = item.metadata?.permissionOutcome;
+  const permissionPending = item.metadata?.permissionPending === true;
+  const selectedOptionId = item.metadata?.optionId;
+  const permissionError = typeof item.metadata?.permissionError === "string"
+    ? item.metadata.permissionError
+    : undefined;
+  const options = item.permission!.options.length > 0
+    ? item.permission!.options
+    : [
+        { id: "deny", label: "拒绝", kind: "deny" as const },
+        { id: "allow_once", label: "允许一次", kind: "allow" as const },
+      ];
+  const selectedLabel = options.find((option) => option.id === selectedOptionId)?.label ??
+    (outcome === "allow" ? "已允许" : outcome === "deny" ? "已拒绝" : outcome === "cancelled" ? "已取消" : undefined);
+  const statusLabel = outcome
+    ? selectedLabel ?? "授权已处理"
+    : permissionPending
+      ? "发送中"
+      : "等待处理";
+  const statusColor = outcome === "deny" || outcome === "cancelled"
+    ? theme.error
+    : outcome === "allow"
+      ? theme.success
+      : theme.warning;
+  const toolName = item.permission!.toolName || "工具调用";
+
+  return (
+    <View
+      style={{
+        borderRadius: 12,
+        borderCurve: "continuous",
+        backgroundColor: theme.bgCard,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.separator,
+        overflow: "hidden",
+      }}
+    >
+      <View
+        style={{
+          paddingHorizontal: 12,
+          paddingVertical: 11,
+          backgroundColor: theme.bgInput,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.separator,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 9,
+        }}
+      >
+        <View
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 13,
+            backgroundColor: theme.accentLight,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <AppSymbol name="checkmark.shield" size={14} color={theme.warning} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: theme.text, fontSize: 14, fontWeight: "800" }} numberOfLines={1}>
+            需要授权 · {toolName}
+          </Text>
+          <Text style={{ color: statusColor, fontSize: 12, fontWeight: "700", marginTop: 2 }} numberOfLines={1}>
+            {statusLabel}
+          </Text>
+        </View>
+        {permissionPending ? <ActivityIndicator size="small" color={theme.warning} /> : null}
+      </View>
+
+      {item.permission!.context || item.permission!.toolInput || permissionError ? (
+        <View style={{ padding: 12, gap: 9 }}>
+          {item.permission!.context ? (
+            <MarkdownContent text={item.permission!.context} theme={theme} />
+          ) : null}
+          {item.permission!.toolInput ? (
+            <CodeBlock label="请求内容" code={item.permission!.toolInput} theme={theme} maxLines={8} />
+          ) : null}
+          {permissionError ? (
+            <Text style={{ color: theme.error, fontSize: 12, lineHeight: 17, fontWeight: "700" }}>
+              {permissionError}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      <View
+        style={{
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.separator,
+          gap: 3,
+        }}
+      >
+        {options.map((option) => {
+          const optionOutcome = option.kind === "allow" ? "allow" : option.kind === "deny" ? "deny" : "cancelled";
+          const isAllow = option.kind === "allow";
+          const isDeny = option.kind === "deny";
+          const isElevated = isElevatedPermissionOption(option);
+          const selected = Boolean(outcome) &&
+            (selectedOptionId === option.id || (!selectedOptionId && outcome === optionOutcome));
+          const inactive = Boolean(outcome) && !selected;
+          const optionColor = selected
+            ? theme.text
+            : isAllow
+              ? isElevated ? theme.warning : theme.accent
+              : isDeny
+                ? theme.error
+                : theme.textSecondary;
+
+          return (
+            <Pressable
+              key={option.id}
+              disabled={permissionPending || Boolean(outcome)}
+              onPress={() => {
+                if (isElevated) {
+                  Alert.alert(
+                    "确认高权限授权",
+                    `“${option.label}”可能会扩大本次授权范围。确认继续吗？`,
+                    [
+                      { text: "取消", style: "cancel" },
+                      {
+                        text: "确认授权",
+                        onPress: () => onPermission(item.permission!.requestId, optionOutcome, option.id),
+                      },
+                    ],
+                  );
+                  return;
+                }
+                onPermission(item.permission!.requestId, optionOutcome, option.id);
+              }}
+              style={({ pressed }) => ({
+                minHeight: 36,
+                borderRadius: 5,
+                borderCurve: "continuous",
+                paddingHorizontal: 8,
+                paddingVertical: 8,
+                borderLeftWidth: 3,
+                borderLeftColor: selected ? theme.text : "transparent",
+                backgroundColor: pressed ? theme.bgInput : "transparent",
+                opacity: inactive || permissionPending ? 0.45 : 1,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 7,
+              })}
+            >
+              <AppSymbol
+                name={selected ? "checkmark" : isAllow ? "checkmark.circle" : isDeny ? "xmark.circle" : "minus.circle"}
+                size={14}
+                color={optionColor}
+              />
+              <Text style={{ flex: 1, color: optionColor, fontSize: 13, fontWeight: selected ? "800" : "700" }} numberOfLines={2}>
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -1328,9 +1654,11 @@ function TimelineItemView({
           maxWidth: isUser ? "88%" : "100%",
           borderRadius: 12,
           borderCurve: "continuous",
-          backgroundColor: isUser ? theme.accent : "transparent",
-          paddingVertical: isUser ? 10 : 2,
-          paddingHorizontal: isUser ? 12 : 0,
+          backgroundColor: isUser ? theme.accent : theme.bgCard,
+          borderWidth: isUser ? 0 : StyleSheet.hairlineWidth,
+          borderColor: theme.separator,
+          paddingVertical: isUser ? 10 : 11,
+          paddingHorizontal: isUser ? 12 : 12,
           gap: 6,
         }}
       >
@@ -1407,89 +1735,7 @@ function TimelineItemView({
   }
 
   if (item.type === "permission" && item.permission) {
-    const outcome = item.metadata?.permissionOutcome;
-    const permissionPending = item.metadata?.permissionPending === true;
-    const selectedOptionId = item.metadata?.optionId;
-    const permissionError = typeof item.metadata?.permissionError === "string"
-      ? item.metadata.permissionError
-      : undefined;
-    const options = item.permission.options.length > 0
-      ? item.permission.options
-      : [
-          { id: "deny", label: "拒绝", kind: "deny" as const },
-          { id: "allow_once", label: "允许一次", kind: "allow" as const },
-        ];
-    return (
-      <View
-        style={{
-          borderRadius: 14,
-          borderCurve: "continuous",
-          backgroundColor: theme.accentLight,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.separator,
-          padding: 12,
-          gap: 10,
-        }}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <AppSymbol name="checkmark.shield" size={16} color={theme.warning} />
-          <Text style={{ flex: 1, color: theme.text, fontSize: 15, fontWeight: "800" }} numberOfLines={1}>
-            {outcome ? "授权已处理" : permissionPending ? "授权发送中" : "需要授权"}{item.permission.toolName ? ` · ${item.permission.toolName}` : ""}
-          </Text>
-        </View>
-        {item.permission.context ? (
-          <Text selectable style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
-            {item.permission.context}
-          </Text>
-        ) : null}
-        {item.permission.toolInput ? <CodeBlock label="请求内容" code={item.permission.toolInput} theme={theme} maxLines={5} /> : null}
-        {permissionError ? (
-          <Text style={{ color: theme.error, fontSize: 12, fontWeight: "700" }}>
-            {permissionError}
-          </Text>
-        ) : null}
-        {outcome ? (
-          <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
-            {options.find((option) => option.id === selectedOptionId)?.label ??
-              (outcome === "allow" ? "已允许" : outcome === "deny" ? "已拒绝" : "已取消")}
-          </Text>
-        ) : (
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {options.map((option) => {
-              const optionOutcome = option.kind === "allow" ? "allow" : option.kind === "deny" ? "deny" : "cancelled";
-              const isAllow = option.kind === "allow";
-              const isDeny = option.kind === "deny";
-              return (
-                <Pressable
-                  key={option.id}
-                  disabled={permissionPending}
-                  onPress={() => onPermission(item.permission!.requestId, optionOutcome, option.id)}
-                  style={({ pressed }) => ({
-                    minWidth: options.length > 2 ? "47%" : undefined,
-                    flexGrow: 1,
-                    borderRadius: 10,
-                    borderCurve: "continuous",
-                    paddingVertical: 10,
-                    paddingHorizontal: 12,
-                    alignItems: "center",
-                    borderWidth: StyleSheet.hairlineWidth,
-                    borderColor: isAllow ? "transparent" : isDeny ? theme.error : theme.separator,
-                    backgroundColor: isAllow
-                      ? pressed ? theme.accentSecondary : theme.accent
-                      : pressed ? theme.bgInput : theme.bg,
-                    opacity: permissionPending ? 0.65 : 1,
-                  })}
-                >
-                  <Text style={{ color: isAllow ? "#fff" : isDeny ? theme.error : theme.textSecondary, fontWeight: "700" }}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-      </View>
-    );
+    return <PermissionRequestCard item={item} theme={theme} onPermission={onPermission} />;
   }
 
   if (item.type === "error") {
@@ -1516,6 +1762,10 @@ export function AgentConversationScreen({
   const timeline = workspace.getTimeline(conversationId);
   const visibleTimeline = useMemo(() => dedupeTimelineItems(timeline), [timeline]);
   const timelineRef = useRef<ScrollView>(null);
+  const timelineNearBottomRef = useRef(true);
+  const initialScrollConversationRef = useRef<string | null>(null);
+  const [isTimelineNearBottom, setIsTimelineNearBottom] = useState(true);
+  const [hasNewOutput, setHasNewOutput] = useState(false);
   const [text, setText] = useState("");
   const [model, setModel] = useState<string | undefined>(conversation?.model);
   const [effort, setEffort] = useState<AgentReasoningEffort | undefined>(conversation?.reasoningEffort);
@@ -1552,22 +1802,25 @@ export function AgentConversationScreen({
     }
   }, [permissionMode, permissionOpts]);
 
-  const runtimeMenuActions = useMemo(
-    () => [
-      ...modelOpts.map((option) => ({
+  const modelMenuActions = useMemo(
+    () =>
+      modelOpts.map((option) => ({
         id: `model:${option.value ?? DEFAULT_OPTION_ID}`,
-        title: `模型 · ${option.label}`,
+        title: option.label,
         image: "square.stack.3d.up",
         state: option.value === model ? "on" as const : "off" as const,
       })),
-      ...effortOpts.map((option) => ({
+    [modelOpts, model],
+  );
+  const effortMenuActions = useMemo(
+    () =>
+      effortOpts.map((option) => ({
         id: `effort:${option.value ?? DEFAULT_OPTION_ID}`,
-        title: `思考强度 · ${option.label}`,
+        title: option.label,
         image: "textformat.size.larger",
         state: option.value === effort ? "on" as const : "off" as const,
       })),
-    ],
-    [modelOpts, effortOpts, effort, model],
+    [effortOpts, effort],
   );
   const timelineAutoScrollKey = useMemo(
     () =>
@@ -1588,10 +1841,47 @@ export function AgentConversationScreen({
 
   useEffect(() => {
     if (visibleTimeline.length === 0) return;
+    if (!timelineNearBottomRef.current) {
+      setHasNewOutput(true);
+      return;
+    }
     requestAnimationFrame(() => {
       timelineRef.current?.scrollToEnd({ animated: true });
     });
   }, [timelineAutoScrollKey, visibleTimeline.length]);
+
+  const handleTimelineScroll = useCallback((event: any) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    const nearBottom = distanceFromBottom < 96;
+    timelineNearBottomRef.current = nearBottom;
+    setIsTimelineNearBottom(nearBottom);
+    if (nearBottom) setHasNewOutput(false);
+  }, []);
+
+  const scrollTimelineToEnd = useCallback((animated = true) => {
+    timelineNearBottomRef.current = true;
+    setIsTimelineNearBottom(true);
+    setHasNewOutput(false);
+    requestAnimationFrame(() => {
+      timelineRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!conversation || visibleTimeline.length === 0) return;
+    if (initialScrollConversationRef.current === conversation.id) return;
+    initialScrollConversationRef.current = conversation.id;
+    timelineNearBottomRef.current = true;
+    setIsTimelineNearBottom(true);
+    setHasNewOutput(false);
+    const firstTimer = setTimeout(() => scrollTimelineToEnd(false), 0);
+    const secondTimer = setTimeout(() => scrollTimelineToEnd(false), 120);
+    return () => {
+      clearTimeout(firstTimer);
+      clearTimeout(secondTimer);
+    };
+  }, [conversation, scrollTimelineToEnd, visibleTimeline.length]);
 
   const send = useCallback(() => {
     const value = text.trim();
@@ -1609,6 +1899,37 @@ export function AgentConversationScreen({
     setText("");
     setAttachments([]);
   }, [attachments, canSend, conversation, effort, effortOpts, model, permissionMode, permissionOpts, text, workspace]);
+
+  const setPermissionModeWithGuard = useCallback((nextMode: AgentPermissionMode | undefined) => {
+    if (nextMode === "full_access") {
+      Alert.alert(
+        "启用完全访问权限？",
+        "Agent 可能不再逐项请求文件或命令授权。只在你信任当前任务和工作区时使用。",
+        [
+          { text: "取消", style: "cancel" },
+          { text: "启用", onPress: () => setPermissionMode(nextMode) },
+        ],
+      );
+      return;
+    }
+    setPermissionMode(nextMode);
+  }, []);
+
+  const cancelRunningTurn = useCallback(() => {
+    if (!conversation) return;
+    Alert.alert(
+      "停止当前任务？",
+      "Agent 会中断当前运行中的回复和工具调用。",
+      [
+        { text: "继续运行", style: "cancel" },
+        {
+          text: "停止",
+          style: "destructive",
+          onPress: () => workspace.cancel(conversation.id),
+        },
+      ],
+    );
+  }, [conversation, workspace]);
 
   const appendImageBlocks = useCallback((assets: ImagePicker.ImagePickerAsset[]) => {
     const blocks = assets
@@ -1769,35 +2090,78 @@ export function AgentConversationScreen({
         </MenuView>
       </View>
 
-      <ScrollView
-        ref={timelineRef}
-        contentContainerStyle={{ padding: 14, gap: 10, paddingBottom: 16 }}
-        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-        keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => timelineRef.current?.scrollToEnd({ animated: true })}
-      >
-        {visibleTimeline.length === 0 ? (
-          <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.bgCard, padding: 18, alignItems: "center", gap: 8 }}>
-            <AppSymbol name="sparkles" size={24} color={theme.accent} />
-            <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }}>开始一个 Agent 对话</Text>
-            <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
-              发送 prompt 后，回复、代码、工具调用和权限请求都会在这里按时间线展示。
-            </Text>
-          </View>
-        ) : visibleTimeline.map((item) => (
-          <TimelineItemView
-            key={item.id}
-            item={item}
-            theme={theme}
-            onPermission={(requestId, outcome, optionId) =>
-              workspace.respondPermission(conversation.id, requestId, outcome, optionId)
+      <View style={{ flex: 1 }}>
+        <ScrollView
+          ref={timelineRef}
+          contentContainerStyle={{ padding: 14, gap: 10, paddingBottom: 16 }}
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          keyboardShouldPersistTaps="handled"
+          onScroll={handleTimelineScroll}
+          scrollEventThrottle={16}
+          onContentSizeChange={() => {
+            if (isTimelineNearBottom || timelineNearBottomRef.current) {
+              scrollTimelineToEnd(true);
+            } else {
+              setHasNewOutput(true);
             }
-            onStructuredInput={(requestId, answers) =>
-              workspace.respondStructuredInput(conversation.id, requestId, answers)
-            }
-          />
-        ))}
-      </ScrollView>
+          }}
+        >
+          {visibleTimeline.length === 0 ? (
+            <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: theme.bgCard, padding: 18, alignItems: "center", gap: 8 }}>
+              <AppSymbol name="sparkles" size={24} color={theme.accent} />
+              <Text style={{ color: theme.text, fontSize: 15, fontWeight: "700" }}>开始一个 Agent 对话</Text>
+              <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
+                发送 prompt 后，回复、代码、工具调用和权限请求都会在这里按时间线展示。
+              </Text>
+            </View>
+          ) : visibleTimeline.map((item, index) => {
+            const previous = visibleTimeline[index - 1];
+            const startsTurn = Boolean(item.turnId && previous?.turnId && item.turnId !== previous.turnId);
+            return (
+              <React.Fragment key={item.id}>
+                {startsTurn ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 }}>
+                    <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
+                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>新一轮</Text>
+                    <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
+                  </View>
+                ) : null}
+                <TimelineItemView
+                  item={item}
+                  theme={theme}
+                  onPermission={(requestId, outcome, optionId) =>
+                    workspace.respondPermission(conversation.id, requestId, outcome, optionId)
+                  }
+                  onStructuredInput={(requestId, answers) =>
+                    workspace.respondStructuredInput(conversation.id, requestId, answers)
+                  }
+                />
+              </React.Fragment>
+            );
+          })}
+        </ScrollView>
+        {hasNewOutput ? (
+          <Pressable
+            onPress={() => scrollTimelineToEnd(true)}
+            style={({ pressed }) => ({
+              position: "absolute",
+              right: 14,
+              bottom: 12,
+              borderRadius: 999,
+              borderCurve: "continuous",
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+            })}
+          >
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>有新输出</Text>
+            <AppSymbol name="arrow.down" size={12} color="#fff" />
+          </Pressable>
+        ) : null}
+      </View>
 
       <View
         style={{
@@ -1865,7 +2229,7 @@ export function AgentConversationScreen({
           <TextInput
             value={text}
             onChangeText={setText}
-            placeholder="给 Agent 发送消息"
+            placeholder={running ? "Agent 运行中，可先编辑草稿" : "给 Agent 发送消息"}
             placeholderTextColor={theme.textTertiary}
             multiline
             keyboardType="default"
@@ -1885,6 +2249,11 @@ export function AgentConversationScreen({
               paddingVertical: 4,
             }}
           />
+          {running ? (
+            <Text style={{ color: theme.textTertiary, fontSize: 11, lineHeight: 15 }}>
+              当前任务运行中，停止后再发送这条消息。
+            </Text>
+          ) : null}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             {supportsImages ? (
               <Pressable
@@ -1905,32 +2274,37 @@ export function AgentConversationScreen({
               <MenuView
                 actions={menuActions(permissionOpts, permissionMode)}
                 onPressAction={({ nativeEvent }) =>
-                  setPermissionMode(valueFromMenuId<AgentPermissionMode>(nativeEvent.event))
+                  setPermissionModeWithGuard(valueFromMenuId<AgentPermissionMode>(nativeEvent.event))
                 }
               >
                 <View
                   style={{
-                    width: 34,
+                    minWidth: permissionModeNeedsAttention(permissionMode) ? 82 : 34,
                     height: 34,
                     borderRadius: 999,
                     alignItems: "center",
                     justifyContent: "center",
-                    backgroundColor: permission.bg,
+                    flexDirection: "row",
+                    gap: 5,
+                    paddingHorizontal: permissionModeNeedsAttention(permissionMode) ? 10 : 0,
+                    backgroundColor: permissionMode === "full_access" ? theme.warning : permission.bg,
                   }}
                 >
-                  <AppSymbol name={permission.icon} size={13} color={permission.color} />
+                  <AppSymbol name={permission.icon} size={13} color={permissionMode === "full_access" ? theme.textInverse : permission.color} />
+                  {permissionModeNeedsAttention(permissionMode) ? (
+                    <Text style={{ color: permissionMode === "full_access" ? theme.textInverse : permission.color, fontSize: 11, fontWeight: "800" }}>
+                      {permission.label.replace("权限", "")}
+                    </Text>
+                  ) : null}
                 </View>
               </MenuView>
             ) : null}
             <MenuView
-              actions={runtimeMenuActions}
+              actions={modelMenuActions}
               onPressAction={({ nativeEvent }) => {
                 const event = nativeEvent.event;
                 if (event.startsWith("model:")) {
                   setModel(valueFromMenuId<string>(event.slice("model:".length)));
-                }
-                if (event.startsWith("effort:")) {
-                  setEffort(valueFromMenuId<AgentReasoningEffort>(event.slice("effort:".length)));
                 }
               }}
             >
@@ -1940,22 +2314,51 @@ export function AgentConversationScreen({
                   alignItems: "center",
                   gap: 6,
                   borderRadius: 999,
-                  paddingHorizontal: 10,
+                  paddingHorizontal: 9,
                   paddingVertical: 7,
                   backgroundColor: theme.bgInput,
-                  maxWidth: 160,
+                  maxWidth: 132,
                 }}
               >
                 <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
-                  {formatRuntime(model, effort, modelOpts)}
+                  {formatModel(model, modelOpts)}
                 </Text>
                 <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
               </View>
             </MenuView>
+            {effortMenuActions.length > 0 ? (
+              <MenuView
+                actions={effortMenuActions}
+                onPressAction={({ nativeEvent }) => {
+                  const event = nativeEvent.event;
+                  if (event.startsWith("effort:")) {
+                    setEffort(valueFromMenuId<AgentReasoningEffort>(event.slice("effort:".length)));
+                  }
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 5,
+                    borderRadius: 999,
+                    paddingHorizontal: 9,
+                    paddingVertical: 7,
+                    backgroundColor: theme.bgInput,
+                    maxWidth: 94,
+                  }}
+                >
+                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
+                    思考 {formatEffort(effort)}
+                  </Text>
+                  <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
+                </View>
+              </MenuView>
+            ) : null}
             <View style={{ flex: 1 }} />
             {running ? (
               <Pressable
-                onPress={() => workspace.cancel(conversation.id)}
+                onPress={cancelRunningTurn}
                 style={({ pressed }) => ({
                   width: 38,
                   height: 38,

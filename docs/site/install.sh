@@ -48,8 +48,8 @@ if command -v linkshell >/dev/null 2>&1; then
   ok "linkshell ${VER}"
   echo ""
   info "Get started:"
-  echo "    linkshell start              # start a bridge session"
-  echo "    linkshell doctor             # check your environment"
+  echo "    linkshell start --agent-ui   # start bridge + Agent Workspace"
+  echo "    linkshell doctor             # check providers and environment"
   echo "    linkshell setup              # interactive configuration"
   echo ""
 else

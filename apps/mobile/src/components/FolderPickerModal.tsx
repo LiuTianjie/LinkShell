@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "./AppSymbol";
 import type { BrowseEntry } from "../hooks/useSessionManager";
@@ -16,6 +16,7 @@ export function FolderPickerModal({
   initialPath,
   selectLabel,
   switchLabel,
+  connectionStatus,
 }: {
   visible: boolean;
   browseResult: { path: string; entries: BrowseEntry[]; error?: string } | null;
@@ -28,10 +29,15 @@ export function FolderPickerModal({
   initialPath?: string;
   selectLabel?: string;
   switchLabel?: string;
+  connectionStatus?: string;
 }) {
   const insets = useSafeAreaInsets();
   const [manualPath, setManualPath] = useState("");
   const currentPath = browseResult?.path ?? initialPath ?? "~";
+  const isConnected = !connectionStatus || connectionStatus === "connected";
+  const isConnecting = visible && !browseResult && !isConnected;
+  const isReading = visible && !browseResult && isConnected;
+  const hasManualPath = manualPath.trim().length > 0;
   const initialPathRef = React.useRef(initialPath);
   initialPathRef.current = initialPath;
 
@@ -129,7 +135,7 @@ export function FolderPickerModal({
             style={{ flex: 1, backgroundColor: getRunningTerminalId(currentPath) ? theme.success + "30" : theme.accentLight, borderRadius: 8, paddingVertical: 10, alignItems: "center" }}
           >
             <Text style={{ color: getRunningTerminalId(currentPath) ? theme.success : theme.accent, fontWeight: "600", fontSize: 14 }}>
-              {getRunningTerminalId(currentPath) ? (switchLabel ?? "切换到此终端") : (selectLabel ?? "在此打开终端")}
+              {getRunningTerminalId(currentPath) ? (switchLabel ?? "切换到此终端") : (selectLabel ?? "选择此目录")}
             </Text>
           </Pressable>
           {onMkdir && (
@@ -143,7 +149,21 @@ export function FolderPickerModal({
         </View>
 
         {browseResult?.error && (
-          <Text style={{ color: theme.error, fontSize: 12, paddingHorizontal: 20, paddingBottom: 4 }}>{browseResult.error}</Text>
+          <View style={{ paddingHorizontal: 20, paddingBottom: 8, gap: 8 }}>
+            <Text selectable style={{ color: theme.error, fontSize: 12, lineHeight: 17 }}>{browseResult.error}</Text>
+            <Pressable
+              onPress={() => onBrowse(currentPath)}
+              style={({ pressed }) => ({
+                alignSelf: "flex-start",
+                borderRadius: 999,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                backgroundColor: pressed ? theme.bgInput : theme.errorLight,
+              })}
+            >
+              <Text style={{ color: theme.error, fontSize: 12, fontWeight: "800" }}>重试</Text>
+            </Pressable>
+          </View>
         )}
 
         <FlatList
@@ -152,9 +172,21 @@ export function FolderPickerModal({
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingHorizontal: 16 }}
           ListEmptyComponent={
-            <Text style={{ color: theme.textTertiary, fontSize: 13, textAlign: "center", paddingTop: 24 }}>
-              {browseResult ? "空目录" : "加载中..."}
-            </Text>
+            <View style={{ alignItems: "center", gap: 8, paddingTop: 28 }}>
+              {isConnecting || isReading ? <ActivityIndicator size="small" color={theme.textTertiary} /> : null}
+              <Text style={{ color: theme.textTertiary, fontSize: 13, textAlign: "center" }}>
+                {browseResult
+                  ? "空目录"
+                  : isConnecting
+                    ? "正在连接主机…"
+                    : "正在读取目录…"}
+              </Text>
+              {!browseResult && (
+                <Text style={{ color: theme.textTertiary, fontSize: 12, textAlign: "center", lineHeight: 17 }}>
+                  也可以在下方手动输入路径后直接使用。
+                </Text>
+              )}
+            </View>
           }
           renderItem={({ item }) => {
             const running = getRunningTerminalId(item.path);
@@ -182,7 +214,7 @@ export function FolderPickerModal({
             <TextInput
               value={manualPath}
               onChangeText={setManualPath}
-              placeholder="手动输入路径..."
+              placeholder="手动输入路径…"
               placeholderTextColor={theme.textTertiary}
               style={{ flex: 1, color: theme.text, fontSize: 14, backgroundColor: theme.bgInput, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10 }}
               autoCapitalize="none"
@@ -196,11 +228,22 @@ export function FolderPickerModal({
             <Pressable
               onPress={() => {
                 const p = manualPath.trim();
+                if (p) onBrowse(p);
+              }}
+              disabled={!hasManualPath}
+              style={{ marginLeft: 8, backgroundColor: theme.bgInput, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, opacity: hasManualPath ? 1 : 0.45 }}
+            >
+              <Text style={{ color: theme.textSecondary, fontWeight: "600", fontSize: 14 }}>跳转</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                const p = manualPath.trim();
                 if (p) { onSelect(p); onClose(); setManualPath(""); }
               }}
-              style={{ marginLeft: 8, backgroundColor: theme.accentLight, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 }}
+              disabled={!hasManualPath}
+              style={{ marginLeft: 8, backgroundColor: theme.accentLight, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, opacity: hasManualPath ? 1 : 0.45 }}
             >
-              <Text style={{ color: theme.accent, fontWeight: "600", fontSize: 14 }}>打开</Text>
+              <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 14 }}>使用</Text>
             </Pressable>
           </View>
         </KeyboardAvoidingView>
