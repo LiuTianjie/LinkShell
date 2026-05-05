@@ -155,7 +155,18 @@ class LiveActivityModule: NSObject {
             ext.permissionRequestId = ""
             ext.permissionOptions = []
             LiveActivityStore.writeExtendedData(ext)
-            resolve(true)
+            Task {
+                for activity in Activity<LinkShellAttributes>.activities {
+                    var state = activity.content.state
+                    state.status = "running"
+                    state.phaseLabel = "运行中"
+                    state.hasPermission = false
+                    state.permissionCount = 0
+                    state.updatedAt = Date().timeIntervalSince1970 * 1000
+                    await activity.update(ActivityContent(state: state, staleDate: nil))
+                }
+                resolve(true)
+            }
         } else {
             resolve(false)
         }

@@ -133,13 +133,14 @@ export class AcpClient {
     cwd: string;
   }): Promise<unknown> {
     if (this.protocol === "codex-app-server") {
-      const collaborationMode = input.collaborationMode
+      const collaborationSettings = {
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
+      };
+      const collaborationMode = input.collaborationMode && input.collaborationMode !== "default"
         ? {
             mode: input.collaborationMode,
-            settings: {
-              model: input.model ?? null,
-              reasoning_effort: input.reasoningEffort ?? null,
-            },
+            settings: collaborationSettings,
           }
         : undefined;
       return this.transport.request("turn/start", {

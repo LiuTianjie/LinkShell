@@ -49,17 +49,6 @@ struct QuickActionIntent: AppIntent {
             return .result()
         }
 
-        if !requestId.isEmpty {
-            var processed = defaults.array(forKey: LiveActivityStore.processedActionsKey) as? [String] ?? []
-            if processed.contains(requestId) {
-                return .result()
-            }
-
-            processed.append(requestId)
-            if processed.count > 50 { processed = Array(processed.suffix(50)) }
-            defaults.set(processed, forKey: LiveActivityStore.processedActionsKey)
-        }
-
         // Enqueue action for main app
         var queue = defaults.array(forKey: LiveActivityStore.pendingActionsKey) as? [[String: String]] ?? []
         queue.append([

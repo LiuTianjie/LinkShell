@@ -130,7 +130,6 @@ describe("AcpClient codex app-server protocol", () => {
       collaborationMode: {
         mode: "plan",
         settings: {
-          model: null,
           reasoning_effort: "high",
         },
       },
@@ -144,6 +143,72 @@ describe("AcpClient codex app-server protocol", () => {
     });
     expect(entries[5].params).toEqual({ threadId: "thread-1" });
     expect(entries[4].params).not.toHaveProperty("permissionProfile");
+  });
+
+  it("omits default collaboration mode and null settings for ordinary turns", async () => {
+    const fake = makeFakeAppServer();
+    const client = new AcpClient({
+      command: fake.command,
+      protocol: "codex-app-server",
+      framing: "newline",
+      cwd: fake.cwd,
+      onNotification: () => {},
+      onRequest: () => ({}),
+      onExit: () => {},
+    });
+    clients.push(client);
+
+    await client.initialize();
+    await client.newSession({ cwd: fake.cwd });
+    await client.prompt({
+      sessionId: "thread-1",
+      content: [{ type: "text", text: "hello" }],
+      clientMessageId: "client-msg-ordinary",
+      collaborationMode: "default",
+      cwd: fake.cwd,
+    });
+
+    const entries = await waitForLogEntries(fake.logPath, 4);
+    expect(entries.map((entry) => entry.method)).toEqual([
+      "initialize",
+      "initialized",
+      "thread/start",
+      "turn/start",
+    ]);
+    expect(entries[3].params).not.toHaveProperty("collaborationMode");
+    expect(entries[3].params).not.toHaveProperty("model");
+    expect(entries[3].params).not.toHaveProperty("effort");
+  });
+
+  it("sends an empty settings object for plan mode without optional strings", async () => {
+    const fake = makeFakeAppServer();
+    const client = new AcpClient({
+      command: fake.command,
+      protocol: "codex-app-server",
+      framing: "newline",
+      cwd: fake.cwd,
+      onNotification: () => {},
+      onRequest: () => ({}),
+      onExit: () => {},
+    });
+    clients.push(client);
+
+    await client.initialize();
+    await client.newSession({ cwd: fake.cwd });
+    await client.prompt({
+      sessionId: "thread-1",
+      content: [{ type: "text", text: "plan this" }],
+      clientMessageId: "client-msg-plan",
+      collaborationMode: "plan",
+      cwd: fake.cwd,
+    });
+
+    const entries = await waitForLogEntries(fake.logPath, 4);
+    expect(entries[3].method).toBe("turn/start");
+    expect(entries[3].params.collaborationMode).toEqual({
+      mode: "plan",
+      settings: {},
+    });
   });
 });
 

@@ -5,6 +5,7 @@ import {
   Alert,
   Clipboard,
   InteractionManager,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -229,10 +230,9 @@ function filteredCommands(
   query: string,
 ): AgentCommandDescriptor[] {
   const normalized = query.trim().toLowerCase();
-  const filtered = normalized
+  return normalized
     ? commands.filter((command) => commandSearchBlob(command).includes(normalized))
     : commands;
-  return filtered.slice(0, 12);
 }
 
 function commandCategoryLabel(command: AgentCommandDescriptor): string {
@@ -1764,49 +1764,58 @@ function SlashCommandPanel({
   return (
     <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: timelineSurface(theme), borderWidth: StyleSheet.hairlineWidth, borderColor: theme.separator, overflow: "hidden" }}>
       <View style={{ paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.separator, flexDirection: "row", alignItems: "center" }}>
-        <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 12, fontWeight: "800" }}>命令</Text>
+        <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 12, fontWeight: "800" }}>
+          命令 · {items.length}
+        </Text>
         <Pressable onPress={onClose} hitSlop={8}>
           <AppSymbol name="xmark" size={12} color={theme.textTertiary} />
         </Pressable>
       </View>
-      {items.map((command) => {
-        const disabled = Boolean(command.disabledReason);
-        return (
-          <Pressable
-            key={command.id}
-            disabled={disabled}
-            onPress={() => onSelect(command)}
-            style={({ pressed }) => ({
-              paddingHorizontal: 12,
-              paddingVertical: 10,
-              borderBottomWidth: StyleSheet.hairlineWidth,
-              borderBottomColor: theme.separator,
-              backgroundColor: pressed ? theme.bgInput : "transparent",
-              opacity: disabled ? 0.45 : 1,
-              flexDirection: "row",
-              gap: 9,
-              alignItems: "flex-start",
-            })}
-          >
-            <View style={{ width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: command.destructive ? theme.errorLight : theme.accentLight }}>
-              <AppSymbol name={command.destructive ? "exclamationmark.triangle.fill" : "terminal.fill"} size={12} color={command.destructive ? theme.error : theme.accent} />
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                <Text style={{ color: theme.text, fontSize: 14, fontWeight: "800" }} numberOfLines={1}>
-                  {command.title}
-                </Text>
-                <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }} numberOfLines={1}>
-                  {commandCategoryLabel(command)}
+      <ScrollView
+        style={{ maxHeight: 320 }}
+        bounces={items.length > 5}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={items.length > 5}
+      >
+        {items.map((command, index) => {
+          const disabled = Boolean(command.disabledReason);
+          return (
+            <Pressable
+              key={command.id}
+              disabled={disabled}
+              onPress={() => onSelect(command)}
+              style={({ pressed }) => ({
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderBottomWidth: index === items.length - 1 ? 0 : StyleSheet.hairlineWidth,
+                borderBottomColor: theme.separator,
+                backgroundColor: pressed ? theme.bgInput : "transparent",
+                opacity: disabled ? 0.45 : 1,
+                flexDirection: "row",
+                gap: 9,
+                alignItems: "flex-start",
+              })}
+            >
+              <View style={{ width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: command.destructive ? theme.errorLight : theme.accentLight }}>
+                <AppSymbol name={command.destructive ? "exclamationmark.triangle.fill" : "terminal.fill"} size={12} color={command.destructive ? theme.error : theme.accent} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                  <Text style={{ color: theme.text, fontSize: 14, fontWeight: "800" }} numberOfLines={1}>
+                    {command.title}
+                  </Text>
+                  <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
+                    {commandCategoryLabel(command)}
+                  </Text>
+                </View>
+                <Text style={{ color: disabled ? theme.error : theme.textTertiary, fontSize: 12, lineHeight: 16, marginTop: 2 }} numberOfLines={2}>
+                  {command.disabledReason || command.description || "发送给当前 Agent"}
                 </Text>
               </View>
-              <Text style={{ color: disabled ? theme.error : theme.textTertiary, fontSize: 12, lineHeight: 16, marginTop: 2 }} numberOfLines={2}>
-                {command.disabledReason || command.description || "发送给当前 Agent"}
-              </Text>
-            </View>
-          </Pressable>
-        );
-      })}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 }
@@ -1902,6 +1911,18 @@ function TimelineItemView({
         running={item.isStreaming}
       />
     );
+  }
+
+  if (item.type === "status") {
+    return item.text ? (
+      <SystemActivityCard
+        icon={item.status === "error" ? "exclamationmark.triangle.fill" : "info.circle"}
+        title={item.status === "error" ? "状态异常" : "状态"}
+        text={item.text}
+        theme={theme}
+        running={item.isStreaming}
+      />
+    ) : null;
   }
 
   if (item.type === "message") {
@@ -2099,6 +2120,12 @@ export function AgentConversationScreen({
   const currentCollaborationMode = (conversation?.collaborationMode ?? providerCapability?.currentMode ?? "default") as AgentCollaborationMode;
 
   useEffect(() => {
+    if (commandPanelVisible) {
+      Keyboard.dismiss();
+    }
+  }, [commandPanelVisible]);
+
+  useEffect(() => {
     setModel(conversation?.model);
     setEffort(conversation?.reasoningEffort);
     setPermissionMode(conversation?.permissionMode);
@@ -2193,7 +2220,6 @@ export function AgentConversationScreen({
     }
     if (!updateTimelineScrollable()) {
       scrollTimelineToTop();
-      return;
     }
     const scroll = (scrollAnimated: boolean) =>
       timelineRef.current?.scrollToEnd({ animated: scrollAnimated });
@@ -2259,7 +2285,8 @@ export function AgentConversationScreen({
       return;
     }
     setHasNewOutput(false);
-  }, [timelineAutoScrollKey, visibleTimeline.length]);
+    scrollTimelineToEnd(false);
+  }, [scrollTimelineToEnd, timelineAutoScrollKey, visibleTimeline.length]);
 
   useEffect(() => {
     if (!conversation || visibleTimeline.length === 0) return;
@@ -2652,11 +2679,10 @@ export function AgentConversationScreen({
           scrollEventThrottle={16}
           estimatedItemSize={96}
           drawDistance={420}
-          maintainScrollAtEnd={isTimelineScrollable ? { onDataChange: true, onItemLayout: true, onLayout: true } : undefined}
-          maintainScrollAtEndThreshold={0.22}
-          maintainVisibleContentPosition={isTimelineScrollable}
+          maintainVisibleContentPosition={false}
           onContentSizeChange={(_width, height) => {
             timelineContentHeightRef.current = height;
+            const shouldStickToEnd = timelineNearBottomRef.current;
             const scrollable = updateTimelineScrollable();
             if (!scrollable) {
               scrollTimelineToTop();
@@ -2666,6 +2692,10 @@ export function AgentConversationScreen({
               return;
             }
             if (conversation && pendingInitialScrollConversationRef.current === conversation.id) {
+              scrollTimelineToEnd(false);
+              return;
+            }
+            if (shouldStickToEnd) {
               scrollTimelineToEnd(false);
             }
           }}
@@ -2810,115 +2840,95 @@ export function AgentConversationScreen({
               当前任务运行中，停止后再发送这条消息。
             </Text>
           ) : null}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            {supportsImages ? (
-              <Pressable
-                onPress={showAttachSheet}
-                style={({ pressed }) => ({
-                  width: 34,
-                  height: 34,
-                  borderRadius: 17,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: pressed ? theme.accentLight : theme.bgInput,
-                })}
-              >
-                <AppSymbol name="photo" size={17} color={theme.textSecondary} />
-              </Pressable>
-            ) : null}
-            {permissionOpts.length > 0 ? (
-              <MenuView
-                actions={menuActions(permissionOpts, permissionMode)}
-                onPressAction={({ nativeEvent }) =>
-                  setPermissionModeWithGuard(valueFromMenuId<AgentPermissionMode>(nativeEvent.event))
-                }
-              >
-                <View
-                  style={{
-                    minWidth: permissionModeNeedsAttention(permissionMode) ? 82 : 34,
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <ScrollView
+              horizontal
+              bounces={false}
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              style={{ flex: 1, minWidth: 0 }}
+              contentContainerStyle={{ flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 2 }}
+            >
+              {supportsImages ? (
+                <Pressable
+                  onPress={showAttachSheet}
+                  style={({ pressed }) => ({
+                    width: 34,
+                    height: 34,
+                    borderRadius: 17,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: pressed ? theme.accentLight : theme.bgInput,
+                  })}
+                >
+                  <AppSymbol name="photo" size={17} color={theme.textSecondary} />
+                </Pressable>
+              ) : null}
+              {permissionOpts.length > 0 ? (
+                <MenuView
+                  actions={menuActions(permissionOpts, permissionMode)}
+                  onPressAction={({ nativeEvent }) =>
+                    setPermissionModeWithGuard(valueFromMenuId<AgentPermissionMode>(nativeEvent.event))
+                  }
+                >
+                  <View
+                    style={{
+                      minWidth: permissionModeNeedsAttention(permissionMode) ? 82 : 34,
+                      height: 34,
+                      borderRadius: 999,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexDirection: "row",
+                      gap: 5,
+                      paddingHorizontal: permissionModeNeedsAttention(permissionMode) ? 10 : 0,
+                      backgroundColor: permissionMode === "full_access" ? theme.warning : permission.bg,
+                    }}
+                  >
+                    <AppSymbol name={permission.icon} size={13} color={permissionMode === "full_access" ? theme.textInverse : permission.color} />
+                    {permissionModeNeedsAttention(permissionMode) ? (
+                      <Text style={{ color: permissionMode === "full_access" ? theme.textInverse : permission.color, fontSize: 11, fontWeight: "800" }}>
+                        {permission.label.replace("权限", "")}
+                      </Text>
+                    ) : null}
+                  </View>
+                </MenuView>
+              ) : null}
+              {providerCapability?.supportsPlan || availableCommands.some((command) => command.name === "plan") ? (
+                <Pressable
+                  onPress={() => {
+                    const targetName = currentCollaborationMode === "plan" ? "exit-plan" : "plan";
+                    const command = availableCommands.find((item) => item.name === targetName);
+                    if (command?.disabledReason) {
+                      Alert.alert("命令不可用", command.disabledReason);
+                      return;
+                    }
+                    if (command) executeSlashCommand(command);
+                  }}
+                  style={({ pressed }) => ({
                     height: 34,
                     borderRadius: 999,
                     alignItems: "center",
                     justifyContent: "center",
                     flexDirection: "row",
                     gap: 5,
-                    paddingHorizontal: permissionModeNeedsAttention(permissionMode) ? 10 : 0,
-                    backgroundColor: permissionMode === "full_access" ? theme.warning : permission.bg,
-                  }}
+                    paddingHorizontal: 10,
+                    backgroundColor: currentCollaborationMode === "plan"
+                      ? (pressed ? theme.accentSecondary : theme.accent)
+                      : (pressed ? theme.accentLight : theme.bgInput),
+                  })}
                 >
-                  <AppSymbol name={permission.icon} size={13} color={permissionMode === "full_access" ? theme.textInverse : permission.color} />
-                  {permissionModeNeedsAttention(permissionMode) ? (
-                    <Text style={{ color: permissionMode === "full_access" ? theme.textInverse : permission.color, fontSize: 11, fontWeight: "800" }}>
-                      {permission.label.replace("权限", "")}
-                    </Text>
-                  ) : null}
-                </View>
-              </MenuView>
-            ) : null}
-            {providerCapability?.supportsPlan || availableCommands.some((command) => command.name === "plan") ? (
-              <Pressable
-                onPress={() => {
-                  const targetName = currentCollaborationMode === "plan" ? "exit-plan" : "plan";
-                  const command = availableCommands.find((item) => item.name === targetName);
-                  if (command?.disabledReason) {
-                    Alert.alert("命令不可用", command.disabledReason);
-                    return;
-                  }
-                  if (command) executeSlashCommand(command);
-                }}
-                style={({ pressed }) => ({
-                  height: 34,
-                  borderRadius: 999,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexDirection: "row",
-                  gap: 5,
-                  paddingHorizontal: 10,
-                  backgroundColor: currentCollaborationMode === "plan"
-                    ? (pressed ? theme.accentSecondary : theme.accent)
-                    : (pressed ? theme.accentLight : theme.bgInput),
-                })}
-              >
-                <AppSymbol name="checklist" size={13} color={currentCollaborationMode === "plan" ? theme.textInverse : theme.textSecondary} />
-                <Text style={{ color: currentCollaborationMode === "plan" ? theme.textInverse : theme.textSecondary, fontSize: 11, fontWeight: "800" }}>
-                  Plan
-                </Text>
-              </Pressable>
-            ) : null}
-            <MenuView
-              actions={modelMenuActions}
-              onPressAction={({ nativeEvent }) => {
-                const event = nativeEvent.event;
-                if (event.startsWith("model:")) {
-                  commitModel(valueFromMenuId<string>(event.slice("model:".length)));
-                }
-              }}
-            >
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  borderRadius: 999,
-                  paddingHorizontal: 9,
-                  paddingVertical: 7,
-                  backgroundColor: theme.bgInput,
-                  maxWidth: 132,
-                }}
-              >
-                <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
-                  {formatModel(model, modelOpts)}
-                </Text>
-                <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
-              </View>
-            </MenuView>
-            {effortMenuActions.length > 0 ? (
+                  <AppSymbol name="checklist" size={13} color={currentCollaborationMode === "plan" ? theme.textInverse : theme.textSecondary} />
+                  <Text style={{ color: currentCollaborationMode === "plan" ? theme.textInverse : theme.textSecondary, fontSize: 11, fontWeight: "800" }}>
+                    Plan
+                  </Text>
+                </Pressable>
+              ) : null}
               <MenuView
-                actions={effortMenuActions}
+                actions={modelMenuActions}
                 onPressAction={({ nativeEvent }) => {
                   const event = nativeEvent.event;
-                  if (event.startsWith("effort:")) {
-                    commitEffort(valueFromMenuId<AgentReasoningEffort>(event.slice("effort:".length)));
+                  if (event.startsWith("model:")) {
+                    commitModel(valueFromMenuId<string>(event.slice("model:".length)));
                   }
                 }}
               >
@@ -2926,22 +2936,50 @@ export function AgentConversationScreen({
                   style={{
                     flexDirection: "row",
                     alignItems: "center",
-                    gap: 5,
+                    gap: 6,
                     borderRadius: 999,
                     paddingHorizontal: 9,
                     paddingVertical: 7,
                     backgroundColor: theme.bgInput,
-                    maxWidth: 94,
+                    maxWidth: 132,
                   }}
                 >
                   <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
-                    思考 {formatEffort(effort)}
+                    {formatModel(model, modelOpts)}
                   </Text>
                   <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
                 </View>
               </MenuView>
-            ) : null}
-            <View style={{ flex: 1 }} />
+              {effortMenuActions.length > 0 ? (
+                <MenuView
+                  actions={effortMenuActions}
+                  onPressAction={({ nativeEvent }) => {
+                    const event = nativeEvent.event;
+                    if (event.startsWith("effort:")) {
+                      commitEffort(valueFromMenuId<AgentReasoningEffort>(event.slice("effort:".length)));
+                    }
+                  }}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 5,
+                      borderRadius: 999,
+                      paddingHorizontal: 9,
+                      paddingVertical: 7,
+                      backgroundColor: theme.bgInput,
+                      maxWidth: 94,
+                    }}
+                  >
+                    <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
+                      思考 {formatEffort(effort)}
+                    </Text>
+                    <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
+                  </View>
+                </MenuView>
+              ) : null}
+            </ScrollView>
             {running ? (
               <Pressable
                 onPress={cancelRunningTurn}

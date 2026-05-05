@@ -841,11 +841,7 @@ export function AgentWorkspaceScreen({
       const next = new Set<string>();
       const previousKnown = knownProjectKeysRef.current;
       for (const projectId of projectIds) {
-        if (
-          prev.has(projectId) ||
-          !didInitializeCollapsedProjectsRef.current ||
-          !previousKnown.has(projectId)
-        ) {
+        if (prev.has(projectId) && previousKnown.has(projectId)) {
           next.add(projectId);
         }
       }
@@ -987,12 +983,25 @@ export function AgentWorkspaceScreen({
       }).catch(() => {});
       const exactKey = projectKey(selectedTarget.serverUrl, selectedTarget.machineId ?? selectedTarget.sessionId, effectiveCwd);
       const pathKey = projectPathKey(selectedTarget.serverUrl, effectiveCwd);
+      const groupId = deviceProjectKey(
+        effectiveCwd,
+        selectedTarget.machineId ?? selectedTarget.hostname ?? selectedTarget.projectName,
+        selectedTarget.serverUrl,
+      );
       setHiddenProjectKeys((prev) => {
-        if (!prev.has(exactKey) && !prev.has(pathKey)) return prev;
+        const hiddenProjectKey = `project:${groupId}`;
+        if (!prev.has(exactKey) && !prev.has(pathKey) && !prev.has(hiddenProjectKey)) return prev;
         const next = new Set(prev);
         next.delete(exactKey);
         next.delete(pathKey);
+        next.delete(hiddenProjectKey);
         saveHiddenAgentProjectKeys(next).catch(() => {});
+        return next;
+      });
+      setCollapsedProjectKeys((prev) => {
+        if (!prev.has(groupId)) return prev;
+        const next = new Set(prev);
+        next.delete(groupId);
         return next;
       });
       setCreateVisible(false);

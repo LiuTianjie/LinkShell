@@ -723,37 +723,180 @@ interface ProviderRuntimeCapabilities {
 const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 const ALL_PERMISSION_MODES = ["read_only", "workspace_write", "full_access"] as const;
 const CODEX_COMMAND_NAMES = ["plan", "exit-plan", "compact", "clear", "status", "review", "subagents"] as const;
+const CLAUDE_REMOTE_HIDDEN_COMMANDS = new Set([
+  "add-dir",
+  "agents",
+  "allowed-tools",
+  "android",
+  "app",
+  "bashes",
+  "branch",
+  "bug",
+  "checkpoint",
+  "chrome",
+  "color",
+  "config",
+  "continue",
+  "copy",
+  "cost",
+  "desktop",
+  "diff",
+  "doctor",
+  "exit",
+  "export",
+  "extra-usage",
+  "feedback",
+  "focus",
+  "fork",
+  "hooks",
+  "ide",
+  "init",
+  "install-github-app",
+  "install-slack-app",
+  "ios",
+  "keybindings",
+  "login",
+  "logout",
+  "mcp",
+  "memory",
+  "migrate-installer",
+  "mobile",
+  "model",
+  "passes",
+  "permissions",
+  "plugin",
+  "powerup",
+  "pr-comments",
+  "privacy-settings",
+  "quit",
+  "rc",
+  "release-notes",
+  "remote-control",
+  "remote-env",
+  "resume",
+  "rewind",
+  "settings",
+  "statusline",
+  "stickers",
+  "tasks",
+  "teleport",
+  "terminal-setup",
+  "theme",
+  "tp",
+  "tui",
+  "undo",
+  "upgrade",
+  "vim",
+  "voice",
+  "web-setup",
+]);
 const CLAUDE_BUILT_IN_COMMANDS: Array<{ name: string; description: string; argsMode?: AgentCommandDescriptor["argsMode"]; destructive?: boolean }> = [
-  { name: "add-dir", description: "Add additional working directories" },
-  { name: "agents", description: "Manage subagents" },
-  { name: "bug", description: "Report a Claude Code bug" },
-  { name: "clear", description: "Clear conversation context", argsMode: "none", destructive: true },
+  { name: "add-dir", description: "Add a working directory for file access", argsMode: "required" },
+  { name: "agents", description: "Manage agent configurations", argsMode: "none" },
+  { name: "autofix-pr", description: "Spawn a Claude Code web session to fix PR CI or review comments" },
+  { name: "batch", description: "Orchestrate large-scale changes across parallel agents", argsMode: "required" },
+  { name: "branch", description: "Create a branch of the current conversation" },
+  { name: "fork", description: "Alias for /branch" },
+  { name: "btw", description: "Ask a side question without adding to the conversation", argsMode: "required" },
+  { name: "chrome", description: "Configure Claude in Chrome settings", argsMode: "none" },
+  { name: "claude-api", description: "Load Claude API reference or migration guidance" },
+  { name: "clear", description: "Start a new conversation with empty context", argsMode: "none", destructive: true },
+  { name: "reset", description: "Alias for /clear", argsMode: "none", destructive: true },
+  { name: "new", description: "Alias for /clear", argsMode: "none", destructive: true },
+  { name: "color", description: "Set the prompt bar color" },
   { name: "compact", description: "Compact conversation history" },
   { name: "config", description: "Open configuration" },
-  { name: "cost", description: "Show usage cost" },
-  { name: "doctor", description: "Check Claude Code health" },
+  { name: "settings", description: "Alias for /config", argsMode: "none" },
+  { name: "context", description: "Visualize current context usage", argsMode: "none" },
+  { name: "copy", description: "Copy the last assistant response" },
+  { name: "cost", description: "Alias for /usage", argsMode: "none" },
+  { name: "debug", description: "Enable debug logging and troubleshoot the session" },
+  { name: "desktop", description: "Continue the current session in Claude Code Desktop", argsMode: "none" },
+  { name: "app", description: "Alias for /desktop", argsMode: "none" },
+  { name: "diff", description: "Open an interactive diff viewer", argsMode: "none" },
+  { name: "doctor", description: "Check Claude Code health", argsMode: "none" },
+  { name: "effort", description: "Set model effort level" },
   { name: "exit", description: "Exit Claude Code", argsMode: "none", destructive: true },
+  { name: "quit", description: "Alias for /exit", argsMode: "none", destructive: true },
   { name: "export", description: "Export conversation" },
-  { name: "help", description: "Show help" },
-  { name: "ide", description: "Manage IDE integration" },
-  { name: "init", description: "Create or update CLAUDE.md" },
-  { name: "login", description: "Sign in" },
-  { name: "logout", description: "Sign out" },
-  { name: "mcp", description: "Manage MCP servers" },
-  { name: "memory", description: "Edit memory files" },
+  { name: "extra-usage", description: "Configure extra usage when rate limits are hit", argsMode: "none" },
+  { name: "fast", description: "Toggle fast mode" },
+  { name: "feedback", description: "Submit feedback about Claude Code" },
+  { name: "bug", description: "Alias for /feedback" },
+  { name: "fewer-permission-prompts", description: "Reduce common permission prompts", argsMode: "none" },
+  { name: "focus", description: "Toggle the focus view", argsMode: "none" },
+  { name: "heapdump", description: "Write a JavaScript heap snapshot for diagnostics", argsMode: "none" },
+  { name: "help", description: "Show help and available commands", argsMode: "none" },
+  { name: "hooks", description: "View hook configurations", argsMode: "none" },
+  { name: "ide", description: "Manage IDE integrations and show status", argsMode: "none" },
+  { name: "init", description: "Initialize project with a CLAUDE.md guide", argsMode: "none" },
+  { name: "insights", description: "Generate a report analyzing Claude Code sessions", argsMode: "none" },
+  { name: "install-github-app", description: "Set up the Claude GitHub Actions app", argsMode: "none" },
+  { name: "install-slack-app", description: "Install the Claude Slack app", argsMode: "none" },
+  { name: "keybindings", description: "Open or create keybindings configuration", argsMode: "none" },
+  { name: "login", description: "Sign in", argsMode: "none" },
+  { name: "logout", description: "Sign out", argsMode: "none" },
+  { name: "loop", description: "Run a prompt repeatedly while the session stays open" },
+  { name: "proactive", description: "Alias for /loop" },
+  { name: "mcp", description: "Manage MCP servers and OAuth authentication", argsMode: "none" },
+  { name: "memory", description: "Edit memory files and auto-memory settings", argsMode: "none" },
+  { name: "mobile", description: "Show QR code to download the Claude mobile app", argsMode: "none" },
+  { name: "ios", description: "Alias for /mobile", argsMode: "none" },
+  { name: "android", description: "Alias for /mobile", argsMode: "none" },
   { name: "model", description: "Switch model" },
-  { name: "permissions", description: "Manage permissions" },
-  { name: "pr-comments", description: "Fetch PR comments" },
-  { name: "release-notes", description: "Show release notes" },
+  { name: "passes", description: "Share a free week of Claude Code", argsMode: "none" },
+  { name: "permissions", description: "Manage tool permission rules", argsMode: "none" },
+  { name: "allowed-tools", description: "Alias for /permissions", argsMode: "none" },
+  { name: "plan", description: "Enter Claude Code plan mode" },
+  { name: "plugin", description: "Manage Claude Code plugins", argsMode: "none" },
+  { name: "powerup", description: "Discover Claude Code features through lessons", argsMode: "none" },
+  { name: "pr-comments", description: "Fetch PR comments on older Claude Code versions" },
+  { name: "privacy-settings", description: "View and update privacy settings", argsMode: "none" },
+  { name: "recap", description: "Generate a one-line session summary", argsMode: "none" },
+  { name: "release-notes", description: "Show release notes", argsMode: "none" },
+  { name: "reload-plugins", description: "Reload active plugins", argsMode: "none" },
+  { name: "remote-control", description: "Make this session available for remote control", argsMode: "none" },
+  { name: "rc", description: "Alias for /remote-control", argsMode: "none" },
+  { name: "remote-env", description: "Configure the default remote environment", argsMode: "none" },
+  { name: "rename", description: "Rename the current session" },
   { name: "resume", description: "Resume a conversation" },
-  { name: "review", description: "Review local changes" },
-  { name: "security-review", description: "Run a security review" },
-  { name: "status", description: "Show status" },
+  { name: "continue", description: "Alias for /resume" },
+  { name: "review", description: "Review a pull request locally" },
+  { name: "rewind", description: "Rewind the conversation or code to a previous point", argsMode: "none", destructive: true },
+  { name: "checkpoint", description: "Alias for /rewind", argsMode: "none", destructive: true },
+  { name: "undo", description: "Alias for /rewind", argsMode: "none", destructive: true },
+  { name: "sandbox", description: "Toggle sandbox mode", argsMode: "none" },
+  { name: "schedule", description: "Create, update, list, or run routines" },
+  { name: "routines", description: "Alias for /schedule" },
+  { name: "security-review", description: "Analyze pending changes for security issues", argsMode: "none" },
+  { name: "setup-bedrock", description: "Configure Amazon Bedrock authentication", argsMode: "none" },
+  { name: "setup-vertex", description: "Configure Google Vertex AI authentication", argsMode: "none" },
+  { name: "simplify", description: "Review and simplify recently changed files" },
+  { name: "skills", description: "List available skills", argsMode: "none" },
+  { name: "stats", description: "Alias for /usage", argsMode: "none" },
+  { name: "status", description: "Show status", argsMode: "none" },
   { name: "statusline", description: "Configure status line" },
-  { name: "terminal-setup", description: "Configure terminal integration" },
-  { name: "upgrade", description: "Upgrade Claude Code" },
-  { name: "vim", description: "Toggle vim mode" },
+  { name: "stickers", description: "Order Claude Code stickers", argsMode: "none" },
+  { name: "tasks", description: "List and manage background tasks", argsMode: "none" },
+  { name: "bashes", description: "Alias for /tasks", argsMode: "none" },
+  { name: "team-onboarding", description: "Generate a team onboarding guide", argsMode: "none" },
+  { name: "teleport", description: "Pull a Claude Code web session into this terminal", argsMode: "none" },
+  { name: "tp", description: "Alias for /teleport", argsMode: "none" },
+  { name: "terminal-setup", description: "Configure terminal keybindings", argsMode: "none" },
+  { name: "theme", description: "Change color theme" },
+  { name: "tui", description: "Set the terminal UI renderer" },
+  { name: "ultraplan", description: "Draft a plan in an ultraplan web session", argsMode: "required" },
+  { name: "ultrareview", description: "Run a deep cloud-based code review" },
+  { name: "upgrade", description: "Open upgrade page", argsMode: "none" },
+  { name: "usage", description: "Show usage and rate-limit status", argsMode: "none" },
+  { name: "vim", description: "Toggle vim mode on older Claude Code versions", argsMode: "none" },
+  { name: "voice", description: "Toggle voice dictation" },
+  { name: "web-setup", description: "Connect your GitHub account to Claude Code on the web", argsMode: "none" },
 ];
+
+function isClaudeRemoteFriendlyCommand(name: string): boolean {
+  return !CLAUDE_REMOTE_HIDDEN_COMMANDS.has(name.replace(/^\/+/, ""));
+}
 
 function commandId(provider: AgentProvider, name: string, source: AgentCommandSource = "built_in"): string {
   return `${provider}:${source}:${name.replace(/^\/+/, "")}`;
@@ -874,15 +1017,17 @@ function defaultProviderCommands(provider: AgentProvider, cwd: string, enabled: 
     }));
   }
   if (provider === "claude") {
-    const builtIns = CLAUDE_BUILT_IN_COMMANDS.map((entry) => makeCommand({
-      provider,
-      name: entry.name,
-      description: entry.description,
-      argsMode: entry.argsMode,
-      destructive: entry.destructive,
-      disabledReason,
-      executionKind: "prompt",
-    }));
+    const builtIns = CLAUDE_BUILT_IN_COMMANDS
+      .filter((entry) => isClaudeRemoteFriendlyCommand(entry.name))
+      .map((entry) => makeCommand({
+        provider,
+        name: entry.name,
+        description: entry.description,
+        argsMode: entry.argsMode,
+        destructive: entry.destructive,
+        disabledReason,
+        executionKind: "prompt",
+      }));
     const custom = customClaudeCommands(cwd).map((command) => ({
       ...command,
       disabledReason: command.disabledReason ?? disabledReason,
@@ -908,7 +1053,12 @@ function mergeCommands(...groups: Array<AgentCommandDescriptor[] | undefined>): 
   for (const group of groups) {
     for (const command of group ?? []) {
       const key = `${command.provider ?? ""}:${command.name}`;
-      map.set(key, { ...map.get(key), ...command });
+      const existing = map.get(key);
+      map.set(key, {
+        ...existing,
+        ...command,
+        disabledReason: command.disabledReason ?? existing?.disabledReason,
+      });
     }
   }
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -926,6 +1076,7 @@ function runtimeCommands(provider: AgentProvider, value: unknown): AgentCommandD
   return commandsValue
     .map((entry) => {
       if (typeof entry === "string") {
+        if (provider === "claude" && !isClaudeRemoteFriendlyCommand(entry)) return undefined;
         return makeCommand({
           provider,
           name: entry,
@@ -938,6 +1089,7 @@ function runtimeCommands(provider: AgentProvider, value: unknown): AgentCommandD
       const record = asRecord(entry);
       const name = firstString(record, ["name", "command", "id"]);
       if (!name) return undefined;
+      if (provider === "claude" && !isClaudeRemoteFriendlyCommand(name)) return undefined;
       return makeCommand({
         provider,
         name,
@@ -1055,6 +1207,7 @@ export class AgentWorkspaceProxy {
   private error: string | undefined;
   private activeConversationId: string | undefined;
   private currentTurnIds = new Map<string, string>();
+  private turnConversationIds = new Map<string, string>();
   private conversations = new Map<string, AgentConversation>();
   private conversationByAgentSessionId = new Map<string, string>();
   private timelines = new Map<string, AgentTimelineItem[]>();
@@ -1064,6 +1217,7 @@ export class AgentWorkspaceProxy {
   private permissionSources = new Map<string, string>();
   private pendingStructuredInputs = new Map<string, { conversationId: string; input: AgentStructuredInput }>();
   private structuredInputWaiters = new Map<string, PendingStructuredInputWaiter>();
+  private itemConversationIds = new Map<string, string>();
   private toolConversationIds = new Map<string, string>();
 
   constructor(
@@ -1125,7 +1279,7 @@ export class AgentWorkspaceProxy {
           sessionId: conversation?.agentSessionId,
           turnId: this.currentTurnIds.get(payload.conversationId),
         });
-        this.currentTurnIds.delete(payload.conversationId);
+        this.forgetCurrentTurn(payload.conversationId);
         this.updateConversationStatus(payload.conversationId, "idle");
         this.emitStatus(payload.conversationId, "idle", "已停止");
         break;
@@ -1425,7 +1579,7 @@ export class AgentWorkspaceProxy {
       (payload.conversationId ? this.conversations.get(payload.conversationId) : undefined) ??
       (agentSessionId ? this.conversations.get(this.conversationByAgentSessionId.get(agentSessionId) ?? "") : undefined);
 
-    if (existingConversation && existingConversation.status !== "error") {
+    if (existingConversation && existingConversation.status !== "error" && existingConversation.agentSessionId) {
       if (payload.conversationId && existingConversation.id !== payload.conversationId) {
         existingConversation = this.adoptConversationId(existingConversation.id, payload.conversationId);
       }
@@ -1541,9 +1695,28 @@ export class AgentWorkspaceProxy {
     const conversation =
       this.conversations.get(payload.conversationId) ??
       await this.openConversation({ conversationId: payload.conversationId });
-    if (!conversation || !conversation.agentSessionId) return;
+    if (!conversation) return;
+    if (!conversation.agentSessionId) {
+      this.addItem(payload.conversationId, {
+        id: id("error"),
+        conversationId: payload.conversationId,
+        type: "error",
+        error: "Agent session 尚未就绪，消息没有发送。请重新打开对话后再试。",
+        createdAt: Date.now(),
+      });
+      return;
+    }
     const client = this.clientForProvider(conversation.provider);
-    if (!client) return;
+    if (!client) {
+      this.addItem(conversation.id, {
+        id: id("error"),
+        conversationId: conversation.id,
+        type: "error",
+        error: `${providerLabel(conversation.provider)} 未连接，消息没有发送。`,
+        createdAt: Date.now(),
+      });
+      return;
+    }
 
     const protocol = this.protocolForProvider(conversation.provider);
     if (payload.contentBlocks.some((block) => block.type === "image") && !protocolSupportsImages(protocol)) {
@@ -1598,7 +1771,7 @@ export class AgentWorkspaceProxy {
         this.conversationByAgentSessionId.set(nextAgentSessionId, conversation.id);
       }
       const turnId = this.extractTurnId(result);
-      if (turnId) this.currentTurnIds.set(conversation.id, turnId);
+      if (turnId) this.rememberTurnConversationId(conversation.id, turnId);
       if (conversation.status === "running" && protocol !== "codex-app-server") {
         this.updateConversationStatus(conversation.id, "idle");
       }
@@ -1638,7 +1811,17 @@ export class AgentWorkspaceProxy {
     const conversation =
       this.conversations.get(payload.conversationId) ??
       await this.openConversation({ conversationId: payload.conversationId });
-    if (!conversation || !conversation.agentSessionId) return;
+    if (!conversation) return;
+    if (!conversation.agentSessionId) {
+      this.addItem(payload.conversationId, {
+        id: id("error"),
+        conversationId: payload.conversationId,
+        type: "error",
+        error: "Agent session 尚未就绪，命令没有执行。请重新打开对话后再试。",
+        createdAt: Date.now(),
+      });
+      return;
+    }
 
     const command = this.commandForConversation(conversation, payload.commandId);
     if (!command) {
@@ -1826,7 +2009,7 @@ export class AgentWorkspaceProxy {
       process.stderr.write(`[agent:v2] ${method} ${stringify(params).slice(0, 500)}\n`);
     }
     if (method === "initialized") {
-      const conversationId = this.conversationIdFromParams(params) ?? this.activeConversationId;
+      const conversationId = this.conversationIdFromParams(params) ?? this.fallbackConversationId();
       const provider = conversationId ? this.conversations.get(conversationId)?.provider : this.input.availableProviders[0];
       if (provider) {
         const commands = runtimeCommands(provider, params);
@@ -1852,7 +2035,7 @@ export class AgentWorkspaceProxy {
       return;
     }
 
-    const conversationId = this.conversationIdFromParams(params) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(params) ?? this.fallbackConversationId();
     if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") {
       this.handleStructuredInput(params);
       return;
@@ -1877,14 +2060,14 @@ export class AgentWorkspaceProxy {
     if (method === "turn/started") {
       if (conversationId) {
         const turnId = this.extractTurnId(params);
-        if (turnId) this.currentTurnIds.set(conversationId, turnId);
+        if (turnId) this.rememberTurnConversationId(conversationId, turnId);
         this.updateConversationStatus(conversationId, "running");
       }
       return;
     }
     if (method === "turn/completed") {
       if (conversationId) {
-        this.currentTurnIds.delete(conversationId);
+        this.forgetCurrentTurn(conversationId, this.extractTurnId(params));
         this.updateConversationStatus(conversationId, "idle");
       }
       return;
@@ -1943,7 +2126,7 @@ export class AgentWorkspaceProxy {
   private handleAgentMessageDelta(params: unknown): void {
     const raw = asRecord(params);
     if (!raw) return;
-    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     if (!conversationId) return;
     const itemId = firstString(raw, ["itemId", "id", "messageId"]) ?? id("msg");
     const delta = firstString(raw, ["delta", "text", "content"]);
@@ -1967,7 +2150,7 @@ export class AgentWorkspaceProxy {
 
   private handlePlanUpdated(params: unknown): void {
     const raw = asRecord(params);
-    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     if (!conversationId) return;
     const plan = Array.isArray(raw?.plan) ? raw.plan : [];
     const steps = plan
@@ -1996,7 +2179,7 @@ export class AgentWorkspaceProxy {
   private handlePlanDelta(params: unknown): void {
     const raw = asRecord(params);
     if (!raw) return;
-    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     if (!conversationId) return;
     const itemId = firstString(raw, ["itemId", "id"]) ?? "plan";
     const delta = firstString(raw, ["delta", "text"]);
@@ -2018,23 +2201,25 @@ export class AgentWorkspaceProxy {
   private handleItemStarted(params: unknown): void {
     const item = extractItem(params);
     if (!item) return;
-    const itemType = firstString(item, ["type"]);
+    const sourceConversationId = this.conversationIdFromParams(params);
+    const routedItem = sourceConversationId ? { ...item, conversationId: sourceConversationId } : item;
+    const itemType = firstString(routedItem, ["type"]);
     const normalizedItemType = normalizedIdentifier(itemType);
     if (normalizedItemType === "agentmessage" || normalizedItemType === "assistantmessage") {
-      this.handleCompletedMessageItem(item, true);
+      this.handleCompletedMessageItem(routedItem, true);
       return;
     }
     if (normalizedItemType === "plan") {
-      this.handlePlanUpdated({ plan: [item] });
+      this.handlePlanUpdated({ plan: [routedItem], conversationId: sourceConversationId });
       return;
     }
     if (isSubagentItemType(itemType)) {
-      this.handleSubagentItem(item, "running", true);
+      this.handleSubagentItem(routedItem, "running", true);
       return;
     }
-    if (this.handleSemanticSystemItem(item, "running", true)) return;
-    const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
-    const toolCall = this.toolCallFromItem(item, "running");
+    if (this.handleSemanticSystemItem(routedItem, "running", true)) return;
+    const conversationId = this.conversationIdFromParams(routedItem) ?? this.fallbackConversationId();
+    const toolCall = this.toolCallFromItem(routedItem, "running");
     if (!conversationId || !toolCall) return;
     this.toolConversationIds.set(toolCall.id, conversationId);
     this.upsertTool(conversationId, toolCall);
@@ -2043,23 +2228,25 @@ export class AgentWorkspaceProxy {
   private handleItemCompleted(params: unknown): void {
     const item = extractItem(params);
     if (!item) return;
-    const itemType = firstString(item, ["type"]);
+    const sourceConversationId = this.conversationIdFromParams(params);
+    const routedItem = sourceConversationId ? { ...item, conversationId: sourceConversationId } : item;
+    const itemType = firstString(routedItem, ["type"]);
     const normalizedItemType = normalizedIdentifier(itemType);
     if (normalizedItemType === "agentmessage" || normalizedItemType === "assistantmessage") {
-      this.handleCompletedMessageItem(item, false);
+      this.handleCompletedMessageItem(routedItem, false);
       return;
     }
     if (normalizedItemType === "plan") {
-      this.handlePlanDelta({ ...item, delta: firstString(item, ["text", "content", "message"]) });
+      this.handlePlanDelta({ ...routedItem, delta: firstString(routedItem, ["text", "content", "message"]) });
       return;
     }
     if (isSubagentItemType(itemType)) {
-      this.handleSubagentItem(item, normalizeToolStatus(item.status, true), false);
+      this.handleSubagentItem(routedItem, normalizeToolStatus(routedItem.status, true), false);
       return;
     }
-    if (this.handleSemanticSystemItem(item, normalizeToolStatus(item.status, true), false)) return;
-    const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
-    const toolCall = this.toolCallFromItem(item, normalizeToolStatus(item.status, true));
+    if (this.handleSemanticSystemItem(routedItem, normalizeToolStatus(routedItem.status, true), false)) return;
+    const conversationId = this.conversationIdFromParams(routedItem) ?? this.fallbackConversationId();
+    const toolCall = this.toolCallFromItem(routedItem, normalizeToolStatus(routedItem.status, true));
     if (!conversationId || !toolCall) return;
     const bufferedOutput = this.toolOutputBuffers.get(toolCall.id);
     if (bufferedOutput && !toolCall.output) toolCall.output = bufferedOutput;
@@ -2075,7 +2262,8 @@ export class AgentWorkspaceProxy {
     const conversationId =
       this.conversationIdFromParams(raw) ??
       this.toolConversationIds.get(itemId) ??
-      this.activeConversationId;
+      this.itemConversationIds.get(itemId) ??
+      this.fallbackConversationId();
     if (!conversationId) return;
     const output = appendCapped(this.toolOutputBuffers.get(itemId), delta, 6000);
     this.toolOutputBuffers.set(itemId, output);
@@ -2097,7 +2285,8 @@ export class AgentWorkspaceProxy {
     const conversationId =
       this.conversationIdFromParams(raw) ??
       this.toolConversationIds.get(itemId) ??
-      this.activeConversationId;
+      this.itemConversationIds.get(itemId) ??
+      this.fallbackConversationId();
     if (!conversationId) return;
     const output =
       extractDiffText(raw) ??
@@ -2116,7 +2305,7 @@ export class AgentWorkspaceProxy {
   private handleTurnDiffUpdated(params: unknown): void {
     const raw = asRecord(params);
     if (!raw) return;
-    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     if (!conversationId) return;
     const diff = extractDiffText(raw);
     if (!diff) return;
@@ -2146,7 +2335,8 @@ export class AgentWorkspaceProxy {
     const conversationId =
       this.conversationIdFromParams(raw) ??
       this.toolConversationIds.get(processId) ??
-      this.activeConversationId;
+      this.itemConversationIds.get(processId) ??
+      this.fallbackConversationId();
     if (!conversationId) return;
     const output = appendCapped(this.toolOutputBuffers.get(processId), delta, 6000);
     this.toolOutputBuffers.set(processId, output);
@@ -2163,7 +2353,7 @@ export class AgentWorkspaceProxy {
 
   private handleAutoApprovalReview(params: unknown, streaming: boolean): void {
     const raw = asRecord(params) ?? {};
-    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     if (!conversationId) return;
     const itemId = firstString(raw, ["itemId", "id", "reviewId"]) ?? "auto-approval-review";
     const existing = this.findItem(conversationId, itemId);
@@ -2193,7 +2383,7 @@ export class AgentWorkspaceProxy {
   }
 
   private handleCompletedMessageItem(item: Record<string, unknown>, streaming: boolean): void {
-    const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(item) ?? this.fallbackConversationId();
     if (!conversationId) return;
     const itemId = firstString(item, ["id"]) ?? id("msg");
     const existing = this.findItem(conversationId, itemId);
@@ -2220,7 +2410,7 @@ export class AgentWorkspaceProxy {
       firstString(raw, ["delta", "text", "content", "message"]) ??
       firstString(nested, ["delta", "text", "content", "message"]);
     if (!text) return;
-    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     if (!conversationId) return;
     if (firstString(raw, ["toolName", "tool", "name"])) {
       this.upsertTool(conversationId, {
@@ -2257,7 +2447,7 @@ export class AgentWorkspaceProxy {
   ): boolean {
     const itemType = firstString(item, ["type"]);
     const normalized = normalizedIdentifier(itemType);
-    const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(item) ?? this.fallbackConversationId();
     if (!conversationId) return false;
     const itemId = firstString(item, ["id", "itemId"]) ?? id("item");
     const existing = this.findItem(conversationId, itemId);
@@ -2312,7 +2502,7 @@ export class AgentWorkspaceProxy {
     status: AgentToolCall["status"],
     streaming: boolean,
   ): void {
-    const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(item) ?? this.fallbackConversationId();
     if (!conversationId) return;
     const subagent = decodeSubagentAction(item, status);
     if (!subagent) return;
@@ -2338,7 +2528,7 @@ export class AgentWorkspaceProxy {
 
   private handleStructuredInput(params: unknown, waitForResponse = false): Promise<unknown> | void {
     const raw = asRecord(params) ?? {};
-    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     const source = firstString(raw, ["method", "source", "requestMethod"]);
     const formatResponse = source === "mcpServer/elicitation/request"
       ? formatMcpElicitationResponse
@@ -2409,7 +2599,7 @@ export class AgentWorkspaceProxy {
     source?: string,
   ): Promise<unknown> | void {
     const raw = asRecord(params) ?? {};
-    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     if (!conversationId) return waitForResponse ? Promise.resolve({ outcome: { outcome: "cancelled" } }) : undefined;
     const requestId = firstString(raw, ["requestId", "id", "permissionId"]) ?? id("perm");
     const rawToolCall = asRecord(raw.toolCall) ?? raw;
@@ -2545,6 +2735,7 @@ export class AgentWorkspaceProxy {
   }
 
   private addItem(conversationId: string, item: AgentTimelineItem): void {
+    this.rememberItemConversationId(conversationId, item);
     const timeline = this.timelines.get(conversationId) ?? [];
     timeline.push(item);
     timeline.sort((a, b) => a.createdAt - b.createdAt);
@@ -2556,6 +2747,7 @@ export class AgentWorkspaceProxy {
   }
 
   private upsertItem(conversationId: string, item: AgentTimelineItem): void {
+    this.rememberItemConversationId(conversationId, item);
     const timeline = this.timelines.get(conversationId) ?? [];
     const index = timeline.findIndex((entry) => entry.id === item.id);
     if (index >= 0) timeline[index] = item;
@@ -2583,6 +2775,8 @@ export class AgentWorkspaceProxy {
     };
     this.toolConversationIds.set(toolCall.id, conversationId);
     this.toolConversationIds.set(nextToolCall.id, conversationId);
+    this.itemConversationIds.set(toolCall.id, conversationId);
+    this.itemConversationIds.set(nextToolCall.id, conversationId);
     const kind: AgentTimelineKind = nextToolCall.name.includes("文件")
       ? "file_change"
       : nextToolCall.name.includes("命令")
@@ -2682,6 +2876,22 @@ export class AgentWorkspaceProxy {
         this.toolConversationIds.set(toolId, newId);
       }
     }
+    for (const [turnId, conversationId] of this.turnConversationIds) {
+      if (conversationId === oldId) {
+        this.turnConversationIds.set(turnId, newId);
+      }
+    }
+    const currentTurnId = this.currentTurnIds.get(oldId);
+    if (currentTurnId) {
+      this.currentTurnIds.delete(oldId);
+      this.currentTurnIds.set(newId, currentTurnId);
+      this.turnConversationIds.set(currentTurnId, newId);
+    }
+    for (const [itemId, conversationId] of this.itemConversationIds) {
+      if (conversationId === oldId) {
+        this.itemConversationIds.set(itemId, newId);
+      }
+    }
     if (this.activeConversationId === oldId) {
       this.activeConversationId = newId;
     }
@@ -2760,11 +2970,84 @@ export class AgentWorkspaceProxy {
 
   private conversationIdFromParams(params: unknown): string | undefined {
     const raw = asRecord(params);
-    const agentSessionId = this.extractSessionId(raw);
-    if (agentSessionId) return this.conversationByAgentSessionId.get(agentSessionId);
+    if (!raw) return undefined;
+    const directConversationId = firstString(raw, ["conversationId"]);
+    if (directConversationId && this.conversations.has(directConversationId)) {
+      return directConversationId;
+    }
     const threadId = firstString(raw, ["threadId", "sessionId", "agentSessionId"]);
-    if (threadId) return this.conversationByAgentSessionId.get(threadId);
+    if (threadId) {
+      const conversationId = this.conversationByAgentSessionId.get(threadId);
+      if (conversationId) return conversationId;
+    }
+    const agentSessionId = this.extractSessionId(raw);
+    if (agentSessionId) {
+      const conversationId = this.conversationByAgentSessionId.get(agentSessionId);
+      if (conversationId) return conversationId;
+    }
+    const turnId = this.extractTurnId(raw) ?? firstString(raw, ["turnId"]);
+    if (turnId) {
+      const conversationId = this.turnConversationIds.get(turnId);
+      if (conversationId) return conversationId;
+    }
+    const itemId = firstString(raw, [
+      "itemId",
+      "messageId",
+      "toolCallId",
+      "processId",
+      "callId",
+      "requestId",
+      "permissionId",
+      "id",
+    ]);
+    if (itemId) {
+      const conversationId =
+        this.itemConversationIds.get(itemId) ??
+        this.toolConversationIds.get(itemId);
+      if (conversationId) return conversationId;
+    }
+    for (const nested of [raw.params, raw.item, raw.message, raw.toolCall, raw.command, raw.event]) {
+      const nestedRecord = asRecord(nested);
+      if (!nestedRecord || nestedRecord === raw) continue;
+      const conversationId = this.conversationIdFromParams(nestedRecord);
+      if (conversationId) return conversationId;
+    }
     return undefined;
+  }
+
+  private fallbackConversationId(): string | undefined {
+    const liveConversations = [...this.conversations.values()].filter((conversation) =>
+      conversation.status === "running" || conversation.status === "waiting_permission",
+    );
+    return liveConversations.length === 1 ? liveConversations[0]?.id : undefined;
+  }
+
+  private rememberTurnConversationId(conversationId: string, turnId: string): void {
+    this.currentTurnIds.set(conversationId, turnId);
+    this.turnConversationIds.set(turnId, conversationId);
+  }
+
+  private forgetCurrentTurn(conversationId: string, turnId?: string): void {
+    const currentTurnId = this.currentTurnIds.get(conversationId);
+    this.currentTurnIds.delete(conversationId);
+    if (turnId) this.turnConversationIds.delete(turnId);
+    if (currentTurnId && currentTurnId !== turnId) this.turnConversationIds.delete(currentTurnId);
+  }
+
+  private rememberItemConversationId(conversationId: string, item: AgentTimelineItem): void {
+    const keys = [
+      item.id,
+      item.itemId,
+      item.toolCall?.id,
+      item.permission?.requestId,
+      item.structuredInput?.requestId,
+    ].filter((key): key is string => Boolean(key));
+    for (const key of keys) {
+      this.itemConversationIds.set(key, conversationId);
+    }
+    if (item.turnId) {
+      this.turnConversationIds.set(item.turnId, conversationId);
+    }
   }
 
   private handleProviderExit(provider: AgentProvider, message: string): void {

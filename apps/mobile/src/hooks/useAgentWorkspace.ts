@@ -89,6 +89,12 @@ export interface AgentWorkspaceHandle {
     requestId: string,
     outcome: "allow" | "deny" | "cancelled",
     optionId?: string,
+  ) => boolean;
+  suppressPermissionRequest: (
+    conversationId: string,
+    requestId: string,
+    outcome?: "allow" | "deny" | "cancelled",
+    optionId?: string,
   ) => void;
   respondStructuredInput: (
     conversationId: string,
@@ -926,6 +932,43 @@ export function useAgentWorkspace(
         },
         { queue: true },
       );
+      if (accepted) {
+        const now = Date.now();
+        const optimisticItem: AgentTimelineItem = {
+          id: clientMessageId,
+          conversationId,
+          type: "message",
+          kind: "chat",
+          role: "user",
+          content: [{ type: "text", text: rawText }],
+          text: rawText,
+          metadata: {
+            optimistic: true,
+            commandId: command.id,
+            commandExecutionKind: command.executionKind,
+          },
+          createdAt: now,
+        };
+        setTimelineById((prev) => {
+          const next = new Map(prev);
+          next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [optimisticItem]));
+          return next;
+        });
+        upsertAgentTimelineItem(optimisticItem).catch(() => {});
+        const nextConversation: AgentConversationRecord = {
+          ...conversation,
+          status: command.executionKind === "prompt" ? "running" : conversation.status,
+          lastMessagePreview: previewFromItem(optimisticItem) ?? conversation.lastMessagePreview,
+          lastActivityAt: now,
+        };
+        setConversations((prev) => {
+          const next = prev.filter((item) => item.id !== conversationId);
+          next.unshift(nextConversation);
+          return next.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+        });
+        upsertAgentConversation(nextConversation).catch(() => {});
+        return;
+      }
       if (!accepted) {
         const failedItem: AgentTimelineItem = {
           id: `error:${clientMessageId}`,
@@ -1076,7 +1119,7 @@ export function useAgentWorkspace(
       optionId?: string,
     ) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-      if (!conversation) return;
+      if (!conversation) return false;
       const permissionItem = timelineRef.current
         .get(conversationId)
         ?.find((item) => item.type === "permission" && item.permission?.requestId === requestId);
@@ -1088,7 +1131,7 @@ export function useAgentWorkspace(
           permissionPending: false,
           permissionError: "授权未发送：设备连接已失效，请重新打开会话。",
         });
-        return;
+        return false;
       }
       let accepted = false;
       if (permissionItem?.metadata?.protocol === "terminal") {
@@ -1128,7 +1171,7 @@ export function useAgentWorkspace(
           permissionPending: false,
           permissionError: "授权未发送：连接未就绪，请稍后重试。",
         });
-        return;
+        return false;
       }
       updatePermissionMetadata(conversationId, requestId, {
         permissionPending: true,
@@ -1143,8 +1186,28 @@ export function useAgentWorkspace(
         status: "running",
         lastActivityAt: Date.now(),
       }).catch(() => {});
+      return true;
     },
     [manager, persistConversation, resolvePermissionSessionId, updatePermissionMetadata],
+  );
+
+  const suppressPermissionRequest = useCallback(
+    (
+      conversationId: string,
+      requestId: string,
+      outcome?: "allow" | "deny" | "cancelled",
+      optionId?: string,
+    ) => {
+      updatePermissionMetadata(conversationId, requestId, {
+        permissionPending: true,
+        permissionLive: false,
+        permissionExpired: false,
+        pendingOutcome: outcome,
+        optionId,
+        permissionError: undefined,
+      });
+    },
+    [updatePermissionMetadata],
   );
 
   const respondStructuredInput = useCallback(
@@ -1201,6 +1264,7 @@ export function useAgentWorkspace(
     updateConversationSettings,
     cancel,
     respondPermission,
+    suppressPermissionRequest,
     respondStructuredInput,
     archive,
     rename,
