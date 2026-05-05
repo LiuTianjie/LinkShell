@@ -134,6 +134,8 @@ function handleHostMessage(
     case "terminal.spawned":
     case "terminal.list":
     case "terminal.browse.result":
+      broadcastToClients(session, envelope);
+      break;
     // Structured status from hooks
     case "terminal.status":
       sessions.cacheStatus(session.id, envelope);
@@ -255,6 +257,7 @@ function handleClientMessage(
     case "agent.v2.prompt":
     case "agent.v2.cancel":
     case "agent.v2.permission.respond":
+    case "agent.v2.structured_input.respond":
     // Multi-terminal: client → host
     case "terminal.spawn":
     case "terminal.kill":

@@ -762,6 +762,7 @@ export class BridgeSession {
       case "agent.v2.prompt":
       case "agent.v2.cancel":
       case "agent.v2.permission.respond":
+      case "agent.v2.structured_input.respond":
       case "agent.v2.snapshot.request": {
         if (!this.agentWorkspace) {
           this.send(

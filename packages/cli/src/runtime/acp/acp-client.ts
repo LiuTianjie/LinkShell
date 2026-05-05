@@ -14,7 +14,7 @@ function normalizeMcpServers(value: unknown): unknown[] {
   });
 }
 
-function permissionProfileForMode(
+function permissionsForMode(
   mode: AgentPermissionMode | undefined,
   cwd: string,
 ): unknown | undefined {
@@ -60,7 +60,15 @@ export class AcpClient {
     this.transport.start(input.cwd);
   }
 
-  initialize(): Promise<unknown> {
+  async initialize(): Promise<unknown> {
+    if (this.protocol === "codex-app-server") {
+      const result = await this.transport.request("initialize", {
+        clientInfo: { name: "LinkShell", version: "0.1" },
+        capabilities: { experimentalApi: true },
+      });
+      this.transport.notify("initialized", {});
+      return result;
+    }
     return this.transport.request("initialize", {
       protocolVersion: 1,
       clientInfo: { name: "LinkShell", version: "0.1" },
@@ -106,6 +114,13 @@ export class AcpClient {
     return this.transport.request("session/list", {});
   }
 
+  listModels(): Promise<unknown> {
+    if (this.protocol === "codex-app-server") {
+      return this.transport.request("model/list", {});
+    }
+    return Promise.resolve(undefined);
+  }
+
   prompt(input: {
     sessionId: string;
     content: unknown[];
@@ -120,7 +135,7 @@ export class AcpClient {
         threadId: input.sessionId,
         model: input.model,
         effort: input.reasoningEffort,
-        permissionProfile: permissionProfileForMode(input.permissionMode, input.cwd),
+        permissions: permissionsForMode(input.permissionMode, input.cwd),
         input: input.content.map((block) => {
           const raw = block as { type?: string; text?: string; data?: string };
           if (raw.type === "image" && raw.data) {

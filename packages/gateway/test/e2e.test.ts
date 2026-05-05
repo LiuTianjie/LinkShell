@@ -4,6 +4,7 @@ import type { Server } from "node:http";
 import WebSocket from "ws";
 import { WebSocketServer } from "ws";
 import { createEnvelope, parseEnvelope, serializeEnvelope } from "@linkshell/protocol";
+import { parseTypedPayload as parseLocalTypedPayload } from "../../shared-protocol/src/index.js";
 import { SessionManager } from "../src/sessions.js";
 import { PairingManager } from "../src/pairings.js";
 import { handleSocketMessage } from "../src/relay.js";
@@ -194,6 +195,60 @@ describe("Health check", () => {
     const { status, body } = await getJson("/healthz");
     expect(status).toBe(200);
     expect(body.ok).toBe(true);
+  });
+});
+
+describe("Protocol schemas", () => {
+  it("keeps provider capability fields for agent v2", () => {
+    const payload = parseLocalTypedPayload("agent.v2.capabilities", {
+      enabled: true,
+      provider: "codex",
+      providers: [{
+        id: "codex",
+        label: "Codex",
+        enabled: true,
+        models: [{ id: "gpt-5.5", label: "GPT-5.5" }],
+        defaultModel: "gpt-5.5",
+        reasoningEfforts: ["none", "minimal", "high"],
+        permissionModes: ["read_only", "workspace_write"],
+        features: { permissions: true, reasoningEffort: true },
+      }],
+      supportsSessionList: true,
+      supportsSessionLoad: true,
+      supportsImages: true,
+      supportsAudio: false,
+      supportsPermission: true,
+      supportsPlan: true,
+      supportsCancel: true,
+    });
+    expect(payload.providers?.[0]?.models?.[0]?.id).toBe("gpt-5.5");
+    expect(payload.providers?.[0]?.defaultModel).toBe("gpt-5.5");
+    expect(payload.providers?.[0]?.reasoningEfforts).toContain("minimal");
+    expect(payload.providers?.[0]?.permissionModes).toContain("read_only");
+    expect(payload.providers?.[0]?.features?.permissions).toBe(true);
+  });
+
+  it("keeps structured agent v2 patch fields", () => {
+    const payload = parseLocalTypedPayload("agent.v2.event", {
+      conversationId: "conversation-1",
+      patch: {
+        itemId: "tool-1",
+        kind: "command_execution",
+        commandExecution: {
+          command: "pnpm typecheck",
+          status: "running",
+          output: "checking",
+        },
+        fileChange: {
+          entries: [{ path: "packages/shared-protocol/src/index.ts", kind: "modified" }],
+          status: "completed",
+        },
+        metadata: { inputPending: false },
+      },
+    });
+    expect(payload.patch?.commandExecution?.command).toBe("pnpm typecheck");
+    expect(payload.patch?.fileChange?.entries[0]?.path).toBe("packages/shared-protocol/src/index.ts");
+    expect(payload.patch?.metadata?.inputPending).toBe(false);
   });
 });
 
@@ -405,6 +460,80 @@ describe("Control ownership", () => {
     host.close();
     client1.close();
     client2.close();
+  });
+
+  it("routes structured input responses only from the controller", async () => {
+    const { body } = await postJson("/pairings", {});
+    const sessionId = body.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-agent-input");
+    await waitForMessage(host);
+
+    const client1 = await connectWs(sessionId, "client", "client-agent-input-a");
+    await waitForMessage(client1);
+
+    const client2 = await connectWs(sessionId, "client", "client-agent-input-b");
+    await waitForMessage(client2);
+
+    const response = createEnvelope({
+      type: "agent.v2.structured_input.respond",
+      sessionId,
+      payload: {
+        conversationId: "conversation-1",
+        requestId: "input-1",
+        answers: { question: ["answer"] },
+      },
+    });
+
+    client2.send(serializeEnvelope(response));
+    const error = await waitForMessage(client2);
+    expect(error.type).toBe("session.error");
+    expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
+
+    client1.send(serializeEnvelope(response));
+    const received = await waitForMessage(host);
+    expect(received.type).toBe("agent.v2.structured_input.respond");
+    expect((received.payload as Record<string, unknown>).requestId).toBe("input-1");
+
+    host.close();
+    client1.close();
+    client2.close();
+  });
+
+  it("does not store agent messages in terminal status replay", async () => {
+    const { body } = await postJson("/pairings", {});
+    const sessionId = body.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-agent-cache");
+    await waitForMessage(host);
+
+    const client = await connectWs(sessionId, "client", "client-agent-cache");
+    await waitForMessage(client);
+
+    host.send(serializeEnvelope(createEnvelope({
+      type: "agent.v2.capabilities",
+      sessionId,
+      payload: {
+        enabled: true,
+        provider: "codex",
+        providers: [],
+        workspaceProtocolVersion: 2,
+        supportsSessionList: true,
+        supportsSessionLoad: true,
+        supportsImages: false,
+        supportsAudio: false,
+        supportsPermission: true,
+        supportsPlan: true,
+        supportsCancel: true,
+      },
+    })));
+
+    const received = await waitForMessage(client);
+    expect(received.type).toBe("agent.v2.capabilities");
+    expect(sessionManager.getStatusReplay(sessionId)).toHaveLength(0);
+
+    host.close();
+    client.close();
   });
 });
 

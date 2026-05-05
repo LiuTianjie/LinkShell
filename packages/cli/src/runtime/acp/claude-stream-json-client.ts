@@ -44,6 +44,27 @@ function id(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Claude stream-json returns tool_result content as either a plain string or
+// an array of content-block objects. Extract the text regardless of shape.
+function extractToolResultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+          return part.text;
+        }
+        return "";
+      })
+      .join("");
+  }
+  if (content && typeof content === "object" && "text" in content && typeof (content as { text: unknown }).text === "string") {
+    return (content as { text: string }).text;
+  }
+  return String(content ?? "");
+}
+
 export class ClaudeStreamJsonClient {
   private child: ChildProcessWithoutNullStreams | undefined;
   private claudeSessionId: string | undefined;
@@ -114,8 +135,10 @@ export class ClaudeStreamJsonClient {
     if (this.claudeSessionId) {
       args.push("--resume", this.claudeSessionId);
     }
-    // Prevent autonomous multi-turn tool loops in headless mode
-    args.push("--max-turns", "1");
+    // Allow up to 10 turns so Claude can execute tools and continue responding.
+    // With bypassPermissions, tools auto-execute — a generous limit prevents
+    // infinite loops while still allowing complex multi-step workflows.
+    args.push("--max-turns", "10");
 
     if (input.model) {
       args.push("--model", input.model);
@@ -180,6 +203,10 @@ export class ClaudeStreamJsonClient {
       const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
       let currentToolId: string | undefined;
       let currentToolName: string | undefined;
+      let currentMessageId: string | undefined;
+      // Map tool_use_id → tool_name so tool_result can look up the correct name
+      // even when multiple tools are in flight
+      const toolNames = new Map<string, string>();
 
       rl.on("line", (line: string) => {
         if (this.pendingCancel) {
@@ -225,11 +252,15 @@ export class ClaudeStreamJsonClient {
             const message = event.message;
             if (!message) break;
             const content = (message.content ?? []) as ClaudeContentBlock[];
+            // Reset per-message tracking — each assistant message starts fresh
+            currentMessageId = undefined;
 
             for (const block of content) {
               switch (block.type) {
                 case "thinking":
-                  this.input.onNotification("item/started", {
+                  // Use item/completed since thinking blocks arrive complete (not streaming deltas)
+                  // item/started would leave isStreaming=true forever with no matching item/completed
+                  this.input.onNotification("item/completed", {
                     sessionId: this.claudeSessionId,
                     item: {
                       id: event.uuid ?? id("thinking"),
@@ -241,9 +272,10 @@ export class ClaudeStreamJsonClient {
                   break;
 
                 case "text":
+                  currentMessageId = (typeof message.id === "string" ? message.id : undefined) ?? event.uuid ?? id("msg");
                   this.input.onNotification("item/agentMessage/delta", {
                     sessionId: this.claudeSessionId,
-                    itemId: message.id ?? event.uuid ?? id("msg"),
+                    itemId: currentMessageId,
                     delta: block.text,
                   });
                   break;
@@ -251,6 +283,7 @@ export class ClaudeStreamJsonClient {
                 case "tool_use": {
                   currentToolId = block.id;
                   currentToolName = block.name ?? "tool";
+                  if (block.id) toolNames.set(block.id, block.name ?? "tool");
                   const toolName = block.name ?? "tool";
                   this.input.onNotification("item/started", {
                     sessionId: this.claudeSessionId,
@@ -273,6 +306,20 @@ export class ClaudeStreamJsonClient {
                   break;
               }
             }
+
+            // Mark this assistant message as complete — the full message has arrived.
+            // Each text block was streamed via item/agentMessage/delta; now we signal
+            // that streaming is done so the UI stops showing "正在生成".
+            if (currentMessageId) {
+              this.input.onNotification("item/completed", {
+                sessionId: this.claudeSessionId,
+                item: {
+                  id: currentMessageId,
+                  type: "agentMessage",
+                  status: "completed",
+                },
+              });
+            }
             break;
           }
 
@@ -285,17 +332,21 @@ export class ClaudeStreamJsonClient {
             for (const block of content) {
               if (block.type === "tool_result") {
                 const toolId = block.tool_use_id ?? currentToolId;
+                const toolName = (toolId ? toolNames.get(toolId) : undefined) ?? currentToolName;
                 const isError = block.is_error === true;
+                // Claude stream-json may return content as a plain string or as
+                // an array of content-block objects (e.g. [{type:"text", text:"..."}]).
+                const output = extractToolResultText(block.content);
                 this.input.onNotification("item/completed", {
                   sessionId: this.claudeSessionId,
                   item: {
                     id: toolId ?? id("tool"),
                     type: "toolCall",
-                    toolName: currentToolName,
-                    tool: currentToolName,
+                    toolName,
+                    tool: toolName,
                     status: isError ? "failed" : "completed",
-                    output: typeof block.content === "string" ? block.content : JSON.stringify(block.content),
-                    aggregatedOutput: typeof block.content === "string" ? block.content : undefined,
+                    output,
+                    aggregatedOutput: output,
                     isError,
                   },
                 });
@@ -305,6 +356,17 @@ export class ClaudeStreamJsonClient {
           }
 
           case "result": {
+            // Mark the last agent message as complete so isStreaming flips to false
+            if (currentMessageId) {
+              this.input.onNotification("item/completed", {
+                sessionId: this.claudeSessionId,
+                item: {
+                  id: currentMessageId,
+                  type: "agentMessage",
+                  status: "completed",
+                },
+              });
+            }
             // Turn complete
             const isError = event.subtype === "error" || event.is_error === true;
             this.input.onNotification("turn/completed", {

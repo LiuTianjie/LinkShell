@@ -366,19 +366,31 @@ export const agentPermissionSchema = z.object({
   })).default([]),
 });
 
+export const agentModelOptionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+});
+
+export const agentProviderCapabilitySchema = z.object({
+  id: agentProviderSchema,
+  label: z.string().min(1),
+  enabled: z.boolean(),
+  reason: z.string().optional(),
+  supportsImages: z.boolean().optional(),
+  supportsPermission: z.boolean().optional(),
+  supportsPlan: z.boolean().optional(),
+  supportsCancel: z.boolean().optional(),
+  models: z.array(agentModelOptionSchema).optional(),
+  defaultModel: z.string().min(1).optional(),
+  reasoningEfforts: z.array(agentReasoningEffortSchema).optional(),
+  permissionModes: z.array(agentPermissionModeSchema).optional(),
+  features: z.record(z.boolean()).optional(),
+});
+
 export const agentCapabilitiesPayloadSchema = z.object({
   enabled: z.boolean(),
   provider: agentProviderSchema.optional(),
-  providers: z.array(z.object({
-    id: agentProviderSchema,
-    label: z.string().min(1),
-    enabled: z.boolean(),
-    reason: z.string().optional(),
-    supportsImages: z.boolean().optional(),
-    supportsPermission: z.boolean().optional(),
-    supportsPlan: z.boolean().optional(),
-    supportsCancel: z.boolean().optional(),
-  })).optional(),
+  providers: z.array(agentProviderCapabilitySchema).optional(),
   protocolVersion: z.number().int().optional(),
   error: z.string().optional(),
   supportsSessionList: z.boolean().default(false),
@@ -663,9 +675,25 @@ export const agentV2EventPayloadSchema = z.object({
   item: agentV2TimelineItemSchema.optional(),
   patch: z.object({
     itemId: z.string().min(1),
+    kind: agentV2TimelineKindSchema.optional(),
+    role: z.enum(["user", "assistant", "system"]).optional(),
+    content: z.array(agentContentBlockSchema).optional(),
+    text: z.string().optional(),
     textDelta: z.string().optional(),
     status: agentV2StatusSchema.optional(),
     toolCall: agentToolCallSchema.optional(),
+    commandExecution: agentV2CommandExecutionSchema.optional(),
+    fileChange: agentV2FileChangeSchema.optional(),
+    subagent: agentV2SubagentActionSchema.optional(),
+    structuredInput: agentV2StructuredInputSchema.optional(),
+    plan: z.array(z.object({
+      id: z.string().min(1),
+      text: z.string().min(1),
+      status: z.enum(["pending", "in_progress", "completed"]),
+    })).optional(),
+    permission: agentPermissionSchema.optional(),
+    error: z.string().optional(),
+    metadata: z.record(z.unknown()).optional(),
     updatedAt: z.number().optional(),
     isStreaming: z.boolean().optional(),
   }).optional(),

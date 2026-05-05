@@ -5,6 +5,7 @@ import {
   type Envelope,
 } from "@linkshell/protocol";
 import { AcpClient } from "./acp-client.js";
+import { ClaudeSdkClient } from "./claude-sdk-client.js";
 import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
 import type { AgentProtocol, AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
@@ -172,6 +173,7 @@ interface PendingPermissionWaiter {
 interface PendingStructuredInputWaiter {
   resolve: (value: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
+  source?: string;
 }
 
 const PERMISSION_TIMEOUT_MS = 5 * 60_000;
@@ -392,9 +394,18 @@ function commandExecutionFromTool(toolCall: AgentToolCall): AgentCommandExecutio
   };
 }
 
-function fileChangeFromTool(toolCall: AgentToolCall): AgentFileChange | undefined {
-  const diff = toolCall.output && looksLikeDiff(toolCall.output) ? toolCall.output : undefined;
-  const entries: AgentFileChangeEntry[] = (toolCall.input ?? "")
+function fileChangeFromStructuredInput(input: string | undefined): AgentFileChangeEntry[] {
+  const raw = input?.trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      return fileChangeEntriesFromItem(parsed as Record<string, unknown>);
+    }
+  } catch {
+    // Fall through to line parser.
+  }
+  return raw
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
@@ -406,6 +417,11 @@ function fileChangeFromTool(toolCall: AgentToolCall): AgentFileChange | undefine
       return entry;
     })
     .filter((entry) => entry.path.length > 0);
+}
+
+function fileChangeFromTool(toolCall: AgentToolCall): AgentFileChange | undefined {
+  const diff = toolCall.output && looksLikeDiff(toolCall.output) ? toolCall.output : undefined;
+  const entries = fileChangeFromStructuredInput(toolCall.input);
   if (entries.length === 0 && !diff && !toolCall.output) return undefined;
   return {
     entries,
@@ -662,35 +678,119 @@ interface AgentModelOption {
   label: string;
 }
 
-function providerModels(provider: AgentProvider): AgentModelOption[] {
-  if (provider === "claude") {
-    return [
-      { id: "default", label: "默认模型" },
-      { id: "opus", label: "Opus 4.7" },
-      { id: "sonnet", label: "Sonnet 4.6" },
-      { id: "haiku", label: "Haiku 4.5" },
-    ];
+interface ProviderRuntimeCapabilities {
+  models?: AgentModelOption[];
+  defaultModel?: string;
+  reasoningEfforts?: string[];
+}
+
+const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
+const ALL_PERMISSION_MODES = ["read_only", "workspace_write", "full_access"] as const;
+
+function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities | undefined {
+  const raw = asRecord(value);
+  const modelsValue =
+    Array.isArray(value) ? value :
+    Array.isArray(raw?.models) ? raw.models :
+    Array.isArray(raw?.items) ? raw.items :
+    Array.isArray(raw?.modelOptions) ? raw.modelOptions :
+    [];
+  const models = modelsValue
+    .map((entry, index) => {
+      const model = asRecord(entry);
+      if (!model) {
+        return typeof entry === "string" && entry
+          ? { id: entry, label: entry }
+          : undefined;
+      }
+      const modelId = firstString(model, ["id", "model", "name", "value"]) ?? `model-${index + 1}`;
+      const label = firstString(model, ["label", "title", "displayName", "name"]) ?? modelId;
+      return { id: modelId, label };
+    })
+    .filter((entry): entry is AgentModelOption => Boolean(entry));
+  const defaultModel =
+    firstString(raw, ["defaultModel", "default_model", "currentModel"]) ??
+    firstString(asRecord(raw?.defaults), ["model"]);
+  const effortsValue =
+    Array.isArray(raw?.reasoningEfforts) ? raw.reasoningEfforts :
+    Array.isArray(raw?.reasoning_efforts) ? raw.reasoning_efforts :
+    Array.isArray(raw?.efforts) ? raw.efforts :
+    undefined;
+  const reasoningEfforts = effortsValue
+    ?.filter((entry): entry is string => typeof entry === "string" && ALL_REASONING_EFFORTS.includes(entry as typeof ALL_REASONING_EFFORTS[number]));
+  if (models.length === 0 && !defaultModel && !reasoningEfforts?.length) return undefined;
+  return {
+    ...(models.length > 0 ? { models: [{ id: "default", label: "默认模型" }, ...models] } : {}),
+    ...(defaultModel ? { defaultModel } : {}),
+    ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
+  };
+}
+
+function parseTimestamp(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 10_000_000_000 ? value : value * 1000;
   }
-  if (provider === "codex") {
-    return [
-      { id: "default", label: "默认模型" },
-      { id: "gpt-5.5", label: "GPT-5.5" },
-      { id: "gpt-5.4", label: "GPT-5.4" },
-      { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
-      { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
-    ];
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
   }
-  return [{ id: "default", label: "默认模型" }];
+  return undefined;
+}
+
+function parseRemoteSessions(value: unknown): Array<{
+  id: string;
+  cwd?: string;
+  title?: string;
+  model?: string;
+  createdAt?: number;
+  lastActivityAt?: number;
+}> {
+  const raw = asRecord(value);
+  const sessionsValue =
+    Array.isArray(value) ? value :
+    Array.isArray(raw?.threads) ? raw.threads :
+    Array.isArray(raw?.sessions) ? raw.sessions :
+    Array.isArray(raw?.items) ? raw.items :
+    [];
+  const result: Array<{
+    id: string;
+    cwd?: string;
+    title?: string;
+    model?: string;
+    createdAt?: number;
+    lastActivityAt?: number;
+  }> = [];
+  for (const entry of sessionsValue) {
+    const session = asRecord(entry);
+    if (!session) {
+      if (typeof entry === "string" && entry) result.push({ id: entry });
+      continue;
+    }
+    const nestedThread = asRecord(session.thread);
+    const source = nestedThread ?? session;
+    const id = firstString(source, ["id", "threadId", "sessionId", "agentSessionId"]);
+    if (!id) continue;
+    result.push({
+      id,
+      cwd: firstString(source, ["cwd", "workingDirectory", "workspacePath"]),
+      title: firstString(source, ["title", "name", "summary"]),
+      model: firstString(source, ["model", "modelId"]),
+      createdAt: parseTimestamp(source.createdAt ?? source.created_at),
+      lastActivityAt: parseTimestamp(source.lastActivityAt ?? source.updatedAt ?? source.modifiedAt ?? source.lastModified ?? source.updated_at),
+    });
+  }
+  return result;
 }
 
 export class AgentWorkspaceProxy {
-  private clients = new Map<AgentProvider, AcpClient | ClaudeStreamJsonClient>();
+  private clients = new Map<AgentProvider, AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient>();
   private agentProtocols = new Map<AgentProvider, AgentProtocol>();
+  private providerCapabilities = new Map<AgentProvider, ProviderRuntimeCapabilities>();
   private initialized = false;
   private status: AgentStatus = "unavailable";
   private error: string | undefined;
   private activeConversationId: string | undefined;
-  private currentTurnId: string | undefined;
+  private currentTurnIds = new Map<string, string>();
   private conversations = new Map<string, AgentConversation>();
   private conversationByAgentSessionId = new Map<string, string>();
   private timelines = new Map<string, AgentTimelineItem[]>();
@@ -726,6 +826,7 @@ export class AgentWorkspaceProxy {
       }
       case "agent.v2.conversation.list": {
         const payload = parseTypedPayload("agent.v2.conversation.list", envelope.payload);
+        await this.syncProviderSessions();
         const conversations = [...this.conversations.values()].filter((conversation) =>
           payload.includeArchived ? true : !conversation.archived,
         );
@@ -753,9 +854,9 @@ export class AgentWorkspaceProxy {
         const cancelClient = conversation ? this.clientForProvider(conversation.provider) : undefined;
         cancelClient?.cancel({
           sessionId: conversation?.agentSessionId,
-          turnId: this.currentTurnId,
+          turnId: this.currentTurnIds.get(payload.conversationId),
         });
-        this.currentTurnId = undefined;
+        this.currentTurnIds.delete(payload.conversationId);
         this.updateConversationStatus(payload.conversationId, "idle");
         this.emitStatus(payload.conversationId, "idle", "已停止");
         break;
@@ -780,7 +881,7 @@ export class AgentWorkspaceProxy {
     this.clients.clear();
   }
 
-  private clientForProvider(provider: AgentProvider): AcpClient | ClaudeStreamJsonClient | undefined {
+  private clientForProvider(provider: AgentProvider): AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined {
     return this.clients.get(provider);
   }
 
@@ -799,7 +900,7 @@ export class AgentWorkspaceProxy {
     this.sendCapabilities();
   }
 
-  private async ensureProviderClient(provider: AgentProvider): Promise<AcpClient | ClaudeStreamJsonClient | undefined> {
+  private async ensureProviderClient(provider: AgentProvider): Promise<AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined> {
     const existing = this.clients.get(provider);
     if (existing) return existing;
 
@@ -814,35 +915,76 @@ export class AgentWorkspaceProxy {
       return undefined;
     }
 
-    try {
-      this.agentProtocols.set(provider, resolved.protocol);
-      const isClaudeStreamJson = resolved.protocol === "claude-stream-json";
-      const client = isClaudeStreamJson
+    const tryCreateClient = async (config: typeof resolved): Promise<AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient> => {
+      this.agentProtocols.set(provider, config.protocol);
+      const isClaudeSdk = config.protocol === "claude-agent-sdk";
+      const isClaudeStreamJson = config.protocol === "claude-stream-json";
+      const client = isClaudeSdk
+        ? new ClaudeSdkClient({
+            command: config.command,
+            protocol: config.protocol,
+            framing: config.framing,
+            cwd: this.input.cwd,
+            onNotification: (method, params) => this.handleNotification(method, params),
+            onRequest: (method, params) => this.handleRequest(method, params),
+            onExit: (message) => this.handleProviderExit(provider, message),
+          })
+        : isClaudeStreamJson
         ? new ClaudeStreamJsonClient({
-            command: resolved.command,
-            protocol: resolved.protocol,
-            framing: resolved.framing,
+            command: config.command,
+            protocol: config.protocol,
+            framing: config.framing,
             cwd: this.input.cwd,
             onNotification: (method, params) => this.handleNotification(method, params),
             onRequest: (method, params) => this.handleRequest(method, params),
             onExit: (message) => this.handleProviderExit(provider, message),
           })
         : new AcpClient({
-            command: resolved.command,
-            protocol: resolved.protocol,
-            framing: resolved.framing,
+            command: config.command,
+            protocol: config.protocol,
+            framing: config.framing,
             cwd: this.input.cwd,
             onNotification: (method, params) => this.handleNotification(method, params),
             onRequest: (method, params) => this.handleRequest(method, params),
             onExit: (message) => this.handleProviderExit(provider, message),
-          });
+      });
       await client.initialize();
+      return client;
+    };
+
+    try {
+      const client = await tryCreateClient(resolved);
       this.clients.set(provider, client);
+      await this.refreshProviderCapabilities(provider, client, resolved.protocol);
       this.status = "idle";
       this.error = undefined;
       this.sendCapabilities();
       return client;
     } catch (error) {
+      if (provider === "claude" && resolved.protocol === "claude-agent-sdk") {
+        if (this.input.verbose) {
+          process.stderr.write(`[agent:v2] Claude SDK failed, falling back to stream-json: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+        try {
+          const fallback = {
+            provider,
+            command: "claude --print --output-format stream-json --input-format stream-json --verbose --permission-mode bypassPermissions",
+            protocol: "claude-stream-json" as const,
+            framing: "newline" as const,
+          };
+          const client = await tryCreateClient(fallback);
+          this.clients.set(provider, client);
+          await this.refreshProviderCapabilities(provider, client, fallback.protocol);
+          this.status = "idle";
+          this.error = undefined;
+          this.sendCapabilities();
+          return client;
+        } catch (fallbackError) {
+          if (this.input.verbose) {
+            process.stderr.write(`[agent:v2] Claude stream-json fallback failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}\n`);
+          }
+        }
+      }
       if (this.input.verbose) {
         process.stderr.write(`[agent:v2] failed to start ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
       }
@@ -850,25 +992,99 @@ export class AgentWorkspaceProxy {
     }
   }
 
+  private async refreshProviderCapabilities(
+    provider: AgentProvider,
+    client: AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient,
+    protocol: AgentProtocol,
+  ): Promise<void> {
+    if (!(client instanceof AcpClient) || protocol !== "codex-app-server") return;
+    try {
+      const result = await client.listModels();
+      const runtimeCapabilities = parseModelListCapabilities(result);
+      if (runtimeCapabilities) this.providerCapabilities.set(provider, runtimeCapabilities);
+    } catch (error) {
+      if (this.input.verbose) {
+        process.stderr.write(`[agent:v2] model/list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    }
+  }
+
+  private async syncProviderSessions(): Promise<void> {
+    await this.initialize();
+    for (const [provider, client] of this.clients) {
+      try {
+        const result = await client.listSessions();
+        for (const remote of parseRemoteSessions(result)) {
+          const agentSessionId = remote.id;
+          const existingId = this.conversationByAgentSessionId.get(agentSessionId);
+          const now = Date.now();
+          const conversationId = existingId ?? `agent:${agentSessionId}`;
+          const existing = this.conversations.get(conversationId);
+          const cwd = remote.cwd ?? existing?.cwd ?? this.input.cwd;
+          const conversation: AgentConversation = {
+            id: conversationId,
+            agentSessionId,
+            provider,
+            cwd,
+            title: remote.title ?? existing?.title ?? titleFromCwd(cwd),
+            model: remote.model ?? existing?.model,
+            reasoningEffort: existing?.reasoningEffort,
+            permissionMode: existing?.permissionMode,
+            status: existing?.status ?? "idle",
+            archived: existing?.archived ?? false,
+            lastMessagePreview: existing?.lastMessagePreview,
+            lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
+            createdAt: remote.createdAt ?? existing?.createdAt ?? now,
+          };
+          this.conversations.set(conversation.id, conversation);
+          this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
+          this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
+        }
+      } catch (error) {
+        if (this.input.verbose) {
+          process.stderr.write(`[agent:v2] session list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      }
+    }
+  }
+
   private sendCapabilities(): void {
     const providers = this.input.availableProviders.map((provider) => {
       const client = this.clients.get(provider);
       const protocol = this.agentProtocols.get(provider);
+      const runtimeCapabilities = this.providerCapabilities.get(provider);
       const enabled = Boolean(client);
       const supportsImages = enabled && protocol === "codex-app-server";
+      const isClaudeFallback = protocol === "claude-stream-json";
+      const supportsPermission = enabled && !isClaudeFallback;
+      const supportsReasoningEffort = enabled && !isClaudeFallback;
       return {
         id: provider,
         label: providerLabel(provider),
         enabled,
         reason: enabled ? undefined : `${providerLabel(provider)} 未安装或启动失败`,
         supportsImages,
-        supportsPermission: enabled,
+        supportsPermission,
         supportsPlan: enabled,
         supportsCancel: enabled,
-        models: providerModels(provider),
+        models: runtimeCapabilities?.models ?? [{ id: "default", label: "默认模型" }],
+        defaultModel: runtimeCapabilities?.defaultModel ?? "default",
+        reasoningEfforts: supportsReasoningEffort
+          ? runtimeCapabilities?.reasoningEfforts ?? [...ALL_REASONING_EFFORTS]
+          : [],
+        permissionModes: supportsPermission ? [...ALL_PERMISSION_MODES] : [],
+        features: {
+          images: supportsImages,
+          permissions: supportsPermission,
+          plan: enabled,
+          cancel: enabled,
+          reasoningEffort: supportsReasoningEffort,
+          streamJsonFallback: isClaudeFallback,
+        },
       };
     });
     const anyEnabled = providers.some((p) => p.enabled);
+    const anyPermission = providers.some((p) => p.supportsPermission);
     this.input.send(createEnvelope({
       type: "agent.v2.capabilities",
       sessionId: this.input.sessionId,
@@ -883,7 +1099,7 @@ export class AgentWorkspaceProxy {
         supportsSessionLoad: anyEnabled,
         supportsImages: providers.some((p) => p.supportsImages),
         supportsAudio: false,
-        supportsPermission: anyEnabled,
+        supportsPermission: anyPermission,
         supportsPlan: anyEnabled,
         supportsCancel: anyEnabled,
       },
@@ -1085,8 +1301,15 @@ export class AgentWorkspaceProxy {
         permissionMode: payload.permissionMode,
         cwd: conversation.cwd,
       });
-      this.currentTurnId = this.extractTurnId(result) ?? this.currentTurnId;
-      if (conversation.status === "running") {
+      const nextAgentSessionId = this.extractSessionId(result);
+      if (nextAgentSessionId && nextAgentSessionId !== conversation.agentSessionId) {
+        if (conversation.agentSessionId) this.conversationByAgentSessionId.delete(conversation.agentSessionId);
+        conversation.agentSessionId = nextAgentSessionId;
+        this.conversationByAgentSessionId.set(nextAgentSessionId, conversation.id);
+      }
+      const turnId = this.extractTurnId(result);
+      if (turnId) this.currentTurnIds.set(conversation.id, turnId);
+      if (conversation.status === "running" && protocol !== "codex-app-server") {
         this.updateConversationStatus(conversation.id, "idle");
       }
     } catch (error) {
@@ -1105,6 +1328,9 @@ export class AgentWorkspaceProxy {
   private handleRequest(method: string, params: unknown): Promise<unknown> | unknown {
     if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") {
       return this.handleStructuredInput(params, true);
+    }
+    if (method === "mcpServer/elicitation/request") {
+      return this.handleStructuredInput({ ...(asRecord(params) ?? {}), source: method }, true);
     }
     if (isPermissionRequestMethod(method)) {
       return this.handlePermission(params, true, method);
@@ -1136,6 +1362,10 @@ export class AgentWorkspaceProxy {
       this.handleStructuredInput(params);
       return;
     }
+    if (method === "mcpServer/elicitation/request") {
+      this.handleStructuredInput({ ...(asRecord(params) ?? {}), source: method });
+      return;
+    }
     if (isPermissionRequestMethod(method)) {
       this.handlePermission(params, false, method);
       return;
@@ -1150,13 +1380,18 @@ export class AgentWorkspaceProxy {
       return;
     }
     if (method === "turn/started") {
-      this.currentTurnId = this.extractTurnId(params) ?? this.currentTurnId;
-      if (conversationId) this.updateConversationStatus(conversationId, "running");
+      if (conversationId) {
+        const turnId = this.extractTurnId(params);
+        if (turnId) this.currentTurnIds.set(conversationId, turnId);
+        this.updateConversationStatus(conversationId, "running");
+      }
       return;
     }
     if (method === "turn/completed") {
-      this.currentTurnId = undefined;
-      if (conversationId) this.updateConversationStatus(conversationId, "idle");
+      if (conversationId) {
+        this.currentTurnIds.delete(conversationId);
+        this.updateConversationStatus(conversationId, "idle");
+      }
       return;
     }
     if (method === "session/request_permission") {
@@ -1195,7 +1430,11 @@ export class AgentWorkspaceProxy {
         this.handleCommandExecDelta(params);
         return;
       case "item/autoApprovalReview/started":
+        this.handleAutoApprovalReview(params, true);
+        return;
       case "item/autoApprovalReview/completed":
+        this.handleAutoApprovalReview(params, false);
+        return;
       case "item/commandExecution/terminalInteraction":
         return;
     }
@@ -1427,6 +1666,37 @@ export class AgentWorkspaceProxy {
     });
   }
 
+  private handleAutoApprovalReview(params: unknown, streaming: boolean): void {
+    const raw = asRecord(params) ?? {};
+    const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
+    if (!conversationId) return;
+    const itemId = firstString(raw, ["itemId", "id", "reviewId"]) ?? "auto-approval-review";
+    const existing = this.findItem(conversationId, itemId);
+    const decision = firstString(raw, ["decision", "result", "outcome", "status"]);
+    const summary =
+      firstString(raw, ["summary", "message", "text", "reason"]) ??
+      stringifyDefined(raw.review ?? raw.details);
+    this.upsertItem(conversationId, {
+      id: itemId,
+      conversationId,
+      type: "status",
+      kind: "review",
+      role: "system",
+      turnId: this.extractTurnId(raw) ?? this.currentTurnIds.get(conversationId),
+      itemId,
+      text: summary ?? (streaming ? "正在审查自动授权" : decision ? `自动授权审查：${decision}` : "已完成自动授权审查"),
+      metadata: {
+        ...(existing?.metadata ?? {}),
+        autoApprovalReview: true,
+        ...(decision ? { decision } : {}),
+      },
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+      isStreaming: streaming,
+    });
+    this.updateConversationPreview(conversationId, streaming ? "正在审查自动授权" : "已完成自动授权审查", streaming ? "running" : undefined);
+  }
+
   private handleCompletedMessageItem(item: Record<string, unknown>, streaming: boolean): void {
     const conversationId = this.conversationIdFromParams(item) ?? this.activeConversationId;
     if (!conversationId) return;
@@ -1501,7 +1771,7 @@ export class AgentWorkspaceProxy {
       conversationId,
       type: "status" as const,
       role: "system" as const,
-      turnId: this.extractTurnId(item) ?? this.currentTurnId,
+      turnId: this.extractTurnId(item) ?? this.currentTurnIds.get(conversationId),
       itemId,
       createdAt: existing?.createdAt ?? Date.now(),
       updatedAt: Date.now(),
@@ -1559,7 +1829,7 @@ export class AgentWorkspaceProxy {
       type: "status",
       kind: "subagent_action",
       role: "system",
-      turnId: this.extractTurnId(item) ?? this.currentTurnId,
+      turnId: this.extractTurnId(item) ?? this.currentTurnIds.get(conversationId),
       itemId,
       text,
       subagent,
@@ -1573,9 +1843,13 @@ export class AgentWorkspaceProxy {
   private handleStructuredInput(params: unknown, waitForResponse = false): Promise<unknown> | void {
     const raw = asRecord(params) ?? {};
     const conversationId = this.conversationIdFromParams(raw) ?? this.activeConversationId;
-    if (!conversationId) return waitForResponse ? Promise.resolve(formatStructuredInputResponse({})) : undefined;
+    const source = firstString(raw, ["method", "source", "requestMethod"]);
+    const formatResponse = source === "mcpServer/elicitation/request"
+      ? formatMcpElicitationResponse
+      : formatStructuredInputResponse;
+    if (!conversationId) return waitForResponse ? Promise.resolve(formatResponse({})) : undefined;
     const structuredInput = decodeStructuredInput(raw);
-    if (!structuredInput) return waitForResponse ? Promise.resolve(formatStructuredInputResponse({})) : undefined;
+    if (!structuredInput) return waitForResponse ? Promise.resolve(formatResponse({})) : undefined;
     const text = structuredInput.questions.map((question) => question.question).join("\n");
     this.pendingStructuredInputs.set(structuredInput.requestId, { conversationId, input: structuredInput });
     this.upsertItem(conversationId, {
@@ -1596,13 +1870,13 @@ export class AgentWorkspaceProxy {
       const timer = setTimeout(() => {
         this.pendingStructuredInputs.delete(structuredInput.requestId);
         this.structuredInputWaiters.delete(structuredInput.requestId);
-        resolve(formatStructuredInputResponse({}));
+        resolve(formatResponse({}));
         this.markStructuredInput(conversationId, structuredInput.requestId, {
           inputPending: false,
           inputError: "等待用户输入超时",
         });
       }, PERMISSION_TIMEOUT_MS);
-      this.structuredInputWaiters.set(structuredInput.requestId, { resolve, timer });
+      this.structuredInputWaiters.set(structuredInput.requestId, { resolve, timer, source });
     });
   }
 
@@ -1711,6 +1985,12 @@ export class AgentWorkspaceProxy {
         optionId: selectedOptionId,
       });
     }
+    this.markPermission(payload.conversationId, payload.requestId, {
+      permissionOutcome: payload.outcome,
+      optionId: selectedOptionId,
+      permissionError: undefined,
+      permissionPending: false,
+    });
     this.updateConversationStatus(payload.conversationId, "running");
   }
 
@@ -1725,14 +2005,33 @@ export class AgentWorkspaceProxy {
     if (waiter) {
       clearTimeout(waiter.timer);
       this.structuredInputWaiters.delete(payload.requestId);
-      waiter.resolve(formatStructuredInputResponse(payload.answers));
+      const formatResponse = waiter.source === "mcpServer/elicitation/request"
+        ? formatMcpElicitationResponse
+        : formatStructuredInputResponse;
+      waiter.resolve(formatResponse(payload.answers));
     }
     this.markStructuredInput(payload.conversationId, payload.requestId, {
       inputPending: false,
       inputSubmitted: true,
+      inputSubmitting: false,
+      inputError: undefined,
       answers: payload.answers,
     });
     this.updateConversationStatus(pending?.conversationId ?? payload.conversationId, "running");
+  }
+
+  private markPermission(
+    conversationId: string,
+    requestId: string,
+    metadata: Record<string, unknown>,
+  ): void {
+    const item = this.findItem(conversationId, `permission:${requestId}`);
+    if (!item) return;
+    this.upsertItem(conversationId, {
+      ...item,
+      metadata: { ...(item.metadata ?? {}), ...metadata },
+      updatedAt: Date.now(),
+    });
   }
 
   private markStructuredInput(
@@ -2090,7 +2389,8 @@ function isPermissionRequestMethod(method: string): boolean {
   return (
     method === "session/request_permission" ||
     method.endsWith("/requestApproval") ||
-    method === "mcpServer/elicitation/request"
+    method === "mcpServer/elicitation/request" ||
+    method === "claude/requestApproval"
   );
 }
 
@@ -2102,6 +2402,20 @@ function formatStructuredInputResponse(answers: Record<string, string[]>): unkno
         { answers: values.map((value) => value.trim()).filter(Boolean) },
       ]),
     ),
+  };
+}
+
+function formatMcpElicitationResponse(answers: Record<string, string[]>): unknown {
+  const content = Object.fromEntries(
+    Object.entries(answers).map(([questionId, values]) => [
+      questionId,
+      values.length <= 1 ? values[0] ?? "" : values,
+    ]),
+  );
+  return {
+    action: Object.keys(content).length > 0 ? "accept" : "cancel",
+    content,
+    _meta: { source: "linkshell" },
   };
 }
 
@@ -2121,6 +2435,14 @@ function formatPermissionResponse(
       };
     }
     return { permissions: { type: "managed", network: { enabled: false }, fileSystem: { type: "readOnly" } } };
+  }
+  if (source === "claude/requestApproval") {
+    return { behavior: outcome === "allow" ? "allow" : "deny" };
+  }
+  if (source === "mcpServer/elicitation/request") {
+    return outcome === "allow"
+      ? { action: "accept", content: { optionId }, _meta: { source: "linkshell" } }
+      : { action: outcome === "cancelled" ? "cancel" : "decline", content: {}, _meta: { source: "linkshell" } };
   }
   return {
     outcome:

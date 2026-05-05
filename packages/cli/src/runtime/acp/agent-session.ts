@@ -4,8 +4,9 @@ import {
   type Envelope,
 } from "@linkshell/protocol";
 import { AcpClient } from "./acp-client.js";
+import { ClaudeSdkClient } from "./claude-sdk-client.js";
 import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
-import type { AgentProvider } from "./provider-resolver.js";
+import type { AgentProtocol, AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
 
 type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
@@ -235,8 +236,9 @@ function summarizeFileChanges(changes: unknown[]): string | undefined {
 }
 
 export class AgentSessionProxy {
-  private client: AcpClient | ClaudeStreamJsonClient | undefined;
+  private client: AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined;
   private activeProvider: AgentProvider | undefined;
+  private activeProtocol: AgentProtocol | undefined;
   private agentSessionId: string | undefined;
   private status: AgentStatus = "unavailable";
   private error: string | undefined;
@@ -362,37 +364,83 @@ export class AgentSessionProxy {
       });
       if (!resolved) continue;
 
-      try {
-        const isClaudeStreamJson = resolved.protocol === "claude-stream-json";
-        this.client = isClaudeStreamJson
+      const tryCreateClient = async (config: typeof resolved): Promise<AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient> => {
+        const isClaudeSdk = config.protocol === "claude-agent-sdk";
+        const isClaudeStreamJson = config.protocol === "claude-stream-json";
+        const client = isClaudeSdk
+          ? new ClaudeSdkClient({
+              command: config.command,
+              protocol: config.protocol,
+              framing: config.framing,
+              cwd: this.input.cwd,
+              onNotification: (method, params) => this.handleNotification(method, params),
+              onRequest: (method, params) => this.handleRequest(method, params),
+              onExit: (message) => this.handleExit(message),
+            })
+          : isClaudeStreamJson
           ? new ClaudeStreamJsonClient({
-              command: resolved.command,
-              protocol: resolved.protocol,
-              framing: resolved.framing,
+              command: config.command,
+              protocol: config.protocol,
+              framing: config.framing,
               cwd: this.input.cwd,
               onNotification: (method, params) => this.handleNotification(method, params),
               onRequest: (method, params) => this.handleRequest(method, params),
               onExit: (message) => this.handleExit(message),
             })
           : new AcpClient({
-              command: resolved.command,
-              protocol: resolved.protocol,
-              framing: resolved.framing,
+              command: config.command,
+              protocol: config.protocol,
+              framing: config.framing,
               cwd: this.input.cwd,
               onNotification: (method, params) => this.handleNotification(method, params),
               onRequest: (method, params) => this.handleRequest(method, params),
               onExit: (message) => this.handleExit(message),
             });
-        await this.client.initialize();
+        await client.initialize();
+        return client;
+      };
+
+      try {
+        this.client = await tryCreateClient(resolved);
         this.activeProvider = provider;
+        this.activeProtocol = resolved.protocol;
         this.initialized = true;
         this.status = "idle";
         this.error = undefined;
         this.sendCapabilities();
         return;
       } catch (error) {
+        if (provider === "claude" && resolved.protocol === "claude-agent-sdk") {
+          if (this.input.verbose) {
+            process.stderr.write(`[agent] Claude SDK failed, falling back to stream-json: ${error instanceof Error ? error.message : String(error)}\n`);
+          }
+          try {
+            const fallback = {
+              provider,
+              command: "claude --print --output-format stream-json --input-format stream-json --verbose --permission-mode bypassPermissions",
+              protocol: "claude-stream-json" as const,
+              framing: "newline" as const,
+            };
+            this.client = await tryCreateClient(fallback);
+            this.activeProvider = provider;
+            this.activeProtocol = fallback.protocol;
+            this.initialized = true;
+            this.status = "idle";
+            this.error = undefined;
+            this.sendCapabilities();
+            return;
+          } catch (fallbackError) {
+            this.client?.stop();
+            this.client = undefined;
+            this.activeProtocol = undefined;
+            if (this.input.verbose) {
+              process.stderr.write(`[agent] Claude stream-json fallback failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}\n`);
+            }
+          }
+        }
         this.client?.stop();
         this.client = undefined;
+        this.activeProtocol = undefined;
         if (this.input.verbose) {
           process.stderr.write(`[agent] failed to start ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
         }
@@ -923,6 +971,7 @@ export class AgentSessionProxy {
     this.status = "error";
     this.error = message;
     this.client = undefined;
+    this.activeProtocol = undefined;
     this.sendUpdate({ kind: "error", error: message, status: "error" });
   }
 
@@ -972,6 +1021,7 @@ export class AgentSessionProxy {
   private sendCapabilities(): void {
     const enabled = Boolean(this.client && this.initialized && !this.error);
     const activeProvider = this.activeProvider ?? this.input.availableProviders[0];
+    const supportsPermission = enabled && this.activeProtocol !== "claude-stream-json";
     this.input.send(createEnvelope({
       type: "agent.capabilities",
       sessionId: this.input.sessionId,
@@ -984,7 +1034,7 @@ export class AgentSessionProxy {
         supportsSessionLoad: enabled,
         supportsImages: false,
         supportsAudio: false,
-        supportsPermission: enabled,
+        supportsPermission,
         supportsPlan: enabled,
         supportsCancel: enabled,
       },
@@ -1090,7 +1140,8 @@ function isPermissionRequestMethod(method: string): boolean {
     method === "session/request_permission" ||
     method.endsWith("/requestApproval") ||
     method === "mcpServer/elicitation/request" ||
-    method === "item/tool/requestUserInput"
+    method === "item/tool/requestUserInput" ||
+    method === "claude/requestApproval"
   );
 }
 
@@ -1110,6 +1161,9 @@ function formatPermissionResponse(
       };
     }
     return { permissions: { type: "managed", network: { enabled: false }, fileSystem: { type: "readOnly" } } };
+  }
+  if (source === "claude/requestApproval") {
+    return { behavior: outcome === "allow" ? "allow" : "deny" };
   }
   return {
     outcome:

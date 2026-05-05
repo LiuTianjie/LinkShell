@@ -1,10 +1,13 @@
 import { execSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 
 export type AgentProvider = "codex" | "claude" | "custom";
-export type AgentProtocol = "acp" | "codex-app-server" | "claude-stream-json";
+export type AgentProtocol = "acp" | "codex-app-server" | "claude-agent-sdk" | "claude-stream-json";
 export type AgentFraming = "content-length" | "newline";
+
+const require = createRequire(import.meta.url);
 
 export interface AgentCommandConfig {
   command: string;
@@ -20,11 +23,12 @@ export function resolveAgentCommand(input: {
   const explicit = input.command?.trim();
   if (explicit) {
     const isCodexAppServer = /\bcodex\b/.test(explicit) && /\bapp-server\b/.test(explicit);
+    const isClaudeCli = input.provider === "claude" && /\bclaude\b/.test(explicit);
     return {
       provider: input.provider,
       command: explicit,
-      protocol: isCodexAppServer ? "codex-app-server" : "acp",
-      framing: isCodexAppServer ? "newline" : "content-length",
+      protocol: isCodexAppServer ? "codex-app-server" : isClaudeCli ? "claude-stream-json" : "acp",
+      framing: isCodexAppServer || isClaudeCli ? "newline" : "content-length",
     };
   }
 
@@ -38,6 +42,14 @@ export function resolveAgentCommand(input: {
   }
 
   if (input.provider === "claude") {
+    if (process.env.LINKSHELL_CLAUDE_PROVIDER !== "stream-json" && hasPackage("@anthropic-ai/claude-agent-sdk")) {
+      return {
+        provider: "claude",
+        command: "claude-agent-sdk",
+        protocol: "claude-agent-sdk",
+        framing: "newline",
+      };
+    }
     return {
       provider: "claude",
       command: "claude --print --output-format stream-json --input-format stream-json --verbose --permission-mode bypassPermissions",
@@ -48,6 +60,15 @@ export function resolveAgentCommand(input: {
 
   // custom: caller must provide --agent-command
   return null;
+}
+
+function hasPackage(name: string): boolean {
+  try {
+    require.resolve(name);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function resolveBinary(bin: string): string | null {
