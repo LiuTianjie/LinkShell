@@ -143,11 +143,13 @@ class LiveActivityModule: NSObject {
                        resolver resolve: @escaping RCTPromiseResolveBlock,
                        rejecter reject: @escaping RCTPromiseRejectBlock) {
         guard var ext = LiveActivityStore.readExtendedData() else {
+            NSLog("[LiveActivityAction] liveActivity confirm no extended data requestId=%@", requestId)
             resolve(false)
             return
         }
 
         if ext.permissionRequestId == requestId {
+            NSLog("[LiveActivityAction] liveActivity confirm matched requestId=%@", requestId)
             ext.permissionTitle = ""
             ext.currentToolName = ""
             ext.currentToolInput = ""
@@ -168,6 +170,7 @@ class LiveActivityModule: NSObject {
                 resolve(true)
             }
         } else {
+            NSLog("[LiveActivityAction] liveActivity confirm mismatch requestId=%@ current=%@", requestId, ext.permissionRequestId)
             resolve(false)
         }
     }

@@ -2187,15 +2187,26 @@ export function AgentConversationScreen({
     }
   }, []);
 
+  const forceTimelineToBottom = useCallback((animated = true) => {
+    const ref = timelineRef.current;
+    if (!ref) return;
+    const nativeScrollRef = ref.getNativeScrollRef() as { scrollToEnd?: (options?: { animated?: boolean }) => void } | null;
+    ref.scrollToEnd({ animated, viewOffset: 0 });
+    nativeScrollRef?.scrollToEnd?.({ animated });
+    ref.scrollToOffset({ offset: Number.MAX_SAFE_INTEGER, animated });
+  }, []);
+
   const scrollTimelineToBottom = useCallback((animated = true, stick = true) => {
     if (stick) {
-      timelineNearBottomRef.current = true;
-      setIsTimelineNearBottom(true);
       setHasNewOutput(false);
     }
 
-    requestAnimationFrame(() => timelineRef.current?.scrollToEnd({ animated }));
-  }, []);
+    const scroll = () => forceTimelineToBottom(animated);
+    requestAnimationFrame(scroll);
+    requestAnimationFrame(() => requestAnimationFrame(scroll));
+    setTimeout(scroll, 80);
+    setTimeout(scroll, 220);
+  }, [forceTimelineToBottom]);
 
   const renderTimelineItem = useCallback(({ item, index }: LegendListRenderItemProps<AgentTimelineItem>) => {
     const previous = visibleTimeline[index - 1];
@@ -2251,7 +2262,8 @@ export function AgentConversationScreen({
       return;
     }
     setHasNewOutput(false);
-  }, [timelineAutoScrollKey, visibleTimeline.length]);
+    forceTimelineToBottom(false);
+  }, [forceTimelineToBottom, timelineAutoScrollKey, visibleTimeline.length]);
 
   const send = useCallback(() => {
     const value = text.trim();
@@ -2612,10 +2624,18 @@ export function AgentConversationScreen({
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
           onScroll={handleTimelineScroll}
+          onContentSizeChange={() => {
+            if (timelineNearBottomRef.current) forceTimelineToBottom(false);
+          }}
+          onLayout={() => {
+            if (timelineNearBottomRef.current) forceTimelineToBottom(false);
+          }}
           scrollEventThrottle={16}
           estimatedItemSize={96}
           drawDistance={420}
           alignItemsAtEnd
+          maintainScrollAtEnd={{ onDataChange: true, onItemLayout: true, onLayout: true }}
+          maintainScrollAtEndThreshold={0.2}
           maintainVisibleContentPosition={false}
         />
         {!isTimelineNearBottom || hasNewOutput ? (

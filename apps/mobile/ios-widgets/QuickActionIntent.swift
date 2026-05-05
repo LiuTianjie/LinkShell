@@ -6,7 +6,7 @@ import Foundation
 struct QuickActionIntent: AppIntent {
     static var title: LocalizedStringResource = "Respond to Agent Permission"
     static var description = IntentDescription("Respond to a LinkShell Agent permission request")
-    static var openAppWhenRun: Bool = true
+    static var openAppWhenRun: Bool = false
 
     @Parameter(title: "Action Kind")
     var kind: String
@@ -45,26 +45,20 @@ struct QuickActionIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult {
-        guard let defaults = LiveActivityStore.defaults else {
+        guard let extended = LiveActivityStore.readExtendedData() else {
+            NSLog("[LiveActivityAction] intent no extended data sessionId=%@ conversationId=%@ requestId=%@ outcome=%@", sessionId, conversationId, requestId, outcome)
             return .result()
         }
 
-        // Enqueue action for main app
-        var queue = defaults.array(forKey: LiveActivityStore.pendingActionsKey) as? [[String: String]] ?? []
-        queue.append([
-            "actionId": UUID().uuidString,
-            "kind": kind,
-            "sessionId": sessionId,
-            "conversationId": conversationId,
-            "requestId": requestId,
-            "outcome": outcome,
-            "optionId": optionId,
-            "timestamp": "\(Date().timeIntervalSince1970)",
-        ])
-        defaults.set(queue, forKey: LiveActivityStore.pendingActionsKey)
-        defaults.synchronize()
+        let result = await sendPermissionResponse(extended: extended)
+        guard result.ok else {
+            NSLog("[LiveActivityAction] gateway respond failed sessionId=%@ conversationId=%@ requestId=%@ outcome=%@ protocol=%@ status=%d error=%@", sessionId, conversationId, requestId, outcome, extended.permissionProtocol ?? "v2", result.status, result.message)
+            return .result()
+        }
 
-        // Optimistic update: clear permission from extended data
+        NSLog("[LiveActivityAction] gateway respond ok sessionId=%@ conversationId=%@ requestId=%@ outcome=%@ protocol=%@", sessionId, conversationId, requestId, outcome, extended.permissionProtocol ?? "v2")
+
+        // Clear permission only after the gateway accepts the response.
         if !requestId.isEmpty, var ext = LiveActivityStore.readExtendedData(), ext.permissionRequestId == requestId {
             ext.permissionTitle = ""
             ext.currentToolName = ""
@@ -75,7 +69,7 @@ struct QuickActionIntent: AppIntent {
             LiveActivityStore.writeExtendedData(ext)
         }
 
-        // Optimistic update: show the Agent as running again.
+        // Show the Agent as running again while the normal timeline update catches up.
         for activity in Activity<LinkShellAttributes>.activities {
             var state = activity.content.state
             if state.conversationId == conversationId {
@@ -89,13 +83,76 @@ struct QuickActionIntent: AppIntent {
             await activity.update(ActivityContent(state: state, staleDate: nil))
         }
 
-        // Darwin notification to wake main app
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName("com.bd.linkshell.quickAction" as CFString),
-            nil, nil, true
-        )
-
         return .result()
+    }
+
+    private func sendPermissionResponse(extended: ExtendedActivityData) async -> (ok: Bool, status: Int, message: String) {
+        guard let gatewayUrl = extended.gatewayUrl?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !gatewayUrl.isEmpty else {
+            return (false, 0, "missing_gateway_url")
+        }
+        guard let deviceToken = extended.deviceToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !deviceToken.isEmpty else {
+            return (false, 0, "missing_device_token")
+        }
+
+        let base = gatewayUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(base)/agent/permission/respond") else {
+            return (false, 0, "invalid_gateway_url")
+        }
+
+        let protocolName = normalizedProtocol(extended.permissionProtocol)
+        var body: [String: Any] = [
+            "sessionId": sessionId,
+            "requestId": requestId,
+            "outcome": outcome,
+            "protocol": protocolName,
+        ]
+        if !optionId.isEmpty {
+            body["optionId"] = optionId
+        }
+
+        switch protocolName {
+        case "legacy":
+            if let agentSessionId = extended.agentSessionId, !agentSessionId.isEmpty {
+                body["agentSessionId"] = agentSessionId
+            }
+        case "terminal":
+            if let terminalId = extended.terminalId, !terminalId.isEmpty {
+                body["terminalId"] = terminalId
+            }
+        default:
+            body["conversationId"] = conversationId
+        }
+
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(deviceToken)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if (200..<300).contains(status) {
+                return (true, status, "")
+            }
+            let text = String(data: data, encoding: .utf8) ?? ""
+            return (false, status, text)
+        } catch {
+            return (false, 0, String(describing: error))
+        }
+    }
+
+    private func normalizedProtocol(_ raw: String?) -> String {
+        switch raw?.lowercased() {
+        case "legacy":
+            return "legacy"
+        case "terminal":
+            return "terminal"
+        default:
+            return "v2"
+        }
     }
 }

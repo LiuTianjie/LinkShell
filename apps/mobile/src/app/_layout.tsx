@@ -19,7 +19,6 @@ import { ThemeProvider, useTheme } from "../theme";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 import { parsePairingLink } from "../utils/pairing-link";
 import { useAgentLiveActivity } from "../hooks/useAgentLiveActivity";
-import { useAgentLiveActivityActions } from "../hooks/useAgentLiveActivityActions";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
 const LAST_SESSION_KEY = "@linkshell/last_session";
@@ -230,8 +229,7 @@ function AppInner() {
   }, [manager.sessions]);
 
   // Agent Live Activity
-  useAgentLiveActivity(agentWorkspace);
-  useAgentLiveActivityActions(agentWorkspace);
+  useAgentLiveActivity(agentWorkspace, manager);
 
   // App state
   const handleForeground = useCallback(async () => {

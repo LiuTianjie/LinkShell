@@ -25,6 +25,11 @@ struct LinkShellAttributes: ActivityAttributes {
 
 struct ExtendedActivityData: Codable {
     var conversationId: String
+    var gatewayUrl: String?
+    var deviceToken: String?
+    var permissionProtocol: String?
+    var terminalId: String?
+    var agentSessionId: String?
     var permissionRequestId: String
     var permissionTitle: String
     var permissionContext: String
@@ -45,8 +50,6 @@ struct AgentPermissionOption: Codable, Hashable {
 enum LiveActivityStore {
     static let suiteName = "group.com.bd.linkshell"
     static let extendedDataKey = "liveActivityExtended"
-    static let pendingActionsKey = "pendingActions"
-    static let processedActionsKey = "processedActions"
 
     static var defaults: UserDefaults? {
         UserDefaults(suiteName: suiteName)

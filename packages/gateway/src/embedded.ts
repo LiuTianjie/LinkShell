@@ -14,6 +14,10 @@ import { PairingManager } from "./pairings.js";
 import { TokenManager } from "./tokens.js";
 import { handleSocketMessage } from "./relay.js";
 import {
+  agentPermissionHttpBodySchema,
+  forwardAgentPermissionHttp,
+} from "./agent-permission-http.js";
+import {
   parseTunnelPath,
   parseTunnelCookie,
   handleTunnelRequest,
@@ -124,6 +128,28 @@ export function startEmbeddedGateway(
 
       if (method === "GET" && url.pathname === "/healthz") {
         json(res, 200, { ok: true });
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/agent/permission/respond") {
+        const token = extractBearerToken(req);
+        const parsed = agentPermissionHttpBodySchema.safeParse(await readJson(req));
+        if (!parsed.success) {
+          json(res, 400, {
+            error: "invalid_payload",
+            message: parsed.error.errors[0]?.message ?? "Invalid permission response payload",
+          });
+          return;
+        }
+        const body = parsed.data;
+        const result = forwardAgentPermissionHttp({
+          token,
+          body,
+          sessionManager,
+          tokenManager,
+        });
+        log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} session=${body.sessionId} request=${body.requestId} status=${result.status}`);
+        json(res, result.status, result.body);
         return;
       }
 

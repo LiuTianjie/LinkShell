@@ -10,6 +10,7 @@ import {
 } from "../native/LiveActivity";
 import type { AgentConversationRecord, AgentPermission, AgentTimelineItem } from "../storage/agent-workspace";
 import type { AgentWorkspaceHandle } from "./useAgentWorkspace";
+import type { SessionManagerHandle } from "./useSessionManager";
 
 type Candidate = {
   conversation: AgentConversationRecord;
@@ -17,6 +18,7 @@ type Candidate = {
   phaseLabel: string;
   summary: string;
   permission?: AgentPermission;
+  permissionItem?: AgentTimelineItem & { permission: AgentPermission };
   permissionCount: number;
   currentToolName: string;
   currentToolInput: string;
@@ -111,7 +113,8 @@ function toolFromTimeline(items: AgentTimelineItem[]) {
 
 function buildCandidate(conversation: AgentConversationRecord, items: AgentTimelineItem[]): Candidate {
   const openPermissions = items.filter(isOpenPermission).sort((a, b) => latestTimestamp(b) - latestTimestamp(a));
-  const topPermission = openPermissions[0]?.permission;
+  const topPermissionItem = openPermissions[0];
+  const topPermission = topPermissionItem?.permission;
   const tool = toolFromTimeline(items);
   const updatedAt = Math.max(
     conversation.lastActivityAt,
@@ -126,6 +129,7 @@ function buildCandidate(conversation: AgentConversationRecord, items: AgentTimel
       phaseLabel: "等待授权",
       summary: compactText(topPermission.context || topPermission.toolInput || conversation.lastMessagePreview || title),
       permission: topPermission,
+      permissionItem: topPermissionItem,
       permissionCount: openPermissions.length,
       currentToolName: topPermission.toolName || tool.name,
       currentToolInput: compactText(topPermission.toolInput || topPermission.context || tool.input, 500),
@@ -145,10 +149,17 @@ function buildCandidate(conversation: AgentConversationRecord, items: AgentTimel
   };
 }
 
+function sourceSessionId(candidate: Candidate): string {
+  const metadataSessionId = candidate.permissionItem?.metadata?.sessionId;
+  return typeof metadataSessionId === "string" && metadataSessionId
+    ? metadataSessionId
+    : candidate.conversation.sessionId;
+}
+
 function buildState(candidate: Candidate): ActivityState {
   return {
     conversationId: candidate.conversation.id,
-    sessionId: candidate.conversation.sessionId,
+    sessionId: sourceSessionId(candidate),
     provider: candidate.conversation.provider,
     project: compactText(candidate.conversation.title || candidate.conversation.cwd.split("/").filter(Boolean).pop() || "Agent", 40),
     status: candidate.status,
@@ -160,10 +171,28 @@ function buildState(candidate: Candidate): ActivityState {
   };
 }
 
-function buildExtended(candidate: Candidate): ExtendedActivityData {
+function permissionProtocol(candidate: Candidate): ExtendedActivityData["permissionProtocol"] {
+  const protocol = candidate.permissionItem?.metadata?.protocol;
+  if (protocol === "legacy" || protocol === "terminal") return protocol;
+  return "v2";
+}
+
+function buildExtended(candidate: Candidate, manager: SessionManagerHandle): ExtendedActivityData {
   const permission = candidate.permission;
+  const metadata = candidate.permissionItem?.metadata;
+  const session = manager.sessions.get(sourceSessionId(candidate));
+  const protocol = permissionProtocol(candidate);
+  const terminalId = typeof metadata?.terminalId === "string" ? metadata.terminalId : undefined;
+  const agentSessionId = typeof metadata?.agentSessionId === "string"
+    ? metadata.agentSessionId
+    : candidate.conversation.agentSessionId;
   return {
     conversationId: candidate.conversation.id,
+    gatewayUrl: session?.gatewayUrl ?? "",
+    deviceToken: manager.deviceToken ?? "",
+    permissionProtocol: protocol,
+    terminalId,
+    agentSessionId,
     permissionRequestId: permission?.requestId ?? "",
     permissionTitle: permission?.toolName ? `需要授权 · ${permission.toolName}` : permission ? "需要授权" : "",
     permissionContext: compactText(permission?.context || permission?.toolInput, 500),
@@ -210,7 +239,7 @@ function selectCandidate(workspace: AgentWorkspaceHandle): Candidate | null {
   return recentError ?? null;
 }
 
-export function useAgentLiveActivity(workspace: AgentWorkspaceHandle) {
+export function useAgentLiveActivity(workspace: AgentWorkspaceHandle, manager: SessionManagerHandle) {
   const liveActivityActiveRef = useRef(false);
   const liveActivityStartingRef = useRef(false);
   const alertedRequestIdsRef = useRef<string[]>([]);
@@ -246,7 +275,7 @@ export function useAgentLiveActivity(workspace: AgentWorkspaceHandle) {
 
     clearEndTimer();
     const state = buildState(candidate);
-    const extended = buildExtended(candidate);
+    const extended = buildExtended(candidate, manager);
     const alertRequestId = candidate.permission?.requestId ?? null;
     const needsAlert =
       !!alertRequestId &&
@@ -278,7 +307,7 @@ export function useAgentLiveActivity(workspace: AgentWorkspaceHandle) {
         pushUpdate();
       });
     }
-  }, [clearEndTimer, scheduleEnd, workspace]);
+  }, [clearEndTimer, manager, scheduleEnd, workspace]);
 
   useEffect(() => {
     pushUpdate();

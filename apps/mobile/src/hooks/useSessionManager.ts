@@ -342,6 +342,8 @@ interface InternalSession {
   lastAckedSeqByTerminal: Map<string, number>;
   pendingOutbound: Array<{ envelope: Envelope; dedupeKey?: string }>;
   outboundDedupeKeys: Set<string>;
+  pendingControlOutbound: Array<{ envelope: Envelope; dedupeKey?: string }>;
+  pendingControlDedupeKeys: Set<string>;
   pendingPermissionResponseIds: Set<string>;
   manualDisconnect: boolean;
   // Multi-terminal
@@ -446,6 +448,8 @@ function createInternalSession(
     lastAckedSeqByTerminal: new Map(),
     pendingOutbound: [],
     outboundDedupeKeys: new Set(),
+    pendingControlOutbound: [],
+    pendingControlDedupeKeys: new Set(),
     pendingPermissionResponseIds: new Set(),
     manualDisconnect: false,
     terminals: new Map(),
@@ -626,6 +630,35 @@ export function useSessionManager(): SessionManagerHandle {
     }
   };
 
+  const flushControlOutbound = (s: InternalSession) => {
+    if (!s.socket || s.socket.readyState !== WebSocket.OPEN) {
+      console.warn("[LiveActivityAction] session flushControl skipped socket not open", {
+        sessionId: s.sessionId,
+        pendingControlCount: s.pendingControlOutbound.length,
+      });
+      return;
+    }
+    if (s.controllerId !== s.deviceId) {
+      console.warn("[LiveActivityAction] session flushControl skipped not controller", {
+        sessionId: s.sessionId,
+        deviceId: s.deviceId,
+        controllerId: s.controllerId,
+        pendingControlCount: s.pendingControlOutbound.length,
+      });
+      return;
+    }
+    const queued = s.pendingControlOutbound.splice(0);
+    s.pendingControlDedupeKeys.clear();
+    console.log("[LiveActivityAction] session flushControl sending", {
+      sessionId: s.sessionId,
+      count: queued.length,
+      types: queued.map((item) => item.envelope.type),
+    });
+    for (const item of queued) {
+      s.socket.send(serializeEnvelope(item.envelope));
+    }
+  };
+
   const sendRaw = (
     s: InternalSession,
     envelope: Envelope,
@@ -673,6 +706,12 @@ export function useSessionManager(): SessionManagerHandle {
   };
 
   const requestControl = (s: InternalSession) => {
+    console.log("[LiveActivityAction] session request control", {
+      sessionId: s.sessionId,
+      deviceId: s.deviceId,
+      controllerId: s.controllerId,
+      socketOpen: s.socket?.readyState === WebSocket.OPEN,
+    });
     sendRaw(
       s,
       createEnvelope({
@@ -689,6 +728,17 @@ export function useSessionManager(): SessionManagerHandle {
     options?: { queue?: boolean; dedupeKey?: string },
   ): boolean => {
     const requestId = (envelope.payload as { requestId?: unknown } | undefined)?.requestId;
+    console.log("[LiveActivityAction] session sendWithControl start", {
+      sessionId: s.sessionId,
+      deviceId: s.deviceId,
+      controllerId: s.controllerId,
+      type: envelope.type,
+      requestId,
+      queue: options?.queue,
+      dedupeKey: options?.dedupeKey,
+      socketOpen: s.socket?.readyState === WebSocket.OPEN,
+      pendingControlCount: s.pendingControlOutbound.length,
+    });
     const claimAccepted = sendRaw(
       s,
       createEnvelope({
@@ -701,14 +751,64 @@ export function useSessionManager(): SessionManagerHandle {
         dedupeKey: options?.dedupeKey ? `control:${options.dedupeKey}` : undefined,
       },
     );
-    const accepted = sendRaw(s, envelope, options);
+    let accepted = true;
+    if (s.controllerId === s.deviceId) {
+      accepted = sendRaw(s, envelope, options);
+      console.log("[LiveActivityAction] session sendWithControl sent immediately", {
+        sessionId: s.sessionId,
+        type: envelope.type,
+        requestId,
+        accepted,
+      });
+    } else if (options?.queue) {
+      if (options.dedupeKey && s.pendingControlDedupeKeys.has(options.dedupeKey)) {
+        accepted = true;
+        console.log("[LiveActivityAction] session sendWithControl already pending", {
+          sessionId: s.sessionId,
+          type: envelope.type,
+          requestId,
+          dedupeKey: options.dedupeKey,
+        });
+      } else {
+        if (s.pendingControlOutbound.length >= OUTBOUND_QUEUE_LIMIT) {
+          const dropped = s.pendingControlOutbound.shift();
+          if (dropped?.dedupeKey) s.pendingControlDedupeKeys.delete(dropped.dedupeKey);
+        }
+        s.pendingControlOutbound.push({ envelope, dedupeKey: options.dedupeKey });
+        if (options.dedupeKey) s.pendingControlDedupeKeys.add(options.dedupeKey);
+        console.log("[LiveActivityAction] session sendWithControl queued until grant", {
+          sessionId: s.sessionId,
+          type: envelope.type,
+          requestId,
+          dedupeKey: options.dedupeKey,
+          pendingControlCount: s.pendingControlOutbound.length,
+        });
+      }
+    } else {
+      accepted = false;
+      console.warn("[LiveActivityAction] session sendWithControl rejected no queue", {
+        sessionId: s.sessionId,
+        type: envelope.type,
+        requestId,
+      });
+    }
     if (accepted && typeof requestId === "string") {
       s.pendingPermissionResponseIds.add(requestId);
       setTimeout(() => {
         s.pendingPermissionResponseIds.delete(requestId);
       }, 5_000);
     }
-    return claimAccepted && accepted;
+    const result = claimAccepted && accepted;
+    console.log("[LiveActivityAction] session sendWithControl result", {
+      sessionId: s.sessionId,
+      type: envelope.type,
+      requestId,
+      claimAccepted,
+      accepted,
+      result,
+      pendingControlCount: s.pendingControlOutbound.length,
+    });
+    return result;
   };
 
   const cleanupSession = (s: InternalSession) => {
@@ -722,6 +822,8 @@ export function useSessionManager(): SessionManagerHandle {
       clearTimeout(s.healthProbeTimer);
       s.healthProbeTimer = null;
     }
+    s.pendingControlOutbound = [];
+    s.pendingControlDedupeKeys.clear();
     s.socket?.close();
     s.socket = null;
   };
@@ -1130,6 +1232,15 @@ export function useSessionManager(): SessionManagerHandle {
         }
         case "session.error": {
           const p = parseTypedPayload("session.error", envelope.payload);
+          console.warn("[LiveActivityAction] session error", {
+            sessionId: s.sessionId,
+            code: p.code,
+            message: p.message,
+            pendingPermissionResponseIds: [...s.pendingPermissionResponseIds],
+            pendingControlCount: s.pendingControlOutbound.length,
+            controllerId: s.controllerId,
+            deviceId: s.deviceId,
+          });
           if (p.code === "control_conflict") {
             if (s.pendingPermissionResponseIds.size > 0) {
               s.pendingPermissionResponseIds.clear();
@@ -1154,7 +1265,15 @@ export function useSessionManager(): SessionManagerHandle {
         case "control.grant": {
           const p = parseTypedPayload("control.grant", envelope.payload);
           s.controllerId = p.deviceId;
+          console.log("[LiveActivityAction] session control grant", {
+            sessionId: s.sessionId,
+            deviceId: s.deviceId,
+            controllerId: p.deviceId,
+            isMine: p.deviceId === s.deviceId,
+            pendingControlCount: s.pendingControlOutbound.length,
+          });
           if (p.deviceId === s.deviceId) {
+            flushControlOutbound(s);
             agentWorkspaceCbRef.current?.(envelope);
           }
           tick();

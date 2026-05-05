@@ -27,6 +27,11 @@ export interface ActivityState {
 
 export interface ExtendedActivityData {
   conversationId: string;
+  gatewayUrl: string;
+  deviceToken: string;
+  permissionProtocol: "v2" | "legacy" | "terminal";
+  terminalId?: string;
+  agentSessionId?: string;
   permissionRequestId: string;
   permissionTitle: string;
   permissionContext: string;
@@ -101,8 +106,9 @@ export async function endLiveActivity(): Promise<void> {
 export async function confirmAction(requestId: string): Promise<void> {
   if (!isIOS || !LiveActivityModule) return;
   try {
-    await LiveActivityModule.confirmAction(requestId);
-  } catch {
-    // Silently ignore
+    const ok = await LiveActivityModule.confirmAction(requestId);
+    console.log("[LiveActivityAction] JS confirmAction result", { requestId, ok });
+  } catch (error) {
+    console.warn("[LiveActivityAction] JS confirmAction failed", { requestId, error });
   }
 }

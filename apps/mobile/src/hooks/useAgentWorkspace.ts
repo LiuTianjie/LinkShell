@@ -55,6 +55,7 @@ export interface AgentWorkspaceHandle {
   openConversation: (input: OpenConversationInput) => Promise<OpenConversationResult>;
   openProject: (record: ProjectRecord) => Promise<string | null>;
   resumeConversation: (conversationId: string) => Promise<string | null>;
+  ensureConversationSession: (conversationId: string, preferredSessionId?: string) => boolean;
   getConversation: (conversationId: string) => AgentConversationRecord | undefined;
   getTimeline: (conversationId: string) => AgentTimelineItem[];
   sendPrompt: (
@@ -257,6 +258,73 @@ export function useAgentWorkspace(
       return findSessionForConversation(conversation, manager.sessions);
     },
     [manager.sessions],
+  );
+
+  const ensureConversationSession = useCallback(
+    (conversationId: string, preferredSessionId?: string) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation) {
+        console.warn("[LiveActivityAction] workspace ensureSession missing conversation", { conversationId, preferredSessionId });
+        return false;
+      }
+      const isUsable = (session: SessionInfo | undefined) =>
+        Boolean(session) &&
+        (
+          session!.status === "connected" ||
+          session!.status === "reconnecting" ||
+          session!.status === "connecting" ||
+          session!.status === "host_disconnected"
+        );
+
+      const preferred = preferredSessionId ? manager.sessions.get(preferredSessionId) : undefined;
+      if (isUsable(preferred)) {
+        console.log("[LiveActivityAction] workspace ensureSession preferred usable", {
+          conversationId,
+          preferredSessionId,
+          status: preferred?.status,
+          controllerId: preferred?.controllerId,
+        });
+        return true;
+      }
+
+      const resolved = findSessionForConversation(conversation, manager.sessions);
+      if (isUsable(resolved)) {
+        console.log("[LiveActivityAction] workspace ensureSession resolved usable", {
+          conversationId,
+          preferredSessionId,
+          resolvedSessionId: resolved?.sessionId,
+          status: resolved?.status,
+          controllerId: resolved?.controllerId,
+        });
+        return true;
+      }
+
+      const sessionId = preferredSessionId || conversation.sessionId;
+      if (sessionId && conversation.serverUrl) {
+        console.warn("[LiveActivityAction] workspace ensureSession reconnect", {
+          conversationId,
+          preferredSessionId,
+          sessionId,
+          serverUrl: conversation.serverUrl,
+          knownSessions: [...manager.sessions.values()].map((session) => ({
+            sessionId: session.sessionId,
+            status: session.status,
+            gatewayUrl: session.gatewayUrl,
+            controllerId: session.controllerId,
+          })),
+        });
+        manager.connectToSession(sessionId, conversation.serverUrl);
+      } else {
+        console.warn("[LiveActivityAction] workspace ensureSession cannot reconnect", {
+          conversationId,
+          preferredSessionId,
+          sessionId,
+          serverUrl: conversation.serverUrl,
+        });
+      }
+      return false;
+    },
+    [manager],
   );
 
   function findSessionForConversation(
@@ -1119,12 +1187,23 @@ export function useAgentWorkspace(
       optionId?: string,
     ) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-      if (!conversation) return false;
+      if (!conversation) {
+        console.warn("[LiveActivityAction] workspace respond missing conversation", { conversationId, requestId, outcome, optionId });
+        return false;
+      }
       const permissionItem = timelineRef.current
         .get(conversationId)
         ?.find((item) => item.type === "permission" && item.permission?.requestId === requestId);
       const sourceSessionId = resolvePermissionSessionId(conversation, permissionItem);
       if (!sourceSessionId) {
+        console.warn("[LiveActivityAction] workspace respond no source session", {
+          conversationId,
+          requestId,
+          outcome,
+          optionId,
+          protocol: permissionItem?.metadata?.protocol,
+          conversationSessionId: conversation.sessionId,
+        });
         updatePermissionMetadata(conversationId, requestId, {
           permissionLive: false,
           permissionExpired: true,
@@ -1134,6 +1213,15 @@ export function useAgentWorkspace(
         return false;
       }
       let accepted = false;
+      const protocol = permissionItem?.metadata?.protocol ?? "v2";
+      console.log("[LiveActivityAction] workspace respond route", {
+        conversationId,
+        requestId,
+        outcome,
+        optionId,
+        sourceSessionId,
+        protocol,
+      });
       if (permissionItem?.metadata?.protocol === "terminal") {
         const terminalId = typeof permissionItem.metadata.terminalId === "string"
           ? permissionItem.metadata.terminalId
@@ -1163,16 +1251,32 @@ export function useAgentWorkspace(
           sourceSessionId,
           "agent.v2.permission.respond",
           { conversationId, requestId, outcome, optionId },
-          { queue: true, dedupeKey: `agent-v2-permission:${requestId}` },
+          { queue: true, dedupeKey: `agent-v2-permission:${requestId}`, claimControl: true },
         );
       }
       if (!accepted) {
+        console.warn("[LiveActivityAction] workspace respond not accepted", {
+          conversationId,
+          requestId,
+          outcome,
+          optionId,
+          sourceSessionId,
+          protocol,
+        });
         updatePermissionMetadata(conversationId, requestId, {
           permissionPending: false,
           permissionError: "授权未发送：连接未就绪，请稍后重试。",
         });
         return false;
       }
+      console.log("[LiveActivityAction] workspace respond accepted", {
+        conversationId,
+        requestId,
+        outcome,
+        optionId,
+        sourceSessionId,
+        protocol,
+      });
       updatePermissionMetadata(conversationId, requestId, {
         permissionPending: true,
         permissionLive: true,
@@ -1256,6 +1360,7 @@ export function useAgentWorkspace(
     openConversation,
     openProject,
     resumeConversation,
+    ensureConversationSession,
     getConversation: (conversationId) =>
       conversationsRef.current.find((item) => item.id === conversationId),
     getTimeline: (conversationId) => timelineRef.current.get(conversationId) ?? [],
