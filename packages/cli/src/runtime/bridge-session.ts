@@ -1138,7 +1138,7 @@ export class BridgeSession {
       hookPort = result.port;
       hookConfigPaths.push(result.configPath);
       // Also set up hooks for other providers (curlCmd already has marker from setupHookServer)
-      const curlCmd = `curl -s -X POST "http://127.0.0.1:${result.port}/hook?m=${hookMarker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @-`;
+      const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${result.port}/hook?m=${hookMarker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
       hookConfigPaths.push(this.setupCodexHooks(terminalId, curlCmd, hookMarker));
       hookConfigPaths.push(this.setupGeminiHooks(terminalId, curlCmd, hookMarker));
       hookConfigPaths.push(this.setupCopilotHooks(terminalId, curlCmd, hookMarker));
@@ -1317,7 +1317,7 @@ export class BridgeSession {
     });
     this.log(`hook server for ${terminalId} (${provider}) listening on port ${port}, marker=${marker}`);
 
-    const curlCmd = `curl -s -X POST "http://127.0.0.1:${port}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @-`;
+    const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${port}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
     let configPath: string;
 
     if (provider === "codex") {
@@ -1338,7 +1338,7 @@ export class BridgeSession {
     const term = this.terminals.get(DEFAULT_TERMINAL_ID);
     if (!term?.hookPort) return;
     const marker = term.hookMarker;
-    const curlCmd = `curl -s -X POST "http://127.0.0.1:${term.hookPort}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @-`;
+    const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${term.hookPort}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
     const providers = this.options.agentProvider
       ? [normalizeAgentProvider(this.options.agentProvider)]
       : detectAvailableProviders();
