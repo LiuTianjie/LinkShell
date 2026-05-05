@@ -176,7 +176,7 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: ^0.2.39
+        specifier: ^0.2.40
         version: link:../gateway
       '@linkshell/protocol':
         specifier: ^0.2.30
