@@ -49,6 +49,11 @@ struct QuickActionIntent: AppIntent {
             NSLog("[LiveActivityAction] intent no extended data sessionId=%@ conversationId=%@ requestId=%@ outcome=%@", sessionId, conversationId, requestId, outcome)
             return .result()
         }
+        if !extended.permissionRequestId.isEmpty && extended.permissionRequestId != requestId {
+            NSLog("[LiveActivityAction] stale intent requestId=%@ current=%@ sessionId=%@ conversationId=%@", requestId, extended.permissionRequestId, sessionId, conversationId)
+            await markPermissionStale(currentRequestId: extended.permissionRequestId)
+            return .result()
+        }
 
         let result = await sendPermissionResponse(extended: extended)
         guard result.ok else {
@@ -57,22 +62,54 @@ struct QuickActionIntent: AppIntent {
         }
 
         NSLog("[LiveActivityAction] gateway respond ok sessionId=%@ conversationId=%@ requestId=%@ outcome=%@ protocol=%@", sessionId, conversationId, requestId, outcome, extended.permissionProtocol ?? "v2")
-        // Gateway acceptance only means the request was forwarded to the host.
-        // The Live Activity permission is cleared only after the CLI confirms
-        // the Agent permission response was actually delivered.
+        clearStoredPermission(extended: extended)
+
         var updatedCount = 0
         for activity in Activity<LinkShellAttributes>.activities {
             var state = activity.content.state
             if state.sessionId == sessionId || state.conversationId == conversationId {
-                state.phaseLabel = "授权已发送，等待确认"
+                state.status = "running"
+                state.phaseLabel = "运行中"
+                state.hasPermission = false
+                state.permissionCount = 0
                 state.updatedAt = Date().timeIntervalSince1970 * 1000
                 await activity.update(ActivityContent(state: state, staleDate: nil))
                 updatedCount += 1
             }
         }
-        NSLog("[LiveActivityAction] marked live activity permission sent sessionId=%@ conversationId=%@ requestId=%@ updated=%d", sessionId, conversationId, requestId, updatedCount)
+        NSLog("[LiveActivityAction] cleared delivered live activity permission sessionId=%@ conversationId=%@ requestId=%@ updated=%d", sessionId, conversationId, requestId, updatedCount)
 
         return .result()
+    }
+
+    private func markPermissionStale(currentRequestId: String) async {
+        var updatedCount = 0
+        for activity in Activity<LinkShellAttributes>.activities {
+            var state = activity.content.state
+            if state.sessionId == sessionId || state.conversationId == conversationId {
+                state.phaseLabel = "授权已更新，请重新选择"
+                state.updatedAt = Date().timeIntervalSince1970 * 1000
+                await activity.update(ActivityContent(state: state, staleDate: nil))
+                updatedCount += 1
+            }
+        }
+        NSLog("[LiveActivityAction] refreshed stale live activity requestId=%@ current=%@ updated=%d", requestId, currentRequestId, updatedCount)
+    }
+
+    private func clearStoredPermission(extended: ExtendedActivityData) {
+        guard !requestId.isEmpty else { return }
+        var ext = LiveActivityStore.readExtendedData() ?? extended
+        guard ext.permissionRequestId == requestId || ext.conversationId == conversationId else {
+            NSLog("[LiveActivityAction] skip clearing stored permission requestId=%@ current=%@ conversationId=%@ currentConversationId=%@", requestId, ext.permissionRequestId, conversationId, ext.conversationId)
+            return
+        }
+        ext.permissionTitle = ""
+        ext.currentToolName = ""
+        ext.currentToolInput = ""
+        ext.permissionContext = ""
+        ext.permissionRequestId = ""
+        ext.permissionOptions = []
+        LiveActivityStore.writeExtendedData(ext)
     }
 
     private func sendPermissionResponse(extended: ExtendedActivityData) async -> (ok: Bool, status: Int, message: String) {

@@ -277,6 +277,15 @@ export const permissionDecisionPayloadSchema = z.object({
   decision: z.enum(["allow", "deny"]),
 });
 
+export const permissionDecisionResultPayloadSchema = z.object({
+  requestId: z.string().min(1),
+  decision: z.enum(["allow", "deny"]),
+  resolved: z.boolean(),
+  delivered: z.boolean(),
+  source: z.string().optional(),
+  message: z.string().optional(),
+});
+
 export const errorPayloadSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
@@ -792,6 +801,7 @@ export const protocolMessageSchemas = {
   "terminal.mkdir": terminalMkdirPayloadSchema,
   "terminal.status": terminalStatusPayloadSchema,
   "permission.decision": permissionDecisionPayloadSchema,
+  "permission.decision.result": permissionDecisionResultPayloadSchema,
   "tunnel.request": tunnelRequestPayloadSchema,
   "tunnel.response": tunnelResponsePayloadSchema,
   "tunnel.ws.data": tunnelWsDataPayloadSchema,

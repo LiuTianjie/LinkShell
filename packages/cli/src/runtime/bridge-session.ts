@@ -853,6 +853,23 @@ export class BridgeSession {
         process.stderr.write(
           `[bridge] permission decision request=${p.requestId} decision=${p.decision} resolved=${result.resolved} delivered=${result.delivered}\n`,
         );
+        this.send(createEnvelope({
+          type: "permission.decision.result",
+          sessionId: this.sessionId,
+          terminalId: tid,
+          payload: {
+            requestId: p.requestId,
+            decision: p.decision,
+            resolved: result.resolved,
+            delivered: result.delivered,
+            source: "permission.decision",
+            message: result.delivered
+              ? undefined
+              : result.resolved
+                ? "Permission resolved but response was not delivered"
+                : "Permission request is no longer pending",
+          },
+        }));
         break;
       }
       case "tunnel.request": {

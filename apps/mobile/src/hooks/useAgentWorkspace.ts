@@ -782,14 +782,6 @@ export function useAgentWorkspace(
             next.set(conversation.id, nextItems);
             return next;
           });
-          if (delivered && conversation.status === "waiting_permission") {
-            persistConversation({
-              ...conversation,
-              status: "running",
-              lastMessagePreview: payload.summary ?? conversation.lastMessagePreview,
-              lastActivityAt: Date.now(),
-            }).catch(() => {});
-          }
           if (!topPermission?.requestId) return;
         }
         if (!topPermission?.requestId) {
@@ -838,14 +830,6 @@ export function useAgentWorkspace(
             next.set(conversation.id, nextItems);
             return next;
           });
-          if (conversation.status === "waiting_permission") {
-            persistConversation({
-              ...conversation,
-              status: "running",
-              lastMessagePreview: payload.summary ?? conversation.lastMessagePreview,
-              lastActivityAt: Date.now(),
-            }).catch(() => {});
-          }
           return;
         }
         const permissionItem: AgentTimelineItem = {

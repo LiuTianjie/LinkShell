@@ -4,6 +4,7 @@ import { parseEnvelope, parseTypedPayload } from "@linkshell/protocol";
 import {
   type AgentPermissionHttpBody,
   forwardAgentPermissionHttp,
+  resolveAgentPermissionHttpAck,
 } from "../src/agent-permission-http.js";
 import { SessionManager } from "../src/sessions.js";
 import { TokenManager } from "../src/tokens.js";
@@ -43,7 +44,7 @@ function createHarness(options: { hostConnected?: boolean } = {}) {
 }
 
 describe("Live Activity permission HTTP forwarding", () => {
-  it("forwards valid v2 payloads to the host", () => {
+  it("forwards valid v2 payloads to the host", async () => {
     const h = createHarness();
     try {
       const body: AgentPermissionHttpBody = {
@@ -55,7 +56,7 @@ describe("Live Activity permission HTTP forwarding", () => {
         optionId: "allow_once",
       };
 
-      const result = forwardAgentPermissionHttp({
+      const result = await forwardAgentPermissionHttp({
         token: h.token,
         body,
         sessionManager: h.sessionManager,
@@ -82,7 +83,7 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("rejects missing or invalid tokens", () => {
+  it("rejects missing or invalid tokens", async () => {
     const h = createHarness();
     try {
       const body: AgentPermissionHttpBody = {
@@ -92,7 +93,7 @@ describe("Live Activity permission HTTP forwarding", () => {
         requestId: "request-1",
         outcome: "allow",
       };
-      const result = forwardAgentPermissionHttp({
+      const result = await forwardAgentPermissionHttp({
         token: null,
         body,
         sessionManager: h.sessionManager,
@@ -107,7 +108,7 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("rejects tokens that do not own the session", () => {
+  it("rejects tokens that do not own the session", async () => {
     const h = createHarness();
     try {
       const otherToken = h.tokenManager.register("other-token");
@@ -118,7 +119,7 @@ describe("Live Activity permission HTTP forwarding", () => {
         requestId: "request-1",
         outcome: "allow",
       };
-      const result = forwardAgentPermissionHttp({
+      const result = await forwardAgentPermissionHttp({
         token: otherToken,
         body,
         sessionManager: h.sessionManager,
@@ -133,7 +134,7 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("returns session_not_found for a valid token bound to a missing session", () => {
+  it("returns session_not_found for a valid token bound to a missing session", async () => {
     const h = createHarness();
     try {
       const missingSessionId = "missing-session";
@@ -145,7 +146,7 @@ describe("Live Activity permission HTTP forwarding", () => {
         requestId: "request-1",
         outcome: "allow",
       };
-      const result = forwardAgentPermissionHttp({
+      const result = await forwardAgentPermissionHttp({
         token: h.token,
         body,
         sessionManager: h.sessionManager,
@@ -160,7 +161,7 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("returns host_not_connected when the host is absent", () => {
+  it("returns host_not_connected when the host is absent", async () => {
     const h = createHarness({ hostConnected: false });
     try {
       h.sessionManager.getOrCreate(h.sessionId);
@@ -171,7 +172,7 @@ describe("Live Activity permission HTTP forwarding", () => {
         requestId: "request-1",
         outcome: "allow",
       };
-      const result = forwardAgentPermissionHttp({
+      const result = await forwardAgentPermissionHttp({
         token: h.token,
         body,
         sessionManager: h.sessionManager,
@@ -186,7 +187,7 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("forwards terminal protocol payloads as permission.decision with terminalId", () => {
+  it("forwards terminal protocol payloads as permission.decision with terminalId", async () => {
     const h = createHarness();
     try {
       const body: AgentPermissionHttpBody = {
@@ -196,14 +197,13 @@ describe("Live Activity permission HTTP forwarding", () => {
         requestId: "request-1",
         outcome: "cancelled",
       };
-      const result = forwardAgentPermissionHttp({
+      const resultPromise = forwardAgentPermissionHttp({
         token: h.token,
         body,
         sessionManager: h.sessionManager,
         tokenManager: h.tokenManager,
       });
 
-      expect(result.status).toBe(200);
       const envelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
       expect(envelope.type).toBe("permission.decision");
       expect((envelope as any).terminalId).toBe("terminal-1");
@@ -211,12 +211,24 @@ describe("Live Activity permission HTTP forwarding", () => {
         requestId: "request-1",
         decision: "deny",
       });
+      resolveAgentPermissionHttpAck({
+        sessionId: h.sessionId,
+        ack: {
+          requestId: "request-1",
+          decision: "deny",
+          resolved: true,
+          delivered: true,
+        },
+      });
+      const result = await resultPromise;
+      expect(result.status).toBe(200);
+      expect(result.body).toEqual({ ok: true, resolved: true, delivered: true });
     } finally {
       h.destroy();
     }
   });
 
-  it("forwards legacy protocol payloads with agentSessionId", () => {
+  it("forwards legacy protocol payloads with agentSessionId", async () => {
     const h = createHarness();
     try {
       const body: AgentPermissionHttpBody = {
@@ -226,7 +238,7 @@ describe("Live Activity permission HTTP forwarding", () => {
         requestId: "request-1",
         outcome: "deny",
       };
-      const result = forwardAgentPermissionHttp({
+      const result = await forwardAgentPermissionHttp({
         token: h.token,
         body,
         sessionManager: h.sessionManager,
@@ -247,7 +259,7 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("also forwards terminal decisions for legacy terminal hook requests", () => {
+  it("also forwards terminal decisions for legacy terminal hook requests", async () => {
     const h = createHarness();
     try {
       const body: AgentPermissionHttpBody = {
@@ -258,14 +270,13 @@ describe("Live Activity permission HTTP forwarding", () => {
         outcome: "allow",
         optionId: "allow_once",
       };
-      const result = forwardAgentPermissionHttp({
+      const resultPromise = forwardAgentPermissionHttp({
         token: h.token,
         body,
         sessionManager: h.sessionManager,
         tokenManager: h.tokenManager,
       });
 
-      expect(result.status).toBe(200);
       expect(h.send).toHaveBeenCalledTimes(2);
       const legacyEnvelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
       expect(legacyEnvelope.type).toBe("agent.permission.response");
@@ -282,6 +293,18 @@ describe("Live Activity permission HTTP forwarding", () => {
         requestId: "pr-123-abcdef",
         decision: "allow",
       });
+      resolveAgentPermissionHttpAck({
+        sessionId: h.sessionId,
+        ack: {
+          requestId: "pr-123-abcdef",
+          decision: "allow",
+          resolved: true,
+          delivered: true,
+        },
+      });
+      const result = await resultPromise;
+      expect(result.status).toBe(200);
+      expect(result.body).toEqual({ ok: true, resolved: true, delivered: true });
     } finally {
       h.destroy();
     }
