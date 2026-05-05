@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Alert,
   Clipboard,
-  FlatList,
   InteractionManager,
   KeyboardAvoidingView,
   Platform,
@@ -19,6 +18,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
+import { LegendList, type LegendListRef, type LegendListRenderItemProps } from "@legendapp/list";
 import { MenuView } from "@react-native-menu/menu";
 import Markdown from "react-native-markdown-display";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -1927,7 +1927,7 @@ export function AgentConversationScreen({
   const conversation = workspace.getConversation(conversationId);
   const timeline = workspace.getTimeline(conversationId);
   const visibleTimeline = useMemo(() => dedupeTimelineItems(timeline), [timeline]);
-  const timelineRef = useRef<FlatList<AgentTimelineItem>>(null);
+  const timelineRef = useRef<LegendListRef>(null);
   const timelineNearBottomRef = useRef(true);
   const initialScrollConversationRef = useRef<string | null>(null);
   const pendingInitialScrollConversationRef = useRef<string | null>(null);
@@ -1943,8 +1943,10 @@ export function AgentConversationScreen({
   const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
   const capabilities = conversation ? workspace.capabilitiesBySessionId.get(conversation.sessionId) : undefined;
   const providerCapability = conversation ? providerCapabilityFor(conversation.provider, capabilities) : undefined;
+  const providerSupportsImageInput = conversation?.provider === "claude" || conversation?.provider === "codex";
   const supportsImages = Boolean(
-    capabilities?.enabled && (providerCapability?.supportsImages ?? capabilities.supportsImages),
+    providerSupportsImageInput ||
+    (capabilities?.enabled && (providerCapability?.supportsImages ?? capabilities.supportsImages)),
   );
   const running = conversation?.status === "running" || conversation?.status === "waiting_permission";
   const meta = visibleConversationStatus(conversation?.status, theme);
@@ -2053,7 +2055,7 @@ export function AgentConversationScreen({
     }, animated ? 260 : 80);
   }, []);
 
-  const renderTimelineItem = useCallback(({ item, index }: { item: AgentTimelineItem; index: number }) => {
+  const renderTimelineItem = useCallback(({ item, index }: LegendListRenderItemProps<AgentTimelineItem>) => {
     const previous = visibleTimeline[index - 1];
     const startsTurn = Boolean(item.turnId && previous?.turnId && item.turnId !== previous.turnId);
     return (
@@ -2106,8 +2108,8 @@ export function AgentConversationScreen({
       setHasNewOutput(true);
       return;
     }
-    scrollTimelineToEnd(true);
-  }, [scrollTimelineToEnd, timelineAutoScrollKey, visibleTimeline.length]);
+    setHasNewOutput(false);
+  }, [timelineAutoScrollKey, visibleTimeline.length]);
 
   useEffect(() => {
     if (!conversation || visibleTimeline.length === 0) return;
@@ -2233,7 +2235,7 @@ export function AgentConversationScreen({
 
   const pickImages = useCallback(async (source: "camera" | "library") => {
     if (!supportsImages) {
-      Alert.alert("当前 Agent 不支持图片", "请升级 CLI 或切换到支持图片输入的 Codex Agent。");
+      Alert.alert("当前 Agent 不支持图片", "请切换到 Claude 或 Codex Agent，或使用支持图片输入的自定义 Agent。");
       return;
     }
     if (attachments.length >= MAX_IMAGE_ATTACHMENTS) {
@@ -2277,7 +2279,7 @@ export function AgentConversationScreen({
 
   const showAttachSheet = useCallback(() => {
     if (!supportsImages) {
-      Alert.alert("当前 Agent 不支持图片", "请升级 CLI 或切换到支持图片输入的 Codex Agent。");
+      Alert.alert("当前 Agent 不支持图片", "请切换到 Claude 或 Codex Agent，或使用支持图片输入的自定义 Agent。");
       return;
     }
     if (Platform.OS === "ios") {
@@ -2414,7 +2416,7 @@ export function AgentConversationScreen({
       </View>
 
       <View style={{ flex: 1 }}>
-        <FlatList
+        <LegendList
           ref={timelineRef}
           data={visibleTimeline}
           keyExtractor={(item) => item.id}
@@ -2427,22 +2429,14 @@ export function AgentConversationScreen({
           keyboardShouldPersistTaps="handled"
           onScroll={handleTimelineScroll}
           scrollEventThrottle={16}
-          removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={18}
-          maxToRenderPerBatch={12}
-          windowSize={9}
+          estimatedItemSize={96}
+          drawDistance={420}
+          maintainScrollAtEnd={{ onDataChange: true, onItemLayout: true, onLayout: true }}
+          maintainScrollAtEndThreshold={0.22}
+          maintainVisibleContentPosition
           onContentSizeChange={() => {
-            if (
-              conversation &&
-              pendingInitialScrollConversationRef.current === conversation.id
-            ) {
+            if (conversation && pendingInitialScrollConversationRef.current === conversation.id) {
               scrollTimelineToEnd(false);
-              return;
-            }
-            if (isTimelineNearBottom || timelineNearBottomRef.current) {
-              scrollTimelineToEnd(true);
-            } else {
-              setHasNewOutput(true);
             }
           }}
         />

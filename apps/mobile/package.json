@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
+    "@legendapp/list": "^2.0.19",
     "@linkshell/protocol": "workspace:*",
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@react-native-menu/menu": "^2.0.0",
