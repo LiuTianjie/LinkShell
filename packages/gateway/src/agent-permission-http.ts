@@ -46,6 +46,10 @@ export type AgentPermissionHttpBody = z.infer<typeof agentPermissionHttpBodySche
 
 export type AgentPermissionHttpResult = {
   status: number;
+  forwarded?: Array<{
+    type: string;
+    terminalId?: string;
+  }>;
   body: {
     ok?: true;
     error?: "unauthorized" | "session_not_found" | "host_not_connected" | "invalid_payload";
@@ -98,7 +102,14 @@ export function forwardAgentPermissionHttp(input: {
       session.host.socket.send(serializeEnvelope(envelope));
     }
     session.lastActivity = Date.now();
-    return { status: 200, body: { ok: true } };
+    return {
+      status: 200,
+      forwarded: envelopes.map((envelope) => ({
+        type: envelope.type,
+        terminalId: envelope.terminalId,
+      })),
+      body: { ok: true },
+    };
   } catch (err) {
     return {
       status: 400,

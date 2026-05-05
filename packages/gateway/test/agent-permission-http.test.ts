@@ -62,7 +62,11 @@ describe("Live Activity permission HTTP forwarding", () => {
         tokenManager: h.tokenManager,
       });
 
-      expect(result).toEqual({ status: 200, body: { ok: true } });
+      expect(result.status).toBe(200);
+      expect(result.body).toEqual({ ok: true });
+      expect(result.forwarded).toEqual([
+        { type: "agent.v2.permission.respond", terminalId: undefined },
+      ]);
       expect(h.send).toHaveBeenCalledTimes(1);
       const envelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
       expect(envelope.type).toBe("agent.v2.permission.respond");

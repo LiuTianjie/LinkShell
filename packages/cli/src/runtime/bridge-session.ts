@@ -836,7 +836,10 @@ export class BridgeSession {
       }
       case "permission.decision": {
         const p = envelope.payload as { requestId: string; decision: "allow" | "deny" };
-        this.resolvePendingPermission(p.requestId, p.decision, "permission.decision");
+        const resolved = this.resolvePendingPermission(p.requestId, p.decision, "permission.decision");
+        process.stderr.write(
+          `[bridge] permission decision request=${p.requestId} decision=${p.decision} resolved=${resolved}\n`,
+        );
         break;
       }
       case "tunnel.request": {

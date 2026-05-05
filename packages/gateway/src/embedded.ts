@@ -148,7 +148,10 @@ export function startEmbeddedGateway(
           sessionManager,
           tokenManager,
         });
-        log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} session=${body.sessionId} request=${body.requestId} status=${result.status}`);
+        const forwarded = result.forwarded?.map((item) =>
+          item.terminalId ? `${item.type}:${item.terminalId}` : item.type,
+        ).join(",") ?? "none";
+        log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} session=${body.sessionId} request=${body.requestId} status=${result.status} forwarded=${forwarded}`);
         json(res, result.status, result.body);
         return;
       }
