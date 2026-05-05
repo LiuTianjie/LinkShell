@@ -13,6 +13,8 @@ import {
   upsertAgentConversation,
   upsertAgentTimelineItem,
   type AgentCapabilities,
+  type AgentCollaborationMode,
+  type AgentCommandDescriptor,
   type AgentContentBlock,
   type AgentConversationRecord,
   type AgentProvider,
@@ -33,6 +35,7 @@ interface OpenConversationInput {
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
   permissionMode?: AgentPermissionMode;
+  collaborationMode?: AgentCollaborationMode;
 }
 
 export interface OpenConversationResult {
@@ -61,8 +64,15 @@ export interface AgentWorkspaceHandle {
       model?: string;
       reasoningEffort?: AgentReasoningEffort;
       permissionMode?: AgentPermissionMode;
+      collaborationMode?: AgentCollaborationMode;
       attachments?: AgentContentBlock[];
     },
+  ) => void;
+  executeCommand: (
+    conversationId: string,
+    command: AgentCommandDescriptor,
+    rawText: string,
+    args?: string,
   ) => void;
   updateConversationSettings: (
     conversationId: string,
@@ -70,6 +80,7 @@ export interface AgentWorkspaceHandle {
       model?: string;
       reasoningEffort?: AgentReasoningEffort;
       permissionMode?: AgentPermissionMode;
+      collaborationMode?: AgentCollaborationMode;
     },
   ) => Promise<void>;
   cancel: (conversationId: string) => void;
@@ -225,12 +236,12 @@ export function useAgentWorkspace(
   }, []);
 
   const persistTimelineItem = useCallback(async (item: AgentTimelineItem) => {
-    await upsertAgentTimelineItem(item);
     setTimelineById((prev) => {
       const next = new Map(prev);
       next.set(item.conversationId, mergeTimeline(next.get(item.conversationId) ?? [], [item]));
       return next;
     });
+    await upsertAgentTimelineItem(item);
   }, []);
 
   const sessionForConversation = useCallback(
@@ -308,6 +319,7 @@ export function useAgentWorkspace(
         model: conversation.model,
         reasoningEffort: conversation.reasoningEffort,
         permissionMode: conversation.permissionMode,
+        collaborationMode: conversation.collaborationMode,
         status: conversation.status ?? "idle",
         archived: Boolean(conversation.archived),
         lastMessagePreview: conversation.lastMessagePreview,
@@ -722,6 +734,7 @@ export function useAgentWorkspace(
             model: input.model,
             reasoningEffort: input.reasoningEffort,
             permissionMode: input.permissionMode,
+            collaborationMode: input.collaborationMode,
             title: input.title || input.cwd.split("/").filter(Boolean).pop() || "Agent",
           },
           { queue: true, dedupeKey: `agent-v2-open:${conversationId}` },
@@ -788,6 +801,7 @@ export function useAgentWorkspace(
         model: conversation.model,
         reasoningEffort: conversation.reasoningEffort,
         permissionMode: conversation.permissionMode,
+        collaborationMode: conversation.collaborationMode,
         title: conversation.title,
       });
       return result.conversationId;
@@ -803,6 +817,7 @@ export function useAgentWorkspace(
         model?: string;
         reasoningEffort?: AgentReasoningEffort;
         permissionMode?: AgentPermissionMode;
+        collaborationMode?: AgentCollaborationMode;
         attachments?: AgentContentBlock[];
       },
     ) => {
@@ -817,7 +832,44 @@ export function useAgentWorkspace(
       ];
       const session = findSessionForConversation(conversation, manager.sessions);
       if (!session) return;
-      manager.sendAgentWorkspaceEnvelope(
+
+      const now = Date.now();
+      const optimisticItem: AgentTimelineItem = {
+        id: clientMessageId,
+        conversationId,
+        type: "message",
+        kind: "chat",
+        role: "user",
+        content: contentBlocks,
+        text: textFromBlocks(contentBlocks),
+        metadata: { optimistic: true },
+        createdAt: now,
+      };
+      setTimelineById((prev) => {
+        const next = new Map(prev);
+        next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [optimisticItem]));
+        return next;
+      });
+      upsertAgentTimelineItem(optimisticItem).catch(() => {});
+
+      const nextConversation: AgentConversationRecord = {
+        ...conversation,
+        model: options?.model ?? conversation.model,
+        reasoningEffort: options?.reasoningEffort ?? conversation.reasoningEffort,
+        permissionMode: options?.permissionMode ?? conversation.permissionMode,
+        collaborationMode: options?.collaborationMode ?? conversation.collaborationMode,
+        status: "running",
+        lastMessagePreview: previewFromItem(optimisticItem) ?? conversation.lastMessagePreview,
+        lastActivityAt: now,
+      };
+      setConversations((prev) => {
+        const next = prev.filter((item) => item.id !== conversationId);
+        next.unshift(nextConversation);
+        return next.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+      });
+      upsertAgentConversation(nextConversation).catch(() => {});
+
+      const accepted = manager.sendAgentWorkspaceEnvelope(
         session.sessionId,
         "agent.v2.prompt",
         {
@@ -827,9 +879,68 @@ export function useAgentWorkspace(
           model: options?.model,
           reasoningEffort: options?.reasoningEffort,
           permissionMode: options?.permissionMode,
+          collaborationMode: options?.collaborationMode,
         },
         { queue: true },
       );
+      if (!accepted) {
+        const failedItem: AgentTimelineItem = {
+          id: `error:${clientMessageId}`,
+          conversationId,
+          type: "error",
+          error: "消息未发送：连接未就绪，请稍后重试。",
+          createdAt: Date.now(),
+        };
+        setTimelineById((prev) => {
+          const next = new Map(prev);
+          next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [failedItem]));
+          return next;
+        });
+        upsertAgentTimelineItem(failedItem).catch(() => {});
+      }
+    },
+    [manager],
+  );
+
+  const executeCommand = useCallback(
+    (
+      conversationId: string,
+      command: AgentCommandDescriptor,
+      rawText: string,
+      args?: string,
+    ) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation) return;
+      const session = findSessionForConversation(conversation, manager.sessions);
+      if (!session) return;
+      const clientMessageId = `cmd-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const accepted = manager.sendAgentWorkspaceEnvelope(
+        session.sessionId,
+        "agent.v2.command.execute",
+        {
+          conversationId,
+          commandId: command.id,
+          rawText,
+          args,
+          clientMessageId,
+        },
+        { queue: true },
+      );
+      if (!accepted) {
+        const failedItem: AgentTimelineItem = {
+          id: `error:${clientMessageId}`,
+          conversationId,
+          type: "error",
+          error: "命令未发送：连接未就绪，请稍后重试。",
+          createdAt: Date.now(),
+        };
+        setTimelineById((prev) => {
+          const next = new Map(prev);
+          next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [failedItem]));
+          return next;
+        });
+        upsertAgentTimelineItem(failedItem).catch(() => {});
+      }
     },
     [manager],
   );
@@ -841,6 +952,7 @@ export function useAgentWorkspace(
         model?: string;
         reasoningEffort?: AgentReasoningEffort;
         permissionMode?: AgentPermissionMode;
+        collaborationMode?: AgentCollaborationMode;
       },
     ) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
@@ -848,11 +960,13 @@ export function useAgentWorkspace(
       const hasModel = Object.prototype.hasOwnProperty.call(settings, "model");
       const hasEffort = Object.prototype.hasOwnProperty.call(settings, "reasoningEffort");
       const hasPermission = Object.prototype.hasOwnProperty.call(settings, "permissionMode");
+      const hasCollaboration = Object.prototype.hasOwnProperty.call(settings, "collaborationMode");
       await persistConversation({
         ...conversation,
         model: hasModel ? settings.model : conversation.model,
         reasoningEffort: hasEffort ? settings.reasoningEffort : conversation.reasoningEffort,
         permissionMode: hasPermission ? settings.permissionMode : conversation.permissionMode,
+        collaborationMode: hasCollaboration ? settings.collaborationMode : conversation.collaborationMode,
         lastActivityAt: conversation.lastActivityAt,
       });
     },
@@ -1083,6 +1197,7 @@ export function useAgentWorkspace(
       conversationsRef.current.find((item) => item.id === conversationId),
     getTimeline: (conversationId) => timelineRef.current.get(conversationId) ?? [],
     sendPrompt,
+    executeCommand,
     updateConversationSettings,
     cancel,
     respondPermission,

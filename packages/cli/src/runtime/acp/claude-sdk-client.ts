@@ -208,6 +208,7 @@ export class ClaudeSdkClient {
     model?: string;
     reasoningEffort?: string;
     permissionMode?: AgentPermissionMode;
+    collaborationMode?: "default" | "plan";
     cwd: string;
   }): Promise<unknown> {
     if (!this.query) await this.initialize();

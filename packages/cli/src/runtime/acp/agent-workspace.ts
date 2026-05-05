@@ -1,4 +1,6 @@
-import { basename } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join, relative } from "node:path";
 import {
   createEnvelope,
   parseTypedPayload,
@@ -12,6 +14,9 @@ import { resolveAgentCommand } from "./provider-resolver.js";
 
 type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
+type AgentCollaborationMode = "default" | "plan";
+type AgentCommandExecutionKind = "prompt" | "native" | "local_ui";
+type AgentCommandSource = "built_in" | "custom" | "project" | "user" | "linkshell";
 
 interface AgentContentBlock {
   type: "text" | "image";
@@ -124,6 +129,27 @@ interface AgentSubagentAction {
   agentStates: Record<string, AgentSubagentState>;
 }
 
+interface AgentCommandDescriptor {
+  id: string;
+  name: string;
+  title: string;
+  description?: string;
+  provider?: AgentProvider;
+  source: AgentCommandSource;
+  category?: string;
+  argsMode: "none" | "optional" | "required" | "raw";
+  requiresIdle?: boolean;
+  destructive?: boolean;
+  disabledReason?: string;
+  executionKind: AgentCommandExecutionKind;
+}
+
+interface AgentModeDescriptor {
+  id: string;
+  title: string;
+  description?: string;
+}
+
 interface AgentConversation {
   id: string;
   agentSessionId?: string;
@@ -133,6 +159,7 @@ interface AgentConversation {
   model?: string;
   reasoningEffort?: string;
   permissionMode?: AgentPermissionMode;
+  collaborationMode?: AgentCollaborationMode;
   status: AgentStatus;
   archived: boolean;
   lastMessagePreview?: string;
@@ -688,10 +715,241 @@ interface ProviderRuntimeCapabilities {
   models?: AgentModelOption[];
   defaultModel?: string;
   reasoningEfforts?: string[];
+  commands?: AgentCommandDescriptor[];
+  modes?: AgentModeDescriptor[];
+  currentMode?: string;
 }
 
 const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 const ALL_PERMISSION_MODES = ["read_only", "workspace_write", "full_access"] as const;
+const CODEX_COMMAND_NAMES = ["plan", "exit-plan", "compact", "clear", "status", "review", "subagents"] as const;
+const CLAUDE_BUILT_IN_COMMANDS: Array<{ name: string; description: string; argsMode?: AgentCommandDescriptor["argsMode"]; destructive?: boolean }> = [
+  { name: "add-dir", description: "Add additional working directories" },
+  { name: "agents", description: "Manage subagents" },
+  { name: "bug", description: "Report a Claude Code bug" },
+  { name: "clear", description: "Clear conversation context", argsMode: "none", destructive: true },
+  { name: "compact", description: "Compact conversation history" },
+  { name: "config", description: "Open configuration" },
+  { name: "cost", description: "Show usage cost" },
+  { name: "doctor", description: "Check Claude Code health" },
+  { name: "exit", description: "Exit Claude Code", argsMode: "none", destructive: true },
+  { name: "export", description: "Export conversation" },
+  { name: "help", description: "Show help" },
+  { name: "ide", description: "Manage IDE integration" },
+  { name: "init", description: "Create or update CLAUDE.md" },
+  { name: "login", description: "Sign in" },
+  { name: "logout", description: "Sign out" },
+  { name: "mcp", description: "Manage MCP servers" },
+  { name: "memory", description: "Edit memory files" },
+  { name: "model", description: "Switch model" },
+  { name: "permissions", description: "Manage permissions" },
+  { name: "pr-comments", description: "Fetch PR comments" },
+  { name: "release-notes", description: "Show release notes" },
+  { name: "resume", description: "Resume a conversation" },
+  { name: "review", description: "Review local changes" },
+  { name: "security-review", description: "Run a security review" },
+  { name: "status", description: "Show status" },
+  { name: "statusline", description: "Configure status line" },
+  { name: "terminal-setup", description: "Configure terminal integration" },
+  { name: "upgrade", description: "Upgrade Claude Code" },
+  { name: "vim", description: "Toggle vim mode" },
+];
+
+function commandId(provider: AgentProvider, name: string, source: AgentCommandSource = "built_in"): string {
+  return `${provider}:${source}:${name.replace(/^\/+/, "")}`;
+}
+
+function commandTitle(name: string): string {
+  return `/${name.replace(/^\/+/, "")}`;
+}
+
+function makeCommand(input: {
+  provider: AgentProvider;
+  name: string;
+  description?: string;
+  source?: AgentCommandSource;
+  category?: string;
+  argsMode?: AgentCommandDescriptor["argsMode"];
+  requiresIdle?: boolean;
+  destructive?: boolean;
+  disabledReason?: string;
+  executionKind?: AgentCommandExecutionKind;
+}): AgentCommandDescriptor {
+  const cleanName = input.name.replace(/^\/+/, "");
+  const source = input.source ?? "built_in";
+  return {
+    id: commandId(input.provider, cleanName, source),
+    name: cleanName,
+    title: commandTitle(cleanName),
+    description: input.description,
+    provider: input.provider,
+    source,
+    category: input.category,
+    argsMode: input.argsMode ?? "optional",
+    requiresIdle: input.requiresIdle,
+    destructive: input.destructive,
+    disabledReason: input.disabledReason,
+    executionKind: input.executionKind ?? "prompt",
+  };
+}
+
+function commandFromMarkdownFile(provider: AgentProvider, root: string, filePath: string, source: AgentCommandSource): AgentCommandDescriptor | undefined {
+  if (!filePath.endsWith(".md")) return undefined;
+  const rel = relative(root, filePath).replace(/\\/g, "/").replace(/\.md$/i, "");
+  const name = rel.split("/").filter(Boolean).join(":");
+  if (!name) return undefined;
+  let description: string | undefined;
+  try {
+    const text = readFileSync(filePath, "utf8");
+    description = text.split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith("---"))?.slice(0, 160);
+  } catch {
+    description = undefined;
+  }
+  return makeCommand({
+    provider,
+    name,
+    description: description || "Custom Claude command",
+    source,
+    category: source === "project" ? "Project commands" : "User commands",
+    argsMode: "raw",
+  });
+}
+
+function walkMarkdownCommands(provider: AgentProvider, root: string, source: AgentCommandSource): AgentCommandDescriptor[] {
+  if (!existsSync(root)) return [];
+  const result: AgentCommandDescriptor[] = [];
+  const walk = (dir: string) => {
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry);
+      let stat;
+      try {
+        stat = statSync(path);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) walk(path);
+      else if (stat.isFile()) {
+        const command = commandFromMarkdownFile(provider, root, path, source);
+        if (command) result.push(command);
+      }
+    }
+  };
+  walk(root);
+  return result;
+}
+
+function customClaudeCommands(cwd: string): AgentCommandDescriptor[] {
+  const projectCommands = walkMarkdownCommands("claude", join(cwd, ".claude", "commands"), "project");
+  const userCommands = walkMarkdownCommands("claude", join(homedir(), ".claude", "commands"), "user");
+  return [...projectCommands, ...userCommands];
+}
+
+function defaultProviderCommands(provider: AgentProvider, cwd: string, enabled: boolean): AgentCommandDescriptor[] {
+  const disabledReason = enabled ? undefined : `${providerLabel(provider)} 未安装或启动失败`;
+  if (provider === "codex") {
+    return CODEX_COMMAND_NAMES.map((name) => makeCommand({
+      provider,
+      name,
+      source: "linkshell",
+      category: name === "plan" || name === "exit-plan" ? "Modes" : "Codex",
+      description: {
+        "plan": "Enter Codex plan mode",
+        "exit-plan": "Exit Codex plan mode",
+        compact: "Compact the current thread",
+        clear: "Start a fresh Codex thread",
+        status: "Show LinkShell agent status",
+        review: "Ask Codex to review local changes",
+        subagents: "Insert a delegation prompt",
+      }[name],
+      argsMode: name === "review" || name === "subagents" ? "optional" : "none",
+      destructive: name === "clear",
+      disabledReason,
+      executionKind: name === "review" || name === "subagents" ? "prompt" : "native",
+    }));
+  }
+  if (provider === "claude") {
+    const builtIns = CLAUDE_BUILT_IN_COMMANDS.map((entry) => makeCommand({
+      provider,
+      name: entry.name,
+      description: entry.description,
+      argsMode: entry.argsMode,
+      destructive: entry.destructive,
+      disabledReason,
+      executionKind: "prompt",
+    }));
+    const custom = customClaudeCommands(cwd).map((command) => ({
+      ...command,
+      disabledReason: command.disabledReason ?? disabledReason,
+    }));
+    return [...builtIns, ...custom];
+  }
+  return [
+    makeCommand({
+      provider,
+      name: "status",
+      source: "linkshell",
+      category: "LinkShell",
+      description: "Show LinkShell agent status",
+      argsMode: "none",
+      disabledReason,
+      executionKind: "native",
+    }),
+  ];
+}
+
+function mergeCommands(...groups: Array<AgentCommandDescriptor[] | undefined>): AgentCommandDescriptor[] {
+  const map = new Map<string, AgentCommandDescriptor>();
+  for (const group of groups) {
+    for (const command of group ?? []) {
+      const key = `${command.provider ?? ""}:${command.name}`;
+      map.set(key, { ...map.get(key), ...command });
+    }
+  }
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function runtimeCommands(provider: AgentProvider, value: unknown): AgentCommandDescriptor[] {
+  const raw = asRecord(value);
+  const commandsValue =
+    Array.isArray(value) ? value :
+    Array.isArray(raw?.commands) ? raw.commands :
+    Array.isArray(raw?.slashCommands) ? raw.slashCommands :
+    Array.isArray(raw?.slash_commands) ? raw.slash_commands :
+    Array.isArray(raw?.available_commands) ? raw.available_commands :
+    [];
+  return commandsValue
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return makeCommand({
+          provider,
+          name: entry,
+          description: undefined,
+          source: "built_in",
+          argsMode: "raw",
+          executionKind: "prompt",
+        });
+      }
+      const record = asRecord(entry);
+      const name = firstString(record, ["name", "command", "id"]);
+      if (!name) return undefined;
+      return makeCommand({
+        provider,
+        name,
+        description: firstString(record, ["description", "summary"]),
+        source: "built_in",
+        category: firstString(record, ["category", "group"]),
+        argsMode: "raw",
+        executionKind: "prompt",
+      });
+    })
+    .filter((entry): entry is AgentCommandDescriptor => Boolean(entry));
+}
 
 function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities | undefined {
   const raw = asRecord(value);
@@ -851,6 +1109,11 @@ export class AgentWorkspaceProxy {
       case "agent.v2.prompt": {
         const payload = parseTypedPayload("agent.v2.prompt", envelope.payload);
         await this.sendPrompt(payload);
+        break;
+      }
+      case "agent.v2.command.execute": {
+        const payload = parseTypedPayload("agent.v2.command.execute", envelope.payload);
+        await this.executeCommand(payload);
         break;
       }
       case "agent.v2.cancel": {
@@ -1038,6 +1301,7 @@ export class AgentWorkspaceProxy {
             model: remote.model ?? existing?.model,
             reasoningEffort: existing?.reasoningEffort,
             permissionMode: existing?.permissionMode,
+            collaborationMode: existing?.collaborationMode,
             status: existing?.status ?? "idle",
             archived: existing?.archived ?? false,
             lastMessagePreview: existing?.lastMessagePreview,
@@ -1066,6 +1330,11 @@ export class AgentWorkspaceProxy {
       const isClaudeFallback = protocol === "claude-stream-json";
       const supportsPermission = enabled && !isClaudeFallback;
       const supportsReasoningEffort = enabled && !isClaudeFallback;
+      const commands = mergeCommands(
+        defaultProviderCommands(provider, this.input.cwd, enabled),
+        runtimeCapabilities?.commands,
+      );
+      const currentMode = [...this.conversations.values()].find((conversation) => conversation.provider === provider)?.collaborationMode;
       return {
         id: provider,
         label: providerLabel(provider),
@@ -1081,6 +1350,12 @@ export class AgentWorkspaceProxy {
           ? runtimeCapabilities?.reasoningEfforts ?? [...ALL_REASONING_EFFORTS]
           : [],
         permissionModes: supportsPermission ? [...ALL_PERMISSION_MODES] : [],
+        commands,
+        modes: runtimeCapabilities?.modes ?? (provider === "codex" ? [
+          { id: "default", title: "Default", description: "Run normal implementation turns" },
+          { id: "plan", title: "Plan", description: "Discuss and produce an implementation plan first" },
+        ] : []),
+        currentMode,
         features: {
           images: supportsImages,
           permissions: supportsPermission,
@@ -1122,6 +1397,7 @@ export class AgentWorkspaceProxy {
     model?: string;
     reasoningEffort?: string;
     permissionMode?: AgentPermissionMode;
+    collaborationMode?: AgentCollaborationMode;
     title?: string;
   }): Promise<AgentConversation | undefined> {
     const provider = payload.provider ?? this.input.availableProviders[0];
@@ -1182,6 +1458,7 @@ export class AgentWorkspaceProxy {
         model: payload.model ?? existingConversation?.model,
         reasoningEffort: payload.reasoningEffort ?? existingConversation?.reasoningEffort,
         permissionMode: payload.permissionMode ?? existingConversation?.permissionMode,
+        collaborationMode: payload.collaborationMode ?? existingConversation?.collaborationMode,
         status: "idle",
         archived: existingConversation?.archived ?? false,
         lastMessagePreview: existingConversation?.status === "error" ? undefined : existingConversation?.lastMessagePreview,
@@ -1212,6 +1489,7 @@ export class AgentWorkspaceProxy {
       model?: string;
       reasoningEffort?: string;
       permissionMode?: AgentPermissionMode;
+      collaborationMode?: AgentCollaborationMode;
       title?: string;
     },
     message: string,
@@ -1227,6 +1505,7 @@ export class AgentWorkspaceProxy {
       model: payload.model,
       reasoningEffort: payload.reasoningEffort,
       permissionMode: payload.permissionMode,
+      collaborationMode: payload.collaborationMode,
       status: "error",
       archived: false,
       lastMessagePreview: message,
@@ -1257,6 +1536,7 @@ export class AgentWorkspaceProxy {
     model?: string;
     reasoningEffort?: string;
     permissionMode?: AgentPermissionMode;
+    collaborationMode?: AgentCollaborationMode;
   }): Promise<void> {
     const conversation =
       this.conversations.get(payload.conversationId) ??
@@ -1283,6 +1563,7 @@ export class AgentWorkspaceProxy {
     conversation.model = payload.model ?? conversation.model;
     conversation.reasoningEffort = payload.reasoningEffort ?? conversation.reasoningEffort;
     conversation.permissionMode = payload.permissionMode ?? conversation.permissionMode;
+    conversation.collaborationMode = payload.collaborationMode ?? conversation.collaborationMode;
     conversation.status = "running";
     conversation.lastActivityAt = Date.now();
     this.activeConversationId = conversation.id;
@@ -1307,6 +1588,7 @@ export class AgentWorkspaceProxy {
         model: payload.model,
         reasoningEffort: payload.reasoningEffort,
         permissionMode: payload.permissionMode,
+        collaborationMode: payload.collaborationMode ?? conversation.collaborationMode,
         cwd: conversation.cwd,
       });
       const nextAgentSessionId = this.extractSessionId(result);
@@ -1320,6 +1602,196 @@ export class AgentWorkspaceProxy {
       if (conversation.status === "running" && protocol !== "codex-app-server") {
         this.updateConversationStatus(conversation.id, "idle");
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.updateConversationStatus(conversation.id, "error", message);
+      this.addItem(conversation.id, {
+        id: id("error"),
+        conversationId: conversation.id,
+        type: "error",
+        error: message,
+        createdAt: Date.now(),
+      });
+    }
+  }
+
+  private commandForConversation(conversation: AgentConversation, commandId: string): AgentCommandDescriptor | undefined {
+    const runtimeCapabilities = this.providerCapabilities.get(conversation.provider);
+    const commands = mergeCommands(
+      defaultProviderCommands(conversation.provider, conversation.cwd, true),
+      runtimeCapabilities?.commands,
+    );
+    return commands.find((command) =>
+      command.id === commandId ||
+      command.name === commandId ||
+      `/${command.name}` === commandId
+    );
+  }
+
+  private async executeCommand(payload: {
+    conversationId: string;
+    commandId: string;
+    rawText?: string;
+    args?: string;
+    clientMessageId: string;
+  }): Promise<void> {
+    const conversation =
+      this.conversations.get(payload.conversationId) ??
+      await this.openConversation({ conversationId: payload.conversationId });
+    if (!conversation || !conversation.agentSessionId) return;
+
+    const command = this.commandForConversation(conversation, payload.commandId);
+    if (!command) {
+      this.addItem(conversation.id, {
+        id: id("error"),
+        conversationId: conversation.id,
+        type: "error",
+        error: `未知命令：${payload.commandId}`,
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
+    if (command.disabledReason) {
+      this.addItem(conversation.id, {
+        id: id("error"),
+        conversationId: conversation.id,
+        type: "error",
+        error: command.disabledReason,
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
+    const rawText = payload.rawText?.trim() || `/${command.name}${payload.args?.trim() ? ` ${payload.args.trim()}` : ""}`;
+    if (command.executionKind === "prompt") {
+      await this.sendPrompt({
+        conversationId: conversation.id,
+        clientMessageId: payload.clientMessageId,
+        contentBlocks: [{ type: "text", text: rawText }],
+        model: conversation.model,
+        reasoningEffort: conversation.reasoningEffort,
+        permissionMode: conversation.permissionMode,
+        collaborationMode: conversation.collaborationMode,
+      });
+      return;
+    }
+
+    this.addItem(conversation.id, {
+      id: payload.clientMessageId,
+      conversationId: conversation.id,
+      type: "message",
+      kind: "chat",
+      role: "user",
+      content: [{ type: "text", text: rawText }],
+      text: rawText,
+      metadata: { commandId: command.id, commandExecutionKind: command.executionKind },
+      createdAt: Date.now(),
+    });
+
+    if (command.executionKind === "local_ui") {
+      this.emitStatus(conversation.id, "idle", `${command.title} 已由移动端处理。`);
+      return;
+    }
+
+    await this.executeNativeCommand(conversation, command, payload.args?.trim());
+  }
+
+  private async executeNativeCommand(
+    conversation: AgentConversation,
+    command: AgentCommandDescriptor,
+    args?: string,
+  ): Promise<void> {
+    const client = this.clientForProvider(conversation.provider);
+    const now = Date.now();
+    try {
+      if (command.name === "status") {
+        this.emitStatus(
+          conversation.id,
+          conversation.status,
+          `${providerLabel(conversation.provider)} · ${conversation.collaborationMode === "plan" ? "Plan mode" : "Default mode"} · ${conversation.cwd}`,
+        );
+        return;
+      }
+
+      if (conversation.provider !== "codex") {
+        this.addItem(conversation.id, {
+          id: id("error"),
+          conversationId: conversation.id,
+          type: "error",
+          error: `${command.title} 暂无 ${providerLabel(conversation.provider)} 原生实现。`,
+          createdAt: now,
+        });
+        return;
+      }
+
+      if (command.name === "plan" || command.name === "exit-plan") {
+        conversation.collaborationMode = command.name === "plan" ? "plan" : "default";
+        conversation.status = "idle";
+        conversation.lastMessagePreview = command.name === "plan" ? "已进入 Plan mode" : "已退出 Plan mode";
+        conversation.lastActivityAt = now;
+        this.emitConversation(conversation);
+        this.sendCapabilities();
+        this.emitStatus(conversation.id, "idle", command.name === "plan"
+          ? "已进入 Plan mode。下一条消息会先制定计划。"
+          : "已退出 Plan mode。");
+        return;
+      }
+
+      if (command.name === "compact") {
+        if (!(client instanceof AcpClient)) throw new Error("当前 Codex runtime 不支持原生 compact。");
+        conversation.status = "running";
+        this.emitConversation(conversation);
+        this.addItem(conversation.id, {
+          id: id("compact"),
+          conversationId: conversation.id,
+          type: "status",
+          kind: "context_compaction",
+          text: "正在压缩上下文",
+          status: "running",
+          isStreaming: true,
+          createdAt: now,
+        });
+        await client.compact({ sessionId: conversation.agentSessionId! });
+        this.updateConversationStatus(conversation.id, "idle", "上下文压缩完成");
+        this.emitStatus(conversation.id, "idle", "上下文压缩完成。");
+        return;
+      }
+
+      if (command.name === "clear") {
+        if (!client) throw new Error("Agent provider 不在线。");
+        const result = await client.newSession({ cwd: conversation.cwd });
+        const nextAgentSessionId = this.extractSessionId(result) ?? id("agent-session");
+        if (conversation.agentSessionId) this.conversationByAgentSessionId.delete(conversation.agentSessionId);
+        conversation.agentSessionId = nextAgentSessionId;
+        conversation.collaborationMode = "default";
+        conversation.status = "idle";
+        conversation.lastMessagePreview = "上下文已重置";
+        conversation.lastActivityAt = now;
+        this.conversationByAgentSessionId.set(nextAgentSessionId, conversation.id);
+        this.timelines.set(conversation.id, []);
+        this.emitConversation(conversation);
+        this.emitStatus(conversation.id, "idle", "上下文已重置，已创建新的 Codex thread。");
+        return;
+      }
+
+      if (command.name === "review" || command.name === "subagents") {
+        const prompt = command.name === "review"
+          ? args || "Review the current local changes."
+          : args || "Run subagents for distinct tasks in parallel when useful, then synthesize the results.";
+        await this.sendPrompt({
+          conversationId: conversation.id,
+          clientMessageId: id(command.name),
+          contentBlocks: [{ type: "text", text: prompt }],
+          model: conversation.model,
+          reasoningEffort: conversation.reasoningEffort,
+          permissionMode: conversation.permissionMode,
+          collaborationMode: conversation.collaborationMode,
+        });
+        return;
+      }
+
+      throw new Error(`命令暂未实现：/${command.name}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.updateConversationStatus(conversation.id, "error", message);
@@ -1353,8 +1825,23 @@ export class AgentWorkspaceProxy {
     if (this.input.verbose) {
       process.stderr.write(`[agent:v2] ${method} ${stringify(params).slice(0, 500)}\n`);
     }
+    if (method === "initialized") {
+      const conversationId = this.conversationIdFromParams(params) ?? this.activeConversationId;
+      const provider = conversationId ? this.conversations.get(conversationId)?.provider : this.input.availableProviders[0];
+      if (provider) {
+        const commands = runtimeCommands(provider, params);
+        if (commands.length > 0) {
+          const existing = this.providerCapabilities.get(provider);
+          this.providerCapabilities.set(provider, {
+            ...(existing ?? {}),
+            commands: mergeCommands(existing?.commands, commands),
+          });
+          this.sendCapabilities();
+        }
+      }
+      return;
+    }
     if (
-      method === "initialized" ||
       method.startsWith("account/") ||
       method.startsWith("mcpServer/startupStatus/") ||
       method === "thread/status/changed" ||

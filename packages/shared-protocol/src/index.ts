@@ -333,6 +333,8 @@ export const agentPermissionModeSchema = z.enum([
   "full_access",
 ]);
 
+export const agentCollaborationModeSchema = z.enum(["default", "plan"]);
+
 export const agentContentBlockSchema = z.object({
   type: z.enum(["text", "image"]),
   text: z.string().optional(),
@@ -374,6 +376,27 @@ export const agentModelOptionSchema = z.object({
   label: z.string().min(1),
 });
 
+export const agentCommandDescriptorSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  provider: agentProviderSchema.optional(),
+  source: z.enum(["built_in", "custom", "project", "user", "linkshell"]).default("built_in"),
+  category: z.string().optional(),
+  argsMode: z.enum(["none", "optional", "required", "raw"]).default("optional"),
+  requiresIdle: z.boolean().optional(),
+  destructive: z.boolean().optional(),
+  disabledReason: z.string().optional(),
+  executionKind: z.enum(["prompt", "native", "local_ui"]).default("prompt"),
+});
+
+export const agentModeDescriptorSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+});
+
 export const agentProviderCapabilitySchema = z.object({
   id: agentProviderSchema,
   label: z.string().min(1),
@@ -387,6 +410,9 @@ export const agentProviderCapabilitySchema = z.object({
   defaultModel: z.string().min(1).optional(),
   reasoningEfforts: z.array(agentReasoningEffortSchema).optional(),
   permissionModes: z.array(agentPermissionModeSchema).optional(),
+  commands: z.array(agentCommandDescriptorSchema).optional(),
+  modes: z.array(agentModeDescriptorSchema).optional(),
+  currentMode: z.string().optional(),
   features: z.record(z.boolean()).optional(),
 });
 
@@ -600,6 +626,7 @@ export const agentV2ConversationSchema = z.object({
   model: z.string().optional(),
   reasoningEffort: agentReasoningEffortSchema.optional(),
   permissionMode: agentPermissionModeSchema.optional(),
+  collaborationMode: agentCollaborationModeSchema.optional(),
   status: agentV2StatusSchema.default("idle"),
   archived: z.boolean().default(false),
   lastMessagePreview: z.string().optional(),
@@ -621,6 +648,7 @@ export const agentV2ConversationOpenPayloadSchema = z.object({
   model: z.string().optional(),
   reasoningEffort: agentReasoningEffortSchema.optional(),
   permissionMode: agentPermissionModeSchema.optional(),
+  collaborationMode: agentCollaborationModeSchema.optional(),
   title: z.string().optional(),
 });
 
@@ -644,6 +672,15 @@ export const agentV2PromptPayloadSchema = z.object({
   model: z.string().min(1).optional(),
   reasoningEffort: agentReasoningEffortSchema.optional(),
   permissionMode: agentPermissionModeSchema.optional(),
+  collaborationMode: agentCollaborationModeSchema.optional(),
+});
+
+export const agentV2CommandExecutePayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  commandId: z.string().min(1),
+  rawText: z.string().optional(),
+  args: z.string().optional(),
+  clientMessageId: z.string().min(1),
 });
 
 export const agentV2CancelPayloadSchema = z.object({
@@ -771,6 +808,7 @@ export const protocolMessageSchemas = {
   "agent.v2.conversation.list": agentV2ConversationListPayloadSchema,
   "agent.v2.conversation.list.result": agentV2ConversationListResultPayloadSchema,
   "agent.v2.prompt": agentV2PromptPayloadSchema,
+  "agent.v2.command.execute": agentV2CommandExecutePayloadSchema,
   "agent.v2.cancel": agentV2CancelPayloadSchema,
   "agent.v2.permission.respond": agentV2PermissionRespondPayloadSchema,
   "agent.v2.permission.request": agentV2PermissionRequestPayloadSchema,

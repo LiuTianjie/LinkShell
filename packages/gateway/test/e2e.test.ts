@@ -216,6 +216,18 @@ describe("Protocol schemas", () => {
         defaultModel: "gpt-5.5",
         reasoningEfforts: ["none", "minimal", "high"],
         permissionModes: ["read_only", "workspace_write"],
+        commands: [{
+          id: "codex:linkshell:plan",
+          name: "plan",
+          title: "/plan",
+          description: "Enter plan mode",
+          provider: "codex",
+          source: "linkshell",
+          argsMode: "none",
+          executionKind: "native",
+        }],
+        modes: [{ id: "plan", title: "Plan" }],
+        currentMode: "plan",
         features: { permissions: true, reasoningEffort: true },
       }],
       supportsSessionList: true,
@@ -230,7 +242,28 @@ describe("Protocol schemas", () => {
     expect(payload.providers?.[0]?.defaultModel).toBe("gpt-5.5");
     expect(payload.providers?.[0]?.reasoningEfforts).toContain("minimal");
     expect(payload.providers?.[0]?.permissionModes).toContain("read_only");
+    expect(payload.providers?.[0]?.commands?.[0]?.name).toBe("plan");
+    expect(payload.providers?.[0]?.modes?.[0]?.id).toBe("plan");
+    expect(payload.providers?.[0]?.currentMode).toBe("plan");
     expect(payload.providers?.[0]?.features?.permissions).toBe(true);
+  });
+
+  it("validates agent command execution and collaboration mode payloads", () => {
+    const command = parseLocalTypedPayload("agent.v2.command.execute", {
+      conversationId: "conversation-1",
+      commandId: "codex:linkshell:plan",
+      rawText: "/plan",
+      clientMessageId: "cmd-1",
+    });
+    expect(command.commandId).toBe("codex:linkshell:plan");
+
+    const prompt = parseLocalTypedPayload("agent.v2.prompt", {
+      conversationId: "conversation-1",
+      clientMessageId: "msg-1",
+      contentBlocks: [{ type: "text", text: "make a plan" }],
+      collaborationMode: "plan",
+    });
+    expect(prompt.collaborationMode).toBe("plan");
   });
 
   it("accepts missing and present machineId fields", () => {
@@ -520,6 +553,45 @@ describe("Control ownership", () => {
     const received = await waitForMessage(host);
     expect(received.type).toBe("agent.v2.structured_input.respond");
     expect((received.payload as Record<string, unknown>).requestId).toBe("input-1");
+
+    host.close();
+    client1.close();
+    client2.close();
+  });
+
+  it("routes agent command execution only from the controller", async () => {
+    const { body } = await postJson("/pairings", {});
+    const sessionId = body.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-agent-command");
+    await waitForMessage(host);
+
+    const client1 = await connectWs(sessionId, "client", "client-agent-command-a");
+    await waitForMessage(client1);
+
+    const client2 = await connectWs(sessionId, "client", "client-agent-command-b");
+    await waitForMessage(client2);
+
+    const command = createEnvelope({
+      type: "agent.v2.command.execute",
+      sessionId,
+      payload: {
+        conversationId: "conversation-1",
+        commandId: "codex:linkshell:plan",
+        rawText: "/plan",
+        clientMessageId: "cmd-1",
+      },
+    });
+
+    client2.send(serializeEnvelope(command));
+    const error = await waitForMessage(client2);
+    expect(error.type).toBe("session.error");
+    expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
+
+    client1.send(serializeEnvelope(command));
+    const received = await waitForMessage(host);
+    expect(received.type).toBe("agent.v2.command.execute");
+    expect((received.payload as Record<string, unknown>).commandId).toBe("codex:linkshell:plan");
 
     host.close();
     client1.close();

@@ -264,6 +264,7 @@ function handleClientMessage(
     case "agent.permission.response":
     case "agent.v2.conversation.open":
     case "agent.v2.prompt":
+    case "agent.v2.command.execute":
     case "agent.v2.cancel":
     case "agent.v2.permission.respond":
     case "agent.v2.structured_input.respond":

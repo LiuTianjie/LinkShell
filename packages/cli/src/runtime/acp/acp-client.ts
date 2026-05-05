@@ -2,6 +2,7 @@ import { JsonRpcStdioTransport } from "./json-rpc.js";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
+type AgentCollaborationMode = "default" | "plan";
 
 function normalizeMcpServers(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
@@ -128,14 +129,25 @@ export class AcpClient {
     model?: string;
     reasoningEffort?: string;
     permissionMode?: AgentPermissionMode;
+    collaborationMode?: AgentCollaborationMode;
     cwd: string;
   }): Promise<unknown> {
     if (this.protocol === "codex-app-server") {
+      const collaborationMode = input.collaborationMode
+        ? {
+            mode: input.collaborationMode,
+            settings: {
+              model: input.model ?? null,
+              reasoning_effort: input.reasoningEffort ?? null,
+            },
+          }
+        : undefined;
       return this.transport.request("turn/start", {
         threadId: input.sessionId,
         model: input.model,
         effort: input.reasoningEffort,
         permissions: permissionsForMode(input.permissionMode, input.cwd),
+        collaborationMode,
         input: input.content.map((block) => {
           const raw = block as { type?: string; text?: string; data?: string };
           if (raw.type === "image" && raw.data) {
@@ -176,6 +188,13 @@ export class AcpClient {
     optionId?: string;
   }): void {
     this.transport.notify("session/respond_permission", input);
+  }
+
+  compact(input: { sessionId: string }): Promise<unknown> {
+    if (this.protocol === "codex-app-server") {
+      return this.transport.request("thread/compact/start", { threadId: input.sessionId });
+    }
+    return Promise.reject(new Error("Native compact is not supported by this provider."));
   }
 
   stop(): void {

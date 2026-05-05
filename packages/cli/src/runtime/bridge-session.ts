@@ -788,6 +788,7 @@ export class BridgeSession {
       case "agent.v2.conversation.open":
       case "agent.v2.conversation.list":
       case "agent.v2.prompt":
+      case "agent.v2.command.execute":
       case "agent.v2.cancel":
       case "agent.v2.permission.respond":
       case "agent.v2.structured_input.respond":
@@ -817,7 +818,7 @@ export class BridgeSession {
           );
           break;
         }
-        if (envelope.type === "agent.v2.prompt") this.refreshAgentPermissionHooks();
+        if (envelope.type === "agent.v2.prompt" || envelope.type === "agent.v2.command.execute") this.refreshAgentPermissionHooks();
         await this.agentWorkspace.handleEnvelope(envelope);
         break;
       }

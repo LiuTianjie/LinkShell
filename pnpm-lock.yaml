@@ -176,10 +176,10 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: ^0.2.37
+        specifier: ^0.2.39
         version: link:../gateway
       '@linkshell/protocol':
-        specifier: ^0.2.29
+        specifier: ^0.2.30
         version: link:../shared-protocol
       commander:
         specifier: ^13.1.0
@@ -217,7 +217,7 @@ importers:
   packages/gateway:
     dependencies:
       '@linkshell/protocol':
-        specifier: ^0.2.29
+        specifier: ^0.2.30
         version: link:../shared-protocol
       ws:
         specifier: ^8.18.1

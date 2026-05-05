@@ -130,6 +130,7 @@ export class ClaudeStreamJsonClient {
     model?: string;
     reasoningEffort?: string;
     permissionMode?: AgentPermissionMode;
+    collaborationMode?: "default" | "plan";
     cwd: string;
   }): Promise<unknown> {
     if (this.child) {
@@ -258,6 +259,7 @@ export class ClaudeStreamJsonClient {
                 model: event.model,
               };
               if (event.tools) initParams.tools = event.tools;
+              if (event.slash_commands) initParams.slashCommands = event.slash_commands;
               if (event.mcp_servers) initParams.mcpServers = event.mcp_servers;
               this.input.onNotification("initialized", initParams);
             }

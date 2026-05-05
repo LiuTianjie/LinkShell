@@ -46,6 +46,8 @@ rl.on("line", (line) => {
     send({ jsonrpc: "2.0", id: message.id, result: { thread: { id: "thread-1" } } });
   } else if (message.method === "turn/start") {
     send({ jsonrpc: "2.0", id: message.id, result: { turn: { id: "turn-1" } } });
+  } else if (message.method === "thread/compact/start") {
+    send({ jsonrpc: "2.0", id: message.id, result: { ok: true } });
   } else if (message.method === "thread/list") {
     send({ jsonrpc: "2.0", id: message.id, result: { threads: [{ id: "thread-1", cwd: ${JSON.stringify(cwd)}, title: "Test thread" }] } });
   } else {
@@ -98,8 +100,10 @@ describe("AcpClient codex app-server protocol", () => {
       clientMessageId: "client-msg-1",
       reasoningEffort: "high",
       permissionMode: "workspace_write",
+      collaborationMode: "plan",
       cwd: fake.cwd,
     });
+    await client.compact({ sessionId: "thread-1" });
 
     expect(models).toMatchObject({
       models: [{ id: "gpt-5.5", label: "GPT-5.5" }],
@@ -107,13 +111,14 @@ describe("AcpClient codex app-server protocol", () => {
     });
     expect(session).toMatchObject({ thread: { id: "thread-1" } });
 
-    const entries = await waitForLogEntries(fake.logPath, 5);
+    const entries = await waitForLogEntries(fake.logPath, 6);
     expect(entries.map((entry) => entry.method)).toEqual([
       "initialize",
       "initialized",
       "model/list",
       "thread/start",
       "turn/start",
+      "thread/compact/start",
     ]);
     expect(entries[0].params).toEqual({
       clientInfo: { name: "LinkShell", version: "0.1" },
@@ -122,6 +127,13 @@ describe("AcpClient codex app-server protocol", () => {
     expect(entries[4].params).toMatchObject({
       threadId: "thread-1",
       effort: "high",
+      collaborationMode: {
+        mode: "plan",
+        settings: {
+          model: null,
+          reasoning_effort: "high",
+        },
+      },
       permissions: {
         type: "managed",
         fileSystem: {
@@ -130,6 +142,7 @@ describe("AcpClient codex app-server protocol", () => {
         },
       },
     });
+    expect(entries[5].params).toEqual({ threadId: "thread-1" });
     expect(entries[4].params).not.toHaveProperty("permissionProfile");
   });
 });

@@ -28,7 +28,9 @@ import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
 import type {
   AgentContentBlock,
   AgentCapabilities,
+  AgentCommandDescriptor,
   AgentConversationRecord,
+  AgentCollaborationMode,
   AgentPermissionMode,
   AgentReasoningEffort,
   AgentStructuredInput,
@@ -207,6 +209,54 @@ function formatModel(model: string | undefined, modelOptions: Option<string>[]):
 
 function permissionModeNeedsAttention(mode: AgentPermissionMode | undefined): boolean {
   return mode === "workspace_write" || mode === "full_access";
+}
+
+function trailingSlashCommandToken(text: string): { query: string; start: number; end: number } | null {
+  const slashIndex = text.lastIndexOf("/");
+  if (slashIndex < 0) return null;
+  if (slashIndex > 0 && !/\s/.test(text[slashIndex - 1] ?? "")) return null;
+  const query = text.slice(slashIndex + 1);
+  if (/\s/.test(query)) return null;
+  return { query, start: slashIndex, end: text.length };
+}
+
+function commandSearchBlob(command: AgentCommandDescriptor): string {
+  return [command.name, command.title, command.description, command.category, command.source].filter(Boolean).join(" ").toLowerCase();
+}
+
+function filteredCommands(
+  commands: AgentCommandDescriptor[],
+  query: string,
+): AgentCommandDescriptor[] {
+  const normalized = query.trim().toLowerCase();
+  const filtered = normalized
+    ? commands.filter((command) => commandSearchBlob(command).includes(normalized))
+    : commands;
+  return filtered.slice(0, 12);
+}
+
+function commandCategoryLabel(command: AgentCommandDescriptor): string {
+  if (command.category) return command.category;
+  if (command.source === "project") return "Project";
+  if (command.source === "user") return "User";
+  if (command.source === "linkshell") return "LinkShell";
+  return "Built-in";
+}
+
+function commandRawText(command: AgentCommandDescriptor, args = ""): string {
+  const cleanArgs = args.trim();
+  return `/${command.name}${cleanArgs ? ` ${cleanArgs}` : ""}`;
+}
+
+function commandFromMessage(
+  text: string,
+  commands: AgentCommandDescriptor[],
+): { command: AgentCommandDescriptor; args: string } | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/")) return null;
+  const [token, ...rest] = trimmed.slice(1).split(/\s+/);
+  const command = commands.find((item) => item.name === token || item.title === `/${token}`);
+  return command ? { command, args: rest.join(" ") } : null;
 }
 
 function isElevatedPermissionOption(option: { id: string; label: string; kind: "allow" | "deny" | "other" }): boolean {
@@ -1690,6 +1740,77 @@ function StreamingPill({ theme }: { theme: Theme }) {
   );
 }
 
+function SlashCommandPanel({
+  commands,
+  query,
+  theme,
+  onSelect,
+  onClose,
+}: {
+  commands: AgentCommandDescriptor[];
+  query: string;
+  theme: Theme;
+  onSelect: (command: AgentCommandDescriptor) => void;
+  onClose: () => void;
+}) {
+  const items = filteredCommands(commands, query);
+  if (items.length === 0) {
+    return (
+      <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: timelineSurface(theme), borderWidth: StyleSheet.hairlineWidth, borderColor: theme.separator, padding: 12 }}>
+        <Text style={{ color: theme.textTertiary, fontSize: 13, fontWeight: "700" }}>没有匹配的命令</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: timelineSurface(theme), borderWidth: StyleSheet.hairlineWidth, borderColor: theme.separator, overflow: "hidden" }}>
+      <View style={{ paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.separator, flexDirection: "row", alignItems: "center" }}>
+        <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 12, fontWeight: "800" }}>命令</Text>
+        <Pressable onPress={onClose} hitSlop={8}>
+          <AppSymbol name="xmark" size={12} color={theme.textTertiary} />
+        </Pressable>
+      </View>
+      {items.map((command) => {
+        const disabled = Boolean(command.disabledReason);
+        return (
+          <Pressable
+            key={command.id}
+            disabled={disabled}
+            onPress={() => onSelect(command)}
+            style={({ pressed }) => ({
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              borderBottomWidth: StyleSheet.hairlineWidth,
+              borderBottomColor: theme.separator,
+              backgroundColor: pressed ? theme.bgInput : "transparent",
+              opacity: disabled ? 0.45 : 1,
+              flexDirection: "row",
+              gap: 9,
+              alignItems: "flex-start",
+            })}
+          >
+            <View style={{ width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: command.destructive ? theme.errorLight : theme.accentLight }}>
+              <AppSymbol name={command.destructive ? "exclamationmark.triangle.fill" : "terminal.fill"} size={12} color={command.destructive ? theme.error : theme.accent} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                <Text style={{ color: theme.text, fontSize: 14, fontWeight: "800" }} numberOfLines={1}>
+                  {command.title}
+                </Text>
+                <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "700" }} numberOfLines={1}>
+                  {commandCategoryLabel(command)}
+                </Text>
+              </View>
+              <Text style={{ color: disabled ? theme.error : theme.textTertiary, fontSize: 12, lineHeight: 16, marginTop: 2 }} numberOfLines={2}>
+                {command.disabledReason || command.description || "发送给当前 Agent"}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function AssistantMessage({
   item,
   text,
@@ -1929,10 +2050,13 @@ export function AgentConversationScreen({
   const visibleTimeline = useMemo(() => dedupeTimelineItems(timeline), [timeline]);
   const timelineRef = useRef<LegendListRef>(null);
   const timelineNearBottomRef = useRef(true);
+  const timelineContentHeightRef = useRef(0);
+  const timelineViewportHeightRef = useRef(0);
   const initialScrollConversationRef = useRef<string | null>(null);
   const pendingInitialScrollConversationRef = useRef<string | null>(null);
   const timelineScrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isTimelineNearBottom, setIsTimelineNearBottom] = useState(true);
+  const [isTimelineScrollable, setIsTimelineScrollable] = useState(false);
   const [hasNewOutput, setHasNewOutput] = useState(false);
   const [text, setText] = useState("");
   const [model, setModel] = useState<string | undefined>(conversation?.model);
@@ -1964,6 +2088,15 @@ export function AgentConversationScreen({
     () => permissionOptionsFor(conversation?.provider ?? "codex", capabilities),
     [capabilities, conversation?.provider],
   );
+  const commandToken = useMemo(() => trailingSlashCommandToken(text), [text]);
+  const availableCommands = useMemo(
+    () => (providerCapability?.commands ?? []).filter((command) =>
+      !command.provider || command.provider === conversation?.provider,
+    ),
+    [conversation?.provider, providerCapability?.commands],
+  );
+  const commandPanelVisible = Boolean(commandToken && availableCommands.length > 0 && attachments.length === 0);
+  const currentCollaborationMode = (conversation?.collaborationMode ?? providerCapability?.currentMode ?? "default") as AgentCollaborationMode;
 
   useEffect(() => {
     setModel(conversation?.model);
@@ -2028,11 +2161,24 @@ export function AgentConversationScreen({
 
   const handleTimelineScroll = useCallback((event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    timelineContentHeightRef.current = contentSize.height;
+    timelineViewportHeightRef.current = layoutMeasurement.height;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
     const nearBottom = distanceFromBottom < 96;
     timelineNearBottomRef.current = nearBottom;
     setIsTimelineNearBottom(nearBottom);
     if (nearBottom) setHasNewOutput(false);
+  }, []);
+
+  const updateTimelineScrollable = useCallback(() => {
+    const nextScrollable = timelineContentHeightRef.current > timelineViewportHeightRef.current + 1;
+    setIsTimelineScrollable((current) => current === nextScrollable ? current : nextScrollable);
+    return nextScrollable;
+  }, []);
+
+  const scrollTimelineToTop = useCallback(() => {
+    const list = timelineRef.current as unknown as { scrollToOffset?: (params: { offset: number; animated?: boolean }) => void };
+    list?.scrollToOffset?.({ offset: 0, animated: false });
   }, []);
 
   const scrollTimelineToEnd = useCallback((animated = true, markNearBottom = true) => {
@@ -2045,6 +2191,10 @@ export function AgentConversationScreen({
       clearTimeout(timelineScrollSettleTimerRef.current);
       timelineScrollSettleTimerRef.current = null;
     }
+    if (!updateTimelineScrollable()) {
+      scrollTimelineToTop();
+      return;
+    }
     const scroll = (scrollAnimated: boolean) =>
       timelineRef.current?.scrollToEnd({ animated: scrollAnimated });
     requestAnimationFrame(() => scroll(animated));
@@ -2053,7 +2203,7 @@ export function AgentConversationScreen({
       scroll(false);
       timelineScrollSettleTimerRef.current = null;
     }, animated ? 260 : 80);
-  }, []);
+  }, [scrollTimelineToTop, updateTimelineScrollable]);
 
   const renderTimelineItem = useCallback(({ item, index }: LegendListRenderItemProps<AgentTimelineItem>) => {
     const previous = visibleTimeline[index - 1];
@@ -2139,6 +2289,29 @@ export function AgentConversationScreen({
   const send = useCallback(() => {
     const value = text.trim();
     if (!canSend || !conversation) return;
+    const commandMatch = attachments.length === 0 ? commandFromMessage(value, availableCommands) : null;
+    if (commandMatch) {
+      const run = () => {
+        workspace.executeCommand(conversation.id, commandMatch.command, value, commandMatch.args);
+        setText("");
+        setAttachments([]);
+        scrollTimelineToEnd(true);
+        setTimeout(() => scrollTimelineToEnd(false), 320);
+      };
+      if (commandMatch.command.destructive) {
+        Alert.alert(
+          "执行命令？",
+          `${commandMatch.command.title} 可能会重置或改变当前会话状态。`,
+          [
+            { text: "取消", style: "cancel" },
+            { text: "执行", style: "destructive", onPress: run },
+          ],
+        );
+        return;
+      }
+      run();
+      return;
+    }
     const nextEffort = effort && effortOpts.some((option) => option.value === effort) ? effort : undefined;
     const nextPermissionMode = permissionMode && permissionOpts.some((option) => option.value === permissionMode)
       ? permissionMode
@@ -2147,13 +2320,57 @@ export function AgentConversationScreen({
       model,
       reasoningEffort: nextEffort,
       permissionMode: nextPermissionMode,
+      collaborationMode: currentCollaborationMode,
       attachments,
     });
     setText("");
     setAttachments([]);
     scrollTimelineToEnd(true);
     setTimeout(() => scrollTimelineToEnd(false), 320);
-  }, [attachments, canSend, conversation, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToEnd, text, workspace]);
+  }, [attachments, availableCommands, canSend, conversation, currentCollaborationMode, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToEnd, text, workspace]);
+
+  const executeSlashCommand = useCallback((command: AgentCommandDescriptor, args = "") => {
+    if (!conversation) return;
+    const run = () => {
+      const rawText = commandRawText(command, args);
+      workspace.executeCommand(conversation.id, command, rawText, args);
+      setText("");
+      setAttachments([]);
+      Haptics.selectionAsync().catch(() => {});
+      scrollTimelineToEnd(true);
+      setTimeout(() => scrollTimelineToEnd(false), 320);
+    };
+    if (command.destructive) {
+      Alert.alert(
+        "执行命令？",
+        `${command.title} 可能会重置或改变当前会话状态。`,
+        [
+          { text: "取消", style: "cancel" },
+          { text: "执行", style: "destructive", onPress: run },
+        ],
+      );
+      return;
+    }
+    run();
+  }, [conversation, scrollTimelineToEnd, workspace]);
+
+  const selectSlashCommand = useCallback((command: AgentCommandDescriptor) => {
+    if (!commandToken) return;
+    const draftWithoutToken = text.slice(0, commandToken.start).trimEnd();
+    if (command.argsMode === "none") {
+      executeSlashCommand(command);
+      return;
+    }
+    const replacement = commandRawText(command, "");
+    const nextText = `${draftWithoutToken ? `${draftWithoutToken} ` : ""}${replacement} `;
+    setText(nextText);
+    Haptics.selectionAsync().catch(() => {});
+  }, [commandToken, executeSlashCommand, text]);
+
+  const closeSlashCommandPanel = useCallback(() => {
+    if (!commandToken) return;
+    setText((current) => `${current.slice(0, commandToken.start)}${current.slice(commandToken.end)}`.trimEnd());
+  }, [commandToken]);
 
   const commitModel = useCallback((nextModel: string | undefined) => {
     setModel(nextModel);
@@ -2423,18 +2640,31 @@ export function AgentConversationScreen({
           renderItem={renderTimelineItem}
           ListEmptyComponent={timelineEmpty}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: insets.top + 60, paddingBottom: 18 }}
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16, paddingTop: insets.top + 60, paddingBottom: 18 }}
           contentInsetAdjustmentBehavior="automatic"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
+          onLayout={(event) => {
+            timelineViewportHeightRef.current = event.nativeEvent.layout.height;
+            if (!updateTimelineScrollable()) scrollTimelineToTop();
+          }}
           onScroll={handleTimelineScroll}
           scrollEventThrottle={16}
           estimatedItemSize={96}
           drawDistance={420}
-          maintainScrollAtEnd={{ onDataChange: true, onItemLayout: true, onLayout: true }}
+          maintainScrollAtEnd={isTimelineScrollable ? { onDataChange: true, onItemLayout: true, onLayout: true } : undefined}
           maintainScrollAtEndThreshold={0.22}
-          maintainVisibleContentPosition
-          onContentSizeChange={() => {
+          maintainVisibleContentPosition={isTimelineScrollable}
+          onContentSizeChange={(_width, height) => {
+            timelineContentHeightRef.current = height;
+            const scrollable = updateTimelineScrollable();
+            if (!scrollable) {
+              scrollTimelineToTop();
+              if (conversation && pendingInitialScrollConversationRef.current === conversation.id) {
+                pendingInitialScrollConversationRef.current = null;
+              }
+              return;
+            }
             if (conversation && pendingInitialScrollConversationRef.current === conversation.id) {
               scrollTimelineToEnd(false);
             }
@@ -2543,6 +2773,15 @@ export function AgentConversationScreen({
               </View>
             </ScrollView>
           ) : null}
+          {commandPanelVisible && commandToken ? (
+            <SlashCommandPanel
+              commands={availableCommands}
+              query={commandToken.query}
+              theme={theme}
+              onSelect={selectSlashCommand}
+              onClose={closeSlashCommandPanel}
+            />
+          ) : null}
           <TextInput
             value={text}
             onChangeText={setText}
@@ -2615,6 +2854,36 @@ export function AgentConversationScreen({
                   ) : null}
                 </View>
               </MenuView>
+            ) : null}
+            {providerCapability?.supportsPlan || availableCommands.some((command) => command.name === "plan") ? (
+              <Pressable
+                onPress={() => {
+                  const targetName = currentCollaborationMode === "plan" ? "exit-plan" : "plan";
+                  const command = availableCommands.find((item) => item.name === targetName);
+                  if (command?.disabledReason) {
+                    Alert.alert("命令不可用", command.disabledReason);
+                    return;
+                  }
+                  if (command) executeSlashCommand(command);
+                }}
+                style={({ pressed }) => ({
+                  height: 34,
+                  borderRadius: 999,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexDirection: "row",
+                  gap: 5,
+                  paddingHorizontal: 10,
+                  backgroundColor: currentCollaborationMode === "plan"
+                    ? (pressed ? theme.accentSecondary : theme.accent)
+                    : (pressed ? theme.accentLight : theme.bgInput),
+                })}
+              >
+                <AppSymbol name="checklist" size={13} color={currentCollaborationMode === "plan" ? theme.textInverse : theme.textSecondary} />
+                <Text style={{ color: currentCollaborationMode === "plan" ? theme.textInverse : theme.textSecondary, fontSize: 11, fontWeight: "800" }}>
+                  Plan
+                </Text>
+              </Pressable>
             ) : null}
             <MenuView
               actions={modelMenuActions}

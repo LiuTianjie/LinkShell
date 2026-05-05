@@ -4,6 +4,7 @@ export type AgentProvider = "codex" | "claude" | "custom";
 export type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
 export type AgentReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
+export type AgentCollaborationMode = "default" | "plan";
 export type AgentTimelineKind =
   | "chat"
   | "thinking"
@@ -115,6 +116,27 @@ export interface AgentSubagentAction {
   agentStates: Record<string, AgentSubagentState>;
 }
 
+export interface AgentCommandDescriptor {
+  id: string;
+  name: string;
+  title: string;
+  description?: string;
+  provider?: AgentProvider;
+  source: "built_in" | "custom" | "project" | "user" | "linkshell";
+  category?: string;
+  argsMode: "none" | "optional" | "required" | "raw";
+  requiresIdle?: boolean;
+  destructive?: boolean;
+  disabledReason?: string;
+  executionKind: "prompt" | "native" | "local_ui";
+}
+
+export interface AgentModeDescriptor {
+  id: string;
+  title: string;
+  description?: string;
+}
+
 export interface AgentConversationRecord {
   id: string;
   serverUrl: string;
@@ -127,6 +149,7 @@ export interface AgentConversationRecord {
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
   permissionMode?: AgentPermissionMode;
+  collaborationMode?: AgentCollaborationMode;
   status: AgentStatus;
   archived: boolean;
   lastMessagePreview?: string;
@@ -195,6 +218,9 @@ export interface AgentProviderCapability {
   defaultModel?: string;
   reasoningEfforts?: AgentReasoningEffort[];
   permissionModes?: AgentPermissionMode[];
+  commands?: AgentCommandDescriptor[];
+  modes?: AgentModeDescriptor[];
+  currentMode?: string;
   features?: Record<string, boolean>;
 }
 
