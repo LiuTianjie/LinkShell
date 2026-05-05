@@ -34,6 +34,8 @@ function compactText(value: string | undefined, max = 220): string {
 function isOpenPermission(item: AgentTimelineItem): item is AgentTimelineItem & { permission: AgentPermission } {
   return item.type === "permission" &&
     !!item.permission?.requestId &&
+    item.metadata?.permissionLive === true &&
+    item.metadata?.permissionExpired !== true &&
     item.metadata?.permissionOutcome !== "allow" &&
     item.metadata?.permissionOutcome !== "deny" &&
     item.metadata?.permissionOutcome !== "cancelled" &&

@@ -31,14 +31,14 @@ struct LinkShellLiveActivity: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 7) {
                         if state.hasPermission, let ext {
                             Text(trimmed(ext.permissionContext.isEmpty ? state.summary : ext.permissionContext, max: 150))
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.72))
                                 .lineLimit(2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            PermissionButtonRow(state: state, ext: ext, maxButtons: 2)
+                            PermissionButtonRow(state: state, ext: ext, maxButtons: 3, compact: true)
                         } else {
                             Text(state.summary.isEmpty ? state.phaseLabel : state.summary)
                                 .font(.system(size: 12, weight: .medium))
@@ -47,6 +47,7 @@ struct LinkShellLiveActivity: Widget {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
+                    .padding(.horizontal, 2)
                 }
             } compactLeading: {
                 ProviderMark(provider: state.provider, size: 18)
@@ -68,7 +69,7 @@ struct AgentLockScreenView: View {
         let state = context.state
         let ext = LiveActivityStore.readExtendedData()
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 ProviderHeader(provider: state.provider, project: state.project, compact: false)
                 Spacer(minLength: 8)
@@ -77,12 +78,13 @@ struct AgentLockScreenView: View {
 
             if state.hasPermission, let ext {
                 PermissionSummary(state: state, ext: ext)
-                PermissionButtonRow(state: state, ext: ext, maxButtons: 3)
+                PermissionButtonRow(state: state, ext: ext, maxButtons: 3, compact: false)
             } else {
                 RunningSummary(state: state, ext: ext)
             }
         }
-        .padding(16)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .widgetURL(agentURL(state: state, ext: ext))
     }
 }
@@ -93,7 +95,7 @@ struct PermissionSummary: View {
     let ext: ExtendedActivityData
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 5) {
             Label(ext.permissionTitle.isEmpty ? "Agent 需要授权" : ext.permissionTitle, systemImage: "checkmark.shield")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.white)
@@ -148,10 +150,11 @@ struct PermissionButtonRow: View {
     let state: LinkShellAttributes.ContentState
     let ext: ExtendedActivityData
     let maxButtons: Int
+    let compact: Bool
 
     var body: some View {
         let options = normalizedOptions(ext.permissionOptions)
-        HStack(spacing: 8) {
+        HStack(spacing: compact ? 6 : 8) {
             ForEach(Array(options.prefix(maxButtons)), id: \.id) { option in
                 if #available(iOS 17.0, *) {
                     Button(intent: QuickActionIntent(
@@ -162,17 +165,20 @@ struct PermissionButtonRow: View {
                         optionId: option.id
                     )) {
                         Label(option.label, systemImage: icon(for: option))
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: compact ? 11 : 12, weight: .bold))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.82)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(compact ? .small : .regular)
                     .tint(optionTint(for: option))
                 } else {
                     Link(destination: agentURL(state: state, ext: ext)) {
                         Label(option.label, systemImage: icon(for: option))
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: compact ? 11 : 12, weight: .bold))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.82)
                             .frame(maxWidth: .infinity)
                     }
                 }
