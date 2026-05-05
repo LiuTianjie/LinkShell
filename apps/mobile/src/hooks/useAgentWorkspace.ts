@@ -668,6 +668,10 @@ export function useAgentWorkspace(
           conversationsRef.current.find((item) => item.id === activeConversationId && item.sessionId === envelope.sessionId) ??
           conversationsRef.current.find((item) => item.sessionId === envelope.sessionId && !item.archived);
         if (!conversation) return;
+        const isTerminalPermission =
+          typeof envelope.terminalId === "string" &&
+          envelope.terminalId.length > 0 &&
+          typeof payload.agentSessionId !== "string";
         const permissionItem: AgentTimelineItem = {
           id: `permission:${payload.requestId}`,
           conversationId: conversation.id,
@@ -680,8 +684,9 @@ export function useAgentWorkspace(
             options: payload.options ?? [],
           },
           metadata: {
-            protocol: "legacy",
+            protocol: isTerminalPermission ? "terminal" : "legacy",
             sessionId: envelope.sessionId,
+            terminalId: envelope.terminalId,
             agentSessionId: payload.agentSessionId,
             permissionLive: true,
             permissionExpired: false,

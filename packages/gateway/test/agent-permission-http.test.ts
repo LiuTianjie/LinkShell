@@ -230,12 +230,53 @@ describe("Live Activity permission HTTP forwarding", () => {
       });
 
       expect(result.status).toBe(200);
+      expect(h.send).toHaveBeenCalledTimes(1);
       const envelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
       expect(envelope.type).toBe("agent.permission.response");
       expect(parseTypedPayload("agent.permission.response", envelope.payload)).toEqual({
         agentSessionId: "agent-session-1",
         requestId: "request-1",
         outcome: "deny",
+      });
+    } finally {
+      h.destroy();
+    }
+  });
+
+  it("also forwards terminal decisions for legacy terminal hook requests", () => {
+    const h = createHarness();
+    try {
+      const body: AgentPermissionHttpBody = {
+        protocol: "legacy",
+        sessionId: h.sessionId,
+        terminalId: "terminal-1",
+        requestId: "pr-123-abcdef",
+        outcome: "allow",
+        optionId: "allow_once",
+      };
+      const result = forwardAgentPermissionHttp({
+        token: h.token,
+        body,
+        sessionManager: h.sessionManager,
+        tokenManager: h.tokenManager,
+      });
+
+      expect(result.status).toBe(200);
+      expect(h.send).toHaveBeenCalledTimes(2);
+      const legacyEnvelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
+      expect(legacyEnvelope.type).toBe("agent.permission.response");
+      expect(parseTypedPayload("agent.permission.response", legacyEnvelope.payload)).toEqual({
+        requestId: "pr-123-abcdef",
+        outcome: "allow",
+        optionId: "allow_once",
+      });
+
+      const terminalEnvelope = parseEnvelope(h.send.mock.calls[1]![0] as string);
+      expect(terminalEnvelope.type).toBe("permission.decision");
+      expect((terminalEnvelope as any).terminalId).toBe("terminal-1");
+      expect(parseTypedPayload("permission.decision", terminalEnvelope.payload)).toEqual({
+        requestId: "pr-123-abcdef",
+        decision: "allow",
       });
     } finally {
       h.destroy();
