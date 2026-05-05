@@ -47,8 +47,6 @@ interface AgentConversationScreenProps {
 }
 
 type Option<T extends string> = { label: string; value?: T; image?: string };
-
-
 const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
   { label: "默认强度", value: undefined },
   { label: "无", value: "none" },
@@ -2070,12 +2068,6 @@ export function AgentConversationScreen({
   const visibleTimeline = useMemo(() => dedupeTimelineItems(timeline), [timeline]);
   const timelineRef = useRef<LegendListRef>(null);
   const timelineNearBottomRef = useRef(true);
-  const timelineContentHeightRef = useRef(0);
-  const timelineViewportHeightRef = useRef(0);
-  const initialScrollConversationRef = useRef<string | null>(null);
-  const pendingInitialScrollConversationRef = useRef<string | null>(null);
-  const shouldStickToEndOnContentSizeRef = useRef(false);
-  const timelineScrollRetryTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [isTimelineNearBottom, setIsTimelineNearBottom] = useState(true);
   const [hasNewOutput, setHasNewOutput] = useState(false);
   const [text, setText] = useState("");
@@ -2186,43 +2178,23 @@ export function AgentConversationScreen({
   );
   const handleTimelineScroll = useCallback((event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    timelineContentHeightRef.current = contentSize.height;
-    timelineViewportHeightRef.current = layoutMeasurement.height;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
     const nearBottom = distanceFromBottom < 96;
     timelineNearBottomRef.current = nearBottom;
     setIsTimelineNearBottom(nearBottom);
     if (nearBottom) {
-      shouldStickToEndOnContentSizeRef.current = false;
       setHasNewOutput(false);
     }
   }, []);
 
-  const scrollTimelineToEnd = useCallback((animated = true, markNearBottom = true) => {
-    if (markNearBottom) {
+  const scrollTimelineToBottom = useCallback((animated = true, stick = true) => {
+    if (stick) {
       timelineNearBottomRef.current = true;
-      shouldStickToEndOnContentSizeRef.current = true;
       setIsTimelineNearBottom(true);
       setHasNewOutput(false);
     }
-    timelineScrollRetryTimersRef.current.forEach(clearTimeout);
-    timelineScrollRetryTimersRef.current = [];
-    const scroll = (scrollAnimated: boolean) => timelineRef.current?.scrollToEnd({ animated: scrollAnimated });
-    requestAnimationFrame(() => {
-      scroll(animated);
-    });
-    if (markNearBottom) {
-      timelineScrollRetryTimersRef.current = [80, 180, 360].map((delay) =>
-        setTimeout(() => scroll(false), delay),
-      );
-    }
-  }, []);
 
-  const cancelTimelineAutoScroll = useCallback(() => {
-    shouldStickToEndOnContentSizeRef.current = false;
-    pendingInitialScrollConversationRef.current = null;
-    timelineScrollRetryTimersRef.current.forEach(clearTimeout);
-    timelineScrollRetryTimersRef.current = [];
+    requestAnimationFrame(() => timelineRef.current?.scrollToEnd({ animated }));
   }, []);
 
   const renderTimelineItem = useCallback(({ item, index }: LegendListRenderItemProps<AgentTimelineItem>) => {
@@ -2279,19 +2251,7 @@ export function AgentConversationScreen({
       return;
     }
     setHasNewOutput(false);
-    shouldStickToEndOnContentSizeRef.current = true;
   }, [timelineAutoScrollKey, visibleTimeline.length]);
-
-  useEffect(() => {
-    if (!conversation || visibleTimeline.length === 0) return;
-    if (initialScrollConversationRef.current === conversation.id) return;
-    initialScrollConversationRef.current = conversation.id;
-    pendingInitialScrollConversationRef.current = conversation.id;
-    timelineNearBottomRef.current = true;
-    shouldStickToEndOnContentSizeRef.current = true;
-    setIsTimelineNearBottom(true);
-    setHasNewOutput(false);
-  }, [conversation, visibleTimeline.length]);
 
   const send = useCallback(() => {
     const value = text.trim();
@@ -2302,7 +2262,7 @@ export function AgentConversationScreen({
         workspace.executeCommand(conversation.id, commandMatch.command, value, commandMatch.args);
         setText("");
         setAttachments([]);
-        scrollTimelineToEnd(true);
+        scrollTimelineToBottom(true);
       };
       if (commandMatch.command.destructive) {
         Alert.alert(
@@ -2331,8 +2291,8 @@ export function AgentConversationScreen({
     });
     setText("");
     setAttachments([]);
-    scrollTimelineToEnd(true);
-  }, [attachments, availableCommands, canSend, conversation, currentCollaborationMode, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToEnd, text, workspace]);
+    scrollTimelineToBottom(true);
+  }, [attachments, availableCommands, canSend, conversation, currentCollaborationMode, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToBottom, text, workspace]);
 
   const executeSlashCommand = useCallback((command: AgentCommandDescriptor, args = "") => {
     if (!conversation) return;
@@ -2342,7 +2302,7 @@ export function AgentConversationScreen({
       setText("");
       setAttachments([]);
       Haptics.selectionAsync().catch(() => {});
-      scrollTimelineToEnd(true);
+      scrollTimelineToBottom(true);
     };
     if (command.destructive) {
       Alert.alert(
@@ -2356,7 +2316,7 @@ export function AgentConversationScreen({
       return;
     }
     run();
-  }, [conversation, scrollTimelineToEnd, workspace]);
+  }, [conversation, scrollTimelineToBottom, workspace]);
 
   const selectSlashCommand = useCallback((command: AgentCommandDescriptor) => {
     if (!commandToken) return;
@@ -2651,26 +2611,12 @@ export function AgentConversationScreen({
           scrollIndicatorInsets={{ top: insets.top + 60, bottom: 18 }}
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
-          onLayout={(event) => {
-            timelineViewportHeightRef.current = event.nativeEvent.layout.height;
-          }}
           onScroll={handleTimelineScroll}
-          onTouchStart={cancelTimelineAutoScroll}
-          onScrollBeginDrag={cancelTimelineAutoScroll}
           scrollEventThrottle={16}
           estimatedItemSize={96}
           drawDistance={420}
+          alignItemsAtEnd
           maintainVisibleContentPosition={false}
-          onContentSizeChange={(_width, height) => {
-            timelineContentHeightRef.current = height;
-            const shouldInitialScroll = Boolean(
-              conversation && pendingInitialScrollConversationRef.current === conversation.id,
-            );
-            if (shouldInitialScroll || shouldStickToEndOnContentSizeRef.current) {
-              if (shouldInitialScroll) pendingInitialScrollConversationRef.current = null;
-              scrollTimelineToEnd(false);
-            }
-          }}
         />
         {!isTimelineNearBottom || hasNewOutput ? (
           <View
@@ -2684,12 +2630,12 @@ export function AgentConversationScreen({
             }}
           >
             <Pressable
-              onPress={() => scrollTimelineToEnd(true)}
-              hitSlop={10}
+              onPress={() => scrollTimelineToBottom(true)}
+              hitSlop={8}
               style={({ pressed }) => ({
-                width: 34,
-                height: 34,
-                borderRadius: 17,
+                width: 44,
+                height: 44,
+                borderRadius: 22,
                 borderCurve: "continuous",
                 borderWidth: StyleSheet.hairlineWidth,
                 borderColor: theme.separator,
