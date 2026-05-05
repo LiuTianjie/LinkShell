@@ -1,4 +1,5 @@
-import { execSync } from "node:child_process";
+import { accessSync, constants, existsSync } from "node:fs";
+import { delimiter, join } from "node:path";
 
 export type ProviderName = "claude" | "codex" | "gemini" | "copilot" | "custom";
 
@@ -9,12 +10,58 @@ export interface ProviderConfig {
   env: NodeJS.ProcessEnv;
 }
 
-function which(bin: string): string | undefined {
+function stripOuterQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function canExecute(path: string): boolean {
   try {
-    return execSync(`which ${bin}`, { encoding: "utf8" }).trim() || undefined;
+    accessSync(path, constants.X_OK);
+    return true;
   } catch {
+    return process.platform === "win32" && existsSync(path);
+  }
+}
+
+function executableExtensions(bin: string): string[] {
+  if (process.platform !== "win32") return [""];
+  if (/\.[^\\/]+$/.test(bin)) return [""];
+  const pathext = process.env.PATHEXT?.split(";").filter(Boolean) ?? [];
+  return ["", ...pathext.map((ext) => ext.toLowerCase()), ...pathext.map((ext) => ext.toUpperCase())];
+}
+
+function commandHasPathSeparator(command: string): boolean {
+  return command.includes("/") || command.includes("\\");
+}
+
+function which(bin: string): string | undefined {
+  const command = stripOuterQuotes(bin);
+  if (!command) return undefined;
+  const extensions = executableExtensions(command);
+  if (commandHasPathSeparator(command)) {
+    for (const extension of extensions) {
+      const candidate = `${command}${extension}`;
+      if (canExecute(candidate)) return candidate;
+    }
     return undefined;
   }
+  const pathEntries = (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter(Boolean);
+  for (const dir of pathEntries) {
+    for (const extension of extensions) {
+      const candidate = join(dir, `${command}${extension}`);
+      if (canExecute(candidate)) return candidate;
+    }
+  }
+  return undefined;
 }
 
 function resolveClaudeProvider(input: {

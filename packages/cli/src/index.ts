@@ -81,6 +81,7 @@ program
   .option("--verbose", "Enable verbose logging")
   .option("--_foreground-bridge", undefined) // internal
   .allowUnknownOption(true)
+  .allowExcessArguments(true)
   .action(async (options, command) => {
     const daemon = await import("./utils/daemon.js");
     const keepAwake = shouldKeepAwake(options.keepAwake);

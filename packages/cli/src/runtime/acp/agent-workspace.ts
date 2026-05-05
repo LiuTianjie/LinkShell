@@ -1781,10 +1781,11 @@ export class AgentWorkspaceProxy {
     if (normalized === "reasoning" || normalized === "thinking") {
       const text = firstString(item, ["text", "content", "summary", "message"]) ??
         stringifyDefined(item.contentItems ?? item.summary);
+      if (!text?.trim()) return true;
       this.upsertItem(conversationId, {
         ...base,
         kind: "thinking",
-        text: text ?? (streaming ? "正在思考" : "完成思考"),
+        text,
       });
       return true;
     }
