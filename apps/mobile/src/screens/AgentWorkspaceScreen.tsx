@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Image } from "expo-image";
 import { Swipeable } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
@@ -24,7 +25,7 @@ import type {
   AgentProvider,
   AgentProviderCapability,
 } from "../storage/agent-workspace";
-import { loadProjects, removeProject, touchProject, type ProjectRecord } from "../storage/projects";
+import { loadProjects, touchProject, type ProjectRecord } from "../storage/projects";
 import { loadServers, type SavedServer } from "../storage/servers";
 import { getDeviceToken } from "../storage/device-token";
 import { fetchMySessions, fetchOfficialGateways, getValidSession } from "../lib/supabase";
@@ -66,10 +67,10 @@ interface GatewayHostSession {
   lastActivity?: number;
 }
 
-const PROVIDER_META: Record<AgentProvider, { label: string; subtitle: string }> = {
-  codex: { label: "Codex", subtitle: "OpenAI Agent" },
-  claude: { label: "Claude", subtitle: "Anthropic Agent" },
-  custom: { label: "Custom", subtitle: "自定义 Agent 命令" },
+const PROVIDER_META: Record<AgentProvider, { label: string; subtitle: string; icon: string }> = {
+  codex: { label: "Codex", subtitle: "OpenAI Agent", icon: "sparkles" },
+  claude: { label: "Claude", subtitle: "Anthropic Agent", icon: "brain.head.profile" },
+  custom: { label: "Custom", subtitle: "自定义 Agent 命令", icon: "gearshape.fill" },
 };
 
 const HIDDEN_AGENT_PROJECT_KEYS = "@linkshell/agent-hidden-projects:v1";
@@ -88,6 +89,10 @@ interface AgentProjectItem {
 
 function normalizeServerUrl(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+function agentHostKey(serverUrl: string, sessionId: string): string {
+  return `${normalizeServerUrl(serverUrl)}\u0000${sessionId}`;
 }
 
 function shortPath(path: string): string {
@@ -158,6 +163,13 @@ function providerOptions(
   return [];
 }
 
+function sessionCanUseAgent(
+  capabilities: AgentCapabilities | undefined,
+  target?: AgentTarget,
+): boolean {
+  return Boolean(target && (!capabilities || capabilities.enabled));
+}
+
 function providerReason(
   capabilities: AgentCapabilities | undefined,
   provider: AgentProvider,
@@ -168,7 +180,7 @@ function providerReason(
   if (!capabilities) {
     return targetStatus === "online"
       ? "正在确认 Agent 能力，请稍候。"
-      : "需要先连接 Mac 并确认 Agent 能力。";
+      : "需要先连接主机并确认 Agent 能力。";
   }
   if (provider === "custom") return "Custom Agent 需要在 CLI 侧配置 --agent-command 后才能使用。";
   return capabilities?.error;
@@ -178,8 +190,61 @@ function projectKey(serverUrl: string, sessionId: string, cwd: string): string {
   return [normalizeServerUrl(serverUrl), sessionId, cwd.trim()].join("\u0000");
 }
 
-function projectPathKey(serverUrl: string, cwd: string): string {
-  return [normalizeServerUrl(serverUrl), cwd.trim()].join("\u0000");
+function projectPathKey(serverUrl: string, cwd: string, provider?: string): string {
+  const parts = [normalizeServerUrl(serverUrl), cwd.trim()];
+  if (provider) parts.push(provider);
+  return parts.join("\u0000");
+}
+
+function conversationHiddenKey(conversationId: string): string {
+  return `conversation:${conversationId}`;
+}
+
+function shortConversationId(conversation: AgentConversationRecord): string {
+  return (conversation.agentSessionId || conversation.id).replace(/^agent-remote-/, "").slice(0, 8);
+}
+
+function providerColor(provider: AgentProvider, theme: Theme): { color: string; bg: string } {
+  if (provider === "claude") {
+    return {
+      color: theme.warning,
+      bg: theme.mode === "dark" ? "rgba(255, 214, 10, 0.14)" : "rgba(255, 149, 0, 0.12)",
+    };
+  }
+  if (provider === "codex") {
+    return { color: theme.accent, bg: theme.accentLight };
+  }
+  return { color: theme.textSecondary, bg: theme.bgInput };
+}
+
+function providerLogo(provider: AgentProvider): number | undefined {
+  if (provider === "codex") return require("../../assets/codex-logo.png");
+  if (provider === "claude") return require("../../assets/claudecode-logo.png");
+  return undefined;
+}
+
+function ProviderBadge({ provider, theme }: { provider: AgentProvider; theme: Theme }) {
+  const meta = PROVIDER_META[provider];
+  const colors = providerColor(provider, theme);
+  const logo = providerLogo(provider);
+  return (
+    <View
+      style={{
+        borderRadius: 999,
+        width: 26,
+        height: 26,
+        backgroundColor: colors.bg,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {logo ? (
+        <Image source={logo} contentFit="contain" style={{ width: 17, height: 17 }} />
+      ) : (
+        <AppSymbol name={meta.icon} size={13} color={colors.color} />
+      )}
+    </View>
+  );
 }
 
 async function loadHiddenAgentProjectKeys(): Promise<Set<string>> {
@@ -258,6 +323,7 @@ export function AgentWorkspaceScreen({
   const [knownGatewayCount, setKnownGatewayCount] = useState(0);
   const [hiddenProjectKeys, setHiddenProjectKeys] = useState<Set<string>>(() => new Set());
   const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
+  const autoConnectedHostKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -363,7 +429,7 @@ export function AgentWorkspaceScreen({
     return () => {
       cancelled = true;
     };
-  }, [allSessions, deviceToken, gatewayBaseUrl, gatewaySignature, refreshKey, sessionSignature]);
+  }, [deviceToken, gatewayBaseUrl, gatewaySignature, refreshKey, sessionSignature]);
 
   const targets = useMemo(() => {
     const bySession = new Map<string, AgentTarget>();
@@ -405,110 +471,66 @@ export function AgentWorkspaceScreen({
     });
   }, [gatewayHosts, onlineSessions, projects]);
 
+  useEffect(() => {
+    if (!onConnectSession) return;
+    const existingKeys = new Set(
+      allSessions.map((session) => agentHostKey(session.gatewayUrl, session.sessionId)),
+    );
+    const onlineHostKeys = new Set<string>();
+    for (const host of gatewayHosts) {
+      if (!host.id || !host.serverUrl) continue;
+      const key = agentHostKey(host.serverUrl, host.id);
+      onlineHostKeys.add(key);
+      if (existingKeys.has(key) || autoConnectedHostKeysRef.current.has(key)) continue;
+      autoConnectedHostKeysRef.current.add(key);
+      onConnectSession(host.id, host.serverUrl);
+    }
+    for (const key of autoConnectedHostKeysRef.current) {
+      if (!onlineHostKeys.has(key) && !existingKeys.has(key)) {
+        autoConnectedHostKeysRef.current.delete(key);
+      }
+    }
+  }, [allSessions, gatewayHosts, onConnectSession]);
+
+  useEffect(() => {
+    for (const target of targets) {
+      workspace.requestCapabilities(target.sessionId);
+    }
+  }, [targets, workspace.requestCapabilities]);
+
   const projectItems = useMemo(() => {
     const targetBySession = new Map(targets.map((target) => [target.sessionId, target]));
     const targetByPath = new Map<string, AgentTarget>();
     for (const target of targets) {
       if (target.cwd) targetByPath.set(projectPathKey(target.serverUrl, target.cwd), target);
     }
-    const latestByExactProject = new Map<string, AgentConversationRecord>();
-    const latestByPath = new Map<string, AgentConversationRecord>();
+    const projectByExact = new Map<string, ProjectRecord>();
+    for (const project of projects) {
+      projectByExact.set(projectKey(project.serverUrl, project.sessionId, project.cwd), project);
+    }
+
+    const items: AgentProjectItem[] = [];
     for (const conversation of workspace.conversations) {
       if (conversation.archived || !conversation.cwd) continue;
-      const exactKey = projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd);
-      const current = latestByExactProject.get(exactKey);
-      if (!current || conversation.lastActivityAt > current.lastActivityAt) {
-        latestByExactProject.set(exactKey, conversation);
-      }
-      const pathKey = projectPathKey(conversation.serverUrl, conversation.cwd);
-      const currentByPath = latestByPath.get(pathKey);
-      if (!currentByPath || conversation.lastActivityAt > currentByPath.lastActivityAt) {
-        latestByPath.set(pathKey, conversation);
-      }
-    }
-
-    const byProject = new Map<string, AgentProjectItem>();
-    for (const project of projects) {
-      const exactKey = projectKey(project.serverUrl, project.sessionId, project.cwd);
-      const pathKey = projectPathKey(project.serverUrl, project.cwd);
-      if (hiddenProjectKeys.has(exactKey) || hiddenProjectKeys.has(pathKey)) continue;
-      const target = targetBySession.get(project.sessionId) ??
-        targetByPath.get(pathKey);
-      const currentExactKey = projectKey(
-        target?.serverUrl ?? project.serverUrl,
-        target?.sessionId ?? project.sessionId,
-        project.cwd,
-      );
-      const latestConversation =
-        latestByExactProject.get(currentExactKey) ??
-        latestByPath.get(pathKey);
-      if (!latestConversation) continue;
-      byProject.set(pathKey, {
-        id: pathKey,
-        serverUrl: target?.serverUrl ?? project.serverUrl,
-        sessionId: target?.sessionId ?? project.sessionId,
-        cwd: project.cwd,
-        title: project.projectName || titleFromCwd(project.cwd),
-        hostname: target?.hostname ?? project.hostname,
-        target,
-        project,
-        latestConversation,
-      });
-    }
-
-    for (const target of targets) {
-      if (!target.cwd) continue;
-      const pathKey = projectPathKey(target.serverUrl, target.cwd);
-      const exactKey = projectKey(target.serverUrl, target.sessionId, target.cwd);
-      if (hiddenProjectKeys.has(exactKey) || hiddenProjectKeys.has(pathKey)) continue;
-      const existing = byProject.get(pathKey);
-      const latestConversation =
-        latestByExactProject.get(exactKey) ??
-        existing?.latestConversation ??
-        latestByPath.get(pathKey);
-      if (existing) {
-        byProject.set(pathKey, {
-          ...existing,
-          id: pathKey,
-          serverUrl: target.serverUrl,
-          sessionId: target.sessionId,
-          hostname: target.hostname ?? existing.hostname,
-          target,
-          latestConversation,
-        });
-      } else {
-        if (!latestConversation) continue;
-        byProject.set(pathKey, {
-          id: pathKey,
-          serverUrl: target.serverUrl,
-          sessionId: target.sessionId,
-          cwd: target.cwd,
-          title: target.projectName ?? titleFromCwd(target.cwd),
-          hostname: target.hostname,
-          target,
-          latestConversation,
-        });
-      }
-    }
-
-    for (const [pathKey, conversation] of latestByPath) {
-      const exactKey = projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd);
-      if (hiddenProjectKeys.has(exactKey) || hiddenProjectKeys.has(pathKey)) continue;
-      if (byProject.has(pathKey)) continue;
-      const target = targetBySession.get(conversation.sessionId);
-      byProject.set(pathKey, {
-        id: pathKey,
+      if (hiddenProjectKeys.has(conversationHiddenKey(conversation.id))) continue;
+      const target =
+        targetBySession.get(conversation.sessionId) ??
+        targetByPath.get(projectPathKey(conversation.serverUrl, conversation.cwd));
+      const project = projectByExact.get(projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd));
+      items.push({
+        id: conversationHiddenKey(conversation.id),
         serverUrl: conversation.serverUrl,
         sessionId: conversation.sessionId,
         cwd: conversation.cwd,
-        title: conversation.title || titleFromCwd(conversation.cwd),
-        hostname: target?.hostname,
+        title: project?.projectName || conversation.title || titleFromCwd(conversation.cwd),
+        hostname: target?.hostname ?? project?.hostname,
         target,
+        project,
         latestConversation: conversation,
       });
     }
 
-    return [...byProject.values()].sort((a, b) => {
+    return items.sort((a, b) => {
       if (Boolean(a.target) !== Boolean(b.target)) return a.target ? -1 : 1;
       const aTime = a.latestConversation?.lastActivityAt ?? a.project?.lastOpenedAt ?? 0;
       const bTime = b.latestConversation?.lastActivityAt ?? b.project?.lastOpenedAt ?? 0;
@@ -591,10 +613,10 @@ export function AgentWorkspaceScreen({
     if (targets.length === 0) {
       if (knownGatewayCount > 0) {
         Alert.alert(
-          loadingGatewayHosts ? "正在加载网关会话" : "没有可用 Mac",
+          loadingGatewayHosts ? "正在加载网关会话" : "没有可用主机",
           loadingGatewayHosts
-            ? "正在从已连接的网关读取可用 Mac，请稍候再试。"
-            : "当前网关没有可用的 Mac host。请确认 Mac 端 linkshell 仍在运行。",
+            ? "正在从已连接的网关读取可用主机，请稍候再试。"
+            : "当前网关没有可用主机。请确认主机端 linkshell 仍在运行。",
         );
         return;
       }
@@ -635,7 +657,7 @@ export function AgentWorkspaceScreen({
         title: selectedProject?.projectName || titleFromCwd(effectiveCwd),
       });
       if (!result.conversationId) {
-        Alert.alert("无法创建 Agent 对话", result.error ?? "CLI 没有确认对话，请确认 Mac 端 linkshell 仍在线。");
+        Alert.alert("无法创建 Agent 对话", result.error ?? "CLI 没有确认对话，请确认主机端 linkshell 仍在线。");
         return;
       }
       touchProject({
@@ -677,7 +699,7 @@ export function AgentWorkspaceScreen({
     async (project: AgentProjectItem) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       if (!project.target) {
-        Alert.alert("Mac 不在线", "请先在这个项目所在的 Mac 上启动 linkshell，再继续使用 Agent。");
+        Alert.alert("主机不在线", "请先在这个项目所在的主机上启动 linkshell，再继续使用 Agent。");
         return;
       }
       const latest = project.latestConversation;
@@ -702,42 +724,30 @@ export function AgentWorkspaceScreen({
         onOpenConversation(result.conversationId);
         return;
       }
-      Alert.alert("无法恢复 Agent 对话", result.error ?? "请确认 Mac 端会话在线，并且 Agent GUI 已启用。");
+      Alert.alert("无法恢复 Agent 对话", result.error ?? "请确认主机端会话在线，并且 Agent GUI 已启用。");
     },
     [onOpenConversation, openCreate, workspace],
   );
 
   const deleteProject = useCallback((project: AgentProjectItem) => {
+    const conversation = project.latestConversation;
+    if (!conversation) return;
     Alert.alert(
-      "删除项目",
-      `确定从 Agent 首页移除「${project.title}」吗？相关 Agent 对话会移到归档。`,
+      "删除会话",
+      `确定从 Agent 首页移除这条 ${PROVIDER_META[conversation.provider].label} 会话吗？会话会移到归档。`,
       [
         { text: "取消", style: "cancel" },
         {
           text: "删除",
           style: "destructive",
           onPress: () => {
-            const key = projectKey(project.serverUrl, project.sessionId, project.cwd);
-            const pathKey = projectPathKey(project.serverUrl, project.cwd);
             setHiddenProjectKeys((prev) => {
               const next = new Set(prev);
-              next.add(key);
-              next.add(pathKey);
+              next.add(conversationHiddenKey(conversation.id));
               saveHiddenAgentProjectKeys(next).catch(() => {});
               return next;
             });
-            setProjects((prev) => prev.filter((item) => item.id !== project.project?.id));
-            const tasks: Promise<unknown>[] = [];
-            if (project.project) tasks.push(removeProject(project.project.id));
-            for (const conversation of workspace.conversations) {
-              if (
-                projectKey(conversation.serverUrl, conversation.sessionId, conversation.cwd) === key ||
-                projectPathKey(conversation.serverUrl, conversation.cwd) === pathKey
-              ) {
-                tasks.push(workspace.archive(conversation.id, true));
-              }
-            }
-            Promise.all(tasks).catch(() => {});
+            workspace.archive(conversation.id, true).catch(() => {});
           },
         },
       ],
@@ -782,27 +792,15 @@ export function AgentWorkspaceScreen({
               gap: 12,
             })}
           >
-            <View
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 10,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: "rgba(255,255,255,0.16)",
-              }}
-            >
-              <AppSymbol name={targets.length > 0 || knownGatewayCount > 0 ? "sparkles" : "plus"} size={17} color="#fff" />
-            </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700" }}>
                 {targets.length > 0 || knownGatewayCount > 0 ? "新建 Agent 对话" : "连接网关"}
               </Text>
               <Text style={{ color: "rgba(255,255,255,0.78)", fontSize: 13, marginTop: 2 }} numberOfLines={1}>
                 {targets.length > 0
-                  ? "选择网关里的 Mac、Agent 和工作目录"
+                  ? "选择网关里的主机、Agent 和工作目录"
                   : knownGatewayCount > 0
-                    ? "正在从网关确认可用 Mac"
+                    ? "正在从网关确认可用主机"
                     : "没有可用网关时再扫码或输入连接"}
               </Text>
             </View>
@@ -835,7 +833,10 @@ export function AgentWorkspaceScreen({
             ) : projectItems.map((project) => {
               const online = Boolean(project.target);
               const caps = project.target ? workspace.capabilitiesBySessionId.get(project.target.sessionId) : undefined;
-              const canUseAgent = online && caps?.enabled;
+              const canUseAgent = sessionCanUseAgent(caps, project.target);
+              const conversation = project.latestConversation;
+              const provider = conversation?.provider ?? project.target?.provider ?? "codex";
+              const hostLabel = project.hostname || project.sessionId.slice(0, 8);
               return (
                 <Swipeable
                   key={project.id}
@@ -895,6 +896,7 @@ export function AgentWorkspaceScreen({
                       <Text style={{ flex: 1, color: theme.text, fontSize: 16, fontWeight: "700" }} numberOfLines={1}>
                         {project.title}
                       </Text>
+                      <ProviderBadge provider={provider} theme={theme} />
                       <View
                         style={{
                           borderRadius: 999,
@@ -910,7 +912,7 @@ export function AgentWorkspaceScreen({
                             fontWeight: "700",
                           }}
                         >
-                          {online ? (caps ? (caps.enabled ? "在线" : "不可用") : "可用") : "离线"}
+                          {online ? (caps ? (caps.enabled ? "在线" : "不可用") : "在线") : "离线"}
                         </Text>
                       </View>
                     </View>
@@ -919,7 +921,11 @@ export function AgentWorkspaceScreen({
                         (project.latestConversation ? "继续这个项目的 Agent 对话" : "还没有 Agent 对话")}
                     </Text>
                     <Text style={{ color: theme.textTertiary, fontSize: 12 }} numberOfLines={1}>
-                      {[project.hostname, shortPath(project.cwd)].filter(Boolean).join(" · ")}
+                      {[
+                        hostLabel,
+                        conversation ? `会话 ${shortConversationId(conversation)}` : undefined,
+                        shortPath(project.cwd),
+                      ].filter(Boolean).join(" · ")}
                     </Text>
                   </Pressable>
                 </Swipeable>
@@ -973,7 +979,7 @@ export function AgentWorkspaceScreen({
 
             <View style={{ gap: 9 }}>
               <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
-                Mac
+                主机
               </Text>
               {targets.map((target) => {
                 const selected = target.sessionId === selectedTarget?.sessionId;

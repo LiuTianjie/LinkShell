@@ -187,8 +187,12 @@ export interface SessionManagerHandle {
   requestTerminalList: () => void;
   /** Browse a directory on the host */
   browseDirectory: (path: string) => void;
+  /** Browse a directory on a specific session */
+  browseDirectoryForSession: (sessionId: string, path: string) => void;
   /** Create a directory on the host */
   mkdirRemote: (path: string) => void;
+  /** Create a directory on a specific session */
+  mkdirRemoteForSession: (sessionId: string, path: string) => void;
   /** Kill a terminal in the active session */
   killTerminal: (terminalId: string) => void;
   /** Remove an exited terminal from the local map */
@@ -1110,6 +1114,7 @@ export function useSessionManager(): SessionManagerHandle {
             } else {
               s.connectionDetail = null;
             }
+            agentWorkspaceCbRef.current?.(envelope);
             break;
           }
           s.connectionDetail = p.message;
@@ -1125,6 +1130,9 @@ export function useSessionManager(): SessionManagerHandle {
         case "control.grant": {
           const p = parseTypedPayload("control.grant", envelope.payload);
           s.controllerId = p.deviceId;
+          if (p.deviceId === s.deviceId) {
+            agentWorkspaceCbRef.current?.(envelope);
+          }
           tick();
           break;
         }
@@ -1612,6 +1620,25 @@ export function useSessionManager(): SessionManagerHandle {
     [getActive, tick],
   );
 
+  const browseDirectoryForSessionFn = useCallback(
+    (sessionId: string, path: string) => {
+      const s = sessionsRef.current.get(sessionId);
+      if (!s) return;
+      s.browseResult = null;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "terminal.browse" as any,
+          sessionId: s.sessionId,
+          payload: { path },
+        }),
+        { queue: true },
+      );
+      tick();
+    },
+    [tick],
+  );
+
   const requestHistoryFn = useCallback(() => {
     const s = getActive();
     if (!s) return;
@@ -1808,8 +1835,21 @@ export function useSessionManager(): SessionManagerHandle {
     switchTerminal: switchTerminalFn,
     requestTerminalList: requestTerminalListFn,
     browseDirectory: browseDirectoryFn,
+    browseDirectoryForSession: browseDirectoryForSessionFn,
     mkdirRemote: (path: string) => {
       const s = getActive();
+      if (!s) return;
+      sendRaw(
+        s,
+        createEnvelope({
+          type: "terminal.mkdir" as any,
+          sessionId: s.sessionId,
+          payload: { path },
+        }),
+      );
+    },
+    mkdirRemoteForSession: (sessionId: string, path: string) => {
+      const s = sessionsRef.current.get(sessionId);
       if (!s) return;
       sendRaw(
         s,

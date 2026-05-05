@@ -47,12 +47,16 @@ PORT=8787 node packages/gateway/dist/gateway/src/index.js
 | `GET` | `/sessions` | 列出活跃会话 |
 | `GET` | `/sessions/:id` | 会话详情 |
 | `WS` | `/ws?sessionId=&role=` | 实时连接（role=host 或 client） |
+| `GET/POST` | `/tunnel/:sessionId/:port/**` | HTTP 端口转发 |
+| `WS` | `/tunnel/:sessionId/:port/**` | WebSocket 端口转发（HMR） |
 
 ## 特性
 
 - 内存态会话管理，可选 Supabase 持久化设备 token 和配对状态
 - ACK 追踪 + 输出缓存（最近 200 条，client 重连时快速重放）
 - 单设备控制权管理（claim/grant/reject/release）
+- Agent Workspace v2 envelope 透传，支持 capabilities、snapshot、event、permission 和 structured input
+- Tunnel proxy 支持 HTTP 与 WebSocket，移动端可预览本地 dev server
 - 心跳 ping/pong 检测死连接（20s 间隔）
 - 会话 TTL（host 断开保留 60s，空闲 30min 清理）
 - IP 限流（配对 30 req/min，WebSocket 20 conn/min）

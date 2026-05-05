@@ -21,13 +21,16 @@
 
 1. 首页 — 快速操作、继续上次会话、最近会话历史（左滑删除）
 2. 会话 — 按网关分组的活动会话列表（并行拉取、骨架加载）
-3. 设置 — 主题切换、网关管理
+3. Agent — Agent Workspace 首页、项目/会话入口、Provider 选择
+4. 设置 — 主题切换、网关管理
 
 全屏流转：
 
 1. ScannerScreen — 扫码连接
 2. SessionScreen — 终端详情页
-3. ConnectionSheet — 新建连接 Sheet（扫码 / 手动输入，iOS sheet detents）
+3. AgentWorkspaceScreen — Agent 项目/历史会话入口
+4. AgentConversationScreen — 结构化 Agent 对话、tool/permission/timeline 渲染
+5. ConnectionSheet — 新建连接 Sheet（扫码 / 手动输入，iOS sheet detents）
 
 ## 3. 关键文件
 
@@ -70,6 +73,18 @@
 13. src/storage/servers.ts
     作用：AsyncStorage 网关服务器管理，支持增删改查、设置默认。
 
+14. src/hooks/useAgentWorkspace.ts
+    作用：Agent Workspace v2 状态管理，处理 capabilities、conversation open/list、snapshot、event patch、权限响应、结构化输入和本地缓存。
+
+15. src/screens/AgentWorkspaceScreen.tsx
+    作用：Agent 首页。自动发现网关 host，按历史对话/项目展示入口，支持选择主机、provider 和目录。
+
+16. src/screens/AgentConversationScreen.tsx
+    作用：Agent 对话页。渲染消息、计划、tool call、命令执行、文件变更、权限请求、结构化输入、子 Agent 活动和动态模型/权限控件。
+
+17. src/storage/agent-workspace.ts
+    作用：AsyncStorage Agent 对话和 timeline 缓存，支持 provider-scoped 远端会话 ID 迁移。
+
 ## 4. 当前设计状态
 
 1. 整体风格为 iOS 原生工具类 App，使用 SF Symbols（expo-symbols），中文优先。
@@ -79,6 +94,7 @@
 5. 新建连接入口收口到首页按钮 + ConnectionSheet，不在其他位置重复。
 6. 网络加载场景有骨架动画（pulsing skeleton）和 FadeIn/LayoutAnimation 过渡。
 7. ServerPicker 使用动态主题 token，无硬编码颜色。
+8. Agent Workspace 使用结构化卡片，provider badge 和在线/离线状态，中文文案统一使用“主机”而不是固定 “Mac”。
 
 ## 5. 已知实现要点
 
@@ -88,14 +104,18 @@
 4. RN 0.81 new arch 下 ATS（App Transport Security）需要在 Info.plist 配置 NSExceptionDomains。
 5. Expo/RN runtime 不支持 AbortSignal.timeout()，使用 src/utils/fetch-with-timeout.ts 替代。
 6. babel.config.js 需要 react-native-reanimated/plugin 作为最后一个 plugin。
+7. Agent capabilities 由 CLI 动态下发，模型、推理强度和权限模式不要在 UI 里写死为单一 provider。
+8. Agent permission / structured input 发送后先进入 pending/submitting 状态，等待 CLI 回传确认；如果 control conflict，会在 timeline 上显示可重试错误。
 
 ## 6. 如果继续改 UI，优先看哪里
 
 1. src/screens/SessionScreen.tsx（终端体验核心）
-2. src/components/InputBar.tsx
-3. src/components/KeyboardAccessory.tsx
-4. src/components/ConnectionSheet.tsx
-5. src/screens/HomeScreen.tsx
+2. src/screens/AgentConversationScreen.tsx（Agent 结构化对话核心）
+3. src/screens/AgentWorkspaceScreen.tsx（Agent 首页、provider/目录入口）
+4. src/components/InputBar.tsx
+5. src/components/KeyboardAccessory.tsx
+6. src/components/ConnectionSheet.tsx
+7. src/screens/HomeScreen.tsx
 
 ## 7. 本地开发
 
@@ -178,4 +198,5 @@ pnpm --filter linkshell-cli dev start --gateway ws://localhost:8787/ws --provide
 
 1. 先读这个文件。
 2. 再读根目录 docs/ai-handoff.md。
-3. 然后直接看 SessionScreen、InputBar、KeyboardAccessory 的当前实现。
+3. 如果改终端体验，直接看 SessionScreen、InputBar、KeyboardAccessory。
+4. 如果改 Agent 体验，直接看 useAgentWorkspace、AgentWorkspaceScreen、AgentConversationScreen。

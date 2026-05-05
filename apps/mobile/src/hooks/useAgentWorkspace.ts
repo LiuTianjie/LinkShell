@@ -120,6 +120,33 @@ function mergeTimeline(
     .slice(-200);
 }
 
+function normalizeSnapshotItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
+  return items.map((item) => {
+    if (item.type === "permission" && !item.metadata?.permissionOutcome) {
+      return {
+        ...item,
+        metadata: {
+          ...(item.metadata ?? {}),
+          permissionPending: false,
+          permissionError: undefined,
+        },
+      };
+    }
+    if (item.kind === "user_input_prompt" && !item.metadata?.inputSubmitted) {
+      return {
+        ...item,
+        metadata: {
+          ...(item.metadata ?? {}),
+          inputSubmitting: false,
+          inputPending: item.metadata?.inputPending ?? true,
+          inputError: undefined,
+        },
+      };
+    }
+    return item;
+  });
+}
+
 export function useAgentWorkspace(
   manager: SessionManagerHandle,
 ): AgentWorkspaceHandle {
@@ -282,7 +309,7 @@ export function useAgentWorkspace(
               : undefined,
           });
         }
-        const items = (payload.snapshot ?? []) as AgentTimelineItem[];
+        const items = normalizeSnapshotItems((payload.snapshot ?? []) as AgentTimelineItem[]);
         if (items.length > 0) {
           saveAgentTimeline(record.id, items).catch(() => {});
           setTimelineById((prev) => {
@@ -309,7 +336,7 @@ export function useAgentWorkspace(
           persistConversation(toRecord(conversation)).catch(() => {});
         }
         const grouped = new Map<string, AgentTimelineItem[]>();
-        for (const item of (payload.items ?? []) as AgentTimelineItem[]) {
+        for (const item of normalizeSnapshotItems((payload.items ?? []) as AgentTimelineItem[])) {
           grouped.set(item.conversationId, [...(grouped.get(item.conversationId) ?? []), item]);
         }
         setTimelineById((prev) => {
@@ -344,6 +371,127 @@ export function useAgentWorkspace(
             }
           }
         }
+        if (payload.patch) {
+          const patch = payload.patch as {
+            itemId: string;
+            kind?: AgentTimelineItem["kind"];
+            role?: AgentTimelineItem["role"];
+            content?: AgentTimelineItem["content"];
+            text?: string;
+            textDelta?: string;
+            status?: AgentTimelineItem["status"];
+            toolCall?: AgentTimelineItem["toolCall"];
+            commandExecution?: AgentTimelineItem["commandExecution"];
+            fileChange?: AgentTimelineItem["fileChange"];
+            subagent?: AgentTimelineItem["subagent"];
+            structuredInput?: AgentTimelineItem["structuredInput"];
+            plan?: AgentTimelineItem["plan"];
+            permission?: AgentTimelineItem["permission"];
+            error?: AgentTimelineItem["error"];
+            metadata?: AgentTimelineItem["metadata"];
+            updatedAt?: number;
+            isStreaming?: boolean;
+          };
+          setTimelineById((prev) => {
+            const items = prev.get(payload.conversationId);
+            if (!items) return prev;
+            let patchedItem: AgentTimelineItem | undefined;
+            const nextItems = items.map((item) => {
+              if (item.id !== patch.itemId && item.itemId !== patch.itemId) return item;
+              patchedItem = {
+                ...item,
+                kind: patch.kind ?? item.kind,
+                role: patch.role ?? item.role,
+                content: patch.content ?? item.content,
+                text: patch.textDelta ? `${patch.text ?? item.text ?? ""}${patch.textDelta}` : patch.text ?? item.text,
+                status: patch.status ?? item.status,
+                toolCall: patch.toolCall ? { ...(item.toolCall ?? patch.toolCall), ...patch.toolCall } : item.toolCall,
+                commandExecution: patch.commandExecution
+                  ? { ...(item.commandExecution ?? {}), ...patch.commandExecution }
+                  : item.commandExecution,
+                fileChange: patch.fileChange
+                  ? { ...(item.fileChange ?? {}), ...patch.fileChange }
+                  : item.fileChange,
+                subagent: patch.subagent
+                  ? { ...(item.subagent ?? {}), ...patch.subagent }
+                  : item.subagent,
+                structuredInput: patch.structuredInput ?? item.structuredInput,
+                plan: patch.plan ?? item.plan,
+                permission: patch.permission
+                  ? { ...(item.permission ?? {}), ...patch.permission }
+                  : item.permission,
+                error: patch.error ?? item.error,
+                metadata: patch.metadata
+                  ? { ...(item.metadata ?? {}), ...patch.metadata }
+                  : item.metadata,
+                updatedAt: patch.updatedAt ?? Date.now(),
+                isStreaming: patch.isStreaming ?? item.isStreaming,
+              };
+              return patchedItem;
+            });
+            if (!patchedItem) return prev;
+            saveAgentTimeline(payload.conversationId, nextItems).catch(() => {});
+            const existing = conversationsRef.current.find((item) => item.id === payload.conversationId);
+            const preview = previewFromItem(patchedItem);
+            if (existing && preview) {
+              persistConversation({
+                ...existing,
+                lastMessagePreview: preview,
+                lastActivityAt: Date.now(),
+                status: patchedItem.status ?? existing.status,
+              }).catch(() => {});
+            }
+            const next = new Map(prev);
+            next.set(payload.conversationId, nextItems);
+            return next;
+          });
+        }
+        return;
+      }
+
+      if (envelope.type === "session.error") {
+        const payload = parseTypedPayload("session.error", envelope.payload) as any;
+        if (payload.code !== "control_conflict") return;
+        setTimelineById((prev) => {
+          const next = new Map(prev);
+          for (const [conversationId, items] of prev) {
+            const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+            if (conversation?.sessionId !== envelope.sessionId) continue;
+            let changed = false;
+            const nextItems = items.map((item) => {
+              if (item.type === "permission" && item.metadata?.permissionPending === true) {
+                changed = true;
+                return {
+                  ...item,
+                  metadata: {
+                    ...(item.metadata ?? {}),
+                    permissionPending: false,
+                    permissionError: "授权未发送：未获得控制权，请重试。",
+                  },
+                  updatedAt: Date.now(),
+                };
+              }
+              if (item.kind === "user_input_prompt" && item.metadata?.inputSubmitting === true) {
+                changed = true;
+                return {
+                  ...item,
+                  metadata: {
+                    ...(item.metadata ?? {}),
+                    inputSubmitting: false,
+                    inputError: "回答未发送：未获得控制权，请重试。",
+                  },
+                  updatedAt: Date.now(),
+                };
+              }
+              return item;
+            });
+            if (changed) {
+              next.set(conversationId, nextItems);
+              saveAgentTimeline(conversationId, nextItems).catch(() => {});
+            }
+          }
+          return next;
+        });
         return;
       }
 
@@ -504,6 +652,7 @@ export function useAgentWorkspace(
           sessionId: input.sessionId,
           agentSessionId: input.agentSessionId,
           cwd: input.cwd,
+          provider: input.provider,
         });
       setActiveConversationId(conversationId);
       if (session) manager.setActiveSessionId(input.sessionId);
@@ -512,7 +661,7 @@ export function useAgentWorkspace(
           pendingOpenRef.current.delete(conversationId);
           resolve({
             conversationId: null,
-            error: "CLI 没有在 12 秒内确认对话，请确认 Mac 端 linkshell 仍在线。",
+            error: "CLI 没有在 12 秒内确认对话，请确认主机端 linkshell 仍在线。",
           });
         }, 12_000);
         pendingOpenRef.current.set(conversationId, { resolve, timer });
@@ -765,17 +914,19 @@ export function useAgentWorkspace(
           sourceSessionId,
           "agent.v2.permission.respond",
           { conversationId, requestId, outcome, optionId },
-          { queue: true, dedupeKey: `agent-v2-permission:${requestId}`, claimControl: true },
+          { queue: true, dedupeKey: `agent-v2-permission:${requestId}` },
         );
       }
       if (!accepted) {
         updatePermissionMetadata(conversationId, requestId, {
+          permissionPending: false,
           permissionError: "授权未发送：连接未就绪，请稍后重试。",
         });
         return;
       }
       updatePermissionMetadata(conversationId, requestId, {
-        permissionOutcome: outcome,
+        permissionPending: true,
+        pendingOutcome: outcome,
         optionId,
         permissionError: undefined,
       });
@@ -800,11 +951,11 @@ export function useAgentWorkspace(
         conversation.sessionId,
         "agent.v2.structured_input.respond" as any,
         { conversationId, requestId, answers },
-        { queue: true, dedupeKey: `agent-v2-input:${requestId}`, claimControl: true },
+        { queue: true, dedupeKey: `agent-v2-input:${requestId}` },
       );
       updateTimelineItemMetadata(conversationId, `input:${requestId}`, accepted
-        ? { inputPending: false, inputSubmitted: true, inputError: undefined, answers }
-        : { inputError: "回答未发送：连接未就绪，请稍后重试。" });
+        ? { inputSubmitting: true, inputError: undefined, answers }
+        : { inputSubmitting: false, inputError: "回答未发送：连接未就绪，请稍后重试。" });
     },
     [manager, updateTimelineItemMetadata],
   );

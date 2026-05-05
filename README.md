@@ -5,11 +5,11 @@
 <h1 align="center">LinkShell</h1>
 
 <p align="center">
-  <strong>Remote Terminal for Claude Code & Codex</strong>
+  <strong>Remote Terminal and Agent Workspace for Claude Code, Codex, Gemini, and Copilot</strong>
 </p>
 
 <p align="center">
-  Remotely view and control your local Claude Code / Codex terminal sessions from your phone
+  Remotely control local AI terminals, Agent Workspace conversations, desktop sharing, and dev server previews from your phone
 </p>
 
 <p align="center">
@@ -82,13 +82,17 @@ linkshell start --daemon --provider claude
 
 The CLI starts a built-in Gateway + terminal bridge in the background, then prints a pairing code and QR code. Scan to connect. Disconnecting the app does not affect the background process. On macOS, the bridge prevents idle system sleep by default so locking the screen does not usually drop the session.
 
+Terminal providers currently include `claude`, `codex`, `gemini`, `copilot`, and `custom`. The Agent Workspace auto-detects ACP-capable Claude Code and Codex installations when `--agent-ui` is enabled.
+
 ## Commands
 
 ```bash
 linkshell start --daemon --provider claude   # Start in background (built-in Gateway + bridge)
 linkshell start --daemon --provider claude --no-keep-awake  # macOS: allow idle sleep
 linkshell start --provider claude             # Start in foreground
-linkshell start --daemon --agent-ui  # Enable Agent GUI (auto-detects Claude/Codex)
+linkshell start --daemon --provider gemini    # Bridge Gemini CLI
+linkshell start --daemon --provider copilot   # Bridge GitHub Copilot CLI
+linkshell start --daemon --agent-ui           # Enable Agent Workspace (auto-detects Claude/Codex)
 linkshell status                              # Check running status
 linkshell stop                                # Stop all background processes
 tail -f ~/.linkshell/bridge.log               # View logs
@@ -175,7 +179,7 @@ With `--screen`, the app can switch to the Desktop tab to view your computer scr
 
 ### Agent GUI
 
-LinkShell exposes an ACP-based Agent tab alongside Terminal, Desktop, and Browser. It auto-detects installed agent providers (Claude Code, Codex CLI) and enables them all — no `--agent-provider` flag needed.
+LinkShell exposes an Agent tab alongside Terminal, Desktop, and Browser. It auto-detects installed agent providers (Claude Code, Codex CLI), starts available providers, and reports provider capabilities to the app.
 
 ```bash
 # Auto-detects Claude Code and/or Codex CLI — both available to the mobile app
@@ -185,7 +189,9 @@ linkshell start --daemon --agent-ui
 linkshell start --daemon --agent-ui --agent-provider codex
 ```
 
-If the local ACP agent is unavailable, the app shows a disabled Agent tab and the terminal session continues normally.
+The current Agent Workspace v2 supports provider selection, dynamic model lists from CLI capabilities, reasoning effort and permission mode controls, image/text input blocks, structured input prompts, permission approval, plan/timeline events, command/file-change cards, subagent activity, reconnect snapshots, and local conversation history. Claude Code is supported through the Claude Agent SDK when available, with stream-json fallback; Codex uses `codex app-server --listen stdio://`.
+
+If no local agent provider is available, the app shows an unavailable Agent state and the terminal session continues normally.
 
 ### Port Forwarding (Preview Dev Server)
 
@@ -271,11 +277,11 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 ```
 ├── packages/
 │   ├── shared-protocol/       # Shared protocol (Zod schema, message types, version negotiation)
-│   ├── cli/                   # CLI (PTY, built-in Gateway, daemon, doctor/setup/login/upgrade)
+│   ├── cli/                   # CLI (PTY, providers, Agent Workspace, built-in Gateway, daemon)
 │   └── gateway/               # Cloud gateway (pairing, sessions, routing, control, auth, rate limiting)
 │       └── Dockerfile
 ├── apps/
-│   ├── mobile/                # Expo App (WebView + xterm.js, multi-server management, session list)
+│   ├── mobile/                # Expo App (xterm.js WebView, Agent Workspace, desktop/browser tabs)
 │   ├── web-dashboard/         # Web dashboard (Vite + React + Tailwind, login, subscription, devices)
 │   └── web-debug/             # Web debug client (Vite + xterm.js + debug panel)
 ├── docs/
@@ -311,6 +317,7 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 - Session persistence (host disconnect retained for 60s, idle cleanup after 30min)
 - Single-device control management
 - Protocol version negotiation
+- Agent Workspace v2 snapshots for reconnect and resume
 - CORS + rate limiting + graceful shutdown
 - Daemon mode (both CLI and Gateway support background running)
 

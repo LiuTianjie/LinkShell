@@ -190,6 +190,10 @@ export interface AgentProviderCapability {
   supportsPlan?: boolean;
   supportsCancel?: boolean;
   models?: AgentModelOption[];
+  defaultModel?: string;
+  reasoningEfforts?: AgentReasoningEffort[];
+  permissionModes?: AgentPermissionMode[];
+  features?: Record<string, boolean>;
 }
 
 const CONVERSATIONS_KEY = "@linkshell/agent-conversations:v1";
@@ -206,16 +210,89 @@ function sortConversations(items: AgentConversationRecord[]): AgentConversationR
   return [...items].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 }
 
+function normalizeAgentIdSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-");
+}
+
 export function makeAgentConversationId(input: {
   serverUrl: string;
   sessionId: string;
   agentSessionId?: string;
   cwd: string;
+  provider?: AgentProvider;
 }): string {
+  const provider = input.provider ?? "agent";
   const stableSuffix = input.agentSessionId
-    ? `remote-${input.agentSessionId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`
+    ? `remote-${provider}-${normalizeAgentIdSegment(input.agentSessionId)}`
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   return `agent-${stableSuffix}`;
+}
+
+function providerScopedConversationId(record: AgentConversationRecord): string | null {
+  if (!record.agentSessionId) return null;
+  const suffix = normalizeAgentIdSegment(record.agentSessionId);
+  const scoped = `agent-remote-${record.provider}-${suffix}`;
+  const legacy = `agent-remote-${suffix}`;
+  if (record.id !== legacy) return null;
+  return scoped;
+}
+
+interface ProviderScopedMigration {
+  oldId: string;
+  newId: string;
+}
+
+function migrateProviderScopedConversations(items: AgentConversationRecord[]): {
+  items: AgentConversationRecord[];
+  migrations: ProviderScopedMigration[];
+} {
+  const byId = new Map<string, AgentConversationRecord>();
+  const migrations: ProviderScopedMigration[] = [];
+  for (const item of items) {
+    const migratedId = providerScopedConversationId(item);
+    const next = migratedId ? { ...item, id: migratedId } : item;
+    if (migratedId) {
+      migrations.push({ oldId: item.id, newId: migratedId });
+    }
+    const existing = byId.get(next.id);
+    if (!existing || next.lastActivityAt >= existing.lastActivityAt) {
+      byId.set(next.id, next);
+    }
+  }
+  return { items: [...byId.values()], migrations };
+}
+
+async function migrateAgentTimelineKey(migration: ProviderScopedMigration): Promise<void> {
+  try {
+    const oldKey = `${TIMELINE_PREFIX}${migration.oldId}`;
+    const newKey = `${TIMELINE_PREFIX}${migration.newId}`;
+    const [oldRaw, newRaw] = await Promise.all([
+      AsyncStorage.getItem(oldKey),
+      AsyncStorage.getItem(newKey),
+    ]);
+    if (!oldRaw) return;
+    const oldItems = JSON.parse(oldRaw) as AgentTimelineItem[];
+    if (!Array.isArray(oldItems)) return;
+    const newItems = newRaw ? JSON.parse(newRaw) as AgentTimelineItem[] : [];
+    const mergedById = new Map<string, AgentTimelineItem>();
+    if (Array.isArray(newItems)) {
+      for (const item of newItems) {
+        if (item.id) mergedById.set(item.id, item);
+      }
+    }
+    for (const item of oldItems) {
+      if (!item.id) continue;
+      const migratedItem = { ...item, conversationId: migration.newId };
+      const existing = mergedById.get(item.id);
+      if (!existing || (migratedItem.updatedAt ?? migratedItem.createdAt) >= (existing.updatedAt ?? existing.createdAt)) {
+        mergedById.set(item.id, migratedItem);
+      }
+    }
+    await saveAgentTimeline(migration.newId, [...mergedById.values()]);
+    await AsyncStorage.removeItem(oldKey);
+  } catch {
+    // Best-effort migration; old timelines remain untouched if parsing/storage fails.
+  }
 }
 
 async function saveConversations(items: AgentConversationRecord[]): Promise<void> {
@@ -231,8 +308,13 @@ export async function loadAgentConversations(): Promise<AgentConversationRecord[
     if (!raw) return [];
     const parsed = JSON.parse(raw) as AgentConversationRecord[];
     if (!Array.isArray(parsed)) return [];
+    const { items: migrated, migrations } = migrateProviderScopedConversations(parsed);
+    if (JSON.stringify(migrated) !== JSON.stringify(parsed)) {
+      await saveConversations(migrated);
+      await Promise.all(migrations.map((migration) => migrateAgentTimelineKey(migration)));
+    }
     return sortConversations(
-      parsed.filter((item) => item.id && item.serverUrl && item.sessionId && item.cwd),
+      migrated.filter((item) => item.id && item.serverUrl && item.sessionId && item.cwd),
     );
   } catch {
     return [];

@@ -13,6 +13,9 @@ export function FolderPickerModal({
   onMkdir,
   onClose,
   theme,
+  initialPath,
+  selectLabel,
+  switchLabel,
 }: {
   visible: boolean;
   browseResult: { path: string; entries: BrowseEntry[]; error?: string } | null;
@@ -22,13 +25,18 @@ export function FolderPickerModal({
   onMkdir?: (path: string) => void;
   onClose: () => void;
   theme: any;
+  initialPath?: string;
+  selectLabel?: string;
+  switchLabel?: string;
 }) {
   const insets = useSafeAreaInsets();
   const [manualPath, setManualPath] = useState("");
-  const currentPath = browseResult?.path ?? "~";
+  const currentPath = browseResult?.path ?? initialPath ?? "~";
+  const initialPathRef = React.useRef(initialPath);
+  initialPathRef.current = initialPath;
 
   useEffect(() => {
-    if (visible && !browseResult) onBrowse("~");
+    if (visible && !browseResult) onBrowse(initialPathRef.current || "~");
   }, [visible]);
 
   const getRunningTerminalId = (path: string): string | null => {
@@ -121,7 +129,7 @@ export function FolderPickerModal({
             style={{ flex: 1, backgroundColor: getRunningTerminalId(currentPath) ? theme.success + "30" : theme.accentLight, borderRadius: 8, paddingVertical: 10, alignItems: "center" }}
           >
             <Text style={{ color: getRunningTerminalId(currentPath) ? theme.success : theme.accent, fontWeight: "600", fontSize: 14 }}>
-              {getRunningTerminalId(currentPath) ? "切换到此终端" : "在此打开终端"}
+              {getRunningTerminalId(currentPath) ? (switchLabel ?? "切换到此终端") : (selectLabel ?? "在此打开终端")}
             </Text>
           </Pressable>
           {onMkdir && (

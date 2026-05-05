@@ -22,6 +22,7 @@ import { AppSymbol } from "../components/AppSymbol";
 import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
 import type {
   AgentContentBlock,
+  AgentCapabilities,
   AgentConversationRecord,
   AgentPermissionMode,
   AgentReasoningEffort,
@@ -43,6 +44,8 @@ type Option<T extends string> = { label: string; value?: T; image?: string };
 
 const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
   { label: "默认强度", value: undefined },
+  { label: "无", value: "none" },
+  { label: "极低", value: "minimal" },
   { label: "低", value: "low" },
   { label: "中", value: "medium" },
   { label: "高", value: "high" },
@@ -51,6 +54,7 @@ const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
 
 const PERMISSION_OPTIONS: Option<AgentPermissionMode>[] = [
   { label: "默认权限", value: undefined, image: "hand.raised.fill" },
+  { label: "只读", value: "read_only", image: "eye.fill" },
   { label: "自动审查", value: "workspace_write", image: "lock.shield.fill" },
   { label: "完全访问权限", value: "full_access", image: "lock.open.fill" },
 ];
@@ -107,37 +111,67 @@ function permissionMeta(mode: AgentPermissionMode | undefined, theme: Theme) {
   if (mode === "workspace_write") {
     return { label: "自动审查", icon: "lock.shield.fill", color: theme.accent, bg: theme.accentLight };
   }
+  if (mode === "read_only") {
+    return { label: "只读", icon: "eye.fill", color: theme.textSecondary, bg: theme.bgInput };
+  }
   return { label: "默认权限", icon: "hand.raised.fill", color: theme.textSecondary, bg: theme.bgInput };
+}
+
+function providerCapabilityFor(
+  provider: AgentConversationRecord["provider"],
+  capabilities: AgentCapabilities | undefined,
+) {
+  return capabilities?.providers?.find((p) => p.id === provider);
 }
 
 function modelOptionsFor(
   provider: AgentConversationRecord["provider"],
-  capabilities: { providers?: { id: string; models?: { id: string; label: string }[] }[] } | undefined,
+  capabilities: AgentCapabilities | undefined,
 ): Option<string>[] {
-  // Prefer dynamic models from CLI capabilities
-  const dynamicModels = capabilities?.providers?.find((p) => p.id === provider)?.models;
+  const providerCapability = providerCapabilityFor(provider, capabilities);
+  const dynamicModels = providerCapability?.models;
+  const defaultModel = providerCapability?.defaultModel ?? "default";
   if (dynamicModels?.length) {
     return dynamicModels.map((m) => ({
       label: m.label,
-      value: m.id === "default" ? undefined : m.id,
+      value: m.id === defaultModel || m.id === "default" ? undefined : m.id,
     }));
   }
-  // Fallbacks if CLI is older and doesn't send models
-  if (provider === "claude") {
+  return [{ label: "默认模型", value: undefined }];
+}
+
+function effortOptionsFor(
+  provider: AgentConversationRecord["provider"],
+  capabilities: AgentCapabilities | undefined,
+): Option<AgentReasoningEffort>[] {
+  const providerCapability = providerCapabilityFor(provider, capabilities);
+  if (providerCapability?.reasoningEfforts) {
+    if (providerCapability.reasoningEfforts.length === 0) return [];
     return [
-      { label: "默认模型", value: undefined },
-      { label: "Opus 4.7", value: "opus" },
-      { label: "Sonnet 4.6", value: "sonnet" },
-      { label: "Haiku 4.5", value: "haiku" },
+      { label: "默认强度", value: undefined },
+      ...EFFORT_OPTIONS.filter((option) =>
+        option.value ? providerCapability.reasoningEfforts?.includes(option.value) : false,
+      ),
     ];
   }
-  return [
-    { label: "默认模型", value: undefined },
-    { label: "GPT-5.5", value: "gpt-5.5" },
-    { label: "GPT-5.4", value: "gpt-5.4" },
-    { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
-    { label: "GPT-5.3 Codex", value: "gpt-5.3-codex" },
-  ];
+  return [];
+}
+
+function permissionOptionsFor(
+  provider: AgentConversationRecord["provider"],
+  capabilities: AgentCapabilities | undefined,
+): Option<AgentPermissionMode>[] {
+  const providerCapability = providerCapabilityFor(provider, capabilities);
+  if (providerCapability?.permissionModes) {
+    if (providerCapability.permissionModes.length === 0) return [];
+    return [
+      { label: "默认权限", value: undefined, image: "hand.raised.fill" },
+      ...PERMISSION_OPTIONS.filter((option) =>
+        option.value ? providerCapability.permissionModes?.includes(option.value) : false,
+      ),
+    ];
+  }
+  return PERMISSION_OPTIONS;
 }
 
 function formatEffort(effort?: AgentReasoningEffort): string {
@@ -146,6 +180,8 @@ function formatEffort(effort?: AgentReasoningEffort): string {
   if (effort === "high") return "高";
   if (effort === "medium") return "中";
   if (effort === "low") return "低";
+  if (effort === "minimal") return "极低";
+  if (effort === "none") return "无";
   return "极低";
 }
 
@@ -1039,12 +1075,14 @@ function StructuredInputCard({
   input,
   theme,
   submitted,
+  submitting,
   error,
   onSubmit,
 }: {
   input: AgentStructuredInput;
   theme: Theme;
   submitted?: boolean;
+  submitting?: boolean;
   error?: string;
   onSubmit: (answers: Record<string, string[]>) => void;
 }) {
@@ -1066,7 +1104,8 @@ function StructuredInputCard({
 
   const canSubmit = input.questions.length > 0 &&
     input.questions.every((question) => (answers[question.id] ?? []).length > 0) &&
-    !submitted;
+    !submitted &&
+    !submitting;
 
   const toggleOption = useCallback((questionId: string, label: string, limit?: number) => {
     setSelected((current) => {
@@ -1099,7 +1138,7 @@ function StructuredInputCard({
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <AppSymbol name="questionmark.circle.fill" size={15} color={theme.accent} />
         <Text style={{ color: theme.text, fontSize: 14, fontWeight: "800" }}>
-          {submitted ? "已发送补充信息" : "Agent 需要补充信息"}
+          {submitted ? "已发送补充信息" : submitting ? "正在发送补充信息" : "Agent 需要补充信息"}
         </Text>
       </View>
       {input.questions.map((question) => (
@@ -1117,7 +1156,7 @@ function StructuredInputCard({
               {question.options.map((option) => (
                 <Pressable
                   key={option.id}
-                  disabled={submitted}
+                  disabled={submitted || submitting}
                   onPress={() => toggleOption(question.id, option.label, question.selectionLimit)}
                   style={{
                     borderRadius: 10,
@@ -1131,7 +1170,7 @@ function StructuredInputCard({
                     borderColor: (selected[question.id] ?? []).includes(option.label)
                       ? theme.accent
                       : theme.separator,
-                    opacity: submitted ? 0.65 : 1,
+                    opacity: submitted || submitting ? 0.65 : 1,
                   }}
                 >
                   <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "800" }}>
@@ -1150,7 +1189,7 @@ function StructuredInputCard({
             <TextInput
               value={typed[question.id] ?? ""}
               onChangeText={(value) => setTyped((current) => ({ ...current, [question.id]: value }))}
-              editable={!submitted}
+              editable={!submitted && !submitting}
               secureTextEntry={question.isSecret}
               placeholder={question.isSecret ? "输入敏感信息" : "输入回答"}
               placeholderTextColor={theme.textTertiary}
@@ -1194,7 +1233,7 @@ function StructuredInputCard({
           })}
         >
           <Text style={{ color: "#fff", fontSize: 13, fontWeight: "800" }}>
-            发送回答
+            {submitting ? "发送中" : "发送回答"}
           </Text>
         </Pressable>
       ) : null}
@@ -1232,6 +1271,7 @@ function TimelineItemView({
         input={item.structuredInput}
         theme={theme}
         submitted={item.metadata?.inputSubmitted === true}
+        submitting={item.metadata?.inputSubmitting === true}
         error={typeof item.metadata?.inputError === "string" ? item.metadata.inputError : undefined}
         onSubmit={(answers) => onStructuredInput(item.structuredInput!.requestId, answers)}
       />
@@ -1239,6 +1279,7 @@ function TimelineItemView({
   }
 
   if (item.kind === "thinking") {
+    if (!item.text?.trim()) return null;
     return (
       <SystemActivityCard
         icon="brain.head.profile"
@@ -1303,8 +1344,46 @@ function TimelineItemView({
     );
   }
 
-  if (item.type === "tool_call" && item.toolCall) {
+  if (item.type === "tool_call" && item.toolCall && !item.commandExecution && !item.fileChange) {
     return <ToolCard tool={item.toolCall} theme={theme} />;
+  }
+
+  if (item.commandExecution) {
+    return (
+      <ToolCard
+        tool={{
+          id: item.itemId ?? item.id,
+          name: "命令",
+          input: [
+            item.commandExecution.command,
+            item.commandExecution.cwd ? `cwd: ${item.commandExecution.cwd}` : undefined,
+          ].filter(Boolean).join("\n\n"),
+          output: item.commandExecution.output,
+          createdAt: item.createdAt,
+          status: item.commandExecution.status ?? "running",
+        }}
+        theme={theme}
+      />
+    );
+  }
+
+  if (item.fileChange) {
+    const summary = item.fileChange.entries
+      .map((entry) => [entry.kind, entry.path].filter(Boolean).join(" ") || entry.path)
+      .join("\n");
+    return (
+      <FileChangeCard
+        tool={{
+          id: item.itemId ?? item.id,
+          name: "文件修改",
+          input: summary,
+          output: item.fileChange.diff ?? item.fileChange.summary,
+          createdAt: item.createdAt,
+          status: item.fileChange.status ?? "running",
+        }}
+        theme={theme}
+      />
+    );
   }
 
   if (item.type === "plan" && item.plan?.length) {
@@ -1329,6 +1408,7 @@ function TimelineItemView({
 
   if (item.type === "permission" && item.permission) {
     const outcome = item.metadata?.permissionOutcome;
+    const permissionPending = item.metadata?.permissionPending === true;
     const selectedOptionId = item.metadata?.optionId;
     const permissionError = typeof item.metadata?.permissionError === "string"
       ? item.metadata.permissionError
@@ -1354,7 +1434,7 @@ function TimelineItemView({
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <AppSymbol name="checkmark.shield" size={16} color={theme.warning} />
           <Text style={{ flex: 1, color: theme.text, fontSize: 15, fontWeight: "800" }} numberOfLines={1}>
-            {outcome ? "授权已处理" : "需要授权"}{item.permission.toolName ? ` · ${item.permission.toolName}` : ""}
+            {outcome ? "授权已处理" : permissionPending ? "授权发送中" : "需要授权"}{item.permission.toolName ? ` · ${item.permission.toolName}` : ""}
           </Text>
         </View>
         {item.permission.context ? (
@@ -1382,6 +1462,7 @@ function TimelineItemView({
               return (
                 <Pressable
                   key={option.id}
+                  disabled={permissionPending}
                   onPress={() => onPermission(item.permission!.requestId, optionOutcome, option.id)}
                   style={({ pressed }) => ({
                     minWidth: options.length > 2 ? "47%" : undefined,
@@ -1396,6 +1477,7 @@ function TimelineItemView({
                     backgroundColor: isAllow
                       ? pressed ? theme.accentSecondary : theme.accent
                       : pressed ? theme.bgInput : theme.bg,
+                    opacity: permissionPending ? 0.65 : 1,
                   })}
                 >
                   <Text style={{ color: isAllow ? "#fff" : isDeny ? theme.error : theme.textSecondary, fontWeight: "700" }}>
@@ -1451,6 +1533,24 @@ export function AgentConversationScreen({
     () => modelOptionsFor(conversation?.provider ?? "codex", capabilities),
     [capabilities, conversation?.provider],
   );
+  const effortOpts = useMemo(
+    () => effortOptionsFor(conversation?.provider ?? "codex", capabilities),
+    [capabilities, conversation?.provider],
+  );
+  const permissionOpts = useMemo(
+    () => permissionOptionsFor(conversation?.provider ?? "codex", capabilities),
+    [capabilities, conversation?.provider],
+  );
+
+  useEffect(() => {
+    if (effort && !effortOpts.some((option) => option.value === effort)) setEffort(undefined);
+  }, [effort, effortOpts]);
+
+  useEffect(() => {
+    if (permissionMode && !permissionOpts.some((option) => option.value === permissionMode)) {
+      setPermissionMode(undefined);
+    }
+  }, [permissionMode, permissionOpts]);
 
   const runtimeMenuActions = useMemo(
     () => [
@@ -1460,14 +1560,14 @@ export function AgentConversationScreen({
         image: "square.stack.3d.up",
         state: option.value === model ? "on" as const : "off" as const,
       })),
-      ...EFFORT_OPTIONS.map((option) => ({
+      ...effortOpts.map((option) => ({
         id: `effort:${option.value ?? DEFAULT_OPTION_ID}`,
-        title: `推理强度 · ${option.label}`,
+        title: `思考强度 · ${option.label}`,
         image: "textformat.size.larger",
         state: option.value === effort ? "on" as const : "off" as const,
       })),
     ],
-    [modelOpts, effort, model],
+    [modelOpts, effortOpts, effort, model],
   );
   const timelineAutoScrollKey = useMemo(
     () =>
@@ -1496,15 +1596,19 @@ export function AgentConversationScreen({
   const send = useCallback(() => {
     const value = text.trim();
     if (!canSend || !conversation) return;
+    const nextEffort = effort && effortOpts.some((option) => option.value === effort) ? effort : undefined;
+    const nextPermissionMode = permissionMode && permissionOpts.some((option) => option.value === permissionMode)
+      ? permissionMode
+      : undefined;
     workspace.sendPrompt(conversation.id, value, {
       model,
-      reasoningEffort: effort,
-      permissionMode,
+      reasoningEffort: nextEffort,
+      permissionMode: nextPermissionMode,
       attachments,
     });
     setText("");
     setAttachments([]);
-  }, [attachments, canSend, conversation, effort, model, permissionMode, text, workspace]);
+  }, [attachments, canSend, conversation, effort, effortOpts, model, permissionMode, permissionOpts, text, workspace]);
 
   const appendImageBlocks = useCallback((assets: ImagePicker.ImagePickerAsset[]) => {
     const blocks = assets
@@ -1797,25 +1901,27 @@ export function AgentConversationScreen({
                 <AppSymbol name="photo" size={17} color={theme.textSecondary} />
               </Pressable>
             ) : null}
-            <MenuView
-              actions={menuActions(PERMISSION_OPTIONS, permissionMode)}
-              onPressAction={({ nativeEvent }) =>
-                setPermissionMode(valueFromMenuId<AgentPermissionMode>(nativeEvent.event))
-              }
-            >
-              <View
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 999,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: permission.bg,
-                }}
+            {permissionOpts.length > 0 ? (
+              <MenuView
+                actions={menuActions(permissionOpts, permissionMode)}
+                onPressAction={({ nativeEvent }) =>
+                  setPermissionMode(valueFromMenuId<AgentPermissionMode>(nativeEvent.event))
+                }
               >
-                <AppSymbol name={permission.icon} size={13} color={permission.color} />
-              </View>
-            </MenuView>
+                <View
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 999,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: permission.bg,
+                  }}
+                >
+                  <AppSymbol name={permission.icon} size={13} color={permission.color} />
+                </View>
+              </MenuView>
+            ) : null}
             <MenuView
               actions={runtimeMenuActions}
               onPressAction={({ nativeEvent }) => {

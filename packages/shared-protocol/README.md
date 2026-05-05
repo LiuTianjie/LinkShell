@@ -55,6 +55,10 @@ const output = parseTypedPayload("terminal.output", parsed.payload);
 | `terminal.input` | 用户输入 |
 | `terminal.resize` | 窗口尺寸变化 |
 | `terminal.exit` | 进程退出 |
+| `terminal.spawn` / `terminal.spawned` / `terminal.kill` / `terminal.list` | 多终端管理 |
+| `terminal.browse` / `terminal.browse.result` / `terminal.mkdir` | 远端目录浏览和创建 |
+| `terminal.status` | Claude/Codex hook 状态与权限摘要 |
+| `terminal.history.request` / `terminal.history.response` | shell 历史读取 |
 | `pairing.created` | 配对已创建 |
 | `pairing.claim` | 配对认领 |
 | `pairing.claimed` | 配对成功 |
@@ -62,8 +66,18 @@ const output = parseTypedPayload("terminal.output", parsed.payload);
 | `control.grant` | 授予控制权 |
 | `control.reject` | 拒绝控制权 |
 | `control.release` | 释放控制权 |
+| `screen.start` / `screen.stop` / `screen.frame` / `screen.status` | 截图流远程桌面 |
+| `screen.offer` / `screen.answer` / `screen.ice` | WebRTC 远程桌面协商 |
+| `file.upload` | 文件上传 |
+| `tunnel.request` / `tunnel.response` | HTTP 端口转发 |
+| `tunnel.ws.data` / `tunnel.ws.close` | WebSocket 端口转发 |
+| `agent.capabilities` / `agent.snapshot` / `agent.update` | Agent Workspace v1 兼容消息 |
+| `agent.v2.capabilities` / `agent.v2.conversation.*` / `agent.v2.prompt` / `agent.v2.event` | Agent Workspace v2 |
+| `agent.v2.permission.*` / `agent.v2.structured_input.respond` | Agent 权限与结构化输入 |
 
 所有 payload 使用 Zod schema 做运行时校验。
+
+Agent Workspace v2 的 timeline 支持 `chat`、`thinking`、`tool_activity`、`command_execution`、`file_change`、`subagent_action`、`plan`、`user_input_prompt`、`review` 和 `context_compaction`。Provider capability 会携带可用模型、默认模型、reasoning effort、permission mode 和 provider feature flags，供移动端动态渲染控制项。
 
 ## 代码入口
 

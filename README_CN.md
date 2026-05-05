@@ -5,11 +5,11 @@
 <h1 align="center">LinkShell</h1>
 
 <p align="center">
-  <strong>Remote Terminal for Claude Code & Codex</strong>
+  <strong>Remote Terminal and Agent Workspace for Claude Code, Codex, Gemini, and Copilot</strong>
 </p>
 
 <p align="center">
-  在手机上远程查看和控制本地 Claude Code / Codex 终端会话
+  在手机上远程接管本地 AI 终端、Agent 对话、桌面共享和 dev server 预览
 </p>
 
 <p align="center">
@@ -82,13 +82,17 @@ linkshell start --daemon --provider claude
 
 CLI 会在后台启动内置 Gateway + 终端桥接，打印配对码和 QR 码。手机扫码即连。App 断开不影响后台进程。macOS 上会默认阻止系统闲置睡眠，所以锁屏后一般不会掉线。
 
+终端 provider 目前支持 `claude`、`codex`、`gemini`、`copilot` 和 `custom`。启用 `--agent-ui` 后，Agent Workspace 会自动检测支持 ACP/结构化协议的 Claude Code 与 Codex。
+
 ## 命令一览
 
 ```bash
 linkshell start --daemon --provider claude   # 后台启动（内置 Gateway + 桥接）
 linkshell start --daemon --provider claude --no-keep-awake  # macOS：允许闲置睡眠
 linkshell start --provider claude             # 前台启动
-linkshell start --daemon --agent-ui  # 启用 Agent GUI（自动检测 Claude/Codex）
+linkshell start --daemon --provider gemini    # 桥接 Gemini CLI
+linkshell start --daemon --provider copilot   # 桥接 GitHub Copilot CLI
+linkshell start --daemon --agent-ui           # 启用 Agent Workspace（自动检测 Claude/Codex）
 linkshell status                              # 查看运行状态
 linkshell stop                                # 停止所有后台进程
 tail -f ~/.linkshell/bridge.log               # 查看日志
@@ -175,7 +179,7 @@ linkshell start --daemon --provider claude --screen
 
 ### Agent GUI
 
-LinkShell 在 Terminal、Desktop、Browser 之外提供基于 ACP 的 Agent 标签，用结构化卡片展示对话、工具调用和权限请求。CLI 启动时自动检测已安装的 Agent provider（Claude Code、Codex CLI）并全部启用，无需手动指定 `--agent-provider`。
+LinkShell 在 Terminal、Desktop、Browser 之外提供 Agent 标签，用结构化卡片展示对话、工具调用和权限请求。CLI 启动时自动检测已安装的 Agent provider（Claude Code、Codex CLI），启动可用 provider，并把模型、权限、推理强度等能力同步给 App。
 
 ```bash
 # 自动检测 Claude Code / Codex CLI，手机端均可使用
@@ -185,7 +189,9 @@ linkshell start --daemon --agent-ui
 linkshell start --daemon --agent-ui --agent-provider codex
 ```
 
-如果本机无可用的 ACP agent，App 会显示 Agent 不可用提示，终端会话不受影响。
+当前 Agent Workspace v2 支持 provider 选择、CLI 动态模型列表、reasoning effort、permission mode、图文输入块、结构化补充输入、权限审批、计划/时间线事件、命令/文件变更卡片、子 Agent 活动、重连快照和本地对话历史。Claude Code 会优先使用 Claude Agent SDK，未安装时回退到 stream-json；Codex 使用 `codex app-server --listen stdio://`。
+
+如果本机无可用 Agent provider，App 会显示 Agent 不可用提示，终端会话不受影响。
 
 ### 端口转发（预览 Dev Server）
 
@@ -271,11 +277,11 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 ```
 ├── packages/
 │   ├── shared-protocol/       # 三端共享协议（Zod schema、消息类型、版本协商）
-│   ├── cli/                   # CLI（PTY、内置 Gateway、daemon、doctor/setup/login/upgrade）
+│   ├── cli/                   # CLI（PTY、Provider、Agent Workspace、内置 Gateway、daemon）
 │   └── gateway/               # 云端网关（配对、会话、路由、控制权、认证、限流）
 │       └── Dockerfile
 ├── apps/
-│   ├── mobile/                # Expo App（WebView + xterm.js、多服务器管理、会话列表）
+│   ├── mobile/                # Expo App（xterm.js WebView、Agent Workspace、桌面/浏览器标签）
 │   ├── web-dashboard/         # Web 管理面板（Vite + React + Tailwind、登录、订阅、设备管理）
 │   └── web-debug/             # Web 调试端（Vite + xterm.js + 调试面板）
 ├── docs/
@@ -311,6 +317,7 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 - 会话保持（host 断开保留 60s，空闲 30min 清理）
 - 单设备控制权管理
 - 协议版本协商
+- Agent Workspace v2 快照恢复
 - CORS + 限流 + 优雅关闭
 - Daemon 模式（CLI 和 Gateway 均支持后台运行）
 

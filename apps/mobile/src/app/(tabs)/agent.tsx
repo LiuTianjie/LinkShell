@@ -21,6 +21,13 @@ export default function AgentTab() {
           params: { conversationId },
         })
       }
+      onBrowseDirectory={ctx.manager.browseDirectoryForSession}
+      onMkdirRemote={ctx.manager.mkdirRemoteForSession}
+      onConnectSession={(sessionId, gatewayUrl) => {
+        if (!ctx.manager.sessions.has(sessionId)) {
+          ctx.manager.connectToSession(sessionId, gatewayUrl);
+        }
+      }}
     />
   );
 }
