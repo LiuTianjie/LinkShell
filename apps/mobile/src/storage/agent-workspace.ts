@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
 
 export type AgentProvider = "codex" | "claude" | "custom";
 export type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
@@ -228,7 +229,8 @@ const CONVERSATIONS_KEY = "@linkshell/agent-conversations:v1";
 const TIMELINE_PREFIX = "@linkshell/agent-timeline:v1:";
 const MAX_CONVERSATIONS = 100;
 const MAX_TIMELINE_ITEMS = 200;
-const MAX_TIMELINE_BYTES = 1024 * 1024;
+const MAX_TIMELINE_BYTES = 100 * 1024 * 1024;
+const IMAGE_CACHE_DIR = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ""}agent-images`;
 
 function normalizeServerUrl(serverUrl: string): string {
   return serverUrl.replace(/\/+$/, "");
@@ -240,6 +242,105 @@ function sortConversations(items: AgentConversationRecord[]): AgentConversationR
 
 function normalizeAgentIdSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]+/g, "-");
+}
+
+function sanitizePathSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 120) || "item";
+}
+
+function hashString(value: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function extensionForMimeType(mimeType: string | undefined): string {
+  if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpg";
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/gif") return "gif";
+  if (mimeType === "image/webp") return "webp";
+  if (mimeType === "image/heic") return "heic";
+  if (mimeType === "image/heif") return "heif";
+  return "img";
+}
+
+function parseImageData(value: string | undefined, mimeType: string | undefined): {
+  base64: string;
+  mimeType: string | undefined;
+} | null {
+  if (!value || value.startsWith("file://") || /^https?:\/\//i.test(value)) return null;
+  const match = value.match(/^data:([^;,]+)?;base64,(.*)$/is);
+  if (match) {
+    return {
+      base64: match[2] ?? "",
+      mimeType: match[1] || mimeType,
+    };
+  }
+  if (/^[a-zA-Z0-9+/=\s]+$/.test(value) && value.length > 512) {
+    return { base64: value.replace(/\s+/g, ""), mimeType };
+  }
+  return null;
+}
+
+async function ensureImageCacheDir(conversationId: string): Promise<string | null> {
+  if (!IMAGE_CACHE_DIR) return null;
+  const root = `${IMAGE_CACHE_DIR}/`;
+  const dir = `${root}${sanitizePathSegment(conversationId)}/`;
+  await FileSystem.makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
+  await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+  return dir;
+}
+
+async function cacheImageBlock(
+  conversationId: string,
+  item: AgentTimelineItem,
+  block: AgentContentBlock,
+  blockIndex: number,
+): Promise<AgentContentBlock> {
+  if (block.type !== "image") return block;
+  const parsed = parseImageData(block.data, block.mimeType);
+  if (!parsed?.base64) return block;
+  const dir = await ensureImageCacheDir(conversationId);
+  if (!dir) return block;
+  const itemKey = sanitizePathSegment(item.id || item.itemId || "message");
+  const updatedAt = item.updatedAt ?? item.createdAt;
+  const hash = hashString(parsed.base64.slice(0, 4096) + parsed.base64.length);
+  const ext = extensionForMimeType(parsed.mimeType);
+  const uri = `${dir}${itemKey}-${blockIndex}-${updatedAt}-${hash}.${ext}`;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (!info.exists) {
+      await FileSystem.writeAsStringAsync(uri, parsed.base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    }
+    return {
+      ...block,
+      data: uri,
+      mimeType: parsed.mimeType ?? block.mimeType,
+      text: block.text,
+    };
+  } catch {
+    return block;
+  }
+}
+
+async function cacheTimelineImages(
+  conversationId: string,
+  items: AgentTimelineItem[],
+): Promise<AgentTimelineItem[]> {
+  return Promise.all(items.map(async (item) => {
+    if (item.type !== "message" || !item.content?.some((block) => block.type === "image")) {
+      return item;
+    }
+    const content = await Promise.all(
+      item.content.map((block, index) => cacheImageBlock(conversationId, item, block, index)),
+    );
+    return { ...item, content };
+  }));
 }
 
 export function makeAgentConversationId(input: {
@@ -426,6 +527,7 @@ export async function saveAgentTimeline(
   let next = [...items]
     .sort((a, b) => a.createdAt - b.createdAt)
     .slice(-MAX_TIMELINE_ITEMS);
+  next = await cacheTimelineImages(conversationId, next);
   let serialized = JSON.stringify(next);
   if (serialized.length > MAX_TIMELINE_BYTES) {
     next = next.map((item) =>

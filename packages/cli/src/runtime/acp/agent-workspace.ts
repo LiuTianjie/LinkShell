@@ -529,6 +529,49 @@ function textFromBlocks(blocks: AgentContentBlock[]): string {
     .join("\n");
 }
 
+function contentBlocksFromValue(value: unknown): AgentContentBlock[] {
+  if (typeof value === "string") {
+    return value.trim() ? [{ type: "text", text: value }] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => contentBlocksFromValue(entry));
+  }
+  const raw = asRecord(value);
+  if (!raw) return [];
+  const rawType = firstString(raw, ["type", "kind"]);
+  const normalizedType = normalizedIdentifier(rawType);
+  if (normalizedType === "image" || normalizedType === "inputimage" || normalizedType === "outputimage") {
+    const data = firstString(raw, [
+      "data",
+      "url",
+      "uri",
+      "imageUrl",
+      "image_url",
+      "base64",
+    ]);
+    const mimeType = firstString(raw, ["mimeType", "mime_type", "mediaType", "media_type"]);
+    const text = firstString(raw, ["text", "alt", "caption", "name"]);
+    return [{ type: "image", data, mimeType, text }];
+  }
+  if (normalizedType === "text" || normalizedType === "outputtext" || normalizedType === "inputtext") {
+    const text = firstString(raw, ["text", "content", "message"]);
+    return text ? [{ type: "text", text }] : [];
+  }
+  const nested = raw.content ?? raw.contentItems ?? raw.parts;
+  if (Array.isArray(nested)) return contentBlocksFromValue(nested);
+  const text = firstString(raw, ["text", "message", "content"]);
+  return text ? [{ type: "text", text }] : [];
+}
+
+function contentBlocksFromItem(item: Record<string, unknown>): AgentContentBlock[] {
+  for (const key of ["content", "contentItems", "parts", "message"]) {
+    const blocks = contentBlocksFromValue(item[key]);
+    if (blocks.length > 0) return blocks;
+  }
+  const text = firstString(item, ["text", "message"]);
+  return text ? [{ type: "text", text }] : [];
+}
+
 function protocolSupportsImages(protocol: AgentProtocol | undefined): boolean {
   return protocol === "codex-app-server" ||
     protocol === "claude-agent-sdk" ||
@@ -2391,20 +2434,24 @@ export class AgentWorkspaceProxy {
     if (!conversationId) return;
     const itemId = firstString(item, ["id"]) ?? id("msg");
     const existing = this.findItem(conversationId, itemId);
-    const content = firstString(item, ["text", "content", "message"]) ?? existing?.text;
-    if (!content) return;
+    const content = contentBlocksFromItem(item);
+    const nextContent = content.length > 0
+      ? content
+      : existing?.content ?? (existing?.text ? [{ type: "text", text: existing.text }] : []);
+    const text = textFromBlocks(nextContent);
+    if (!nextContent.length && !text) return;
     this.upsertItem(conversationId, {
       id: itemId,
       conversationId,
       type: "message",
       role: "assistant",
-      content: [{ type: "text", text: content }],
-      text: content,
+      content: nextContent,
+      text,
       createdAt: existing?.createdAt ?? Date.now(),
       updatedAt: Date.now(),
       isStreaming: streaming,
     });
-    this.updateConversationPreview(conversationId, content, streaming ? "running" : "idle");
+    this.updateConversationPreview(conversationId, text || "图片附件", streaming ? "running" : "idle");
   }
 
   private handleSessionUpdate(params: unknown): void {
@@ -2413,7 +2460,8 @@ export class AgentWorkspaceProxy {
     const text =
       firstString(raw, ["delta", "text", "content", "message"]) ??
       firstString(nested, ["delta", "text", "content", "message"]);
-    if (!text) return;
+    const content = contentBlocksFromItem(raw);
+    if (!text && content.length === 0) return;
     const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     if (!conversationId) return;
     if (firstString(raw, ["toolName", "tool", "name"])) {
@@ -2430,18 +2478,20 @@ export class AgentWorkspaceProxy {
       return;
     }
     const role = raw.role === "user" || raw.role === "system" ? raw.role : "assistant";
+    const blocks = content.length > 0 ? content : [{ type: "text" as const, text }];
+    const preview = textFromBlocks(blocks);
     this.upsertItem(conversationId, {
       id: firstString(raw, ["messageId", "id"]) ?? id("msg"),
       conversationId,
       type: "message",
       role,
-      content: [{ type: "text", text }],
-      text,
+      content: blocks,
+      text: preview,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       isStreaming: raw.done === false || raw.isStreaming === true,
     });
-    this.updateConversationPreview(conversationId, text, raw.done === true ? "idle" : "running");
+    this.updateConversationPreview(conversationId, preview || "图片附件", raw.done === true ? "idle" : "running");
   }
 
   private handleSemanticSystemItem(

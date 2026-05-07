@@ -67,4 +67,27 @@ describe("AgentWorkspaceProxy event routing", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].payload.conversation.agentSessionId).toBe("claude-real-session");
   });
+
+  it("keeps assistant image content blocks for mobile rendering", () => {
+    const { proxy, sent } = makeProxy();
+
+    proxy.handleItemCompleted({
+      sessionId: "thread-a",
+      item: {
+        id: "assistant-image",
+        type: "agentMessage",
+        content: [
+          { type: "text", text: "Here is the image." },
+          { type: "image", url: "data:image/png;base64,AAAA", mimeType: "image/png" },
+        ],
+        status: "completed",
+      },
+    });
+
+    expect(sent[0].payload.item.content).toEqual([
+      { type: "text", text: "Here is the image." },
+      { type: "image", data: "data:image/png;base64,AAAA", mimeType: "image/png" },
+    ]);
+    expect(sent[0].payload.item.text).toBe("Here is the image.\n[image/png attachment]");
+  });
 });
