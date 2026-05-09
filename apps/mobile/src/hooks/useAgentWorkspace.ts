@@ -44,6 +44,29 @@ export interface OpenConversationResult {
   error?: string;
 }
 
+export interface AgentFileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size?: number;
+  modifiedAt?: string;
+}
+
+export interface AgentFileBrowseResult {
+  path: string;
+  entries: AgentFileEntry[];
+  error?: string;
+}
+
+export interface AgentFileReadResult {
+  path: string;
+  content: string;
+  encoding: "utf8";
+  size?: number;
+  truncated: boolean;
+  error?: string;
+}
+
 export interface AgentWorkspaceHandle {
   conversations: AgentConversationRecord[];
   archivedConversations: AgentConversationRecord[];
@@ -102,6 +125,8 @@ export interface AgentWorkspaceHandle {
     requestId: string,
     answers: Record<string, string[]>,
   ) => void;
+  browseFiles: (conversationId: string, path: string) => Promise<AgentFileBrowseResult>;
+  readFile: (conversationId: string, path: string, maxBytes?: number) => Promise<AgentFileReadResult>;
   archive: (conversationId: string, archived: boolean) => Promise<void>;
   rename: (conversationId: string, title: string) => Promise<void>;
 }
@@ -188,6 +213,14 @@ export function useAgentWorkspace(
   const timelineRef = useRef(timelineById);
   const pendingOpenRef = useRef(new Map<string, {
     resolve: (result: OpenConversationResult) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>());
+  const pendingBrowseRef = useRef(new Map<string, {
+    resolve: (result: AgentFileBrowseResult) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>());
+  const pendingReadRef = useRef(new Map<string, {
+    resolve: (result: AgentFileReadResult) => void;
     timer: ReturnType<typeof setTimeout>;
   }>());
 
@@ -411,6 +444,43 @@ export function useAgentWorkspace(
           const next = new Map(prev);
           next.set(envelope.sessionId, payload);
           return next;
+        });
+        return;
+      }
+
+      if (envelope.type === "terminal.browse.result") {
+        const payload = parseTypedPayload("terminal.browse.result", envelope.payload) as AgentFileBrowseResult & {
+          requestId?: string;
+        };
+        if (!payload.requestId) return;
+        const pending = pendingBrowseRef.current.get(payload.requestId);
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        pendingBrowseRef.current.delete(payload.requestId);
+        pending.resolve({
+          path: payload.path,
+          entries: payload.entries,
+          error: payload.error,
+        });
+        return;
+      }
+
+      if (envelope.type === "terminal.file.read.result") {
+        const payload = parseTypedPayload("terminal.file.read.result", envelope.payload) as AgentFileReadResult & {
+          requestId?: string;
+        };
+        if (!payload.requestId) return;
+        const pending = pendingReadRef.current.get(payload.requestId);
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        pendingReadRef.current.delete(payload.requestId);
+        pending.resolve({
+          path: payload.path,
+          content: payload.content,
+          encoding: payload.encoding,
+          size: payload.size,
+          truncated: payload.truncated,
+          error: payload.error,
         });
         return;
       }
@@ -1443,6 +1513,88 @@ export function useAgentWorkspace(
     [manager, updateTimelineItemMetadata],
   );
 
+  const browseFiles = useCallback(
+    (conversationId: string, path: string) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      const session = conversation ? findSessionForConversation(conversation, manager.sessions) : undefined;
+      if (!conversation || !session) {
+        return Promise.resolve({
+          path,
+          entries: [],
+          error: "设备连接已失效，请重新打开会话。",
+        });
+      }
+      const requestId = `browse-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      return new Promise<AgentFileBrowseResult>((resolve) => {
+        const timer = setTimeout(() => {
+          pendingBrowseRef.current.delete(requestId);
+          resolve({ path, entries: [], error: "读取目录超时，请确认主机端仍在线。" });
+        }, 12_000);
+        pendingBrowseRef.current.set(requestId, { resolve, timer });
+        const accepted = manager.sendAgentWorkspaceEnvelope(
+          session.sessionId,
+          "terminal.browse",
+          { path, includeFiles: true, requestId },
+          { queue: true },
+        );
+        if (!accepted) {
+          clearTimeout(timer);
+          pendingBrowseRef.current.delete(requestId);
+          resolve({ path, entries: [], error: "目录请求未发送：连接未就绪。" });
+        }
+      });
+    },
+    [manager],
+  );
+
+  const readFile = useCallback(
+    (conversationId: string, path: string, maxBytes = 256_000) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      const session = conversation ? findSessionForConversation(conversation, manager.sessions) : undefined;
+      if (!conversation || !session) {
+        return Promise.resolve({
+          path,
+          content: "",
+          encoding: "utf8" as const,
+          truncated: false,
+          error: "设备连接已失效，请重新打开会话。",
+        });
+      }
+      const requestId = `read-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      return new Promise<AgentFileReadResult>((resolve) => {
+        const timer = setTimeout(() => {
+          pendingReadRef.current.delete(requestId);
+          resolve({
+            path,
+            content: "",
+            encoding: "utf8",
+            truncated: false,
+            error: "读取文件超时，请确认主机端仍在线。",
+          });
+        }, 12_000);
+        pendingReadRef.current.set(requestId, { resolve, timer });
+        const accepted = manager.sendAgentWorkspaceEnvelope(
+          session.sessionId,
+          "terminal.file.read",
+          { path, maxBytes, requestId },
+          { queue: true },
+        );
+        if (!accepted) {
+          clearTimeout(timer);
+          pendingReadRef.current.delete(requestId);
+          resolve({
+            path,
+            content: "",
+            encoding: "utf8",
+            truncated: false,
+            error: "文件请求未发送：连接未就绪。",
+          });
+        }
+      });
+    },
+    [manager],
+  );
+
   const archive = useCallback(async (conversationId: string, archived: boolean) => {
     await archiveAgentConversation(conversationId, archived);
     setConversations((prev) =>
@@ -1479,6 +1631,8 @@ export function useAgentWorkspace(
     respondPermission,
     suppressPermissionRequest,
     respondStructuredInput,
+    browseFiles,
+    readFile,
     archive,
     rename,
   };

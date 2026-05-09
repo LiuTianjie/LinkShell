@@ -24,7 +24,7 @@ import Markdown from "react-native-markdown-display";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { GlassBar } from "../components/GlassBar";
-import type { AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
+import type { AgentFileEntry, AgentFileReadResult, AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
 import type {
   AgentContentBlock,
   AgentCapabilities,
@@ -66,6 +66,7 @@ const PERMISSION_OPTIONS: Option<AgentPermissionMode>[] = [
 
 const MAX_IMAGE_ATTACHMENTS = 3;
 const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
+const FILE_PREVIEW_MAX_BYTES = 256_000;
 const DEFAULT_OPTION_ID = "__default__";
 const MONO_FONT = Platform.select({ ios: "Menlo", android: "monospace" });
 
@@ -404,6 +405,100 @@ function diffEntries(diff: string, fallback?: string): FileDiffEntry[] {
       removed: 0,
     }));
   return fallbackEntries.slice(0, 12);
+}
+
+function parentPath(path: string): string {
+  const clean = path.replace(/\/+$/, "");
+  if (!clean || clean === "/") return "/";
+  const index = clean.lastIndexOf("/");
+  return index <= 0 ? "/" : clean.slice(0, index);
+}
+
+function fileName(path: string): string {
+  return path.split("/").filter(Boolean).pop() || path || "/";
+}
+
+function formatBytes(value: number | undefined): string {
+  if (typeof value !== "number") return "";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function languageFromPath(path: string): string {
+  const ext = (path.split(".").pop() || "").toLowerCase();
+  const map: Record<string, string> = {
+    ts: "typescript",
+    tsx: "tsx",
+    js: "javascript",
+    jsx: "jsx",
+    json: "json",
+    mjs: "javascript",
+    cjs: "javascript",
+    css: "css",
+    scss: "scss",
+    html: "html",
+    md: "markdown",
+    yml: "yaml",
+    yaml: "yaml",
+    sh: "shell",
+    zsh: "shell",
+    bash: "shell",
+    py: "python",
+    rb: "ruby",
+    go: "go",
+    rs: "rust",
+    swift: "swift",
+    kt: "kotlin",
+    java: "java",
+    c: "c",
+    h: "c",
+    cpp: "cpp",
+    hpp: "cpp",
+    sql: "sql",
+    xml: "xml",
+  };
+  return map[ext] ?? (ext || "text");
+}
+
+type HighlightToken = { text: string; color: string; fontWeight?: "400" | "700" };
+
+function syntaxTokens(line: string, language: string, theme: Theme): HighlightToken[] {
+  if (!line) return [{ text: " ", color: theme.textSecondary }];
+  if (line.startsWith("+") && !line.startsWith("+++")) return [{ text: line, color: theme.success }];
+  if (line.startsWith("-") && !line.startsWith("---")) return [{ text: line, color: theme.error }];
+  if (line.startsWith("@@")) return [{ text: line, color: theme.accent, fontWeight: "700" }];
+
+  const commentIndex = (() => {
+    if (["python", "ruby", "shell", "yaml"].includes(language)) return line.indexOf("#");
+    const slash = line.indexOf("//");
+    return slash >= 0 ? slash : -1;
+  })();
+  const code = commentIndex >= 0 ? line.slice(0, commentIndex) : line;
+  const comment = commentIndex >= 0 ? line.slice(commentIndex) : "";
+  const keywordPattern = /\b(import|from|export|const|let|var|function|return|if|else|for|while|switch|case|break|continue|class|interface|type|extends|implements|async|await|try|catch|throw|new|true|false|null|undefined|def|self|struct|enum|public|private|protected|static|package)\b/g;
+  const tokenPattern = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\b\d+(?:\.\d+)?\b|\b(import|from|export|const|let|var|function|return|if|else|for|while|switch|case|break|continue|class|interface|type|extends|implements|async|await|try|catch|throw|new|true|false|null|undefined|def|self|struct|enum|public|private|protected|static|package)\b)/g;
+  const tokens: HighlightToken[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = tokenPattern.exec(code))) {
+    if (match.index > cursor) {
+      tokens.push({ text: code.slice(cursor, match.index), color: theme.textSecondary });
+    }
+    const value = match[0];
+    const isString = value.startsWith("\"") || value.startsWith("'") || value.startsWith("`");
+    const isNumber = /^\d/.test(value);
+    tokens.push({
+      text: value,
+      color: isString ? theme.success : isNumber ? theme.warning : keywordPattern.test(value) ? theme.accent : theme.text,
+      fontWeight: isString || isNumber ? "400" : "700",
+    });
+    keywordPattern.lastIndex = 0;
+    cursor = match.index + value.length;
+  }
+  if (cursor < code.length) tokens.push({ text: code.slice(cursor), color: theme.textSecondary });
+  if (comment) tokens.push({ text: comment, color: theme.textTertiary });
+  return tokens.length ? tokens : [{ text: line, color: theme.textSecondary }];
 }
 
 function diffLineColors(line: string, theme: Theme) {
@@ -2056,6 +2151,377 @@ function TimelineItemView({
   return null;
 }
 
+function HighlightedCodeLine({
+  line,
+  lineNumber,
+  language,
+  theme,
+}: {
+  line: string;
+  lineNumber: number;
+  language: string;
+  theme: Theme;
+}) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-start", minHeight: 19 }}>
+      <Text
+        style={{
+          width: 42,
+          color: theme.textTertiary,
+          fontSize: 11,
+          lineHeight: 19,
+          fontFamily: MONO_FONT,
+          textAlign: "right",
+          paddingRight: 10,
+        }}
+      >
+        {lineNumber}
+      </Text>
+      <Text selectable style={{ flex: 1, color: theme.textSecondary, fontSize: 12, lineHeight: 19, fontFamily: MONO_FONT }}>
+        {syntaxTokens(line, language, theme).map((token, index) => (
+          <Text key={`${lineNumber}:${index}`} style={{ color: token.color, fontWeight: token.fontWeight }}>
+            {token.text}
+          </Text>
+        ))}
+      </Text>
+    </View>
+  );
+}
+
+function FilePreviewDrawer({
+  visible,
+  conversationId,
+  cwd,
+  workspace,
+  theme,
+  topInset,
+  bottomInset,
+  onClose,
+}: {
+  visible: boolean;
+  conversationId: string;
+  cwd: string;
+  workspace: AgentWorkspaceHandle;
+  theme: Theme;
+  topInset: number;
+  bottomInset: number;
+  onClose: () => void;
+}) {
+  const [currentPath, setCurrentPath] = useState(cwd);
+  const [entries, setEntries] = useState<AgentFileEntry[]>([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseError, setBrowseError] = useState<string | undefined>();
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [preview, setPreview] = useState<AgentFileReadResult | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const requestSeqRef = useRef(0);
+  const readSeqRef = useRef(0);
+
+  const loadDirectory = useCallback(async (path: string) => {
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
+    setCurrentPath(path);
+    setBrowseLoading(true);
+    setBrowseError(undefined);
+    setSelectedPath(null);
+    setPreview(null);
+    readSeqRef.current += 1;
+    setPreviewLoading(false);
+    const result = await workspace.browseFiles(conversationId, path);
+    if (requestSeqRef.current !== requestSeq) return;
+    setEntries(result.entries);
+    setBrowseError(result.error);
+    setCurrentPath(result.path || path);
+    setBrowseLoading(false);
+  }, [conversationId, workspace]);
+
+  useEffect(() => {
+    if (!visible) return;
+    loadDirectory(cwd).catch(() => {
+      setBrowseLoading(false);
+      setBrowseError("读取目录失败。");
+    });
+  }, [cwd, loadDirectory, visible]);
+
+  const openEntry = useCallback((entry: AgentFileEntry) => {
+    if (entry.isDirectory) {
+      loadDirectory(entry.path).catch(() => {
+        setBrowseLoading(false);
+        setBrowseError("读取目录失败。");
+      });
+      return;
+    }
+    setSelectedPath(entry.path);
+    setPreviewLoading(true);
+    setPreview(null);
+    const readSeq = readSeqRef.current + 1;
+    readSeqRef.current = readSeq;
+    workspace.readFile(conversationId, entry.path, FILE_PREVIEW_MAX_BYTES)
+      .then((result) => {
+        if (readSeqRef.current !== readSeq) return;
+        setPreview(result);
+      })
+      .catch((error) => {
+        if (readSeqRef.current !== readSeq) return;
+        setPreview({
+          path: entry.path,
+          content: "",
+          encoding: "utf8",
+          truncated: false,
+          error: error instanceof Error ? error.message : "读取文件失败。",
+        });
+      })
+      .finally(() => {
+        if (readSeqRef.current === readSeq) setPreviewLoading(false);
+      });
+  }, [conversationId, loadDirectory, workspace]);
+
+  const copyPreview = useCallback(() => {
+    if (!preview?.content) return;
+    copy(preview.content).then((ok) => {
+      if (!ok) Alert.alert("复制失败", "系统剪贴板暂不可用，请长按文本手动复制。");
+    }).catch(() => Alert.alert("复制失败", "系统剪贴板暂不可用，请长按文本手动复制。"));
+  }, [preview?.content]);
+
+  if (!visible) return null;
+
+  const language = preview ? languageFromPath(preview.path) : "text";
+  const lines = preview?.content.split("\n") ?? [];
+  const directoryCount = entries.filter((entry) => entry.isDirectory).length;
+  const fileCount = entries.length - directoryCount;
+
+  return (
+    <View
+      style={{
+        position: "absolute",
+        top: 0,
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 40,
+        flexDirection: "row",
+      }}
+      pointerEvents="box-none"
+    >
+      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.34)" }} onPress={onClose} />
+      <View
+        style={{
+          width: "88%",
+          maxWidth: 460,
+          backgroundColor: theme.bg,
+          borderLeftWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.separator,
+          paddingTop: topInset + 10,
+          paddingBottom: Math.max(bottomInset, 12),
+          shadowColor: "#000",
+          shadowOpacity: 0.28,
+          shadowRadius: 28,
+          shadowOffset: { width: -8, height: 0 },
+          elevation: 12,
+        }}
+      >
+        <View style={{ paddingHorizontal: 14, gap: 10 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: theme.accentLight,
+              }}
+            >
+              <AppSymbol name="doc.text.magnifyingglass" size={17} color={theme.accent} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: theme.text, fontSize: 16, fontWeight: "800" }}>文件预览</Text>
+              <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2, fontFamily: MONO_FONT }} numberOfLines={1}>
+                {directoryCount} 个目录 · {fileCount} 个文件
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => loadDirectory(currentPath)}
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed ? theme.accentLight : theme.bgInput,
+              })}
+            >
+              {browseLoading ? <ActivityIndicator size="small" color={theme.accent} /> : <AppSymbol name="arrow.clockwise" size={15} color={theme.textSecondary} />}
+            </Pressable>
+            <Pressable
+              onPress={onClose}
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed ? theme.bgInput : "transparent",
+              })}
+            >
+              <AppSymbol name="xmark" size={16} color={theme.textSecondary} />
+            </Pressable>
+          </View>
+
+          <View
+            style={{
+              borderRadius: 12,
+              borderCurve: "continuous",
+              backgroundColor: theme.bgInput,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <Pressable
+              onPress={() => loadDirectory(parentPath(currentPath))}
+              disabled={currentPath === "/"}
+              style={{ opacity: currentPath === "/" ? 0.35 : 1 }}
+            >
+              <AppSymbol name="chevron.left" size={15} color={theme.textSecondary} />
+            </Pressable>
+            <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 11, fontFamily: MONO_FONT }} numberOfLines={1}>
+              {currentPath}
+            </Text>
+          </View>
+        </View>
+
+        <ScrollView
+          style={{ flex: 1, marginTop: 10 }}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12, gap: 6 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          {browseError ? (
+            <View style={{ borderRadius: 10, padding: 10, backgroundColor: theme.errorLight }}>
+              <Text style={{ color: theme.error, fontSize: 12, lineHeight: 17 }}>{browseError}</Text>
+            </View>
+          ) : null}
+          {browseLoading && entries.length === 0 ? (
+            <View style={{ paddingVertical: 24, alignItems: "center" }}>
+              <ActivityIndicator color={theme.accent} />
+            </View>
+          ) : null}
+          {entries.map((entry) => {
+            const selected = selectedPath === entry.path;
+            return (
+              <Pressable
+                key={entry.path}
+                onPress={() => openEntry(entry)}
+                style={({ pressed }) => ({
+                  borderRadius: 10,
+                  borderCurve: "continuous",
+                  paddingVertical: 9,
+                  paddingHorizontal: 10,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 9,
+                  backgroundColor: selected ? theme.accentLight : pressed ? theme.bgInput : "transparent",
+                })}
+              >
+                <AppSymbol
+                  name={entry.isDirectory ? "folder.fill" : "doc.text"}
+                  size={17}
+                  color={entry.isDirectory ? theme.accent : selected ? theme.accent : theme.textSecondary}
+                />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ color: theme.text, fontSize: 13, fontWeight: "700" }} numberOfLines={1}>
+                    {entry.name}
+                  </Text>
+                  {!entry.isDirectory ? (
+                    <Text style={{ color: theme.textTertiary, fontSize: 10, marginTop: 2, fontFamily: MONO_FONT }}>
+                      {formatBytes(entry.size)}
+                    </Text>
+                  ) : null}
+                </View>
+                {entry.isDirectory ? <AppSymbol name="chevron.right" size={13} color={theme.textTertiary} /> : null}
+              </Pressable>
+            );
+          })}
+
+          <View
+            style={{
+              marginTop: 8,
+              borderRadius: 12,
+              borderCurve: "continuous",
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: theme.separator,
+              backgroundColor: theme.mode === "light" ? "#fff" : "#09090a",
+              overflow: "hidden",
+            }}
+          >
+            <View
+              style={{
+                minHeight: 40,
+                paddingHorizontal: 10,
+                paddingVertical: 9,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.separator,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ color: theme.text, fontSize: 13, fontWeight: "800" }} numberOfLines={1}>
+                  {preview ? fileName(preview.path) : selectedPath ? fileName(selectedPath) : "选择一个文件"}
+                </Text>
+                <Text style={{ color: theme.textTertiary, fontSize: 10, marginTop: 2, fontFamily: MONO_FONT }} numberOfLines={1}>
+                  {preview ? [language, formatBytes(preview.size), preview.truncated ? "已截断" : null].filter(Boolean).join(" · ") : "支持常见代码文件高亮"}
+                </Text>
+              </View>
+              {preview?.content ? (
+                <Pressable onPress={copyPreview} hitSlop={8}>
+                  <AppSymbol name="doc.on.doc" size={15} color={theme.textSecondary} />
+                </Pressable>
+              ) : null}
+            </View>
+            {previewLoading ? (
+              <View style={{ paddingVertical: 28, alignItems: "center" }}>
+                <ActivityIndicator color={theme.accent} />
+              </View>
+            ) : preview?.error ? (
+              <View style={{ padding: 12 }}>
+                <Text selectable style={{ color: theme.error, fontSize: 12, lineHeight: 17 }}>
+                  {preview.error}
+                </Text>
+              </View>
+            ) : preview ? (
+              <ScrollView horizontal bounces={false}>
+                <View style={{ minWidth: 520, paddingVertical: 8, paddingRight: 14 }}>
+                  {lines.map((line, index) => (
+                    <HighlightedCodeLine
+                      key={`${preview.path}:${index}`}
+                      line={line}
+                      lineNumber={index + 1}
+                      language={language}
+                      theme={theme}
+                    />
+                  ))}
+                </View>
+              </ScrollView>
+            ) : (
+              <View style={{ padding: 12 }}>
+                <Text style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}>
+                  从上方列表选择文件后会在这里显示内容。
+                </Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </View>
+    </View>
+  );
+}
+
 export function AgentConversationScreen({
   conversationId,
   workspace,
@@ -2077,6 +2543,7 @@ export function AgentConversationScreen({
     conversation?.permissionMode,
   );
   const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
+  const [fileDrawerOpen, setFileDrawerOpen] = useState(false);
   const capabilities = conversation ? workspace.capabilitiesBySessionId.get(conversation.sessionId) : undefined;
   const providerCapability = conversation ? providerCapabilityFor(conversation.provider, capabilities) : undefined;
   const providerSupportsImageInput = conversation?.provider === "claude" || conversation?.provider === "codex";
@@ -2548,6 +3015,28 @@ export function AgentConversationScreen({
           blurTint={theme.mode === "dark" ? "systemUltraThinMaterialDark" : "systemUltraThinMaterialLight"}
           fallbackColor={theme.mode === "light" ? "rgba(250,250,250,0.62)" : "rgba(42,42,43,0.58)"}
           style={{
+            borderRadius: 17,
+            borderCurve: "continuous",
+          }}
+        >
+          <Pressable
+            onPress={() => setFileDrawerOpen(true)}
+            hitSlop={8}
+            style={({ pressed }) => ({
+              width: 34,
+              height: 34,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? "rgba(120,120,128,0.14)" : "transparent",
+            })}
+          >
+            <AppSymbol name="doc.text.magnifyingglass" size={18} color={theme.textSecondary} />
+          </Pressable>
+        </GlassBar>
+        <GlassBar
+          blurTint={theme.mode === "dark" ? "systemUltraThinMaterialDark" : "systemUltraThinMaterialLight"}
+          fallbackColor={theme.mode === "light" ? "rgba(250,250,250,0.62)" : "rgba(42,42,43,0.58)"}
+          style={{
             flex: 1,
             minWidth: 0,
             minHeight: 38,
@@ -2952,6 +3441,16 @@ export function AgentConversationScreen({
           </View>
         </View>
       </View>
+      <FilePreviewDrawer
+        visible={fileDrawerOpen}
+        conversationId={conversation.id}
+        cwd={conversation.cwd || "~"}
+        workspace={workspace}
+        theme={theme}
+        topInset={insets.top}
+        bottomInset={insets.bottom}
+        onClose={() => setFileDrawerOpen(false)}
+      />
     </KeyboardAvoidingView>
   );
 }

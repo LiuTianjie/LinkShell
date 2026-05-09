@@ -47,6 +47,8 @@ export interface BrowseEntry {
   name: string;
   path: string;
   isDirectory: boolean;
+  size?: number;
+  modifiedAt?: string;
 }
 
 export interface BrowseResult {
@@ -1356,8 +1358,15 @@ export function useSessionManager(): SessionManagerHandle {
             path: string;
             entries: BrowseEntry[];
             error?: string;
+            requestId?: string;
           };
           s.browseResult = { path: p.path, entries: p.entries, error: p.error };
+          agentWorkspaceCbRef.current?.(envelope);
+          tick();
+          break;
+        }
+        case "terminal.file.read.result": {
+          agentWorkspaceCbRef.current?.(envelope);
           tick();
           break;
         }

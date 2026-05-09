@@ -187,6 +187,7 @@ function handleHostMessage(
     case "terminal.spawned":
     case "terminal.list":
     case "terminal.browse.result":
+    case "terminal.file.read.result":
       broadcastToClients(session, envelope);
       break;
     // Structured status from hooks
@@ -325,6 +326,7 @@ function handleClientMessage(
     case "terminal.kill":
     case "terminal.list":
     case "terminal.browse":
+    case "terminal.file.read":
     case "terminal.mkdir":
     case "terminal.history.request":
     case "file.upload":

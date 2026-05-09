@@ -2,7 +2,7 @@ import * as pty from "node-pty";
 import * as http from "node:http";
 import WebSocket from "ws";
 import { hostname, platform, homedir } from "node:os";
-import { writeFileSync, readFileSync, readdirSync, statSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, readdirSync, statSync, unlinkSync, mkdirSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename, resolve } from "node:path";
 import {
@@ -581,23 +581,81 @@ export class BridgeSession {
         const browsePath = resolve(rawPath);
         try {
           const entries = readdirSync(browsePath, { withFileTypes: true })
-            .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((d) => ({
-              name: d.name,
-              path: join(browsePath, d.name),
-              isDirectory: true,
-            }));
+            .filter((d) => !d.name.startsWith(".") && (d.isDirectory() || (p.includeFiles && d.isFile())))
+            .map((d) => {
+              const entryPath = join(browsePath, d.name);
+              const stats = statSync(entryPath);
+              return {
+                name: d.name,
+                path: entryPath,
+                isDirectory: d.isDirectory(),
+                size: stats.size,
+                modifiedAt: stats.mtime.toISOString(),
+              };
+            })
+            .sort((a, b) => {
+              if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+              return a.name.localeCompare(b.name);
+            });
           this.send(createEnvelope({
             type: "terminal.browse.result",
             sessionId: this.sessionId,
-            payload: { path: browsePath, entries },
+            payload: { path: browsePath, entries, requestId: p.requestId },
           }));
         } catch (err: unknown) {
           this.send(createEnvelope({
             type: "terminal.browse.result",
             sessionId: this.sessionId,
-            payload: { path: browsePath, entries: [], error: (err as Error).message },
+            payload: { path: browsePath, entries: [], error: (err as Error).message, requestId: p.requestId },
+          }));
+        }
+        break;
+      }
+      case "terminal.file.read": {
+        const p = parseTypedPayload("terminal.file.read", envelope.payload);
+        const rawPath = p.path.startsWith("~") ? p.path.replace(/^~/, homedir()) : p.path;
+        const filePath = resolve(rawPath);
+        try {
+          const stats = statSync(filePath);
+          if (!stats.isFile()) {
+            throw new Error("Path is not a file");
+          }
+          const maxBytes = p.maxBytes ?? 256_000;
+          const bytesToRead = Math.min(stats.size, maxBytes);
+          const buffer = Buffer.alloc(bytesToRead);
+          const fd = openSync(filePath, "r");
+          try {
+            readSync(fd, buffer, 0, bytesToRead, 0);
+          } finally {
+            closeSync(fd);
+          }
+          if (buffer.includes(0)) {
+            throw new Error("Binary files cannot be previewed");
+          }
+          this.send(createEnvelope({
+            type: "terminal.file.read.result",
+            sessionId: this.sessionId,
+            payload: {
+              path: filePath,
+              content: buffer.toString("utf8"),
+              encoding: "utf8",
+              size: stats.size,
+              truncated: stats.size > maxBytes,
+              requestId: p.requestId,
+            },
+          }));
+        } catch (err: unknown) {
+          this.send(createEnvelope({
+            type: "terminal.file.read.result",
+            sessionId: this.sessionId,
+            payload: {
+              path: filePath,
+              content: "",
+              encoding: "utf8",
+              truncated: false,
+              error: (err as Error).message,
+              requestId: p.requestId,
+            },
           }));
         }
         break;

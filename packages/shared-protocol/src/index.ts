@@ -223,18 +223,39 @@ export const terminalMkdirPayloadSchema = z.object({
 
 export const terminalBrowsePayloadSchema = z.object({
   path: z.string().min(1),
+  includeFiles: z.boolean().optional().default(false),
+  requestId: z.string().min(1).optional(),
 });
 
 export const terminalBrowseEntrySchema = z.object({
   name: z.string(),
   path: z.string(),
   isDirectory: z.boolean(),
+  size: z.number().int().nonnegative().optional(),
+  modifiedAt: z.string().datetime().optional(),
 });
 
 export const terminalBrowseResultPayloadSchema = z.object({
   path: z.string(),
   entries: z.array(terminalBrowseEntrySchema),
   error: z.string().optional(),
+  requestId: z.string().min(1).optional(),
+});
+
+export const terminalFileReadPayloadSchema = z.object({
+  path: z.string().min(1),
+  maxBytes: z.number().int().positive().max(1_000_000).optional().default(256_000),
+  requestId: z.string().min(1).optional(),
+});
+
+export const terminalFileReadResultPayloadSchema = z.object({
+  path: z.string(),
+  content: z.string().default(""),
+  encoding: z.literal("utf8").default("utf8"),
+  size: z.number().int().nonnegative().optional(),
+  truncated: z.boolean().default(false),
+  error: z.string().optional(),
+  requestId: z.string().min(1).optional(),
 });
 
 // ── Terminal status payloads (from Claude Code hooks) ────────────────
@@ -806,6 +827,8 @@ export const protocolMessageSchemas = {
   "terminal.list": terminalListPayloadSchema,
   "terminal.browse": terminalBrowsePayloadSchema,
   "terminal.browse.result": terminalBrowseResultPayloadSchema,
+  "terminal.file.read": terminalFileReadPayloadSchema,
+  "terminal.file.read.result": terminalFileReadResultPayloadSchema,
   "terminal.kill": terminalKillPayloadSchema,
   "terminal.mkdir": terminalMkdirPayloadSchema,
   "terminal.status": terminalStatusPayloadSchema,
