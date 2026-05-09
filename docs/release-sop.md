@@ -154,8 +154,8 @@ gh release upload vX.Y.Z ./apps/mobile/android/app/build/outputs/apk/release/app
 npm info linkshell-cli version
 
 # 验证 Docker
-docker pull nickname4th/linkshell-gateway:latest
-docker run --rm nickname4th/linkshell-gateway:latest node -e "console.log('ok')"
+docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
+docker run --platform linux/amd64 --rm nickname4th/linkshell-gateway:latest node -e "console.log('ok')"
 
 # 验证 Homebrew（首次 tap 后）
 brew update

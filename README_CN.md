@@ -231,6 +231,9 @@ linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider clau
 docker pull nickname4th/linkshell-gateway:latest
 docker run -d -p 8787:8787 --name linkshell-gateway nickname4th/linkshell-gateway:latest
 
+# Apple Silicon / arm64 主机：当前 Docker Hub 镜像是 linux/amd64。
+docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
+
 # 或从源码构建
 git clone https://github.com/LiuTianjie/LinkShell
 cd LinkShell

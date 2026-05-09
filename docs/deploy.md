@@ -33,6 +33,17 @@ docker run -d \
   nickname4th/linkshell-gateway:latest
 ```
 
+当前 Docker Hub 镜像为 `linux/amd64`。如果在 Apple Silicon / arm64 主机上拉取，请显式指定平台：
+
+```bash
+docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
+docker run --platform linux/amd64 -d \
+  -p 8787:8787 \
+  --name linkshell-gateway \
+  --restart unless-stopped \
+  nickname4th/linkshell-gateway:latest
+```
+
 ### 从源码构建
 
 ```bash
@@ -65,9 +76,9 @@ docker compose logs -f gateway
 
 ```bash
 # Docker Hub 方式
-docker pull nickname4th/linkshell-gateway:latest
+docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
 docker stop linkshell-gateway && docker rm linkshell-gateway
-docker run -d -p 8787:8787 --name linkshell-gateway --restart unless-stopped nickname4th/linkshell-gateway:latest
+docker run --platform linux/amd64 -d -p 8787:8787 --name linkshell-gateway --restart unless-stopped nickname4th/linkshell-gateway:latest
 
 # 源码方式
 git pull

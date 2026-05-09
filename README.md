@@ -231,6 +231,9 @@ You can also deploy the Gateway with Docker:
 docker pull nickname4th/linkshell-gateway:latest
 docker run -d -p 8787:8787 --name linkshell-gateway nickname4th/linkshell-gateway:latest
 
+# Apple Silicon / arm64 hosts: current Docker Hub images are linux/amd64.
+docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
+
 # Or build from source
 git clone https://github.com/LiuTianjie/LinkShell
 cd LinkShell
