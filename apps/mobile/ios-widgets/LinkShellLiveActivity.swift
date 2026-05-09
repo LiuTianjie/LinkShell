@@ -217,10 +217,17 @@ struct ProviderMark: View {
 
     var body: some View {
         ZStack {
-            Circle().fill(providerColor(provider).opacity(0.25))
-            Text(providerInitial(provider))
-                .font(.system(size: size * 0.48, weight: .black))
-                .foregroundStyle(providerColor(provider))
+            Circle().fill(providerColor(provider).opacity(0.18))
+            if let assetName = providerIconAsset(provider) {
+                Image(assetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size * 0.68, height: size * 0.68)
+            } else {
+                Image(systemName: providerSymbol(provider))
+                    .font(.system(size: size * 0.48, weight: .bold))
+                    .foregroundStyle(providerColor(provider))
+            }
         }
         .frame(width: size, height: size)
     }
@@ -322,15 +329,27 @@ func providerLabel(_ provider: String) -> String {
     switch provider.lowercased() {
     case "codex": return "Codex"
     case "claude": return "Claude"
+    case "gemini": return "Gemini"
+    case "copilot": return "Copilot"
+    case "custom": return "Custom"
     default: return "Agent"
     }
 }
 
-func providerInitial(_ provider: String) -> String {
+func providerIconAsset(_ provider: String) -> String? {
     switch provider.lowercased() {
-    case "codex": return "C"
-    case "claude": return "A"
-    default: return "L"
+    case "codex": return "codex-logo"
+    case "claude": return "claudecode-logo"
+    case "gemini": return "gemini-logo"
+    case "copilot": return "copilot-logo"
+    default: return nil
+    }
+}
+
+func providerSymbol(_ provider: String) -> String {
+    switch provider.lowercased() {
+    case "custom": return "gearshape.fill"
+    default: return "sparkles"
     }
 }
 
@@ -338,6 +357,8 @@ func providerColor(_ provider: String) -> Color {
     switch provider.lowercased() {
     case "codex": return Color(red: 0.36, green: 0.76, blue: 0.98)
     case "claude": return Color(red: 0.96, green: 0.68, blue: 0.40)
+    case "gemini": return Color(red: 0.51, green: 0.62, blue: 1.0)
+    case "copilot": return Color(red: 0.58, green: 0.64, blue: 0.74)
     default: return Color(red: 0.58, green: 0.70, blue: 1.0)
     }
 }
