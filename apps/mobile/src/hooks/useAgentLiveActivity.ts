@@ -10,7 +10,7 @@ import {
 } from "../native/LiveActivity";
 import type { AgentConversationRecord, AgentPermission, AgentTimelineItem } from "../storage/agent-workspace";
 import type { AgentWorkspaceHandle } from "./useAgentWorkspace";
-import type { SessionManagerHandle } from "./useSessionManager";
+import type { SessionInfo, SessionManagerHandle } from "./useSessionManager";
 
 type Candidate = {
   conversation: AgentConversationRecord;
@@ -25,8 +25,93 @@ type Candidate = {
   updatedAt: number;
 };
 
+type ResolvedCandidate = Candidate & {
+  session: SessionInfo;
+};
+
 const IDLE_END_DELAY_MS = 30_000;
 const ERROR_VISIBLE_MS = 60_000;
+
+function isActiveSession(session: SessionInfo): boolean {
+  return (
+    session.status === "connected" ||
+    session.status === "connecting" ||
+    session.status === "claiming" ||
+    session.status === "reconnecting"
+  );
+}
+
+function hasActiveSession(manager: SessionManagerHandle): boolean {
+  for (const session of manager.sessions.values()) {
+    if (isActiveSession(session)) return true;
+  }
+  return false;
+}
+
+function activeSessionSignature(manager: SessionManagerHandle): string {
+  return [...manager.sessions.values()]
+    .filter(isActiveSession)
+    .map((session) => `${session.sessionId}:${session.status}`)
+    .sort()
+    .join("|");
+}
+
+function normalizeServerUrl(url: string | undefined): string {
+  return (url ?? "").replace(/\/+$/, "");
+}
+
+function sessionHasCwd(session: SessionInfo, cwd: string): boolean {
+  return session.cwd === cwd ||
+    [...session.terminals.values()].some((terminal) => terminal.cwd === cwd);
+}
+
+function resolveCandidateSession(candidate: Candidate, manager: SessionManagerHandle): SessionInfo | undefined {
+  const conversation = candidate.conversation;
+  const metadataSessionId = candidate.permissionItem?.metadata?.sessionId;
+  if (typeof metadataSessionId === "string" && metadataSessionId) {
+    const metadataSession = manager.sessions.get(metadataSessionId);
+    if (metadataSession) return metadataSession;
+  }
+
+  const exact = manager.sessions.get(conversation.sessionId);
+  if (exact && (!conversation.machineId || exact.machineId === conversation.machineId)) {
+    return exact;
+  }
+
+  const serverUrl = normalizeServerUrl(conversation.serverUrl);
+  const candidates = [...manager.sessions.values()].filter((session) =>
+    normalizeServerUrl(session.gatewayUrl) === serverUrl
+  );
+  if (conversation.machineId) {
+    const machineMatch = candidates.find((session) => session.machineId === conversation.machineId);
+    if (machineMatch) return machineMatch;
+    return undefined;
+  }
+
+  const cwdMatch = candidates.find((session) => sessionHasCwd(session, conversation.cwd));
+  return cwdMatch ?? candidates[0];
+}
+
+function resolveLiveCandidate(candidate: Candidate, manager: SessionManagerHandle): ResolvedCandidate | null {
+  const session = resolveCandidateSession(candidate, manager);
+  return session && isActiveSession(session) ? { ...candidate, session } : null;
+}
+
+function isSessionIdActive(manager: SessionManagerHandle, sessionId: string): boolean {
+  const session = manager.sessions.get(sessionId);
+  return !!session && isActiveSession(session);
+}
+
+function candidateSignature(candidate: ResolvedCandidate): string {
+  return [
+    candidate.session.sessionId,
+    candidate.conversation.id,
+    candidate.conversation.status,
+    candidate.status,
+    candidate.permission?.requestId ?? "",
+    candidate.updatedAt,
+  ].join(":");
+}
 
 function compactText(value: string | undefined, max = 220): string {
   const text = (value ?? "").replace(/\s+/g, " ").trim();
@@ -149,17 +234,10 @@ function buildCandidate(conversation: AgentConversationRecord, items: AgentTimel
   };
 }
 
-function sourceSessionId(candidate: Candidate): string {
-  const metadataSessionId = candidate.permissionItem?.metadata?.sessionId;
-  return typeof metadataSessionId === "string" && metadataSessionId
-    ? metadataSessionId
-    : candidate.conversation.sessionId;
-}
-
-function buildState(candidate: Candidate): ActivityState {
+function buildState(candidate: ResolvedCandidate): ActivityState {
   return {
     conversationId: candidate.conversation.id,
-    sessionId: sourceSessionId(candidate),
+    sessionId: candidate.session.sessionId,
     provider: candidate.conversation.provider,
     project: compactText(candidate.conversation.title || candidate.conversation.cwd.split("/").filter(Boolean).pop() || "Agent", 40),
     status: candidate.status,
@@ -177,10 +255,9 @@ function permissionProtocol(candidate: Candidate): ExtendedActivityData["permiss
   return "v2";
 }
 
-function buildExtended(candidate: Candidate, manager: SessionManagerHandle): ExtendedActivityData {
+function buildExtended(candidate: ResolvedCandidate, manager: SessionManagerHandle): ExtendedActivityData {
   const permission = candidate.permission;
   const metadata = candidate.permissionItem?.metadata;
-  const session = manager.sessions.get(sourceSessionId(candidate));
   const protocol = permissionProtocol(candidate);
   const terminalId = typeof metadata?.terminalId === "string" ? metadata.terminalId : undefined;
   const agentSessionId = typeof metadata?.agentSessionId === "string"
@@ -188,7 +265,7 @@ function buildExtended(candidate: Candidate, manager: SessionManagerHandle): Ext
     : candidate.conversation.agentSessionId;
   return {
     conversationId: candidate.conversation.id,
-    gatewayUrl: session?.gatewayUrl ?? "",
+    gatewayUrl: candidate.session.gatewayUrl,
     deviceToken: manager.deviceToken ?? "",
     permissionProtocol: protocol,
     terminalId,
@@ -210,11 +287,14 @@ function buildExtended(candidate: Candidate, manager: SessionManagerHandle): Ext
   };
 }
 
-function selectCandidate(workspace: AgentWorkspaceHandle): Candidate | null {
+function selectCandidate(workspace: AgentWorkspaceHandle, manager: SessionManagerHandle): ResolvedCandidate | null {
   const conversations = workspace.conversations;
-  const candidates = conversations.map((conversation) =>
-    buildCandidate(conversation, workspace.getTimeline(conversation.id)),
-  );
+  const candidates = conversations
+    .map((conversation) =>
+      buildCandidate(conversation, workspace.getTimeline(conversation.id)),
+    )
+    .map((candidate) => resolveLiveCandidate(candidate, manager))
+    .filter((candidate): candidate is ResolvedCandidate => Boolean(candidate));
   const pending = candidates
     .filter((candidate) => candidate.permission)
     .sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -245,6 +325,16 @@ export function useAgentLiveActivity(workspace: AgentWorkspaceHandle, manager: S
   const alertedRequestIdsRef = useRef<string[]>([]);
   const appStateRef = useRef(AppState.currentState);
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activityGenerationRef = useRef(0);
+  const cleanupKeyRef = useRef<string | null>(null);
+  const startingSignatureRef = useRef<string | null>(null);
+  const pendingUpdateRef = useRef<{
+    state: ActivityState;
+    extended: ExtendedActivityData;
+    needsAlert: boolean;
+    signature: string;
+    sessionId: string;
+  } | null>(null);
 
   const clearEndTimer = useCallback(() => {
     if (!endTimerRef.current) return;
@@ -252,10 +342,22 @@ export function useAgentLiveActivity(workspace: AgentWorkspaceHandle, manager: S
     endTimerRef.current = null;
   }, []);
 
-  const finishActivity = useCallback(() => {
+  const finishActivity = useCallback((cleanupKey?: string) => {
+    if (
+      cleanupKey &&
+      cleanupKeyRef.current === cleanupKey &&
+      !liveActivityActiveRef.current &&
+      !liveActivityStartingRef.current
+    ) {
+      return;
+    }
+    cleanupKeyRef.current = cleanupKey ?? null;
+    activityGenerationRef.current += 1;
     clearEndTimer();
     liveActivityActiveRef.current = false;
     liveActivityStartingRef.current = false;
+    startingSignatureRef.current = null;
+    pendingUpdateRef.current = null;
     endLiveActivity();
   }, [clearEndTimer]);
 
@@ -267,15 +369,27 @@ export function useAgentLiveActivity(workspace: AgentWorkspaceHandle, manager: S
   }, [finishActivity]);
 
   const pushUpdate = useCallback(() => {
-    const candidate = selectCandidate(workspace);
-    if (!candidate) {
-      scheduleEnd();
+    const sessionSignature = activeSessionSignature(manager);
+    if (!sessionSignature) {
+      finishActivity("no-active-sessions");
       return;
     }
 
+    const candidate = selectCandidate(workspace, manager);
+    if (!candidate) {
+      if (liveActivityActiveRef.current) {
+        scheduleEnd();
+      } else {
+        finishActivity(`no-candidate:${sessionSignature}`);
+      }
+      return;
+    }
+
+    cleanupKeyRef.current = null;
     clearEndTimer();
     const state = buildState(candidate);
     const extended = buildExtended(candidate, manager);
+    const signature = candidateSignature(candidate);
     const alertRequestId = candidate.permission?.requestId ?? null;
     const needsAlert =
       !!alertRequestId &&
@@ -287,16 +401,47 @@ export function useAgentLiveActivity(workspace: AgentWorkspaceHandle, manager: S
 
     if (!liveActivityActiveRef.current && !liveActivityStartingRef.current) {
       liveActivityStartingRef.current = true;
+      startingSignatureRef.current = signature;
+      pendingUpdateRef.current = null;
+      const generation = activityGenerationRef.current;
       isLiveActivityAvailable()
         .then((ok) => ok ? startLiveActivity(state, extended) : null)
         .then((id) => {
           if (!id) return;
+          if (generation !== activityGenerationRef.current || !isSessionIdActive(manager, candidate.session.sessionId)) {
+            endLiveActivity();
+            return;
+          }
           liveActivityActiveRef.current = true;
-          if (needsAlert) updateLiveActivity(state, extended, true).catch(() => {});
+          const pending = pendingUpdateRef.current;
+          pendingUpdateRef.current = null;
+          if (
+            pending &&
+            pending.signature !== startingSignatureRef.current &&
+            isSessionIdActive(manager, pending.sessionId)
+          ) {
+            updateLiveActivity(pending.state, pending.extended, pending.needsAlert).catch(() => {});
+          } else if (needsAlert) {
+            updateLiveActivity(state, extended, true).catch(() => {});
+          }
         })
         .finally(() => {
-          liveActivityStartingRef.current = false;
+          if (generation === activityGenerationRef.current) {
+            liveActivityStartingRef.current = false;
+            startingSignatureRef.current = null;
+          }
         });
+      return;
+    }
+
+    if (liveActivityStartingRef.current) {
+      pendingUpdateRef.current = {
+        state,
+        extended,
+        needsAlert,
+        signature,
+        sessionId: candidate.session.sessionId,
+      };
       return;
     }
 
@@ -307,7 +452,7 @@ export function useAgentLiveActivity(workspace: AgentWorkspaceHandle, manager: S
         pushUpdate();
       });
     }
-  }, [clearEndTimer, manager, scheduleEnd, workspace]);
+  }, [clearEndTimer, finishActivity, manager, scheduleEnd, workspace]);
 
   useEffect(() => {
     pushUpdate();

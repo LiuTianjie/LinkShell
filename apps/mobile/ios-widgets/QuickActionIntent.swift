@@ -58,6 +58,7 @@ struct QuickActionIntent: AppIntent {
         let result = await sendPermissionResponse(extended: extended)
         guard result.ok else {
             NSLog("[LiveActivityAction] gateway respond failed sessionId=%@ conversationId=%@ requestId=%@ outcome=%@ protocol=%@ status=%d error=%@", sessionId, conversationId, requestId, outcome, extended.permissionProtocol ?? "v2", result.status, result.message)
+            await markPermissionResponseFailed()
             return .result()
         }
 
@@ -94,6 +95,24 @@ struct QuickActionIntent: AppIntent {
             }
         }
         NSLog("[LiveActivityAction] refreshed stale live activity requestId=%@ current=%@ updated=%d", requestId, currentRequestId, updatedCount)
+    }
+
+    private func markPermissionResponseFailed() async {
+        var updatedCount = 0
+        for activity in Activity<LinkShellAttributes>.activities {
+            var state = activity.content.state
+            if state.sessionId == sessionId || state.conversationId == conversationId {
+                state.status = "error"
+                state.phaseLabel = "授权未送达，请回 App 查看"
+                state.summary = "授权未送达，请回 App 查看"
+                state.hasPermission = false
+                state.permissionCount = 0
+                state.updatedAt = Date().timeIntervalSince1970 * 1000
+                await activity.update(ActivityContent(state: state, staleDate: nil))
+                updatedCount += 1
+            }
+        }
+        NSLog("[LiveActivityAction] marked failed live activity response sessionId=%@ conversationId=%@ requestId=%@ updated=%d", sessionId, conversationId, requestId, updatedCount)
     }
 
     private func clearStoredPermission(extended: ExtendedActivityData) {

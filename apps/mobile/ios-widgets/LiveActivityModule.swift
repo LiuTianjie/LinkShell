@@ -8,6 +8,7 @@ class LiveActivityModule: NSObject {
 
     private var activityId: String? = nil
     private var startTime: Date? = nil
+    private var activityGeneration: Int = 0
 
     // MARK: - Start
 
@@ -27,11 +28,19 @@ class LiveActivityModule: NSObject {
         }
 
         writeExtendedData(extendedJson)
+        activityGeneration += 1
+        let generation = activityGeneration
+        let staleActivities = Activity<LinkShellAttributes>.activities
 
         // End any stale activities before starting a new one
         Task {
-            for activity in Activity<LinkShellAttributes>.activities {
+            for activity in staleActivities {
                 await activity.end(nil, dismissalPolicy: .immediate)
+            }
+
+            guard generation == self.activityGeneration else {
+                resolve("")
+                return
             }
 
             let attributes = LinkShellAttributes(startedAt: Date())
@@ -42,6 +51,11 @@ class LiveActivityModule: NSObject {
                     content: content,
                     pushType: nil
                 )
+                guard generation == self.activityGeneration else {
+                    await activity.end(nil, dismissalPolicy: .immediate)
+                    resolve("")
+                    return
+                }
                 self.activityId = activity.id
                 self.startTime = Date()
                 resolve(activity.id)
@@ -100,9 +114,10 @@ class LiveActivityModule: NSObject {
     @objc
     func endActivity(_ resolve: @escaping RCTPromiseResolveBlock,
                      rejecter reject: @escaping RCTPromiseRejectBlock) {
-        guard let aid = activityId else {
-            resolve(false)
-            return
+        activityGeneration += 1
+        let targetActivityId = activityId
+        let activitiesToEnd = Activity<LinkShellAttributes>.activities.filter { activity in
+            targetActivityId == nil || activity.id == targetActivityId
         }
 
         activityId = nil
@@ -112,27 +127,29 @@ class LiveActivityModule: NSObject {
         LiveActivityStore.defaults?.synchronize()
 
         Task {
-            for activity in Activity<LinkShellAttributes>.activities {
-                if activity.id == aid {
-                    let finalState = LinkShellAttributes.ContentState(
-                        conversationId: "",
-                        sessionId: "",
-                        provider: "custom",
-                        project: "",
-                        status: "idle",
-                        phaseLabel: "",
-                        summary: "",
-                        hasPermission: false,
-                        permissionCount: 0,
-                        updatedAt: Date().timeIntervalSince1970 * 1000
-                    )
-                    let content = ActivityContent(state: finalState, staleDate: nil)
+            var didEnd = false
+            let finalState = LinkShellAttributes.ContentState(
+                conversationId: "",
+                sessionId: "",
+                provider: "custom",
+                project: "",
+                status: "idle",
+                phaseLabel: "",
+                summary: "",
+                hasPermission: false,
+                permissionCount: 0,
+                updatedAt: Date().timeIntervalSince1970 * 1000
+            )
+            let content = ActivityContent(state: finalState, staleDate: nil)
+            for activity in activitiesToEnd {
+                didEnd = true
+                if targetActivityId == nil {
+                    await activity.end(content, dismissalPolicy: .immediate)
+                } else {
                     await activity.end(content, dismissalPolicy: .after(.now + 5))
-                    resolve(true)
-                    return
                 }
             }
-            resolve(false)
+            resolve(didEnd)
         }
     }
 
