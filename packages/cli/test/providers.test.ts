@@ -18,6 +18,12 @@ function makeExecutableInSpacedDir(name: string): string {
   return file;
 }
 
+function prependExecutableToPath(name: string): string {
+  const executable = makeExecutableInSpacedDir(name);
+  process.env.PATH = `${dirname(executable)}${process.env.PATH ? `${delimiter}${process.env.PATH}` : ""}`;
+  return executable;
+}
+
 describe("resolveProviderConfig", () => {
   it("resolves an explicit executable path that contains spaces", () => {
     const executable = makeExecutableInSpacedDir("agent-cli");
@@ -55,5 +61,31 @@ describe("resolveProviderConfig", () => {
     });
 
     expect(config.command).toBe(executable);
+  });
+
+  it("resolves Gemini as a first-class terminal provider", () => {
+    const executable = prependExecutableToPath("gemini");
+
+    const config = resolveProviderConfig({
+      provider: "gemini",
+      args: ["--model", "flash"],
+    });
+
+    expect(config.provider).toBe("gemini");
+    expect(config.command).toBe(executable);
+    expect(config.args).toEqual(["--model", "flash"]);
+  });
+
+  it("resolves GitHub Copilot as a first-class terminal provider", () => {
+    const executable = prependExecutableToPath("github-copilot");
+
+    const config = resolveProviderConfig({
+      provider: "copilot",
+      args: ["suggest"],
+    });
+
+    expect(config.provider).toBe("copilot");
+    expect(config.command).toBe(executable);
+    expect(config.args).toEqual(["suggest"]);
   });
 });

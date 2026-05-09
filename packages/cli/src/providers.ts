@@ -1,7 +1,8 @@
 import { accessSync, constants, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import type { TerminalProvider } from "@linkshell/protocol";
 
-export type ProviderName = "claude" | "codex" | "gemini" | "copilot" | "custom";
+export type ProviderName = TerminalProvider;
 
 export interface ProviderConfig {
   provider: ProviderName;

@@ -1,11 +1,12 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import type { ProviderName } from "./providers.js";
 
 export interface LinkShellConfig {
   gateway?: string;
   pairingGateway?: string;
-  provider?: "claude" | "codex" | "custom";
+  provider?: ProviderName;
   command?: string;
   clientName?: string;
   hostname?: string;

@@ -179,11 +179,11 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: ^0.2.42
-        version: 0.2.44
+        specifier: ^0.2.46
+        version: 0.2.46
       '@linkshell/protocol':
-        specifier: ^0.2.32
-        version: 0.2.32
+        specifier: ^0.2.33
+        version: 0.2.33
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -220,8 +220,8 @@ importers:
   packages/gateway:
     dependencies:
       '@linkshell/protocol':
-        specifier: ^0.2.32
-        version: 0.2.32
+        specifier: ^0.2.33
+        version: 0.2.33
       ws:
         specifier: ^8.18.1
         version: 8.20.0
@@ -1370,11 +1370,11 @@ packages:
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
 
-  '@linkshell/gateway@0.2.44':
-    resolution: {integrity: sha512-cRlbyARME3Ppn6il2n5oml2/4wGYhMXcX9Pmd4QV+LassgNrJfMBix+G3NT2XOf57gVkQ6ZC25UqVa40HosupA==}
+  '@linkshell/gateway@0.2.46':
+    resolution: {integrity: sha512-B+lhKlaOZ10RKnwyRxCCmWuA2fjG6xg+pT/5H/6r48FyFFudpTiTOyyxvKmOtiPnqH0YxdTl7igb+NqFd+iVXQ==}
 
-  '@linkshell/protocol@0.2.32':
-    resolution: {integrity: sha512-tfhoQeGkwXAg+t5y4S9I849rI9bnLcpUdrBMPwTv0iVbd3gi5NKSxTsy/U2Hql7B1ZimHTWhZF3ig3XImkG+YQ==}
+  '@linkshell/protocol@0.2.33':
+    resolution: {integrity: sha512-HjSIeu6GbfcYTQYR7b1Km5I5GWNVzTPaZw8o2/yunYCr0wpBCwM7BqZO9uIAr7coH9J+dVig2ObMmRBSwjSvpg==}
 
   '@minhducsun2002/leb128@1.0.0':
     resolution: {integrity: sha512-eFrYUPDVHeuwWHluTG1kwNQUEUcFjVKYwPkU8z9DR1JH3AW7JtJsG9cRVGmwz809kKtGfwGJj58juCZxEvnI/g==}
@@ -2093,6 +2093,7 @@ packages:
 
   '@ungap/structured-clone@1.3.0':
     resolution: {integrity: sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==}
+    deprecated: Potential CWE-502 - Update to 1.3.1 or higher
 
   '@urql/core@5.2.0':
     resolution: {integrity: sha512-/n0ieD0mvvDnVAXEQgX/7qJiVcvYvNkOHeBvkwtylfjydar123caCXcl58PXFY11oU1oquJocVXHxLAbtv4x1A==}
@@ -4882,6 +4883,7 @@ packages:
 
   uuid@7.0.3:
     resolution: {integrity: sha512-DPSke0pXhTZgoF/d+WSt2QaKMCFSfx7QegxEWT+JOuHF5aWrKEn0G+ztjuJg/gG8/ItK+rbPCD/yNv8yyih6Cg==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   validate-npm-package-name@5.0.1:
@@ -6470,16 +6472,16 @@ snapshots:
   '@leichtgewicht/ip-codec@2.0.5':
     optional: true
 
-  '@linkshell/gateway@0.2.44':
+  '@linkshell/gateway@0.2.46':
     dependencies:
-      '@linkshell/protocol': 0.2.32
+      '@linkshell/protocol': 0.2.33
       ws: 8.20.0
       zod: 3.25.76
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@linkshell/protocol@0.2.32':
+  '@linkshell/protocol@0.2.33':
     dependencies:
       zod: 3.25.76
 

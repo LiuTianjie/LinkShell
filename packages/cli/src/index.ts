@@ -45,7 +45,7 @@ program
   .option("--session-id <id>", "Session identifier (auto-created if omitted)")
   .option(
     "--provider <provider>",
-    "claude | codex | custom",
+    "claude | codex | gemini | copilot | custom",
     config.provider ?? "claude",
   )
   .option("--command <command>", "Override provider executable", config.command)

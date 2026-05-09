@@ -19,6 +19,15 @@ export const sessionStateSchema = z.enum([
 ]);
 export type SessionState = z.infer<typeof sessionStateSchema>;
 
+export const terminalProviderSchema = z.enum([
+  "claude",
+  "codex",
+  "gemini",
+  "copilot",
+  "custom",
+]);
+export type TerminalProvider = z.infer<typeof terminalProviderSchema>;
+
 export const errorCodeSchema = z.enum([
   "session_not_found",
   "pairing_expired",
@@ -70,7 +79,7 @@ export const terminalResizePayloadSchema = z.object({
 export const sessionConnectPayloadSchema = z.object({
   role: deviceRoleSchema,
   clientName: z.string().min(1),
-  provider: z.enum(["claude", "codex", "custom"]).optional(),
+  provider: terminalProviderSchema.optional(),
   protocolVersion: z.number().int().optional(),
   machineId: z.string().min(1).optional(),
   hostname: z.string().optional(),
@@ -180,7 +189,7 @@ export const screenIcePayloadSchema = z.object({
 
 export const terminalSpawnPayloadSchema = z.object({
   cwd: z.string().min(1),
-  provider: z.enum(["claude", "codex", "custom"]).optional(),
+  provider: terminalProviderSchema.optional(),
 });
 
 export const terminalInfoSchema = z.object({

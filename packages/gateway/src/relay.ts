@@ -2,10 +2,12 @@ import type WebSocket from "ws";
 import {
   parseEnvelope,
   parseTypedPayload,
+  protocolMessageSchemas,
   serializeEnvelope,
   createEnvelope,
 } from "@linkshell/protocol";
-import type { Envelope } from "@linkshell/protocol";
+import type { Envelope, ProtocolMessageType } from "@linkshell/protocol";
+import { ZodError } from "zod";
 import type { SessionManager, ConnectedDevice } from "./sessions.js";
 import {
   handleTunnelResponse,
@@ -26,40 +28,73 @@ export function handleSocketMessage(
   try {
     envelope = parseEnvelope(raw);
   } catch {
-    socket.send(
-      serializeEnvelope(
-        createEnvelope({
-          type: "session.error",
-          sessionId,
-          payload: {
-            code: "invalid_message",
-            message: "Failed to parse envelope",
-          },
-        }),
-      ),
+    sendSessionError(socket, sessionId, "invalid_message", "Failed to parse envelope");
+    return;
+  }
+
+  if (envelope.sessionId !== sessionId) {
+    sendSessionError(
+      socket,
+      sessionId,
+      "invalid_message",
+      "Envelope sessionId does not match connection sessionId",
     );
     return;
   }
 
   const session = sessions.get(sessionId);
   if (!session) {
-    socket.send(
-      serializeEnvelope(
-        createEnvelope({
-          type: "session.error",
-          sessionId,
-          payload: { code: "session_not_found", message: "Session not found" },
-        }),
-      ),
-    );
+    sendSessionError(socket, sessionId, "session_not_found", "Session not found");
     return;
   }
 
-  if (role === "host") {
-    handleHostMessage(envelope, session, sessions);
-  } else {
-    handleClientMessage(envelope, socket, session, deviceId, sessions);
+  try {
+    if (isProtocolMessageType(envelope.type)) {
+      envelope = {
+        ...envelope,
+        payload: parseTypedPayload(envelope.type, envelope.payload),
+      };
+    }
+
+    if (role === "host") {
+      handleHostMessage(envelope, session, sessions);
+    } else {
+      handleClientMessage(envelope, socket, session, deviceId, sessions);
+    }
+  } catch (error) {
+    if (error instanceof ZodError) {
+      sendSessionError(
+        socket,
+        sessionId,
+        "invalid_message",
+        error.errors[0]?.message ?? "Invalid message payload",
+      );
+      return;
+    }
+    sendSessionError(socket, sessionId, "invalid_message", "Failed to handle message");
   }
+}
+
+function isProtocolMessageType(type: string): type is ProtocolMessageType {
+  return Object.prototype.hasOwnProperty.call(protocolMessageSchemas, type);
+}
+
+function sendSessionError(
+  socket: WebSocket,
+  sessionId: string,
+  code: string,
+  message: string,
+): void {
+  if (socket.readyState !== socket.OPEN) return;
+  socket.send(
+    serializeEnvelope(
+      createEnvelope({
+        type: "session.error",
+        sessionId,
+        payload: { code, message },
+      }),
+    ),
+  );
 }
 
 function handleHostMessage(

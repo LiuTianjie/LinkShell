@@ -287,6 +287,23 @@ describe("Protocol schemas", () => {
     expect(status.machineId).toBe("machine-123");
   });
 
+  it("accepts all terminal providers in connect and spawn payloads", () => {
+    for (const provider of ["claude", "codex", "gemini", "copilot", "custom"] as const) {
+      const connect = parseLocalTypedPayload("session.connect", {
+        role: "host",
+        clientName: `${provider}-cli`,
+        provider,
+      });
+      expect(connect.provider).toBe(provider);
+
+      const spawn = parseLocalTypedPayload("terminal.spawn", {
+        cwd: "/repo",
+        provider,
+      });
+      expect(spawn.provider).toBe(provider);
+    }
+  });
+
   it("keeps structured agent v2 patch fields", () => {
     const payload = parseLocalTypedPayload("agent.v2.event", {
       conversationId: "conversation-1",
@@ -420,6 +437,82 @@ describe("WebSocket session", () => {
     const received = await waitForMessage(host);
     expect(received.type).toBe("session.ack");
     expect((received.payload as Record<string, unknown>).seq).toBe(5);
+
+    host.close();
+    client.close();
+  });
+
+  it("rejects invalid typed payloads without killing the session", async () => {
+    const { body } = await postJson("/pairings", {});
+    const sessionId = body.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-invalid-payload");
+    await waitForMessage(host);
+
+    const client = await connectWs(sessionId, "client", "client-invalid-payload");
+    await waitForMessage(client);
+
+    host.send(serializeEnvelope(createEnvelope({
+      type: "session.connect",
+      sessionId,
+      payload: {
+        role: "host",
+        clientName: "bad-provider",
+        provider: "not-a-provider",
+      },
+    })));
+
+    const error = await waitForMessage(host);
+    expect(error.type).toBe("session.error");
+    expect((error.payload as Record<string, unknown>).code).toBe("invalid_message");
+
+    host.send(serializeEnvelope(createEnvelope({
+      type: "terminal.output",
+      sessionId,
+      seq: 1,
+      payload: { stream: "stdout", data: "still alive", encoding: "utf8" },
+    })));
+
+    const received = await waitForMessage(client);
+    expect(received.type).toBe("terminal.output");
+    expect((received.payload as Record<string, unknown>).data).toBe("still alive");
+
+    client.send(serializeEnvelope(createEnvelope({
+      type: "terminal.input",
+      sessionId,
+      payload: {},
+    })));
+
+    const clientError = await waitForMessage(client);
+    expect(clientError.type).toBe("session.error");
+    expect((clientError.payload as Record<string, unknown>).code).toBe("invalid_message");
+
+    host.close();
+    client.close();
+  });
+
+  it("rejects envelopes whose sessionId differs from the websocket URL", async () => {
+    const { body: first } = await postJson("/pairings", {});
+    const { body: second } = await postJson("/pairings", {});
+    const sessionId = first.sessionId as string;
+    const otherSessionId = second.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-mismatch");
+    await waitForMessage(host);
+
+    const client = await connectWs(sessionId, "client", "client-mismatch");
+    await waitForMessage(client);
+
+    client.send(serializeEnvelope(createEnvelope({
+      type: "terminal.input",
+      sessionId: otherSessionId,
+      payload: { data: "cross-session\n" },
+    })));
+
+    const error = await waitForMessage(client);
+    expect(error.type).toBe("session.error");
+    expect(error.sessionId).toBe(sessionId);
+    expect((error.payload as Record<string, unknown>).code).toBe("invalid_message");
 
     host.close();
     client.close();

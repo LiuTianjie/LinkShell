@@ -394,14 +394,32 @@ export function startEmbeddedGateway(
       }, PING_INTERVAL);
 
       socket.on("message", (data: WebSocket.RawData) => {
-        handleSocketMessage(
-          socket,
-          data.toString(),
-          role,
-          sessionId,
-          deviceId,
-          sessionManager,
-        );
+        try {
+          handleSocketMessage(
+            socket,
+            data.toString(),
+            role,
+            sessionId,
+            deviceId,
+            sessionManager,
+          );
+        } catch (err) {
+          log("error", `unhandled websocket message error for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+          if (socket.readyState === socket.OPEN) {
+            socket.send(
+              serializeEnvelope(
+                createEnvelope({
+                  type: "session.error",
+                  sessionId,
+                  payload: {
+                    code: "invalid_message",
+                    message: "Failed to handle message",
+                  },
+                }),
+              ),
+            );
+          }
+        }
       });
 
       socket.on("close", () => {
