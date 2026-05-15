@@ -33,6 +33,7 @@ import type {
   AgentCommandDescriptor,
   AgentConversationRecord,
   AgentCollaborationMode,
+  AgentFileChange,
   AgentPermissionMode,
   AgentReasoningEffort,
   AgentStructuredInput,
@@ -1127,16 +1128,44 @@ function MarkdownContent({
   );
 }
 
-const FileChangeCard = memo(function FileChangeCard({ tool, theme }: { tool: AgentToolCall; theme: Theme }) {
+const FileChangeCard = memo(function FileChangeCard({
+  tool,
+  theme,
+  fileChange,
+}: {
+  tool: AgentToolCall;
+  theme: Theme;
+  fileChange?: AgentFileChange;
+}) {
   const [expanded, setExpanded] = useState(false);
   const input = tool.input?.trim();
   const output = tool.output?.trim();
   const hasDiff = looksLikeDiff(output);
   const diffLineCount = output ? output.split("\n").length : 0;
-  const stats = useMemo(() => hasDiff && output ? diffStats(output, input) : null, [hasDiff, input, output]);
-  const entries = useMemo(() => output ? diffEntries(output, input) : diffEntries("", input), [input, output]);
+  const structuredEntries = fileChange?.entries?.filter((entry) => entry.path?.trim()) ?? [];
+  const entries = useMemo(() => {
+    if (structuredEntries.length > 0) {
+      return structuredEntries.map((entry) => ({
+        path: entry.path,
+        added: entry.added ?? 0,
+        removed: entry.removed ?? 0,
+      }));
+    }
+    return output ? diffEntries(output, input) : diffEntries("", input);
+  }, [input, output, structuredEntries]);
+  const stats = useMemo(() => {
+    if (structuredEntries.length > 0) {
+      return {
+        files: structuredEntries.map((entry) => entry.path),
+        added: structuredEntries.reduce((sum, entry) => sum + (entry.added ?? 0), 0),
+        removed: structuredEntries.reduce((sum, entry) => sum + (entry.removed ?? 0), 0),
+      };
+    }
+    return hasDiff && output ? diffStats(output, input) : null;
+  }, [hasDiff, input, output, structuredEntries]);
   const meta = toolStatusMeta(tool.status, theme);
-  const canExpand = Boolean(output || input);
+  const canExpand = Boolean(output || input || entries.length > 4);
+  const title = entries.length > 0 ? `已编辑 ${entries.length} 个文件` : "文件修改";
 
   return (
     <View
@@ -1161,14 +1190,27 @@ const FileChangeCard = memo(function FileChangeCard({ tool, theme }: { tool: Age
           gap: 9,
         }}
       >
-        <AppSymbol name="pencil.line" size={16} color={theme.textTertiary} />
+        <View
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 9,
+            backgroundColor: theme.mode === "light" ? "rgba(0,0,0,0.045)" : "rgba(255,255,255,0.08)",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <AppSymbol name="doc.badge.plus" size={17} color={theme.textTertiary} />
+        </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ color: theme.text, fontSize: 14, fontWeight: "800" }} numberOfLines={1}>
-            {entries.length > 1 ? `${entries.length} 个文件修改` : "文件修改"}
+          <Text style={{ color: theme.text, fontSize: 16, fontWeight: "800" }} numberOfLines={1}>
+            {title}
           </Text>
-          {stats ? (
-            <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
-              {stats.files.length > 0 ? stats.files.map(shortPath).join("、") : "工作区 diff"}
+          {stats && (stats.added > 0 || stats.removed > 0) ? (
+            <Text style={{ fontSize: 13, marginTop: 3, fontWeight: "800" }} numberOfLines={1}>
+              <Text style={{ color: theme.success }}>+{stats.added}</Text>
+              <Text style={{ color: theme.textTertiary }}> </Text>
+              <Text style={{ color: theme.error }}>-{stats.removed}</Text>
             </Text>
           ) : input ? (
             <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
@@ -1176,16 +1218,7 @@ const FileChangeCard = memo(function FileChangeCard({ tool, theme }: { tool: Age
             </Text>
           ) : null}
         </View>
-        {stats ? (
-          <View style={{ flexDirection: "row", gap: 4 }}>
-            <View style={{ borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: "rgba(52, 199, 89, 0.12)" }}>
-              <Text style={{ color: theme.success, fontSize: 11, fontWeight: "800" }}>+{stats.added}</Text>
-            </View>
-            <View style={{ borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: "rgba(255, 59, 48, 0.12)" }}>
-              <Text style={{ color: theme.error, fontSize: 11, fontWeight: "800" }}>-{stats.removed}</Text>
-            </View>
-          </View>
-        ) : meta ? (
+        {!stats && meta ? (
           <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
             <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
           </View>
@@ -2105,6 +2138,7 @@ function TimelineItemView({
             status: item.fileChange.status ?? "running",
           }}
           theme={theme}
+          fileChange={item.fileChange}
         />
       </AgentTimelineBlock>
     );

@@ -68,6 +68,7 @@ function normalizeRemoteSession(entry: unknown, fallback?: CodexStoredSession): 
     lastModified: parseTimestamp(source.lastActivityAt ?? source.updatedAt ?? source.modifiedAt ?? source.lastModified ?? source.updated_at) ??
       fallback?.lastModified ??
       Date.now(),
+    archived: typeof source.archived === "boolean" ? source.archived : fallback?.archived,
   };
 }
 

@@ -168,4 +168,93 @@ describe("AgentWorkspaceProxy event routing", () => {
       title: "Inspect Claude history",
     }));
   });
+
+  it("preserves device-side Codex archived state in conversation lists", async () => {
+    const home = useTempHome();
+    const codexRoot = join(home, ".codex");
+    const activeDir = join(codexRoot, "sessions", "2026", "05", "16");
+    const archivedDir = join(codexRoot, "archived_sessions");
+    mkdirSync(activeDir, { recursive: true });
+    mkdirSync(archivedDir, { recursive: true });
+    writeJsonl(join(activeDir, "rollout-2026-05-16T01-00-00-019e-active.jsonl"), [
+      {
+        timestamp: "2026-05-16T01:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "019e-active",
+          cwd: "/Users/tifenxia/ActiveProject",
+          timestamp: "2026-05-16T01:00:00.000Z",
+        },
+      },
+      {
+        timestamp: "2026-05-16T01:01:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Open active history" },
+      },
+      {
+        timestamp: "2026-05-16T01:02:00.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "Active history is open" },
+      },
+    ]);
+    writeJsonl(join(archivedDir, "rollout-2026-05-15T01-00-00-019e-archived.jsonl"), [
+      {
+        timestamp: "2026-05-15T01:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "019e-archived",
+          cwd: "/Users/tifenxia/ArchivedProject",
+          timestamp: "2026-05-15T01:00:00.000Z",
+        },
+      },
+    ]);
+    const sent: any[] = [];
+    const proxy = new AgentWorkspaceProxy({
+      hostDeviceId: "host-1",
+      cwd: "/tmp",
+      availableProviders: [],
+      send: (envelope) => sent.push(envelope),
+    });
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.conversation.list",
+      hostDeviceId: "host-1",
+      payload: { includeArchived: false },
+    });
+    await proxy.handleEnvelope({
+      type: "agent.v2.conversation.list",
+      hostDeviceId: "host-1",
+      payload: { includeArchived: true },
+    });
+
+    const results = sent.filter((envelope) => envelope.type === "agent.v2.conversation.list.result");
+    expect(results[0].payload.conversations).toContainEqual(expect.objectContaining({
+      agentSessionId: "019e-active",
+      archived: false,
+    }));
+    expect(results[0].payload.conversations).not.toContainEqual(expect.objectContaining({
+      agentSessionId: "019e-archived",
+    }));
+    expect(results[1].payload.conversations).toContainEqual(expect.objectContaining({
+      agentSessionId: "019e-archived",
+      provider: "codex",
+      archived: true,
+    }));
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.conversation.open",
+      hostDeviceId: "host-1",
+      payload: {
+        conversationId: "agent:019e-active",
+        agentSessionId: "019e-active",
+        provider: "codex",
+      },
+    });
+
+    const opened = sent.find((envelope) => envelope.type === "agent.v2.conversation.opened");
+    expect(opened.payload.snapshot).toEqual([
+      expect.objectContaining({ role: "user", text: "Open active history" }),
+      expect.objectContaining({ role: "assistant", text: "Active history is open" }),
+    ]);
+  });
 });

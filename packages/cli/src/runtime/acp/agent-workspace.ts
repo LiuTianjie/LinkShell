@@ -9,8 +9,8 @@ import {
 import { AcpClient } from "./acp-client.js";
 import { ClaudeSdkClient } from "./claude-sdk-client.js";
 import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
-import { listClaudeStoredSessions } from "./claude-sessions.js";
-import { listCodexStoredSessions } from "./codex-sessions.js";
+import { listClaudeStoredSessions, loadClaudeStoredTimeline } from "./claude-sessions.js";
+import { listCodexStoredSessions, loadCodexStoredTimeline } from "./codex-sessions.js";
 import type { AgentProtocol, AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
 
@@ -1163,6 +1163,7 @@ function parseRemoteSessions(value: unknown): Array<{
   model?: string;
   createdAt?: number;
   lastActivityAt?: number;
+  archived?: boolean;
 }> {
   const raw = asRecord(value);
   const sessionsValue =
@@ -1178,6 +1179,7 @@ function parseRemoteSessions(value: unknown): Array<{
     model?: string;
     createdAt?: number;
     lastActivityAt?: number;
+    archived?: boolean;
   }> = [];
   for (const entry of sessionsValue) {
     const session = asRecord(entry);
@@ -1196,6 +1198,7 @@ function parseRemoteSessions(value: unknown): Array<{
       model: firstString(source, ["model", "modelId"]),
       createdAt: parseTimestamp(source.createdAt ?? source.created_at),
       lastActivityAt: parseTimestamp(source.lastActivityAt ?? source.updatedAt ?? source.modifiedAt ?? source.lastModified ?? source.updated_at),
+      archived: typeof source.archived === "boolean" ? source.archived : undefined,
     });
   }
   return result;
@@ -1472,7 +1475,7 @@ export class AgentWorkspaceProxy {
         permissionMode: existing?.permissionMode,
         collaborationMode: existing?.collaborationMode,
         status: existing?.status ?? "idle",
-        archived: existing?.archived ?? false,
+        archived: remote.archived ?? existing?.archived ?? false,
         lastMessagePreview: existing?.lastMessagePreview,
         lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
         createdAt: remote.createdAt ?? existing?.createdAt ?? now,
@@ -1561,6 +1564,29 @@ export class AgentWorkspaceProxy {
     title?: string;
   }): Promise<AgentConversation | undefined> {
     const provider = payload.provider ?? this.input.availableProviders[0];
+    const cwd = payload.cwd ?? this.input.cwd;
+    let agentSessionId = payload.agentSessionId;
+    let existingConversation =
+      (payload.conversationId ? this.conversations.get(payload.conversationId) : undefined) ??
+      (agentSessionId ? this.conversations.get(this.conversationByAgentSessionId.get(agentSessionId) ?? "") : undefined);
+
+    if (existingConversation && existingConversation.status !== "error" && existingConversation.agentSessionId) {
+      if (payload.conversationId && existingConversation.id !== payload.conversationId) {
+        existingConversation = this.adoptConversationId(existingConversation.id, payload.conversationId);
+      }
+      this.hydrateStoredTimeline(existingConversation);
+      this.activeConversationId = existingConversation.id;
+      this.input.send(createEnvelope({
+        type: "agent.v2.conversation.opened",
+        hostDeviceId: this.input.hostDeviceId,
+        payload: {
+          conversation: existingConversation,
+          snapshot: this.timelines.get(existingConversation.id) ?? [],
+        },
+      }));
+      return existingConversation;
+    }
+
     if (!provider) {
       return this.openFailure(payload, "没有可用的 Agent provider。");
     }
@@ -1577,28 +1603,6 @@ export class AgentWorkspaceProxy {
         payload,
         `${providerLabel(provider)} 启动失败。请确认 CLI 已安装并可用。`,
       );
-    }
-
-    const cwd = payload.cwd ?? this.input.cwd;
-    let agentSessionId = payload.agentSessionId;
-    let existingConversation =
-      (payload.conversationId ? this.conversations.get(payload.conversationId) : undefined) ??
-      (agentSessionId ? this.conversations.get(this.conversationByAgentSessionId.get(agentSessionId) ?? "") : undefined);
-
-    if (existingConversation && existingConversation.status !== "error" && existingConversation.agentSessionId) {
-      if (payload.conversationId && existingConversation.id !== payload.conversationId) {
-        existingConversation = this.adoptConversationId(existingConversation.id, payload.conversationId);
-      }
-      this.activeConversationId = existingConversation.id;
-      this.input.send(createEnvelope({
-        type: "agent.v2.conversation.opened",
-        hostDeviceId: this.input.hostDeviceId,
-        payload: {
-          conversation: existingConversation,
-          snapshot: this.timelines.get(existingConversation.id) ?? [],
-        },
-      }));
-      return existingConversation;
     }
 
     try {
@@ -1629,6 +1633,7 @@ export class AgentWorkspaceProxy {
       this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
       this.activeConversationId = conversation.id;
       this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
+      this.hydrateStoredTimeline(conversation);
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.opened",
         hostDeviceId: this.input.hostDeviceId,
@@ -2970,6 +2975,13 @@ export class AgentWorkspaceProxy {
   }
 
   private sendSnapshot(conversationId?: string): void {
+    if (conversationId) {
+      const conversation = this.conversations.get(conversationId);
+      if (conversation) this.hydrateStoredTimeline(conversation);
+    } else if (this.activeConversationId) {
+      const conversation = this.conversations.get(this.activeConversationId);
+      if (conversation) this.hydrateStoredTimeline(conversation);
+    }
     const conversations = [...this.conversations.values()];
     const items = conversationId
       ? this.timelines.get(conversationId) ?? []
@@ -2983,6 +2995,31 @@ export class AgentWorkspaceProxy {
         items,
       },
     }));
+  }
+
+  private hydrateStoredTimeline(conversation: AgentConversation): void {
+    if (!conversation.agentSessionId) return;
+    const existing = this.timelines.get(conversation.id) ?? [];
+    if (existing.length > 0) return;
+    const result = conversation.provider === "codex"
+      ? loadCodexStoredTimeline(conversation.agentSessionId, conversation.id, conversation.cwd || this.input.cwd)
+      : conversation.provider === "claude"
+      ? loadClaudeStoredTimeline(conversation.agentSessionId, conversation.id)
+      : { items: [] };
+    if (result.items.length === 0) return;
+    const items = result.items
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(-MAX_TIMELINE_ITEMS) as AgentTimelineItem[];
+    this.timelines.set(conversation.id, items);
+    for (const item of items) this.rememberItemConversationId(conversation.id, item);
+    const lastMessage = [...items].reverse().find((item) => item.text?.trim());
+    if (lastMessage?.text && !conversation.lastMessagePreview) {
+      conversation.lastMessagePreview = previewText(lastMessage.text);
+    }
+    const lastActivityAt = items.at(-1)?.createdAt;
+    if (lastActivityAt) {
+      conversation.lastActivityAt = Math.max(conversation.lastActivityAt, lastActivityAt);
+    }
   }
 
   private conversationIdFromParams(params: unknown): string | undefined {

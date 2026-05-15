@@ -418,7 +418,7 @@ export function useAgentWorkspace(
         currentManager.sendAgentWorkspaceEnvelope(
           session.sessionId,
           "agent.v2.conversation.list",
-          { includeArchived: false },
+          { includeArchived: true },
           { queue: true, dedupeKey: "agent-v2-conversation-list" },
         );
       }

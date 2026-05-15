@@ -26,6 +26,7 @@ const FALLBACK_ICONS: Record<string, React.ComponentProps<typeof MaterialCommuni
   clock: "clock-outline",
   desktopcomputer: "monitor",
   "doc.on.doc": "content-copy",
+  "doc.badge.plus": "file-plus-outline",
   "doc.text": "file-document-outline",
   "doc.text.magnifyingglass": "file-search-outline",
   "exclamationmark.triangle.fill": "alert",

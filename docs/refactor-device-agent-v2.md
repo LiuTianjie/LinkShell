@@ -20,19 +20,29 @@ Updated: 2026-05-16
   - `@linkshell/protocol@0.3.2`
   - `@linkshell/gateway@0.3.2`
   - `linkshell-cli@0.3.6`
+  - `linkshell-cli@0.3.7`
+  - `linkshell-cli@0.3.8`
+  - `linkshell-cli@0.3.9`
+  - `linkshell-cli@0.3.10`
+- Device-side Codex and Claude JSONL message history is now lazily synced into Agent conversation snapshots when opening a conversation.
+- Active Codex session titles now fall back to the first visible device-side user message when Codex has not written an index title yet.
+- Device-side Codex archived sessions are now detected from `~/.codex/archived_sessions`, synced to the mobile archived section, and covered by CLI tests.
+- Codex device history now restores first-class command execution and file-change timeline items, including per-file add/remove counts from patch history.
+- Claude device history now restores `tool_use` / `tool_result` blocks as first-class command execution and file-change timeline items for Bash/Edit/MultiEdit/Write/NotebookEdit.
+- Mobile Agent conversation UI now renders structured file changes with a desktop-style edited-files card using device-synced entries instead of text-only fallback parsing.
 
 ### In Progress
 
 - Mobile UI terminology still exposes `sessionId` in several internal prop/function names. Runtime data is host-device based, but the public screen/hook naming should be cleaned up as follow-up work.
 - Port preview is inside Agent conversation UI; the next pass is mostly visual refinement and full-screen ergonomics.
-- Provider history sync is now automatic, but still needs fixture coverage for Claude JSONL variants and Codex app-server `thread/list` responses.
+- Provider history sync is now automatic; Claude local JSONL and Codex archived/local history fixture coverage exists, including message, command, and file-change history. Codex app-server `thread/list` fixture coverage still remains.
 
 ### Remaining Plan
 
 1. Rename mobile screen/hook APIs from `sessionId` to `hostDeviceId` where they cross component boundaries, keeping storage migration compatibility only at the edge.
 2. Polish Agent port preview full-screen ergonomics and empty/loading states.
 3. Move any remaining terminal-oriented Agent affordances out of Terminal screens and verify there is no old v1 `agent.*` network path.
-4. Add Claude/Codex provider history fixtures and update mobile-focused tests where practical; keep `pnpm typecheck`, gateway tests, CLI tests, and full build green.
+4. Add Codex app-server `thread/list` fixtures and mobile-focused tests where practical; keep `pnpm typecheck`, gateway tests, CLI tests, and full build green.
 
 ## Summary
 
