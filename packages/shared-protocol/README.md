@@ -22,7 +22,7 @@ import {
 // 创建消息
 const msg = createEnvelope({
   type: "terminal.output",
-  sessionId: "abc-123",
+  hostDeviceId: "host-abc-123",
   seq: 0,
   payload: {
     stream: "stdout",
@@ -46,11 +46,11 @@ const output = parseTypedPayload("terminal.output", parsed.payload);
 
 | 类型 | 说明 |
 |------|------|
-| `session.connect` | 连接握手（含 protocolVersion、hostname） |
-| `session.ack` | ACK 确认 |
-| `session.resume` | 重连恢复请求 |
-| `session.heartbeat` | 心跳 |
-| `session.error` | 错误通知 |
+| `device.connect` | Host device / client 连接握手（含 protocolVersion、hostname） |
+| `device.ack` | ACK 确认 |
+| `device.resume` | 重连恢复请求 |
+| `device.heartbeat` | 心跳 |
+| `device.error` | 错误通知 |
 | `terminal.output` | 终端输出 |
 | `terminal.input` | 用户输入 |
 | `terminal.resize` | 窗口尺寸变化 |
@@ -71,7 +71,6 @@ const output = parseTypedPayload("terminal.output", parsed.payload);
 | `file.upload` | 文件上传 |
 | `tunnel.request` / `tunnel.response` | HTTP 端口转发 |
 | `tunnel.ws.data` / `tunnel.ws.close` | WebSocket 端口转发 |
-| `agent.capabilities` / `agent.snapshot` / `agent.update` | Agent Workspace v1 兼容消息 |
 | `agent.v2.capabilities` / `agent.v2.conversation.*` / `agent.v2.prompt` / `agent.v2.event` | Agent Workspace v2 |
 | `agent.v2.permission.*` / `agent.v2.structured_input.respond` | Agent 权限与结构化输入 |
 

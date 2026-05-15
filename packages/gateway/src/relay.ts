@@ -8,7 +8,7 @@ import {
 } from "@linkshell/protocol";
 import type { Envelope, ProtocolMessageType } from "@linkshell/protocol";
 import { ZodError } from "zod";
-import type { SessionManager, ConnectedDevice } from "./sessions.js";
+import type { DeviceManager, ConnectedDevice } from "./sessions.js";
 import {
   handleTunnelResponse,
   handleTunnelWsData,
@@ -22,7 +22,7 @@ export function handleSocketMessage(
   role: "host" | "client",
   hostDeviceId: string,
   deviceId: string,
-  sessions: SessionManager,
+  sessions: DeviceManager,
 ): void {
   let envelope: Envelope;
   try {
@@ -99,14 +99,13 @@ function sendSessionError(
 
 function handleHostMessage(
   envelope: Envelope,
-  session: ReturnType<SessionManager["get"]> & {},
-  sessions: SessionManager,
+  session: ReturnType<DeviceManager["get"]> & {},
+  sessions: DeviceManager,
 ): void {
   switch (envelope.type) {
-    case "device.connect":
-    case "session.connect": {
+    case "device.connect": {
       // Extract metadata from host's connect message
-      const p = parseTypedPayload("session.connect", envelope.payload);
+      const p = parseTypedPayload("device.connect", envelope.payload);
       if (p.machineId || p.hostname || p.platform || p.cwd || p.capabilities) {
         sessions.setMetadata(
           session.id,
@@ -132,12 +131,11 @@ function handleHostMessage(
       break;
     }
     case "device.heartbeat":
-    case "session.heartbeat":
       break;
     case "permission.decision.result": {
       const p = parseTypedPayload("permission.decision.result", envelope.payload);
       resolveAgentPermissionHttpAck({
-        sessionId: session.id,
+        hostDeviceId: session.id,
         ack: {
           requestId: p.requestId,
           decision: p.decision,
@@ -175,11 +173,7 @@ function handleHostMessage(
     case "screen.status":
     case "screen.offer":
     case "screen.ice":
-    // Agent GUI: host → clients
-    case "agent.capabilities":
-    case "agent.update":
-    case "agent.permission.request":
-    case "agent.snapshot":
+    // Agent Workspace: host → clients
     case "agent.v2.capabilities":
     case "agent.v2.conversation.opened":
     case "agent.v2.conversation.list.result":
@@ -207,9 +201,9 @@ function handleHostMessage(
 function handleClientMessage(
   envelope: Envelope,
   socket: WebSocket,
-  session: ReturnType<SessionManager["get"]> & {},
+  session: ReturnType<DeviceManager["get"]> & {},
   deviceId: string,
-  sessions: SessionManager,
+  sessions: DeviceManager,
 ): void {
   const requireController = (): boolean => {
     if (session.controllerId === deviceId) return true;
@@ -239,15 +233,13 @@ function handleClientMessage(
       sendToHost(session, envelope);
       break;
     }
-    case "device.ack":
-    case "session.ack": {
+    case "device.ack": {
       // Forward ACK to host
       sendToHost(session, envelope);
       break;
     }
-    case "device.resume":
-    case "session.resume": {
-      const p = parseTypedPayload("session.resume", envelope.payload);
+    case "device.resume": {
+      const p = parseTypedPayload("device.resume", envelope.payload);
       // Replay from gateway buffer first
       const replay = sessions.getReplayFrom(
         session.id,
@@ -309,18 +301,12 @@ function handleClientMessage(
       break;
     }
     case "device.heartbeat":
-    case "session.heartbeat":
       break;
     // Screen sharing: client → host
     case "screen.start":
     case "screen.stop":
     case "screen.answer":
     case "screen.ice":
-    case "agent.session.new":
-    case "agent.session.load":
-    case "agent.prompt":
-    case "agent.cancel":
-    case "agent.permission.response":
     case "agent.v2.conversation.open":
     case "agent.v2.prompt":
     case "agent.v2.command.execute":
@@ -340,8 +326,6 @@ function handleClientMessage(
       if (!requireController()) return;
       sendToHost(session, envelope);
       break;
-    case "agent.initialize":
-    case "agent.session.list":
     case "agent.v2.capabilities.request":
     case "agent.v2.conversation.list":
     case "agent.v2.snapshot.request":
@@ -354,7 +338,7 @@ function handleClientMessage(
 }
 
 function broadcastToClients(
-  session: ReturnType<SessionManager["get"]> & {},
+  session: ReturnType<DeviceManager["get"]> & {},
   envelope: Envelope,
 ): void {
   const data = serializeEnvelope(envelope);
@@ -366,7 +350,7 @@ function broadcastToClients(
 }
 
 function sendToHost(
-  session: ReturnType<SessionManager["get"]> & {},
+  session: ReturnType<DeviceManager["get"]> & {},
   envelope: Envelope,
 ): void {
   if (

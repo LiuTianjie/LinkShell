@@ -21,7 +21,6 @@ import { getLanIp } from "../utils/lan-ip.js";
 import { startKeepAwake, type KeepAwakeHandle } from "../utils/keep-awake.js";
 import { loadOrCreateMachineIdentity, type MachineIdentity } from "../machine-id.js";
 import { getValidToken } from "../auth.js";
-import { AgentSessionProxy } from "./acp/agent-session.js";
 import { AgentWorkspaceProxy } from "./acp/agent-workspace.js";
 import { detectAvailableProviders, type AgentProvider } from "./acp/provider-resolver.js";
 
@@ -137,7 +136,6 @@ export class BridgeSession {
   private screenShare: ScreenShare | undefined;
   private tunnelSockets = new Map<string, WebSocket>();
   private keepAwake: KeepAwakeHandle | undefined;
-  private agentSession: AgentSessionProxy | undefined;
   private agentWorkspace: AgentWorkspaceProxy | undefined;
   private machineIdentity: MachineIdentity | undefined;
 
@@ -169,16 +167,13 @@ export class BridgeSession {
         ? [normalizeAgentProvider(this.options.agentProvider)]
         : detectAvailableProviders();
       const agentOptions = {
-        sessionId: this.sessionId,
+        hostDeviceId: this.sessionId,
         cwd: process.cwd(),
         availableProviders,
         command: this.options.agentCommand,
         verbose: this.options.verbose,
         send: (envelope: Envelope) => this.send(envelope),
       };
-      this.agentSession = new AgentSessionProxy({
-        ...agentOptions,
-      });
       this.agentWorkspace = new AgentWorkspaceProxy({
         ...agentOptions,
       });
@@ -374,7 +369,7 @@ export class BridgeSession {
         if (existing) {
           this.send(createEnvelope({
             type: "terminal.spawned",
-            sessionId: this.sessionId,
+            hostDeviceId: this.sessionId,
             terminalId: existing.id,
             payload: { terminalId: existing.id, cwd: existing.cwd, shell: this.options.providerConfig.command },
           }));
@@ -384,7 +379,7 @@ export class BridgeSession {
             await this.spawnTerminal(newId, normalizedCwd);
             this.send(createEnvelope({
               type: "terminal.spawned",
-              sessionId: this.sessionId,
+              hostDeviceId: this.sessionId,
               terminalId: newId,
               payload: { terminalId: newId, cwd: normalizedCwd, shell: this.options.providerConfig.command },
             }));
@@ -392,7 +387,7 @@ export class BridgeSession {
             this.log(`failed to spawn terminal ${newId}: ${err}`);
             this.send(createEnvelope({
               type: "terminal.exit",
-              sessionId: this.sessionId,
+              hostDeviceId: this.sessionId,
               terminalId: newId,
               payload: { exitCode: 1, signal: 0 },
             }));
@@ -434,13 +429,13 @@ export class BridgeSession {
             });
           this.send(createEnvelope({
             type: "terminal.browse.result",
-            sessionId: this.sessionId,
+            hostDeviceId: this.sessionId,
             payload: { path: browsePath, entries, requestId: p.requestId },
           }));
         } catch (err: unknown) {
           this.send(createEnvelope({
             type: "terminal.browse.result",
-            sessionId: this.sessionId,
+            hostDeviceId: this.sessionId,
             payload: { path: browsePath, entries: [], error: (err as Error).message, requestId: p.requestId },
           }));
         }
@@ -469,7 +464,7 @@ export class BridgeSession {
           }
           this.send(createEnvelope({
             type: "terminal.file.read.result",
-            sessionId: this.sessionId,
+            hostDeviceId: this.sessionId,
             payload: {
               path: filePath,
               content: buffer.toString("utf8"),
@@ -482,7 +477,7 @@ export class BridgeSession {
         } catch (err: unknown) {
           this.send(createEnvelope({
             type: "terminal.file.read.result",
-            sessionId: this.sessionId,
+            hostDeviceId: this.sessionId,
             payload: {
               path: filePath,
               content: "",
@@ -513,13 +508,13 @@ export class BridgeSession {
             }));
           this.send(createEnvelope({
             type: "terminal.browse.result",
-            sessionId: this.sessionId,
+            hostDeviceId: this.sessionId,
             payload: { path: parentPath, entries },
           }));
         } catch (err: unknown) {
           this.send(createEnvelope({
             type: "terminal.browse.result",
-            sessionId: this.sessionId,
+            hostDeviceId: this.sessionId,
             payload: { path: dirPath, entries: [], error: (err as Error).message },
           }));
         }
@@ -560,23 +555,21 @@ export class BridgeSession {
         } catch {}
         this.send(createEnvelope({
           type: "terminal.history.response",
-          sessionId: this.sessionId,
+          hostDeviceId: this.sessionId,
           payload: { entries, shell },
         }));
         break;
       }
-      case "device.ack":
-      case "session.ack": {
-        const p = parseTypedPayload(envelope.type === "device.ack" ? "device.ack" : "session.ack", envelope.payload);
+      case "device.ack": {
+        const p = parseTypedPayload("device.ack", envelope.payload);
         const term = this.terminals.get(tid);
         if (term) {
           term.scrollback.trimUpTo(p.seq);
         }
         break;
       }
-      case "device.resume":
-      case "session.resume": {
-        const p = parseTypedPayload(envelope.type === "device.resume" ? "device.resume" : "session.resume", envelope.payload);
+      case "device.resume": {
+        const p = parseTypedPayload("device.resume", envelope.payload);
         // Replay all terminals
         for (const [termId, term] of this.terminals) {
           this.replayFrom(
@@ -590,7 +583,6 @@ export class BridgeSession {
         break;
       }
       case "device.heartbeat":
-      case "session.heartbeat":
         break;
       case "screen.start": {
         const p = parseTypedPayload("screen.start", envelope.payload);
@@ -611,67 +603,6 @@ export class BridgeSession {
         this.screenShare?.handleIceCandidate(p.candidate, p.sdpMid, p.sdpMLineIndex);
         break;
       }
-      case "agent.initialize":
-      case "agent.session.new":
-      case "agent.session.load":
-      case "agent.session.list":
-      case "agent.prompt":
-      case "agent.cancel": {
-        if (!this.agentSession) {
-          this.send(
-            createEnvelope({
-              type: "agent.capabilities",
-              sessionId: this.sessionId,
-              payload: {
-                enabled: false,
-                provider: normalizeAgentProvider(
-                  this.options.agentProvider ?? "codex",
-                ),
-                machineId: this.machineIdentity?.machineId,
-                error: "Agent GUI is not enabled. Start CLI with --agent-ui.",
-                supportsSessionList: false,
-                supportsSessionLoad: false,
-                supportsImages: false,
-                supportsAudio: false,
-                supportsPermission: false,
-                supportsPlan: false,
-                supportsCancel: false,
-              },
-            }),
-          );
-          break;
-        }
-        await this.agentSession.handleEnvelope(envelope);
-        break;
-      }
-      case "agent.permission.response": {
-        if (!this.agentSession) {
-          this.send(
-            createEnvelope({
-              type: "agent.capabilities",
-              sessionId: this.sessionId,
-              payload: {
-                enabled: false,
-                provider: normalizeAgentProvider(
-                  this.options.agentProvider ?? "codex",
-                ),
-                machineId: this.machineIdentity?.machineId,
-                error: "Agent GUI is not enabled. Start CLI with --agent-ui.",
-                supportsSessionList: false,
-                supportsSessionLoad: false,
-                supportsImages: false,
-                supportsAudio: false,
-                supportsPermission: false,
-                supportsPlan: false,
-                supportsCancel: false,
-              },
-            }),
-          );
-          break;
-        }
-        await this.agentSession.handleEnvelope(envelope);
-        break;
-      }
       case "agent.v2.capabilities.request":
       case "agent.v2.conversation.open":
       case "agent.v2.conversation.list":
@@ -685,7 +616,7 @@ export class BridgeSession {
           this.send(
             createEnvelope({
               type: "agent.v2.capabilities",
-              sessionId: this.sessionId,
+              hostDeviceId: this.sessionId,
               payload: {
                 enabled: false,
                 provider: normalizeAgentProvider(
@@ -782,7 +713,7 @@ export class BridgeSession {
         this.send(
           createEnvelope({
             type: "tunnel.response",
-            sessionId: this.sessionId,
+            hostDeviceId: this.sessionId,
             payload: {
               requestId,
               statusCode: proxyRes.statusCode ?? 200,
@@ -799,7 +730,7 @@ export class BridgeSession {
         this.send(
           createEnvelope({
             type: "tunnel.response",
-            sessionId: this.sessionId,
+            hostDeviceId: this.sessionId,
             payload: {
               requestId,
               statusCode: proxyRes.statusCode ?? 200,
@@ -845,7 +776,7 @@ export class BridgeSession {
       this.send(
         createEnvelope({
           type: "tunnel.ws.data",
-          sessionId: this.sessionId,
+          hostDeviceId: this.sessionId,
           payload: {
             requestId,
             data: buf.toString("base64"),
@@ -861,7 +792,7 @@ export class BridgeSession {
       this.send(
         createEnvelope({
           type: "tunnel.ws.close",
-          sessionId: this.sessionId,
+          hostDeviceId: this.sessionId,
           payload: {
             requestId,
             code: safeCode,
@@ -876,7 +807,7 @@ export class BridgeSession {
       this.send(
         createEnvelope({
           type: "tunnel.ws.close",
-          sessionId: this.sessionId,
+          hostDeviceId: this.sessionId,
           payload: {
             requestId,
             code: 1001,
@@ -914,7 +845,7 @@ export class BridgeSession {
     this.send(
       createEnvelope({
         type: "tunnel.response",
-        sessionId: this.sessionId,
+        hostDeviceId: this.sessionId,
         payload: {
           requestId,
           statusCode,
@@ -935,7 +866,7 @@ export class BridgeSession {
     }));
     this.send(createEnvelope({
       type: "terminal.list",
-      sessionId: this.sessionId,
+      hostDeviceId: this.sessionId,
       payload: { terminals },
     }));
   }
@@ -953,7 +884,7 @@ export class BridgeSession {
       this.send(
         createEnvelope({
           type: "terminal.output",
-          sessionId: this.sessionId,
+          hostDeviceId: this.sessionId,
           terminalId,
           seq: msg.seq,
           payload: { ...payload, isReplay: true },
@@ -993,7 +924,7 @@ export class BridgeSession {
       const seq = term.outputSeq++;
       const envelope = createEnvelope({
         type: "terminal.output",
-        sessionId: this.sessionId,
+        hostDeviceId: this.sessionId,
         terminalId,
         seq,
         payload: {
@@ -1012,7 +943,7 @@ export class BridgeSession {
       term.status = "exited";
       this.send(createEnvelope({
         type: "terminal.exit",
-        sessionId: this.sessionId,
+        hostDeviceId: this.sessionId,
         terminalId,
         payload: { exitCode, signal },
       }));
@@ -1040,8 +971,6 @@ export class BridgeSession {
     }
     const machineId = this.machineIdentity?.machineId;
     const enriched = machineId && (
-      message.type === "agent.capabilities" ||
-      message.type === "agent.snapshot" ||
       message.type === "agent.v2.capabilities" ||
       message.type === "agent.v2.snapshot"
     )
@@ -1082,7 +1011,7 @@ export class BridgeSession {
       this.send(
         createEnvelope({
           type: "screen.status",
-          sessionId: this.sessionId,
+          hostDeviceId: this.sessionId,
           payload: { active: false, mode: "off" as const, error: "Screen sharing not enabled on host. Start CLI with --screen flag." },
         }),
       );
@@ -1095,7 +1024,7 @@ export class BridgeSession {
     if (ScreenShare.isAvailable()) {
       this.log("WebRTC available, starting screen share");
       this.screenShare = new ScreenShare({
-        sessionId: this.sessionId,
+        hostDeviceId: this.sessionId,
         fps,
         quality,
         scale,
@@ -1118,7 +1047,7 @@ export class BridgeSession {
       fps,
       quality,
       scale,
-      sessionId: this.sessionId,
+      hostDeviceId: this.sessionId,
       onFrame: (envelope) => this.send(envelope),
       onStatus: (envelope) => this.send(envelope),
     });
@@ -1177,8 +1106,6 @@ export class BridgeSession {
     this.exited = true;
     this.stopHeartbeat();
     this.stopScreenCapture();
-    this.agentSession?.stop();
-    this.agentSession = undefined;
     this.agentWorkspace?.stop();
     this.agentWorkspace = undefined;
     this.keepAwake?.stop();

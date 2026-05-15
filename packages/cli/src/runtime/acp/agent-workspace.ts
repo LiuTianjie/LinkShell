@@ -1223,7 +1223,7 @@ export class AgentWorkspaceProxy {
 
   constructor(
     private readonly input: {
-      sessionId: string;
+      hostDeviceId: string;
       cwd: string;
       availableProviders: AgentProvider[];
       command?: string;
@@ -1251,7 +1251,7 @@ export class AgentWorkspaceProxy {
         );
         this.input.send(createEnvelope({
           type: "agent.v2.conversation.list.result",
-          sessionId: this.input.sessionId,
+          hostDeviceId: this.input.hostDeviceId,
           payload: { conversations },
         }));
         break;
@@ -1522,7 +1522,7 @@ export class AgentWorkspaceProxy {
     const anyPermission = providers.some((p) => p.supportsPermission);
     this.input.send(createEnvelope({
       type: "agent.v2.capabilities",
-      sessionId: this.input.sessionId,
+      hostDeviceId: this.input.hostDeviceId,
       payload: {
         enabled: anyEnabled,
         provider: this.input.availableProviders[0] ?? "codex",
@@ -1584,7 +1584,7 @@ export class AgentWorkspaceProxy {
       this.activeConversationId = existingConversation.id;
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.opened",
-        sessionId: this.input.sessionId,
+        hostDeviceId: this.input.hostDeviceId,
         payload: {
           conversation: existingConversation,
           snapshot: this.timelines.get(existingConversation.id) ?? [],
@@ -1623,7 +1623,7 @@ export class AgentWorkspaceProxy {
       this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.opened",
-        sessionId: this.input.sessionId,
+        hostDeviceId: this.input.hostDeviceId,
         payload: { conversation, snapshot: this.timelines.get(conversation.id) ?? [] },
       }));
       return conversation;
@@ -1675,7 +1675,7 @@ export class AgentWorkspaceProxy {
     });
     this.input.send(createEnvelope({
       type: "agent.v2.conversation.opened",
-      sessionId: this.input.sessionId,
+      hostDeviceId: this.input.hostDeviceId,
       payload: { conversation, snapshot: this.timelines.get(conversation.id) ?? [] },
     }));
     return conversation;
@@ -2633,7 +2633,7 @@ export class AgentWorkspaceProxy {
     this.upsertItem(conversationId, item);
     this.input.send(createEnvelope({
       type: "agent.v2.permission.request",
-      sessionId: this.input.sessionId,
+      hostDeviceId: this.input.hostDeviceId,
       payload: { conversationId, ...permission, item },
     }));
 
@@ -2911,7 +2911,7 @@ export class AgentWorkspaceProxy {
     const conversation = this.conversations.get(conversationId);
     this.input.send(createEnvelope({
       type: "agent.v2.event",
-      sessionId: this.input.sessionId,
+      hostDeviceId: this.input.hostDeviceId,
       payload: { conversationId, conversation, item },
     }));
   }
@@ -2919,7 +2919,7 @@ export class AgentWorkspaceProxy {
   private emitConversation(conversation: AgentConversation): void {
     this.input.send(createEnvelope({
       type: "agent.v2.event",
-      sessionId: this.input.sessionId,
+      hostDeviceId: this.input.hostDeviceId,
       payload: { conversationId: conversation.id, conversation },
     }));
   }
@@ -2968,7 +2968,7 @@ export class AgentWorkspaceProxy {
       : [...this.timelines.values()].flat();
     this.input.send(createEnvelope({
       type: "agent.v2.snapshot",
-      sessionId: this.input.sessionId,
+      hostDeviceId: this.input.hostDeviceId,
       payload: {
         conversations,
         activeConversationId: this.activeConversationId,

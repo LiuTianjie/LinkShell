@@ -149,7 +149,7 @@ export class AuthorizationManager {
     return this.tokens.get(token)?.authorizations.get(hostDeviceId)?.authorizationId;
   }
 
-  getTokenForSession(hostDeviceId: string): string | undefined {
+  getTokenForHostDevice(hostDeviceId: string): string | undefined {
     return this.hostDeviceToTokens.get(hostDeviceId)?.values().next().value;
   }
 

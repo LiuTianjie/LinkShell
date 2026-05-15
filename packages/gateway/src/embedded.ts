@@ -9,7 +9,7 @@ import {
   PROTOCOL_VERSION,
 } from "@linkshell/protocol";
 import { z, ZodError } from "zod";
-import { SessionManager } from "./sessions.js";
+import { DeviceManager } from "./sessions.js";
 import { PairingManager } from "./pairings.js";
 import { TokenManager } from "./tokens.js";
 import { handleSocketMessage } from "./relay.js";
@@ -108,7 +108,7 @@ export function startEmbeddedGateway(
     }
   }
 
-  const sessionManager = new SessionManager();
+  const sessionManager = new DeviceManager();
   const pairingManager = new PairingManager();
   const tokenManager = new TokenManager();
 
@@ -154,7 +154,7 @@ export function startEmbeddedGateway(
           item.terminalId ? `${item.type}:${item.terminalId}` : item.type,
         ).join(",") ?? "none";
         const ack = result.ack ? ` resolved=${result.ack.resolved} delivered=${result.ack.delivered}` : "";
-        log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} hostDevice=${body.hostDeviceId ?? body.sessionId ?? "unknown"} request=${body.requestId} status=${result.status} forwarded=${forwarded}${ack}`);
+        log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} hostDevice=${body.hostDeviceId} request=${body.requestId} status=${result.status} forwarded=${forwarded}${ack}`);
         json(res, result.status, result.body);
         return;
       }
@@ -386,7 +386,7 @@ export function startEmbeddedGateway(
   wss.on(
     "connection",
     (socket: WebSocket, _request: IncomingMessage, url: URL) => {
-      const hostDeviceId = url.searchParams.get("hostDeviceId") ?? url.searchParams.get("sessionId");
+      const hostDeviceId = url.searchParams.get("hostDeviceId");
       const role = url.searchParams.get("role") as "host" | "client" | null;
 
       if (!hostDeviceId || !role || (role !== "host" && role !== "client")) {

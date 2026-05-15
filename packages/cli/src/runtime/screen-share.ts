@@ -22,7 +22,7 @@ function detectMacScreenIndex(): string {
 }
 
 export interface ScreenShareOptions {
-  sessionId: string;
+  hostDeviceId: string;
   fps: number;
   quality: number;
   scale: number;
@@ -111,7 +111,7 @@ export class ScreenShare {
           this.options.onSignal(
             createEnvelope({
               type: "screen.ice",
-              sessionId: this.options.sessionId,
+              hostDeviceId: this.options.hostDeviceId,
               payload: {
                 candidate: candidate.candidate,
                 sdpMid: candidate.sdpMid ?? null,
@@ -128,7 +128,7 @@ export class ScreenShare {
           this.options.onStatus(
             createEnvelope({
               type: "screen.status",
-              sessionId: this.options.sessionId,
+              hostDeviceId: this.options.hostDeviceId,
               payload: { active: true, mode: "webrtc" as const },
             }),
           );
@@ -136,7 +136,7 @@ export class ScreenShare {
           this.options.onStatus(
             createEnvelope({
               type: "screen.status",
-              sessionId: this.options.sessionId,
+              hostDeviceId: this.options.hostDeviceId,
               payload: { active: false, mode: "off" as const, error: `WebRTC ${state}` },
             }),
           );
@@ -152,7 +152,7 @@ export class ScreenShare {
       this.options.onStatus(
         createEnvelope({
           type: "screen.status",
-          sessionId: this.options.sessionId,
+          hostDeviceId: this.options.hostDeviceId,
           payload: { active: true, mode: "webrtc" as const },
         }),
       );
@@ -160,7 +160,7 @@ export class ScreenShare {
       this.options.onSignal(
         createEnvelope({
           type: "screen.offer",
-          sessionId: this.options.sessionId,
+          hostDeviceId: this.options.hostDeviceId,
           payload: { sdp: offer.sdp },
         }),
       );
@@ -172,7 +172,7 @@ export class ScreenShare {
       this.options.onStatus(
         createEnvelope({
           type: "screen.status",
-          sessionId: this.options.sessionId,
+          hostDeviceId: this.options.hostDeviceId,
           payload: {
             active: false,
             mode: "off" as const,
@@ -221,7 +221,7 @@ export class ScreenShare {
     this.options.onStatus(
       createEnvelope({
         type: "screen.status",
-        sessionId: this.options.sessionId,
+        hostDeviceId: this.options.hostDeviceId,
         payload: { active: false, mode: "off" as const },
       }),
     );

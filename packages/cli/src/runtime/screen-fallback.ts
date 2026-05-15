@@ -10,7 +10,7 @@ export interface ScreenFallbackOptions {
   fps: number;
   quality: number;
   scale: number;
-  sessionId: string;
+  hostDeviceId: string;
   onFrame: (envelope: Envelope) => void;
   onStatus: (envelope: Envelope) => void;
 }
@@ -38,7 +38,7 @@ export class ScreenFallback {
     this.options.onStatus(
       createEnvelope({
         type: "screen.status",
-        sessionId: this.options.sessionId,
+        hostDeviceId: this.options.hostDeviceId,
         payload: { active: true, mode: "fallback" as const },
       }),
     );
@@ -64,7 +64,7 @@ export class ScreenFallback {
     this.options.onStatus(
       createEnvelope({
         type: "screen.status",
-        sessionId: this.options.sessionId,
+        hostDeviceId: this.options.hostDeviceId,
         payload: { active: false, mode: "off" as const },
       }),
     );
@@ -88,7 +88,7 @@ export class ScreenFallback {
         this.options.onFrame(
           createEnvelope({
             type: "screen.frame",
-            sessionId: this.options.sessionId,
+            hostDeviceId: this.options.hostDeviceId,
             payload: {
               data: base64,
               width: dims.width,
@@ -108,7 +108,7 @@ export class ScreenFallback {
           this.options.onFrame(
             createEnvelope({
               type: "screen.frame",
-              sessionId: this.options.sessionId,
+              hostDeviceId: this.options.hostDeviceId,
               payload: {
                 data: chunk,
                 width: dims.width,

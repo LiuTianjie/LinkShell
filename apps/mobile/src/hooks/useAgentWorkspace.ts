@@ -413,13 +413,13 @@ export function useAgentWorkspace(
 
   const handleEnvelope = useCallback(
     (envelope: Envelope) => {
-      const serverSession = managerRef.current.sessions.get(envelope.sessionId);
+      const serverSession = managerRef.current.sessions.get(envelope.hostDeviceId);
       const serverUrl = normalizeServerUrl(serverSession?.gatewayUrl ?? "");
       const toRecord = (conversation: any): AgentConversationRecord => ({
         id: conversation.id,
         serverUrl,
-        hostDeviceId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.sessionId,
-        sessionId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.sessionId,
+        hostDeviceId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.hostDeviceId,
+        sessionId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.hostDeviceId,
         machineId: serverSession?.machineId ?? conversation.machineId,
         agentSessionId: conversation.agentSessionId,
         provider: conversation.provider ?? "codex",
@@ -444,7 +444,7 @@ export function useAgentWorkspace(
         }
         setCapabilitiesBySessionId((prev) => {
           const next = new Map(prev);
-          next.set(envelope.sessionId, payload);
+          next.set(envelope.hostDeviceId, payload);
           return next;
         });
         return;
@@ -644,14 +644,14 @@ export function useAgentWorkspace(
         return;
       }
 
-      if (envelope.type === "session.error") {
-        const payload = parseTypedPayload("session.error", envelope.payload) as any;
+      if (envelope.type === "device.error") {
+        const payload = parseTypedPayload("device.error", envelope.payload) as any;
         if (payload.code !== "control_conflict") return;
         setTimelineById((prev) => {
           const next = new Map(prev);
           for (const [conversationId, items] of prev) {
             const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-            if (conversation?.sessionId !== envelope.sessionId) continue;
+            if (conversation?.sessionId !== envelope.hostDeviceId) continue;
             let changed = false;
             const nextItems = items.map((item) => {
               if (item.type === "permission" && item.metadata?.permissionPending === true) {
@@ -711,7 +711,7 @@ export function useAgentWorkspace(
           metadata: {
             ...(rawPermissionItem.metadata ?? {}),
             protocol: "v2",
-            sessionId: envelope.sessionId,
+            sessionId: envelope.hostDeviceId,
             permissionLive: true,
             permissionExpired: false,
             permissionPending: false,
@@ -727,53 +727,6 @@ export function useAgentWorkspace(
             lastActivityAt: Date.now(),
           }).catch(() => {});
         }
-      }
-
-      if (envelope.type === "agent.permission.request") {
-        const payload = parseTypedPayload("agent.permission.request" as any, envelope.payload) as any;
-        const conversation =
-          conversationsRef.current.find((item) =>
-            item.sessionId === envelope.sessionId &&
-            item.agentSessionId &&
-            item.agentSessionId === payload.agentSessionId,
-          ) ??
-          conversationsRef.current.find((item) => item.id === activeConversationId && item.sessionId === envelope.sessionId) ??
-          conversationsRef.current.find((item) => item.sessionId === envelope.sessionId && !item.archived);
-        if (!conversation) return;
-        const isTerminalPermission =
-          typeof envelope.terminalId === "string" &&
-          envelope.terminalId.length > 0 &&
-          typeof payload.agentSessionId !== "string";
-        const permissionItem: AgentTimelineItem = {
-          id: `permission:${payload.requestId}`,
-          conversationId: conversation.id,
-          type: "permission",
-          permission: {
-            requestId: payload.requestId,
-            toolName: payload.toolName,
-            toolInput: payload.toolInput,
-            context: payload.context,
-            options: payload.options ?? [],
-          },
-          metadata: {
-            protocol: isTerminalPermission ? "terminal" : "legacy",
-            sessionId: envelope.sessionId,
-            terminalId: envelope.terminalId,
-            agentSessionId: payload.agentSessionId,
-            permissionLive: true,
-            permissionExpired: false,
-            permissionPending: false,
-          },
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        persistTimelineItem(permissionItem).catch(() => {});
-        persistConversation({
-          ...conversation,
-          status: "waiting_permission",
-          lastMessagePreview: previewFromItem(permissionItem) ?? "需要授权",
-          lastActivityAt: Date.now(),
-        }).catch(() => {});
       }
 
       if (envelope.type === "terminal.status") {
@@ -805,19 +758,19 @@ export function useAgentWorkspace(
               timelineRef.current.get(item.id)?.some((timelineItem) =>
                 timelineItem.type === "permission" &&
                 timelineItem.permission?.requestId === permissionResolution.requestId &&
-                timelineItem.metadata?.sessionId === envelope.sessionId,
+                timelineItem.metadata?.sessionId === envelope.hostDeviceId,
               ),
             )
           : undefined;
         const conversation =
           resolvedConversation ??
-          conversationsRef.current.find((item) => item.id === activeConversationId && item.sessionId === envelope.sessionId) ??
+          conversationsRef.current.find((item) => item.id === activeConversationId && item.sessionId === envelope.hostDeviceId) ??
           conversationsRef.current.find((item) =>
-            item.sessionId === envelope.sessionId &&
+            item.sessionId === envelope.hostDeviceId &&
             !item.archived &&
             (item.status === "running" || item.status === "waiting_permission"),
           ) ??
-          conversationsRef.current.find((item) => item.sessionId === envelope.sessionId && !item.archived);
+          conversationsRef.current.find((item) => item.sessionId === envelope.hostDeviceId && !item.archived);
         if (!conversation) return;
         if (permissionResolution?.requestId) {
           const delivered = permissionResolution.delivered === true;
@@ -875,7 +828,7 @@ export function useAgentWorkspace(
               if (
                 item.type === "permission" &&
                 item.metadata?.protocol === "terminal" &&
-                item.metadata?.sessionId === envelope.sessionId &&
+                item.metadata?.sessionId === envelope.hostDeviceId &&
                 (item.metadata?.terminalId ?? "default") === terminalId &&
                 item.metadata?.permissionLive === true &&
                 !item.metadata?.permissionOutcome
@@ -920,7 +873,7 @@ export function useAgentWorkspace(
           },
           metadata: {
             protocol: "terminal",
-            sessionId: envelope.sessionId,
+            sessionId: envelope.hostDeviceId,
             terminalId,
             permissionLive: true,
             permissionExpired: false,
@@ -1415,20 +1368,6 @@ export function useAgentWorkspace(
           terminalId,
           requestId,
           outcome === "allow" ? "allow" : "deny",
-        );
-      } else if (permissionItem?.metadata?.protocol === "legacy") {
-        accepted = manager.sendAgentWorkspaceEnvelope(
-          sourceSessionId,
-          "agent.permission.response" as any,
-          {
-            agentSessionId: typeof permissionItem.metadata.agentSessionId === "string"
-              ? permissionItem.metadata.agentSessionId
-              : conversation.agentSessionId,
-            requestId,
-            outcome,
-            optionId,
-          },
-          { queue: true, dedupeKey: `agent-permission:${requestId}`, claimControl: true },
         );
       } else {
         accepted = manager.sendAgentWorkspaceEnvelope(

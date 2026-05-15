@@ -48,7 +48,6 @@ export const envelopeSchema = z.object({
   id: z.string().min(1),
   type: z.string().min(1),
   hostDeviceId: z.string().min(1),
-  sessionId: z.string().min(1).optional(),
   terminalId: z.string().min(1).optional(),
   deviceId: z.string().min(1).optional(),
   timestamp: z.string().datetime(),
@@ -58,7 +57,7 @@ export const envelopeSchema = z.object({
   payload: z.unknown(),
 });
 
-export type Envelope = z.infer<typeof envelopeSchema> & { sessionId: string };
+export type Envelope = z.infer<typeof envelopeSchema>;
 
 // ── Payload schemas ─────────────────────────────────────────────────
 
@@ -478,70 +477,6 @@ export const agentCapabilitiesPayloadSchema = z.object({
   supportsCancel: z.boolean().default(false),
 });
 
-export const agentInitializePayloadSchema = z.object({});
-
-export const agentSessionNewPayloadSchema = z.object({
-  cwd: z.string().optional(),
-  provider: agentProviderSchema.optional(),
-  mcpServers: z.record(z.unknown()).optional(),
-});
-
-export const agentSessionLoadPayloadSchema = z.object({
-  agentSessionId: z.string().min(1),
-  cwd: z.string().optional(),
-});
-
-export const agentSessionListPayloadSchema = z.object({});
-
-export const agentPromptPayloadSchema = z.object({
-  agentSessionId: z.string().optional(),
-  clientMessageId: z.string().min(1),
-  contentBlocks: z.array(agentContentBlockSchema).min(1),
-  model: z.string().min(1).optional(),
-  reasoningEffort: agentReasoningEffortSchema.optional(),
-  permissionMode: agentPermissionModeSchema.optional(),
-});
-
-export const agentCancelPayloadSchema = z.object({
-  agentSessionId: z.string().optional(),
-});
-
-export const agentUpdatePayloadSchema = z.object({
-  agentSessionId: z.string().optional(),
-  kind: z.enum(["message", "message_delta", "tool_call", "tool_result", "plan", "status", "error"]),
-  message: agentMessageSchema.optional(),
-  delta: z.string().optional(),
-  toolCall: agentToolCallSchema.optional(),
-  plan: z.array(z.object({
-    id: z.string().min(1),
-    text: z.string().min(1),
-    status: z.enum(["pending", "in_progress", "completed"]),
-  })).optional(),
-  status: z.enum(["idle", "running", "waiting_permission", "error"]).optional(),
-  error: z.string().optional(),
-});
-
-export const agentPermissionRequestPayloadSchema = agentPermissionSchema.extend({
-  agentSessionId: z.string().optional(),
-});
-
-export const agentPermissionResponsePayloadSchema = z.object({
-  agentSessionId: z.string().optional(),
-  requestId: z.string().min(1),
-  outcome: z.enum(["allow", "deny", "cancelled"]),
-  optionId: z.string().optional(),
-});
-
-export const agentSnapshotPayloadSchema = z.object({
-  agentSessionId: z.string().optional(),
-  capabilities: agentCapabilitiesPayloadSchema.optional(),
-  messages: z.array(agentMessageSchema).default([]),
-  toolCalls: z.array(agentToolCallSchema).default([]),
-  pendingPermissions: z.array(agentPermissionSchema).default([]),
-  status: z.enum(["unavailable", "idle", "running", "waiting_permission", "error"]).default("unavailable"),
-  error: z.string().optional(),
-});
-
 // ── Agent Workspace v2 payloads ────────────────────────────────────
 
 export const agentV2StatusSchema = z.enum([
@@ -802,11 +737,6 @@ export const protocolMessageSchemas = {
   "device.error": errorPayloadSchema,
   "device.host_disconnected": sessionHostDisconnectedPayloadSchema,
   "device.host_reconnected": sessionHostReconnectedPayloadSchema,
-  "session.connect": sessionConnectPayloadSchema,
-  "session.ack": sessionAckPayloadSchema,
-  "session.resume": sessionResumePayloadSchema,
-  "session.heartbeat": sessionHeartbeatPayloadSchema,
-  "session.error": errorPayloadSchema,
   "terminal.output": terminalOutputPayloadSchema,
   "terminal.input": terminalInputPayloadSchema,
   "terminal.resize": terminalResizePayloadSchema,
@@ -846,17 +776,6 @@ export const protocolMessageSchemas = {
   "tunnel.ws.close": tunnelWsClosePayloadSchema,
   "terminal.history.request": terminalHistoryRequestPayloadSchema,
   "terminal.history.response": terminalHistoryResponsePayloadSchema,
-  "agent.initialize": agentInitializePayloadSchema,
-  "agent.capabilities": agentCapabilitiesPayloadSchema,
-  "agent.session.new": agentSessionNewPayloadSchema,
-  "agent.session.load": agentSessionLoadPayloadSchema,
-  "agent.session.list": agentSessionListPayloadSchema,
-  "agent.prompt": agentPromptPayloadSchema,
-  "agent.cancel": agentCancelPayloadSchema,
-  "agent.update": agentUpdatePayloadSchema,
-  "agent.permission.request": agentPermissionRequestPayloadSchema,
-  "agent.permission.response": agentPermissionResponsePayloadSchema,
-  "agent.snapshot": agentSnapshotPayloadSchema,
   "agent.v2.capabilities.request": agentV2CapabilitiesRequestPayloadSchema,
   "agent.v2.capabilities": agentV2CapabilitiesPayloadSchema,
   "agent.v2.conversation.open": agentV2ConversationOpenPayloadSchema,
@@ -893,8 +812,7 @@ function generateId(): string {
 
 export function createEnvelope<T>(input: {
   type: ProtocolMessageType;
-  hostDeviceId?: string;
-  sessionId?: string;
+  hostDeviceId: string;
   payload: T;
   id?: string;
   seq?: number;
@@ -903,16 +821,10 @@ export function createEnvelope<T>(input: {
   terminalId?: string;
   traceId?: string;
 }): Envelope {
-  const hostDeviceId = input.hostDeviceId ?? input.sessionId;
-  if (!hostDeviceId) {
-    throw new Error("createEnvelope requires hostDeviceId");
-  }
   return {
     id: input.id ?? generateId(),
     type: input.type,
-    hostDeviceId,
-    // Transitional alias for internal code that is still being moved to v2.
-    sessionId: input.sessionId ?? hostDeviceId,
+    hostDeviceId: input.hostDeviceId,
     terminalId: input.terminalId,
     deviceId: input.deviceId,
     timestamp: new Date().toISOString(),
@@ -924,11 +836,7 @@ export function createEnvelope<T>(input: {
 }
 
 export function parseEnvelope(raw: string): Envelope {
-  const parsed = envelopeSchema.parse(JSON.parse(raw));
-  return {
-    ...parsed,
-    sessionId: parsed.sessionId ?? parsed.hostDeviceId,
-  };
+  return envelopeSchema.parse(JSON.parse(raw));
 }
 
 export function serializeEnvelope(message: Envelope): string {

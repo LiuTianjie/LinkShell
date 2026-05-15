@@ -117,17 +117,6 @@ export interface AgentPermission {
   options: { id: string; label: string; kind: "allow" | "deny" | "other" }[];
 }
 
-export interface AgentState {
-  capabilities: AgentCapabilities | null;
-  activeAgentSessionId: string | null;
-  messages: AgentMessage[];
-  toolCalls: AgentToolCall[];
-  plan: AgentPlanStep[];
-  pendingPermissions: AgentPermission[];
-  status: "unavailable" | "idle" | "running" | "waiting_permission" | "error";
-  error?: string | null;
-}
-
 export interface SessionInfo {
   hostDeviceId: string;
   sessionId: string;
@@ -162,7 +151,6 @@ export interface SessionInfo {
     sdpMLineIndex?: number | null;
   }[];
   browseResult: BrowseResult | null;
-  agent: AgentState;
 }
 
 export interface SessionManagerHandle {
@@ -226,21 +214,6 @@ export interface SessionManagerHandle {
   requestHistory: () => void;
   /** Shell history entries from the host */
   historyEntries: string[];
-  initializeAgent: () => void;
-  sendAgentPrompt: (
-    text: string,
-    options?: {
-      model?: string;
-      reasoningEffort?: AgentReasoningEffort;
-      permissionMode?: AgentPermissionMode;
-    },
-  ) => void;
-  cancelAgent: () => void;
-  sendAgentPermissionResponse: (
-    requestId: string,
-    outcome: "allow" | "deny" | "cancelled",
-    optionId?: string,
-  ) => boolean;
   sendAgentWorkspaceEnvelope: (
     sessionId: string,
     type: ProtocolMessageType,
@@ -257,32 +230,6 @@ const RECONNECT_BASE_DELAY = 1_000;
 const RECONNECT_MAX_DELAY = 15_000;
 const RECONNECT_MAX_ATTEMPTS = 15;
 const TERMINAL_REPLAY_LIMIT = 100;
-
-function mergeAgentMessages(
-  current: AgentMessage[],
-  incoming: AgentMessage[] | undefined,
-): AgentMessage[] {
-  if (!incoming?.length) return current;
-  const map = new Map(current.map((message) => [message.id, message]));
-  for (const message of incoming) {
-    map.set(message.id, message);
-  }
-  return [...map.values()]
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .slice(-100);
-}
-
-function mergeAgentToolCalls(
-  current: AgentToolCall[],
-  incoming: AgentToolCall[] | undefined,
-): AgentToolCall[] {
-  if (!incoming?.length) return current;
-  const map = new Map(current.map((tool) => [tool.id, tool]));
-  for (const tool of incoming) {
-    map.set(tool.id, tool);
-  }
-  return [...map.values()];
-}
 
 function generateId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") {
@@ -386,7 +333,6 @@ interface InternalSession {
     height: number;
   } | null;
   browseResult: BrowseResult | null;
-  agent: AgentState;
 }
 
 const OUTBOUND_QUEUE_LIMIT = 100;
@@ -481,16 +427,6 @@ function createInternalSession(
     pendingStatusByTerminal: new Map(),
     chunkBuf: null,
     browseResult: null,
-    agent: {
-      capabilities: null,
-      activeAgentSessionId: null,
-      messages: [],
-      toolCalls: [],
-      plan: [],
-      pendingPermissions: [],
-      status: "unavailable",
-      error: null,
-    },
   };
 }
 
@@ -532,13 +468,6 @@ function toSessionInfo(s: InternalSession): SessionInfo {
     pendingOffer: s.pendingOffer,
     pendingIceCandidates: s.pendingIceCandidates,
     browseResult: s.browseResult,
-    agent: {
-      ...s.agent,
-      messages: [...s.agent.messages],
-      toolCalls: [...s.agent.toolCalls],
-      plan: [...s.agent.plan],
-      pendingPermissions: [...s.agent.pendingPermissions],
-    },
   };
 }
 
@@ -640,15 +569,15 @@ export function useSessionManager(): SessionManagerHandle {
   const flushControlOutbound = (s: InternalSession) => {
     if (!s.socket || s.socket.readyState !== WebSocket.OPEN) {
       console.warn("[SessionControl] flush skipped socket not open", {
-        sessionId: s.sessionId,
+        hostDeviceId: s.sessionId,
         pendingControlCount: s.pendingControlOutbound.length,
       });
       return;
     }
     if (s.controllerId !== s.deviceId) {
       console.warn("[SessionControl] flush skipped not controller", {
-        sessionId: s.sessionId,
-        deviceId: s.deviceId,
+        hostDeviceId: s.hostDeviceId,
+          deviceId: s.deviceId,
         controllerId: s.controllerId,
         pendingControlCount: s.pendingControlOutbound.length,
       });
@@ -657,7 +586,7 @@ export function useSessionManager(): SessionManagerHandle {
     const queued = s.pendingControlOutbound.splice(0);
     s.pendingControlDedupeKeys.clear();
     if (queued.length > 0) console.log("[SessionControl] flush sending", {
-      sessionId: s.sessionId,
+      hostDeviceId: s.sessionId,
       count: queued.length,
       types: queued.map((item) => item.envelope.type),
     });
@@ -717,7 +646,7 @@ export function useSessionManager(): SessionManagerHandle {
       s,
       createEnvelope({
         type: "control.claim",
-        sessionId: s.sessionId,
+        hostDeviceId: s.sessionId,
         payload: { deviceId: s.deviceId },
       }),
     );
@@ -730,8 +659,8 @@ export function useSessionManager(): SessionManagerHandle {
   ): boolean => {
     const requestId = (envelope.payload as { requestId?: unknown } | undefined)?.requestId;
     console.log("[LiveActivityAction] session sendWithControl start", {
-      sessionId: s.sessionId,
-      deviceId: s.deviceId,
+      hostDeviceId: s.hostDeviceId,
+          deviceId: s.deviceId,
       controllerId: s.controllerId,
       type: envelope.type,
       requestId,
@@ -744,7 +673,7 @@ export function useSessionManager(): SessionManagerHandle {
       s,
       createEnvelope({
         type: "control.claim",
-        sessionId: s.sessionId,
+        hostDeviceId: s.sessionId,
         payload: { deviceId: s.deviceId },
       }),
       {
@@ -756,7 +685,7 @@ export function useSessionManager(): SessionManagerHandle {
     if (s.controllerId === s.deviceId) {
       accepted = sendRaw(s, envelope, options);
       console.log("[LiveActivityAction] session sendWithControl sent immediately", {
-        sessionId: s.sessionId,
+        hostDeviceId: s.sessionId,
         type: envelope.type,
         requestId,
         accepted,
@@ -765,7 +694,7 @@ export function useSessionManager(): SessionManagerHandle {
       if (options.dedupeKey && s.pendingControlDedupeKeys.has(options.dedupeKey)) {
         accepted = true;
         console.log("[LiveActivityAction] session sendWithControl already pending", {
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           type: envelope.type,
           requestId,
           dedupeKey: options.dedupeKey,
@@ -778,7 +707,7 @@ export function useSessionManager(): SessionManagerHandle {
         s.pendingControlOutbound.push({ envelope, dedupeKey: options.dedupeKey });
         if (options.dedupeKey) s.pendingControlDedupeKeys.add(options.dedupeKey);
         console.log("[LiveActivityAction] session sendWithControl queued until grant", {
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           type: envelope.type,
           requestId,
           dedupeKey: options.dedupeKey,
@@ -788,7 +717,7 @@ export function useSessionManager(): SessionManagerHandle {
     } else {
       accepted = false;
       console.warn("[LiveActivityAction] session sendWithControl rejected no queue", {
-        sessionId: s.sessionId,
+        hostDeviceId: s.sessionId,
         type: envelope.type,
         requestId,
       });
@@ -801,7 +730,7 @@ export function useSessionManager(): SessionManagerHandle {
     }
     const result = claimAccepted && accepted;
     console.log("[LiveActivityAction] session sendWithControl result", {
-      sessionId: s.sessionId,
+      hostDeviceId: s.sessionId,
       type: envelope.type,
       requestId,
       claimAccepted,
@@ -1046,85 +975,6 @@ export function useSessionManager(): SessionManagerHandle {
           tick();
           break;
         }
-        case "agent.capabilities": {
-          const p = parseTypedPayload("agent.capabilities" as any, envelope.payload) as any;
-          s.agent.capabilities = p as AgentCapabilities;
-          if (typeof p.machineId === "string") s.machineId = p.machineId;
-          s.agent.status = p.enabled ? "idle" : "unavailable";
-          s.agent.error = p.error ?? null;
-          tick();
-          break;
-        }
-        case "agent.snapshot": {
-          const p = parseTypedPayload("agent.snapshot" as any, envelope.payload) as any;
-          const incomingAgentSessionId = p.agentSessionId ?? null;
-          const sameAgentSession =
-            !s.agent.activeAgentSessionId ||
-            !incomingAgentSessionId ||
-            s.agent.activeAgentSessionId === incomingAgentSessionId;
-          s.agent.activeAgentSessionId = incomingAgentSessionId ?? s.agent.activeAgentSessionId;
-          s.agent.capabilities = (p.capabilities as AgentCapabilities | undefined) ?? s.agent.capabilities;
-          if (typeof p.machineId === "string") s.machineId = p.machineId;
-          if (typeof p.capabilities?.machineId === "string") s.machineId = p.capabilities.machineId;
-          s.agent.messages = sameAgentSession
-            ? mergeAgentMessages(s.agent.messages, p.messages as AgentMessage[] | undefined)
-            : (p.messages as AgentMessage[]);
-          s.agent.toolCalls = sameAgentSession
-            ? mergeAgentToolCalls(s.agent.toolCalls, p.toolCalls as AgentToolCall[] | undefined)
-            : (p.toolCalls as AgentToolCall[]);
-          s.agent.plan = Array.isArray(p.plan)
-            ? (p.plan as AgentPlanStep[])
-            : sameAgentSession
-              ? s.agent.plan
-              : [];
-          s.agent.pendingPermissions = p.pendingPermissions as AgentPermission[];
-          s.agent.status = p.status;
-          s.agent.error = p.error ?? null;
-          tick();
-          break;
-        }
-        case "agent.update": {
-          const p = parseTypedPayload("agent.update" as any, envelope.payload) as any;
-          s.agent.activeAgentSessionId = p.agentSessionId ?? s.agent.activeAgentSessionId;
-          if (p.status) s.agent.status = p.status;
-          if (p.error) s.agent.error = p.error;
-          if (p.message) {
-            const existing = s.agent.messages.findIndex((m) => m.id === p.message!.id);
-            if (existing >= 0) s.agent.messages[existing] = p.message as AgentMessage;
-            else s.agent.messages.push(p.message as AgentMessage);
-            if (s.agent.messages.length > 100) s.agent.messages.shift();
-          }
-          if (p.toolCall) {
-            const existing = s.agent.toolCalls.findIndex((t) => t.id === p.toolCall!.id);
-            if (existing >= 0) s.agent.toolCalls[existing] = p.toolCall as AgentToolCall;
-            else s.agent.toolCalls.push(p.toolCall as AgentToolCall);
-          }
-          if (p.plan) {
-            s.agent.plan = p.plan as AgentPlanStep[];
-          }
-          tick();
-          break;
-        }
-        case "agent.permission.request": {
-          const p = parseTypedPayload("agent.permission.request" as any, envelope.payload) as any;
-          s.agent.activeAgentSessionId = p.agentSessionId ?? s.agent.activeAgentSessionId;
-          s.agent.status = "waiting_permission";
-          const next = {
-            requestId: p.requestId,
-            toolName: p.toolName,
-            toolInput: p.toolInput,
-            context: p.context,
-            options: p.options,
-          } as AgentPermission;
-          const existing = s.agent.pendingPermissions.findIndex(
-            (perm) => perm.requestId === next.requestId,
-          );
-          if (existing >= 0) s.agent.pendingPermissions[existing] = next;
-          else s.agent.pendingPermissions.push(next);
-          tick();
-          agentWorkspaceCbRef.current?.(envelope);
-          break;
-        }
         case "agent.v2.capabilities": {
           const p = parseTypedPayload("agent.v2.capabilities", envelope.payload) as any;
           if (typeof p.machineId === "string") s.machineId = p.machineId;
@@ -1226,11 +1076,10 @@ export function useSessionManager(): SessionManagerHandle {
           tick();
           break;
         }
-        case "device.error":
-        case "session.error": {
-          const p = parseTypedPayload(envelope.type === "device.error" ? "device.error" : "session.error", envelope.payload);
+        case "device.error": {
+          const p = parseTypedPayload("device.error", envelope.payload);
           console.warn("[LiveActivityAction] session error", {
-            sessionId: s.sessionId,
+            hostDeviceId: s.sessionId,
             code: p.code,
             message: p.message,
             pendingPermissionResponseIds: [...s.pendingPermissionResponseIds],
@@ -1263,8 +1112,8 @@ export function useSessionManager(): SessionManagerHandle {
           const p = parseTypedPayload("control.grant", envelope.payload);
           s.controllerId = p.deviceId;
           if (p.deviceId === s.deviceId && s.pendingControlOutbound.length > 0) console.log("[SessionControl] control grant", {
-            sessionId: s.sessionId,
-            deviceId: s.deviceId,
+            hostDeviceId: s.hostDeviceId,
+          deviceId: s.deviceId,
             controllerId: p.deviceId,
             isMine: p.deviceId === s.deviceId,
             pendingControlCount: s.pendingControlOutbound.length,
@@ -1499,12 +1348,11 @@ export function useSessionManager(): SessionManagerHandle {
         });
         const body = (await res.json()) as {
           hostDeviceId?: string;
-          sessionId?: string;
           deviceToken?: string;
           authorizationId?: string;
           error?: string;
         };
-        const hostDeviceId = body.hostDeviceId ?? body.sessionId;
+        const hostDeviceId = body.hostDeviceId;
         if (!res.ok || !hostDeviceId) return null;
         if (body.deviceToken) {
           deviceTokenRef.current = body.deviceToken;
@@ -1557,7 +1405,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "terminal.input",
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           terminalId: s.activeTerminalId ?? "default",
           deviceId: s.deviceId,
           payload: { data },
@@ -1576,7 +1424,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "file.upload",
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           terminalId: s.activeTerminalId ?? "default",
           deviceId: s.deviceId,
           payload: { data: base64Data, filename },
@@ -1594,7 +1442,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "terminal.resize",
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           terminalId: s.activeTerminalId ?? "default",
           deviceId: s.deviceId,
           payload: { cols, rows },
@@ -1616,7 +1464,7 @@ export function useSessionManager(): SessionManagerHandle {
       s,
       createEnvelope({
         type: "control.release",
-        sessionId: s.sessionId,
+        hostDeviceId: s.sessionId,
         payload: { deviceId: s.deviceId },
       }),
     );
@@ -1630,7 +1478,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "screen.start",
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           payload: { fps, quality, scale },
         }),
       );
@@ -1645,7 +1493,7 @@ export function useSessionManager(): SessionManagerHandle {
       s,
       createEnvelope({
         type: "screen.stop",
-        sessionId: s.sessionId,
+        hostDeviceId: s.sessionId,
         payload: {},
       }),
     );
@@ -1720,7 +1568,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "terminal.spawn",
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           payload: { cwd },
         }),
       );
@@ -1761,7 +1609,7 @@ export function useSessionManager(): SessionManagerHandle {
       s,
       createEnvelope({
         type: "terminal.list",
-        sessionId: s.sessionId,
+        hostDeviceId: s.sessionId,
         payload: { terminals: [] },
       }),
     );
@@ -1776,7 +1624,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "terminal.browse" as any,
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           payload: { path },
         }),
       );
@@ -1794,7 +1642,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "terminal.browse" as any,
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           payload: { path },
         }),
         { queue: true },
@@ -1811,108 +1659,11 @@ export function useSessionManager(): SessionManagerHandle {
       s,
       createEnvelope({
         type: "terminal.history.request" as any,
-        sessionId: s.sessionId,
+        hostDeviceId: s.sessionId,
         payload: { count: 200 },
       }),
     );
   }, [getActive]);
-
-  const initializeAgentFn = useCallback(() => {
-    const s = getActive();
-    if (!s) return;
-    sendRaw(
-      s,
-      createEnvelope({
-        type: "agent.initialize" as any,
-        sessionId: s.sessionId,
-        deviceId: s.deviceId,
-        payload: {},
-      }),
-      { queue: true, dedupeKey: "agent:init" },
-    );
-  }, [getActive]);
-
-  const sendAgentPromptFn = useCallback(
-    (
-      text: string,
-      options?: {
-        model?: string;
-        reasoningEffort?: AgentReasoningEffort;
-        permissionMode?: AgentPermissionMode;
-      },
-    ) => {
-      const s = getActive();
-      const trimmed = text.trim();
-      if (!s || !trimmed) return;
-      sendRaw(
-        s,
-        createEnvelope({
-          type: "agent.prompt" as any,
-          sessionId: s.sessionId,
-          deviceId: s.deviceId,
-          payload: {
-            agentSessionId: s.agent.activeAgentSessionId ?? undefined,
-            clientMessageId: generateId(),
-            contentBlocks: [{ type: "text", text: trimmed }],
-            model: options?.model,
-            reasoningEffort: options?.reasoningEffort,
-            permissionMode:
-              options?.permissionMode && options.permissionMode !== "default"
-                ? options.permissionMode
-                : undefined,
-          },
-        }),
-        { queue: true },
-      );
-      s.agent.status = "running";
-      tick();
-    },
-    [getActive, tick],
-  );
-
-  const cancelAgentFn = useCallback(() => {
-    const s = getActive();
-    if (!s) return;
-    sendRaw(
-      s,
-      createEnvelope({
-        type: "agent.cancel" as any,
-        sessionId: s.sessionId,
-        deviceId: s.deviceId,
-        payload: { agentSessionId: s.agent.activeAgentSessionId ?? undefined },
-      }),
-      { queue: true },
-    );
-  }, [getActive]);
-
-  const sendAgentPermissionResponseFn = useCallback(
-    (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => {
-      const s = getActive();
-      if (!s) return false;
-      const accepted = sendRawWithControl(
-        s,
-        createEnvelope({
-          type: "agent.permission.response" as any,
-          sessionId: s.sessionId,
-          deviceId: s.deviceId,
-          payload: {
-            agentSessionId: s.agent.activeAgentSessionId ?? undefined,
-            requestId,
-            outcome,
-            optionId,
-          },
-        }),
-        { queue: true, dedupeKey: `agent-permission:${requestId}` },
-      );
-      if (!accepted) return false;
-      s.agent.pendingPermissions = s.agent.pendingPermissions.filter(
-        (perm) => perm.requestId !== requestId,
-      );
-      tick();
-      return true;
-    },
-    [getActive, tick],
-  );
 
   const killTerminalFn = useCallback(
     (terminalId: string) => {
@@ -1924,7 +1675,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "terminal.kill" as any,
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           payload: { terminalId },
         }),
       );
@@ -2009,7 +1760,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "terminal.mkdir" as any,
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           payload: { path },
         }),
       );
@@ -2021,7 +1772,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "terminal.mkdir" as any,
-          sessionId: s.sessionId,
+          hostDeviceId: s.sessionId,
           payload: { path },
         }),
       );
@@ -2043,7 +1794,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "permission.decision",
-          sessionId,
+          hostDeviceId: sessionId,
           terminalId,
           deviceId: s.deviceId,
           payload: { requestId, decision },
@@ -2068,10 +1819,6 @@ export function useSessionManager(): SessionManagerHandle {
     deviceToken: deviceTokenRef.current,
     requestHistory: requestHistoryFn,
     historyEntries,
-    initializeAgent: initializeAgentFn,
-    sendAgentPrompt: sendAgentPromptFn,
-    cancelAgent: cancelAgentFn,
-    sendAgentPermissionResponse: sendAgentPermissionResponseFn,
     sendAgentWorkspaceEnvelope: (
       sessionId: string,
       type: ProtocolMessageType,
@@ -2088,7 +1835,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type,
-          sessionId,
+          hostDeviceId: sessionId,
           deviceId: s.deviceId,
           payload,
         }),

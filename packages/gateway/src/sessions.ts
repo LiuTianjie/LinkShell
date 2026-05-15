@@ -2,7 +2,6 @@ import type WebSocket from "ws";
 import type { Envelope } from "@linkshell/protocol";
 
 export type DeviceState = "active" | "host_disconnected" | "terminated";
-export type SessionState = DeviceState;
 
 export interface ConnectedDevice {
   socket: WebSocket;
@@ -32,8 +31,6 @@ export interface HostDevice {
   capabilities: string[];
   userId: string | undefined;
 }
-
-export type Session = HostDevice;
 
 const OUTPUT_BUFFER_CAPACITY = 200;
 const HOST_RECONNECT_WINDOW = 60_000;
@@ -311,5 +308,3 @@ export class DeviceManager {
     clearInterval(this.cleanupTimer);
   }
 }
-
-export class SessionManager extends DeviceManager {}

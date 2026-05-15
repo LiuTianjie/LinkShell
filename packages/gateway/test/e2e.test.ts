@@ -5,7 +5,7 @@ import WebSocket from "ws";
 import { WebSocketServer } from "ws";
 import { createEnvelope, parseEnvelope, serializeEnvelope } from "@linkshell/protocol";
 import { parseTypedPayload as parseLocalTypedPayload } from "../../shared-protocol/src/index.js";
-import { SessionManager } from "../src/sessions.js";
+import { DeviceManager } from "../src/sessions.js";
 import { PairingManager } from "../src/pairings.js";
 import { handleSocketMessage } from "../src/relay.js";
 
@@ -72,12 +72,12 @@ function waitForMessage(ws: WebSocket): Promise<ReturnType<typeof parseEnvelope>
 
 let server: Server;
 let wss: WebSocketServer;
-let sessionManager: SessionManager;
+let sessionManager: DeviceManager;
 let pairingManager: PairingManager;
 let pairingCounter = 0;
 
 beforeAll(async () => {
-  sessionManager = new SessionManager();
+  sessionManager = new DeviceManager();
   pairingManager = new PairingManager();
 
   server = createServer(async (req, res) => {
@@ -267,13 +267,13 @@ describe("Protocol schemas", () => {
   });
 
   it("accepts missing and present machineId fields", () => {
-    const legacyConnect = parseLocalTypedPayload("session.connect", {
+    const deviceConnect = parseLocalTypedPayload("device.connect", {
       role: "host",
-      clientName: "old-cli",
+      clientName: "shell-cli",
     });
-    expect(legacyConnect.machineId).toBeUndefined();
+    expect(deviceConnect.machineId).toBeUndefined();
 
-    const connect = parseLocalTypedPayload("session.connect", {
+    const connect = parseLocalTypedPayload("device.connect", {
       role: "host",
       clientName: "new-cli",
       machineId: "machine-123",
@@ -365,15 +365,15 @@ describe("WebSocket device", () => {
     const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-1");
-    await waitForMessage(host); // session.connect
+    await waitForMessage(host); // device.connect
 
     const client = await connectWs(sessionId, "client", "client-1");
-    await waitForMessage(client); // session.connect
+    await waitForMessage(client); // device.connect
 
     // Host sends terminal output
     const outputEnvelope = createEnvelope({
       type: "terminal.output",
-      sessionId,
+      hostDeviceId: sessionId,
       seq: 0,
       payload: { stream: "stdout", data: "hello world", encoding: "utf8", isReplay: false, isFinal: false },
     });
@@ -393,15 +393,15 @@ describe("WebSocket device", () => {
     const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-2");
-    await waitForMessage(host); // session.connect
+    await waitForMessage(host); // device.connect
 
     const client = await connectWs(sessionId, "client", "client-2");
-    await waitForMessage(client); // session.connect
+    await waitForMessage(client); // device.connect
 
     // Client sends input
     const inputEnvelope = createEnvelope({
       type: "terminal.input",
-      sessionId,
+      hostDeviceId: sessionId,
       payload: { data: "ls\n" },
     });
     client.send(serializeEnvelope(inputEnvelope));
@@ -425,14 +425,14 @@ describe("WebSocket device", () => {
     await waitForMessage(client);
 
     const ackEnvelope = createEnvelope({
-      type: "session.ack",
-      sessionId,
+      type: "device.ack",
+      hostDeviceId: sessionId,
       payload: { seq: 5 },
     });
     client.send(serializeEnvelope(ackEnvelope));
 
     const received = await waitForMessage(host);
-    expect(received.type).toBe("session.ack");
+    expect(received.type).toBe("device.ack");
     expect((received.payload as Record<string, unknown>).seq).toBe(5);
 
     host.close();
@@ -464,7 +464,7 @@ describe("WebSocket device", () => {
 
     host.send(serializeEnvelope(createEnvelope({
       type: "terminal.output",
-      sessionId,
+      hostDeviceId: sessionId,
       seq: 1,
       payload: { stream: "stdout", data: "still alive", encoding: "utf8" },
     })));
@@ -475,7 +475,7 @@ describe("WebSocket device", () => {
 
     client.send(serializeEnvelope(createEnvelope({
       type: "terminal.input",
-      sessionId,
+      hostDeviceId: sessionId,
       payload: {},
     })));
 
@@ -529,7 +529,7 @@ describe("Control ownership", () => {
     // Client sends input — should work since first client gets control
     client.send(serializeEnvelope(createEnvelope({
       type: "terminal.input",
-      sessionId,
+      hostDeviceId: sessionId,
       payload: { data: "test\n" },
     })));
 
@@ -556,7 +556,7 @@ describe("Control ownership", () => {
     // Client2 tries to send input — should be rejected
     client2.send(serializeEnvelope(createEnvelope({
       type: "terminal.input",
-      sessionId,
+      hostDeviceId: sessionId,
       payload: { data: "nope\n" },
     })));
 
@@ -569,7 +569,7 @@ describe("Control ownership", () => {
     client2.close();
   });
 
-  it("rejects agent prompt from non-controller clients", async () => {
+  it("rejects agent workspace mutations from non-controller clients", async () => {
     const { body } = await postJson("/pairings", {});
     const sessionId = body.hostDeviceId as string;
 
@@ -583,9 +583,10 @@ describe("Control ownership", () => {
     await waitForMessage(client2);
 
     client2.send(serializeEnvelope(createEnvelope({
-      type: "agent.prompt",
-      sessionId,
+      type: "agent.v2.prompt",
+      hostDeviceId: sessionId,
       payload: {
+        conversationId: "conversation-1",
         clientMessageId: "test-message",
         contentBlocks: [{ type: "text", text: "hello" }],
       },
@@ -596,8 +597,8 @@ describe("Control ownership", () => {
     expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
 
     client2.send(serializeEnvelope(createEnvelope({
-      type: "agent.session.new",
-      sessionId,
+      type: "agent.v2.conversation.open",
+      hostDeviceId: sessionId,
       payload: { cwd: "/tmp" },
     })));
 
@@ -625,7 +626,7 @@ describe("Control ownership", () => {
 
     const response = createEnvelope({
       type: "agent.v2.structured_input.respond",
-      sessionId,
+      hostDeviceId: sessionId,
       payload: {
         conversationId: "conversation-1",
         requestId: "input-1",
@@ -663,7 +664,7 @@ describe("Control ownership", () => {
 
     const command = createEnvelope({
       type: "agent.v2.command.execute",
-      sessionId,
+      hostDeviceId: sessionId,
       payload: {
         conversationId: "conversation-1",
         commandId: "codex:linkshell:plan",
@@ -699,7 +700,7 @@ describe("Control ownership", () => {
 
     host.send(serializeEnvelope(createEnvelope({
       type: "agent.v2.capabilities",
-      sessionId,
+      hostDeviceId: sessionId,
       payload: {
         enabled: true,
         provider: "codex",
@@ -756,7 +757,7 @@ describe("Device list", () => {
 
 describe("Device authorization revocation", () => {
   it("disconnects live clients for the revoked authorization", () => {
-    const manager = new SessionManager();
+    const manager = new DeviceManager();
     const closeA = vi.fn();
     const closeB = vi.fn();
 

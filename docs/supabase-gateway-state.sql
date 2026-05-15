@@ -3,6 +3,9 @@
 -- v2 is intentionally breaking: host devices and client authorizations replace
 -- the old session token/session pairing tables.
 
+drop table if exists public.linkshell_gateway_tokens;
+drop table if exists public.linkshell_gateway_pairings;
+
 create table if not exists public.linkshell_gateway_device_authorizations (
   authorization_id text primary key,
   token text not null,

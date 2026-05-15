@@ -270,8 +270,8 @@ export function useSession({
     heartbeatRef.current = setInterval(() => {
       sendRaw(
         createEnvelope({
-          type: "session.heartbeat",
-          sessionId: sessionIdRef.current,
+          type: "device.heartbeat",
+          hostDeviceId: sessionIdRef.current,
           payload: { ts: Date.now() },
         }),
       );
@@ -283,7 +283,7 @@ export function useSession({
       sendRaw(
         createEnvelope({
           type: "control.claim",
-          sessionId: sid,
+          hostDeviceId: sid,
           payload: { deviceId: deviceIdRef.current },
         }),
       );
@@ -363,8 +363,8 @@ export function useSession({
         if (isReconnect) {
           sendRaw(
             createEnvelope({
-              type: "session.resume",
-              sessionId: sid,
+              type: "device.resume",
+              hostDeviceId: sid,
               payload: { lastAckedSeq: lastAckedSeqRef.current },
             }),
           );
@@ -397,8 +397,8 @@ export function useSession({
                 lastAckedSeqRef.current = next;
                 sendRaw(
                   createEnvelope({
-                    type: "session.ack",
-                    sessionId: sid,
+                    type: "device.ack",
+                    hostDeviceId: sid,
                     payload: { seq: next },
                   }),
                 );
@@ -406,8 +406,8 @@ export function useSession({
             }
             break;
           }
-          case "session.error": {
-            const p = parseTypedPayload("session.error", envelope.payload);
+          case "device.error": {
+            const p = parseTypedPayload("device.error", envelope.payload);
             setConnectionDetail(p.message);
             if (p.code === "control_conflict") {
               break;
@@ -439,8 +439,8 @@ export function useSession({
             setControllerId((prev) => (prev === p.deviceId ? null : prev));
             break;
           }
-          case "session.connect":
-          case "session.heartbeat":
+          case "device.connect":
+          case "device.heartbeat":
             break;
           case "session.host_disconnected":
             setStatus("host_disconnected" as ConnectionStatus);
@@ -612,11 +612,11 @@ export function useSession({
           }),
         });
         const body = (await res.json()) as {
-          sessionId?: string;
+          hostDeviceId?: string;
           deviceToken?: string;
           error?: string;
         };
-        if (!res.ok || !body.sessionId) {
+        if (!res.ok || !body.hostDeviceId) {
           const errMsg = body.error ?? "Claim failed";
           setConnectionDetail(errMsg);
           setStatus(
@@ -630,12 +630,12 @@ export function useSession({
         }
         manualDisconnectRef.current = false;
         setConnectionDetail(null);
-        setSessionId(body.sessionId);
+        setSessionId(body.hostDeviceId);
         setControllerId(null);
         lastAckedSeqRef.current = -1;
-        resetTerminalStream(body.sessionId);
-        connectSocket(body.sessionId);
-        return body.sessionId;
+        resetTerminalStream(body.hostDeviceId);
+        connectSocket(body.hostDeviceId);
+        return body.hostDeviceId;
       } catch (error) {
         const name = error instanceof Error ? error.name : "Unknown";
         const message =
@@ -667,7 +667,7 @@ export function useSession({
       sendRaw(
         createEnvelope({
           type: "terminal.input",
-          sessionId: sessionIdRef.current,
+          hostDeviceId: sessionIdRef.current,
           deviceId: deviceIdRef.current,
           payload: { data },
         }),
@@ -681,7 +681,7 @@ export function useSession({
       sendRaw(
         createEnvelope({
           type: "terminal.resize",
-          sessionId: sessionIdRef.current,
+          hostDeviceId: sessionIdRef.current,
           deviceId: deviceIdRef.current,
           payload: { cols, rows },
         }),
@@ -698,7 +698,7 @@ export function useSession({
     sendRaw(
       createEnvelope({
         type: "control.release",
-        sessionId: sessionIdRef.current,
+        hostDeviceId: sessionIdRef.current,
         payload: { deviceId: deviceIdRef.current },
       }),
     );
@@ -709,7 +709,7 @@ export function useSession({
       sendRaw(
         createEnvelope({
           type: "screen.start",
-          sessionId: sessionIdRef.current,
+          hostDeviceId: sessionIdRef.current,
           payload: { fps, quality, scale },
         }),
       );
@@ -721,7 +721,7 @@ export function useSession({
     sendRaw(
       createEnvelope({
         type: "screen.stop",
-        sessionId: sessionIdRef.current,
+        hostDeviceId: sessionIdRef.current,
         payload: {},
       }),
     );
@@ -735,7 +735,7 @@ export function useSession({
       sendRaw(
         createEnvelope({
           type,
-          sessionId: sessionIdRef.current,
+          hostDeviceId: sessionIdRef.current,
           payload,
         }),
       );
@@ -748,7 +748,7 @@ export function useSession({
       sendRaw(
         createEnvelope({
           type: "file.upload",
-          sessionId: sessionIdRef.current,
+          hostDeviceId: sessionIdRef.current,
           deviceId: deviceIdRef.current,
           payload: { data: base64Data, filename },
         }),
@@ -762,7 +762,7 @@ export function useSession({
       sendRaw(
         createEnvelope({
           type: "terminal.history.request",
-          sessionId: sessionIdRef.current,
+          hostDeviceId: sessionIdRef.current,
           payload: { count },
         }),
       );

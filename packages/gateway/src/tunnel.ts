@@ -5,7 +5,7 @@ import {
   createEnvelope,
   serializeEnvelope,
 } from "@linkshell/protocol";
-import type { SessionManager } from "./sessions.js";
+import type { DeviceManager } from "./sessions.js";
 import type { TokenManager } from "./tokens.js";
 import { AUTH_REQUIRED } from "./auth-middleware.js";
 
@@ -66,7 +66,7 @@ function extractToken(req: IncomingMessage, url: URL): string | null {
 }
 
 /** Parse lsh_tunnel cookie: "hostDeviceId:port:token" */
-export function parseTunnelCookie(req: IncomingMessage): { hostDeviceId: string; sessionId: string; port: number; token: string } | null {
+export function parseTunnelCookie(req: IncomingMessage): { hostDeviceId: string; port: number; token: string } | null {
   const cookie = req.headers.cookie;
   if (!cookie) return null;
   const match = cookie.match(/lsh_tunnel=([^;]+)/);
@@ -77,7 +77,7 @@ export function parseTunnelCookie(req: IncomingMessage): { hostDeviceId: string;
   const port = Number(parts[1]);
   const token = parts.slice(2).join(":"); // token may contain colons
   if (!hostDeviceId || isNaN(port) || port < 1 || port > 65535 || !token) return null;
-  return { hostDeviceId, sessionId: hostDeviceId, port, token };
+  return { hostDeviceId, port, token };
 }
 
 function errorResponse(res: ServerResponse, status: number, message: string): void {
@@ -89,22 +89,20 @@ function errorResponse(res: ServerResponse, status: number, message: string): vo
   res.end(message);
 }
 
-export function parseTunnelPath(pathname: string): { hostDeviceId: string; sessionId: string; port: number; path: string } | null {
+export function parseTunnelPath(pathname: string): { hostDeviceId: string; port: number; path: string } | null {
   const match = pathname.match(/^\/tunnel\/([^/]+)\/(\d+)(\/.*)?$/);
   if (!match) return null;
   const port = Number(match[2]);
   if (port < 1 || port > 65535) return null;
   return {
     hostDeviceId: match[1]!,
-    sessionId: match[1]!,
     port,
     path: match[3] || "/",
   };
 }
 
 type ParsedTunnelTarget = {
-  hostDeviceId?: string;
-  sessionId?: string;
+  hostDeviceId: string;
   port: number;
   path: string;
 };
@@ -112,18 +110,13 @@ type ParsedTunnelTarget = {
 export async function handleTunnelRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  sessions: SessionManager,
+  sessions: DeviceManager,
   tokens: TokenManager,
   parsed: ParsedTunnelTarget,
   url: URL,
   preAuthToken?: string,
 ): Promise<void> {
-  const hostDeviceId = parsed.hostDeviceId ?? parsed.sessionId;
-  const { port, path } = parsed;
-  if (!hostDeviceId) {
-    errorResponse(res, 400, "Missing host device id");
-    return;
-  }
+  const { hostDeviceId, port, path } = parsed;
 
   // Auth: device token OR Supabase JWT (userId owns session)
   const token = preAuthToken || extractToken(req, url);
@@ -342,15 +335,10 @@ export async function handleTunnelWsUpgrade(
   ws: WebSocket,
   parsed: ParsedTunnelTarget,
   url: URL,
-  sessions: SessionManager,
+  sessions: DeviceManager,
   tokens: TokenManager,
 ): Promise<void> {
-  const hostDeviceId = parsed.hostDeviceId ?? parsed.sessionId;
-  const { port, path } = parsed;
-  if (!hostDeviceId) {
-    ws.close(1008, "Missing host device id");
-    return;
-  }
+  const { hostDeviceId, port, path } = parsed;
 
   // Auth: device token OR Supabase JWT (userId owns session)
   const token = url.searchParams.get("token");

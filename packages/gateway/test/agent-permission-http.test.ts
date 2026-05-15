@@ -6,19 +6,19 @@ import {
   forwardAgentPermissionHttp,
   resolveAgentPermissionHttpAck,
 } from "../src/agent-permission-http.js";
-import { SessionManager } from "../src/sessions.js";
+import { DeviceManager } from "../src/sessions.js";
 import { TokenManager } from "../src/tokens.js";
 
 function createHarness(options: { hostConnected?: boolean } = {}) {
-  const sessionManager = new SessionManager();
+  const sessionManager = new DeviceManager();
   const tokenManager = new TokenManager();
-  const sessionId = "session-1";
+  const hostDeviceId = "host-device-1";
   const token = tokenManager.register("device-token-1");
-  tokenManager.bind(token, sessionId);
+  tokenManager.bind(token, hostDeviceId);
 
   const send = vi.fn();
   if (options.hostConnected !== false) {
-    sessionManager.setHost(sessionId, {
+    sessionManager.setHost(hostDeviceId, {
       role: "host",
       deviceId: "host-1",
       connectedAt: Date.now(),
@@ -31,7 +31,7 @@ function createHarness(options: { hostConnected?: boolean } = {}) {
   }
 
   return {
-    sessionId,
+    hostDeviceId,
     token,
     send,
     sessionManager,
@@ -44,12 +44,12 @@ function createHarness(options: { hostConnected?: boolean } = {}) {
 }
 
 describe("Live Activity permission HTTP forwarding", () => {
-  it("forwards valid v2 payloads to the host", async () => {
+  it("forwards valid v2 payloads to the host device", async () => {
     const h = createHarness();
     try {
       const body: AgentPermissionHttpBody = {
         protocol: "v2",
-        sessionId: h.sessionId,
+        hostDeviceId: h.hostDeviceId,
         conversationId: "conversation-1",
         requestId: "request-1",
         outcome: "allow",
@@ -71,7 +71,8 @@ describe("Live Activity permission HTTP forwarding", () => {
       expect(h.send).toHaveBeenCalledTimes(1);
       const envelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
       expect(envelope.type).toBe("agent.v2.permission.respond");
-      expect(envelope.sessionId).toBe(h.sessionId);
+      expect(envelope.hostDeviceId).toBe(h.hostDeviceId);
+      expect("sessionId" in envelope).toBe(false);
       expect(parseTypedPayload("agent.v2.permission.respond", envelope.payload)).toEqual({
         conversationId: "conversation-1",
         requestId: "request-1",
@@ -88,7 +89,7 @@ describe("Live Activity permission HTTP forwarding", () => {
     try {
       const body: AgentPermissionHttpBody = {
         protocol: "v2",
-        sessionId: h.sessionId,
+        hostDeviceId: h.hostDeviceId,
         conversationId: "conversation-1",
         requestId: "request-1",
         outcome: "allow",
@@ -108,13 +109,13 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("rejects tokens that do not own the session", async () => {
+  it("rejects tokens that do not own the host device", async () => {
     const h = createHarness();
     try {
       const otherToken = h.tokenManager.register("other-token");
       const body: AgentPermissionHttpBody = {
         protocol: "v2",
-        sessionId: h.sessionId,
+        hostDeviceId: h.hostDeviceId,
         conversationId: "conversation-1",
         requestId: "request-1",
         outcome: "allow",
@@ -134,14 +135,14 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("returns session_not_found for a valid token bound to a missing session", async () => {
+  it("returns device_not_found for a valid token bound to a missing host device", async () => {
     const h = createHarness();
     try {
-      const missingSessionId = "missing-session";
-      h.tokenManager.bind(h.token, missingSessionId);
+      const missingHostDeviceId = "missing-host-device";
+      h.tokenManager.bind(h.token, missingHostDeviceId);
       const body: AgentPermissionHttpBody = {
         protocol: "v2",
-        sessionId: missingSessionId,
+        hostDeviceId: missingHostDeviceId,
         conversationId: "conversation-1",
         requestId: "request-1",
         outcome: "allow",
@@ -154,7 +155,7 @@ describe("Live Activity permission HTTP forwarding", () => {
       });
 
       expect(result.status).toBe(404);
-      expect(result.body.error).toBe("session_not_found");
+      expect(result.body.error).toBe("device_not_found");
       expect(h.send).not.toHaveBeenCalled();
     } finally {
       h.destroy();
@@ -164,10 +165,10 @@ describe("Live Activity permission HTTP forwarding", () => {
   it("returns host_not_connected when the host is absent", async () => {
     const h = createHarness({ hostConnected: false });
     try {
-      h.sessionManager.getOrCreate(h.sessionId);
+      h.sessionManager.getOrCreate(h.hostDeviceId);
       const body: AgentPermissionHttpBody = {
         protocol: "v2",
-        sessionId: h.sessionId,
+        hostDeviceId: h.hostDeviceId,
         conversationId: "conversation-1",
         requestId: "request-1",
         outcome: "allow",
@@ -192,7 +193,7 @@ describe("Live Activity permission HTTP forwarding", () => {
     try {
       const body: AgentPermissionHttpBody = {
         protocol: "terminal",
-        sessionId: h.sessionId,
+        hostDeviceId: h.hostDeviceId,
         terminalId: "terminal-1",
         requestId: "request-1",
         outcome: "cancelled",
@@ -206,98 +207,17 @@ describe("Live Activity permission HTTP forwarding", () => {
 
       const envelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
       expect(envelope.type).toBe("permission.decision");
-      expect((envelope as any).terminalId).toBe("terminal-1");
+      expect(envelope.hostDeviceId).toBe(h.hostDeviceId);
+      expect(envelope.terminalId).toBe("terminal-1");
       expect(parseTypedPayload("permission.decision", envelope.payload)).toEqual({
         requestId: "request-1",
         decision: "deny",
       });
       resolveAgentPermissionHttpAck({
-        sessionId: h.sessionId,
+        hostDeviceId: h.hostDeviceId,
         ack: {
           requestId: "request-1",
           decision: "deny",
-          resolved: true,
-          delivered: true,
-        },
-      });
-      const result = await resultPromise;
-      expect(result.status).toBe(200);
-      expect(result.body).toEqual({ ok: true, resolved: true, delivered: true });
-    } finally {
-      h.destroy();
-    }
-  });
-
-  it("forwards legacy protocol payloads with agentSessionId", async () => {
-    const h = createHarness();
-    try {
-      const body: AgentPermissionHttpBody = {
-        protocol: "legacy",
-        sessionId: h.sessionId,
-        agentSessionId: "agent-session-1",
-        requestId: "request-1",
-        outcome: "deny",
-      };
-      const result = await forwardAgentPermissionHttp({
-        token: h.token,
-        body,
-        sessionManager: h.sessionManager,
-        tokenManager: h.tokenManager,
-      });
-
-      expect(result.status).toBe(200);
-      expect(h.send).toHaveBeenCalledTimes(1);
-      const envelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
-      expect(envelope.type).toBe("agent.permission.response");
-      expect(parseTypedPayload("agent.permission.response", envelope.payload)).toEqual({
-        agentSessionId: "agent-session-1",
-        requestId: "request-1",
-        outcome: "deny",
-      });
-    } finally {
-      h.destroy();
-    }
-  });
-
-  it("also forwards terminal decisions for legacy terminal hook requests", async () => {
-    const h = createHarness();
-    try {
-      const body: AgentPermissionHttpBody = {
-        protocol: "legacy",
-        sessionId: h.sessionId,
-        terminalId: "terminal-1",
-        requestId: "pr-123-abcdef",
-        outcome: "allow",
-        optionId: "allow_once",
-      };
-      const resultPromise = forwardAgentPermissionHttp({
-        token: h.token,
-        body,
-        sessionManager: h.sessionManager,
-        tokenManager: h.tokenManager,
-      });
-
-      expect(h.send).toHaveBeenCalledTimes(2);
-      const legacyEnvelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
-      expect(legacyEnvelope.type).toBe("agent.permission.response");
-      expect(parseTypedPayload("agent.permission.response", legacyEnvelope.payload)).toEqual({
-        requestId: "pr-123-abcdef",
-        outcome: "allow",
-        optionId: "allow_once",
-      });
-
-      const terminalEnvelope = parseEnvelope(h.send.mock.calls[1]![0] as string);
-      expect(terminalEnvelope.type).toBe("permission.decision");
-      expect((terminalEnvelope as any).terminalId).toBe("terminal-1");
-      expect(parseTypedPayload("permission.decision", terminalEnvelope.payload)).toEqual({
-        requestId: "pr-123-abcdef",
-        decision: "allow",
-      });
-      resolveAgentPermissionHttpAck({
-        sessionId: h.sessionId,
-        ack: {
-          requestId: "pr-123-abcdef",
-          decision: "allow",
           resolved: true,
           delivered: true,
         },

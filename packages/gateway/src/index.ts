@@ -9,7 +9,7 @@ import {
   PROTOCOL_VERSION,
 } from "@linkshell/protocol";
 import { z, ZodError } from "zod";
-import { SessionManager } from "./sessions.js";
+import { DeviceManager } from "./sessions.js";
 import { PairingManager } from "./pairings.js";
 import { TokenManager } from "./tokens.js";
 import { createSupabaseStateStore } from "./state-store.js";
@@ -41,7 +41,7 @@ function log(level: "debug" | "info" | "warn" | "error", msg: string): void {
 }
 
 const stateStore = createSupabaseStateStore();
-const sessionManager = new SessionManager();
+const sessionManager = new DeviceManager();
 const pairingManager = new PairingManager(stateStore);
 const tokenManager = new TokenManager(stateStore);
 await Promise.all([pairingManager.hydrate(), tokenManager.hydrate()]);
@@ -266,7 +266,7 @@ async function handleRequest(
       item.terminalId ? `${item.type}:${item.terminalId}` : item.type,
     ).join(",") ?? "none";
     const ack = result.ack ? ` resolved=${result.ack.resolved} delivered=${result.ack.delivered}` : "";
-    log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} hostDevice=${body.hostDeviceId ?? body.sessionId ?? "unknown"} request=${body.requestId} status=${result.status} forwarded=${forwarded}${ack}`);
+    log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} hostDevice=${body.hostDeviceId} request=${body.requestId} status=${result.status} forwarded=${forwarded}${ack}`);
     json(res, result.status, result.body);
     return;
   }
@@ -520,7 +520,7 @@ server.on("upgrade", (request, socket, head) => {
 wss.on(
   "connection",
   (socket: WebSocket, _request: IncomingMessage, url: URL) => {
-    const hostDeviceId = url.searchParams.get("hostDeviceId") ?? url.searchParams.get("sessionId");
+    const hostDeviceId = url.searchParams.get("hostDeviceId");
     const role = url.searchParams.get("role") as "host" | "client" | null;
 
     if (!hostDeviceId || !role || (role !== "host" && role !== "client")) {
@@ -773,7 +773,7 @@ if (AUTH_REQUIRED) {
                   hostDeviceId: session.id,
                   payload: {
                     code: "subscription_expired",
-                    message: "Host subscription expired. Session ended.",
+                    message: "Host subscription expired. HostDevice ended.",
                   },
                 }),
               ),

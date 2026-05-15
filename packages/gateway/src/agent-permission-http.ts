@@ -4,7 +4,7 @@ import {
   serializeEnvelope,
 } from "@linkshell/protocol";
 import { z } from "zod";
-import type { SessionManager } from "./sessions.js";
+import type { DeviceManager } from "./sessions.js";
 import type { TokenManager } from "./tokens.js";
 
 const permissionOutcomeSchema = z.enum(["allow", "deny", "cancelled"]);
@@ -13,8 +13,7 @@ const PERMISSION_ACK_TIMEOUT_MS = 12_000;
 export const agentPermissionHttpBodySchema = z.discriminatedUnion("protocol", [
   z.object({
     protocol: z.literal("v2"),
-    hostDeviceId: z.string().min(1).optional(),
-    sessionId: z.string().min(1).optional(),
+    hostDeviceId: z.string().min(1),
     conversationId: z.string().min(1),
     requestId: z.string().min(1),
     outcome: permissionOutcomeSchema,
@@ -23,20 +22,8 @@ export const agentPermissionHttpBodySchema = z.discriminatedUnion("protocol", [
     agentSessionId: z.string().optional(),
   }),
   z.object({
-    protocol: z.literal("legacy"),
-    hostDeviceId: z.string().min(1).optional(),
-    sessionId: z.string().min(1).optional(),
-    conversationId: z.string().optional(),
-    agentSessionId: z.string().optional(),
-    requestId: z.string().min(1),
-    outcome: permissionOutcomeSchema,
-    optionId: z.string().optional(),
-    terminalId: z.string().optional(),
-  }),
-  z.object({
     protocol: z.literal("terminal"),
-    hostDeviceId: z.string().min(1).optional(),
-    sessionId: z.string().min(1).optional(),
+    hostDeviceId: z.string().min(1),
     conversationId: z.string().optional(),
     requestId: z.string().min(1),
     outcome: permissionOutcomeSchema,
@@ -57,7 +44,7 @@ export type AgentPermissionHttpResult = {
   ack?: AgentPermissionAck;
   body: {
     ok?: true;
-    error?: "unauthorized" | "session_not_found" | "host_not_connected" | "invalid_payload" | "permission_not_delivered" | "permission_ack_timeout";
+    error?: "unauthorized" | "device_not_found" | "host_not_connected" | "invalid_payload" | "permission_not_delivered" | "permission_ack_timeout";
     message?: string;
     resolved?: boolean;
     delivered?: boolean;
@@ -78,15 +65,15 @@ const pendingAcks = new Map<string, {
   timer: ReturnType<typeof setTimeout>;
 }>();
 
-function ackKey(sessionId: string, requestId: string): string {
-  return `${sessionId}:${requestId}`;
+function ackKey(hostDeviceId: string, requestId: string): string {
+  return `${hostDeviceId}:${requestId}`;
 }
 
 export function resolveAgentPermissionHttpAck(input: {
-  sessionId: string;
+  hostDeviceId: string;
   ack: AgentPermissionAck;
 }): boolean {
-  const key = ackKey(input.sessionId, input.ack.requestId);
+  const key = ackKey(input.hostDeviceId, input.ack.requestId);
   const pending = pendingAcks.get(key);
   if (!pending) return false;
   pendingAcks.delete(key);
@@ -95,8 +82,8 @@ export function resolveAgentPermissionHttpAck(input: {
   return true;
 }
 
-function waitForAck(sessionId: string, requestId: string): Promise<AgentPermissionAck | null> {
-  const key = ackKey(sessionId, requestId);
+function waitForAck(hostDeviceId: string, requestId: string): Promise<AgentPermissionAck | null> {
+  const key = ackKey(hostDeviceId, requestId);
   const existing = pendingAcks.get(key);
   if (existing) {
     pendingAcks.delete(key);
@@ -121,13 +108,13 @@ function waitForAck(sessionId: string, requestId: string): Promise<AgentPermissi
 export async function forwardAgentPermissionHttp(input: {
   token: string | null;
   body: AgentPermissionHttpBody;
-  sessionManager: SessionManager;
+  sessionManager: DeviceManager;
   tokenManager: TokenManager;
 }): Promise<AgentPermissionHttpResult> {
   const { token, body, sessionManager, tokenManager } = input;
-  const hostDeviceId = body.hostDeviceId ?? body.sessionId;
+  const { hostDeviceId } = body;
 
-  if (!hostDeviceId || !token || !tokenManager.owns(token, hostDeviceId)) {
+  if (!token || !tokenManager.owns(token, hostDeviceId)) {
     return {
       status: 401,
       body: {
@@ -142,8 +129,8 @@ export async function forwardAgentPermissionHttp(input: {
     return {
       status: 404,
       body: {
-        error: "session_not_found",
-        message: "Session not found",
+        error: "device_not_found",
+        message: "Host device not found",
       },
     };
   }
@@ -231,10 +218,7 @@ export async function forwardAgentPermissionHttp(input: {
 }
 
 function createPermissionEnvelopes(body: AgentPermissionHttpBody) {
-  const hostDeviceId = body.hostDeviceId ?? body.sessionId;
-  if (!hostDeviceId) {
-    throw new Error("hostDeviceId is required");
-  }
+  const { hostDeviceId } = body;
   if (body.protocol === "v2") {
     const payload = parseTypedPayload("agent.v2.permission.respond", {
       conversationId: body.conversationId,
@@ -248,41 +232,6 @@ function createPermissionEnvelopes(body: AgentPermissionHttpBody) {
       deviceId: "live-activity",
       payload,
     })];
-  }
-
-  if (body.protocol === "legacy") {
-    const legacyPayload = parseTypedPayload("agent.permission.response", {
-      agentSessionId: body.agentSessionId || undefined,
-      requestId: body.requestId,
-      outcome: body.outcome,
-      optionId: body.optionId || undefined,
-    });
-    const envelopes = [createEnvelope({
-      type: "agent.permission.response",
-      hostDeviceId,
-      deviceId: "live-activity",
-      payload: legacyPayload,
-    })];
-
-    // `pr-*` requests are terminal PermissionRequest hooks surfaced through the
-    // legacy Agent UI channel. Send the terminal decision too so older hosts, and
-    // hosts that route hook permissions through terminal handling, can resolve it
-    // without involving the mobile websocket/controller path.
-    if (body.requestId.startsWith("pr-")) {
-      const decisionPayload = parseTypedPayload("permission.decision", {
-        requestId: body.requestId,
-        decision: body.outcome === "allow" ? "allow" : "deny",
-      });
-      envelopes.push(createEnvelope({
-        type: "permission.decision",
-        hostDeviceId,
-        terminalId: body.terminalId ?? "default",
-        deviceId: "live-activity",
-        payload: decisionPayload,
-      }));
-    }
-
-    return envelopes;
   }
 
   const payload = parseTypedPayload("permission.decision", {
