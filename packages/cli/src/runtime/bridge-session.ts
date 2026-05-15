@@ -2,7 +2,7 @@ import * as pty from "node-pty";
 import * as http from "node:http";
 import WebSocket from "ws";
 import { hostname, platform, homedir } from "node:os";
-import { writeFileSync, readFileSync, readdirSync, statSync, unlinkSync, mkdirSync, existsSync, openSync, readSync, closeSync } from "node:fs";
+import { writeFileSync, readFileSync, readdirSync, statSync, mkdirSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename, resolve } from "node:path";
 import {
@@ -29,7 +29,7 @@ export interface BridgeSessionOptions {
   gatewayUrl: string;
   gatewayHttpUrl: string;
   pairingGateway?: string;
-  sessionId?: string;
+  hostDeviceId?: string;
   cols: number;
   rows: number;
   clientName: string;
@@ -49,166 +49,14 @@ const RECONNECT_BASE_DELAY = 1_000;
 const RECONNECT_MAX_DELAY = 30_000;
 const RECONNECT_MAX_ATTEMPTS = 20;
 const DEFAULT_TERMINAL_ID = "default";
-const HOOK_BODY_LIMIT = 256 * 1024;
-const PERMISSION_REQUEST_TIMEOUT_MS = Number(
-  process.env.LINKSHELL_PERMISSION_TIMEOUT_MS ?? 5 * 60_000,
-);
-const LINKSHELL_PERMISSION_GUARD_MARKER = "LINKSHELL_PERMISSION_GUARD";
 
 interface TerminalInstance {
   id: string;
   pty: pty.IPty;
   cwd: string;
-  projectName: string;
-  provider: string;
   scrollback: ScrollbackBuffer;
   outputSeq: number;
-  statusSeq: number;
   status: "running" | "exited";
-  hookServer?: http.Server;
-  hookPort?: number;
-  hookMarker: string;
-  hookConfigPaths: string[];
-}
-
-interface PendingPermission {
-  terminalId: string;
-  timeout: ReturnType<typeof setTimeout>;
-  permissionSuggestions: unknown[];
-  resolve: (decision: HookPermissionDecision) => boolean;
-}
-
-interface HookPermissionDecision {
-  behavior: "allow" | "deny";
-  updatedPermissions?: unknown[];
-  message?: string;
-  interrupt?: boolean;
-}
-
-type HookPermissionChoice =
-  | "allow"
-  | "deny"
-  | {
-      outcome: "allow" | "deny" | "cancelled";
-      optionId?: string;
-    };
-
-function isLinkShellHookEntry(entry: unknown, marker?: string): boolean {
-  let raw = "";
-  try {
-    raw = JSON.stringify(entry);
-  } catch {
-    raw = String(entry);
-  }
-  return (
-    (marker ? raw.includes(`/hook?m=${marker}`) : false) ||
-    raw.includes("/hook?m=lsh-") ||
-    (raw.includes("/hook?m=") && raw.includes("LINKSHELL_ID"))
-  );
-}
-
-function withLinkShellHookEntry<T>(
-  entries: unknown[] | undefined,
-  entry: T,
-  priority: "first" | "last",
-): unknown[] {
-  const cleaned = (Array.isArray(entries) ? entries : []).filter((item) => !isLinkShellHookEntry(item));
-  return priority === "first" ? [entry, ...cleaned] : [...cleaned, entry];
-}
-
-function guardPermissionCommandForLinkShell(command: unknown): unknown {
-  if (typeof command !== "string") return command;
-  if (command.includes(LINKSHELL_PERMISSION_GUARD_MARKER)) return command;
-  return [
-    `case "\${LINKSHELL_ID:-}" in lsh-*) exit 0 ;; esac`,
-    `# ${LINKSHELL_PERMISSION_GUARD_MARKER}`,
-    command,
-  ].join("\n");
-}
-
-function guardPermissionHookObjectForLinkShell(
-  hook: Record<string, unknown>,
-): Record<string, unknown> {
-  if (isLinkShellHookEntry(hook)) return hook;
-  const next: Record<string, unknown> = { ...hook };
-  if (typeof next.command === "string") {
-    next.command = guardPermissionCommandForLinkShell(next.command);
-  }
-  if (typeof next.bash === "string") {
-    next.bash = guardPermissionCommandForLinkShell(next.bash);
-  }
-  return next;
-}
-
-function guardPermissionHookEntryForLinkShell(entry: unknown): unknown {
-  if (isLinkShellHookEntry(entry)) return entry;
-  if (typeof entry === "string") return guardPermissionCommandForLinkShell(entry);
-  if (Array.isArray(entry)) return entry.map(guardPermissionHookEntryForLinkShell);
-  if (!entry || typeof entry !== "object") return entry;
-
-  const next = { ...(entry as Record<string, unknown>) };
-  if (Array.isArray(next.hooks)) {
-    next.hooks = next.hooks.map((hook) =>
-      hook && typeof hook === "object" && !Array.isArray(hook)
-        ? guardPermissionHookObjectForLinkShell(hook as Record<string, unknown>)
-        : guardPermissionHookEntryForLinkShell(hook),
-    );
-  }
-  if (typeof next.command === "string" || typeof next.bash === "string") {
-    return guardPermissionHookObjectForLinkShell(next);
-  }
-  return next;
-}
-
-function withBlockingLinkShellPermissionEntry<T>(
-  entries: unknown[] | undefined,
-  entry: T,
-): unknown[] {
-  const cleaned = (Array.isArray(entries) ? entries : [])
-    .filter((item) => !isLinkShellHookEntry(item))
-    .map(guardPermissionHookEntryForLinkShell);
-  return [entry, ...cleaned];
-}
-
-function stringifyHookInput(value: unknown): string {
-  if (typeof value === "string") return value.slice(0, 1200);
-  if (typeof value === "object" && value) {
-    try {
-      return JSON.stringify(value, null, 2).slice(0, 1200);
-    } catch {
-      return String(value).slice(0, 1200);
-    }
-  }
-  return "";
-}
-
-function hookPermissionSuggestions(event: Record<string, unknown>): unknown[] {
-  if (isCodexPermissionRequest(event)) return [];
-  const snake = event.permission_suggestions;
-  const camel = event.permissionSuggestions;
-  if (Array.isArray(snake)) return snake;
-  if (Array.isArray(camel)) return camel;
-  return [];
-}
-
-function isCodexPermissionRequest(event: Record<string, unknown>): boolean {
-  if (typeof event.turn_id === "string" || typeof event.turnId === "string") return true;
-  const transcriptPath = event.transcript_path ?? event.transcriptPath;
-  return typeof transcriptPath === "string" && transcriptPath.includes("/.codex/");
-}
-
-function hookPermissionOptions(suggestions: unknown[]): Array<{
-  id: string;
-  label: string;
-  kind: "allow" | "deny" | "other";
-}> {
-  return [
-    { id: "deny", label: "拒绝", kind: "deny" },
-    { id: "allow_once", label: "允许一次", kind: "allow" },
-    ...(suggestions.length > 0
-      ? [{ id: "allow_always" as const, label: "始终允许", kind: "allow" as const }]
-      : []),
-  ];
 }
 
 function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
@@ -285,16 +133,6 @@ export class BridgeSession {
   private sessionId = "";
   private exited = false;
   private stopped = false;
-  private permissionStacks = new Map<string, Array<{
-    requestId: string;
-    toolName: string;
-    toolInput: string;
-    permissionRequest: string;
-    timestamp: number;
-  }>>();
-  // Pending permission responses: requestId → HTTP response callback
-  private pendingPermissions = new Map<string, PendingPermission>();
-  private hookMarker = `lsh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   private screenCapture: ScreenFallback | undefined;
   private screenShare: ScreenShare | undefined;
   private tunnelSockets = new Map<string, WebSocket>();
@@ -305,7 +143,7 @@ export class BridgeSession {
 
   constructor(options: BridgeSessionOptions) {
     this.options = options;
-    this.sessionId = options.sessionId ?? "";
+    this.sessionId = options.hostDeviceId ?? "";
   }
 
   private log(msg: string): void {
@@ -314,26 +152,19 @@ export class BridgeSession {
     }
   }
 
-  private terminalHookMarker(terminalId: string): string {
-    const safeTerminalId = terminalId.replace(/[^a-zA-Z0-9_-]+/g, "-");
-    return `${this.hookMarker}-${safeTerminalId}`;
-  }
-
   async start(): Promise<void> {
     this.log(
-      `starting session (gateway=${this.options.gatewayUrl}, provider=${this.options.providerConfig.provider})`,
+      `starting device bridge (gateway=${this.options.gatewayUrl}, terminal=shell)`,
     );
     this.machineIdentity = loadOrCreateMachineIdentity();
-    if (!this.sessionId) {
-      await this.createPairing();
-    }
+    this.sessionId ||= this.machineIdentity.machineId;
+    await this.createPairing();
     if (this.options.keepAwake) {
       this.keepAwake = startKeepAwake();
     } else {
       process.stderr.write("[bridge] keep-awake disabled\n");
     }
     if (this.options.agentUi) {
-      process.env.LINKSHELL_ID = this.terminalHookMarker(DEFAULT_TERMINAL_ID);
       const availableProviders = this.options.agentProvider
         ? [normalizeAgentProvider(this.options.agentProvider)]
         : detectAvailableProviders();
@@ -366,17 +197,17 @@ export class BridgeSession {
     const res = await fetch(`${this.options.gatewayHttpUrl}/pairings`, {
       method: "POST",
       headers,
-      body: JSON.stringify({}),
+      body: JSON.stringify({ hostDeviceId: this.sessionId }),
     });
     if (!res.ok) {
       throw new Error(`Failed to create pairing: ${res.status}`);
     }
     const body = (await res.json()) as {
-      sessionId: string;
+      hostDeviceId: string;
       pairingCode: string;
       expiresAt: string;
     };
-    this.sessionId = body.sessionId;
+    this.sessionId = body.hostDeviceId;
 
     const pairingGateway = resolvePairingGateway(
       this.options.gatewayHttpUrl,
@@ -389,7 +220,7 @@ export class BridgeSession {
     process.stderr.write(
       `\n  \x1b[1mPairing code: \x1b[36m${body.pairingCode}\x1b[0m\n`,
     );
-    process.stderr.write(`  Session: ${body.sessionId}\n`);
+    process.stderr.write(`  Host device: ${body.hostDeviceId}\n`);
     process.stderr.write(`  Expires: ${body.expiresAt}\n\n`);
     if (!pairingGateway) {
       process.stderr.write(
@@ -444,7 +275,7 @@ export class BridgeSession {
     }
 
     const url = new URL(this.options.gatewayUrl);
-    url.searchParams.set("sessionId", this.sessionId);
+    url.searchParams.set("hostDeviceId", this.sessionId);
     url.searchParams.set("role", "host");
     const authToken = await this.resolveAuthToken();
     if (authToken) {
@@ -463,18 +294,22 @@ export class BridgeSession {
       this.reconnecting = false;
       this.send(
         createEnvelope({
-          type: "session.connect",
-          sessionId: this.sessionId,
+          type: "device.connect",
+          hostDeviceId: this.sessionId,
           payload: {
             role: "host" as const,
             clientName: this.options.clientName,
-            provider: this.options.providerConfig.provider,
             protocolVersion: PROTOCOL_VERSION,
             machineId: this.machineIdentity?.machineId,
             hostname: this.options.hostname || hostname(),
             platform: platform(),
             cwd: process.cwd(),
-            projectName: basename(process.cwd()),
+            capabilities: [
+              "terminal",
+              ...(this.options.agentUi ? ["agent-ui"] : []),
+              ...(this.options.screen ? ["screen"] : []),
+              "tunnel",
+            ],
           },
         }),
       );
@@ -531,7 +366,7 @@ export class BridgeSession {
       }
       case "terminal.spawn": {
         const p = parseTypedPayload("terminal.spawn", envelope.payload);
-        const normalizedCwd = resolve(p.cwd);
+        const normalizedCwd = resolve(p.cwd ?? process.cwd());
         // Dedup: if a running terminal already exists for this cwd, return it
         const existing = [...this.terminals.values()].find(
           (t) => t.status === "running" && resolve(t.cwd) === normalizedCwd,
@@ -541,17 +376,17 @@ export class BridgeSession {
             type: "terminal.spawned",
             sessionId: this.sessionId,
             terminalId: existing.id,
-            payload: { terminalId: existing.id, cwd: existing.cwd, projectName: existing.projectName, provider: existing.provider },
+            payload: { terminalId: existing.id, cwd: existing.cwd, shell: this.options.providerConfig.command },
           }));
         } else {
           const newId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           try {
-            await this.spawnTerminal(newId, normalizedCwd, p.provider);
+            await this.spawnTerminal(newId, normalizedCwd);
             this.send(createEnvelope({
               type: "terminal.spawned",
               sessionId: this.sessionId,
               terminalId: newId,
-              payload: { terminalId: newId, cwd: normalizedCwd, projectName: basename(normalizedCwd), provider: p.provider },
+              payload: { terminalId: newId, cwd: normalizedCwd, shell: this.options.providerConfig.command },
             }));
           } catch (err) {
             this.log(`failed to spawn terminal ${newId}: ${err}`);
@@ -730,16 +565,18 @@ export class BridgeSession {
         }));
         break;
       }
+      case "device.ack":
       case "session.ack": {
-        const p = parseTypedPayload("session.ack", envelope.payload);
+        const p = parseTypedPayload(envelope.type === "device.ack" ? "device.ack" : "session.ack", envelope.payload);
         const term = this.terminals.get(tid);
         if (term) {
           term.scrollback.trimUpTo(p.seq);
         }
         break;
       }
+      case "device.resume":
       case "session.resume": {
-        const p = parseTypedPayload("session.resume", envelope.payload);
+        const p = parseTypedPayload(envelope.type === "device.resume" ? "device.resume" : "session.resume", envelope.payload);
         // Replay all terminals
         for (const [termId, term] of this.terminals) {
           this.replayFrom(
@@ -752,6 +589,7 @@ export class BridgeSession {
         this.sendTerminalList();
         break;
       }
+      case "device.heartbeat":
       case "session.heartbeat":
         break;
       case "screen.start": {
@@ -803,18 +641,10 @@ export class BridgeSession {
           );
           break;
         }
-        if (envelope.type === "agent.prompt") this.refreshAgentPermissionHooks();
         await this.agentSession.handleEnvelope(envelope);
         break;
       }
       case "agent.permission.response": {
-        const p = parseTypedPayload("agent.permission.response", envelope.payload);
-        if (this.resolvePendingPermission(p.requestId, {
-          outcome: p.outcome,
-          optionId: p.optionId,
-        }, "agent.permission.response").resolved) {
-          break;
-        }
         if (!this.agentSession) {
           this.send(
             createEnvelope({
@@ -876,7 +706,6 @@ export class BridgeSession {
           );
           break;
         }
-        if (envelope.type === "agent.v2.prompt" || envelope.type === "agent.v2.command.execute") this.refreshAgentPermissionHooks();
         await this.agentWorkspace.handleEnvelope(envelope);
         break;
       }
@@ -890,44 +719,6 @@ export class BridgeSession {
         if (term && term.status === "running") {
           term.pty.write(`\x1b[200~${tempPath}\x1b[201~`);
         }
-        break;
-      }
-      case "permission.decision": {
-        const p = envelope.payload as { requestId: string; decision: "allow" | "deny" };
-        const result = this.resolvePendingPermission(p.requestId, p.decision, "permission.decision");
-        if (!result.resolved) {
-          this.sendPermissionSnapshot(
-            tid,
-            "thinking",
-            "permission not pending",
-            {
-              requestId: p.requestId,
-              outcome: p.decision,
-              source: "permission.decision",
-              delivered: false,
-            },
-          );
-        }
-        process.stderr.write(
-          `[bridge] permission decision request=${p.requestId} decision=${p.decision} resolved=${result.resolved} delivered=${result.delivered}\n`,
-        );
-        this.send(createEnvelope({
-          type: "permission.decision.result",
-          sessionId: this.sessionId,
-          terminalId: tid,
-          payload: {
-            requestId: p.requestId,
-            decision: p.decision,
-            resolved: result.resolved,
-            delivered: result.delivered,
-            source: "permission.decision",
-            message: result.delivered
-              ? undefined
-              : result.resolved
-                ? "Permission resolved but response was not delivered"
-                : "Permission request is no longer pending",
-          },
-        }));
         break;
       }
       case "tunnel.request": {
@@ -1139,9 +930,8 @@ export class BridgeSession {
     const terminals = [...this.terminals.values()].map((t) => ({
       terminalId: t.id,
       cwd: t.cwd,
-      projectName: t.projectName,
-      provider: t.provider,
       status: t.status,
+      shell: this.options.providerConfig.command,
     }));
     this.send(createEnvelope({
       type: "terminal.list",
@@ -1172,40 +962,13 @@ export class BridgeSession {
     }
   }
 
-  private async spawnTerminal(terminalId: string, cwd: string, providerOverride?: string): Promise<void> {
+  private async spawnTerminal(terminalId: string, cwd: string): Promise<void> {
     const cleanEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(this.options.providerConfig.env)) {
       if (v !== undefined) cleanEnv[k] = v;
     }
-    const hookMarker = this.terminalHookMarker(terminalId);
-    // Inject marker so child CLIs' hook commands carry our identity
-    cleanEnv["LINKSHELL_ID"] = hookMarker;
 
-    const provider = providerOverride ?? this.options.providerConfig.provider;
     const args = [...this.options.providerConfig.args];
-
-    // Set up hook server for structured status (all supported providers)
-    // For "custom" shell, set up hooks for all providers since user may launch any of them
-    let hookServer: http.Server | undefined;
-    let hookPort: number | undefined;
-    const hookConfigPaths: string[] = [];
-
-    if (provider === "custom") {
-      const result = await this.setupHookServer(terminalId, args, "claude", hookMarker);
-      hookServer = result.server;
-      hookPort = result.port;
-      hookConfigPaths.push(result.configPath);
-      // Also set up hooks for other providers (curlCmd already has marker from setupHookServer)
-      const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${result.port}/hook?m=${hookMarker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
-      hookConfigPaths.push(this.setupCodexHooks(terminalId, curlCmd, hookMarker));
-      hookConfigPaths.push(this.setupGeminiHooks(terminalId, curlCmd, hookMarker));
-      hookConfigPaths.push(this.setupCopilotHooks(terminalId, curlCmd, hookMarker));
-    } else if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "copilot") {
-      const result = await this.setupHookServer(terminalId, args, provider, hookMarker);
-      hookServer = result.server;
-      hookPort = result.port;
-      hookConfigPaths.push(result.configPath);
-    }
 
     const term: TerminalInstance = {
       id: terminalId,
@@ -1221,16 +984,9 @@ export class BridgeSession {
         },
       ),
       cwd,
-      projectName: basename(cwd),
-      provider,
       scrollback: new ScrollbackBuffer(1000),
       outputSeq: 0,
-      statusSeq: 0,
       status: "running",
-      hookServer,
-      hookPort,
-      hookMarker,
-      hookConfigPaths,
     };
 
     term.pty.onData((data) => {
@@ -1254,7 +1010,6 @@ export class BridgeSession {
 
     term.pty.onExit(({ exitCode, signal }) => {
       term.status = "exited";
-      this.cleanupHookServer(term);
       this.send(createEnvelope({
         type: "terminal.exit",
         sessionId: this.sessionId,
@@ -1279,727 +1034,12 @@ export class BridgeSession {
     this.log(`spawned terminal ${terminalId} in ${cwd}`);
   }
 
-  private async setupHookServer(terminalId: string, args: string[], provider: string, marker: string): Promise<{
-    server: http.Server;
-    port: number;
-    configPath: string;
-  }> {
-    const server = http.createServer((req, res) => {
-      this.log(`hook server received: ${req.method} ${req.url}`);
-      const reqUrl = new URL(req.url ?? "/", "http://localhost");
-      if (req.method !== "POST" || reqUrl.pathname !== "/hook") {
-        res.writeHead(404);
-        res.end();
-        return;
-      }
-      // Check marker — reject events not from our PTY
-      // m must match; lid must match OR be empty (some CLIs don't inherit env vars)
-      const reqMarker = reqUrl.searchParams.get("m");
-      const reqLid = reqUrl.searchParams.get("lid") ?? "";
-      if (reqMarker !== marker || (reqLid !== "" && reqLid !== marker)) {
-        this.log(`ignoring hook event: m=${reqMarker} lid=${reqLid} (expected ${marker})`);
-        res.writeHead(200);
-        res.end("ok");
-        return;
-      }
-      let body = "";
-      let bodyTooLarge = false;
-      req.on("data", (chunk: Buffer) => {
-        if (bodyTooLarge) return;
-        body += chunk.toString();
-        if (Buffer.byteLength(body, "utf8") > HOOK_BODY_LIMIT) {
-          bodyTooLarge = true;
-          res.writeHead(413);
-          res.end("payload too large");
-          req.destroy();
-        }
-      });
-      req.on("end", () => {
-        if (bodyTooLarge || res.writableEnded) return;
-        this.log(`hook body (${body.length} bytes): ${body.slice(0, 200)}`);
-        try {
-          const event = JSON.parse(body);
-          const hookName = (event.hook_event_name ?? event.event_name) as string | undefined;
-
-          // PermissionRequest: hold connection, wait for user decision from mobile app
-          if (hookName === "PermissionRequest") {
-            const requestId = `pr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            const permissionSuggestions = hookPermissionSuggestions(event);
-            const timeout = setTimeout(() => {
-              if (this.resolvePendingPermission(requestId, "deny", "permission.timeout").resolved) {
-                this.log(`permission request ${requestId} timed out`);
-                this.sendPermissionSnapshot(terminalId, "thinking", "permission timed out");
-              }
-            }, PERMISSION_REQUEST_TIMEOUT_MS);
-            this.pendingPermissions.set(requestId, {
-              terminalId,
-              timeout,
-              permissionSuggestions,
-              resolve: (decision) => {
-                if (res.writableEnded) return false;
-                const responseJson = JSON.stringify({
-                  hookSpecificOutput: {
-                    hookEventName: "PermissionRequest",
-                    decision,
-                  },
-                });
-                res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(responseJson);
-                return true;
-              },
-            });
-            // Send status with requestId so app can route decision back
-            this.handleHookEvent(terminalId, event, provider, requestId);
-            this.sendHookPermissionRequest(terminalId, event, requestId);
-          } else {
-            // All other hooks: respond immediately
-            res.writeHead(200);
-            res.end("ok");
-            this.handleHookEvent(terminalId, event, provider);
-          }
-        } catch (e) {
-          res.writeHead(200);
-          res.end("ok");
-          this.log(`hook parse error: ${e}`);
-        }
-      });
-    });
-
-    // Listen on random port — await binding before reading address
-    const port = await new Promise<number>((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const addr = server.address() as { port: number };
-        resolve(addr.port);
-      });
-      server.on("error", reject);
-    });
-    this.log(`hook server for ${terminalId} (${provider}) listening on port ${port}, marker=${marker}`);
-
-    const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${port}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
-    let configPath: string;
-
-    if (provider === "codex") {
-      configPath = this.setupCodexHooks(terminalId, curlCmd, marker);
-    } else if (provider === "gemini") {
-      configPath = this.setupGeminiHooks(terminalId, curlCmd, marker);
-    } else if (provider === "copilot") {
-      configPath = this.setupCopilotHooks(terminalId, curlCmd, marker);
-    } else {
-      // Claude (default)
-      configPath = this.setupClaudeHooks(terminalId, curlCmd, args, marker);
-    }
-
-    return { server, port, configPath };
-  }
-
-  private refreshAgentPermissionHooks(): void {
-    const term = this.terminals.get(DEFAULT_TERMINAL_ID);
-    if (!term?.hookPort) return;
-    const marker = term.hookMarker;
-    const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${term.hookPort}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
-    const providers = this.options.agentProvider
-      ? [normalizeAgentProvider(this.options.agentProvider)]
-      : detectAvailableProviders();
-    try {
-      for (const provider of providers) {
-        if (provider === "codex") {
-          this.setupCodexHooks(DEFAULT_TERMINAL_ID, curlCmd, marker);
-        } else {
-          // claude, custom
-          this.setupClaudeHooks(DEFAULT_TERMINAL_ID, curlCmd, [], marker);
-        }
-      }
-    } catch (error) {
-      this.log(`failed to refresh agent permission hooks: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  private setupClaudeHooks(terminalId: string, curlCmd: string, args: string[], marker: string): string {
-    // Write hooks to ~/.claude/settings.json — Claude Code reads hooks from here
-    const claudeDir = join(homedir(), ".claude");
-    if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
-    const settingsPath = join(claudeDir, "settings.json");
-
-    let existing: Record<string, unknown> = {};
-    try {
-      existing = JSON.parse(readFileSync(settingsPath, "utf8"));
-    } catch { /* doesn't exist yet */ }
-
-    const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
-    const permissionEntry = {
-      matcher: "",
-      hooks: [{
-        type: "command",
-        command: curlCmd,
-        timeout: Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000),
-      }],
-    };
-
-    const hookEvents: Record<string, typeof hookEntry | typeof permissionEntry> = {
-      PreToolUse: hookEntry,
-      PostToolUse: hookEntry,
-      PostToolUseFailure: hookEntry,
-      Stop: hookEntry,
-      PermissionRequest: permissionEntry,
-      UserPromptSubmit: hookEntry,
-      SessionStart: hookEntry,
-    };
-
-    // Append our entries to existing hooks (first remove stale linkshell entries)
-    const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
-    for (const [eventName, entry] of Object.entries(hookEvents)) {
-      existingHooks[eventName] = eventName === "PermissionRequest"
-        ? withBlockingLinkShellPermissionEntry(existingHooks[eventName], entry)
-        : withLinkShellHookEntry(existingHooks[eventName], entry, "last");
-    }
-
-    const merged = { ...existing, hooks: existingHooks };
-    writeFileSync(settingsPath, JSON.stringify(merged, null, 2));
-    this.log(`claude hooks appended to ${settingsPath}`);
-
-    return settingsPath;
-  }
-
-  private setupCodexHooks(terminalId: string, curlCmd: string, marker: string): string {
-    // Codex uses ~/.codex/hooks.json — same format as Claude (with matcher)
-    const codexDir = join(homedir(), ".codex");
-    if (!existsSync(codexDir)) mkdirSync(codexDir, { recursive: true });
-
-    // Ensure [features] codex_hooks = true in config.toml
-    const tomlPath = join(codexDir, "config.toml");
-    let tomlContent = "";
-    try { tomlContent = readFileSync(tomlPath, "utf8"); } catch { /* doesn't exist yet */ }
-
-    // Remove top-level codex_hooks (wrong location) and ensure it's under [features]
-    const hasFeatureSection = tomlContent.includes("[features]");
-    const hasCodexHooksUnderFeatures = hasFeatureSection &&
-      /\[features\][^\[]*codex_hooks\s*=\s*true/s.test(tomlContent);
-
-    if (!hasCodexHooksUnderFeatures) {
-      // Remove any top-level codex_hooks line
-      tomlContent = tomlContent.replace(/^codex_hooks\s*=.*\n?/m, "");
-      if (!tomlContent.includes("[features]")) {
-        tomlContent += `\n[features]\ncodex_hooks = true\n`;
-      } else {
-        tomlContent = tomlContent.replace("[features]", "[features]\ncodex_hooks = true");
-      }
-      writeFileSync(tomlPath, tomlContent);
-      this.log(`enabled codex_hooks under [features] in ${tomlPath}`);
-    }
-
-    const hooksPath = join(codexDir, "hooks.json");
-    const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5 }] };
-    const permissionEntry = {
-      matcher: "",
-      hooks: [{
-        type: "command",
-        command: curlCmd,
-        timeout: Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000),
-      }],
-    };
-    const hookEvents: Record<string, typeof hookEntry | typeof permissionEntry> = {
-      SessionStart: hookEntry,
-      PreToolUse: hookEntry,
-      PostToolUse: hookEntry,
-      UserPromptSubmit: hookEntry,
-      Stop: hookEntry,
-      PermissionRequest: permissionEntry,
-    };
-
-    // Read existing and append
-    let existing: { hooks?: Record<string, unknown[]> } = {};
-    try { existing = JSON.parse(readFileSync(hooksPath, "utf8")); } catch { /* doesn't exist yet */ }
-    const existingHooks = existing.hooks ?? {};
-    for (const [eventName, entry] of Object.entries(hookEvents)) {
-      existingHooks[eventName] = eventName === "PermissionRequest"
-        ? withBlockingLinkShellPermissionEntry(existingHooks[eventName], entry)
-        : withLinkShellHookEntry(existingHooks[eventName], entry, "last");
-    }
-
-    writeFileSync(hooksPath, JSON.stringify({ ...existing, hooks: existingHooks }, null, 2));
-    this.log(`codex hooks appended to ${hooksPath}`);
-    return hooksPath;
-  }
-
-  private setupGeminiHooks(terminalId: string, curlCmd: string, marker: string): string {
-    // Gemini uses ~/.gemini/settings.json — same format as Claude (with matcher)
-    const geminiDir = join(homedir(), ".gemini");
-    if (!existsSync(geminiDir)) mkdirSync(geminiDir, { recursive: true });
-
-    const settingsPath = join(geminiDir, "settings.json");
-    const hookEntry = { matcher: "", hooks: [{ type: "command", command: curlCmd, timeout: 5000 }] };
-    const hookEvents: Record<string, typeof hookEntry> = {
-      SessionStart: hookEntry,
-      SessionEnd: hookEntry,
-      BeforeTool: hookEntry,
-      AfterTool: hookEntry,
-    };
-
-    // Merge with existing settings if present
-    let existing: Record<string, unknown> = {};
-    try {
-      existing = JSON.parse(readFileSync(settingsPath, "utf8"));
-    } catch { /* doesn't exist yet */ }
-
-    const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
-    for (const [eventName, entry] of Object.entries(hookEvents)) {
-      existingHooks[eventName] = withLinkShellHookEntry(existingHooks[eventName], entry, "last");
-    }
-
-    existing.hooks = existingHooks;
-    writeFileSync(settingsPath, JSON.stringify(existing, null, 2));
-    this.log(`gemini hooks appended to ${settingsPath}`);
-    return settingsPath;
-  }
-
-  private setupCopilotHooks(terminalId: string, curlCmd: string, marker: string): string {
-    // Copilot loads hooks from CWD as hooks.json
-    const cwd = this.terminals.get(terminalId)?.cwd ?? process.cwd();
-    const hooksPath = join(cwd, "hooks.json");
-    const mkHook = () => ({
-      type: "command",
-      bash: curlCmd,
-      timeoutSec: 30,
-    });
-    const hookEvents: Record<string, ReturnType<typeof mkHook>> = {
-      sessionStart: mkHook(),
-      sessionEnd: mkHook(),
-      userPromptSubmitted: mkHook(),
-      preToolUse: mkHook(),
-      postToolUse: mkHook(),
-      errorOccurred: mkHook(),
-    };
-
-    // Read existing and append
-    let existing: { version?: number; hooks?: Record<string, unknown[]> } = {};
-    try { existing = JSON.parse(readFileSync(hooksPath, "utf8")); } catch { /* doesn't exist yet */ }
-    const existingHooks = existing.hooks ?? {};
-    for (const [eventName, entry] of Object.entries(hookEvents)) {
-      existingHooks[eventName] = withLinkShellHookEntry(existingHooks[eventName], entry, "last");
-    }
-
-    writeFileSync(hooksPath, JSON.stringify({ version: 1, hooks: existingHooks }, null, 2));
-    this.log(`copilot hooks appended to ${hooksPath}`);
-    return hooksPath;
-  }
-
-  private handleHookEvent(terminalId: string, event: Record<string, unknown>, provider: string, permissionRequestId?: string): void {
-    const rawHookName = (event.hook_event_name ?? event.event_name) as string | undefined;
-    if (!rawHookName) return;
-
-    // Auto-detect provider from hook event fields
-    const hookTerm = this.terminals.get(terminalId);
-    let detectedProvider = provider;
-
-    // Always detect from transcript_path (most reliable), regardless of current provider
-    const transcriptPath = typeof event.transcript_path === "string" ? event.transcript_path as string : "";
-    if (transcriptPath.includes(".claude/")) {
-      detectedProvider = "claude";
-    } else if (transcriptPath.includes(".gemini/")) {
-      detectedProvider = "gemini";
-    } else if (transcriptPath.includes(".codex/")) {
-      detectedProvider = "codex";
-    } else if (hookTerm?.provider === "custom") {
-      // Fallback heuristics only when provider is still unknown
-      if (event.model && typeof event.model === "string" && /^(gpt|o[0-9]|codex)/i.test(event.model as string)) {
-        detectedProvider = "codex";
-      } else if (event.session_id && !transcriptPath) {
-        detectedProvider = "codex";
-      } else if (/^(Before|After)(Tool)$|^Session(Start|End)$/.test(rawHookName)) {
-        detectedProvider = "gemini";
-      } else if (/^(pre|post)ToolUse$|^session(Start|End)$|^userPromptSubmitted$|^errorOccurred$/.test(rawHookName)) {
-        detectedProvider = "copilot";
-      }
-    }
-
-    if (hookTerm && detectedProvider !== hookTerm.provider) {
-      const wasCustom = hookTerm.provider === "custom";
-      hookTerm.provider = detectedProvider;
-      this.log(`${wasCustom ? "detected" : "provider switched"} provider for ${terminalId}: ${detectedProvider}`);
-      this.permissionStacks.delete(terminalId);
-      this.sendTerminalList();
-    }
-
-    // Normalize hook event names from different providers to unified names
-    const hookName = this.normalizeHookName(rawHookName, detectedProvider);
-    if (!hookName) return;
-
-    let phase: string;
-    let toolName: string | undefined;
-    let toolInput: string | undefined;
-    let permissionRequest: string | undefined;
-    let summary: string | undefined;
-
-    switch (hookName) {
-      case "PreToolUse":
-        phase = "tool_use";
-        toolName = (event.tool_name ?? event.toolName) as string | undefined;
-        if (event.tool_input && typeof event.tool_input === "object") {
-          const input = event.tool_input as Record<string, unknown>;
-          toolInput = JSON.stringify(input).slice(0, 200);
-        } else if (event.toolInput && typeof event.toolInput === "object") {
-          toolInput = JSON.stringify(event.toolInput).slice(0, 200);
-        }
-        break;
-      case "PostToolUse":
-        phase = "thinking";
-        toolName = (event.tool_name ?? event.toolName) as string | undefined;
-        // Pop permission stack + auto-resolve pending HTTP connection
-        {
-          const stack = this.permissionStacks.get(terminalId);
-          if (stack && stack.length > 0) {
-            const popped = stack.pop();
-            if (popped) this.autoResolvePending(popped.requestId);
-            if (stack.length === 0) this.permissionStacks.delete(terminalId);
-          }
-        }
-        break;
-      case "PostToolUseFailure":
-        phase = "error";
-        toolName = (event.tool_name ?? event.toolName) as string | undefined;
-        {
-          const stack = this.permissionStacks.get(terminalId);
-          if (stack && stack.length > 0) {
-            const popped = stack.pop();
-            if (popped) this.autoResolvePending(popped.requestId);
-            if (stack.length === 0) this.permissionStacks.delete(terminalId);
-          }
-        }
-        break;
-      case "Stop":
-        phase = "idle";
-        if (event.stop_reason) summary = String(event.stop_reason);
-        this.drainPendingPermissions(terminalId);
-        this.permissionStacks.delete(terminalId);
-        // Reset provider to "custom" when a CLI session ends inside a custom shell
-        if (hookTerm && this.options.providerConfig.provider === "custom") {
-          hookTerm.provider = "custom";
-          this.log(`provider reset to custom for ${terminalId} (CLI session ended)`);
-          this.sendTerminalList();
-        }
-        break;
-      case "PermissionRequest":
-        phase = "waiting";
-        toolName = (event.tool_name ?? event.toolName) as string | undefined;
-        if (event.tool_input && typeof event.tool_input === "object") {
-          const input = event.tool_input as Record<string, unknown>;
-          permissionRequest = JSON.stringify(input).slice(0, 300);
-        } else if (event.toolInput && typeof event.toolInput === "object") {
-          permissionRequest = JSON.stringify(event.toolInput).slice(0, 300);
-        }
-        // Push to permission stack (use requestId from hook server if available)
-        {
-          const reqId = permissionRequestId ?? `pr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          if (!this.permissionStacks.has(terminalId)) {
-            this.permissionStacks.set(terminalId, []);
-          }
-          this.permissionStacks.get(terminalId)!.push({
-            requestId: reqId,
-            toolName: toolName ?? "unknown",
-            toolInput: toolInput ?? (permissionRequest ?? ""),
-            permissionRequest: permissionRequest ?? "",
-            timestamp: Date.now(),
-          });
-        }
-        break;
-      case "SessionStart":
-        phase = "idle";
-        summary = "session started";
-        break;
-      case "UserPromptSubmit":
-        phase = "thinking";
-        this.drainPendingPermissions(terminalId);
-        this.permissionStacks.delete(terminalId);
-        break;
-      default:
-        return;
-    }
-
-    this.log(`hook event [${provider}]: ${rawHookName} → ${hookName} → phase=${phase} tool=${toolName ?? "none"}`);
-
-    // Build topPermission from stack
-    const stack = this.permissionStacks.get(terminalId);
-    const topPermission = stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
-    const pendingPermissionCount = stack?.length ?? 0;
-
-    // Increment statusSeq for ordering
-    const term = this.terminals.get(terminalId);
-    const seq = term ? term.statusSeq++ : 0;
-
-    this.send(createEnvelope({
-      type: "terminal.status",
-      sessionId: this.sessionId,
-      terminalId,
-      payload: {
-        phase,
-        seq,
-        ...(toolName && { toolName }),
-        ...(toolInput && { toolInput }),
-        ...(permissionRequest && { permissionRequest }),
-        ...(summary && { summary }),
-        ...(topPermission && { topPermission }),
-        ...(pendingPermissionCount > 0 && { pendingPermissionCount }),
-      },
-    }));
-  }
-
-  private sendHookPermissionRequest(
-    terminalId: string,
-    event: Record<string, unknown>,
-    requestId: string,
-  ): void {
-    const toolName = (event.tool_name ?? event.toolName) as string | undefined;
-    const toolInput = stringifyHookInput(event.tool_input ?? event.toolInput);
-    const suggestions = hookPermissionSuggestions(event);
-    const context =
-      typeof event.permission_prompt === "string"
-        ? event.permission_prompt
-        : typeof event.message === "string"
-          ? event.message
-          : undefined;
-    this.send(createEnvelope({
-      type: "agent.permission.request",
-      sessionId: this.sessionId,
-      terminalId,
-      payload: {
-        requestId,
-        toolName,
-        toolInput,
-        context,
-        options: hookPermissionOptions(suggestions),
-      },
-    }));
-  }
-
-  /**
-   * Normalize hook event names from different CLI providers to unified internal names.
-   * Claude: PascalCase (PreToolUse, PostToolUse, Stop, PermissionRequest)
-   * Codex: camelCase (preToolUse, postToolUse, sessionStart)
-   * Gemini: PascalCase but different names (BeforeTool, AfterTool, BeforeSubmitPrompt)
-   */
-  private normalizeHookName(rawName: string, provider: string): string | undefined {
-    // Claude events — already in our canonical format
-    if (provider === "claude") {
-      return rawName;
-    }
-
-    // Codex events — same as Claude (PascalCase)
-    if (provider === "codex") {
-      switch (rawName) {
-        case "PreToolUse": case "preToolUse": return "PreToolUse";
-        case "PostToolUse": case "postToolUse": return "PostToolUse";
-        case "SessionStart": case "sessionStart": return "SessionStart";
-        case "UserPromptSubmit": return "UserPromptSubmit";
-        case "PermissionRequest": return "PermissionRequest";
-        case "Stop": return "Stop";
-        default: return undefined;
-      }
-    }
-
-    // Gemini events
-    if (provider === "gemini") {
-      switch (rawName) {
-        case "BeforeTool": return "PreToolUse";
-        case "AfterTool": return "PostToolUse";
-        case "SessionStart": return "SessionStart";
-        case "SessionEnd": return "Stop";
-        default: return undefined;
-      }
-    }
-
-    // Copilot events (camelCase)
-    if (provider === "copilot") {
-      switch (rawName) {
-        case "preToolUse": return "PreToolUse";
-        case "postToolUse": return "PostToolUse";
-        case "sessionStart": return "SessionStart";
-        case "sessionEnd": return "Stop";
-        case "userPromptSubmitted": return "UserPromptSubmit";
-        case "errorOccurred": return "PostToolUseFailure";
-        default: return undefined;
-      }
-    }
-
-    // Unknown provider — try all known formats
-    // This handles "custom" shell where any provider might be launched
-    const allProviders = ["claude", "codex", "gemini", "copilot"];
-    for (const p of allProviders) {
-      const result = this.normalizeHookName(rawName, p);
-      if (result) return result;
-    }
-    return undefined;
-  }
-
-  /** Auto-resolve a single pending permission (user acted in terminal) */
-  private autoResolvePending(requestId: string): void {
-    if (this.resolvePendingPermission(requestId, "allow", "terminal.auto").resolved) {
-      this.log(`auto-resolved pending permission ${requestId} (user acted in terminal)`);
-    }
-  }
-
-  /** Drain all pending permissions for a terminal (session ended, stop, etc.) */
-  private drainPendingPermissions(terminalId: string): void {
-    const stack = this.permissionStacks.get(terminalId);
-    if (!stack) return;
-    for (const entry of [...stack]) {
-      if (this.resolvePendingPermission(entry.requestId, "deny", "terminal.drain").resolved) {
-        this.log(`drained pending permission ${entry.requestId}`);
-      }
-    }
-  }
-
-  private resolvePendingPermission(
-    requestId: string,
-    choice: HookPermissionChoice,
-    source = "unknown",
-  ): { resolved: boolean; delivered: boolean } {
-    const pending = this.pendingPermissions.get(requestId);
-    const outcome = typeof choice === "string" ? choice : choice.outcome;
-    const optionId = typeof choice === "string" ? undefined : choice.optionId;
-    if (!pending) {
-      this.log(`no pending permission for ${requestId} via ${source}: ${outcome}:${optionId ?? "default"}`);
-      return { resolved: false, delivered: false };
-    }
-    this.pendingPermissions.delete(requestId);
-    clearTimeout(pending.timeout);
-    const delivered = pending.resolve(this.formatHookPermissionDecision(pending, choice));
-
-    const stack = this.permissionStacks.get(pending.terminalId);
-    if (stack) {
-      const idx = stack.findIndex((entry) => entry.requestId === requestId);
-      if (idx >= 0) stack.splice(idx, 1);
-      if (stack.length === 0) this.permissionStacks.delete(pending.terminalId);
-    }
-    this.log(`resolved permission ${requestId} via ${source}: ${outcome}:${optionId ?? "default"} delivered=${delivered}`);
-    this.sendPermissionSnapshot(
-      pending.terminalId,
-      "thinking",
-      outcome === "allow" ? "permission allowed" : "permission denied",
-      { requestId, outcome, source, delivered },
-    );
-    return { resolved: true, delivered };
-  }
-
-  private formatHookPermissionDecision(
-    permission: PendingPermission,
-    choice: HookPermissionChoice,
-  ): HookPermissionDecision {
-    const outcome = typeof choice === "string" ? choice : choice.outcome;
-    const optionId = typeof choice === "string" ? undefined : choice.optionId;
-    if (outcome === "allow") {
-      return {
-        behavior: "allow",
-        ...(optionId === "allow_always" && permission.permissionSuggestions.length > 0
-          ? { updatedPermissions: permission.permissionSuggestions }
-          : {}),
-      };
-    }
-    return {
-      behavior: "deny",
-      message: outcome === "cancelled" ? "Permission request cancelled." : "Permission denied by user.",
-    };
-  }
-
-  private sendPermissionSnapshot(
-    terminalId: string,
-    phase: string,
-    summary?: string,
-    permissionResolution?: {
-      requestId: string;
-      outcome: "allow" | "deny" | "cancelled";
-      source: string;
-      delivered: boolean;
-    },
-  ): void {
-    const stack = this.permissionStacks.get(terminalId);
-    const topPermission = stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
-    const pendingPermissionCount = stack?.length ?? 0;
-    const term = this.terminals.get(terminalId);
-    const seq = term ? term.statusSeq++ : 0;
-    this.send(createEnvelope({
-      type: "terminal.status",
-      sessionId: this.sessionId,
-      terminalId,
-      payload: {
-        phase,
-        seq,
-        ...(summary && { summary }),
-        ...(permissionResolution && { permissionResolution }),
-        ...(topPermission && { topPermission }),
-        ...(pendingPermissionCount > 0 && { pendingPermissionCount }),
-      },
-    }));
-  }
-
-  private cleanupHookServer(term: TerminalInstance): void {
-    // Drain any pending permission requests for this terminal
-    this.drainPendingPermissions(term.id);
-    if (term.hookServer) {
-      term.hookServer.close();
-      term.hookServer = undefined;
-      this.log(`hook server closed for ${term.id}`);
-    }
-    const marker = term.hookMarker;
-    for (const configPath of term.hookConfigPaths) {
-      try {
-        // Copilot: per-instance file — just delete it
-        if (configPath.includes(`linkshell-${marker}`)) {
-          if (existsSync(configPath)) {
-            unlinkSync(configPath);
-            this.log(`removed copilot hook file ${configPath}`);
-          }
-        } else {
-          // Claude/Codex/Gemini: remove our entries from the shared config
-          this.removeHookEntries(configPath, marker);
-        }
-      } catch { /* ignore */ }
-    }
-    term.hookConfigPaths = [];
-  }
-
-  /** Remove hook entries containing our marker from a JSON config file */
-  private removeHookEntries(configPath: string, marker: string): void {
-    if (!existsSync(configPath)) return;
-    try {
-      const raw = JSON.parse(readFileSync(configPath, "utf8"));
-      const hooks = raw.hooks as Record<string, unknown[]> | undefined;
-      if (!hooks) return;
-
-      let changed = false;
-      for (const [eventName, entries] of Object.entries(hooks)) {
-        if (!Array.isArray(entries)) continue;
-        const filtered = entries.filter((entry) => {
-          const str = JSON.stringify(entry);
-          return !str.includes(marker);
-        });
-        if (filtered.length !== entries.length) {
-          changed = true;
-          if (filtered.length === 0) {
-            delete hooks[eventName];
-          } else {
-            hooks[eventName] = filtered;
-          }
-        }
-      }
-
-      if (changed) {
-        // If no hooks left, remove the hooks key entirely
-        if (Object.keys(hooks).length === 0) {
-          delete raw.hooks;
-        }
-        writeFileSync(configPath, JSON.stringify(raw, null, 2));
-        this.log(`removed our hook entries from ${configPath}`);
-      }
-    } catch { /* ignore parse errors */ }
-  }
-
   private send(message: Envelope): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       return;
     }
     const machineId = this.machineIdentity?.machineId;
     const enriched = machineId && (
-      message.type === "terminal.status" ||
       message.type === "agent.capabilities" ||
       message.type === "agent.snapshot" ||
       message.type === "agent.v2.capabilities" ||
@@ -2021,8 +1061,8 @@ export class BridgeSession {
     this.heartbeatTimer = setInterval(() => {
       this.send(
         createEnvelope({
-          type: "session.heartbeat",
-          sessionId: this.sessionId,
+          type: "device.heartbeat",
+          hostDeviceId: this.sessionId,
           payload: { ts: Date.now() },
         }),
       );
@@ -2155,7 +1195,6 @@ export class BridgeSession {
     }
     this.tunnelSockets.clear();
     for (const term of this.terminals.values()) {
-      this.cleanupHookServer(term);
       if (term.status === "running") term.pty.kill();
     }
     this.terminals.clear();

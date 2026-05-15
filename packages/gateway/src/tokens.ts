@@ -1,47 +1,45 @@
 import { randomUUID } from "node:crypto";
 import type { GatewayStateStore } from "./state-store.js";
 
-const CLEANUP_INTERVAL = 5 * 60_000;
-const SESSION_TTL = 7 * 24 * 60 * 60_000; // 7 days — prune stale bindings
-
-interface TokenRecord {
-  token: string;
-  sessionIds: Set<string>;
+interface DeviceAuthorization {
+  authorizationId: string;
+  hostDeviceId: string;
+  clientDeviceId: string | undefined;
+  clientName: string | undefined;
   createdAt: number;
   lastUsedAt: number;
 }
 
-export class TokenManager {
-  private tokens = new Map<string, TokenRecord>();
-  private sessionToToken = new Map<string, string>();
-  private cleanupTimer: ReturnType<typeof setInterval>;
+interface TokenRecord {
+  token: string;
+  authorizations: Map<string, DeviceAuthorization>;
+  createdAt: number;
+  lastUsedAt: number;
+}
 
-  constructor(private readonly store?: GatewayStateStore) {
-    this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL);
-  }
+export class AuthorizationManager {
+  private tokens = new Map<string, TokenRecord>();
+  private hostDeviceToTokens = new Map<string, Set<string>>();
+
+  constructor(private readonly store?: GatewayStateStore) {}
 
   async hydrate(): Promise<void> {
     if (!this.store) return;
     try {
-      const records = await this.store.loadTokens();
-      const now = Date.now();
+      const records = await this.store.loadAuthorizations();
       for (const record of records) {
-        if (now - record.lastUsedAt > SESSION_TTL) {
-          void this.store.deleteToken(record.token).catch(() => {});
-          continue;
-        }
-        this.tokens.set(record.token, {
-          token: record.token,
-          sessionIds: new Set(record.sessionIds),
+        const token = this.register(record.token);
+        this.authorize(token, record.hostDeviceId, {
+          authorizationId: record.authorizationId,
+          clientDeviceId: record.clientDeviceId,
+          clientName: record.clientName,
           createdAt: record.createdAt,
           lastUsedAt: record.lastUsedAt,
+          persist: false,
         });
-        for (const sessionId of record.sessionIds) {
-          this.sessionToToken.set(sessionId, record.token);
-        }
       }
     } catch (err) {
-      process.stderr.write(`[gateway] token store hydrate failed, using memory only: ${err}\n`);
+      process.stderr.write(`[gateway] authorization store hydrate failed, using memory only: ${err}\n`);
     }
   }
 
@@ -49,83 +47,131 @@ export class TokenManager {
     if (deviceToken && this.tokens.has(deviceToken)) {
       const record = this.tokens.get(deviceToken)!;
       record.lastUsedAt = Date.now();
-      this.persist(record);
       return deviceToken;
     }
     const token = deviceToken || randomUUID();
     this.tokens.set(token, {
       token,
-      sessionIds: new Set(),
+      authorizations: new Map(),
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
     });
-    this.persist(this.tokens.get(token)!);
     return token;
   }
 
-  bind(token: string, sessionId: string): boolean {
+  authorize(
+    token: string,
+    hostDeviceId: string,
+    input: {
+      authorizationId?: string;
+      clientDeviceId?: string;
+      clientName?: string;
+      createdAt?: number;
+      lastUsedAt?: number;
+      persist?: boolean;
+    } = {},
+  ): DeviceAuthorization | undefined {
     const record = this.tokens.get(token);
-    if (!record) return false;
-    record.sessionIds.add(sessionId);
-    record.lastUsedAt = Date.now();
-    this.sessionToToken.set(sessionId, token);
-    this.persist(record);
-    return true;
+    if (!record) return undefined;
+    const existing = record.authorizations.get(hostDeviceId);
+    const now = Date.now();
+    const authorization: DeviceAuthorization = {
+      authorizationId: input.authorizationId ?? existing?.authorizationId ?? randomUUID(),
+      hostDeviceId,
+      clientDeviceId: input.clientDeviceId ?? existing?.clientDeviceId,
+      clientName: input.clientName ?? existing?.clientName,
+      createdAt: input.createdAt ?? existing?.createdAt ?? now,
+      lastUsedAt: input.lastUsedAt ?? now,
+    };
+    record.authorizations.set(hostDeviceId, authorization);
+    record.lastUsedAt = now;
+    let tokens = this.hostDeviceToTokens.get(hostDeviceId);
+    if (!tokens) {
+      tokens = new Set();
+      this.hostDeviceToTokens.set(hostDeviceId, tokens);
+    }
+    tokens.add(token);
+    if (input.persist !== false) {
+      this.persist(token, authorization);
+    }
+    return authorization;
   }
 
   validate(token: string): boolean {
     const record = this.tokens.get(token);
     if (!record) return false;
     record.lastUsedAt = Date.now();
-    this.persist(record);
     return true;
   }
 
-  owns(token: string, sessionId: string): boolean {
+  owns(token: string, hostDeviceId: string): boolean {
     const record = this.tokens.get(token);
     if (!record) return false;
-    record.lastUsedAt = Date.now();
-    this.persist(record);
-    return record.sessionIds.has(sessionId);
+    const authorization = record.authorizations.get(hostDeviceId);
+    if (!authorization) return false;
+    const now = Date.now();
+    record.lastUsedAt = now;
+    authorization.lastUsedAt = now;
+    this.persist(token, authorization);
+    return true;
   }
 
-  getSessionIds(token: string): Set<string> {
+  revoke(token: string, hostDeviceId: string, authorizationId: string): boolean {
+    const record = this.tokens.get(token);
+    const authorization = record?.authorizations.get(hostDeviceId);
+    if (!record || !authorization || authorization.authorizationId !== authorizationId) {
+      return false;
+    }
+    record.authorizations.delete(hostDeviceId);
+    const tokens = this.hostDeviceToTokens.get(hostDeviceId);
+    tokens?.delete(token);
+    if (tokens && tokens.size === 0) {
+      this.hostDeviceToTokens.delete(hostDeviceId);
+    }
+    void this.store?.deleteAuthorization(authorizationId).catch((err) => {
+      process.stderr.write(`[gateway] authorization store delete failed: ${err}\n`);
+    });
+    return true;
+  }
+
+  getHostDeviceIds(token: string): Set<string> {
     const record = this.tokens.get(token);
     if (!record) return new Set();
     record.lastUsedAt = Date.now();
-    this.persist(record);
-    return record.sessionIds;
+    return new Set(record.authorizations.keys());
   }
 
-  getTokenForSession(sessionId: string): string | undefined {
-    return this.sessionToToken.get(sessionId);
+  getSessionIds(token: string): Set<string> {
+    return this.getHostDeviceIds(token);
   }
 
-  private cleanup(): void {
-    const now = Date.now();
-    for (const [token, record] of this.tokens) {
-      if (now - record.lastUsedAt > SESSION_TTL) {
-        for (const sid of record.sessionIds) {
-          this.sessionToToken.delete(sid);
-        }
-        this.tokens.delete(token);
-        void this.store?.deleteToken(token).catch(() => {});
-      }
-    }
+  getAuthorizationId(token: string, hostDeviceId: string): string | undefined {
+    return this.tokens.get(token)?.authorizations.get(hostDeviceId)?.authorizationId;
   }
 
-  private persist(record: TokenRecord): void {
-    void this.store?.saveToken({
-      token: record.token,
-      sessionIds: [...record.sessionIds],
-      createdAt: record.createdAt,
-      lastUsedAt: record.lastUsedAt,
+  getTokenForSession(hostDeviceId: string): string | undefined {
+    return this.hostDeviceToTokens.get(hostDeviceId)?.values().next().value;
+  }
+
+  bind(token: string, hostDeviceId: string): boolean {
+    return !!this.authorize(token, hostDeviceId);
+  }
+
+  private persist(token: string, authorization: DeviceAuthorization): void {
+    void this.store?.saveAuthorization({
+      token,
+      authorizationId: authorization.authorizationId,
+      hostDeviceId: authorization.hostDeviceId,
+      clientDeviceId: authorization.clientDeviceId,
+      clientName: authorization.clientName,
+      createdAt: authorization.createdAt,
+      lastUsedAt: authorization.lastUsedAt,
     }).catch((err) => {
-      process.stderr.write(`[gateway] token store save failed: ${err}\n`);
+      process.stderr.write(`[gateway] authorization store save failed: ${err}\n`);
     });
   }
 
-  destroy(): void {
-    clearInterval(this.cleanupTimer);
-  }
+  destroy(): void {}
 }
+
+export class TokenManager extends AuthorizationManager {}

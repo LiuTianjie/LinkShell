@@ -1,7 +1,8 @@
 import type WebSocket from "ws";
 import type { Envelope } from "@linkshell/protocol";
 
-export type SessionState = "active" | "host_disconnected" | "terminated";
+export type DeviceState = "active" | "host_disconnected" | "terminated";
+export type SessionState = DeviceState;
 
 export interface ConnectedDevice {
   socket: WebSocket;
@@ -10,45 +11,46 @@ export interface ConnectedDevice {
   connectedAt: number;
 }
 
-export interface Session {
+export interface HostDevice {
   id: string;
-  state: SessionState;
+  hostDeviceId: string;
+  state: DeviceState;
   host: ConnectedDevice | undefined;
   clients: Map<string, ConnectedDevice>;
   controllerId: string | undefined;
   lastActivity: number;
   createdAt: number;
-  outputBuffers: Map<string, Envelope[]>; // keyed by terminalId
-  lastStatusByTerminal: Map<string, Envelope>; // last terminal.status per terminal
+  outputBuffers: Map<string, Envelope[]>;
+  lastStatusByTerminal: Map<string, Envelope>;
   hostDisconnectedAt: number | undefined;
-  // Metadata from host's session.connect
-  provider: string | undefined;
   machineId: string | undefined;
   hostname: string | undefined;
   platform: string | undefined;
   cwd: string | undefined;
-  projectName: string | undefined;
-  // Auth: user who owns this session (set on AUTH_REQUIRED gateways)
+  capabilities: string[];
   userId: string | undefined;
 }
 
+export type Session = HostDevice;
+
 const OUTPUT_BUFFER_CAPACITY = 200;
-const HOST_RECONNECT_WINDOW = 60_000; // 60s
+const HOST_RECONNECT_WINDOW = 60_000;
 const CLEANUP_INTERVAL = 30_000;
 
-export class SessionManager {
-  private sessions = new Map<string, Session>();
+export class DeviceManager {
+  private devices = new Map<string, HostDevice>();
   private cleanupTimer: ReturnType<typeof setInterval>;
 
   constructor() {
     this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL);
   }
 
-  getOrCreate(sessionId: string): Session {
-    let session = this.sessions.get(sessionId);
-    if (!session) {
-      session = {
-        id: sessionId,
+  getOrCreate(hostDeviceId: string): HostDevice {
+    let device = this.devices.get(hostDeviceId);
+    if (!device) {
+      device = {
+        id: hostDeviceId,
+        hostDeviceId,
         state: "active",
         host: undefined,
         clients: new Map(),
@@ -58,119 +60,122 @@ export class SessionManager {
         outputBuffers: new Map(),
         lastStatusByTerminal: new Map(),
         hostDisconnectedAt: undefined,
-        provider: undefined,
         machineId: undefined,
         hostname: undefined,
         platform: undefined,
         cwd: undefined,
-        projectName: undefined,
+        capabilities: [],
         userId: undefined,
       };
-      this.sessions.set(sessionId, session);
+      this.devices.set(hostDeviceId, device);
     }
-    return session;
+    return device;
   }
 
-  get(sessionId: string): Session | undefined {
-    return this.sessions.get(sessionId);
+  get(hostDeviceId: string): HostDevice | undefined {
+    return this.devices.get(hostDeviceId);
   }
 
-  setHost(sessionId: string, device: ConnectedDevice): void {
-    const session = this.getOrCreate(sessionId);
-    session.host = device;
-    session.state = "active";
-    session.hostDisconnectedAt = undefined;
-    session.lastActivity = Date.now();
+  setHost(hostDeviceId: string, socketDevice: ConnectedDevice): void {
+    const device = this.getOrCreate(hostDeviceId);
+    device.host = socketDevice;
+    device.state = "active";
+    device.hostDisconnectedAt = undefined;
+    device.lastActivity = Date.now();
   }
 
-  addClient(sessionId: string, device: ConnectedDevice): void {
-    const session = this.getOrCreate(sessionId);
-    session.clients.set(device.deviceId, device);
-    if (!session.controllerId) {
-      session.controllerId = device.deviceId;
+  addClient(hostDeviceId: string, socketDevice: ConnectedDevice): void {
+    const device = this.getOrCreate(hostDeviceId);
+    device.clients.set(socketDevice.deviceId, socketDevice);
+    if (!device.controllerId) {
+      device.controllerId = socketDevice.deviceId;
     }
-    session.lastActivity = Date.now();
+    device.lastActivity = Date.now();
   }
 
   removeHost(
-    sessionId: string,
+    hostDeviceId: string,
   ): { clients: Map<string, ConnectedDevice> } | undefined {
-    const session = this.sessions.get(sessionId);
-    if (!session) return undefined;
-    session.host = undefined;
-    session.state = "host_disconnected";
-    session.hostDisconnectedAt = Date.now();
-    return { clients: session.clients };
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return undefined;
+    device.host = undefined;
+    device.state = "host_disconnected";
+    device.hostDisconnectedAt = Date.now();
+    return { clients: device.clients };
   }
 
-  removeClient(sessionId: string, deviceId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    session.clients.delete(deviceId);
-    if (session.controllerId === deviceId) {
-      // Transfer control to next client or clear
-      const next = session.clients.keys().next();
-      session.controllerId = next.done ? undefined : next.value;
+  removeClient(hostDeviceId: string, deviceId: string): void {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return;
+    device.clients.delete(deviceId);
+    if (device.controllerId === deviceId) {
+      const next = device.clients.keys().next();
+      device.controllerId = next.done ? undefined : next.value;
     }
-    this.maybeDelete(sessionId);
+    this.maybeDelete(hostDeviceId);
   }
 
-  /** Force-delete a session: disconnect host + all clients, remove from map. */
-  forceDelete(sessionId: string): boolean {
-    const session = this.sessions.get(sessionId);
-    if (!session) return false;
-    if (session.host) {
-      try { session.host.socket.close(1000, "session deleted"); } catch {}
+  forceDelete(hostDeviceId: string): boolean {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return false;
+    if (device.host) {
+      try {
+        device.host.socket.close(1000, "device deleted");
+      } catch {}
     }
-    for (const [, client] of session.clients) {
-      try { client.socket.close(1000, "session deleted"); } catch {}
+    for (const [, client] of device.clients) {
+      try {
+        client.socket.close(1000, "device deleted");
+      } catch {}
     }
-    this.sessions.delete(sessionId);
+    this.devices.delete(hostDeviceId);
     return true;
   }
 
-  bufferOutput(sessionId: string, envelope: Envelope): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    const tid = (envelope as any).terminalId ?? "default";
-    let buf = session.outputBuffers.get(tid);
-    if (!buf) {
-      buf = [];
-      session.outputBuffers.set(tid, buf);
+  bufferOutput(hostDeviceId: string, envelope: Envelope): void {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return;
+    const terminalId = envelope.terminalId ?? "default";
+    let buffer = device.outputBuffers.get(terminalId);
+    if (!buffer) {
+      buffer = [];
+      device.outputBuffers.set(terminalId, buffer);
     }
-    buf.push(envelope);
-    if (buf.length > OUTPUT_BUFFER_CAPACITY) {
-      buf.shift();
+    buffer.push(envelope);
+    if (buffer.length > OUTPUT_BUFFER_CAPACITY) {
+      buffer.shift();
     }
-    session.lastActivity = Date.now();
+    device.lastActivity = Date.now();
   }
 
-  cacheStatus(sessionId: string, envelope: Envelope): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    const tid = (envelope as any).terminalId ?? "default";
-    session.lastStatusByTerminal.set(tid, envelope);
-    session.lastActivity = Date.now();
+  cacheStatus(hostDeviceId: string, envelope: Envelope): void {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return;
+    const terminalId = envelope.terminalId ?? "default";
+    device.lastStatusByTerminal.set(terminalId, envelope);
+    device.lastActivity = Date.now();
   }
 
-  getStatusReplay(sessionId: string): Envelope[] {
-    const session = this.sessions.get(sessionId);
-    if (!session) return [];
-    return [...session.lastStatusByTerminal.values()];
+  getStatusReplay(hostDeviceId: string): Envelope[] {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return [];
+    return [...device.lastStatusByTerminal.values()];
   }
 
   getReplayFrom(
-    sessionId: string,
+    hostDeviceId: string,
     afterSeqByTerminal: Record<string, number>,
     fallbackAfterSeq = -1,
   ): Envelope[] {
-    const session = this.sessions.get(sessionId);
-    if (!session) return [];
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return [];
     const result: Envelope[] = [];
-    for (const [terminalId, buf] of session.outputBuffers) {
+    for (const [terminalId, buffer] of device.outputBuffers) {
       const afterSeq = afterSeqByTerminal[terminalId] ?? fallbackAfterSeq;
-      for (const e of buf) {
-        if (e.seq !== undefined && e.seq > afterSeq) result.push(e);
+      for (const envelope of buffer) {
+        if (envelope.seq !== undefined && envelope.seq > afterSeq) {
+          result.push(envelope);
+        }
       }
     }
     return result.sort((a, b) => {
@@ -181,101 +186,101 @@ export class SessionManager {
     });
   }
 
-  claimControl(sessionId: string, deviceId: string): boolean {
-    const session = this.sessions.get(sessionId);
-    if (!session) return false;
-    // Always allow takeover – last claimer wins
-    session.controllerId = deviceId;
+  claimControl(hostDeviceId: string, deviceId: string): boolean {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return false;
+    device.controllerId = deviceId;
     return true;
   }
 
-  releaseControl(sessionId: string, deviceId: string): boolean {
-    const session = this.sessions.get(sessionId);
-    if (!session) return false;
-    if (session.controllerId !== deviceId) return false;
-    session.controllerId = undefined;
+  releaseControl(hostDeviceId: string, deviceId: string): boolean {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return false;
+    if (device.controllerId !== deviceId) return false;
+    device.controllerId = undefined;
     return true;
   }
 
-  terminate(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    session.state = "terminated";
+  terminate(hostDeviceId: string): void {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return;
+    device.state = "terminated";
   }
 
-  listActive(): Session[] {
-    return [...this.sessions.values()].filter((s) => s.state !== "terminated");
+  listActive(): HostDevice[] {
+    return [...this.devices.values()].filter((device) => device.state !== "terminated");
   }
 
-  getSummary(sessionId: string) {
-    const session = this.sessions.get(sessionId);
-    if (!session) return undefined;
+  getSummary(hostDeviceId: string) {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return undefined;
     return {
-      id: session.id,
-      state: session.state,
+      id: device.hostDeviceId,
+      hostDeviceId: device.hostDeviceId,
+      state: device.state,
+      online:
+        !!device.host &&
+        device.host.socket.readyState === device.host.socket.OPEN,
       hasHost:
-        !!session.host &&
-        session.host.socket.readyState === session.host.socket.OPEN,
-      clientCount: session.clients.size,
-      controllerId: session.controllerId ?? null,
-      lastActivity: session.lastActivity,
-      createdAt: session.createdAt,
-      bufferSize: [...session.outputBuffers.values()].reduce((sum, buf) => sum + buf.length, 0),
-      provider: session.provider ?? null,
-      machineId: session.machineId ?? null,
-      hostname: session.hostname ?? null,
-      platform: session.platform ?? null,
-      cwd: session.cwd ?? null,
-      projectName: session.projectName ?? null,
-      userId: session.userId ?? null,
+        !!device.host &&
+        device.host.socket.readyState === device.host.socket.OPEN,
+      clientCount: device.clients.size,
+      controllerId: device.controllerId ?? null,
+      lastActivity: device.lastActivity,
+      createdAt: device.createdAt,
+      bufferSize: [...device.outputBuffers.values()].reduce((sum, buf) => sum + buf.length, 0),
+      machineId: device.machineId ?? null,
+      hostname: device.hostname ?? null,
+      platform: device.platform ?? null,
+      cwd: device.cwd ?? null,
+      capabilities: device.capabilities,
+      userId: device.userId ?? null,
     };
   }
 
   setMetadata(
-    sessionId: string,
-    provider?: string,
+    hostDeviceId: string,
+    _provider?: string,
     machineId?: string,
     hostname?: string,
     platform?: string,
     cwd?: string,
-    projectName?: string,
+    _projectName?: string,
+    capabilities?: string[],
   ): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    if (provider) session.provider = provider;
-    if (machineId) session.machineId = machineId;
-    if (hostname) session.hostname = hostname;
-    if (platform) session.platform = platform;
-    if (cwd) session.cwd = cwd;
-    if (projectName) session.projectName = projectName;
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return;
+    if (machineId) device.machineId = machineId;
+    if (hostname) device.hostname = hostname;
+    if (platform) device.platform = platform;
+    if (cwd) device.cwd = cwd;
+    if (capabilities) device.capabilities = capabilities;
   }
 
-  private maybeDelete(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    if (!session.host && session.clients.size === 0) {
-      this.sessions.delete(sessionId);
+  private maybeDelete(hostDeviceId: string): void {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return;
+    if (!device.host && device.clients.size === 0) {
+      this.devices.delete(hostDeviceId);
     }
   }
 
   private cleanup(): void {
     const now = Date.now();
-    for (const [id, session] of this.sessions) {
-      // Remove sessions where host disconnected and window expired
+    for (const [hostDeviceId, device] of this.devices) {
       if (
-        session.state === "host_disconnected" &&
-        session.hostDisconnectedAt &&
-        now - session.hostDisconnectedAt > HOST_RECONNECT_WINDOW
+        device.state === "host_disconnected" &&
+        device.hostDisconnectedAt &&
+        now - device.hostDisconnectedAt > HOST_RECONNECT_WINDOW
       ) {
-        session.state = "terminated";
+        device.state = "terminated";
       }
-      // Clean up terminated sessions with no connections
       if (
-        session.state === "terminated" &&
-        !session.host &&
-        session.clients.size === 0
+        device.state === "terminated" &&
+        !device.host &&
+        device.clients.size === 0
       ) {
-        this.sessions.delete(id);
+        this.devices.delete(hostDeviceId);
       }
     }
   }
@@ -284,3 +289,5 @@ export class SessionManager {
     clearInterval(this.cleanupTimer);
   }
 }
+
+export class SessionManager extends DeviceManager {}

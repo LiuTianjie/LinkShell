@@ -1,13 +1,15 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAppContext } from "../../contexts/AppContext";
 import { AgentConversationScreen } from "../../screens/AgentConversationScreen";
+import { getValidSession } from "../../lib/supabase";
 
 export default function AgentConversationRoute() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const router = useRouter();
   const ctx = useAppContext();
   const resumedConversationRef = useRef<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -27,10 +29,16 @@ export default function AgentConversationRoute() {
       });
   }, [conversationId, ctx.agentWorkspace]);
 
+  useEffect(() => {
+    getValidSession().then((session) => setAuthToken(session?.accessToken ?? null));
+  }, [conversationId]);
+
   return (
     <AgentConversationScreen
       conversationId={conversationId ?? ""}
       workspace={ctx.agentWorkspace}
+      deviceToken={ctx.manager.deviceToken}
+      authToken={authToken}
       onBack={() => router.back()}
     />
   );

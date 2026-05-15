@@ -26,23 +26,23 @@ export interface PendingTunnelWs {
 const pendingRequests = new Map<string, PendingTunnelRequest>();
 const pendingWsSockets = new Map<string, PendingTunnelWs>();
 
-// Track requestIds per session for cleanup on host disconnect
-const sessionRequests = new Map<string, Set<string>>();
+// Track requestIds per host device for cleanup on host disconnect
+const deviceRequests = new Map<string, Set<string>>();
 
-function trackRequest(sessionId: string, requestId: string): void {
-  let set = sessionRequests.get(sessionId);
+function trackRequest(hostDeviceId: string, requestId: string): void {
+  let set = deviceRequests.get(hostDeviceId);
   if (!set) {
     set = new Set();
-    sessionRequests.set(sessionId, set);
+    deviceRequests.set(hostDeviceId, set);
   }
   set.add(requestId);
 }
 
-function untrackRequest(sessionId: string, requestId: string): void {
-  const set = sessionRequests.get(sessionId);
+function untrackRequest(hostDeviceId: string, requestId: string): void {
+  const set = deviceRequests.get(hostDeviceId);
   if (set) {
     set.delete(requestId);
-    if (set.size === 0) sessionRequests.delete(sessionId);
+    if (set.size === 0) deviceRequests.delete(hostDeviceId);
   }
 }
 
@@ -65,19 +65,19 @@ function extractToken(req: IncomingMessage, url: URL): string | null {
   return null;
 }
 
-/** Parse lsh_tunnel cookie: "sessionId:port:token" */
-export function parseTunnelCookie(req: IncomingMessage): { sessionId: string; port: number; token: string } | null {
+/** Parse lsh_tunnel cookie: "hostDeviceId:port:token" */
+export function parseTunnelCookie(req: IncomingMessage): { hostDeviceId: string; sessionId: string; port: number; token: string } | null {
   const cookie = req.headers.cookie;
   if (!cookie) return null;
   const match = cookie.match(/lsh_tunnel=([^;]+)/);
   if (!match?.[1]) return null;
   const parts = decodeURIComponent(match[1]).split(":");
   if (parts.length < 3) return null;
-  const sessionId = parts[0]!;
+  const hostDeviceId = parts[0]!;
   const port = Number(parts[1]);
   const token = parts.slice(2).join(":"); // token may contain colons
-  if (!sessionId || isNaN(port) || port < 1 || port > 65535 || !token) return null;
-  return { sessionId, port, token };
+  if (!hostDeviceId || isNaN(port) || port < 1 || port > 65535 || !token) return null;
+  return { hostDeviceId, sessionId: hostDeviceId, port, token };
 }
 
 function errorResponse(res: ServerResponse, status: number, message: string): void {
@@ -89,32 +89,45 @@ function errorResponse(res: ServerResponse, status: number, message: string): vo
   res.end(message);
 }
 
-export function parseTunnelPath(pathname: string): { sessionId: string; port: number; path: string } | null {
+export function parseTunnelPath(pathname: string): { hostDeviceId: string; sessionId: string; port: number; path: string } | null {
   const match = pathname.match(/^\/tunnel\/([^/]+)\/(\d+)(\/.*)?$/);
   if (!match) return null;
   const port = Number(match[2]);
   if (port < 1 || port > 65535) return null;
   return {
+    hostDeviceId: match[1]!,
     sessionId: match[1]!,
     port,
     path: match[3] || "/",
   };
 }
 
+type ParsedTunnelTarget = {
+  hostDeviceId?: string;
+  sessionId?: string;
+  port: number;
+  path: string;
+};
+
 export async function handleTunnelRequest(
   req: IncomingMessage,
   res: ServerResponse,
   sessions: SessionManager,
   tokens: TokenManager,
-  parsed: { sessionId: string; port: number; path: string },
+  parsed: ParsedTunnelTarget,
   url: URL,
   preAuthToken?: string,
 ): Promise<void> {
-  const { sessionId, port, path } = parsed;
+  const hostDeviceId = parsed.hostDeviceId ?? parsed.sessionId;
+  const { port, path } = parsed;
+  if (!hostDeviceId) {
+    errorResponse(res, 400, "Missing host device id");
+    return;
+  }
 
   // Auth: device token OR Supabase JWT (userId owns session)
   const token = preAuthToken || extractToken(req, url);
-  const tokenOwns = token && tokens.owns(token, sessionId);
+  const tokenOwns = token && tokens.owns(token, hostDeviceId);
   let authOwns = false;
   let authJwt: string | null = null;
   if (!tokenOwns && AUTH_REQUIRED) {
@@ -135,7 +148,7 @@ export async function handleTunnelRequest(
           });
           if (userRes.ok) {
             const user = (await userRes.json()) as { id: string };
-            const session = sessions.get(sessionId);
+            const session = sessions.get(hostDeviceId);
             if (user.id && session?.userId && user.id === session.userId) {
               authOwns = true;
               authJwt = jwtCandidate;
@@ -153,12 +166,12 @@ export async function handleTunnelRequest(
   // Set auth cookie for subsequent sub-resource requests
   const cookieToken = tokenOwns ? token : authJwt;
   if (cookieToken) {
-    const cookieVal = encodeURIComponent(`${sessionId}:${port}:${cookieToken}`);
+    const cookieVal = encodeURIComponent(`${hostDeviceId}:${port}:${cookieToken}`);
     res.setHeader("Set-Cookie", `lsh_tunnel=${cookieVal}; Path=/; HttpOnly; SameSite=Lax`);
   }
 
   // Validate session & host
-  const session = sessions.get(sessionId);
+  const session = sessions.get(hostDeviceId);
   if (!session || !session.host || session.host.socket.readyState !== session.host.socket.OPEN) {
     errorResponse(res, 502, "Host not connected");
     return;
@@ -204,17 +217,17 @@ export async function handleTunnelRequest(
     headersSent: false,
     timeout: setTimeout(() => {
       pendingRequests.delete(requestId);
-      untrackRequest(sessionId, requestId);
+      untrackRequest(hostDeviceId, requestId);
       errorResponse(res, 504, "Tunnel request timed out");
     }, TUNNEL_TIMEOUT),
   };
   pendingRequests.set(requestId, pending);
-  trackRequest(sessionId, requestId);
+  trackRequest(hostDeviceId, requestId);
 
   // Send tunnel.request to host
   const envelope = createEnvelope({
     type: "tunnel.request",
-    sessionId,
+    hostDeviceId,
     payload: {
       requestId,
       method,
@@ -232,7 +245,7 @@ export async function handleTunnelRequest(
     if (p) {
       clearTimeout(p.timeout);
       pendingRequests.delete(requestId);
-      untrackRequest(sessionId, requestId);
+      untrackRequest(hostDeviceId, requestId);
     }
   });
 }
@@ -306,8 +319,8 @@ export function removeTunnelWs(requestId: string): void {
   pendingWsSockets.delete(requestId);
 }
 
-export function cleanupSessionTunnels(sessionId: string): void {
-  const requestIds = sessionRequests.get(sessionId);
+export function cleanupSessionTunnels(hostDeviceId: string): void {
+  const requestIds = deviceRequests.get(hostDeviceId);
   if (!requestIds) return;
   for (const rid of requestIds) {
     const pending = pendingRequests.get(rid);
@@ -322,21 +335,26 @@ export function cleanupSessionTunnels(sessionId: string): void {
       pendingWsSockets.delete(rid);
     }
   }
-  sessionRequests.delete(sessionId);
+  deviceRequests.delete(hostDeviceId);
 }
 
 export async function handleTunnelWsUpgrade(
   ws: WebSocket,
-  parsed: { sessionId: string; port: number; path: string },
+  parsed: ParsedTunnelTarget,
   url: URL,
   sessions: SessionManager,
   tokens: TokenManager,
 ): Promise<void> {
-  const { sessionId, port, path } = parsed;
+  const hostDeviceId = parsed.hostDeviceId ?? parsed.sessionId;
+  const { port, path } = parsed;
+  if (!hostDeviceId) {
+    ws.close(1008, "Missing host device id");
+    return;
+  }
 
   // Auth: device token OR Supabase JWT (userId owns session)
   const token = url.searchParams.get("token");
-  const tokenOwns = token && tokens.owns(token, sessionId);
+  const tokenOwns = token && tokens.owns(token, hostDeviceId);
   let authOwns = false;
   if (!tokenOwns && AUTH_REQUIRED) {
     // Try auth_token param first, then fall back to token param (cookie fallback stores JWT there)
@@ -352,7 +370,7 @@ export async function handleTunnelWsUpgrade(
           });
           if (userRes.ok) {
             const user = (await userRes.json()) as { id: string };
-            const session = sessions.get(sessionId);
+            const session = sessions.get(hostDeviceId);
             if (user.id && session?.userId && user.id === session.userId) {
               authOwns = true;
             }
@@ -366,7 +384,7 @@ export async function handleTunnelWsUpgrade(
     return;
   }
 
-  const session = sessions.get(sessionId);
+  const session = sessions.get(hostDeviceId);
   if (!session || !session.host || session.host.socket.readyState !== session.host.socket.OPEN) {
     ws.close(4002, "Host not connected");
     return;
@@ -377,12 +395,12 @@ export async function handleTunnelWsUpgrade(
 
   // Register this WS so host responses route here
   registerTunnelWs(requestId, ws);
-  trackRequest(sessionId, requestId);
+  trackRequest(hostDeviceId, requestId);
 
   // Send tunnel.request with upgrade header to host
   const envelope = createEnvelope({
     type: "tunnel.request",
-    sessionId,
+    hostDeviceId,
     payload: {
       requestId,
       method: "GET",
@@ -397,13 +415,13 @@ export async function handleTunnelWsUpgrade(
   // Forward data from browser WS to host
   ws.on("message", (data: Buffer | string) => {
     try {
-      const s = sessions.get(sessionId);
+      const s = sessions.get(hostDeviceId);
       if (!s?.host || s.host.socket.readyState !== s.host.socket.OPEN) return;
       const isBinary = typeof data !== "string";
       const buf = typeof data === "string" ? Buffer.from(data) : data;
       const fwd = createEnvelope({
         type: "tunnel.ws.data",
-        sessionId,
+        hostDeviceId,
         payload: {
           requestId,
           data: buf.toString("base64"),
@@ -417,13 +435,13 @@ export async function handleTunnelWsUpgrade(
   ws.on("close", (code, reason) => {
     try {
       removeTunnelWs(requestId);
-      untrackRequest(sessionId, requestId);
-      const s = sessions.get(sessionId);
+      untrackRequest(hostDeviceId, requestId);
+      const s = sessions.get(hostDeviceId);
       if (!s?.host || s.host.socket.readyState !== s.host.socket.OPEN) return;
       const safeCode = typeof code === "number" && code >= 1000 && code <= 4999 ? code : 1000;
       const fwd = createEnvelope({
         type: "tunnel.ws.close",
-        sessionId,
+        hostDeviceId,
         payload: {
           requestId,
           code: safeCode,

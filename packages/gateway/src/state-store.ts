@@ -1,28 +1,35 @@
-export interface StoredTokenRecord {
+export interface StoredAuthorizationRecord {
+  authorizationId: string;
   token: string;
-  sessionIds: string[];
+  hostDeviceId: string;
+  clientDeviceId?: string;
+  clientName?: string;
   createdAt: number;
   lastUsedAt: number;
 }
 
 export interface StoredPairingRecord {
-  sessionId: string;
+  hostDeviceId: string;
   pairingCode: string;
   expiresAt: number;
   claimed: boolean;
 }
 
 export interface GatewayStateStore {
-  loadTokens(): Promise<StoredTokenRecord[]>;
-  saveToken(record: StoredTokenRecord): Promise<void>;
-  deleteToken(token: string): Promise<void>;
+  loadAuthorizations(): Promise<StoredAuthorizationRecord[]>;
+  saveAuthorization(record: StoredAuthorizationRecord): Promise<void>;
+  deleteAuthorization(authorizationId: string): Promise<void>;
   loadPairings(): Promise<StoredPairingRecord[]>;
   savePairing(record: StoredPairingRecord): Promise<void>;
   deletePairing(pairingCode: string): Promise<void>;
 }
 
-const TOKEN_TABLE = process.env.SUPABASE_GATEWAY_TOKEN_TABLE ?? "linkshell_gateway_tokens";
-const PAIRING_TABLE = process.env.SUPABASE_GATEWAY_PAIRING_TABLE ?? "linkshell_gateway_pairings";
+const AUTHORIZATION_TABLE =
+  process.env.SUPABASE_GATEWAY_AUTHORIZATION_TABLE ??
+  "linkshell_gateway_device_authorizations";
+const PAIRING_TABLE =
+  process.env.SUPABASE_GATEWAY_PAIRING_TABLE ??
+  "linkshell_gateway_pairing_challenges";
 const STORE_TIMEOUT_MS = Number(process.env.SUPABASE_STATE_TIMEOUT_MS ?? 3_000);
 
 function msToIso(ms: number): string {
@@ -33,6 +40,10 @@ function isoToMs(value: unknown): number {
   if (typeof value !== "string") return Date.now();
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? Date.now() : parsed;
+}
+
+function maybeString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export function createSupabaseStateStore(): GatewayStateStore | undefined {
@@ -64,49 +75,54 @@ export function createSupabaseStateStore(): GatewayStateStore | undefined {
   }
 
   return {
-    async loadTokens() {
+    async loadAuthorizations() {
       const rows = await request<Array<Record<string, unknown>>>(
-        `${TOKEN_TABLE}?select=token,session_ids,created_at,last_used_at`,
+        `${AUTHORIZATION_TABLE}?select=authorization_id,token,host_device_id,client_device_id,client_name,created_at,last_used_at`,
       );
       return rows.map((row) => ({
+        authorizationId: String(row.authorization_id ?? ""),
         token: String(row.token ?? ""),
-        sessionIds: Array.isArray(row.session_ids)
-          ? row.session_ids.map(String)
-          : [],
+        hostDeviceId: String(row.host_device_id ?? ""),
+        clientDeviceId: maybeString(row.client_device_id),
+        clientName: maybeString(row.client_name),
         createdAt: isoToMs(row.created_at),
         lastUsedAt: isoToMs(row.last_used_at),
-      })).filter((record) => record.token);
+      })).filter((record) => record.authorizationId && record.token && record.hostDeviceId);
     },
-    async saveToken(record) {
+    async saveAuthorization(record) {
       await request(
-        `${TOKEN_TABLE}?on_conflict=token`,
+        `${AUTHORIZATION_TABLE}?on_conflict=authorization_id`,
         {
           method: "POST",
           headers: { Prefer: "resolution=merge-duplicates" },
           body: JSON.stringify({
+            authorization_id: record.authorizationId,
             token: record.token,
-            session_ids: record.sessionIds,
+            host_device_id: record.hostDeviceId,
+            client_device_id: record.clientDeviceId ?? null,
+            client_name: record.clientName ?? null,
             created_at: msToIso(record.createdAt),
             last_used_at: msToIso(record.lastUsedAt),
           }),
         },
       );
     },
-    async deleteToken(token) {
-      await request(`${TOKEN_TABLE}?token=eq.${encodeURIComponent(token)}`, {
-        method: "DELETE",
-      });
+    async deleteAuthorization(authorizationId) {
+      await request(
+        `${AUTHORIZATION_TABLE}?authorization_id=eq.${encodeURIComponent(authorizationId)}`,
+        { method: "DELETE" },
+      );
     },
     async loadPairings() {
       const rows = await request<Array<Record<string, unknown>>>(
-        `${PAIRING_TABLE}?select=pairing_code,session_id,expires_at,claimed`,
+        `${PAIRING_TABLE}?select=pairing_code,host_device_id,expires_at,claimed`,
       );
       return rows.map((row) => ({
         pairingCode: String(row.pairing_code ?? ""),
-        sessionId: String(row.session_id ?? ""),
+        hostDeviceId: String(row.host_device_id ?? ""),
         expiresAt: isoToMs(row.expires_at),
         claimed: row.claimed === true,
-      })).filter((record) => record.pairingCode && record.sessionId);
+      })).filter((record) => record.pairingCode && record.hostDeviceId);
     },
     async savePairing(record) {
       await request(
@@ -116,7 +132,7 @@ export function createSupabaseStateStore(): GatewayStateStore | undefined {
           headers: { Prefer: "resolution=merge-duplicates" },
           body: JSON.stringify({
             pairing_code: record.pairingCode,
-            session_id: record.sessionId,
+            host_device_id: record.hostDeviceId,
             expires_at: msToIso(record.expiresAt),
             claimed: record.claimed,
           }),

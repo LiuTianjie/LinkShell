@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // ── Protocol version ────────────────────────────────────────────────
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 // ── Device & Session enums ──────────────────────────────────────────
 
@@ -29,10 +29,12 @@ export const terminalProviderSchema = z.enum([
 export type TerminalProvider = z.infer<typeof terminalProviderSchema>;
 
 export const errorCodeSchema = z.enum([
+  "device_not_found",
   "session_not_found",
   "pairing_expired",
   "pairing_not_found",
   "control_conflict",
+  "device_terminated",
   "session_terminated",
   "ack_out_of_range",
   "invalid_message",
@@ -45,7 +47,8 @@ export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const envelopeSchema = z.object({
   id: z.string().min(1),
   type: z.string().min(1),
-  sessionId: z.string().min(1),
+  hostDeviceId: z.string().min(1),
+  sessionId: z.string().min(1).optional(),
   terminalId: z.string().min(1).optional(),
   deviceId: z.string().min(1).optional(),
   timestamp: z.string().datetime(),
@@ -55,7 +58,7 @@ export const envelopeSchema = z.object({
   payload: z.unknown(),
 });
 
-export type Envelope = z.infer<typeof envelopeSchema>;
+export type Envelope = z.infer<typeof envelopeSchema> & { sessionId: string };
 
 // ── Payload schemas ─────────────────────────────────────────────────
 
@@ -79,13 +82,12 @@ export const terminalResizePayloadSchema = z.object({
 export const sessionConnectPayloadSchema = z.object({
   role: deviceRoleSchema,
   clientName: z.string().min(1),
-  provider: terminalProviderSchema.optional(),
   protocolVersion: z.number().int().optional(),
   machineId: z.string().min(1).optional(),
   hostname: z.string().optional(),
   platform: z.string().optional(),
   cwd: z.string().optional(),
-  projectName: z.string().optional(),
+  capabilities: z.array(z.string().min(1)).optional(),
 });
 
 export const terminalExitPayloadSchema = z.object({
@@ -111,7 +113,7 @@ export const sessionHeartbeatPayloadSchema = z.object({
 
 export const pairingCreatedPayloadSchema = z.object({
   pairingCode: z.string().length(6),
-  sessionId: z.string().min(1),
+  hostDeviceId: z.string().min(1),
   expiresAt: z.string().datetime(),
 });
 
@@ -120,7 +122,7 @@ export const sessionClaimPayloadSchema = z.object({
 });
 
 export const sessionClaimedPayloadSchema = z.object({
-  sessionId: z.string().min(1),
+  hostDeviceId: z.string().min(1),
 });
 
 export const controlClaimPayloadSchema = z.object({
@@ -188,16 +190,14 @@ export const screenIcePayloadSchema = z.object({
 // ── Terminal spawn/list payloads ───────────────────────────────────
 
 export const terminalSpawnPayloadSchema = z.object({
-  cwd: z.string().min(1),
-  provider: terminalProviderSchema.optional(),
+  cwd: z.string().min(1).optional(),
 });
 
 export const terminalInfoSchema = z.object({
   terminalId: z.string().min(1),
   cwd: z.string(),
-  projectName: z.string(),
-  provider: z.string(),
   status: z.enum(["running", "exited"]),
+  shell: z.string().optional(),
 });
 
 export const terminalListPayloadSchema = z.object({
@@ -207,8 +207,7 @@ export const terminalListPayloadSchema = z.object({
 export const terminalSpawnedPayloadSchema = z.object({
   terminalId: z.string().min(1),
   cwd: z.string(),
-  projectName: z.string(),
-  provider: z.string().optional(),
+  shell: z.string().optional(),
 });
 
 export const terminalKillPayloadSchema = z.object({
@@ -258,7 +257,7 @@ export const terminalFileReadResultPayloadSchema = z.object({
   requestId: z.string().min(1).optional(),
 });
 
-// ── Terminal status payloads (from Claude Code hooks) ────────────────
+// ── Legacy terminal status payloads ─────────────────────────────────
 
 export const terminalStatusPayloadSchema = z.object({
   phase: z.enum([
@@ -796,6 +795,13 @@ export const agentV2PermissionRequestPayloadSchema = agentPermissionSchema.exten
 // ── Protocol message type registry ──────────────────────────────────
 
 export const protocolMessageSchemas = {
+  "device.connect": sessionConnectPayloadSchema,
+  "device.ack": sessionAckPayloadSchema,
+  "device.resume": sessionResumePayloadSchema,
+  "device.heartbeat": sessionHeartbeatPayloadSchema,
+  "device.error": errorPayloadSchema,
+  "device.host_disconnected": sessionHostDisconnectedPayloadSchema,
+  "device.host_reconnected": sessionHostReconnectedPayloadSchema,
   "session.connect": sessionConnectPayloadSchema,
   "session.ack": sessionAckPayloadSchema,
   "session.resume": sessionResumePayloadSchema,
@@ -887,7 +893,8 @@ function generateId(): string {
 
 export function createEnvelope<T>(input: {
   type: ProtocolMessageType;
-  sessionId: string;
+  hostDeviceId?: string;
+  sessionId?: string;
   payload: T;
   id?: string;
   seq?: number;
@@ -896,10 +903,16 @@ export function createEnvelope<T>(input: {
   terminalId?: string;
   traceId?: string;
 }): Envelope {
+  const hostDeviceId = input.hostDeviceId ?? input.sessionId;
+  if (!hostDeviceId) {
+    throw new Error("createEnvelope requires hostDeviceId");
+  }
   return {
     id: input.id ?? generateId(),
     type: input.type,
-    sessionId: input.sessionId,
+    hostDeviceId,
+    // Transitional alias for internal code that is still being moved to v2.
+    sessionId: input.sessionId ?? hostDeviceId,
     terminalId: input.terminalId,
     deviceId: input.deviceId,
     timestamp: new Date().toISOString(),
@@ -911,7 +924,11 @@ export function createEnvelope<T>(input: {
 }
 
 export function parseEnvelope(raw: string): Envelope {
-  return envelopeSchema.parse(JSON.parse(raw));
+  const parsed = envelopeSchema.parse(JSON.parse(raw));
+  return {
+    ...parsed,
+    sessionId: parsed.sessionId ?? parsed.hostDeviceId,
+  };
 }
 
 export function serializeEnvelope(message: Envelope): string {

@@ -13,7 +13,8 @@ const PERMISSION_ACK_TIMEOUT_MS = 12_000;
 export const agentPermissionHttpBodySchema = z.discriminatedUnion("protocol", [
   z.object({
     protocol: z.literal("v2"),
-    sessionId: z.string().min(1),
+    hostDeviceId: z.string().min(1).optional(),
+    sessionId: z.string().min(1).optional(),
     conversationId: z.string().min(1),
     requestId: z.string().min(1),
     outcome: permissionOutcomeSchema,
@@ -23,7 +24,8 @@ export const agentPermissionHttpBodySchema = z.discriminatedUnion("protocol", [
   }),
   z.object({
     protocol: z.literal("legacy"),
-    sessionId: z.string().min(1),
+    hostDeviceId: z.string().min(1).optional(),
+    sessionId: z.string().min(1).optional(),
     conversationId: z.string().optional(),
     agentSessionId: z.string().optional(),
     requestId: z.string().min(1),
@@ -33,7 +35,8 @@ export const agentPermissionHttpBodySchema = z.discriminatedUnion("protocol", [
   }),
   z.object({
     protocol: z.literal("terminal"),
-    sessionId: z.string().min(1),
+    hostDeviceId: z.string().min(1).optional(),
+    sessionId: z.string().min(1).optional(),
     conversationId: z.string().optional(),
     requestId: z.string().min(1),
     outcome: permissionOutcomeSchema,
@@ -122,8 +125,9 @@ export async function forwardAgentPermissionHttp(input: {
   tokenManager: TokenManager;
 }): Promise<AgentPermissionHttpResult> {
   const { token, body, sessionManager, tokenManager } = input;
+  const hostDeviceId = body.hostDeviceId ?? body.sessionId;
 
-  if (!token || !tokenManager.owns(token, body.sessionId)) {
+  if (!hostDeviceId || !token || !tokenManager.owns(token, hostDeviceId)) {
     return {
       status: 401,
       body: {
@@ -133,7 +137,7 @@ export async function forwardAgentPermissionHttp(input: {
     };
   }
 
-  const session = sessionManager.get(body.sessionId);
+  const session = sessionManager.get(hostDeviceId);
   if (!session) {
     return {
       status: 404,
@@ -157,7 +161,7 @@ export async function forwardAgentPermissionHttp(input: {
   try {
     const envelopes = createPermissionEnvelopes(body);
     const waitsForDelivery = envelopes.some((envelope) => envelope.type === "permission.decision");
-    const ackPromise = waitsForDelivery ? waitForAck(body.sessionId, body.requestId) : null;
+    const ackPromise = waitsForDelivery ? waitForAck(hostDeviceId, body.requestId) : null;
     for (const envelope of envelopes) {
       session.host.socket.send(serializeEnvelope(envelope));
     }
@@ -227,6 +231,10 @@ export async function forwardAgentPermissionHttp(input: {
 }
 
 function createPermissionEnvelopes(body: AgentPermissionHttpBody) {
+  const hostDeviceId = body.hostDeviceId ?? body.sessionId;
+  if (!hostDeviceId) {
+    throw new Error("hostDeviceId is required");
+  }
   if (body.protocol === "v2") {
     const payload = parseTypedPayload("agent.v2.permission.respond", {
       conversationId: body.conversationId,
@@ -236,7 +244,7 @@ function createPermissionEnvelopes(body: AgentPermissionHttpBody) {
     });
     return [createEnvelope({
       type: "agent.v2.permission.respond",
-      sessionId: body.sessionId,
+      hostDeviceId,
       deviceId: "live-activity",
       payload,
     })];
@@ -251,7 +259,7 @@ function createPermissionEnvelopes(body: AgentPermissionHttpBody) {
     });
     const envelopes = [createEnvelope({
       type: "agent.permission.response",
-      sessionId: body.sessionId,
+      hostDeviceId,
       deviceId: "live-activity",
       payload: legacyPayload,
     })];
@@ -267,7 +275,7 @@ function createPermissionEnvelopes(body: AgentPermissionHttpBody) {
       });
       envelopes.push(createEnvelope({
         type: "permission.decision",
-        sessionId: body.sessionId,
+        hostDeviceId,
         terminalId: body.terminalId ?? "default",
         deviceId: "live-activity",
         payload: decisionPayload,
@@ -283,7 +291,7 @@ function createPermissionEnvelopes(body: AgentPermissionHttpBody) {
   });
   return [createEnvelope({
     type: "permission.decision",
-    sessionId: body.sessionId,
+    hostDeviceId,
     terminalId: body.terminalId ?? "default",
     deviceId: "live-activity",
     payload,

@@ -1,8 +1,8 @@
-import { randomInt, randomUUID } from "node:crypto";
+import { randomInt } from "node:crypto";
 import type { GatewayStateStore } from "./state-store.js";
 
 export interface PairingRecord {
-  sessionId: string;
+  hostDeviceId: string;
   pairingCode: string;
   expiresAt: number; // unix ms
   claimed: boolean;
@@ -36,11 +36,10 @@ export class PairingManager {
     }
   }
 
-  create(sessionId?: string): PairingRecord {
-    const id = sessionId ?? randomUUID();
+  create(hostDeviceId: string): PairingRecord {
     const code = String(randomInt(100000, 999999));
     const record: PairingRecord = {
-      sessionId: id,
+      hostDeviceId,
       pairingCode: code,
       expiresAt: Date.now() + PAIRING_TTL,
       claimed: false,
@@ -68,7 +67,7 @@ export class PairingManager {
     return record;
   }
 
-  getStatus(pairingCode: string): { status: string; expiresAt: number; sessionId: string } | { error: string; httpStatus: number } {
+  getStatus(pairingCode: string): { status: string; expiresAt: number; hostDeviceId: string } | { error: string; httpStatus: number } {
     const record = this.pairings.get(pairingCode);
     if (!record) {
       return { error: "pairing_not_found", httpStatus: 404 };
@@ -81,7 +80,7 @@ export class PairingManager {
     return {
       status: record.claimed ? "claimed" : "waiting",
       expiresAt: record.expiresAt,
-      sessionId: record.sessionId,
+      hostDeviceId: record.hostDeviceId,
     };
   }
 

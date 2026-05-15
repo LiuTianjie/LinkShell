@@ -77,21 +77,19 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 ```
 
 ```bash
-linkshell start --daemon --provider claude
+linkshell start --daemon
 ```
 
 CLI 会在后台启动内置 Gateway + 终端桥接，打印配对码和 QR 码。手机扫码即连。App 断开不影响后台进程。macOS 上会默认阻止系统闲置睡眠，所以锁屏后一般不会掉线。
 
-终端 provider 目前支持 `claude`、`codex`、`gemini`、`copilot` 和 `custom`。启用 `--agent-ui` 后，Agent Workspace 会自动检测支持 ACP/结构化协议的 Claude Code 与 Codex。
+终端现在就是配对设备上的通用远程 shell，不再选择 AI provider。Agent Workspace 是独立入口，启用 `--agent-ui` 后会自动检测支持结构化协议的 Claude Code 与 Codex。
 
 ## 命令一览
 
 ```bash
-linkshell start --daemon --provider claude   # 后台启动（内置 Gateway + 桥接）
-linkshell start --daemon --provider claude --no-keep-awake  # macOS：允许闲置睡眠
-linkshell start --provider claude             # 前台启动
-linkshell start --daemon --provider gemini    # 桥接 Gemini CLI
-linkshell start --daemon --provider copilot   # 桥接 GitHub Copilot CLI
+linkshell start --daemon                      # 后台启动（内置 Gateway + shell 桥接）
+linkshell start --daemon --no-keep-awake      # macOS：允许闲置睡眠
+linkshell start                               # 前台启动
 linkshell start --daemon --agent-ui           # 启用 Agent Workspace（自动检测 Claude/Codex）
 linkshell status                              # 查看运行状态
 linkshell stop                                # 停止所有后台进程
@@ -133,7 +131,7 @@ linkshell logout                              # 退出登录
 ### 最简模式（内置 Gateway，局域网）
 
 ```bash
-linkshell start --daemon --provider claude
+linkshell start --daemon
 ```
 
 手机和电脑在同一 WiFi，CLI 自动检测局域网 IP 生成 QR 码。
@@ -143,21 +141,21 @@ linkshell start --daemon --provider claude
 `linkshell start` 会在 bridge 运行期间默认开启 macOS 保活。内部使用 `caffeinate -i -w <bridge-pid>` 阻止系统闲置睡眠，但不会强制点亮屏幕，也不会解锁电脑。
 
 ```bash
-linkshell start --daemon --provider claude
+linkshell start --daemon
 ```
 
 如果更在意电量，希望允许系统闲置睡眠：
 
 ```bash
-linkshell start --daemon --provider claude --no-keep-awake
+linkshell start --daemon --no-keep-awake
 # 或
-LINKSHELL_KEEP_AWAKE=0 linkshell start --daemon --provider claude
+LINKSHELL_KEEP_AWAKE=0 linkshell start --daemon
 ```
 
 ### 远程桌面查看
 
 ```bash
-linkshell start --daemon --provider claude --screen
+linkshell start --daemon --screen
 ```
 
 加 `--screen` 后，App 端可以切换到 Desktop 标签查看电脑桌面。支持 WebRTC（30fps）和截图流（fallback）两种模式，自动选择最优方案。
@@ -221,7 +219,7 @@ linkshell gateway --daemon --port 8787
 在你的电脑上：
 
 ```bash
-linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider claude
+linkshell start --daemon --gateway wss://your-server.com:8787/ws
 ```
 
 也可以用 Docker 部署 Gateway：
@@ -267,7 +265,7 @@ pnpm dev:web        # Web 调试端 (localhost:5173)
 pnpm dev:app        # Expo App
 
 # CLI 本地联调
-pnpm --filter linkshell-cli dev start --provider custom --command bash
+pnpm --filter linkshell-cli dev start --command bash
 ```
 
 ## 交接文档
@@ -304,13 +302,13 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 |------|------|------|
 | `GET` | `/healthz` | 健康检查 |
 | `POST` | `/pairings` | 创建配对（6 位 code，10 分钟有效） |
-| `POST` | `/pairings/claim` | 用 code 换取 sessionId |
+| `POST` | `/pairings/claim` | 用 code 换取 hostDeviceId + 设备授权 |
 | `GET` | `/pairings/:code/status` | 查询配对状态 |
-| `GET` | `/sessions` | 列出活跃会话 |
-| `GET` | `/sessions/:id` | 会话详情 |
-| `WS` | `/ws?sessionId=&role=` | 实时连接 |
-| `GET/POST` | `/tunnel/:sessionId/:port/**` | HTTP 端口转发 |
-| `WS` | `/tunnel/:sessionId/:port/**` | WebSocket 端口转发（HMR） |
+| `GET` | `/devices` | 列出已授权主机设备 |
+| `GET` | `/devices/:hostDeviceId` | 主机设备状态和元数据 |
+| `WS` | `/ws?hostDeviceId=&role=` | 实时连接 |
+| `GET/POST` | `/tunnel/:hostDeviceId/:port/**` | HTTP 端口转发 |
+| `WS` | `/tunnel/:hostDeviceId/:port/**` | WebSocket 端口转发（HMR） |
 
 ## 可靠性
 

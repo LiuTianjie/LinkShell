@@ -179,11 +179,11 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: ^0.2.47
-        version: 0.2.47
+        specifier: workspace:*
+        version: link:../gateway
       '@linkshell/protocol':
-        specifier: ^0.2.34
-        version: 0.2.34
+        specifier: workspace:*
+        version: link:../shared-protocol
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -220,8 +220,8 @@ importers:
   packages/gateway:
     dependencies:
       '@linkshell/protocol':
-        specifier: ^0.2.34
-        version: 0.2.34
+        specifier: workspace:*
+        version: link:../shared-protocol
       ws:
         specifier: ^8.18.1
         version: 8.20.0
@@ -1369,12 +1369,6 @@ packages:
 
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
-
-  '@linkshell/gateway@0.2.47':
-    resolution: {integrity: sha512-p9EjBBk3nEFMMIlbK/vSaUp7uX55XI3cquSm6ZqlYlklpMVDg/376T0gk6re1w02sdYZfgc9qmxBzWdyF1ubBA==}
-
-  '@linkshell/protocol@0.2.34':
-    resolution: {integrity: sha512-iqxlCGr0UWMXMswlsIJAZKxhteQTFc18FbYU1F8cxRQVDzXGOuid2icWRXGyZesPB2Ac9e1ns8aczqHaijslRQ==}
 
   '@minhducsun2002/leb128@1.0.0':
     resolution: {integrity: sha512-eFrYUPDVHeuwWHluTG1kwNQUEUcFjVKYwPkU8z9DR1JH3AW7JtJsG9cRVGmwz809kKtGfwGJj58juCZxEvnI/g==}
@@ -6471,19 +6465,6 @@ snapshots:
 
   '@leichtgewicht/ip-codec@2.0.5':
     optional: true
-
-  '@linkshell/gateway@0.2.47':
-    dependencies:
-      '@linkshell/protocol': 0.2.34
-      ws: 8.20.0
-      zod: 3.25.76
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
-  '@linkshell/protocol@0.2.34':
-    dependencies:
-      zod: 3.25.76
 
   '@minhducsun2002/leb128@1.0.0':
     optional: true

@@ -48,6 +48,7 @@ interface AgentWorkspaceScreenProps {
 }
 
 interface AgentTarget {
+  hostDeviceId: string;
   sessionId: string;
   serverUrl: string;
   machineId?: string;
@@ -60,14 +61,13 @@ interface AgentTarget {
 
 interface GatewayHostSession {
   id: string;
+  hostDeviceId?: string;
   serverUrl: string;
   state?: string | null;
   hasHost?: boolean;
   machineId?: string | null;
   hostname?: string | null;
-  projectName?: string | null;
   cwd?: string | null;
-  provider?: string | null;
   lastActivity?: number;
 }
 
@@ -77,11 +77,12 @@ const PROVIDER_META: Record<AgentProvider, { label: string; subtitle: string; ic
   custom: { label: "Custom", subtitle: "自定义 Agent 命令", icon: "gearshape.fill" },
 };
 
-const HIDDEN_AGENT_PROJECT_KEYS = "@linkshell/agent-hidden-projects:v1";
+const HIDDEN_AGENT_PROJECT_KEYS = "@linkshell/agent-hidden-projects:v2";
 
 interface AgentProjectGroup {
   id: string;
   serverUrl: string;
+  hostDeviceId: string;
   sessionId: string;
   cwd: string;
   title: string;
@@ -184,8 +185,8 @@ function providerReason(
   return capabilities?.error;
 }
 
-function projectKey(serverUrl: string, machineIdOrSessionId: string, cwd: string): string {
-  return [normalizeServerUrl(serverUrl), machineIdOrSessionId, cwd.trim()].join("\u0000");
+function projectKey(serverUrl: string, hostDeviceId: string, cwd: string): string {
+  return [normalizeServerUrl(serverUrl), hostDeviceId, cwd.trim()].join("\u0000");
 }
 
 function projectPathKey(serverUrl: string, cwd: string, provider?: string): string {
@@ -203,8 +204,8 @@ function normalizeDeviceName(value: string | null | undefined): string | undefin
   return trimmed ? trimmed.toLowerCase() : undefined;
 }
 
-function deviceProjectKey(cwd: string, deviceName?: string | null, serverUrl?: string | null): string {
-  const normalizedDevice = normalizeDeviceName(deviceName);
+function deviceProjectKey(cwd: string, hostDeviceId?: string | null, serverUrl?: string | null): string {
+  const normalizedDevice = normalizeDeviceName(hostDeviceId);
   if (normalizedDevice) return `device:${normalizedDevice}\u0000${cwd.trim()}`;
   return `server:${normalizeServerUrl(serverUrl ?? "")}\u0000${cwd.trim()}`;
 }
@@ -600,11 +601,12 @@ export function AgentWorkspaceScreen({
         if (token) headers.Authorization = `Bearer ${token}`;
         const deviceResults = await Promise.allSettled(
           servers.map(async (server) => {
-            const response = await fetchWithTimeout(`${server.url}/sessions`, { headers });
+            const response = await fetchWithTimeout(`${server.url}/devices`, { headers });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const body = (await response.json()) as { sessions?: GatewayHostSession[] };
-            return (body.sessions ?? []).map((session) => ({
+            const body = (await response.json()) as { devices?: GatewayHostSession[] };
+            return (body.devices ?? []).map((session) => ({
               ...session,
+              id: session.hostDeviceId ?? session.id,
               serverUrl: server.url,
             }));
           }),
@@ -614,6 +616,7 @@ export function AgentWorkspaceScreen({
             const sessions = await fetchMySessions(gateway.url);
             return sessions.map((session) => ({
               ...session,
+              id: session.hostDeviceId ?? session.id,
               serverUrl: gateway.url,
             }));
           }),
@@ -644,33 +647,34 @@ export function AgentWorkspaceScreen({
   const targets = useMemo(() => {
     const bySession = new Map<string, AgentTarget>();
     for (const session of gatewayHosts) {
+      const hostDeviceId = session.hostDeviceId ?? session.id;
       bySession.set(session.id, {
-        sessionId: session.id,
+        hostDeviceId,
+        sessionId: hostDeviceId,
         serverUrl: session.serverUrl,
         machineId: session.machineId ?? undefined,
-        hostname: session.hostname ?? session.projectName ?? session.id.slice(0, 8),
+        hostname: session.hostname ?? hostDeviceId.slice(0, 8),
         cwd: session.cwd ?? undefined,
-        projectName: session.projectName ?? undefined,
-        provider: normalizeProvider(session.provider),
         status: "online",
       });
     }
     for (const session of onlineSessions) {
       bySession.set(session.sessionId, {
+        hostDeviceId: session.hostDeviceId,
         sessionId: session.sessionId,
         serverUrl: session.gatewayUrl,
         machineId: session.machineId ?? undefined,
-        hostname: session.hostname ?? session.projectName ?? session.sessionId.slice(0, 8),
+        hostname: session.hostname ?? session.hostDeviceId.slice(0, 8),
         cwd: session.cwd || [...session.terminals.values()][0]?.cwd || undefined,
         projectName: session.projectName ?? undefined,
-        provider: normalizeProvider(session.provider),
         status: "online",
       });
     }
     for (const project of projects) {
-      if (bySession.has(project.sessionId)) {
-        const existing = bySession.get(project.sessionId)!;
-        bySession.set(project.sessionId, {
+      const hostDeviceId = project.hostDeviceId ?? project.sessionId;
+      if (bySession.has(hostDeviceId)) {
+        const existing = bySession.get(hostDeviceId)!;
+        bySession.set(hostDeviceId, {
           ...existing,
           hostname: existing.hostname ?? project.hostname,
           cwd: existing.cwd ?? project.cwd,
@@ -718,42 +722,36 @@ export function AgentWorkspaceScreen({
     for (const target of targets) {
       if (target.cwd) targetByPath.set(projectPathKey(target.serverUrl, target.cwd), target);
       if (target.cwd) {
-        setUniqueTarget(targetByDeviceProject, deviceProjectKey(target.cwd, target.machineId ?? target.hostname ?? target.projectName, target.serverUrl), target);
+        setUniqueTarget(targetByDeviceProject, deviceProjectKey(target.cwd, target.hostDeviceId, target.serverUrl), target);
         setUniqueTarget(targetByFolder, projectFolderKey(target.cwd), target);
       }
     }
     const projectByExact = new Map<string, ProjectRecord>();
     const projectByDeviceProject = new Map<string, ProjectRecord>();
     for (const project of projects) {
-      projectByExact.set(projectKey(project.serverUrl, project.machineId ?? project.sessionId, project.cwd), project);
-      projectByDeviceProject.set(deviceProjectKey(project.cwd, project.machineId ?? project.hostname ?? project.projectName, project.serverUrl), project);
+      projectByExact.set(projectKey(project.serverUrl, project.hostDeviceId ?? project.sessionId, project.cwd), project);
+      projectByDeviceProject.set(deviceProjectKey(project.cwd, project.hostDeviceId ?? project.sessionId, project.serverUrl), project);
     }
 
     const groups = new Map<string, AgentProjectGroup>();
     for (const conversation of workspace.conversations) {
       if (conversation.archived || !conversation.cwd) continue;
       if (hiddenProjectKeys.has(conversationHiddenKey(conversation.id))) continue;
-      const exactProject = projectByExact.get(projectKey(conversation.serverUrl, conversation.machineId ?? conversation.sessionId, conversation.cwd));
+      const exactProject = projectByExact.get(projectKey(conversation.serverUrl, conversation.hostDeviceId ?? conversation.sessionId, conversation.cwd));
       const deviceKey = deviceProjectKey(
         conversation.cwd,
-        conversation.machineId ?? exactProject?.machineId ?? exactProject?.hostname ?? exactProject?.projectName,
+        conversation.hostDeviceId ?? exactProject?.hostDeviceId ?? conversation.sessionId,
         conversation.serverUrl,
       );
       const target =
-        targetBySession.get(conversation.sessionId) ??
-        (conversation.machineId
-          ? targets.find((item) =>
-              item.machineId === conversation.machineId &&
-              normalizeServerUrl(item.serverUrl) === normalizeServerUrl(conversation.serverUrl)
-            )
-          : undefined) ??
+        targetBySession.get(conversation.hostDeviceId ?? conversation.sessionId) ??
         targetByPath.get(projectPathKey(conversation.serverUrl, conversation.cwd)) ??
         targetByDeviceProject.get(deviceKey) ??
         targetByFolder.get(projectFolderKey(conversation.cwd)) ??
         undefined;
       const project = exactProject ?? projectByDeviceProject.get(deviceKey);
       const id = target
-        ? deviceProjectKey(conversation.cwd, target.machineId ?? target.hostname ?? target.projectName, target.serverUrl)
+        ? deviceProjectKey(conversation.cwd, target.hostDeviceId, target.serverUrl)
         : deviceKey;
       if (hiddenProjectKeys.has(`project:${id}`)) continue;
       const existing = groups.get(id);
@@ -768,6 +766,7 @@ export function AgentWorkspaceScreen({
       groups.set(id, {
         id,
         serverUrl: target?.serverUrl ?? conversation.serverUrl,
+        hostDeviceId: target?.hostDeviceId ?? conversation.hostDeviceId ?? conversation.sessionId,
         sessionId: target?.sessionId ?? conversation.sessionId,
         cwd: conversation.cwd,
         title: project?.projectName || titleFromCwd(conversation.cwd),
@@ -781,13 +780,13 @@ export function AgentWorkspaceScreen({
 
     for (const target of targets) {
       if (!target.cwd) continue;
-      const id = deviceProjectKey(target.cwd, target.machineId ?? target.hostname ?? target.projectName, target.serverUrl);
+      const id = deviceProjectKey(target.cwd, target.hostDeviceId, target.serverUrl);
       if (hiddenProjectKeys.has(`project:${id}`)) continue;
       const existing = groups.get(id);
       const project =
         projects.find((item) =>
           item.cwd === target.cwd &&
-          (item.machineId ? item.machineId === target.machineId : item.sessionId === target.sessionId)
+          ((item.hostDeviceId ?? item.sessionId) === target.hostDeviceId)
         ) ??
         projectByDeviceProject.get(id);
       if (existing) {
@@ -802,6 +801,7 @@ export function AgentWorkspaceScreen({
       groups.set(id, {
         id,
         serverUrl: target.serverUrl,
+        hostDeviceId: target.hostDeviceId,
         sessionId: target.sessionId,
         cwd: target.cwd,
         title: project?.projectName || target.projectName || titleFromCwd(target.cwd),
@@ -966,6 +966,7 @@ export function AgentWorkspaceScreen({
     try {
       const result = await workspace.openConversation({
         sessionId: selectedTarget.sessionId,
+        hostDeviceId: selectedTarget.hostDeviceId,
         serverUrl: selectedTarget.serverUrl,
         cwd: effectiveCwd,
         provider: selectedProvider,
@@ -977,15 +978,16 @@ export function AgentWorkspaceScreen({
       }
       touchProject({
         serverUrl: selectedTarget.serverUrl,
+        hostDeviceId: selectedTarget.hostDeviceId,
         sessionId: selectedTarget.sessionId,
         machineId: selectedTarget.machineId,
         cwd: effectiveCwd,
       }).catch(() => {});
-      const exactKey = projectKey(selectedTarget.serverUrl, selectedTarget.machineId ?? selectedTarget.sessionId, effectiveCwd);
+      const exactKey = projectKey(selectedTarget.serverUrl, selectedTarget.hostDeviceId, effectiveCwd);
       const pathKey = projectPathKey(selectedTarget.serverUrl, effectiveCwd);
       const groupId = deviceProjectKey(
         effectiveCwd,
-        selectedTarget.machineId ?? selectedTarget.hostname ?? selectedTarget.projectName,
+        selectedTarget.hostDeviceId,
         selectedTarget.serverUrl,
       );
       setHiddenProjectKeys((prev) => {
@@ -1041,6 +1043,7 @@ export function AgentWorkspaceScreen({
         conversationId: latest.id,
         agentSessionId: latest.agentSessionId,
         sessionId: project.target.sessionId,
+        hostDeviceId: project.target.hostDeviceId,
         machineId: project.target.machineId,
         serverUrl: project.target.serverUrl,
         cwd: project.cwd,
@@ -1471,7 +1474,7 @@ export function AgentWorkspaceScreen({
             {archivedExpanded ? (
               <View style={{ paddingLeft: 28, gap: 4 }}>
                 {archivedItems.map((conversation) => {
-                  const target = targets.find((item) => item.sessionId === conversation.sessionId);
+                  const target = targets.find((item) => item.hostDeviceId === (conversation.hostDeviceId ?? conversation.sessionId));
                   return (
                     <Pressable
                       key={conversation.id}
@@ -1560,7 +1563,7 @@ export function AgentWorkspaceScreen({
                     key={`${target.serverUrl}:${target.sessionId}`}
                     onPress={() => {
                       setSelectedSessionId(target.sessionId);
-                      const project = projects.find((item) => item.sessionId === target.sessionId);
+                      const project = projects.find((item) => (item.hostDeviceId ?? item.sessionId) === target.hostDeviceId);
                       setSelectedProjectId(project?.id ?? null);
                       setCustomCwd(project?.cwd ?? target.cwd ?? "");
                     }}

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { BridgeSession } from "./runtime/bridge-session.js";
-import { resolveProviderConfig } from "./providers.js";
+import { resolveShellConfig } from "./providers.js";
 import { loadConfig } from "./config.js";
 import { runDoctor } from "./commands/doctor.js";
 import { runSetup } from "./commands/setup.js";
@@ -22,7 +22,7 @@ const program = new Command();
 program
   .name("linkshell")
   .description(
-    "Bridge a local Claude/Codex terminal session to a remote gateway",
+    "Bridge a local terminal device to a remote gateway",
   )
   .version(pkg.version);
 
@@ -30,7 +30,7 @@ program
 
 program
   .command("start")
-  .description("Start a bridge session (with built-in or remote gateway)")
+  .description("Start a device bridge (with built-in or remote gateway)")
   .option(
     "--gateway <url>",
     "Gateway websocket URL (omit to start built-in gateway)",
@@ -42,13 +42,8 @@ program
     config.pairingGateway,
   )
   .option("--port <port>", "Port for built-in gateway", "8787")
-  .option("--session-id <id>", "Session identifier (auto-created if omitted)")
-  .option(
-    "--provider <provider>",
-    "claude | codex | gemini | copilot | custom",
-    config.provider ?? "claude",
-  )
-  .option("--command <command>", "Override provider executable", config.command)
+  .option("--host-device-id <id>", "Host device identifier (machine id by default)")
+  .option("--command <command>", "Override shell executable", config.command)
   .option(
     "--client-name <name>",
     "Display name for this CLI",
@@ -101,7 +96,6 @@ program
       if (options.pairingGateway)
         childArgs.push("--pairing-gateway", options.pairingGateway);
       childArgs.push("--port", String(options.port));
-      childArgs.push("--provider", options.provider);
       if (options.command) childArgs.push("--command", options.command);
       childArgs.push("--client-name", options.clientName);
       if (options.hostname) childArgs.push("--hostname", options.hostname);
@@ -115,7 +109,7 @@ program
         childArgs.push("--agent-provider", options.agentProvider);
       if (options.agentCommand)
         childArgs.push("--agent-command", options.agentCommand);
-      if (options.sessionId) childArgs.push("--session-id", options.sessionId);
+      if (options.hostDeviceId) childArgs.push("--host-device-id", options.hostDeviceId);
       // Pass through extra args
       const extra = command.args.filter((v: string) => v !== "--");
       if (extra.length) childArgs.push("--", ...extra);
@@ -124,7 +118,7 @@ program
       daemon.saveMetadata("bridge", { keepAwake, startedAt: Date.now() });
       process.stderr.write(`\n  LinkShell bridge started in background\n`);
       process.stderr.write(`  PID: ${pid}\n`);
-      process.stderr.write(`  Provider: ${options.provider}\n`);
+      process.stderr.write(`  Terminal: system shell\n`);
       process.stderr.write(
         `  Keep awake: ${keepAwake ? "enabled (use --no-keep-awake to disable)" : "disabled"}\n`,
       );
@@ -141,8 +135,7 @@ program
     const passthroughArgs = command.args.filter(
       (value: string) => value !== "--",
     );
-    const providerConfig = resolveProviderConfig({
-      provider: options.provider,
+    const providerConfig = resolveShellConfig({
       command: options.command,
       args: passthroughArgs,
     });
@@ -197,7 +190,7 @@ program
       gatewayUrl,
       gatewayHttpUrl,
       pairingGateway,
-      sessionId: options.sessionId,
+      hostDeviceId: options.hostDeviceId,
       cols: Number(options.cols),
       rows: Number(options.rows),
       clientName: options.clientName,
@@ -485,12 +478,10 @@ program
       return;
     }
 
-    const provider = config.provider ?? "claude";
     const childArgs = [
       "start",
       "--_foreground-bridge",
       "--gateway", gwWsUrl,
-      "--provider", provider,
       "--client-name", config.clientName ?? "local-cli",
       "--cols", String(config.cols ?? 120),
       "--rows", String(config.rows ?? 36),
@@ -505,10 +496,10 @@ program
     daemon.saveMetadata("bridge", { keepAwake, startedAt: Date.now() });
     process.stderr.write(`\n  \x1b[32m✓\x1b[0m Bridge started in background (PID ${pid})\n`);
     process.stderr.write(`    Gateway: ${chosen.name}\n`);
-    process.stderr.write(`    Provider: ${provider}\n`);
+    process.stderr.write(`    Terminal: system shell\n`);
     process.stderr.write(`    Keep awake: ${keepAwake ? "enabled" : "disabled"}\n`);
     process.stderr.write(`    Desktop: enabled\n`);
-    process.stderr.write(`    Agent GUI: enabled (Codex app-server)\n`);
+    process.stderr.write(`    Agent GUI: enabled\n`);
     process.stderr.write(`    Open the LinkShell app on your phone to connect.\n\n`);
     process.stderr.write(`    Stop:   linkshell stop\n`);
     process.stderr.write(`    Status: linkshell status\n`);
@@ -525,7 +516,7 @@ program
 
 program
   .command("list")
-  .description("List your sessions on official gateways")
+  .description("List your devices on official gateways")
   .action(async () => {
     const { getValidToken, loadAuth, SUPABASE_URL, SUPABASE_ANON_KEY } =
       await import("./auth.js");
@@ -567,22 +558,23 @@ program
 
     for (const gw of gateways) {
       const label = gw.region ? `${gw.name} (${gw.region})` : gw.name;
-      // Fetch user's sessions on this gateway
-      let sessions: {
+      // Fetch user's devices on this gateway
+      let devices: {
         id: string;
-        provider: string | null;
-        projectName: string | null;
+        hostDeviceId: string;
+        hostname: string | null;
+        platform: string | null;
         hasHost: boolean;
         lastActivity: number;
       }[] = [];
       try {
-        const res = await fetch(`${gw.url}/sessions/mine`, {
+        const res = await fetch(`${gw.url}/devices/mine`, {
           headers: { Authorization: `Bearer ${token}` },
           signal: AbortSignal.timeout(5_000),
         });
         if (res.ok) {
-          const body = (await res.json()) as { sessions: typeof sessions };
-          sessions = body.sessions;
+          const body = (await res.json()) as { devices: typeof devices };
+          devices = body.devices;
         }
       } catch {}
 
@@ -590,16 +582,16 @@ program
       const wsUrl = gw.url.replace(/\/$/, "").replace(/^https:/, "wss:").replace(/^http:/, "ws:") + "/ws";
       process.stderr.write(`    ${wsUrl}\n`);
 
-      if (sessions.length === 0) {
-        process.stderr.write("    (no active sessions)\n\n");
+      if (devices.length === 0) {
+        process.stderr.write("    (no active devices)\n\n");
       } else {
-        for (const s of sessions) {
+        for (const s of devices) {
           const ago = Math.round((Date.now() - s.lastActivity) / 60_000);
           const agoStr = ago < 1 ? "just now" : `${ago}m ago`;
-          const info = [s.provider, s.projectName].filter(Boolean).join(" · ");
+          const info = [s.hostname, s.platform].filter(Boolean).join(" · ");
           const hostIcon = s.hasHost ? "\x1b[32m●\x1b[0m" : "\x1b[31m●\x1b[0m";
           process.stderr.write(
-            `    └ ${hostIcon} ${s.id.slice(0, 8)} — ${info || "unknown"} · ${agoStr}\n`,
+            `    └ ${hostIcon} ${s.hostDeviceId.slice(0, 8)} — ${info || "unknown device"} · ${agoStr}\n`,
           );
         }
         process.stderr.write("\n");
@@ -607,7 +599,7 @@ program
     }
 
     process.stderr.write(
-      "  Connect: linkshell start --gateway <url> --provider claude\n\n",
+      "  Connect: linkshell start --gateway <url>\n\n",
     );
   });
 

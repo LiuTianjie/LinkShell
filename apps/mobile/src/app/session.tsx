@@ -1,20 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { useAppContext } from "../contexts/AppContext";
 import { SessionScreen } from "../screens/SessionScreen";
 import { FolderPickerModal } from "../components/FolderPickerModal";
 import { useTheme } from "../theme";
-import { getValidSession } from "../lib/supabase";
 
 export default function SessionRoute() {
   const ctx = useAppContext();
   const { theme } = useTheme();
   const { manager, activeSession } = ctx;
-  const [authToken, setAuthToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    getValidSession().then((s) => setAuthToken(s?.accessToken ?? null));
-  }, [activeSession?.sessionId]);
-
   if (!activeSession) return null;
 
   return (
@@ -54,16 +47,8 @@ export default function SessionRoute() {
         terminals={activeSession.terminals}
         onKillTerminal={manager.killTerminal}
         onRemoveTerminal={manager.removeTerminal}
-        gatewayUrl={activeSession.gatewayUrl}
-        deviceToken={manager.deviceToken}
-        authToken={authToken}
         historyEntries={manager.historyEntries}
         onRequestHistory={manager.requestHistory}
-        agent={activeSession.agent}
-        onInitializeAgent={manager.initializeAgent}
-        onSendAgentPrompt={manager.sendAgentPrompt}
-        onCancelAgent={manager.cancelAgent}
-        onSendAgentPermissionResponse={manager.sendAgentPermissionResponse}
       />
       <FolderPickerModal
         visible={ctx.folderPickerVisible}

@@ -20,7 +20,7 @@ export function handleSocketMessage(
   socket: WebSocket,
   raw: string,
   role: "host" | "client",
-  sessionId: string,
+  hostDeviceId: string,
   deviceId: string,
   sessions: SessionManager,
 ): void {
@@ -28,23 +28,23 @@ export function handleSocketMessage(
   try {
     envelope = parseEnvelope(raw);
   } catch {
-    sendSessionError(socket, sessionId, "invalid_message", "Failed to parse envelope");
+    sendSessionError(socket, hostDeviceId, "invalid_message", "Failed to parse envelope");
     return;
   }
 
-  if (envelope.sessionId !== sessionId) {
+  if (envelope.hostDeviceId !== hostDeviceId) {
     sendSessionError(
       socket,
-      sessionId,
+      hostDeviceId,
       "invalid_message",
-      "Envelope sessionId does not match connection sessionId",
+      "Envelope hostDeviceId does not match connection hostDeviceId",
     );
     return;
   }
 
-  const session = sessions.get(sessionId);
+  const session = sessions.get(hostDeviceId);
   if (!session) {
-    sendSessionError(socket, sessionId, "session_not_found", "Session not found");
+    sendSessionError(socket, hostDeviceId, "device_not_found", "Device not found");
     return;
   }
 
@@ -65,13 +65,13 @@ export function handleSocketMessage(
     if (error instanceof ZodError) {
       sendSessionError(
         socket,
-        sessionId,
+        hostDeviceId,
         "invalid_message",
         error.errors[0]?.message ?? "Invalid message payload",
       );
       return;
     }
-    sendSessionError(socket, sessionId, "invalid_message", "Failed to handle message");
+    sendSessionError(socket, hostDeviceId, "invalid_message", "Failed to handle message");
   }
 }
 
@@ -81,7 +81,7 @@ function isProtocolMessageType(type: string): type is ProtocolMessageType {
 
 function sendSessionError(
   socket: WebSocket,
-  sessionId: string,
+  hostDeviceId: string,
   code: string,
   message: string,
 ): void {
@@ -89,8 +89,8 @@ function sendSessionError(
   socket.send(
     serializeEnvelope(
       createEnvelope({
-        type: "session.error",
-        sessionId,
+        type: "device.error",
+        hostDeviceId,
         payload: { code, message },
       }),
     ),
@@ -103,18 +103,20 @@ function handleHostMessage(
   sessions: SessionManager,
 ): void {
   switch (envelope.type) {
+    case "device.connect":
     case "session.connect": {
       // Extract metadata from host's connect message
       const p = parseTypedPayload("session.connect", envelope.payload);
-      if (p.provider || p.machineId || p.hostname || p.platform || p.cwd || p.projectName) {
+      if (p.machineId || p.hostname || p.platform || p.cwd || p.capabilities) {
         sessions.setMetadata(
           session.id,
-          p.provider ?? undefined,
+          undefined,
           p.machineId ?? undefined,
           p.hostname ?? undefined,
           p.platform ?? undefined,
           p.cwd ?? undefined,
-          p.projectName ?? undefined,
+          undefined,
+          p.capabilities ?? undefined,
         );
       }
       break;
@@ -129,6 +131,7 @@ function handleHostMessage(
       broadcastToClients(session, envelope);
       break;
     }
+    case "device.heartbeat":
     case "session.heartbeat":
       break;
     case "permission.decision.result": {
@@ -213,8 +216,8 @@ function handleClientMessage(
     socket.send(
       serializeEnvelope(
         createEnvelope({
-          type: "session.error",
-          sessionId: session.id,
+          type: "device.error",
+          hostDeviceId: session.id,
           payload: {
             code: "control_conflict",
             message: "Not the controller",
@@ -236,11 +239,13 @@ function handleClientMessage(
       sendToHost(session, envelope);
       break;
     }
+    case "device.ack":
     case "session.ack": {
       // Forward ACK to host
       sendToHost(session, envelope);
       break;
     }
+    case "device.resume":
     case "session.resume": {
       const p = parseTypedPayload("session.resume", envelope.payload);
       // Replay from gateway buffer first
@@ -255,7 +260,7 @@ function handleClientMessage(
           serializeEnvelope(
             createEnvelope({
               type: "terminal.output",
-              sessionId: session.id,
+              hostDeviceId: session.id,
               terminalId: msg.terminalId,
               seq: msg.seq,
               payload: { ...payload, isReplay: true },
@@ -284,7 +289,7 @@ function handleClientMessage(
       sessions.claimControl(session.id, deviceId);
       const grantMsg = createEnvelope({
         type: "control.grant",
-        sessionId: session.id,
+        hostDeviceId: session.id,
         payload: { deviceId },
       });
       // Broadcast to ALL clients so previous controller updates its state
@@ -296,13 +301,14 @@ function handleClientMessage(
       sessions.releaseControl(session.id, deviceId);
       const releaseMsg = createEnvelope({
         type: "control.release",
-        sessionId: session.id,
+        hostDeviceId: session.id,
         payload: { deviceId },
       });
       broadcastToClients(session, releaseMsg);
       sendToHost(session, releaseMsg);
       break;
     }
+    case "device.heartbeat":
     case "session.heartbeat":
       break;
     // Screen sharing: client → host

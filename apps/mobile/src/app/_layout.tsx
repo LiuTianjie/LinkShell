@@ -21,7 +21,8 @@ import { parsePairingLink } from "../utils/pairing-link";
 import { useAgentLiveActivity } from "../hooks/useAgentLiveActivity";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
-const LAST_SESSION_KEY = "@linkshell/last_session";
+const LAST_DEVICE_KEY = "@linkshell/last_device:v2";
+const LEGACY_LAST_SESSION_KEY = "@linkshell/last_session";
 
 export default function RootLayout() {
   return (
@@ -143,17 +144,17 @@ function AppInner() {
       if (lastSavedSessionsRef.current.has(sid)) continue;
       if (info.status === "idle" || info.status === "claiming") continue;
       lastSavedSessionsRef.current.add(sid);
-      addToHistory({ serverUrl: info.gatewayUrl, sessionId: sid }).catch(() => {
+      addToHistory({ serverUrl: info.gatewayUrl, hostDeviceId: info.hostDeviceId, sessionId: sid }).catch(() => {
         lastSavedSessionsRef.current.delete(sid);
       });
       addServer(info.gatewayUrl).catch(() => {});
       const authHeaders: Record<string, string> = {};
       if (manager.deviceToken) authHeaders["Authorization"] = `Bearer ${manager.deviceToken}`;
-      fetchWithTimeout(`${info.gatewayUrl}/sessions`, { headers: authHeaders })
+      fetchWithTimeout(`${info.gatewayUrl}/devices`, { headers: authHeaders })
         .then((res) => (res.ok ? res.json() : null))
         .then((body: any) => {
           if (!body) return;
-          const match = body.sessions?.find((s: any) => s.id === sid);
+          const match = body.devices?.find((s: any) => (s.hostDeviceId ?? s.id) === sid);
           if (match) enrichHistory(sid, match);
         })
         .catch(() => {});
@@ -167,6 +168,7 @@ function AppInner() {
     for (const [sid, info] of manager.sessions) {
       const base = {
         serverUrl: info.gatewayUrl,
+        hostDeviceId: info.hostDeviceId,
         sessionId: sid,
         machineId: info.machineId ?? undefined,
         hostname: info.hostname ?? undefined,
@@ -235,11 +237,13 @@ function AppInner() {
   const handleForeground = useCallback(async () => {
     if (manager.sessions.size === 0) {
       try {
-        const raw = await AsyncStorage.getItem(LAST_SESSION_KEY);
+        const raw = await AsyncStorage.getItem(LAST_DEVICE_KEY) ?? await AsyncStorage.getItem(LEGACY_LAST_SESSION_KEY);
         if (raw) {
-          const last = JSON.parse(raw) as { gateway: string; sessionId: string };
+          const last = JSON.parse(raw) as { gateway: string; hostDeviceId?: string; sessionId?: string };
           setGatewayBaseUrl(last.gateway);
-          manager.connectToSession(last.sessionId, last.gateway);
+          const hostDeviceId = last.hostDeviceId ?? last.sessionId;
+          if (!hostDeviceId) return;
+          manager.connectToDevice(hostDeviceId, last.gateway);
           router.push("/session");
         }
       } catch {}
@@ -250,7 +254,7 @@ function AppInner() {
     if (manager.activeSessionId) {
       const info = manager.sessions.get(manager.activeSessionId);
       if (info) {
-        await AsyncStorage.setItem(LAST_SESSION_KEY, JSON.stringify({ gateway: info.gatewayUrl, sessionId: manager.activeSessionId }));
+        await AsyncStorage.setItem(LAST_DEVICE_KEY, JSON.stringify({ gateway: info.gatewayUrl, hostDeviceId: info.hostDeviceId }));
       }
     }
   }, [manager]);
@@ -273,7 +277,7 @@ function AppInner() {
   const handleDisconnectSession = useCallback((sessionId: string) => {
     manager.disconnectSession(sessionId);
     if (manager.sessions.size <= 1) {
-      AsyncStorage.removeItem(LAST_SESSION_KEY);
+      AsyncStorage.removeItem(LAST_DEVICE_KEY);
       router.back();
     }
   }, [manager, router]);

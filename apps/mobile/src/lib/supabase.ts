@@ -260,21 +260,20 @@ export async function fetchOfficialGateways(): Promise<OfficialGateway[]> {
 }
 
 /**
- * Fetch user's sessions on an official gateway.
+ * Fetch user's authorized host devices on an official gateway.
  */
 export async function fetchMySessions(
   gatewayUrl: string,
 ): Promise<
   {
     id: string;
+    hostDeviceId: string;
     state: string;
     hasHost: boolean;
     clientCount: number;
-    provider: string | null;
     machineId: string | null;
     hostname: string | null;
     platform: string | null;
-    projectName: string | null;
     cwd: string | null;
     lastActivity: number;
   }[]
@@ -282,12 +281,12 @@ export async function fetchMySessions(
   const session = await getValidSession();
   if (!session) throw new Error("Not signed in");
 
-  const res = await fetchWithTimeout(`${gatewayUrl}/sessions/mine`, {
+  const res = await fetchWithTimeout(`${gatewayUrl}/devices/mine`, {
     headers: {
       Authorization: `Bearer ${session.accessToken}`,
     },
   }, 5_000);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const body = (await res.json()) as { sessions: any[] };
-  return body.sessions ?? [];
+  const body = (await res.json()) as { devices: any[] };
+  return body.devices ?? [];
 }

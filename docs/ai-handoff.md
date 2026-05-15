@@ -45,7 +45,7 @@ LinkShell 是一个三段式终端桥接系统：
 1. 主导航为 首页 / 会话 / Agent / 设置。
 2. 新建连接入口收口到首页按钮 + ConnectionSheet（Modal，iOS sheet detents）。
 3. 首页：标题/副标题、新建连接按钮、继续上次会话、最近会话历史（Swipeable 左滑删除，LayoutAnimation 过渡）。
-4. 会话列表：按网关分组（并行拉取所有已保存网关的 /sessions），骨架加载动画、FadeIn 过渡、错误与空状态。
+4. 设备列表：按网关分组（并行拉取所有已保存网关的 /devices），骨架加载动画、FadeIn 过渡、错误与空状态。
 5. ConnectionSheet：扫码/手动输入分段控制、iOS pageSheet + sheet detents。
 6. ServerPicker：多网关管理、检测、默认设置、全部主题化。
 7. 完整 dark/light 主题系统：暗色科技风 + 浅色 iOS 系统风。
@@ -155,7 +155,7 @@ pnpm dev:app
 CLI 联调：
 
 ```bash
-pnpm --filter linkshell-cli dev start --gateway ws://localhost:8787/ws --provider custom --command bash
+pnpm --filter linkshell-cli dev start --gateway ws://localhost:8787/ws --command bash
 ```
 
 移动端单独类型检查：
@@ -194,7 +194,7 @@ pnpm --filter @linkshell/app typecheck
 5. 完整 dark/light 主题系统：lightTheme 不再是 darkTheme 的 spread copy，有独立的 iOS 系统色配色方案。
 6. 集成 react-native-gesture-handler + react-native-reanimated（含 babel.config.js plugin）。
 7. App.tsx 外层包裹 GestureHandlerRootView。
-8. 历史记录支持按 sessionId 去重和删除。
+8. 历史记录支持按 hostDeviceId 去重和删除。
 9. 所有页面 safe area 修正（使用 useSafeAreaInsets + paddingTop: insets.top + 2）。
 10. useSession.ts 清理了调试用的 httpbin 诊断日志。
 

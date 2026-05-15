@@ -63,7 +63,7 @@ describe("resolveProviderConfig", () => {
     expect(config.command).toBe(executable);
   });
 
-  it("resolves Gemini as a first-class terminal provider", () => {
+  it("ignores Gemini terminal provider and starts the system shell", () => {
     const executable = prependExecutableToPath("gemini");
 
     const config = resolveProviderConfig({
@@ -71,12 +71,12 @@ describe("resolveProviderConfig", () => {
       args: ["--model", "flash"],
     });
 
-    expect(config.provider).toBe("gemini");
-    expect(config.command).toBe(executable);
+    expect(config.provider).toBe("shell");
+    expect(config.command).toBe(process.env.SHELL || "/bin/zsh");
     expect(config.args).toEqual(["--model", "flash"]);
   });
 
-  it("resolves GitHub Copilot as a first-class terminal provider", () => {
+  it("ignores GitHub Copilot terminal provider and starts the system shell", () => {
     const executable = prependExecutableToPath("github-copilot");
 
     const config = resolveProviderConfig({
@@ -84,8 +84,8 @@ describe("resolveProviderConfig", () => {
       args: ["suggest"],
     });
 
-    expect(config.provider).toBe("copilot");
-    expect(config.command).toBe(executable);
+    expect(config.provider).toBe("shell");
+    expect(config.command).toBe(process.env.SHELL || "/bin/zsh");
     expect(config.args).toEqual(["suggest"]);
   });
 });

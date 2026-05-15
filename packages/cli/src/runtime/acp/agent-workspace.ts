@@ -764,8 +764,6 @@ interface ProviderRuntimeCapabilities {
 }
 
 const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
-const ALL_PERMISSION_MODES = ["read_only", "workspace_write", "full_access"] as const;
-const CODEX_COMMAND_NAMES = ["plan", "exit-plan", "compact", "clear", "status", "review", "subagents"] as const;
 const CLAUDE_REMOTE_HIDDEN_COMMANDS = new Set([
   "add-dir",
   "agents",
@@ -1039,56 +1037,16 @@ function customClaudeCommands(cwd: string): AgentCommandDescriptor[] {
 function defaultProviderCommands(provider: AgentProvider, cwd: string, enabled: boolean): AgentCommandDescriptor[] {
   const disabledReason = enabled ? undefined : `${providerLabel(provider)} 未安装或启动失败`;
   if (provider === "codex") {
-    return CODEX_COMMAND_NAMES.map((name) => makeCommand({
-      provider,
-      name,
-      source: "linkshell",
-      category: name === "plan" || name === "exit-plan" ? "Modes" : "Codex",
-      description: {
-        "plan": "Enter Codex plan mode",
-        "exit-plan": "Exit Codex plan mode",
-        compact: "Compact the current thread",
-        clear: "Start a fresh Codex thread",
-        status: "Show LinkShell agent status",
-        review: "Ask Codex to review local changes",
-        subagents: "Insert a delegation prompt",
-      }[name],
-      argsMode: name === "review" || name === "subagents" ? "optional" : "none",
-      destructive: name === "clear",
-      disabledReason,
-      executionKind: name === "review" || name === "subagents" ? "prompt" : "native",
-    }));
+    return [];
   }
   if (provider === "claude") {
-    const builtIns = CLAUDE_BUILT_IN_COMMANDS
-      .filter((entry) => isClaudeRemoteFriendlyCommand(entry.name))
-      .map((entry) => makeCommand({
-        provider,
-        name: entry.name,
-        description: entry.description,
-        argsMode: entry.argsMode,
-        destructive: entry.destructive,
-        disabledReason,
-        executionKind: "prompt",
-      }));
     const custom = customClaudeCommands(cwd).map((command) => ({
       ...command,
       disabledReason: command.disabledReason ?? disabledReason,
     }));
-    return [...builtIns, ...custom];
+    return custom;
   }
-  return [
-    makeCommand({
-      provider,
-      name: "status",
-      source: "linkshell",
-      category: "LinkShell",
-      description: "Show LinkShell agent status",
-      argsMode: "none",
-      disabledReason,
-      executionKind: "native",
-    }),
-  ];
+  return [];
 }
 
 function mergeCommands(...groups: Array<AgentCommandDescriptor[] | undefined>): AgentCommandDescriptor[] {
@@ -1541,17 +1499,14 @@ export class AgentWorkspaceProxy {
         supportsPermission,
         supportsPlan: enabled,
         supportsCancel: enabled,
-        models: runtimeCapabilities?.models ?? [{ id: "default", label: "默认模型" }],
-        defaultModel: runtimeCapabilities?.defaultModel ?? "default",
+        models: runtimeCapabilities?.models,
+        defaultModel: runtimeCapabilities?.defaultModel,
         reasoningEfforts: supportsReasoningEffort
-          ? runtimeCapabilities?.reasoningEfforts ?? [...ALL_REASONING_EFFORTS]
+          ? runtimeCapabilities?.reasoningEfforts ?? []
           : [],
-        permissionModes: supportsPermission ? [...ALL_PERMISSION_MODES] : [],
+        permissionModes: [],
         commands,
-        modes: runtimeCapabilities?.modes ?? (provider === "codex" ? [
-          { id: "default", title: "Default", description: "Run normal implementation turns" },
-          { id: "plan", title: "Plan", description: "Discuss and produce an implementation plan first" },
-        ] : []),
+        modes: runtimeCapabilities?.modes ?? [],
         currentMode,
         features: {
           images: supportsImages,

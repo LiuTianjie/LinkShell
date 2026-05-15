@@ -35,17 +35,16 @@ if (
 
 interface SessionInfo {
   id: string;
+  hostDeviceId: string;
   state: string;
   hasHost: boolean;
   clientCount: number;
   controllerId: string | null;
   lastActivity: number;
   createdAt: number;
-  provider: string | null;
   machineId: string | null;
   hostname: string | null;
   platform: string | null;
-  projectName: string | null;
   cwd: string | null;
 }
 
@@ -240,7 +239,7 @@ function GatewaySection({
                 fontVariant: ["tabular-nums"],
               }}
             >
-              {group.sessions.length} 个会话
+              {group.sessions.length} 台设备
             </Text>
           ) : null}
         </View>
@@ -328,7 +327,7 @@ function GatewaySection({
                   fontSize: 14,
                 }}
               >
-                暂无活动会话
+                暂无已授权设备
               </Text>
               {group.server.isOfficial ? (
                 <Text
@@ -445,9 +444,7 @@ function GatewaySection({
                           flexShrink: 1,
                         }}
                       >
-                        {session.projectName ??
-                          session.hostname ??
-                          session.id.slice(0, 8)}
+                      {session.hostname ?? session.hostDeviceId.slice(0, 8)}
                       </Text>
                       {session.platform ? (
                         <AppSymbol
@@ -461,10 +458,7 @@ function GatewaySection({
                       numberOfLines={1}
                       style={{ color: theme.textTertiary, fontSize: 13 }}
                     >
-                      {session.provider ?? "unknown"}
-                      {session.hostname && session.projectName
-                        ? ` · ${session.hostname}`
-                        : ""}
+                      {session.platform ?? "device"}
                       {" · "}
                       {session.hasHost ? "主机在线" : "主机离线"}
                       {session.clientCount > 0
@@ -474,7 +468,7 @@ function GatewaySection({
                       {timeAgo(session.lastActivity)}
                       {" · "}
                       <Text style={{ fontVariant: ["tabular-nums"] }}>
-                        {session.id.slice(0, 8)}
+                        {session.hostDeviceId.slice(0, 8)}
                       </Text>
                     </Text>
                   </View>
@@ -528,12 +522,12 @@ export function SessionListScreen({
     if (deviceToken) authHeaders["Authorization"] = `Bearer ${deviceToken}`;
     const results = await Promise.allSettled(
       servers.map(async (server) => {
-        const res = await fetchWithTimeout(`${server.url}/sessions`, {
+        const res = await fetchWithTimeout(`${server.url}/devices`, {
           headers: authHeaders,
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = (await res.json()) as { sessions: SessionInfo[] };
-        return body.sessions.sort((a, b) => b.lastActivity - a.lastActivity);
+        const body = (await res.json()) as { devices: SessionInfo[] };
+        return body.devices.sort((a, b) => b.lastActivity - a.lastActivity);
       }),
     );
 
@@ -548,11 +542,11 @@ export function SessionListScreen({
             ? null
             : result.reason instanceof Error
               ? result.reason.message
-              : "无法加载会话",
+              : "无法加载设备",
       };
     });
 
-    // Fetch official gateway sessions for Pro users
+    // Fetch official gateway devices for Pro users
     const session = await getValidSession();
     const officialUrls = new Set<string>();
     if (session && session.user.plan === "pro") {
@@ -586,7 +580,7 @@ export function SessionListScreen({
                 ? null
                 : result.reason instanceof Error
                   ? result.reason.message
-                  : "无法加载官方网关会话",
+                  : "无法加载官方网关设备",
           });
         }
       } catch {}
@@ -636,7 +630,7 @@ export function SessionListScreen({
         try {
           const session = await getValidSession();
           if (session?.accessToken) {
-            await fetchWithTimeout(`${serverUrl}/sessions/${sessionId}`, {
+            await fetchWithTimeout(`${serverUrl}/devices/${sessionId}`, {
               method: "DELETE",
               headers: { Authorization: `Bearer ${session.accessToken}` },
             }, 5_000);
@@ -653,7 +647,7 @@ export function SessionListScreen({
       };
 
       if (hasHost) {
-        Alert.alert("删除会话", "该会话主机仍在线，确定要强制删除吗？", [
+        Alert.alert("删除设备", "该设备主机仍在线，确定要强制删除吗？", [
           { text: "取消", style: "cancel" },
           { text: "删除", style: "destructive", onPress: doDelete },
         ]);
@@ -698,7 +692,7 @@ export function SessionListScreen({
               letterSpacing: 0.37,
             }}
           >
-            会话
+            设备
           </Text>
           <Text
             style={{
@@ -709,7 +703,7 @@ export function SessionListScreen({
             }}
           >
             {groups.length} 个网关
-            {!initialLoad ? ` · ${totalSessions} 个活动会话` : ""}
+            {!initialLoad ? ` · ${totalSessions} 台授权设备` : ""}
           </Text>
         </View>
 

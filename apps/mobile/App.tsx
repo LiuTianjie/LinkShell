@@ -461,15 +461,8 @@ function AppInner() {
           terminals={activeSession.terminals}
           onKillTerminal={manager.killTerminal}
           onRemoveTerminal={manager.removeTerminal}
-          gatewayUrl={activeSession.gatewayUrl}
-          deviceToken={manager.deviceToken}
           historyEntries={manager.historyEntries}
           onRequestHistory={manager.requestHistory}
-          agent={activeSession.agent}
-          onInitializeAgent={manager.initializeAgent}
-          onSendAgentPrompt={manager.sendAgentPrompt}
-          onCancelAgent={manager.cancelAgent}
-          onSendAgentPermissionResponse={manager.sendAgentPermissionResponse}
         />
         <FolderPickerModal
           visible={folderPickerVisible}

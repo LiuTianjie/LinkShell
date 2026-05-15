@@ -26,6 +26,7 @@ import {
 interface OpenConversationInput {
   conversationId?: string;
   agentSessionId?: string;
+  hostDeviceId?: string;
   sessionId: string;
   machineId?: string;
   serverUrl?: string;
@@ -364,7 +365,7 @@ export function useAgentWorkspace(
     conversation: AgentConversationRecord,
     sessions: Map<string, SessionInfo>,
   ): SessionInfo | undefined {
-    const exact = sessions.get(conversation.sessionId);
+    const exact = sessions.get(conversation.hostDeviceId ?? conversation.sessionId);
     if (exact && (!conversation.machineId || exact.machineId === conversation.machineId)) {
       return exact;
     }
@@ -417,7 +418,8 @@ export function useAgentWorkspace(
       const toRecord = (conversation: any): AgentConversationRecord => ({
         id: conversation.id,
         serverUrl,
-        sessionId: envelope.sessionId,
+        hostDeviceId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.sessionId,
+        sessionId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.sessionId,
         machineId: serverSession?.machineId ?? conversation.machineId,
         agentSessionId: conversation.agentSessionId,
         provider: conversation.provider ?? "codex",
@@ -432,7 +434,7 @@ export function useAgentWorkspace(
         lastMessagePreview: conversation.lastMessagePreview,
         lastActivityAt: conversation.lastActivityAt ?? Date.now(),
         createdAt: conversation.createdAt ?? Date.now(),
-        schemaVersion: 1,
+        schemaVersion: 2,
       });
 
       if (envelope.type === "agent.v2.capabilities") {
@@ -959,6 +961,7 @@ export function useAgentWorkspace(
         input.conversationId ??
         makeAgentConversationId({
           serverUrl,
+          hostDeviceId: session?.hostDeviceId ?? input.hostDeviceId ?? input.sessionId,
           sessionId: input.sessionId,
           agentSessionId: input.agentSessionId,
           cwd: input.cwd,
@@ -1014,6 +1017,7 @@ export function useAgentWorkspace(
       }
       return openConversation({
         sessionId: session?.sessionId ?? record.sessionId,
+        hostDeviceId: session?.hostDeviceId ?? record.hostDeviceId,
         machineId: session?.machineId ?? record.machineId,
         serverUrl: session?.gatewayUrl ?? record.serverUrl,
         cwd: record.cwd,
@@ -1037,6 +1041,7 @@ export function useAgentWorkspace(
       manager.setActiveSessionId(session.sessionId);
       await persistConversation({
         ...conversation,
+        hostDeviceId: session.hostDeviceId,
         sessionId: session.sessionId,
         machineId: session.machineId ?? conversation.machineId,
         archived: false,
@@ -1046,6 +1051,7 @@ export function useAgentWorkspace(
         conversationId: conversation.id,
         agentSessionId: conversation.agentSessionId,
         sessionId: session.sessionId,
+        hostDeviceId: session.hostDeviceId,
         machineId: session.machineId ?? conversation.machineId,
         serverUrl: session.gatewayUrl,
         cwd: conversation.cwd,

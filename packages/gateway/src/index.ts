@@ -127,10 +127,12 @@ function setCors(res: ServerResponse): void {
 
 // ── HTTP API ────────────────────────────────────────────────────────
 
-const createPairingBody = z.object({ sessionId: z.string().optional() });
+const createPairingBody = z.object({ hostDeviceId: z.string().min(1) });
 const claimPairingBody = z.object({
   pairingCode: z.string().length(6),
   deviceToken: z.string().min(1).optional(),
+  clientDeviceId: z.string().min(1).optional(),
+  clientName: z.string().min(1).optional(),
 });
 
 const server = createServer(async (req, res) => {
@@ -181,27 +183,27 @@ async function handleRequest(
     return;
   }
 
-  // Sessions owned by authenticated user (before AUTH_REQUIRED guard — uses its own auth)
-  if (method === "GET" && url.pathname === "/sessions/mine") {
+  // Devices owned by authenticated user (before AUTH_REQUIRED guard — uses its own auth)
+  if (method === "GET" && url.pathname === "/devices/mine") {
     const authResult = await validateRequest(req);
     if (!authResult || !authResult.userId) {
       json(res, 401, { error: "auth_required", message: "Authentication required" });
       return;
     }
-    const sessions = sessionManager
+    const devices = sessionManager
       .listActive()
       .filter((s) => s.userId === authResult.userId)
       .map((s) => sessionManager.getSummary(s.id))
       .filter(Boolean);
-    json(res, 200, { sessions });
+    json(res, 200, { devices });
     return;
   }
 
-  // Delete a session owned by authenticated user
-  if (method === "DELETE" && url.pathname.startsWith("/sessions/")) {
-    const sessionId = url.pathname.split("/")[2];
-    if (!sessionId) {
-      json(res, 400, { error: "missing_session_id" });
+  // Delete a host device owned by authenticated user
+  if (method === "DELETE" && /^\/devices\/[^/]+$/.test(url.pathname)) {
+    const hostDeviceId = url.pathname.split("/")[2];
+    if (!hostDeviceId) {
+      json(res, 400, { error: "missing_host_device_id" });
       return;
     }
     const authResult = await validateRequest(req);
@@ -209,17 +211,17 @@ async function handleRequest(
       json(res, 401, { error: "auth_required", message: "Authentication required" });
       return;
     }
-    const session = sessionManager.get(sessionId);
-    if (!session) {
+    const device = sessionManager.get(hostDeviceId);
+    if (!device) {
       json(res, 404, { error: "not_found" });
       return;
     }
-    if (session.userId && session.userId === authResult.userId) {
-      sessionManager.forceDelete(sessionId);
+    if (device.userId && device.userId === authResult.userId) {
+      sessionManager.forceDelete(hostDeviceId);
       json(res, 200, { ok: true });
       return;
     }
-    json(res, 403, { error: "forbidden", message: "You do not own this session" });
+    json(res, 403, { error: "forbidden", message: "You do not own this device" });
     return;
   }
 
@@ -234,7 +236,7 @@ async function handleRequest(
   const tunnelCookie = parseTunnelCookie(req);
   if (tunnelCookie) {
     const fallbackParsed = {
-      sessionId: tunnelCookie.sessionId,
+      hostDeviceId: tunnelCookie.hostDeviceId,
       port: tunnelCookie.port,
       path: url.pathname,
     };
@@ -264,27 +266,27 @@ async function handleRequest(
       item.terminalId ? `${item.type}:${item.terminalId}` : item.type,
     ).join(",") ?? "none";
     const ack = result.ack ? ` resolved=${result.ack.resolved} delivered=${result.ack.delivered}` : "";
-    log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} session=${body.sessionId} request=${body.requestId} status=${result.status} forwarded=${forwarded}${ack}`);
+    log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} hostDevice=${body.hostDeviceId ?? body.sessionId ?? "unknown"} request=${body.requestId} status=${result.status} forwarded=${forwarded}${ack}`);
     json(res, result.status, result.body);
     return;
   }
 
-  // Auth check for premium gateway (skip healthz, /sessions/mine, tunnel)
+  // Auth check for premium gateway (skip healthz, device-owned endpoints, tunnel)
   if (AUTH_REQUIRED) {
     const authResult = await requireAuth(req, res);
     if (!authResult) return; // response already sent
   }
 
-  // Create pairing
+  // Create one-time pairing challenge for a host device
   if (method === "POST" && url.pathname === "/pairings") {
     if (!isRateLimitBypassed(ip) && !pairingLimiter.allow(ip)) {
       json(res, 429, { error: "rate_limited", message: "Too many requests" });
       return;
     }
     const body = createPairingBody.parse(await readJson(req));
-    const record = pairingManager.create(body.sessionId);
+    const record = pairingManager.create(body.hostDeviceId);
     json(res, 201, {
-      sessionId: record.sessionId,
+      hostDeviceId: record.hostDeviceId,
       pairingCode: record.pairingCode,
       expiresAt: new Date(record.expiresAt).toISOString(),
     });
@@ -304,44 +306,57 @@ async function handleRequest(
       return;
     }
     const token = tokenManager.register(body.deviceToken);
-    tokenManager.bind(token, result.sessionId);
-    json(res, 200, { sessionId: result.sessionId, deviceToken: token });
+    const authorization = tokenManager.authorize(token, result.hostDeviceId, {
+      clientDeviceId: body.clientDeviceId,
+      clientName: body.clientName,
+    });
+    json(res, 200, {
+      hostDeviceId: result.hostDeviceId,
+      deviceToken: token,
+      authorizationId: authorization?.authorizationId,
+    });
     return;
   }
 
-  // Session list
-  if (method === "GET" && url.pathname === "/sessions") {
+  // Authorized host device list
+  if (method === "GET" && url.pathname === "/devices") {
     const token = extractBearerToken(req);
     const allowedIds = token && tokenManager.validate(token)
-      ? tokenManager.getSessionIds(token)
+      ? tokenManager.getHostDeviceIds(token)
       : new Set<string>();
-    const sessions = sessionManager
-      .listActive()
-      .filter((s) => allowedIds.has(s.id))
-      .map((s) => ({
-        id: s.id,
-        state: s.state,
-        hasHost: !!s.host && s.host.socket.readyState === s.host.socket.OPEN,
-        clientCount: s.clients.size,
-        controllerId: s.controllerId ?? null,
-        lastActivity: s.lastActivity,
-        createdAt: s.createdAt,
-        provider: s.provider ?? null,
-        machineId: s.machineId ?? null,
-        hostname: s.hostname ?? null,
-        platform: s.platform ?? null,
-        cwd: s.cwd ?? null,
-        projectName: s.projectName ?? null,
-      }));
-    json(res, 200, { sessions });
+    const devices = [...allowedIds].map((hostDeviceId) => {
+      const summary = sessionManager.getSummary(hostDeviceId);
+      return summary ?? {
+        id: hostDeviceId,
+        hostDeviceId,
+        state: "host_disconnected",
+        online: false,
+        hasHost: false,
+        clientCount: 0,
+        controllerId: null,
+        lastActivity: null,
+        createdAt: null,
+        bufferSize: 0,
+        machineId: null,
+        hostname: null,
+        platform: null,
+        cwd: null,
+        capabilities: [],
+        authorizationId: token ? tokenManager.getAuthorizationId(token, hostDeviceId) ?? null : null,
+      };
+    }).map((device) => ({
+      ...device,
+      authorizationId: token ? tokenManager.getAuthorizationId(token, device.hostDeviceId) ?? null : null,
+    }));
+    json(res, 200, { devices });
     return;
   }
 
-  // Session detail
-  const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
-  if (method === "GET" && sessionMatch) {
+  // Device detail
+  const deviceMatch = url.pathname.match(/^\/devices\/([^/]+)$/);
+  if (method === "GET" && deviceMatch) {
     const token = extractBearerToken(req);
-    const targetId = sessionMatch[1]!;
+    const targetId = deviceMatch[1]!;
     if (!token || !tokenManager.owns(token, targetId)) {
       json(res, 401, {
         error: "unauthorized",
@@ -351,10 +366,29 @@ async function handleRequest(
     }
     const summary = sessionManager.getSummary(targetId);
     if (!summary) {
-      json(res, 404, { error: "session_not_found" });
+      json(res, 404, { error: "device_not_found" });
       return;
     }
-    json(res, 200, summary);
+    json(res, 200, {
+      ...summary,
+      authorizationId: tokenManager.getAuthorizationId(token, targetId) ?? null,
+    });
+    return;
+  }
+
+  const revokeMatch = url.pathname.match(/^\/devices\/([^/]+)\/authorizations\/([^/]+)$/);
+  if (method === "DELETE" && revokeMatch) {
+    const token = extractBearerToken(req);
+    const hostDeviceId = decodeURIComponent(revokeMatch[1]!);
+    const authorizationId = decodeURIComponent(revokeMatch[2]!);
+    if (!token || !tokenManager.revoke(token, hostDeviceId, authorizationId)) {
+      json(res, 401, {
+        error: "unauthorized",
+        message: "Valid device authorization required",
+      });
+      return;
+    }
+    json(res, 200, { ok: true });
     return;
   }
 
@@ -405,7 +439,7 @@ server.on("upgrade", (request, socket, head) => {
   const tunnelCookie = parseTunnelCookie(request);
   if (tunnelCookie && url.pathname !== "/ws") {
     const fallbackParsed = {
-      sessionId: tunnelCookie.sessionId,
+      hostDeviceId: tunnelCookie.hostDeviceId,
       port: tunnelCookie.port,
       path: url.pathname,
     };
@@ -459,11 +493,11 @@ server.on("upgrade", (request, socket, head) => {
 wss.on(
   "connection",
   (socket: WebSocket, _request: IncomingMessage, url: URL) => {
-    const sessionId = url.searchParams.get("sessionId");
+    const hostDeviceId = url.searchParams.get("hostDeviceId") ?? url.searchParams.get("sessionId");
     const role = url.searchParams.get("role") as "host" | "client" | null;
 
-    if (!sessionId || !role || (role !== "host" && role !== "client")) {
-      socket.close(1008, "missing sessionId or role");
+    if (!hostDeviceId || !role || (role !== "host" && role !== "client")) {
+      socket.close(1008, "missing hostDeviceId or role");
       return;
     }
 
@@ -474,15 +508,15 @@ wss.on(
       const authResult = (_request as any).__authResult as
         | { userId?: string }
         | undefined;
-      const session = sessionManager.get(sessionId);
+      const device = sessionManager.get(hostDeviceId);
 
-      // Allow if: device token owns session, OR auth user owns session
-      const tokenOwns = token && tokenManager.owns(token, sessionId);
+      // Allow if: device token owns host device, OR auth user owns host device
+      const tokenOwns = token && tokenManager.owns(token, hostDeviceId);
       const authOwns =
         AUTH_REQUIRED &&
         authResult?.userId &&
-        session?.userId &&
-        authResult.userId === session.userId;
+        device?.userId &&
+        authResult.userId === device.userId;
 
       if (!tokenOwns && !authOwns) {
         socket.close(4001, "unauthorized");
@@ -490,8 +524,8 @@ wss.on(
       }
       if (!tokenOwns && authOwns && token) {
         tokenManager.register(token);
-        tokenManager.bind(token, sessionId);
-        log("info", `bound authenticated device token to session ${sessionId}`);
+        tokenManager.bind(token, hostDeviceId);
+        log("info", `bound authenticated device token to host device ${hostDeviceId}`);
       }
     }
 
@@ -504,26 +538,26 @@ wss.on(
 
     if (role === "host") {
       // Check if this is a reconnect (session already exists with clients)
-      const existingSession = sessionManager.get(sessionId);
+      const existingSession = sessionManager.get(hostDeviceId);
       const isReconnect =
         existingSession &&
         existingSession.clients.size > 0 &&
         existingSession.state === "host_disconnected";
-      sessionManager.setHost(sessionId, device);
+      sessionManager.setHost(hostDeviceId, device);
 
       // Associate userId from auth (for AUTH_REQUIRED gateways)
       const authResult = (_request as any).__authResult as
         | { userId?: string }
         | undefined;
       if (authResult?.userId) {
-        const session = sessionManager.get(sessionId);
-        if (session) session.userId = authResult.userId;
+        const deviceRecord = sessionManager.get(hostDeviceId);
+        if (deviceRecord) deviceRecord.userId = authResult.userId;
       }
       if (isReconnect) {
         const notification = serializeEnvelope(
           createEnvelope({
-            type: "session.host_reconnected",
-            sessionId,
+            type: "device.host_reconnected",
+            hostDeviceId,
             payload: {},
           }),
         );
@@ -534,15 +568,15 @@ wss.on(
         }
       }
     } else {
-      sessionManager.addClient(sessionId, device);
+      sessionManager.addClient(hostDeviceId, device);
     }
 
     // Send welcome with protocol version
     socket.send(
       serializeEnvelope(
         createEnvelope({
-          type: "session.connect",
-          sessionId,
+          type: "device.connect",
+          hostDeviceId,
           payload: {
             role,
             clientName: deviceId,
@@ -554,7 +588,7 @@ wss.on(
 
     // If client just joined and host is not connected, notify immediately
     if (role === "client") {
-      const sessionAfterJoin = sessionManager.get(sessionId);
+      const sessionAfterJoin = sessionManager.get(hostDeviceId);
       if (sessionAfterJoin) {
         const hostGone =
           !sessionAfterJoin.host ||
@@ -565,8 +599,8 @@ wss.on(
           socket.send(
             serializeEnvelope(
               createEnvelope({
-                type: "session.host_disconnected",
-                sessionId,
+                type: "device.host_disconnected",
+                hostDeviceId,
                 payload: { reason: "host not connected" },
               }),
             ),
@@ -588,18 +622,18 @@ wss.on(
           socket,
           data.toString(),
           role,
-          sessionId,
+          hostDeviceId,
           deviceId,
           sessionManager,
         );
       } catch (err) {
-        log("error", `unhandled websocket message error for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+        log("error", `unhandled websocket message error for host device ${hostDeviceId}: ${err instanceof Error ? err.message : String(err)}`);
         if (socket.readyState === socket.OPEN) {
           socket.send(
             serializeEnvelope(
               createEnvelope({
-                type: "session.error",
-                sessionId,
+                type: "device.error",
+                hostDeviceId,
                 payload: {
                   code: "invalid_message",
                   message: "Failed to handle message",
@@ -614,13 +648,14 @@ wss.on(
     socket.on("close", () => {
       clearInterval(pingTimer);
       if (role === "host") {
-        const result = sessionManager.removeHost(sessionId);
+        const result = sessionManager.removeHost(hostDeviceId);
+        cleanupSessionTunnels(hostDeviceId);
         // Notify all clients that host disconnected
         if (result) {
           const notification = serializeEnvelope(
             createEnvelope({
-              type: "session.host_disconnected",
-              sessionId,
+              type: "device.host_disconnected",
+              hostDeviceId,
               payload: { reason: "host connection closed" },
             }),
           );
@@ -631,7 +666,7 @@ wss.on(
           }
         }
       } else {
-        sessionManager.removeClient(sessionId, deviceId);
+        sessionManager.removeClient(hostDeviceId, deviceId);
       }
     });
 
@@ -670,18 +705,18 @@ if (AUTH_REQUIRED) {
       if (!session.userId || !session.host) continue;
       const subscription = await checkSubscriptionByUserId(session.userId);
       if (subscription.status === "unknown") {
-        log("warn", `subscription check unknown for user ${session.userId}, keeping session ${session.id}${subscription.reason ? ` (${subscription.reason})` : ""}`);
+        log("warn", `subscription check unknown for user ${session.userId}, keeping host device ${session.id}${subscription.reason ? ` (${subscription.reason})` : ""}`);
         continue;
       }
       if (subscription.status === "inactive") {
-        log("info", `subscription expired for user ${session.userId}, disconnecting session ${session.id}`);
+        log("info", `subscription expired for user ${session.userId}, disconnecting host device ${session.id}`);
         // Notify host
         try {
           session.host.socket.send(
             serializeEnvelope(
               createEnvelope({
-                type: "session.error",
-                sessionId: session.id,
+                type: "device.error",
+                hostDeviceId: session.id,
                 payload: {
                   code: "subscription_expired",
                   message: "Your Pro subscription has expired. Renew at https://itool.tech",
@@ -697,9 +732,9 @@ if (AUTH_REQUIRED) {
           try {
             client.socket.send(
               serializeEnvelope(
-                createEnvelope({
-                  type: "session.error",
-                  sessionId: session.id,
+              createEnvelope({
+                  type: "device.error",
+                  hostDeviceId: session.id,
                   payload: {
                     code: "subscription_expired",
                     message: "Host subscription expired. Session ended.",

@@ -32,7 +32,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@linkshell/protocol": "^0.2.34",
+    "@linkshell/protocol": "workspace:*",
     "zod": "^3.24.3",
     "ws": "^8.18.1"
   },

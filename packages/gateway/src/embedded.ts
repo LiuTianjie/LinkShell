@@ -44,10 +44,12 @@ const MAX_WS_MESSAGE_SIZE = 50 * 1024 * 1024; // 50MB (supports base64 image upl
 
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 
-const createPairingBody = z.object({ sessionId: z.string().optional() });
+const createPairingBody = z.object({ hostDeviceId: z.string().min(1) });
 const claimPairingBody = z.object({
   pairingCode: z.string().length(6),
   deviceToken: z.string().min(1).optional(),
+  clientDeviceId: z.string().min(1).optional(),
+  clientName: z.string().min(1).optional(),
 });
 
 class BodyTooLargeError extends Error {}
@@ -152,16 +154,16 @@ export function startEmbeddedGateway(
           item.terminalId ? `${item.type}:${item.terminalId}` : item.type,
         ).join(",") ?? "none";
         const ack = result.ack ? ` resolved=${result.ack.resolved} delivered=${result.ack.delivered}` : "";
-        log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} session=${body.sessionId} request=${body.requestId} status=${result.status} forwarded=${forwarded}${ack}`);
+        log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} hostDevice=${body.hostDeviceId ?? body.sessionId ?? "unknown"} request=${body.requestId} status=${result.status} forwarded=${forwarded}${ack}`);
         json(res, result.status, result.body);
         return;
       }
 
       if (method === "POST" && url.pathname === "/pairings") {
         const body = createPairingBody.parse(await readJson(req));
-        const record = pairingManager.create(body.sessionId);
+        const record = pairingManager.create(body.hostDeviceId);
         json(res, 201, {
-          sessionId: record.sessionId,
+          hostDeviceId: record.hostDeviceId,
           pairingCode: record.pairingCode,
           expiresAt: new Date(record.expiresAt).toISOString(),
         });
@@ -176,12 +178,19 @@ export function startEmbeddedGateway(
           return;
         }
         const token = tokenManager.register(body.deviceToken);
-        tokenManager.bind(token, result.sessionId);
-        json(res, 200, { sessionId: result.sessionId, deviceToken: token });
+        const authorization = tokenManager.authorize(token, result.hostDeviceId, {
+          clientDeviceId: body.clientDeviceId,
+          clientName: body.clientName,
+        });
+        json(res, 200, {
+          hostDeviceId: result.hostDeviceId,
+          deviceToken: token,
+          authorizationId: authorization?.authorizationId,
+        });
         return;
       }
 
-      if (method === "GET" && url.pathname === "/sessions") {
+      if (method === "GET" && url.pathname === "/devices") {
         const token = extractBearerToken(req);
         if (!token || !tokenManager.validate(token)) {
           json(res, 401, {
@@ -190,33 +199,38 @@ export function startEmbeddedGateway(
           });
           return;
         }
-        const allowedIds = tokenManager.getSessionIds(token);
-        const sessions = sessionManager
-          .listActive()
-          .filter((s) => allowedIds.has(s.id))
-          .map((s) => ({
-            id: s.id,
-            state: s.state,
-            hasHost: !!s.host && s.host.socket.readyState === s.host.socket.OPEN,
-            clientCount: s.clients.size,
-            controllerId: s.controllerId ?? null,
-            lastActivity: s.lastActivity,
-            createdAt: s.createdAt,
-            provider: s.provider ?? null,
-            machineId: s.machineId ?? null,
-            hostname: s.hostname ?? null,
-            platform: s.platform ?? null,
-            cwd: s.cwd ?? null,
-            projectName: s.projectName ?? null,
-          }));
-        json(res, 200, { sessions });
+        const allowedIds = tokenManager.getHostDeviceIds(token);
+        const devices = [...allowedIds].map((hostDeviceId) => {
+          const summary = sessionManager.getSummary(hostDeviceId);
+          return {
+            ...(summary ?? {
+              id: hostDeviceId,
+              hostDeviceId,
+              state: "host_disconnected",
+              online: false,
+              hasHost: false,
+              clientCount: 0,
+              controllerId: null,
+              lastActivity: null,
+              createdAt: null,
+              bufferSize: 0,
+              machineId: null,
+              hostname: null,
+              platform: null,
+              cwd: null,
+              capabilities: [],
+            }),
+            authorizationId: tokenManager.getAuthorizationId(token, hostDeviceId) ?? null,
+          };
+        });
+        json(res, 200, { devices });
         return;
       }
 
-      const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
-      if (method === "GET" && sessionMatch) {
+      const deviceMatch = url.pathname.match(/^\/devices\/([^/]+)$/);
+      if (method === "GET" && deviceMatch) {
         const token = extractBearerToken(req);
-        const targetId = sessionMatch[1]!;
+        const targetId = deviceMatch[1]!;
         if (!token || !tokenManager.owns(token, targetId)) {
           json(res, 401, {
             error: "unauthorized",
@@ -226,10 +240,29 @@ export function startEmbeddedGateway(
         }
         const summary = sessionManager.getSummary(targetId);
         if (!summary) {
-          json(res, 404, { error: "session_not_found" });
+          json(res, 404, { error: "device_not_found" });
           return;
         }
-        json(res, 200, summary);
+        json(res, 200, {
+          ...summary,
+          authorizationId: tokenManager.getAuthorizationId(token, targetId) ?? null,
+        });
+        return;
+      }
+
+      const revokeMatch = url.pathname.match(/^\/devices\/([^/]+)\/authorizations\/([^/]+)$/);
+      if (method === "DELETE" && revokeMatch) {
+        const token = extractBearerToken(req);
+        const hostDeviceId = decodeURIComponent(revokeMatch[1]!);
+        const authorizationId = decodeURIComponent(revokeMatch[2]!);
+        if (!token || !tokenManager.revoke(token, hostDeviceId, authorizationId)) {
+          json(res, 401, {
+            error: "unauthorized",
+            message: "Valid device authorization required",
+          });
+          return;
+        }
+        json(res, 200, { ok: true });
         return;
       }
 
@@ -255,7 +288,7 @@ export function startEmbeddedGateway(
       const tunnelCookie = parseTunnelCookie(req);
       if (tunnelCookie) {
         const fallbackParsed = {
-          sessionId: tunnelCookie.sessionId,
+          hostDeviceId: tunnelCookie.hostDeviceId,
           port: tunnelCookie.port,
           path: url.pathname,
         };
@@ -308,7 +341,7 @@ export function startEmbeddedGateway(
     const tunnelCookie = parseTunnelCookie(request);
     if (tunnelCookie && url.pathname !== "/ws") {
       const fallbackParsed = {
-        sessionId: tunnelCookie.sessionId,
+        hostDeviceId: tunnelCookie.hostDeviceId,
         port: tunnelCookie.port,
         path: url.pathname,
       };
@@ -331,11 +364,11 @@ export function startEmbeddedGateway(
   wss.on(
     "connection",
     (socket: WebSocket, _request: IncomingMessage, url: URL) => {
-      const sessionId = url.searchParams.get("sessionId");
+      const hostDeviceId = url.searchParams.get("hostDeviceId") ?? url.searchParams.get("sessionId");
       const role = url.searchParams.get("role") as "host" | "client" | null;
 
-      if (!sessionId || !role || (role !== "host" && role !== "client")) {
-        socket.close(1008, "missing sessionId or role");
+      if (!hostDeviceId || !role || (role !== "host" && role !== "client")) {
+        socket.close(1008, "missing hostDeviceId or role");
         return;
       }
 
@@ -343,7 +376,7 @@ export function startEmbeddedGateway(
 
       if (role === "client") {
         const token = url.searchParams.get("token");
-        if (!token || !tokenManager.owns(token, sessionId)) {
+        if (!token || !tokenManager.owns(token, hostDeviceId)) {
           socket.close(4001, "unauthorized");
           return;
         }
@@ -352,17 +385,17 @@ export function startEmbeddedGateway(
       const device = { socket, role, deviceId, connectedAt: Date.now() };
 
       if (role === "host") {
-        const existingSession = sessionManager.get(sessionId);
+        const existingSession = sessionManager.get(hostDeviceId);
         const isReconnect =
           existingSession &&
           existingSession.clients.size > 0 &&
           existingSession.state === "host_disconnected";
-        sessionManager.setHost(sessionId, device);
+        sessionManager.setHost(hostDeviceId, device);
         if (isReconnect) {
           const notification = serializeEnvelope(
             createEnvelope({
-              type: "session.host_reconnected",
-              sessionId,
+              type: "device.host_reconnected",
+              hostDeviceId,
               payload: {},
             }),
           );
@@ -372,14 +405,14 @@ export function startEmbeddedGateway(
           }
         }
       } else {
-        sessionManager.addClient(sessionId, device);
+        sessionManager.addClient(hostDeviceId, device);
       }
 
       socket.send(
         serializeEnvelope(
           createEnvelope({
-            type: "session.connect",
-            sessionId,
+            type: "device.connect",
+            hostDeviceId,
             payload: {
               role,
               clientName: deviceId,
@@ -399,18 +432,18 @@ export function startEmbeddedGateway(
             socket,
             data.toString(),
             role,
-            sessionId,
+            hostDeviceId,
             deviceId,
             sessionManager,
           );
         } catch (err) {
-          log("error", `unhandled websocket message error for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+          log("error", `unhandled websocket message error for host device ${hostDeviceId}: ${err instanceof Error ? err.message : String(err)}`);
           if (socket.readyState === socket.OPEN) {
             socket.send(
               serializeEnvelope(
                 createEnvelope({
-                  type: "session.error",
-                  sessionId,
+                  type: "device.error",
+                  hostDeviceId,
                   payload: {
                     code: "invalid_message",
                     message: "Failed to handle message",
@@ -425,12 +458,13 @@ export function startEmbeddedGateway(
       socket.on("close", () => {
         clearInterval(pingTimer);
         if (role === "host") {
-          const result = sessionManager.removeHost(sessionId);
+          const result = sessionManager.removeHost(hostDeviceId);
+          cleanupSessionTunnels(hostDeviceId);
           if (result) {
             const notification = serializeEnvelope(
               createEnvelope({
-                type: "session.host_disconnected",
-                sessionId,
+                type: "device.host_disconnected",
+                hostDeviceId,
                 payload: { reason: "host connection closed" },
               }),
             );
@@ -440,7 +474,7 @@ export function startEmbeddedGateway(
             }
           }
         } else {
-          sessionManager.removeClient(sessionId, deviceId);
+          sessionManager.removeClient(hostDeviceId, deviceId);
         }
       });
 

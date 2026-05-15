@@ -1036,7 +1036,7 @@
         <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="f4Desc">不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC
           30fps 丝滑体验，自动降级到截图流兜底。</p>
         <code class="term"
-          style="display:block;padding:8px 16px">linkshell start --daemon --provider claude --screen</code>
+          style="display:block;padding:8px 16px">linkshell start --daemon --screen</code>
       </div>
 
       <div style="margin-top:24px">
@@ -1155,7 +1155,7 @@
           <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdStart">启动桥接会话。自动启动内置网关，桥接 AI 终端，开放 Agent Workspace，并生成配对二维码。</p>
           <div class="term"><span class="tm">FLAGS</span>
 --daemon <span class="to" data-i18n="flagDaemon">后台守护模式运行</span>
---provider <span class="to" data-i18n="flagProvider">指定终端 provider (claude / codex / gemini / copilot / custom)</span>
+--command <span class="to" data-i18n="flagProvider">覆盖默认 shell 命令</span>
 --agent-ui <span class="to" data-i18n="flagAgentUi">启用 Agent Workspace</span>
 --screen <span class="to" data-i18n="flagScreen">启用远程桌面共享</span>
 --port <span class="to" data-i18n="flagPort">指定网关端口 (默认 8787)</span></div>
@@ -1292,7 +1292,7 @@
         <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsScreenDesc">启动时加上 --screen 参数，App 端会出现
           Desktop 标签页，实时查看电脑桌面。</p>
         <div class="term" style="margin-bottom:16px"><span class="tp">$</span> <span class="tc">linkshell start --daemon
---provider claude --screen</span>
+--screen</span>
 
 <span class="to">Screen sharing enabled</span>
 <span class="to">Mode: WebRTC (30fps) | Fallback: Screenshot stream</span>
@@ -1314,7 +1314,7 @@
 <span class="to"> ➜ Local: http://localhost:3000</span>
 
 <span class="tm" data-i18n="tmDocsAppBrowser"># App 切换到 Browser 标签（globe 图标），输入端口 3000</span>
-<span class="ts">➜ Preview: http://gateway:8787/tunnel/{sessionId}/3000/</span>
+<span class="ts">➜ Preview: http://gateway:8787/tunnel/{hostDeviceId}/3000/</span>
         </div>
         <div class="li g" data-i18n="docsPortFwd1">完整加载 — HTML、CSS、JS、图片等所有资源通过 tunnel 代理</div>
         <div class="li g" data-i18n="docsPortFwd2">HMR 支持 — WebSocket 热更新自动转发，Vite / Next.js / webpack 均可</div>
@@ -1780,7 +1780,7 @@
         tmStartDevServer: "# 远程终端启动 dev server",
         tmAppBrowserTab: "# App 切换到 Browser 标签，输入端口 3000，即可预览",
         flagDaemon: "后台守护模式运行",
-        flagProvider: "指定终端 provider (claude / codex / gemini / copilot / custom)",
+        flagProvider: "覆盖默认 shell 命令",
         flagAgentUi: "启用 Agent Workspace",
         flagScreen: "启用远程桌面共享",
         flagPort: "指定网关端口 (默认 8787)",
@@ -1995,7 +1995,7 @@
         tmStartDevServer: "# Start dev server remotely",
         tmAppBrowserTab: "# Switch to Browser tab in App, enter port 3000 to preview",
         flagDaemon: "Run in background daemon mode",
-        flagProvider: "Specify terminal provider (claude / codex / gemini / copilot / custom)",
+        flagProvider: "Override default shell command",
         flagAgentUi: "Enable Agent Workspace",
         flagScreen: "Enable remote desktop sharing",
         flagPort: "Specify gateway port (default 8787)",

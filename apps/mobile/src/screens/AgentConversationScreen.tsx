@@ -6,6 +6,7 @@ import {
   Clipboard,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -23,6 +24,7 @@ import { MenuView } from "@react-native-menu/menu";
 import Markdown from "react-native-markdown-display";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
+import { BrowserView } from "../components/BrowserView";
 import { GlassBar } from "../components/GlassBar";
 import type { AgentFileEntry, AgentFileReadResult, AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
 import type {
@@ -43,6 +45,8 @@ import { useTheme, type Theme } from "../theme";
 interface AgentConversationScreenProps {
   conversationId: string;
   workspace: AgentWorkspaceHandle;
+  deviceToken?: string | null;
+  authToken?: string | null;
   onBack: () => void;
 }
 
@@ -148,7 +152,7 @@ function modelOptionsFor(
       value: m.id === defaultModel || m.id === "default" ? undefined : m.id,
     }));
   }
-  return [{ label: "默认模型", value: undefined }];
+  return [];
 }
 
 function effortOptionsFor(
@@ -182,7 +186,7 @@ function permissionOptionsFor(
       ),
     ];
   }
-  return PERMISSION_OPTIONS;
+  return [];
 }
 
 function formatEffort(effort?: AgentReasoningEffort): string {
@@ -2525,6 +2529,8 @@ function FilePreviewDrawer({
 export function AgentConversationScreen({
   conversationId,
   workspace,
+  deviceToken,
+  authToken,
   onBack,
 }: AgentConversationScreenProps) {
   const { theme } = useTheme();
@@ -2544,6 +2550,7 @@ export function AgentConversationScreen({
   );
   const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
   const [fileDrawerOpen, setFileDrawerOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const capabilities = conversation ? workspace.capabilitiesBySessionId.get(conversation.sessionId) : undefined;
   const providerCapability = conversation ? providerCapabilityFor(conversation.provider, capabilities) : undefined;
   const providerSupportsImageInput = conversation?.provider === "claude" || conversation?.provider === "codex";
@@ -3020,6 +3027,28 @@ export function AgentConversationScreen({
           }}
         >
           <Pressable
+            onPress={() => setPreviewOpen(true)}
+            hitSlop={8}
+            style={({ pressed }) => ({
+              width: 34,
+              height: 34,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? "rgba(120,120,128,0.14)" : "transparent",
+            })}
+          >
+            <AppSymbol name="safari" size={18} color={theme.textSecondary} />
+          </Pressable>
+        </GlassBar>
+        <GlassBar
+          blurTint={theme.mode === "dark" ? "systemUltraThinMaterialDark" : "systemUltraThinMaterialLight"}
+          fallbackColor={theme.mode === "light" ? "rgba(250,250,250,0.62)" : "rgba(42,42,43,0.58)"}
+          style={{
+            borderRadius: 17,
+            borderCurve: "continuous",
+          }}
+        >
+          <Pressable
             onPress={() => setFileDrawerOpen(true)}
             hitSlop={8}
             style={({ pressed }) => ({
@@ -3350,33 +3379,56 @@ export function AgentConversationScreen({
                   </Text>
                 </Pressable>
               ) : null}
-              <MenuView
-                actions={modelMenuActions}
-                onPressAction={({ nativeEvent }) => {
-                  const event = nativeEvent.event;
-                  if (event.startsWith("model:")) {
-                    commitModel(valueFromMenuId<string>(event.slice("model:".length)));
-                  }
-                }}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 6,
-                    borderRadius: 999,
-                    paddingHorizontal: 9,
-                    paddingVertical: 7,
-                    backgroundColor: theme.bgInput,
-                    maxWidth: 132,
+              {modelMenuActions.length > 0 ? (
+                <MenuView
+                  actions={modelMenuActions}
+                  onPressAction={({ nativeEvent }) => {
+                    const event = nativeEvent.event;
+                    if (event.startsWith("model:")) {
+                      commitModel(valueFromMenuId<string>(event.slice("model:".length)));
+                    }
                   }}
                 >
-                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
-                    {formatModel(model, modelOpts)}
-                  </Text>
-                  <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
-                </View>
-              </MenuView>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      borderRadius: 999,
+                      paddingHorizontal: 9,
+                      paddingVertical: 7,
+                      backgroundColor: theme.bgInput,
+                      maxWidth: 132,
+                    }}
+                  >
+                    <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
+                      {formatModel(model, modelOpts)}
+                    </Text>
+                    <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
+                  </View>
+                </MenuView>
+              ) : (
+                <TextInput
+                  value={model ?? ""}
+                  onChangeText={(value) => setModel(value.trim() ? value : undefined)}
+                  onEndEditing={() => commitModel(model)}
+                  placeholder="模型"
+                  placeholderTextColor={theme.textTertiary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{
+                    minWidth: 78,
+                    maxWidth: 132,
+                    borderRadius: 999,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    backgroundColor: theme.bgInput,
+                    color: theme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: "700",
+                  }}
+                />
+              )}
               {effortMenuActions.length > 0 ? (
                 <MenuView
                   actions={effortMenuActions}
@@ -3441,6 +3493,50 @@ export function AgentConversationScreen({
           </View>
         </View>
       </View>
+      <Modal
+        visible={previewOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setPreviewOpen(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: theme.bg }}>
+          <View
+            style={{
+              paddingTop: insets.top + 8,
+              paddingHorizontal: 12,
+              paddingBottom: 8,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              borderBottomWidth: StyleSheet.hairlineWidth,
+              borderBottomColor: theme.border,
+            }}
+          >
+            <Text style={{ color: theme.text, fontSize: 16, fontWeight: "800" }}>端口预览</Text>
+            <Pressable
+              onPress={() => setPreviewOpen(false)}
+              style={({ pressed }) => ({
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed ? theme.bgInput : "transparent",
+              })}
+            >
+              <AppSymbol name="xmark" size={16} color={theme.textSecondary} />
+            </Pressable>
+          </View>
+          <BrowserView
+            gatewayUrl={conversation.serverUrl}
+            sessionId={conversation.hostDeviceId}
+            deviceToken={deviceToken ?? null}
+            authToken={authToken ?? null}
+            isFullscreen={false}
+            onToggleFullscreen={() => {}}
+          />
+        </View>
+      </Modal>
       <FilePreviewDrawer
         visible={fileDrawerOpen}
         conversationId={conversation.id}

@@ -141,6 +141,7 @@ export interface AgentModeDescriptor {
 export interface AgentConversationRecord {
   id: string;
   serverUrl: string;
+  hostDeviceId: string;
   sessionId: string;
   machineId?: string;
   agentSessionId?: string;
@@ -156,7 +157,7 @@ export interface AgentConversationRecord {
   lastMessagePreview?: string;
   lastActivityAt: number;
   createdAt: number;
-  schemaVersion: 1;
+  schemaVersion: 2;
 }
 
 export interface AgentTimelineItem {
@@ -225,7 +226,8 @@ export interface AgentProviderCapability {
   features?: Record<string, boolean>;
 }
 
-const CONVERSATIONS_KEY = "@linkshell/agent-conversations:v1";
+const CONVERSATIONS_KEY = "@linkshell/agent-conversations:v2";
+const LEGACY_CONVERSATIONS_KEY = "@linkshell/agent-conversations:v1";
 const TIMELINE_PREFIX = "@linkshell/agent-timeline:v1:";
 const MAX_CONVERSATIONS = 100;
 const MAX_TIMELINE_ITEMS = 200;
@@ -345,6 +347,7 @@ async function cacheTimelineImages(
 
 export function makeAgentConversationId(input: {
   serverUrl: string;
+  hostDeviceId?: string;
   sessionId: string;
   machineId?: string;
   agentSessionId?: string;
@@ -434,11 +437,22 @@ async function saveConversations(items: AgentConversationRecord[]): Promise<void
 
 export async function loadAgentConversations(): Promise<AgentConversationRecord[]> {
   try {
-    const raw = await AsyncStorage.getItem(CONVERSATIONS_KEY);
+    const raw = await AsyncStorage.getItem(CONVERSATIONS_KEY) ?? await AsyncStorage.getItem(LEGACY_CONVERSATIONS_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as AgentConversationRecord[];
+    const parsed = JSON.parse(raw) as (AgentConversationRecord & { hostDeviceId?: string; schemaVersion?: number })[];
     if (!Array.isArray(parsed)) return [];
-    const { items: migrated, migrations } = migrateProviderScopedConversations(parsed);
+    const normalized = parsed.map((item) => {
+      const serverUrl = normalizeServerUrl(item.serverUrl);
+      const hostDeviceId = item.hostDeviceId ?? item.sessionId;
+      return {
+        ...item,
+        serverUrl,
+        hostDeviceId,
+        sessionId: hostDeviceId,
+        schemaVersion: 2 as const,
+      };
+    });
+    const { items: migrated, migrations } = migrateProviderScopedConversations(normalized);
     if (JSON.stringify(migrated) !== JSON.stringify(parsed)) {
       await saveConversations(migrated);
       await Promise.all(migrations.map((migration) => migrateAgentTimelineKey(migration)));
@@ -452,14 +466,19 @@ export async function loadAgentConversations(): Promise<AgentConversationRecord[
 }
 
 export async function upsertAgentConversation(
-  input: Omit<AgentConversationRecord, "schemaVersion"> & { schemaVersion?: 1 },
+  input: Omit<AgentConversationRecord, "hostDeviceId" | "schemaVersion"> & {
+    hostDeviceId?: string;
+    schemaVersion?: 1 | 2;
+  },
   options: { preserveLocalArchived?: boolean } = {},
 ): Promise<AgentConversationRecord> {
   const conversations = await loadAgentConversations();
   const normalized: AgentConversationRecord = {
     ...input,
     serverUrl: normalizeServerUrl(input.serverUrl),
-    schemaVersion: 1,
+    hostDeviceId: input.hostDeviceId ?? input.sessionId,
+    sessionId: input.hostDeviceId ?? input.sessionId,
+    schemaVersion: 2,
   };
   const index = conversations.findIndex((item) => item.id === normalized.id);
   const preserveLocalArchived = options.preserveLocalArchived ?? true;

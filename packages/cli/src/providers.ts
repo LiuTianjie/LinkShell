@@ -1,8 +1,7 @@
 import { accessSync, constants, existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
-import type { TerminalProvider } from "@linkshell/protocol";
+import { basename, delimiter, join } from "node:path";
 
-export type ProviderName = TerminalProvider;
+export type ProviderName = "shell";
 
 export interface ProviderConfig {
   provider: ProviderName;
@@ -10,6 +9,8 @@ export interface ProviderConfig {
   args: string[];
   env: NodeJS.ProcessEnv;
 }
+
+export type ShellConfig = ProviderConfig;
 
 function stripOuterQuotes(value: string): string {
   const trimmed = value.trim();
@@ -65,125 +66,42 @@ function which(bin: string): string | undefined {
   return undefined;
 }
 
-function resolveClaudeProvider(input: {
-  command?: string;
-  args: string[];
-}): ProviderConfig {
-  const command = input.command ?? "claude";
-  const resolved = which(command);
-  if (!resolved) {
-    throw new Error(
-      `Claude CLI not found ("${command}"). Install it with: npm install -g @anthropic-ai/claude-code`,
-    );
-  }
-
-  // Claude starts an interactive REPL by default — that's exactly what we want in the PTY.
-  // Pass through any extra args the user provided.
-  return {
-    provider: "claude",
-    command: resolved,
-    args: input.args,
-    env: { ...process.env },
-  };
+function shellSupportsLoginArg(command: string): boolean {
+  const name = basename(command).toLowerCase();
+  return ["bash", "zsh", "sh", "fish"].includes(name);
 }
 
-function resolveCodexProvider(input: {
+export function resolveShellConfig(input: {
   command?: string;
-  args: string[];
-}): ProviderConfig {
-  const command = input.command ?? "codex";
-  const resolved = which(command);
-  if (!resolved) {
-    throw new Error(
-      `Codex CLI not found ("${command}"). Install it with: npm install -g @openai/codex`,
-    );
-  }
-
-  if (!process.env.OPENAI_API_KEY) {
-    process.stderr.write(
-      "[warn] OPENAI_API_KEY not set — Codex may fail to authenticate\n",
-    );
-  }
+  args?: string[];
+} = {}): ShellConfig {
+  const configuredShell = input.command ?? process.env.SHELL ?? (process.platform === "darwin" ? "/bin/zsh" : undefined);
+  const command = configuredShell ?? (process.platform === "win32" ? "cmd.exe" : "sh");
+  const resolved = which(command) ?? command;
+  const passthrough = input.args ?? [];
+  const args = passthrough.length > 0
+    ? passthrough
+    : shellSupportsLoginArg(resolved)
+      ? ["-l"]
+      : [];
 
   return {
-    provider: "codex",
+    provider: "shell",
     command: resolved,
-    args: input.args,
-    env: { ...process.env },
-  };
-}
-
-function resolveGeminiProvider(input: {
-  command?: string;
-  args: string[];
-}): ProviderConfig {
-  const command = input.command ?? "gemini";
-  const resolved = which(command);
-  if (!resolved) {
-    throw new Error(
-      `Gemini CLI not found ("${command}"). Install it with: npm install -g @anthropic-ai/gemini-cli or check https://github.com/anthropics/gemini-cli`,
-    );
-  }
-
-  if (!process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
-    process.stderr.write(
-      "[warn] GOOGLE_API_KEY / GEMINI_API_KEY not set — Gemini may fail to authenticate\n",
-    );
-  }
-
-  return {
-    provider: "gemini",
-    command: resolved,
-    args: input.args,
-    env: { ...process.env },
-  };
-}
-
-function resolveCopilotProvider(input: {
-  command?: string;
-  args: string[];
-}): ProviderConfig {
-  const command = input.command ?? "github-copilot";
-  const resolved = which(command);
-  if (!resolved) {
-    throw new Error(
-      `GitHub Copilot CLI not found ("${command}").`,
-    );
-  }
-
-  return {
-    provider: "copilot",
-    command: resolved,
-    args: input.args,
+    args,
     env: { ...process.env },
   };
 }
 
 export function resolveProviderConfig(input: {
-  provider: ProviderName;
+  provider?: string;
   command?: string;
   args: string[];
 }): ProviderConfig {
-  switch (input.provider) {
-    case "claude":
-      return resolveClaudeProvider(input);
-    case "codex":
-      return resolveCodexProvider(input);
-    case "gemini":
-      return resolveGeminiProvider(input);
-    case "copilot":
-      return resolveCopilotProvider(input);
-    case "custom": {
-      if (!input.command) {
-        throw new Error("custom provider requires --command");
-      }
-      const resolved = which(input.command);
-      return {
-        provider: "custom",
-        command: resolved ?? input.command,
-        args: input.args,
-        env: { ...process.env },
-      };
-    }
+  if (input.provider && input.provider !== "shell") {
+    process.stderr.write(
+      `[warn] terminal provider "${input.provider}" is ignored in protocol v2; starting the system shell instead\n`,
+    );
   }
+  return resolveShellConfig({ command: input.command, args: input.args });
 }

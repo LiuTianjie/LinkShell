@@ -19,10 +19,10 @@ git status
 pnpm typecheck
 
 # 本地测试
-pnpm dev:cli start --provider custom --command bash
+pnpm dev:cli start --command bash
 
 # Agent Workspace smoke test（如果本机安装了 Claude Code 或 Codex）
-pnpm --filter linkshell-cli dev start --agent-ui --provider custom --command bash
+pnpm --filter linkshell-cli dev start --agent-ui --command bash
 ```
 
 ## 2. 更新版本号
@@ -167,13 +167,13 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 # 验证 upgrade 命令
 linkshell upgrade
 
-# 验证 provider detection
+# 验证 shell-only terminal
 linkshell doctor
-linkshell start --provider claude --no-agent-ui
-linkshell start --provider codex --no-agent-ui
+linkshell start --no-agent-ui
+linkshell start --command bash --no-agent-ui
 
 # 验证 Agent Workspace capabilities（至少覆盖 Codex 或 Claude 其一）
-linkshell start --agent-ui --provider custom --command bash
+linkshell start --agent-ui --command bash
 ```
 
 ## 快速发版 Checklist

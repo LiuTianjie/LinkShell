@@ -29,9 +29,9 @@ async function getJson(path: string) {
   return { status: res.status, body: await res.json() as Record<string, unknown> };
 }
 
-function connectWs(sessionId: string, role: string, deviceId?: string): Promise<WebSocket> {
+function connectWs(hostDeviceId: string, role: string, deviceId?: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const url = `${WS_BASE}/ws?sessionId=${sessionId}&role=${role}${deviceId ? `&deviceId=${deviceId}` : ""}`;
+    const url = `${WS_BASE}/ws?hostDeviceId=${hostDeviceId}&role=${role}${deviceId ? `&deviceId=${deviceId}` : ""}`;
     const ws = new WebSocket(url);
     attachMessageBuffer(ws);
     ws.on("open", () => resolve(ws));
@@ -74,6 +74,7 @@ let server: Server;
 let wss: WebSocketServer;
 let sessionManager: SessionManager;
 let pairingManager: PairingManager;
+let pairingCounter = 0;
 
 beforeAll(async () => {
   sessionManager = new SessionManager();
@@ -92,10 +93,10 @@ beforeAll(async () => {
 
     if (method === "POST" && url.pathname === "/pairings") {
       const body = await readBody(req);
-      const record = pairingManager.create(body.sessionId as string | undefined);
+      const record = pairingManager.create((body.hostDeviceId as string | undefined) ?? `host-${++pairingCounter}`);
       res.writeHead(201, { "content-type": "application/json" });
       res.end(JSON.stringify({
-        sessionId: record.sessionId,
+        hostDeviceId: record.hostDeviceId,
         pairingCode: record.pairingCode,
         expiresAt: new Date(record.expiresAt).toISOString(),
       }));
@@ -111,24 +112,23 @@ beforeAll(async () => {
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ sessionId: result.sessionId }));
+      res.end(JSON.stringify({ hostDeviceId: result.hostDeviceId }));
       return;
     }
 
-    if (method === "GET" && url.pathname === "/sessions") {
-      const sessions = sessionManager.listActive().map((s) => ({
+    if (method === "GET" && url.pathname === "/devices") {
+      const devices = sessionManager.listActive().map((s) => ({
         id: s.id,
+        hostDeviceId: s.hostDeviceId,
         state: s.state,
         hasHost: !!s.host,
         clientCount: s.clients.size,
-        provider: s.provider ?? null,
         machineId: s.machineId ?? null,
         hostname: s.hostname ?? null,
         cwd: s.cwd ?? null,
-        projectName: s.projectName ?? null,
       }));
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ sessions }));
+      res.end(JSON.stringify({ devices }));
       return;
     }
 
@@ -147,30 +147,30 @@ beforeAll(async () => {
   });
 
   wss.on("connection", (socket: WebSocket, _req: unknown, url: URL) => {
-    const sessionId = url.searchParams.get("sessionId")!;
+    const hostDeviceId = url.searchParams.get("hostDeviceId")!;
     const role = url.searchParams.get("role") as "host" | "client";
     const deviceId = url.searchParams.get("deviceId") ?? "test-device";
 
     const device = { socket, role, deviceId, connectedAt: Date.now() };
     if (role === "host") {
-      sessionManager.setHost(sessionId, device);
+      sessionManager.setHost(hostDeviceId, device);
     } else {
-      sessionManager.addClient(sessionId, device);
+      sessionManager.addClient(hostDeviceId, device);
     }
 
     socket.send(serializeEnvelope(createEnvelope({
-      type: "session.connect",
-      sessionId,
+      type: "device.connect",
+      hostDeviceId,
       payload: { role, clientName: deviceId },
     })));
 
     socket.on("message", (data: WebSocket.RawData) => {
-      handleSocketMessage(socket, data.toString(), role, sessionId, deviceId, sessionManager);
+      handleSocketMessage(socket, data.toString(), role, hostDeviceId, deviceId, sessionManager);
     });
 
     socket.on("close", () => {
-      if (role === "host") sessionManager.removeHost(sessionId);
-      else sessionManager.removeClient(sessionId, deviceId);
+      if (role === "host") sessionManager.removeHost(hostDeviceId);
+      else sessionManager.removeClient(hostDeviceId, deviceId);
     });
   });
 
@@ -287,21 +287,18 @@ describe("Protocol schemas", () => {
     expect(status.machineId).toBe("machine-123");
   });
 
-  it("accepts all terminal providers in connect and spawn payloads", () => {
-    for (const provider of ["claude", "codex", "gemini", "copilot", "custom"] as const) {
-      const connect = parseLocalTypedPayload("session.connect", {
-        role: "host",
-        clientName: `${provider}-cli`,
-        provider,
-      });
-      expect(connect.provider).toBe(provider);
+  it("keeps terminal payloads generic and provider-free", () => {
+    const connect = parseLocalTypedPayload("device.connect", {
+      role: "host",
+      clientName: "shell-cli",
+      capabilities: ["terminal"],
+    });
+    expect(connect.capabilities).toContain("terminal");
 
-      const spawn = parseLocalTypedPayload("terminal.spawn", {
-        cwd: "/repo",
-        provider,
-      });
-      expect(spawn.provider).toBe(provider);
-    }
+    const spawn = parseLocalTypedPayload("terminal.spawn", {
+      cwd: "/repo",
+    });
+    expect(spawn.cwd).toBe("/repo");
   });
 
   it("keeps structured agent v2 patch fields", () => {
@@ -329,19 +326,19 @@ describe("Protocol schemas", () => {
 });
 
 describe("Pairing flow", () => {
-  it("creates a pairing and returns code + sessionId", async () => {
-    const { status, body } = await postJson("/pairings", {});
+  it("creates a pairing and returns code + hostDeviceId", async () => {
+    const { status, body } = await postJson("/pairings", { hostDeviceId: "host-pair-create" });
     expect(status).toBe(201);
     expect(body.pairingCode).toMatch(/^\d{6}$/);
-    expect(body.sessionId).toBeTruthy();
+    expect(body.hostDeviceId).toBe("host-pair-create");
     expect(body.expiresAt).toBeTruthy();
   });
 
   it("claims a pairing with valid code", async () => {
-    const create = await postJson("/pairings", {});
+    const create = await postJson("/pairings", { hostDeviceId: "host-pair-claim" });
     const claim = await postJson("/pairings/claim", { pairingCode: create.body.pairingCode });
     expect(claim.status).toBe(200);
-    expect(claim.body.sessionId).toBe(create.body.sessionId);
+    expect(claim.body.hostDeviceId).toBe(create.body.hostDeviceId);
   });
 
   it("rejects invalid pairing code", async () => {
@@ -351,21 +348,21 @@ describe("Pairing flow", () => {
   });
 });
 
-describe("WebSocket session", () => {
-  it("host connects and receives session.connect", async () => {
+describe("WebSocket device", () => {
+  it("host connects and receives device.connect", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host");
     const msg = await waitForMessage(host);
-    expect(msg.type).toBe("session.connect");
-    expect(msg.sessionId).toBe(sessionId);
+    expect(msg.type).toBe("device.connect");
+    expect(msg.hostDeviceId).toBe(sessionId);
     host.close();
   });
 
   it("host output is forwarded to client", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-1");
     await waitForMessage(host); // session.connect
@@ -393,7 +390,7 @@ describe("WebSocket session", () => {
 
   it("client input is forwarded to host", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-2");
     await waitForMessage(host); // session.connect
@@ -419,7 +416,7 @@ describe("WebSocket session", () => {
 
   it("ACK is forwarded from client to host", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-3");
     await waitForMessage(host);
@@ -444,7 +441,7 @@ describe("WebSocket session", () => {
 
   it("rejects invalid typed payloads without killing the session", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-invalid-payload");
     await waitForMessage(host);
@@ -453,17 +450,16 @@ describe("WebSocket session", () => {
     await waitForMessage(client);
 
     host.send(serializeEnvelope(createEnvelope({
-      type: "session.connect",
-      sessionId,
+      type: "terminal.resize",
+      hostDeviceId: sessionId,
       payload: {
-        role: "host",
-        clientName: "bad-provider",
-        provider: "not-a-provider",
+        cols: 0,
+        rows: 24,
       },
     })));
 
     const error = await waitForMessage(host);
-    expect(error.type).toBe("session.error");
+    expect(error.type).toBe("device.error");
     expect((error.payload as Record<string, unknown>).code).toBe("invalid_message");
 
     host.send(serializeEnvelope(createEnvelope({
@@ -484,18 +480,18 @@ describe("WebSocket session", () => {
     })));
 
     const clientError = await waitForMessage(client);
-    expect(clientError.type).toBe("session.error");
+    expect(clientError.type).toBe("device.error");
     expect((clientError.payload as Record<string, unknown>).code).toBe("invalid_message");
 
     host.close();
     client.close();
   });
 
-  it("rejects envelopes whose sessionId differs from the websocket URL", async () => {
+  it("rejects envelopes whose hostDeviceId differs from the websocket URL", async () => {
     const { body: first } = await postJson("/pairings", {});
     const { body: second } = await postJson("/pairings", {});
-    const sessionId = first.sessionId as string;
-    const otherSessionId = second.sessionId as string;
+    const sessionId = first.hostDeviceId as string;
+    const otherSessionId = second.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-mismatch");
     await waitForMessage(host);
@@ -505,13 +501,13 @@ describe("WebSocket session", () => {
 
     client.send(serializeEnvelope(createEnvelope({
       type: "terminal.input",
-      sessionId: otherSessionId,
+      hostDeviceId: otherSessionId,
       payload: { data: "cross-session\n" },
     })));
 
     const error = await waitForMessage(client);
-    expect(error.type).toBe("session.error");
-    expect(error.sessionId).toBe(sessionId);
+    expect(error.type).toBe("device.error");
+    expect(error.hostDeviceId).toBe(sessionId);
     expect((error.payload as Record<string, unknown>).code).toBe("invalid_message");
 
     host.close();
@@ -522,7 +518,7 @@ describe("WebSocket session", () => {
 describe("Control ownership", () => {
   it("first client auto-gets control and can send input", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-ctrl");
     await waitForMessage(host);
@@ -546,7 +542,7 @@ describe("Control ownership", () => {
 
   it("second client without control gets rejected", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-ctrl2");
     await waitForMessage(host);
@@ -565,7 +561,7 @@ describe("Control ownership", () => {
     })));
 
     const error = await waitForMessage(client2);
-    expect(error.type).toBe("session.error");
+    expect(error.type).toBe("device.error");
     expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
 
     host.close();
@@ -575,7 +571,7 @@ describe("Control ownership", () => {
 
   it("rejects agent prompt from non-controller clients", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-agent-ctrl");
     await waitForMessage(host);
@@ -596,7 +592,7 @@ describe("Control ownership", () => {
     })));
 
     const error = await waitForMessage(client2);
-    expect(error.type).toBe("session.error");
+    expect(error.type).toBe("device.error");
     expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
 
     client2.send(serializeEnvelope(createEnvelope({
@@ -606,7 +602,7 @@ describe("Control ownership", () => {
     })));
 
     const sessionError = await waitForMessage(client2);
-    expect(sessionError.type).toBe("session.error");
+    expect(sessionError.type).toBe("device.error");
     expect((sessionError.payload as Record<string, unknown>).code).toBe("control_conflict");
 
     host.close();
@@ -616,7 +612,7 @@ describe("Control ownership", () => {
 
   it("routes structured input responses only from the controller", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-agent-input");
     await waitForMessage(host);
@@ -639,7 +635,7 @@ describe("Control ownership", () => {
 
     client2.send(serializeEnvelope(response));
     const error = await waitForMessage(client2);
-    expect(error.type).toBe("session.error");
+    expect(error.type).toBe("device.error");
     expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
 
     client1.send(serializeEnvelope(response));
@@ -654,7 +650,7 @@ describe("Control ownership", () => {
 
   it("routes agent command execution only from the controller", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-agent-command");
     await waitForMessage(host);
@@ -678,7 +674,7 @@ describe("Control ownership", () => {
 
     client2.send(serializeEnvelope(command));
     const error = await waitForMessage(client2);
-    expect(error.type).toBe("session.error");
+    expect(error.type).toBe("device.error");
     expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
 
     client1.send(serializeEnvelope(command));
@@ -693,7 +689,7 @@ describe("Control ownership", () => {
 
   it("does not store agent messages in terminal status replay", async () => {
     const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
+    const sessionId = body.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-agent-cache");
     await waitForMessage(host);
@@ -728,10 +724,10 @@ describe("Control ownership", () => {
   });
 });
 
-describe("Session list", () => {
-  it("shows active sessions", async () => {
+describe("Device list", () => {
+  it("shows active devices", async () => {
     const { body: pairing } = await postJson("/pairings", {});
-    const sessionId = pairing.sessionId as string;
+    const sessionId = pairing.hostDeviceId as string;
 
     const host = await connectWs(sessionId, "host", "host-list");
     await waitForMessage(host);
@@ -745,9 +741,9 @@ describe("Session list", () => {
       "repo",
     );
 
-    const { body } = await getJson("/sessions");
-    const sessions = body.sessions as Array<Record<string, unknown>>;
-    const found = sessions.find((s) => s.id === sessionId);
+    const { body } = await getJson("/devices");
+    const devices = body.devices as Array<Record<string, unknown>>;
+    const found = devices.find((s) => s.hostDeviceId === sessionId);
     expect(found).toBeTruthy();
     expect(found!.hasHost).toBe(true);
     expect(found!.machineId).toBe("machine-list");

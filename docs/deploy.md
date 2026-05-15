@@ -129,7 +129,7 @@ server {
 
 ```bash
 # CLI
-linkshell start --gateway wss://relay.example.com/ws --provider claude
+linkshell start --gateway wss://relay.example.com/ws
 
 # App 里输入
 # https://relay.example.com
@@ -186,7 +186,7 @@ docker run -d \
 -- 见仓库内 docs/supabase-gateway-state.sql
 ```
 
-这会创建 `linkshell_gateway_tokens` 和 `linkshell_gateway_pairings` 两张表，用来持久化设备 token 和短期配对状态。表不存在时 Gateway 会自动退回内存态，但 Docker 重启或滚动部署后用户可能需要重新配对。
+这会创建 v2 Gateway 状态表：`linkshell_gateway_device_authorizations` 用来持久化客户端设备到主机设备的长期授权，`linkshell_gateway_pairing_challenges` 用来持久化短期配对码。表不存在时 Gateway 会自动退回内存态，但 Docker 重启或滚动部署后用户可能需要重新配对。
 
 ### docker-compose 方式
 
@@ -209,8 +209,8 @@ docker compose up -d
 | `SUPABASE_URL` | AUTH_REQUIRED=true 时必需 | Supabase 项目 URL |
 | `SUPABASE_ANON_KEY` | AUTH_REQUIRED=true 时必需 | Supabase anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | AUTH_REQUIRED=true 时必需 | 用于服务端订阅到期检查 |
-| `SUPABASE_GATEWAY_TOKEN_TABLE` | 否 | Gateway token 持久化表名，默认 `linkshell_gateway_tokens` |
-| `SUPABASE_GATEWAY_PAIRING_TABLE` | 否 | Gateway 配对状态持久化表名，默认 `linkshell_gateway_pairings` |
+| `SUPABASE_GATEWAY_AUTHORIZATION_TABLE` | 否 | Gateway 设备授权持久化表名，默认 `linkshell_gateway_device_authorizations` |
+| `SUPABASE_GATEWAY_PAIRING_TABLE` | 否 | Gateway 配对挑战持久化表名，默认 `linkshell_gateway_pairing_challenges` |
 | `PAIRING_TTL_MS` | 否 | 配对码有效期，默认 10 分钟 |
 
 ### 行为差异

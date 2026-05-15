@@ -4,6 +4,7 @@ import { loadHistory } from "./history";
 export interface ProjectRecord {
   id: string;
   serverUrl: string;
+  hostDeviceId: string;
   sessionId: string;
   machineId?: string;
   cwd: string;
@@ -14,16 +15,19 @@ export interface ProjectRecord {
   lastTerminalId?: string;
   lastOpenedAt: number;
   createdAt: number;
-  schemaVersion: 1;
+  schemaVersion: 2;
 }
 
 export type ProjectRecordInput = Omit<
   ProjectRecord,
-  "id" | "lastOpenedAt" | "createdAt" | "schemaVersion"
-> &
+  "id" | "hostDeviceId" | "lastOpenedAt" | "createdAt" | "schemaVersion"
+> & {
+  hostDeviceId?: string;
+} &
   Partial<Pick<ProjectRecord, "lastOpenedAt" | "createdAt">>;
 
-const STORAGE_KEY = "@linkshell/projects:v1";
+const STORAGE_KEY = "@linkshell/projects:v2";
+const LEGACY_STORAGE_KEY = "@linkshell/projects:v1";
 const MAX_RECORDS = 50;
 
 function normalizeServerUrl(serverUrl: string): string {
@@ -66,13 +70,15 @@ async function migrateProjectsFromHistory(): Promise<ProjectRecord[]> {
     if (!cwd) continue;
 
     const serverUrl = normalizeServerUrl(record.serverUrl);
-    const id = makeProjectId(serverUrl, record.machineId ?? record.sessionId, cwd);
+    const hostDeviceId = record.hostDeviceId ?? record.sessionId;
+    const id = makeProjectId(serverUrl, hostDeviceId, cwd);
     if (projects.has(id)) continue;
 
     projects.set(id, {
       id,
       serverUrl,
-      sessionId: record.sessionId,
+      hostDeviceId,
+      sessionId: hostDeviceId,
       machineId: record.machineId,
       cwd,
       projectName: record.projectName,
@@ -81,7 +87,7 @@ async function migrateProjectsFromHistory(): Promise<ProjectRecord[]> {
       provider: record.provider,
       lastOpenedAt: record.connectedAt,
       createdAt: record.connectedAt,
-      schemaVersion: 1,
+      schemaVersion: 2,
     });
   }
 
@@ -92,18 +98,24 @@ async function migrateProjectsFromHistory(): Promise<ProjectRecord[]> {
 
 export async function loadProjects(): Promise<ProjectRecord[]> {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const raw = await AsyncStorage.getItem(STORAGE_KEY) ?? await AsyncStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return migrateProjectsFromHistory();
-    const parsed = JSON.parse(raw) as ProjectRecord[];
+    const parsed = JSON.parse(raw) as (ProjectRecord & { hostDeviceId?: string; schemaVersion?: number })[];
     if (!Array.isArray(parsed)) return [];
     const normalized = parsed
-      .filter((item) => item.serverUrl && item.sessionId && item.cwd)
+      .filter((item) => item.serverUrl && (item.hostDeviceId || item.sessionId) && item.cwd)
       .map((item) => {
         const serverUrl = normalizeServerUrl(item.serverUrl);
-        const id = makeProjectId(serverUrl, item.machineId ?? item.sessionId, item.cwd);
-        return item.id === id && item.serverUrl === serverUrl
-          ? item
-          : { ...item, id, serverUrl };
+        const hostDeviceId = item.hostDeviceId ?? item.sessionId;
+        const id = makeProjectId(serverUrl, hostDeviceId, item.cwd);
+        return {
+          ...item,
+          id,
+          serverUrl,
+          hostDeviceId,
+          sessionId: hostDeviceId,
+          schemaVersion: 2 as const,
+        };
       });
     if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
       await saveProjects(normalized);
@@ -122,17 +134,18 @@ export async function upsertProject(
 
   const now = Date.now();
   const serverUrl = normalizeServerUrl(input.serverUrl);
-  const id = makeProjectId(serverUrl, input.machineId ?? input.sessionId, cwd);
+  const hostDeviceId = input.hostDeviceId ?? input.sessionId;
+  const id = makeProjectId(serverUrl, hostDeviceId, cwd);
   const projects = await loadProjects();
   const existingIndex = projects.findIndex((item) =>
     item.id === id ||
     (
-      input.machineId &&
-      !item.machineId &&
       normalizeServerUrl(item.serverUrl) === serverUrl &&
       item.cwd === cwd &&
       (
+        item.hostDeviceId === hostDeviceId ||
         item.sessionId === input.sessionId ||
+        (Boolean(input.machineId) && item.machineId === input.machineId) ||
         (Boolean(input.hostname) && item.hostname === input.hostname)
       )
     )
@@ -142,7 +155,8 @@ export async function upsertProject(
   const next: ProjectRecord = {
     id,
     serverUrl,
-    sessionId: input.sessionId,
+    hostDeviceId,
+    sessionId: hostDeviceId,
     machineId: input.machineId ?? existing?.machineId,
     cwd,
     projectName: input.projectName ?? existing?.projectName,
@@ -152,7 +166,7 @@ export async function upsertProject(
     lastTerminalId: input.lastTerminalId ?? existing?.lastTerminalId,
     lastOpenedAt: input.lastOpenedAt ?? existing?.lastOpenedAt ?? now,
     createdAt: existing?.createdAt ?? input.createdAt ?? now,
-    schemaVersion: 1,
+    schemaVersion: 2,
   };
 
   if (existingIndex >= 0) {
@@ -166,6 +180,7 @@ export async function upsertProject(
 
 export async function touchProject(input: {
   serverUrl: string;
+  hostDeviceId?: string;
   sessionId: string;
   machineId?: string;
   cwd: string;
@@ -173,6 +188,7 @@ export async function touchProject(input: {
 }): Promise<void> {
   await upsertProject({
     serverUrl: input.serverUrl,
+    hostDeviceId: input.hostDeviceId,
     sessionId: input.sessionId,
     machineId: input.machineId,
     cwd: input.cwd,
@@ -185,7 +201,7 @@ export async function removeProjectsBySessionId(
   sessionId: string,
 ): Promise<void> {
   const projects = await loadProjects();
-  await saveProjects(projects.filter((item) => item.sessionId !== sessionId));
+  await saveProjects(projects.filter((item) => item.sessionId !== sessionId && item.hostDeviceId !== sessionId));
 }
 
 export async function removeProject(id: string): Promise<void> {

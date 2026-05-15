@@ -19,8 +19,8 @@ import { ensureDeviceToken, setDeviceToken } from "../storage/device-token";
 export interface TerminalInfo {
   terminalId: string;
   cwd: string;
-  projectName: string;
-  provider: string;
+  projectName?: string;
+  provider?: string;
   status: "running" | "exited";
   terminalStream: TerminalStream;
   structuredStatus?: {
@@ -129,6 +129,7 @@ export interface AgentState {
 }
 
 export interface SessionInfo {
+  hostDeviceId: string;
   sessionId: string;
   gatewayUrl: string;
   status: ConnectionStatus;
@@ -170,6 +171,7 @@ export interface SessionManagerHandle {
   setActiveSessionId: (id: string | null) => void;
   claim: (pairingCode: string, gatewayUrl: string) => Promise<string | null>;
   connectToSession: (sessionId: string, gatewayUrl: string) => void;
+  connectToDevice: (hostDeviceId: string, gatewayUrl: string) => void;
   sendInput: (data: string) => void;
   sendImage: (base64Data: string, filename: string) => void;
   sendResize: (cols: number, rows: number) => void;
@@ -297,8 +299,8 @@ function generateId(): string {
 interface InternalTerminal {
   terminalId: string;
   cwd: string;
-  projectName: string;
-  provider: string;
+  projectName?: string;
+  provider?: string;
   status: "running" | "exited";
   snapshot: TerminalStreamSnapshot;
   listeners: Set<(event: TerminalStreamEvent) => void>;
@@ -324,6 +326,7 @@ interface InternalTerminal {
 }
 
 interface InternalSession {
+  hostDeviceId: string;
   sessionId: string;
   gatewayUrl: string;
   deviceId: string;
@@ -391,8 +394,8 @@ const OUTBOUND_QUEUE_LIMIT = 100;
 function createInternalTerminal(
   terminalId: string,
   cwd: string,
-  projectName: string,
-  provider: string,
+  projectName?: string,
+  provider?: string,
 ): InternalTerminal {
   const snapshot: TerminalStreamSnapshot = {
     sessionId: terminalId,
@@ -423,14 +426,15 @@ function createInternalTerminal(
 }
 
 function createInternalSession(
-  sessionId: string,
+  hostDeviceId: string,
   gatewayUrl: string,
   deviceId: string,
 ): InternalSession {
-  const snapshot: TerminalStreamSnapshot = { sessionId, chunks: [] };
+  const snapshot: TerminalStreamSnapshot = { sessionId: hostDeviceId, chunks: [] };
   const listeners = new Set<(event: TerminalStreamEvent) => void>();
   return {
-    sessionId,
+    hostDeviceId,
+    sessionId: hostDeviceId,
     gatewayUrl,
     deviceId,
     status: "connecting",
@@ -508,6 +512,7 @@ function toSessionInfo(s: InternalSession): SessionInfo {
     ? s.terminals.get(s.activeTerminalId)
     : undefined;
   return {
+    hostDeviceId: s.hostDeviceId,
     sessionId: s.sessionId,
     gatewayUrl: s.gatewayUrl,
     status: s.status,
@@ -699,8 +704,8 @@ export function useSessionManager(): SessionManagerHandle {
       sendRaw(
         s,
         createEnvelope({
-          type: "session.heartbeat",
-          sessionId: s.sessionId,
+          type: "device.heartbeat",
+          hostDeviceId: s.hostDeviceId,
           payload: { ts: Date.now() },
         }),
       );
@@ -852,7 +857,7 @@ export function useSessionManager(): SessionManagerHandle {
       }
     } catch {}
 
-    const url = `${base}/ws?sessionId=${encodeURIComponent(s.sessionId)}&role=client&deviceId=${s.deviceId}${tokenParam}${authParam}`;
+    const url = `${base}/ws?hostDeviceId=${encodeURIComponent(s.hostDeviceId)}&role=client&deviceId=${s.deviceId}${tokenParam}${authParam}`;
     const ws = new WebSocket(url);
     s.socket = ws;
 
@@ -868,7 +873,7 @@ export function useSessionManager(): SessionManagerHandle {
         s,
         createEnvelope({
           type: "terminal.list",
-          sessionId: s.sessionId,
+          hostDeviceId: s.hostDeviceId,
           payload: { terminals: [] },
         }),
       );
@@ -880,7 +885,7 @@ export function useSessionManager(): SessionManagerHandle {
           if (deviceTokenRef.current)
             headers["Authorization"] = `Bearer ${deviceTokenRef.current}`;
           const res = await fetch(
-            `${s.gatewayUrl}/sessions/${encodeURIComponent(s.sessionId)}`,
+            `${s.gatewayUrl}/devices/${encodeURIComponent(s.hostDeviceId)}`,
             { headers },
           );
           if (!res.ok) {
@@ -892,23 +897,18 @@ export function useSessionManager(): SessionManagerHandle {
           }
           const body = (await res.json()) as {
             hasHost?: boolean;
-            projectName?: string | null;
             cwd?: string | null;
             machineId?: string | null;
             hostname?: string | null;
-            provider?: string | null;
           };
-          // Extract project metadata
-          if (body.projectName) s.projectName = body.projectName;
           if (body.cwd) s.cwd = body.cwd;
           if (body.machineId) s.machineId = body.machineId;
           if (body.hostname) s.hostname = body.hostname;
-          if (body.provider) s.provider = body.provider;
 
           if (body.hasHost === false) {
             if (s.status === "connecting" || s.status === "reconnecting") {
               s.status = "host_disconnected" as ConnectionStatus;
-              s.connectionDetail = "Host is not connected to this session.";
+              s.connectionDetail = "Host is not connected to this device.";
             }
           } else {
             if (s.status === "connecting" || s.status === "reconnecting") {
@@ -936,8 +936,8 @@ export function useSessionManager(): SessionManagerHandle {
         sendRaw(
           s,
           createEnvelope({
-            type: "session.resume",
-            sessionId: s.sessionId,
+            type: "device.resume",
+            hostDeviceId: s.hostDeviceId,
             payload: {
               lastAckedSeq: s.lastAckedSeq,
               lastAckedSeqByTerminal: Object.fromEntries(
@@ -970,8 +970,8 @@ export function useSessionManager(): SessionManagerHandle {
             const t = createInternalTerminal(
               tid,
               s.cwd ?? "",
-              s.projectName ?? tid,
-              s.provider ?? "claude",
+              undefined,
+              undefined,
             );
             s.terminals.set(tid, t);
             if (!s.activeTerminalId) s.activeTerminalId = tid;
@@ -989,8 +989,8 @@ export function useSessionManager(): SessionManagerHandle {
               sendRaw(
                 s,
                 createEnvelope({
-                  type: "session.ack",
-                  sessionId: s.sessionId,
+                  type: "device.ack",
+                  hostDeviceId: s.hostDeviceId,
                   terminalId: tid,
                   payload: { seq: nextForTerminal },
                 }),
@@ -1021,8 +1021,8 @@ export function useSessionManager(): SessionManagerHandle {
             const t = createInternalTerminal(
               p.terminalId,
               p.cwd,
-              p.projectName,
-              (p as any).provider ?? s.provider ?? "claude",
+              undefined,
+              undefined,
             );
             // Apply any pending status from reconnect replay
             const pendingStatus = s.pendingStatusByTerminal.get(p.terminalId);
@@ -1152,8 +1152,8 @@ export function useSessionManager(): SessionManagerHandle {
               const t = createInternalTerminal(
                 info.terminalId,
                 info.cwd,
-                info.projectName,
-                info.provider,
+                undefined,
+                undefined,
               );
               t.status = info.status;
               // Apply any pending status from reconnect replay
@@ -1174,8 +1174,8 @@ export function useSessionManager(): SessionManagerHandle {
               const existing = s.terminals.get(info.terminalId)!;
               existing.status = info.status;
               existing.cwd = info.cwd;
-              existing.projectName = info.projectName;
-              if (info.provider) existing.provider = info.provider;
+              existing.projectName = undefined;
+              existing.provider = undefined;
             }
           }
           // Set active terminal if not set
@@ -1226,8 +1226,9 @@ export function useSessionManager(): SessionManagerHandle {
           tick();
           break;
         }
+        case "device.error":
         case "session.error": {
-          const p = parseTypedPayload("session.error", envelope.payload);
+          const p = parseTypedPayload(envelope.type === "device.error" ? "device.error" : "session.error", envelope.payload);
           console.warn("[LiveActivityAction] session error", {
             sessionId: s.sessionId,
             code: p.code,
@@ -1281,12 +1282,14 @@ export function useSessionManager(): SessionManagerHandle {
           tick();
           break;
         }
+        case "device.host_disconnected":
         case "session.host_disconnected":
           s.status = "host_disconnected" as ConnectionStatus;
           s.connectionDetail =
             "Host connection closed. Waiting for it to come back.";
           tick();
           break;
+        case "device.host_reconnected":
         case "session.host_reconnected":
           s.status = "connected";
           s.connectionDetail = null;
@@ -1487,20 +1490,28 @@ export function useSessionManager(): SessionManagerHandle {
         const res = await fetch(`${gatewayUrl}/pairings/claim`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ pairingCode, deviceToken: currentToken }),
+          body: JSON.stringify({
+            pairingCode,
+            deviceToken: currentToken,
+            clientDeviceId: deviceIdRef.current,
+            clientName: "mobile",
+          }),
         });
         const body = (await res.json()) as {
+          hostDeviceId?: string;
           sessionId?: string;
           deviceToken?: string;
+          authorizationId?: string;
           error?: string;
         };
-        if (!res.ok || !body.sessionId) return null;
+        const hostDeviceId = body.hostDeviceId ?? body.sessionId;
+        if (!res.ok || !hostDeviceId) return null;
         if (body.deviceToken) {
           deviceTokenRef.current = body.deviceToken;
           setDeviceToken(body.deviceToken);
         }
 
-        const sid = body.sessionId;
+        const sid = hostDeviceId;
         const s = createInternalSession(sid, gatewayUrl, deviceIdRef.current);
         sessionsRef.current.set(sid, s);
         setActiveSessionId(sid);
@@ -1535,6 +1546,8 @@ export function useSessionManager(): SessionManagerHandle {
     },
     [tick],
   );
+
+  const connectToDevice = connectToSession;
 
   const sendInput = useCallback(
     (data: string) => {
@@ -1646,7 +1659,7 @@ export function useSessionManager(): SessionManagerHandle {
     (type: "screen.answer" | "screen.ice", payload: any) => {
       const s = getActive();
       if (!s) return;
-      sendRaw(s, createEnvelope({ type, sessionId: s.sessionId, payload }));
+      sendRaw(s, createEnvelope({ type, hostDeviceId: s.hostDeviceId, payload }));
     },
     [getActive],
   );
@@ -1972,6 +1985,7 @@ export function useSessionManager(): SessionManagerHandle {
     setActiveSessionId,
     claim,
     connectToSession,
+    connectToDevice,
     sendInput,
     sendImage,
     sendResize,

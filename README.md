@@ -77,21 +77,19 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 ```
 
 ```bash
-linkshell start --daemon --provider claude
+linkshell start --daemon
 ```
 
 The CLI starts a built-in Gateway + terminal bridge in the background, then prints a pairing code and QR code. Scan to connect. Disconnecting the app does not affect the background process. On macOS, the bridge prevents idle system sleep by default so locking the screen does not usually drop the session.
 
-Terminal providers currently include `claude`, `codex`, `gemini`, `copilot`, and `custom`. The Agent Workspace auto-detects ACP-capable Claude Code and Codex installations when `--agent-ui` is enabled.
+The terminal is a generic remote shell on the paired host device. Agent Workspace is separate and auto-detects supported Claude Code and Codex runtimes when `--agent-ui` is enabled.
 
 ## Commands
 
 ```bash
-linkshell start --daemon --provider claude   # Start in background (built-in Gateway + bridge)
-linkshell start --daemon --provider claude --no-keep-awake  # macOS: allow idle sleep
-linkshell start --provider claude             # Start in foreground
-linkshell start --daemon --provider gemini    # Bridge Gemini CLI
-linkshell start --daemon --provider copilot   # Bridge GitHub Copilot CLI
+linkshell start --daemon                      # Start in background (built-in Gateway + shell bridge)
+linkshell start --daemon --no-keep-awake      # macOS: allow idle sleep
+linkshell start                               # Start in foreground
 linkshell start --daemon --agent-ui           # Enable Agent Workspace (auto-detects Claude/Codex)
 linkshell status                              # Check running status
 linkshell stop                                # Stop all background processes
@@ -133,7 +131,7 @@ Your Computer              Public Server                Your Phone
 ### Simple Mode (Built-in Gateway, LAN)
 
 ```bash
-linkshell start --daemon --provider claude
+linkshell start --daemon
 ```
 
 With your phone and computer on the same WiFi, the CLI auto-detects the LAN IP and generates a QR code.
@@ -143,21 +141,21 @@ With your phone and computer on the same WiFi, the CLI auto-detects the LAN IP a
 `linkshell start` enables macOS keep-awake by default while the bridge is running. This uses `caffeinate -i -w <bridge-pid>` to prevent idle system sleep without keeping the display on or unlocking the screen.
 
 ```bash
-linkshell start --daemon --provider claude
+linkshell start --daemon
 ```
 
 To favor battery life and allow idle sleep:
 
 ```bash
-linkshell start --daemon --provider claude --no-keep-awake
+linkshell start --daemon --no-keep-awake
 # or
-LINKSHELL_KEEP_AWAKE=0 linkshell start --daemon --provider claude
+LINKSHELL_KEEP_AWAKE=0 linkshell start --daemon
 ```
 
 ### Remote Desktop Viewing
 
 ```bash
-linkshell start --daemon --provider claude --screen
+linkshell start --daemon --screen
 ```
 
 With `--screen`, the app can switch to the Desktop tab to view your computer screen. Supports WebRTC (30fps) and screenshot streaming (fallback), automatically selecting the best option.
@@ -221,7 +219,7 @@ linkshell gateway --daemon --port 8787
 On your computer:
 
 ```bash
-linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider claude
+linkshell start --daemon --gateway wss://your-server.com:8787/ws
 ```
 
 You can also deploy the Gateway with Docker:
@@ -267,7 +265,7 @@ pnpm dev:web        # Web debug client (localhost:5173)
 pnpm dev:app        # Expo App
 
 # CLI local development
-pnpm --filter linkshell-cli dev start --provider custom --command bash
+pnpm --filter linkshell-cli dev start --command bash
 ```
 
 ## Handoff Docs
@@ -304,13 +302,13 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 |--------|------|-------------|
 | `GET` | `/healthz` | Health check |
 | `POST` | `/pairings` | Create pairing (6-digit code, valid for 10 minutes) |
-| `POST` | `/pairings/claim` | Exchange code for sessionId |
+| `POST` | `/pairings/claim` | Exchange code for hostDeviceId + device authorization |
 | `GET` | `/pairings/:code/status` | Query pairing status |
-| `GET` | `/sessions` | List active sessions |
-| `GET` | `/sessions/:id` | Session details |
-| `WS` | `/ws?sessionId=&role=` | Real-time connection |
-| `GET/POST` | `/tunnel/:sessionId/:port/**` | HTTP port forwarding |
-| `WS` | `/tunnel/:sessionId/:port/**` | WebSocket port forwarding (HMR) |
+| `GET` | `/devices` | List authorized host devices |
+| `GET` | `/devices/:hostDeviceId` | Host device status and metadata |
+| `WS` | `/ws?hostDeviceId=&role=` | Real-time connection |
+| `GET/POST` | `/tunnel/:hostDeviceId/:port/**` | HTTP port forwarding |
+| `WS` | `/tunnel/:hostDeviceId/:port/**` | WebSocket port forwarding (HMR) |
 
 ## Reliability
 

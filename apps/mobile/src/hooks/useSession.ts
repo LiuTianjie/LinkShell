@@ -248,7 +248,7 @@ export function useSession({
     const tokenParam = deviceTokenRef.current
       ? `&token=${encodeURIComponent(deviceTokenRef.current)}`
       : "";
-    return `${base}/ws?sessionId=${encodeURIComponent(sid)}&role=client&deviceId=${deviceIdRef.current}${tokenParam}`;
+    return `${base}/ws?hostDeviceId=${encodeURIComponent(sid)}&role=client&deviceId=${deviceIdRef.current}${tokenParam}`;
   }, []);
 
   const stopHeartbeat = useCallback(() => {
@@ -320,7 +320,7 @@ export function useSession({
             const token = await getDeviceToken();
             if (token) headers["Authorization"] = `Bearer ${token}`;
             const res = await fetch(
-              `${resolvedGateway}/sessions/${encodeURIComponent(sid)}`,
+              `${resolvedGateway}/devices/${encodeURIComponent(sid)}`,
               { headers },
             );
             if (!res.ok) {

@@ -16,25 +16,6 @@ function ask(
   });
 }
 
-function choose(
-  rl: readline.Interface,
-  question: string,
-  options: string[],
-  defaultIdx = 0,
-): Promise<string> {
-  return new Promise((resolve) => {
-    process.stdout.write(`  ${question}\n`);
-    for (let i = 0; i < options.length; i++) {
-      const marker = i === defaultIdx ? "\x1b[36m>\x1b[0m" : " ";
-      process.stdout.write(`  ${marker} ${i + 1}. ${options[i]}\n`);
-    }
-    rl.question(`  Choice (${defaultIdx + 1}): `, (answer) => {
-      const idx = Number(answer.trim()) - 1;
-      resolve(options[idx >= 0 && idx < options.length ? idx : defaultIdx]!);
-    });
-  });
-}
-
 export async function runSetup(): Promise<void> {
   const existing = loadConfig();
   const rl = readline.createInterface({
@@ -49,17 +30,11 @@ export async function runSetup(): Promise<void> {
 
   const gateway = await ask(rl, "Gateway URL (leave empty for built-in)", "");
 
-  const provider = (await choose(
+  const command = await ask(
     rl,
-    "Default provider:",
-    ["claude", "codex", "gemini", "copilot", "custom"],
-    ["claude", "codex", "gemini", "copilot", "custom"].indexOf(existing.provider ?? "claude"),
-  )) as LinkShellConfig["provider"];
-
-  let command: string | undefined;
-  if (provider === "custom") {
-    command = await ask(rl, "Custom command", existing.command ?? "bash");
-  }
+    "Shell command (leave empty for system shell)",
+    existing.command ?? "",
+  );
 
   const clientName = await ask(
     rl,
@@ -76,8 +51,7 @@ export async function runSetup(): Promise<void> {
 
   const config: LinkShellConfig = {
     gateway: gateway || undefined,
-    provider,
-    command,
+    command: command || undefined,
     clientName,
     hostname: hostnameName || undefined,
   };

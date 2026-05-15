@@ -37,8 +37,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@linkshell/gateway": "^0.2.47",
-    "@linkshell/protocol": "^0.2.34",
+    "@linkshell/gateway": "workspace:*",
+    "@linkshell/protocol": "workspace:*",
     "commander": "^13.1.0",
     "node-pty": "^1.0.0",
     "qrcode-terminal": "^0.12.0",
