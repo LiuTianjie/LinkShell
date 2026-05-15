@@ -6,7 +6,7 @@ function makeProxy() {
   const proxy = new AgentWorkspaceProxy({
     hostDeviceId: "host-1",
     cwd: "/tmp",
-    availableProviders: ["codex"],
+    availableProviders: [],
     send: (envelope) => sent.push(envelope),
   }) as any;
   proxy.conversations.set("conversation-a", {

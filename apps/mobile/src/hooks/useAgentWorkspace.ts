@@ -8,6 +8,7 @@ import {
   loadAgentConversations,
   loadAgentTimeline,
   makeAgentConversationId,
+  replaceAgentConversationsForDevice,
   renameAgentConversation,
   saveAgentTimeline,
   upsertAgentConversation,
@@ -538,9 +539,21 @@ export function useAgentWorkspace(
 
       if (envelope.type === "agent.v2.conversation.list.result") {
         const payload = parseTypedPayload("agent.v2.conversation.list.result", envelope.payload) as any;
-        for (const conversation of payload.conversations ?? []) {
-          persistConversation(toRecord(conversation)).catch(() => {});
-        }
+        const records = (payload.conversations ?? [])
+          .map((conversation: any) => toRecord(conversation))
+          .filter((conversation: AgentConversationRecord) => conversation.id && conversation.cwd);
+        replaceAgentConversationsForDevice({
+          serverUrl,
+          hostDeviceId: serverSession?.hostDeviceId ?? envelope.hostDeviceId,
+          conversations: records,
+          preserveLocalArchived: true,
+        })
+          .then((nextConversations) => setConversations(nextConversations))
+          .catch(() => {
+            for (const record of records) {
+              persistConversation(record).catch(() => {});
+            }
+          });
         return;
       }
 

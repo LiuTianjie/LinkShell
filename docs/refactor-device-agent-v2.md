@@ -19,7 +19,7 @@ Updated: 2026-05-16
 - Published releases:
   - `@linkshell/protocol@0.3.2`
   - `@linkshell/gateway@0.3.2`
-  - `linkshell-cli@0.3.4`
+  - `linkshell-cli@0.3.5`
 
 ### In Progress
 

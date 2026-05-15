@@ -497,6 +497,52 @@ export async function upsertAgentConversation(
   return nextRecord;
 }
 
+export async function replaceAgentConversationsForDevice(input: {
+  serverUrl: string;
+  hostDeviceId: string;
+  conversations: Array<Omit<AgentConversationRecord, "hostDeviceId" | "schemaVersion"> & {
+    hostDeviceId?: string;
+    schemaVersion?: 1 | 2;
+  }>;
+  preserveLocalArchived?: boolean;
+}): Promise<AgentConversationRecord[]> {
+  const conversations = await loadAgentConversations();
+  const serverUrl = normalizeServerUrl(input.serverUrl);
+  const normalized = input.conversations.map((conversation): AgentConversationRecord => ({
+    ...conversation,
+    serverUrl: normalizeServerUrl(conversation.serverUrl || serverUrl),
+    hostDeviceId: conversation.hostDeviceId ?? conversation.sessionId ?? input.hostDeviceId,
+    sessionId: conversation.hostDeviceId ?? conversation.sessionId ?? input.hostDeviceId,
+    schemaVersion: 2,
+  }));
+  const incomingIds = new Set(normalized.map((conversation) => conversation.id));
+  const previousById = new Map(conversations.map((conversation) => [conversation.id, conversation]));
+  const preserveLocalArchived = input.preserveLocalArchived ?? true;
+  const mergedIncoming = normalized.map((conversation) => {
+    const previous = previousById.get(conversation.id);
+    if (!previous) return conversation;
+    return {
+      ...previous,
+      ...conversation,
+      archived: preserveLocalArchived && previous.archived && !conversation.archived
+        ? true
+        : conversation.archived,
+    };
+  });
+  const retained = conversations.filter((conversation) => {
+    const sameDevice =
+      normalizeServerUrl(conversation.serverUrl) === serverUrl &&
+      (conversation.hostDeviceId ?? conversation.sessionId) === input.hostDeviceId;
+    return !sameDevice || incomingIds.has(conversation.id);
+  });
+  const next = [
+    ...mergedIncoming,
+    ...retained.filter((conversation) => !incomingIds.has(conversation.id)),
+  ];
+  await saveConversations(next);
+  return sortConversations(next);
+}
+
 export async function archiveAgentConversation(id: string, archived: boolean): Promise<void> {
   const conversations = await loadAgentConversations();
   await saveConversations(

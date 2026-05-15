@@ -1,4 +1,5 @@
 import { JsonRpcStdioTransport } from "./json-rpc.js";
+import { listCodexStoredSessions, type CodexStoredSession } from "./codex-sessions.js";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
@@ -13,6 +14,79 @@ function normalizeMcpServers(value: unknown): unknown[] {
     }
     return { name, config };
   });
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function parseTimestamp(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 10_000_000_000 ? value : value * 1000;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+}
+
+function firstString(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+function remoteSessionEntries(value: unknown): unknown[] {
+  const raw = asRecord(value);
+  return Array.isArray(value) ? value :
+    Array.isArray(raw?.threads) ? raw.threads :
+    Array.isArray(raw?.sessions) ? raw.sessions :
+    Array.isArray(raw?.items) ? raw.items :
+    [];
+}
+
+function normalizeRemoteSession(entry: unknown, fallback?: CodexStoredSession): CodexStoredSession | undefined {
+  if (typeof entry === "string" && entry.trim()) {
+    return fallback ?? { id: entry, cwd: "", lastModified: Date.now() };
+  }
+  const session = asRecord(entry);
+  if (!session) return fallback;
+  const nestedThread = asRecord(session.thread);
+  const source = nestedThread ?? session;
+  const id = firstString(source, ["id", "threadId", "sessionId", "agentSessionId"]) ?? fallback?.id;
+  if (!id) return undefined;
+  return {
+    id,
+    cwd: firstString(source, ["cwd", "workingDirectory", "workspacePath"]) ?? fallback?.cwd ?? "",
+    title: firstString(source, ["title", "name", "summary", "thread_name"]) ?? fallback?.title,
+    createdAt: parseTimestamp(source.createdAt ?? source.created_at) ?? fallback?.createdAt,
+    lastModified: parseTimestamp(source.lastActivityAt ?? source.updatedAt ?? source.modifiedAt ?? source.lastModified ?? source.updated_at) ??
+      fallback?.lastModified ??
+      Date.now(),
+  };
+}
+
+function mergeCodexSessionLists(remote: unknown, local: { sessions: CodexStoredSession[] }): { sessions: CodexStoredSession[] } {
+  const byId = new Map(local.sessions.map((session) => [session.id, session]));
+  for (const entry of remoteSessionEntries(remote)) {
+    const id = typeof entry === "string"
+      ? entry
+      : (() => {
+          const session = asRecord(entry);
+          const source = asRecord(session?.thread) ?? session;
+          return source ? firstString(source, ["id", "threadId", "sessionId", "agentSessionId"]) : undefined;
+        })();
+    const merged = normalizeRemoteSession(entry, id ? byId.get(id) : undefined);
+    if (merged?.id) byId.set(merged.id, merged);
+  }
+  return {
+    sessions: [...byId.values()].sort((a, b) => b.lastModified - a.lastModified),
+  };
 }
 
 function permissionsForMode(
@@ -40,6 +114,7 @@ function permissionsForMode(
 export class AcpClient {
   private readonly transport: JsonRpcStdioTransport;
   private readonly protocol: AgentProtocol;
+  private readonly cwd: string;
 
   constructor(input: {
     command: string;
@@ -51,6 +126,7 @@ export class AcpClient {
     onExit: (message: string) => void;
   }) {
     this.protocol = input.protocol;
+    this.cwd = input.cwd;
     this.transport = new JsonRpcStdioTransport(
       input.command,
       input.framing,
@@ -108,9 +184,15 @@ export class AcpClient {
     });
   }
 
-  listSessions(): Promise<unknown> {
+  async listSessions(): Promise<unknown> {
     if (this.protocol === "codex-app-server") {
-      return this.transport.request("thread/list", { limit: 20 });
+      const localSessions = listCodexStoredSessions(this.cwd);
+      try {
+        const remoteSessions = await this.transport.request("thread/list", { limit: 200 });
+        return mergeCodexSessionLists(remoteSessions, localSessions);
+      } catch {
+        return localSessions;
+      }
     }
     return this.transport.request("session/list", {});
   }
