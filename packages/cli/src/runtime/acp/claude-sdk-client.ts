@@ -3,6 +3,7 @@ import { listClaudeStoredSessions } from "./claude-sessions.js";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
+type AgentCollaborationMode = "default" | "plan";
 
 interface ClaudeContentBlock {
   type?: string;
@@ -130,6 +131,23 @@ function isInsideCwd(cwd: string, candidate: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
+function claudeEffort(value: string | undefined): "low" | "medium" | "high" | "xhigh" | undefined {
+  if (value === "low" || value === "medium" || value === "high" || value === "xhigh") return value;
+  if (value === "minimal") return "low";
+  return undefined;
+}
+
+function claudePermissionMode(
+  permissionMode: AgentPermissionMode | undefined,
+  collaborationMode: AgentCollaborationMode | undefined,
+): "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | undefined {
+  if (collaborationMode === "plan") return "plan";
+  if (permissionMode === "full_access") return "bypassPermissions";
+  if (permissionMode === "workspace_write") return "acceptEdits";
+  if (permissionMode === "read_only") return "dontAsk";
+  return undefined;
+}
+
 function outcomeFromPermissionResponse(value: unknown): "allow" | "deny" {
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
   if (raw.behavior === "allow") return "allow";
@@ -198,7 +216,7 @@ export class ClaudeSdkClient {
     model?: string;
     reasoningEffort?: string;
     permissionMode?: AgentPermissionMode;
-    collaborationMode?: "default" | "plan";
+    collaborationMode?: AgentCollaborationMode;
     cwd: string;
   }): Promise<unknown> {
     if (!this.query) await this.initialize();
@@ -253,6 +271,13 @@ export class ClaudeSdkClient {
       },
     };
     if (input.model) sdkOptions.model = input.model;
+    const effort = claudeEffort(input.reasoningEffort);
+    if (effort) sdkOptions.effort = effort;
+    const permissionMode = claudePermissionMode(input.permissionMode, input.collaborationMode);
+    if (permissionMode) {
+      sdkOptions.permissionMode = permissionMode;
+      if (permissionMode === "bypassPermissions") sdkOptions.allowDangerouslySkipPermissions = true;
+    }
     if (isRealClaudeSessionId(input.sessionId ?? this.claudeSessionId)) {
       sdkOptions.resume = input.sessionId ?? this.claudeSessionId;
     }
@@ -329,6 +354,7 @@ export class ClaudeSdkClient {
   async listModels(): Promise<unknown> {
     return {
       defaultModel: "default",
+      reasoningEfforts: ["low", "medium", "high", "xhigh"],
       models: [
         { id: "sonnet", label: "Sonnet" },
         { id: "opus", label: "Opus" },

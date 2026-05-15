@@ -257,4 +257,106 @@ describe("AgentWorkspaceProxy event routing", () => {
       expect.objectContaining({ role: "assistant", text: "Active history is open" }),
     ]);
   });
+
+  it("advertises selectable controls for enabled providers", async () => {
+    const sent: any[] = [];
+    const proxy = new AgentWorkspaceProxy({
+      hostDeviceId: "host-1",
+      cwd: "/tmp",
+      availableProviders: ["codex", "claude"],
+      send: (envelope) => sent.push(envelope),
+    }) as any;
+    proxy.initialized = true;
+    proxy.clients.set("codex", {});
+    proxy.clients.set("claude", {});
+    proxy.agentProtocols.set("codex", "codex-app-server");
+    proxy.agentProtocols.set("claude", "claude-agent-sdk");
+    proxy.providerCapabilities.set("claude", {
+      models: [{ id: "default", label: "默认模型" }, { id: "sonnet", label: "Sonnet" }],
+      defaultModel: "default",
+      reasoningEfforts: ["low", "medium", "high", "xhigh"],
+    });
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.capabilities.request",
+      hostDeviceId: "host-1",
+      payload: {},
+    });
+
+    const capabilities = sent.find((envelope) => envelope.type === "agent.v2.capabilities")?.payload;
+    expect(capabilities.providers).toEqual([
+      expect.objectContaining({
+        id: "codex",
+        models: [{ id: "default", label: "默认模型" }],
+        reasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
+        permissionModes: ["read_only", "workspace_write", "full_access"],
+      }),
+      expect.objectContaining({
+        id: "claude",
+        models: [{ id: "default", label: "默认模型" }, { id: "sonnet", label: "Sonnet" }],
+        reasoningEfforts: ["low", "medium", "high", "xhigh"],
+        permissionModes: ["read_only", "workspace_write", "full_access"],
+      }),
+    ]);
+  });
+
+  it("clears prompt settings when the mobile app sends null defaults", async () => {
+    const sent: any[] = [];
+    const prompts: any[] = [];
+    const proxy = new AgentWorkspaceProxy({
+      hostDeviceId: "host-1",
+      cwd: "/tmp",
+      availableProviders: [],
+      send: (envelope) => sent.push(envelope),
+    }) as any;
+    proxy.clients.set("codex", {
+      prompt: async (input: any) => {
+        prompts.push(input);
+        return { status: "completed" };
+      },
+    });
+    proxy.agentProtocols.set("codex", "codex-app-server");
+    proxy.conversations.set("conversation-a", {
+      id: "conversation-a",
+      agentSessionId: "thread-a",
+      provider: "codex",
+      cwd: "/tmp",
+      title: "A",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      permissionMode: "full_access",
+      collaborationMode: "plan",
+      status: "idle",
+      archived: false,
+      createdAt: 1,
+      lastActivityAt: 1,
+    });
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.prompt",
+      hostDeviceId: "host-1",
+      payload: {
+        conversationId: "conversation-a",
+        clientMessageId: "msg-a",
+        contentBlocks: [{ type: "text", text: "hello" }],
+        model: null,
+        reasoningEffort: null,
+        permissionMode: null,
+        collaborationMode: null,
+      },
+    });
+
+    expect(proxy.conversations.get("conversation-a")).toEqual(expect.objectContaining({
+      model: undefined,
+      reasoningEffort: undefined,
+      permissionMode: undefined,
+      collaborationMode: "default",
+    }));
+    expect(prompts[0]).toEqual(expect.objectContaining({
+      model: undefined,
+      reasoningEffort: undefined,
+      permissionMode: undefined,
+      collaborationMode: "default",
+    }));
+  });
 });

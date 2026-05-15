@@ -4,6 +4,7 @@ import { listClaudeStoredSessions } from "./claude-sessions.js";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
+type AgentCollaborationMode = "default" | "plan";
 
 type AgentInputContentBlock = {
   type?: string;
@@ -69,6 +70,23 @@ function splitImageDataUrl(value: string, fallbackMimeType = "image/png"): { dat
   };
 }
 
+function claudeEffort(value: string | undefined): "low" | "medium" | "high" | "xhigh" | undefined {
+  if (value === "low" || value === "medium" || value === "high" || value === "xhigh") return value;
+  if (value === "minimal") return "low";
+  return undefined;
+}
+
+function claudePermissionMode(
+  permissionMode: AgentPermissionMode | undefined,
+  collaborationMode: AgentCollaborationMode | undefined,
+): "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" {
+  if (collaborationMode === "plan") return "plan";
+  if (permissionMode === "full_access") return "bypassPermissions";
+  if (permissionMode === "workspace_write") return "acceptEdits";
+  if (permissionMode === "read_only") return "dontAsk";
+  return "default";
+}
+
 export class ClaudeStreamJsonClient {
   private child: ChildProcessWithoutNullStreams | undefined;
   private claudeSessionId: string | undefined;
@@ -118,7 +136,7 @@ export class ClaudeStreamJsonClient {
     model?: string;
     reasoningEffort?: string;
     permissionMode?: AgentPermissionMode;
-    collaborationMode?: "default" | "plan";
+    collaborationMode?: AgentCollaborationMode;
     cwd: string;
   }): Promise<unknown> {
     if (this.child) {
@@ -133,8 +151,11 @@ export class ClaudeStreamJsonClient {
       "--output-format", "stream-json",
       "--input-format", "stream-json",
       "--verbose",
-      "--permission-mode", "bypassPermissions",
+      "--permission-mode", claudePermissionMode(input.permissionMode, input.collaborationMode),
     ];
+    if (input.permissionMode === "read_only") {
+      args.push("--disallowedTools", "Bash,Write,Edit,MultiEdit,NotebookEdit");
+    }
 
     // Use stored session for --resume (only when we have a real session ID from system.init)
     if (this.claudeSessionId) {
@@ -147,6 +168,10 @@ export class ClaudeStreamJsonClient {
 
     if (input.model) {
       args.push("--model", input.model);
+    }
+    const effort = claudeEffort(input.reasoningEffort);
+    if (effort) {
+      args.push("--effort", effort);
     }
 
     // Build the user message
@@ -468,6 +493,7 @@ export class ClaudeStreamJsonClient {
   async listModels(): Promise<unknown> {
     return {
       defaultModel: "default",
+      reasoningEfforts: ["low", "medium", "high", "xhigh"],
       models: [
         { id: "sonnet", label: "Sonnet" },
         { id: "opus", label: "Opus" },

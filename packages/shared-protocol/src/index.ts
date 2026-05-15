@@ -650,10 +650,10 @@ export const agentV2PromptPayloadSchema = z.object({
   conversationId: z.string().min(1),
   clientMessageId: z.string().min(1),
   contentBlocks: z.array(agentContentBlockSchema).min(1),
-  model: z.string().min(1).optional(),
-  reasoningEffort: agentReasoningEffortSchema.optional(),
-  permissionMode: agentPermissionModeSchema.optional(),
-  collaborationMode: agentCollaborationModeSchema.optional(),
+  model: z.string().min(1).nullable().optional(),
+  reasoningEffort: agentReasoningEffortSchema.nullable().optional(),
+  permissionMode: agentPermissionModeSchema.nullable().optional(),
+  collaborationMode: agentCollaborationModeSchema.nullable().optional(),
 });
 
 export const agentV2CommandExecutePayloadSchema = z.object({

@@ -179,7 +179,7 @@ pnpm --filter @linkshell/app typecheck
 
 1. 多 Agent provider 自动检测：CLI 启动时会检测 `claude` 与 `codex`，并把可用 provider 一起暴露给 App。
 2. Claude Code Agent 支持：优先使用 `@anthropic-ai/claude-agent-sdk`，也支持 `claude --print --output-format stream-json --input-format stream-json` fallback。
-3. 动态模型发现：CLI capabilities 会携带 provider 模型列表、默认模型、reasoning effort、permission mode，App 不再依赖静态模型枚举。
+3. 动态模型发现：CLI capabilities 会携带 provider 模型列表、默认模型、reasoning effort、permission mode；App 使用选择菜单，不再提供手写模型输入，离线/待能力返回时只展示默认项或 CLI 已验证的 Claude alias。
 4. Agent Workspace v2 timeline 支持 command execution、file change、subagent action、plan、user input prompt、context compaction 等类型。
 5. 权限和结构化输入现在有 pending/submitting 状态；遇到 control conflict 时 App 会在对应 timeline item 上显示错误。
 6. Provider-scoped 远端会话 ID：本地缓存会把旧的 `agent-remote-<id>` 迁移到 `agent-remote-<provider>-<id>`，避免不同 provider 会话冲突。

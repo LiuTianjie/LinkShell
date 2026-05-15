@@ -1096,12 +1096,16 @@ export function useAgentWorkspace(
       });
       upsertAgentTimelineItem(optimisticItem).catch(() => {});
 
+      const hasModel = Object.prototype.hasOwnProperty.call(options ?? {}, "model");
+      const hasEffort = Object.prototype.hasOwnProperty.call(options ?? {}, "reasoningEffort");
+      const hasPermission = Object.prototype.hasOwnProperty.call(options ?? {}, "permissionMode");
+      const hasCollaboration = Object.prototype.hasOwnProperty.call(options ?? {}, "collaborationMode");
       const nextConversation: AgentConversationRecord = {
         ...conversation,
-        model: options?.model ?? conversation.model,
-        reasoningEffort: options?.reasoningEffort ?? conversation.reasoningEffort,
-        permissionMode: options?.permissionMode ?? conversation.permissionMode,
-        collaborationMode: options?.collaborationMode ?? conversation.collaborationMode,
+        model: hasModel ? options?.model : conversation.model,
+        reasoningEffort: hasEffort ? options?.reasoningEffort : conversation.reasoningEffort,
+        permissionMode: hasPermission ? options?.permissionMode : conversation.permissionMode,
+        collaborationMode: hasCollaboration ? options?.collaborationMode : conversation.collaborationMode,
         status: "running",
         lastMessagePreview: previewFromItem(optimisticItem) ?? conversation.lastMessagePreview,
         lastActivityAt: now,
@@ -1120,10 +1124,10 @@ export function useAgentWorkspace(
           conversationId,
           clientMessageId,
           contentBlocks,
-          model: options?.model,
-          reasoningEffort: options?.reasoningEffort,
-          permissionMode: options?.permissionMode,
-          collaborationMode: options?.collaborationMode,
+          model: hasModel ? options?.model ?? null : undefined,
+          reasoningEffort: hasEffort ? options?.reasoningEffort ?? null : undefined,
+          permissionMode: hasPermission ? options?.permissionMode ?? null : undefined,
+          collaborationMode: hasCollaboration ? options?.collaborationMode ?? null : undefined,
         },
         { queue: true },
       );

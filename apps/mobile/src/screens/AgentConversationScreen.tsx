@@ -68,6 +68,15 @@ const PERMISSION_OPTIONS: Option<AgentPermissionMode>[] = [
   { label: "自动审查", value: "workspace_write", image: "lock.shield.fill" },
   { label: "完全访问权限", value: "full_access", image: "lock.open.fill" },
 ];
+const DEFAULT_MODEL_OPTIONS: Option<string>[] = [{ label: "默认模型", value: undefined }];
+const CLAUDE_MODEL_OPTIONS: Option<string>[] = [
+  { label: "默认模型", value: undefined },
+  { label: "Sonnet", value: "sonnet" },
+  { label: "Opus", value: "opus" },
+  { label: "Haiku", value: "haiku" },
+  { label: "Sonnet 1M", value: "sonnet[1m]" },
+  { label: "Opus Plan", value: "opusplan" },
+];
 
 const MAX_IMAGE_ATTACHMENTS = 3;
 const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
@@ -153,6 +162,8 @@ function modelOptionsFor(
       value: m.id === defaultModel || m.id === "default" ? undefined : m.id,
     }));
   }
+  if (provider === "claude") return CLAUDE_MODEL_OPTIONS;
+  if (provider === "codex") return DEFAULT_MODEL_OPTIONS;
   return [];
 }
 
@@ -167,6 +178,18 @@ function effortOptionsFor(
       { label: "默认强度", value: undefined },
       ...EFFORT_OPTIONS.filter((option) =>
         option.value ? providerCapability.reasoningEfforts?.includes(option.value) : false,
+      ),
+    ];
+  }
+  if (!providerCapability && provider === "codex") return EFFORT_OPTIONS;
+  if (!providerCapability && provider === "claude") {
+    return [
+      { label: "默认强度", value: undefined },
+      ...EFFORT_OPTIONS.filter((option) =>
+        option.value === "low" ||
+        option.value === "medium" ||
+        option.value === "high" ||
+        option.value === "xhigh",
       ),
     ];
   }
@@ -187,6 +210,7 @@ function permissionOptionsFor(
       ),
     ];
   }
+  if (!providerCapability && (provider === "codex" || provider === "claude")) return PERMISSION_OPTIONS;
   return [];
 }
 
@@ -2892,6 +2916,23 @@ export function AgentConversationScreen({
     commitPermissionMode(nextMode);
   }, [commitPermissionMode]);
 
+  const togglePlanMode = useCallback(() => {
+    if (!conversation) return;
+    const nextMode: AgentCollaborationMode = currentCollaborationMode === "plan" ? "default" : "plan";
+    const targetName = nextMode === "plan" ? "plan" : "exit-plan";
+    const command = availableCommands.find((item) => item.name === targetName);
+    if (command?.disabledReason) {
+      Alert.alert("命令不可用", command.disabledReason);
+      return;
+    }
+    if (command) {
+      executeSlashCommand(command);
+      return;
+    }
+    workspace.updateConversationSettings(conversation.id, { collaborationMode: nextMode }).catch(() => {});
+    Haptics.selectionAsync().catch(() => {});
+  }, [availableCommands, conversation, currentCollaborationMode, executeSlashCommand, workspace]);
+
   const cancelRunningTurn = useCallback(() => {
     if (!conversation) return;
     Alert.alert(
@@ -3385,15 +3426,7 @@ export function AgentConversationScreen({
               ) : null}
               {providerCapability?.supportsPlan || availableCommands.some((command) => command.name === "plan") ? (
                 <Pressable
-                  onPress={() => {
-                    const targetName = currentCollaborationMode === "plan" ? "exit-plan" : "plan";
-                    const command = availableCommands.find((item) => item.name === targetName);
-                    if (command?.disabledReason) {
-                      Alert.alert("命令不可用", command.disabledReason);
-                      return;
-                    }
-                    if (command) executeSlashCommand(command);
-                  }}
+                  onPress={togglePlanMode}
                   style={({ pressed }) => ({
                     height: 34,
                     borderRadius: 999,
@@ -3441,28 +3474,7 @@ export function AgentConversationScreen({
                     <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
                   </View>
                 </MenuView>
-              ) : (
-                <TextInput
-                  value={model ?? ""}
-                  onChangeText={(value) => setModel(value.trim() ? value : undefined)}
-                  onEndEditing={() => commitModel(model)}
-                  placeholder="模型"
-                  placeholderTextColor={theme.textTertiary}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={{
-                    minWidth: 78,
-                    maxWidth: 132,
-                    borderRadius: 999,
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    backgroundColor: theme.bgInput,
-                    color: theme.textSecondary,
-                    fontSize: 12,
-                    fontWeight: "700",
-                  }}
-                />
-              )}
+              ) : null}
               {effortMenuActions.length > 0 ? (
                 <MenuView
                   actions={effortMenuActions}

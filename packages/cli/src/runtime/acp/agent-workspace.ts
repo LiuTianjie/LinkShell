@@ -766,6 +766,8 @@ interface ProviderRuntimeCapabilities {
 }
 
 const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
+const CLAUDE_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+const AGENT_PERMISSION_MODES: AgentPermissionMode[] = ["read_only", "workspace_write", "full_access"];
 const CLAUDE_REMOTE_HIDDEN_COMMANDS = new Set([
   "add-dir",
   "agents",
@@ -1495,7 +1497,7 @@ export class AgentWorkspaceProxy {
       const supportsImages = enabled && protocolSupportsImages(protocol);
       const isClaudeFallback = protocol === "claude-stream-json";
       const supportsPermission = enabled && !isClaudeFallback;
-      const supportsReasoningEffort = enabled && !isClaudeFallback;
+      const supportsReasoningEffort = enabled;
       const commands = mergeCommands(
         defaultProviderCommands(provider, this.input.cwd, enabled),
         runtimeCapabilities?.commands,
@@ -1510,12 +1512,12 @@ export class AgentWorkspaceProxy {
         supportsPermission,
         supportsPlan: enabled,
         supportsCancel: enabled,
-        models: runtimeCapabilities?.models,
+        models: runtimeCapabilities?.models ?? [{ id: "default", label: "默认模型" }],
         defaultModel: runtimeCapabilities?.defaultModel,
         reasoningEfforts: supportsReasoningEffort
-          ? runtimeCapabilities?.reasoningEfforts ?? []
+          ? runtimeCapabilities?.reasoningEfforts ?? (provider === "claude" ? [...CLAUDE_REASONING_EFFORTS] : [...ALL_REASONING_EFFORTS])
           : [],
-        permissionModes: [],
+        permissionModes: supportsPermission ? AGENT_PERMISSION_MODES : [],
         commands,
         modes: runtimeCapabilities?.modes ?? [],
         currentMode,
@@ -1698,10 +1700,10 @@ export class AgentWorkspaceProxy {
     conversationId: string;
     clientMessageId: string;
     contentBlocks: AgentContentBlock[];
-    model?: string;
-    reasoningEffort?: string;
-    permissionMode?: AgentPermissionMode;
-    collaborationMode?: AgentCollaborationMode;
+    model?: string | null;
+    reasoningEffort?: string | null;
+    permissionMode?: AgentPermissionMode | null;
+    collaborationMode?: AgentCollaborationMode | null;
   }): Promise<void> {
     const conversation =
       this.conversations.get(payload.conversationId) ??
@@ -1744,10 +1746,18 @@ export class AgentWorkspaceProxy {
       return;
     }
 
-    conversation.model = payload.model ?? conversation.model;
-    conversation.reasoningEffort = payload.reasoningEffort ?? conversation.reasoningEffort;
-    conversation.permissionMode = payload.permissionMode ?? conversation.permissionMode;
-    conversation.collaborationMode = payload.collaborationMode ?? conversation.collaborationMode;
+    if (Object.prototype.hasOwnProperty.call(payload, "model")) {
+      conversation.model = payload.model ?? undefined;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, "reasoningEffort")) {
+      conversation.reasoningEffort = payload.reasoningEffort ?? undefined;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, "permissionMode")) {
+      conversation.permissionMode = payload.permissionMode ?? undefined;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, "collaborationMode")) {
+      conversation.collaborationMode = payload.collaborationMode ?? "default";
+    }
     conversation.status = "running";
     conversation.lastActivityAt = Date.now();
     this.activeConversationId = conversation.id;
@@ -1769,10 +1779,10 @@ export class AgentWorkspaceProxy {
         sessionId: conversation.agentSessionId,
         content: payload.contentBlocks,
         clientMessageId: payload.clientMessageId,
-        model: payload.model,
-        reasoningEffort: payload.reasoningEffort,
-        permissionMode: payload.permissionMode,
-        collaborationMode: payload.collaborationMode ?? conversation.collaborationMode,
+        model: conversation.model,
+        reasoningEffort: conversation.reasoningEffort,
+        permissionMode: conversation.permissionMode,
+        collaborationMode: conversation.collaborationMode,
         cwd: conversation.cwd,
       });
       const nextAgentSessionId = this.extractSessionId(result);

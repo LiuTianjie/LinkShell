@@ -18,18 +18,21 @@ Updated: 2026-05-16
 - Agent Workspace now auto-requests provider conversation lists from online devices; CLI Claude adapters scan all local `~/.claude/projects` history and Codex sessions are grouped by provider through the existing provider list sync.
 - Published releases:
   - `@linkshell/protocol@0.3.2`
+  - `@linkshell/protocol@0.3.3`
   - `@linkshell/gateway@0.3.2`
   - `linkshell-cli@0.3.6`
   - `linkshell-cli@0.3.7`
   - `linkshell-cli@0.3.8`
   - `linkshell-cli@0.3.9`
   - `linkshell-cli@0.3.10`
+  - `linkshell-cli@0.3.11`
 - Device-side Codex and Claude JSONL message history is now lazily synced into Agent conversation snapshots when opening a conversation.
 - Active Codex session titles now fall back to the first visible device-side user message when Codex has not written an index title yet.
 - Device-side Codex archived sessions are now detected from `~/.codex/archived_sessions`, synced to the mobile archived section, and covered by CLI tests.
 - Codex device history now restores first-class command execution and file-change timeline items, including per-file add/remove counts from patch history.
 - Claude device history now restores `tool_use` / `tool_result` blocks as first-class command execution and file-change timeline items for Bash/Edit/MultiEdit/Write/NotebookEdit.
 - Mobile Agent conversation UI now renders structured file changes with a desktop-style edited-files card using device-synced entries instead of text-only fallback parsing.
+- Agent message composer controls are first-class: model is menu-only, reasoning effort and permission mode are advertised by provider capabilities, Plan mode toggles reliably, image prompts flow through Codex and Claude providers, and default selections are explicitly cleared on the host.
 
 ### In Progress
 
@@ -90,7 +93,7 @@ Updated: 2026-05-16
 - Claude adapter:
   - read conversations/projects from `~/.claude/projects` and resume via official Claude CLI/session IDs;
   - use Claude CLI-supported flags for model, effort, and permission mode;
-  - show a model text/alias control instead of a fake fixed dropdown unless a real list is discoverable;
+  - show model selection as a menu sourced from CLI/runtime capabilities, falling back only to verified Claude aliases or a default item;
   - expose only verified commands: official CLI/native commands and `.claude/commands` custom commands.
 - Mobile storage moves to v2 keys keyed by `hostDeviceId`; conversations store `hostDeviceId`, `provider`, `projectPath`, `agentSessionId`, and cached timeline.
 - Mobile home becomes device-first; Agent screen groups as `Device -> Provider -> Project -> Conversation`.
