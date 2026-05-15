@@ -197,8 +197,8 @@ importers:
         specifier: ^8.18.1
         version: 8.20.0
       zod:
-        specifier: ^3.24.3
-        version: 3.25.76
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/ws':
         specifier: ^8.5.14
@@ -212,7 +212,7 @@ importers:
     optionalDependencies:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.2.128
-        version: 0.2.128(zod@3.25.76)
+        version: 0.2.128(zod@4.4.3)
       werift:
         specifier: ^0.22.9
         version: 0.22.9
@@ -226,8 +226,8 @@ importers:
         specifier: ^8.18.1
         version: 8.20.0
       zod:
-        specifier: ^3.24.3
-        version: 3.25.76
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/ws':
         specifier: ^8.5.14
@@ -242,8 +242,8 @@ importers:
   packages/shared-protocol:
     dependencies:
       zod:
-        specifier: ^3.24.3
-        version: 3.25.76
+        specifier: ^4.4.3
+        version: 4.4.3
 
 packages:
 
@@ -5132,8 +5132,8 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
 
@@ -5165,11 +5165,11 @@ snapshots:
   '@anthropic-ai/claude-agent-sdk-win32-x64@0.2.128':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk@0.2.128(zod@3.25.76)':
+  '@anthropic-ai/claude-agent-sdk@0.2.128(zod@4.4.3)':
     dependencies:
-      '@anthropic-ai/sdk': 0.81.0(zod@3.25.76)
-      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
-      zod: 3.25.76
+      '@anthropic-ai/sdk': 0.81.0(zod@4.4.3)
+      '@modelcontextprotocol/sdk': 1.29.0(zod@4.4.3)
+      zod: 4.4.3
     optionalDependencies:
       '@anthropic-ai/claude-agent-sdk-darwin-arm64': 0.2.128
       '@anthropic-ai/claude-agent-sdk-darwin-x64': 0.2.128
@@ -5184,11 +5184,11 @@ snapshots:
       - supports-color
     optional: true
 
-  '@anthropic-ai/sdk@0.81.0(zod@3.25.76)':
+  '@anthropic-ai/sdk@0.81.0(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
     optionalDependencies:
-      zod: 3.25.76
+      zod: 4.4.3
     optional: true
 
   '@babel/code-frame@7.10.4':
@@ -6469,7 +6469,7 @@ snapshots:
   '@minhducsun2002/leb128@1.0.0':
     optional: true
 
-  '@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.29.0(zod@4.4.3)':
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.16)
       ajv: 8.18.0
@@ -6486,8 +6486,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.4.3
+      zod-to-json-schema: 3.25.2(zod@4.4.3)
     transitivePeerDependencies:
       - supports-color
     optional: true
@@ -10935,9 +10935,9 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
+  zod-to-json-schema@3.25.2(zod@4.4.3):
     dependencies:
-      zod: 3.25.76
+      zod: 4.4.3
     optional: true
 
-  zod@3.25.76: {}
+  zod@4.4.3: {}

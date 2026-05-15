@@ -139,7 +139,7 @@ export function startEmbeddedGateway(
         if (!parsed.success) {
           json(res, 400, {
             error: "invalid_payload",
-            message: parsed.error.errors[0]?.message ?? "Invalid permission response payload",
+            message: parsed.error.issues[0]?.message ?? "Invalid permission response payload",
           });
           return;
         }
@@ -323,7 +323,7 @@ export function startEmbeddedGateway(
       if (err instanceof ZodError) {
         json(res, 400, {
           error: "invalid_message",
-          message: err.errors[0]?.message ?? "Validation failed",
+          message: err.issues[0]?.message ?? "Validation failed",
         });
       } else if (err instanceof BodyTooLargeError) {
         json(res, 413, {

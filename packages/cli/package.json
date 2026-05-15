@@ -1,6 +1,6 @@
 {
   "name": "linkshell-cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Remote terminal bridge for Claude Code / Codex / Gemini / Copilot — control from your phone",
   "type": "module",
   "main": "dist/index.js",
@@ -43,7 +43,7 @@
     "node-pty": "^1.0.0",
     "qrcode-terminal": "^0.12.0",
     "ws": "^8.18.1",
-    "zod": "^3.24.3"
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.128",

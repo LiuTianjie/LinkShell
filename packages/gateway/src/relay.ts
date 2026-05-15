@@ -67,7 +67,7 @@ export function handleSocketMessage(
         socket,
         hostDeviceId,
         "invalid_message",
-        error.errors[0]?.message ?? "Invalid message payload",
+        error.issues[0]?.message ?? "Invalid message payload",
       );
       return;
     }

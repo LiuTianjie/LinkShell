@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/gateway",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "main": "dist/gateway/src/index.js",
   "exports": {
@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@linkshell/protocol": "workspace:*",
-    "zod": "^3.24.3",
+    "zod": "^4.4.3",
     "ws": "^8.18.1"
   },
   "devDependencies": {
