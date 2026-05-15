@@ -9,6 +9,8 @@ import {
 import { AcpClient } from "./acp-client.js";
 import { ClaudeSdkClient } from "./claude-sdk-client.js";
 import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
+import { listClaudeStoredSessions } from "./claude-sessions.js";
+import { listCodexStoredSessions } from "./codex-sessions.js";
 import type { AgentProtocol, AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
 
@@ -1437,41 +1439,47 @@ export class AgentWorkspaceProxy {
 
   private async syncProviderSessions(): Promise<void> {
     await this.initialize();
+    this.upsertProviderSessions("codex", listCodexStoredSessions(this.input.cwd));
+    this.upsertProviderSessions("claude", listClaudeStoredSessions(this.input.cwd));
     for (const [provider, client] of this.clients) {
       try {
         const result = await client.listSessions();
-        for (const remote of parseRemoteSessions(result)) {
-          const agentSessionId = remote.id;
-          const existingId = this.conversationByAgentSessionId.get(agentSessionId);
-          const now = Date.now();
-          const conversationId = existingId ?? `agent:${agentSessionId}`;
-          const existing = this.conversations.get(conversationId);
-          const cwd = remote.cwd ?? existing?.cwd ?? this.input.cwd;
-          const conversation: AgentConversation = {
-            id: conversationId,
-            agentSessionId,
-            provider,
-            cwd,
-            title: remote.title ?? existing?.title ?? titleFromCwd(cwd),
-            model: remote.model ?? existing?.model,
-            reasoningEffort: existing?.reasoningEffort,
-            permissionMode: existing?.permissionMode,
-            collaborationMode: existing?.collaborationMode,
-            status: existing?.status ?? "idle",
-            archived: existing?.archived ?? false,
-            lastMessagePreview: existing?.lastMessagePreview,
-            lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
-            createdAt: remote.createdAt ?? existing?.createdAt ?? now,
-          };
-          this.conversations.set(conversation.id, conversation);
-          this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
-          this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
-        }
+        this.upsertProviderSessions(provider, result);
       } catch (error) {
         if (this.input.verbose) {
           process.stderr.write(`[agent:v2] session list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
         }
       }
+    }
+  }
+
+  private upsertProviderSessions(provider: AgentProvider, result: unknown): void {
+    for (const remote of parseRemoteSessions(result)) {
+      const agentSessionId = remote.id;
+      const existingId = this.conversationByAgentSessionId.get(agentSessionId);
+      const now = Date.now();
+      const conversationId = existingId ?? `agent:${agentSessionId}`;
+      const existing = this.conversations.get(conversationId);
+      const cwd = remote.cwd ?? existing?.cwd ?? this.input.cwd;
+      const conversation: AgentConversation = {
+        id: conversationId,
+        agentSessionId,
+        provider,
+        cwd,
+        title: remote.title ?? existing?.title ?? titleFromCwd(cwd),
+        model: remote.model ?? existing?.model,
+        reasoningEffort: existing?.reasoningEffort,
+        permissionMode: existing?.permissionMode,
+        collaborationMode: existing?.collaborationMode,
+        status: existing?.status ?? "idle",
+        archived: existing?.archived ?? false,
+        lastMessagePreview: existing?.lastMessagePreview,
+        lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
+        createdAt: remote.createdAt ?? existing?.createdAt ?? now,
+      };
+      this.conversations.set(conversation.id, conversation);
+      this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
+      this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
     }
   }
 

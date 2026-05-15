@@ -1,5 +1,28 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach } from "vitest";
 import { describe, expect, it } from "vitest";
 import { AgentWorkspaceProxy } from "../src/runtime/acp/agent-workspace.js";
+
+let homeDir: string | undefined;
+const originalHome = process.env.HOME;
+
+function useTempHome(): string {
+  homeDir = mkdtempSync(join(tmpdir(), "linkshell-agent-workspace-"));
+  process.env.HOME = homeDir;
+  return homeDir;
+}
+
+function writeJsonl(path: string, rows: unknown[]): void {
+  writeFileSync(path, rows.map((row) => JSON.stringify(row)).join("\n") + "\n", "utf8");
+}
+
+afterEach(() => {
+  process.env.HOME = originalHome;
+  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
+  homeDir = undefined;
+});
 
 function makeProxy() {
   const sent: any[] = [];
@@ -94,6 +117,7 @@ describe("AgentWorkspaceProxy event routing", () => {
   });
 
   it("only returns archived conversations when the list request asks for them", async () => {
+    useTempHome();
     const { proxy, sent } = makeProxy();
     proxy.conversations.get("conversation-b").archived = true;
 
@@ -114,5 +138,34 @@ describe("AgentWorkspaceProxy event routing", () => {
       "conversation-a",
       "conversation-b",
     ]);
+  });
+
+  it("lists device-side Claude sessions even when no Claude runtime is available", async () => {
+    const home = useTempHome();
+    const projectDir = join(home, ".claude", "projects", "-Users-tifenxia-ClaudeProject");
+    mkdirSync(projectDir, { recursive: true });
+    writeJsonl(join(projectDir, "claude-session.jsonl"), [
+      {
+        type: "user",
+        cwd: "/Users/tifenxia/ClaudeProject",
+        timestamp: "2026-05-16T02:00:00.000Z",
+        message: { role: "user", content: "Inspect Claude history" },
+      },
+    ]);
+    const { proxy, sent } = makeProxy();
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.conversation.list",
+      hostDeviceId: "host-1",
+      payload: { includeArchived: false },
+    });
+
+    const result = sent.find((envelope) => envelope.type === "agent.v2.conversation.list.result");
+    expect(result.payload.conversations).toContainEqual(expect.objectContaining({
+      agentSessionId: "claude-session",
+      provider: "claude",
+      cwd: "/Users/tifenxia/ClaudeProject",
+      title: "Inspect Claude history",
+    }));
   });
 });
