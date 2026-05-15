@@ -33,6 +33,9 @@ export interface HostDevice {
 }
 
 const OUTPUT_BUFFER_CAPACITY = 200;
+const OUTPUT_BUFFER_MAX_PAYLOAD_BYTES = Number(
+  process.env.OUTPUT_BUFFER_MAX_PAYLOAD_BYTES ?? 64 * 1024,
+);
 const HOST_RECONNECT_WINDOW = 60_000;
 const CLEANUP_INTERVAL = 30_000;
 
@@ -154,6 +157,14 @@ export class DeviceManager {
   bufferOutput(hostDeviceId: string, envelope: Envelope): void {
     const device = this.devices.get(hostDeviceId);
     if (!device) return;
+    const payload = envelope.payload as { data?: unknown } | undefined;
+    if (
+      typeof payload?.data === "string" &&
+      Buffer.byteLength(payload.data, "utf8") > OUTPUT_BUFFER_MAX_PAYLOAD_BYTES
+    ) {
+      device.lastActivity = Date.now();
+      return;
+    }
     const terminalId = envelope.terminalId ?? "default";
     let buffer = device.outputBuffers.get(terminalId);
     if (!buffer) {
@@ -254,6 +265,24 @@ export class DeviceManager {
       cwd: device.cwd ?? null,
       capabilities: device.capabilities,
       userId: device.userId ?? null,
+    };
+  }
+
+  getStats() {
+    let clientCount = 0;
+    let bufferedTerminalFrames = 0;
+    let terminalCount = 0;
+    for (const device of this.devices.values()) {
+      clientCount += device.clients.size;
+      terminalCount += device.outputBuffers.size;
+      bufferedTerminalFrames += [...device.outputBuffers.values()].reduce((sum, buf) => sum + buf.length, 0);
+    }
+    return {
+      devices: this.devices.size,
+      activeDevices: this.listActive().length,
+      clients: clientCount,
+      terminalsWithReplay: terminalCount,
+      bufferedTerminalFrames,
     };
   }
 

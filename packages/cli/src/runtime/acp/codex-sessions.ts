@@ -62,6 +62,8 @@ interface CodexIndexEntry {
   updatedAt?: number;
 }
 
+type StoredToolStatus = NonNullable<StoredAgentTimelineItem["toolCall"]>["status"];
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -366,7 +368,8 @@ function historyToolName(name: string | undefined): string {
   return name;
 }
 
-function historyToolKind(name: string | undefined): "tool_activity" | "command_execution" {
+function historyToolKind(name: string | undefined): "tool_activity" | "command_execution" | "file_change" {
+  if (name === "apply_patch") return "file_change";
   return name?.endsWith("exec_command") || name?.endsWith("write_stdin") ? "command_execution" : "tool_activity";
 }
 
@@ -390,6 +393,75 @@ function commandFromCodexTool(name: string | undefined, rawInput: unknown, outpu
   return { command, cwd, output, status: output === undefined ? "running" : "completed" };
 }
 
+function patchTextFromCodexTool(name: string | undefined, rawInput: unknown, input: string | undefined): string | undefined {
+  if (name !== "apply_patch") return undefined;
+  if (typeof rawInput === "string") return rawInput;
+  const record = asRecord(rawInput);
+  for (const key of ["patch", "input", "text", "content"]) {
+    const value = record?.[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return input;
+}
+
+function fileChangeFromApplyPatch(
+  patchText: string | undefined,
+  status: StoredToolStatus,
+): StoredAgentTimelineItem["fileChange"] | undefined {
+  if (!patchText?.trim()) return undefined;
+  const entries: NonNullable<StoredAgentTimelineItem["fileChange"]>["entries"] = [];
+  let current: NonNullable<StoredAgentTimelineItem["fileChange"]>["entries"][number] | undefined;
+
+  const flush = () => {
+    if (!current?.path) return;
+    const existing = entries.find((entry) => entry.path === current!.path);
+    if (existing) {
+      existing.added = (existing.added ?? 0) + (current.added ?? 0);
+      existing.removed = (existing.removed ?? 0) + (current.removed ?? 0);
+      existing.kind ??= current.kind;
+    } else {
+      entries.push(current);
+    }
+  };
+
+  for (const rawLine of patchText.split(/\r?\n/)) {
+    const add = rawLine.match(/^\*\*\* Add File:\s+(.+)$/);
+    const update = rawLine.match(/^\*\*\* Update File:\s+(.+)$/);
+    const del = rawLine.match(/^\*\*\* Delete File:\s+(.+)$/);
+    const move = rawLine.match(/^\*\*\* Move to:\s+(.+)$/);
+    if (add || update || del) {
+      flush();
+      current = {
+        path: (add?.[1] ?? update?.[1] ?? del?.[1] ?? "").trim(),
+        kind: add ? "create" : del ? "delete" : "update",
+        added: 0,
+        removed: 0,
+      };
+      continue;
+    }
+    if (move?.[1] && current) {
+      current.path = move[1].trim();
+      current.kind = "move";
+      continue;
+    }
+    if (!current) continue;
+    if (rawLine.startsWith("+") && !rawLine.startsWith("+++")) {
+      current.added = (current.added ?? 0) + 1;
+    } else if (rawLine.startsWith("-") && !rawLine.startsWith("---")) {
+      current.removed = (current.removed ?? 0) + 1;
+    }
+  }
+  flush();
+
+  if (entries.length === 0) return undefined;
+  return {
+    entries,
+    diff: patchText,
+    summary: entries.map((entry) => [entry.kind, entry.path].filter(Boolean).join(" ")).join("\n"),
+    status,
+  };
+}
+
 function upsertHistoryTool(
   itemsById: Map<string, StoredAgentTimelineItem>,
   conversationId: string,
@@ -402,21 +474,27 @@ function upsertHistoryTool(
   const id = `history-tool:${callId}`;
   const existing = itemsById.get(id);
   const commandExecution = commandFromCodexTool(name, rawInput, existing?.commandExecution?.output);
+  const status: StoredToolStatus = existing?.toolCall?.status ?? "running";
+  const fileChange = fileChangeFromApplyPatch(patchTextFromCodexTool(name, rawInput, input), status);
   itemsById.set(id, {
     id,
     conversationId,
     type: "tool_call",
-    kind: historyToolKind(name),
+    kind: fileChange ? "file_change" : historyToolKind(name),
     itemId: callId,
     toolCall: {
       id: callId,
-      name: historyToolName(name),
-      input: input ?? existing?.toolCall?.input,
+      name: fileChange ? "文件修改" : historyToolName(name),
+      input: fileChange?.summary ?? input ?? existing?.toolCall?.input,
       output: existing?.toolCall?.output,
       createdAt: existing?.toolCall?.createdAt ?? createdAt,
-      status: existing?.toolCall?.status ?? "running",
+      status,
     },
     commandExecution: commandExecution ?? existing?.commandExecution,
+    fileChange: fileChange ?? existing?.fileChange,
+    text: fileChange
+      ? `已编辑 ${fileChange.entries.length} 个文件`
+      : existing?.text,
     createdAt: existing?.createdAt ?? createdAt,
     updatedAt: createdAt,
     metadata: { source: "device-history", provider: "codex" },
@@ -435,6 +513,9 @@ function completeHistoryTool(
   const commandExecution = existing?.commandExecution
     ? { ...existing.commandExecution, output, status: "completed" as const }
     : undefined;
+  const fileChange = existing?.fileChange
+    ? { ...existing.fileChange, summary: existing.fileChange.summary ?? output, status: "completed" as const }
+    : undefined;
   itemsById.set(id, {
     id,
     conversationId,
@@ -450,6 +531,8 @@ function completeHistoryTool(
       status: "completed",
     },
     commandExecution,
+    fileChange,
+    text: fileChange ? existing?.text ?? `已编辑 ${fileChange.entries.length} 个文件` : existing?.text,
     createdAt: existing?.createdAt ?? createdAt,
     updatedAt: createdAt,
     metadata: { source: "device-history", provider: "codex" },

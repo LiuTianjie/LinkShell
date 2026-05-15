@@ -207,6 +207,8 @@ interface PendingStructuredInputWaiter {
 
 const PERMISSION_TIMEOUT_MS = 5 * 60_000;
 const MAX_TIMELINE_ITEMS = 200;
+const MAX_SNAPSHOT_ITEMS = 80;
+const MAX_SNAPSHOT_TEXT_BYTES = 128 * 1024;
 
 function id(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -219,6 +221,71 @@ function stringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function truncateUtf8(value: string | undefined, maxBytes = MAX_SNAPSHOT_TEXT_BYTES): string | undefined {
+  if (!value) return value;
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
+  let end = Math.min(value.length, maxBytes);
+  while (end > 0 && Buffer.byteLength(value.slice(0, end), "utf8") > maxBytes) {
+    end = Math.floor(end * 0.9);
+  }
+  return `${value.slice(0, end)}\n\n[truncated by LinkShell: original ${Buffer.byteLength(value, "utf8")} bytes]`;
+}
+
+function snapshotContentBlocks(
+  blocks: AgentContentBlock[] | undefined,
+  options: { stripImages?: boolean } = {},
+): AgentContentBlock[] | undefined {
+  if (!blocks) return undefined;
+  return blocks.map((block) =>
+    block.type === "image" && options.stripImages !== false
+      ? { ...block, data: undefined, text: block.text || "图片附件" }
+      : { ...block, text: truncateUtf8(block.text) },
+  );
+}
+
+function snapshotTimelineItem(
+  item: AgentTimelineItem,
+  options: { stripImages?: boolean } = {},
+): AgentTimelineItem {
+  return {
+    ...item,
+    content: snapshotContentBlocks(item.content, options),
+    text: truncateUtf8(item.text),
+    toolCall: item.toolCall
+      ? {
+          ...item.toolCall,
+          input: truncateUtf8(item.toolCall.input),
+          output: truncateUtf8(item.toolCall.output),
+        }
+      : undefined,
+    commandExecution: item.commandExecution
+      ? {
+          ...item.commandExecution,
+          command: truncateUtf8(item.commandExecution.command, 16 * 1024),
+          output: truncateUtf8(item.commandExecution.output),
+        }
+      : undefined,
+    fileChange: item.fileChange
+      ? {
+          ...item.fileChange,
+          diff: truncateUtf8(item.fileChange.diff),
+          summary: truncateUtf8(item.fileChange.summary),
+        }
+      : undefined,
+    permission: item.permission
+      ? {
+          ...item.permission,
+          toolInput: truncateUtf8(item.permission.toolInput),
+          context: truncateUtf8(item.permission.context),
+        }
+      : undefined,
+  };
+}
+
+function snapshotTimelineItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
+  return items.slice(-MAX_SNAPSHOT_ITEMS).map((item) => snapshotTimelineItem(item));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -1583,7 +1650,7 @@ export class AgentWorkspaceProxy {
         hostDeviceId: this.input.hostDeviceId,
         payload: {
           conversation: existingConversation,
-          snapshot: this.timelines.get(existingConversation.id) ?? [],
+          snapshot: snapshotTimelineItems(this.timelines.get(existingConversation.id) ?? []),
         },
       }));
       return existingConversation;
@@ -1639,7 +1706,7 @@ export class AgentWorkspaceProxy {
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.opened",
         hostDeviceId: this.input.hostDeviceId,
-        payload: { conversation, snapshot: this.timelines.get(conversation.id) ?? [] },
+        payload: { conversation, snapshot: snapshotTimelineItems(this.timelines.get(conversation.id) ?? []) },
       }));
       return conversation;
     } catch (error) {
@@ -1691,7 +1758,7 @@ export class AgentWorkspaceProxy {
     this.input.send(createEnvelope({
       type: "agent.v2.conversation.opened",
       hostDeviceId: this.input.hostDeviceId,
-      payload: { conversation, snapshot: this.timelines.get(conversation.id) ?? [] },
+      payload: { conversation, snapshot: snapshotTimelineItems(this.timelines.get(conversation.id) ?? []) },
     }));
     return conversation;
   }
@@ -2935,7 +3002,7 @@ export class AgentWorkspaceProxy {
     this.input.send(createEnvelope({
       type: "agent.v2.event",
       hostDeviceId: this.input.hostDeviceId,
-      payload: { conversationId, conversation, item },
+      payload: { conversationId, conversation, item: snapshotTimelineItem(item, { stripImages: false }) },
     }));
   }
 
@@ -2994,8 +3061,8 @@ export class AgentWorkspaceProxy {
     }
     const conversations = [...this.conversations.values()];
     const items = conversationId
-      ? this.timelines.get(conversationId) ?? []
-      : [...this.timelines.values()].flat();
+      ? snapshotTimelineItems(this.timelines.get(conversationId) ?? [])
+      : [];
     this.input.send(createEnvelope({
       type: "agent.v2.snapshot",
       hostDeviceId: this.input.hostDeviceId,

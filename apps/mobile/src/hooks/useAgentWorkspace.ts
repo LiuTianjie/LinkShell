@@ -397,12 +397,6 @@ export function useAgentWorkspace(
           {},
           { queue: true, dedupeKey: "agent-v2-capabilities" },
         );
-        currentManager.sendAgentWorkspaceEnvelope(
-          session.sessionId,
-          "agent.v2.snapshot.request",
-          {},
-          { queue: true, dedupeKey: "agent-v2-snapshot" },
-        );
       }
     },
     [],

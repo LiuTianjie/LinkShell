@@ -2,7 +2,6 @@ import type WebSocket from "ws";
 import {
   parseEnvelope,
   parseTypedPayload,
-  protocolMessageSchemas,
   serializeEnvelope,
   createEnvelope,
 } from "@linkshell/protocol";
@@ -49,7 +48,7 @@ export function handleSocketMessage(
   }
 
   try {
-    if (isProtocolMessageType(envelope.type)) {
+    if (shouldValidatePayload(envelope.type)) {
       envelope = {
         ...envelope,
         payload: parseTypedPayload(envelope.type, envelope.payload),
@@ -57,9 +56,9 @@ export function handleSocketMessage(
     }
 
     if (role === "host") {
-      handleHostMessage(envelope, session, sessions);
+      handleHostMessage(envelope, raw, session, sessions);
     } else {
-      handleClientMessage(envelope, socket, session, deviceId, sessions);
+      handleClientMessage(envelope, raw, socket, session, deviceId, sessions);
     }
   } catch (error) {
     if (error instanceof ZodError) {
@@ -75,8 +74,18 @@ export function handleSocketMessage(
   }
 }
 
-function isProtocolMessageType(type: string): type is ProtocolMessageType {
-  return Object.prototype.hasOwnProperty.call(protocolMessageSchemas, type);
+function shouldValidatePayload(type: string): type is ProtocolMessageType {
+  return (
+    type === "device.connect" ||
+    type === "device.ack" ||
+    type === "device.resume" ||
+    type === "terminal.input" ||
+    type === "terminal.resize" ||
+    type === "permission.decision" ||
+    type === "permission.decision.result" ||
+    type === "control.claim" ||
+    type === "control.release"
+  );
 }
 
 function sendSessionError(
@@ -99,6 +108,7 @@ function sendSessionError(
 
 function handleHostMessage(
   envelope: Envelope,
+  raw: string,
   session: ReturnType<DeviceManager["get"]> & {},
   sessions: DeviceManager,
 ): void {
@@ -122,12 +132,12 @@ function handleHostMessage(
     }
     case "terminal.output": {
       sessions.bufferOutput(session.id, envelope);
-      broadcastToClients(session, envelope);
+      broadcastToClients(session, envelope, raw);
       break;
     }
     case "terminal.exit": {
       // Don't terminate session — other terminals may still be running
-      broadcastToClients(session, envelope);
+      broadcastToClients(session, envelope, raw);
       break;
     }
     case "device.heartbeat":
@@ -145,7 +155,7 @@ function handleHostMessage(
           message: p.message,
         },
       });
-      broadcastToClients(session, envelope);
+      broadcastToClients(session, envelope, raw);
       break;
     }
     // Tunnel: host → gateway (not broadcast to clients)
@@ -166,7 +176,7 @@ function handleHostMessage(
     }
     case "control.grant":
     case "control.reject":
-      broadcastToClients(session, envelope);
+      broadcastToClients(session, envelope, raw);
       break;
     // Screen sharing: host → clients
     case "screen.frame":
@@ -185,21 +195,22 @@ function handleHostMessage(
     case "terminal.list":
     case "terminal.browse.result":
     case "terminal.file.read.result":
-      broadcastToClients(session, envelope);
+      broadcastToClients(session, envelope, raw);
       break;
     // Structured status from hooks
     case "terminal.status":
       sessions.cacheStatus(session.id, envelope);
-      broadcastToClients(session, envelope);
+      broadcastToClients(session, envelope, raw);
       break;
     default:
-      broadcastToClients(session, envelope);
+      broadcastToClients(session, envelope, raw);
       break;
   }
 }
 
 function handleClientMessage(
   envelope: Envelope,
+  raw: string,
   socket: WebSocket,
   session: ReturnType<DeviceManager["get"]> & {},
   deviceId: string,
@@ -225,17 +236,17 @@ function handleClientMessage(
   switch (envelope.type) {
     case "terminal.input": {
       if (!requireController()) return;
-      sendToHost(session, envelope);
+      sendToHost(session, envelope, raw);
       break;
     }
     case "terminal.resize": {
       if (!requireController()) return;
-      sendToHost(session, envelope);
+      sendToHost(session, envelope, raw);
       break;
     }
     case "device.ack": {
       // Forward ACK to host
-      sendToHost(session, envelope);
+      sendToHost(session, envelope, raw);
       break;
     }
     case "device.resume": {
@@ -324,15 +335,15 @@ function handleClientMessage(
     case "file.upload":
     case "permission.decision":
       if (!requireController()) return;
-      sendToHost(session, envelope);
+      sendToHost(session, envelope, raw);
       break;
     case "agent.v2.capabilities.request":
     case "agent.v2.conversation.list":
     case "agent.v2.snapshot.request":
-      sendToHost(session, envelope);
+      sendToHost(session, envelope, raw);
       break;
     default:
-      sendToHost(session, envelope);
+      sendToHost(session, envelope, raw);
       break;
   }
 }
@@ -340,8 +351,9 @@ function handleClientMessage(
 function broadcastToClients(
   session: ReturnType<DeviceManager["get"]> & {},
   envelope: Envelope,
+  raw?: string,
 ): void {
-  const data = serializeEnvelope(envelope);
+  const data = raw ?? serializeEnvelope(envelope);
   for (const [, client] of session.clients) {
     if (client.socket.readyState === client.socket.OPEN) {
       client.socket.send(data);
@@ -352,11 +364,12 @@ function broadcastToClients(
 function sendToHost(
   session: ReturnType<DeviceManager["get"]> & {},
   envelope: Envelope,
+  raw?: string,
 ): void {
   if (
     session.host &&
     session.host.socket.readyState === session.host.socket.OPEN
   ) {
-    session.host.socket.send(serializeEnvelope(envelope));
+    session.host.socket.send(raw ?? serializeEnvelope(envelope));
   }
 }

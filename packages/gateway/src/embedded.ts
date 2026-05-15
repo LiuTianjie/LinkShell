@@ -40,7 +40,9 @@ export interface EmbeddedGateway {
 
 const PING_INTERVAL = 20_000;
 const MAX_BODY_SIZE = 4096;
-const MAX_WS_MESSAGE_SIZE = 50 * 1024 * 1024; // 50MB (supports base64 image uploads)
+const MAX_WS_MESSAGE_SIZE = Number(
+  process.env.MAX_WS_MESSAGE_SIZE ?? 16 * 1024 * 1024,
+);
 
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 

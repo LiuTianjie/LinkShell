@@ -335,6 +335,8 @@ type FileDiffEntry = {
   path: string;
   added: number;
   removed: number;
+  kind?: string;
+  patch?: string;
 };
 
 function displayProvider(provider: AgentConversationRecord["provider"]): string {
@@ -345,13 +347,53 @@ function displayProvider(provider: AgentConversationRecord["provider"]): string 
 
 function looksLikeDiff(text: string | undefined): boolean {
   if (!text) return false;
-  const value = text.trim();
+  const value = extractFencedDiff(text) ?? text.trim();
   return (
     value.startsWith("diff --git ") ||
+    value.startsWith("*** Begin Patch") ||
     value.startsWith("@@ ") ||
     value.includes("\n@@ ") ||
     (value.includes("\n--- ") && value.includes("\n+++ "))
   );
+}
+
+function extractFencedDiff(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const blocks = [...text.matchAll(/```(?:diff|patch)?\s*\n([\s\S]*?)```/gi)]
+    .map((match) => match[1]?.trim())
+    .filter((value): value is string => Boolean(value));
+  if (blocks.length > 0) return blocks.join("\n\n");
+  const trimmed = text.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function splitPatchIntoFileChunks(patch: string | undefined): Map<string, string> {
+  const chunks = new Map<string, string>();
+  if (!patch?.trim()) return chunks;
+  let currentPath: string | undefined;
+  let currentLines: string[] = [];
+
+  const flush = () => {
+    if (!currentPath || currentLines.length === 0) return;
+    chunks.set(currentPath, currentLines.join("\n").trimEnd());
+  };
+
+  for (const line of patch.split(/\r?\n/)) {
+    const gitMatch = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+    const updateMatch = line.match(/^\*\*\* Update File:\s+(.+)$/);
+    const addMatch = line.match(/^\*\*\* Add File:\s+(.+)$/);
+    const deleteMatch = line.match(/^\*\*\* Delete File:\s+(.+)$/);
+    const headerPath = gitMatch?.[2] ?? updateMatch?.[1] ?? addMatch?.[1] ?? deleteMatch?.[1];
+    if (headerPath) {
+      flush();
+      currentPath = headerPath.trim();
+      currentLines = [line];
+      continue;
+    }
+    if (currentPath) currentLines.push(line);
+  }
+  flush();
+  return chunks;
 }
 
 function diffStats(diff: string, fallback?: string) {
@@ -404,6 +446,17 @@ function diffEntries(diff: string, fallback?: string): FileDiffEntry[] {
       current = { path: match?.[2] || rawLine.replace(/^diff --git\s+/, ""), added: 0, removed: 0 };
       continue;
     }
+    const patchHeader = rawLine.match(/^\*\*\* (Add|Update|Delete) File:\s+(.+)$/);
+    if (patchHeader?.[2]) {
+      flush();
+      current = {
+        path: patchHeader[2].trim(),
+        kind: patchHeader[1] === "Add" ? "create" : patchHeader[1] === "Delete" ? "delete" : "update",
+        added: 0,
+        removed: 0,
+      };
+      continue;
+    }
     if (rawLine.startsWith("+++ ") && !rawLine.startsWith("+++ /dev/null")) {
       const path = rawLine.replace(/^\+\+\+ b?\//, "").trim();
       if (!current) current = { path, added: 0, removed: 0 };
@@ -434,6 +487,16 @@ function diffEntries(diff: string, fallback?: string): FileDiffEntry[] {
       removed: 0,
     }));
   return fallbackEntries.slice(0, 12);
+}
+
+function entryKindLabel(kind: string | undefined): string | undefined {
+  const normalized = kind?.toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === "create" || normalized === "add" || normalized === "added") return "新增";
+  if (normalized === "delete" || normalized === "deleted" || normalized === "remove") return "删除";
+  if (normalized === "move" || normalized === "rename" || normalized === "renamed") return "重命名";
+  if (normalized === "update" || normalized === "edit" || normalized === "edited" || normalized === "modify") return "编辑";
+  return kind;
 }
 
 function parentPath(path: string): string {
@@ -702,6 +765,117 @@ function dedupeTimelineItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
     const key = fileToolDedupeKey(item);
     return !key || keepByKey.get(key) === index;
   });
+}
+
+function isFileChangeItem(item: AgentTimelineItem): boolean {
+  return item.kind === "file_change" || Boolean(item.fileChange);
+}
+
+function fileChangeGroupKey(item: AgentTimelineItem): string {
+  return item.turnId || `near:${Math.floor(item.createdAt / 2500)}`;
+}
+
+function aggregateFileChangeItems(group: AgentTimelineItem[]): AgentTimelineItem {
+  if (group.length === 1) return group[0]!;
+  const first = group[0]!;
+  const entriesByPath = new Map<string, AgentFileChange["entries"][number]>();
+  const diffParts: string[] = [];
+  const summaryParts: string[] = [];
+  let hasRunning = false;
+  let hasFailed = false;
+
+  for (const item of group) {
+    const fileChange = item.fileChange;
+    const entries = fileChange?.entries ?? [];
+    for (const entry of entries) {
+      const path = entry.path?.trim();
+      if (!path) continue;
+      const existing = entriesByPath.get(path);
+      if (existing) {
+        existing.added = (existing.added ?? 0) + (entry.added ?? 0);
+        existing.removed = (existing.removed ?? 0) + (entry.removed ?? 0);
+        existing.kind ??= entry.kind;
+      } else {
+        entriesByPath.set(path, { ...entry, added: entry.added ?? 0, removed: entry.removed ?? 0 });
+      }
+    }
+    const diff = fileChange?.diff ?? (looksLikeDiff(item.toolCall?.output) ? item.toolCall?.output : undefined);
+    const summary = fileChange?.summary ?? (!looksLikeDiff(item.toolCall?.output) ? item.toolCall?.output : undefined);
+    if (diff?.trim()) diffParts.push(diff.trim());
+    if (summary?.trim()) summaryParts.push(summary.trim());
+    const status = fileChange?.status ?? item.toolCall?.status;
+    hasRunning ||= status === "running" || status === "pending" || item.isStreaming === true;
+    hasFailed ||= status === "failed";
+  }
+
+  const entries = [...entriesByPath.values()];
+  const added = entries.reduce((sum, entry) => sum + (entry.added ?? 0), 0);
+  const removed = entries.reduce((sum, entry) => sum + (entry.removed ?? 0), 0);
+  const status: AgentToolCall["status"] = hasRunning ? "running" : hasFailed ? "failed" : "completed";
+  const summary = summaryParts.length > 0
+    ? summaryParts.join("\n")
+    : entries.map((entry) => [entry.kind, entry.path].filter(Boolean).join(" ")).join("\n");
+  const diff = diffParts.length > 0 ? diffParts.join("\n\n") : undefined;
+
+  return {
+    ...first,
+    id: `file-change-group:${group.map((item) => item.id).join("|")}`,
+    itemId: first.itemId ?? first.id,
+    type: "tool_call",
+    kind: "file_change",
+    text: `已编辑 ${entries.length} 个文件 +${added} -${removed}`,
+    toolCall: {
+      id: first.itemId ?? first.id,
+      name: "文件修改",
+      input: summary,
+      output: diff ?? summary,
+      createdAt: first.createdAt,
+      status,
+    },
+    fileChange: {
+      entries,
+      diff,
+      summary,
+      status,
+    },
+    createdAt: Math.min(...group.map((item) => item.createdAt)),
+    updatedAt: Math.max(...group.map((item) => item.updatedAt ?? item.createdAt)),
+    isStreaming: hasRunning,
+    metadata: {
+      ...(first.metadata ?? {}),
+      groupedItemIds: group.map((item) => item.id),
+    },
+  };
+}
+
+function groupFileChangeItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
+  const out: AgentTimelineItem[] = [];
+  let pending: AgentTimelineItem[] = [];
+  let pendingKey: string | undefined;
+
+  const flush = () => {
+    if (pending.length > 0) out.push(aggregateFileChangeItems(pending));
+    pending = [];
+    pendingKey = undefined;
+  };
+
+  for (const item of items) {
+    if (!isFileChangeItem(item)) {
+      flush();
+      out.push(item);
+      continue;
+    }
+    const key = fileChangeGroupKey(item);
+    if (pending.length > 0 && pendingKey !== key) flush();
+    pending.push(item);
+    pendingKey = key;
+  }
+  flush();
+  return out;
+}
+
+function prepareTimelineItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
+  return groupFileChangeItems(dedupeTimelineItems(items));
 }
 
 function CodeBlock({
@@ -1164,19 +1338,26 @@ const FileChangeCard = memo(function FileChangeCard({
   const [expanded, setExpanded] = useState(false);
   const input = tool.input?.trim();
   const output = tool.output?.trim();
-  const hasDiff = looksLikeDiff(output);
-  const diffLineCount = output ? output.split("\n").length : 0;
+  const patchText = useMemo(() => extractFencedDiff(fileChange?.diff ?? output), [fileChange?.diff, output]);
+  const hasDiff = looksLikeDiff(patchText);
+  const diffLineCount = patchText ? patchText.split("\n").length : 0;
   const structuredEntries = fileChange?.entries?.filter((entry) => entry.path?.trim()) ?? [];
+  const patchChunks = useMemo(() => splitPatchIntoFileChunks(patchText), [patchText]);
   const entries = useMemo(() => {
     if (structuredEntries.length > 0) {
       return structuredEntries.map((entry) => ({
         path: entry.path,
         added: entry.added ?? 0,
         removed: entry.removed ?? 0,
+        kind: entry.kind,
+        patch: patchChunks.get(entry.path) ?? patchChunks.get(shortPath(entry.path)),
       }));
     }
-    return output ? diffEntries(output, input) : diffEntries("", input);
-  }, [input, output, structuredEntries]);
+    return patchText ? diffEntries(patchText, input).map((entry) => ({
+      ...entry,
+      patch: patchChunks.get(entry.path) ?? patchChunks.get(shortPath(entry.path)),
+    })) : diffEntries("", input);
+  }, [input, patchChunks, patchText, structuredEntries]);
   const stats = useMemo(() => {
     if (structuredEntries.length > 0) {
       return {
@@ -1185,10 +1366,10 @@ const FileChangeCard = memo(function FileChangeCard({
         removed: structuredEntries.reduce((sum, entry) => sum + (entry.removed ?? 0), 0),
       };
     }
-    return hasDiff && output ? diffStats(output, input) : null;
-  }, [hasDiff, input, output, structuredEntries]);
+    return hasDiff && patchText ? diffStats(patchText, input) : null;
+  }, [hasDiff, input, patchText, structuredEntries]);
   const meta = toolStatusMeta(tool.status, theme);
-  const canExpand = Boolean(output || input || entries.length > 4);
+  const canExpand = Boolean(output || input || patchText || entries.some((entry) => entry.patch) || entries.length > 4);
   const title = entries.length > 0 ? `已编辑 ${entries.length} 个文件` : "文件修改";
 
   return (
@@ -1242,7 +1423,7 @@ const FileChangeCard = memo(function FileChangeCard({
             </Text>
           ) : null}
         </View>
-        {!stats && meta ? (
+        {stats && (stats.added > 0 || stats.removed > 0) ? null : meta ? (
           <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
             <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
           </View>
@@ -1273,6 +1454,11 @@ const FileChangeCard = memo(function FileChangeCard({
               >
                 {shortPath(entry.path)}
               </Text>
+              {entry.kind ? (
+                <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
+                  {entryKindLabel(entry.kind)}
+                </Text>
+              ) : null}
               {entry.added > 0 || entry.removed > 0 ? (
                 <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "800" }}>
                   <Text style={{ color: theme.success }}>+{entry.added}</Text>
@@ -1284,15 +1470,26 @@ const FileChangeCard = memo(function FileChangeCard({
           ))}
           {!expanded && entries.length > 4 ? (
             <Text style={{ paddingHorizontal: 12, paddingBottom: 9, color: theme.textTertiary, fontSize: 12 }}>
-              还有 {entries.length - 4} 个文件
+              再显示 {entries.length - 4} 个文件
             </Text>
           ) : null}
         </View>
       ) : null}
 
-      {hasDiff && output && expanded ? (
-        <View style={{ padding: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.separator }}>
-          <DiffBlock diff={output} theme={theme} expanded />
+      {hasDiff && patchText && expanded ? (
+        <View style={{ padding: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.separator, gap: 10 }}>
+          {entries.some((entry) => entry.patch) ? (
+            entries.map((entry, index) => entry.patch ? (
+              <View key={`patch-${entry.path}-${index}`} style={{ gap: 6 }}>
+                <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
+                  {shortPath(entry.path)}
+                </Text>
+                <DiffBlock diff={entry.patch} theme={theme} expanded={entries.length <= 2} />
+              </View>
+            ) : null)
+          ) : (
+            <DiffBlock diff={patchText} theme={theme} expanded />
+          )}
         </View>
       ) : !hasDiff && output && expanded ? (
         <View style={{ gap: 8, padding: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.separator }}>
@@ -2595,7 +2792,7 @@ export function AgentConversationScreen({
   const insets = useSafeAreaInsets();
   const conversation = workspace.getConversation(conversationId);
   const timeline = workspace.getTimeline(conversationId);
-  const visibleTimeline = useMemo(() => dedupeTimelineItems(timeline), [timeline]);
+  const visibleTimeline = useMemo(() => prepareTimelineItems(timeline), [timeline]);
   const timelineRef = useRef<LegendListRef>(null);
   const timelineNearBottomRef = useRef(true);
   const [isTimelineNearBottom, setIsTimelineNearBottom] = useState(true);

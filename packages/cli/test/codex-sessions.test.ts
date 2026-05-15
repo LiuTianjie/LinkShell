@@ -239,4 +239,64 @@ describe("Codex local session discovery", () => {
       }),
     ]);
   });
+
+  it("promotes Codex apply_patch calls into a single file change item", () => {
+    const home = useTempHome();
+    const codexRoot = join(home, ".codex");
+    const activeDir = join(codexRoot, "sessions", "2026", "05", "16");
+    mkdirSync(activeDir, { recursive: true });
+    writeJsonl(join(activeDir, "rollout-2026-05-16T01-00-00-019e-active.jsonl"), [
+      {
+        timestamp: "2026-05-16T01:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "019e-active", cwd: "/Users/tifenxia/ActiveProject" },
+      },
+      {
+        timestamp: "2026-05-16T01:01:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          call_id: "patch-call-1",
+          name: "apply_patch",
+          arguments: [
+            "*** Begin Patch",
+            "*** Update File: src/app.ts",
+            "@@",
+            "-old",
+            "+new",
+            "*** Add File: src/new.ts",
+            "+export const value = 1;",
+            "*** End Patch",
+          ].join("\n"),
+        },
+      },
+      {
+        timestamp: "2026-05-16T01:02:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: "patch-call-1",
+          output: "Done!",
+        },
+      },
+    ]);
+
+    const result = loadCodexStoredTimeline("019e-active", "agent:019e-active", "/Users/tifenxia/ActiveProject");
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        type: "tool_call",
+        kind: "file_change",
+        text: "已编辑 2 个文件",
+        toolCall: expect.objectContaining({ name: "文件修改", status: "completed" }),
+        fileChange: expect.objectContaining({
+          entries: [
+            expect.objectContaining({ path: "src/app.ts", kind: "update", added: 1, removed: 1 }),
+            expect.objectContaining({ path: "src/new.ts", kind: "create", added: 1, removed: 0 }),
+          ],
+          status: "completed",
+        }),
+      }),
+    ]);
+  });
 });

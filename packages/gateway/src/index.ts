@@ -48,7 +48,9 @@ await Promise.all([pairingManager.hydrate(), tokenManager.hydrate()]);
 
 const PING_INTERVAL = 20_000;
 const MAX_BODY_SIZE = 4096;
-const MAX_WS_MESSAGE_SIZE = 50 * 1024 * 1024; // 50MB (supports base64 image uploads)
+const MAX_WS_MESSAGE_SIZE = Number(
+  process.env.MAX_WS_MESSAGE_SIZE ?? 16 * 1024 * 1024,
+);
 const PAIRING_RATE_LIMIT_MAX = Number(process.env.PAIRING_RATE_LIMIT_MAX ?? 30);
 const PAIRING_RATE_LIMIT_WINDOW_MS = Number(
   process.env.PAIRING_RATE_LIMIT_WINDOW_MS ?? 60_000,
@@ -179,7 +181,18 @@ async function handleRequest(
 
   // Health check
   if (method === "GET" && url.pathname === "/healthz") {
-    json(res, 200, { ok: true });
+    const memory = process.memoryUsage();
+    json(res, 200, {
+      ok: true,
+      uptime: Math.round(process.uptime()),
+      memory: {
+        rss: memory.rss,
+        heapUsed: memory.heapUsed,
+        heapTotal: memory.heapTotal,
+        external: memory.external,
+      },
+      sessions: sessionManager.getStats(),
+    });
     return;
   }
 
