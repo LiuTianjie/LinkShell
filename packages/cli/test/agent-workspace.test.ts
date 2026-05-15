@@ -1,4 +1,5 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "vitest";
@@ -290,14 +291,73 @@ describe("AgentWorkspaceProxy event routing", () => {
         models: [{ id: "default", label: "默认模型" }],
         reasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
         permissionModes: ["read_only", "workspace_write", "full_access"],
+        commands: expect.arrayContaining([
+          expect.objectContaining({ name: "git-status", executionKind: "native" }),
+          expect.objectContaining({ name: "review", executionKind: "native" }),
+          expect.objectContaining({ name: "plan", executionKind: "native" }),
+        ]),
       }),
       expect.objectContaining({
         id: "claude",
         models: [{ id: "default", label: "默认模型" }, { id: "sonnet", label: "Sonnet" }],
         reasoningEfforts: ["low", "medium", "high", "xhigh"],
         permissionModes: ["read_only", "workspace_write", "full_access"],
+        commands: expect.arrayContaining([
+          expect.objectContaining({ name: "git-status", executionKind: "native" }),
+          expect.objectContaining({ name: "review", executionKind: "native" }),
+        ]),
       }),
     ]);
+  });
+
+  it("executes native git status as a command timeline item", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "linkshell-agent-git-"));
+    try {
+      execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+      writeFileSync(join(cwd, "note.txt"), "hello\n", "utf8");
+      const sent: any[] = [];
+      const proxy = new AgentWorkspaceProxy({
+        hostDeviceId: "host-1",
+        cwd,
+        availableProviders: [],
+        send: (envelope) => sent.push(envelope),
+      }) as any;
+      proxy.conversations.set("conversation-a", {
+        id: "conversation-a",
+        agentSessionId: "thread-a",
+        provider: "codex",
+        cwd,
+        title: "A",
+        status: "idle",
+        archived: false,
+        createdAt: 1,
+        lastActivityAt: 1,
+      });
+
+      await proxy.handleEnvelope({
+        type: "agent.v2.command.execute",
+        hostDeviceId: "host-1",
+        payload: {
+          conversationId: "conversation-a",
+          commandId: "git-status",
+          clientMessageId: "cmd-a",
+        },
+      });
+
+      const completed = sent
+        .filter((envelope) => envelope.type === "agent.v2.event")
+        .map((envelope) => envelope.payload.item)
+        .find((item) => item?.commandExecution?.status === "completed");
+      expect(completed).toEqual(expect.objectContaining({
+        kind: "command_execution",
+        commandExecution: expect.objectContaining({
+          command: expect.stringContaining("git status --short --branch"),
+          output: expect.stringContaining("note.txt"),
+        }),
+      }));
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("clears prompt settings when the mobile app sends null defaults", async () => {

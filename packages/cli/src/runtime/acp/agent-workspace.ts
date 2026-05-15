@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { basename, join, relative } from "node:path";
 import {
@@ -835,6 +836,30 @@ interface ProviderRuntimeCapabilities {
 const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 const CLAUDE_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 const AGENT_PERMISSION_MODES: AgentPermissionMode[] = ["read_only", "workspace_write", "full_access"];
+const COMMAND_OUTPUT_MAX_BYTES = 96 * 1024;
+const LINKSHELL_NATIVE_COMMANDS: Array<{
+  name: string;
+  description: string;
+  category: string;
+  argsMode?: AgentCommandDescriptor["argsMode"];
+  destructive?: boolean;
+  providers?: AgentProvider[];
+}> = [
+  { name: "status", description: "Show current Agent and workspace status", category: "LinkShell", argsMode: "none" },
+  { name: "plan", description: "Enter Plan mode for the next turn", category: "Agent", argsMode: "none" },
+  { name: "exit-plan", description: "Exit Plan mode", category: "Agent", argsMode: "none" },
+  { name: "review", description: "Ask the Agent to review current local changes", category: "Agent", argsMode: "optional" },
+  { name: "subagents", description: "Ask the Agent to split work across subagents when useful", category: "Agent", argsMode: "optional" },
+  { name: "compact", description: "Compact the active Codex context", category: "Codex", argsMode: "none", providers: ["codex"] },
+  { name: "clear", description: "Start a fresh Agent context for this conversation", category: "Agent", argsMode: "none", destructive: true },
+  { name: "git-status", description: "Show branch and working tree status", category: "Git", argsMode: "none" },
+  { name: "git-diff", description: "Show a compact diffstat for current changes", category: "Git", argsMode: "none" },
+  { name: "git-commit", description: "Commit staged changes with the given message", category: "Git", argsMode: "required" },
+  { name: "git-pull", description: "Pull with fast-forward only", category: "Git", argsMode: "none" },
+  { name: "git-push", description: "Push the current branch", category: "Git", argsMode: "none" },
+  { name: "git-stash", description: "Stash current working tree changes", category: "Git", argsMode: "optional" },
+  { name: "git-stash-pop", description: "Pop the latest stash", category: "Git", argsMode: "none" },
+];
 const CLAUDE_REMOTE_HIDDEN_COMMANDS = new Set([
   "add-dir",
   "agents",
@@ -1107,17 +1132,30 @@ function customClaudeCommands(cwd: string): AgentCommandDescriptor[] {
 
 function defaultProviderCommands(provider: AgentProvider, cwd: string, enabled: boolean): AgentCommandDescriptor[] {
   const disabledReason = enabled ? undefined : `${providerLabel(provider)} 未安装或启动失败`;
+  const linkshellCommands = LINKSHELL_NATIVE_COMMANDS
+    .filter((command) => !command.providers || command.providers.includes(provider))
+    .map((command) => makeCommand({
+      provider,
+      name: command.name,
+      description: command.description,
+      source: "linkshell",
+      category: command.category,
+      argsMode: command.argsMode ?? "optional",
+      destructive: command.destructive,
+      disabledReason,
+      executionKind: "native",
+    }));
   if (provider === "codex") {
-    return [];
+    return linkshellCommands;
   }
   if (provider === "claude") {
     const custom = customClaudeCommands(cwd).map((command) => ({
       ...command,
       disabledReason: command.disabledReason ?? disabledReason,
     }));
-    return custom;
+    return [...linkshellCommands, ...custom];
   }
-  return [];
+  return linkshellCommands;
 }
 
 function mergeCommands(...groups: Array<AgentCommandDescriptor[] | undefined>): AgentCommandDescriptor[] {
@@ -1134,6 +1172,81 @@ function mergeCommands(...groups: Array<AgentCommandDescriptor[] | undefined>): 
     }
   }
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function isGitNativeCommand(name: string): boolean {
+  return name === "git-status" ||
+    name === "git-diff" ||
+    name === "git-commit" ||
+    name === "git-pull" ||
+    name === "git-push" ||
+    name === "git-stash" ||
+    name === "git-stash-pop";
+}
+
+function gitCommandArgs(name: string, args?: string): { display: string; argv: string[] } {
+  const message = args?.trim();
+  switch (name) {
+    case "git-status":
+      return { display: "git status --short --branch", argv: ["status", "--short", "--branch"] };
+    case "git-diff":
+      return { display: "git diff --stat", argv: ["diff", "--stat"] };
+    case "git-commit":
+      if (!message) throw new Error("请先输入提交信息，例如 /git-commit fix mobile agent timeline");
+      return { display: `git commit -m ${JSON.stringify(message)}`, argv: ["commit", "-m", message] };
+    case "git-pull":
+      return { display: "git pull --ff-only", argv: ["pull", "--ff-only"] };
+    case "git-push":
+      return { display: "git push", argv: ["push"] };
+    case "git-stash":
+      return {
+        display: "git stash push -u",
+        argv: ["stash", "push", "-u", "-m", message || "LinkShell mobile stash"],
+      };
+    case "git-stash-pop":
+      return { display: "git stash pop", argv: ["stash", "pop"] };
+    default:
+      throw new Error(`未知 Git 命令：/${name}`);
+  }
+}
+
+function runProcess(
+  command: string,
+  args: string[],
+  options: { cwd: string; maxBytes?: number },
+): Promise<{ output: string; exitCode: number | null; signal: NodeJS.Signals | null }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    const maxBytes = options.maxBytes ?? COMMAND_OUTPUT_MAX_BYTES;
+    let output = "";
+    let bytes = 0;
+    let truncated = false;
+    const append = (chunk: Buffer) => {
+      if (bytes >= maxBytes) {
+        truncated = true;
+        return;
+      }
+      const remaining = maxBytes - bytes;
+      const slice = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
+      output += slice.toString("utf8");
+      bytes += slice.byteLength;
+      if (slice.byteLength < chunk.byteLength) truncated = true;
+    };
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
+    child.once("error", reject);
+    child.once("close", (exitCode, signal) => {
+      resolve({
+        output: `${output.trimEnd()}${truncated ? "\n\n[truncated by LinkShell]" : ""}`,
+        exitCode,
+        signal,
+      });
+    });
+  });
 }
 
 function runtimeCommands(provider: AgentProvider, value: unknown): AgentCommandDescriptor[] {
@@ -1985,14 +2098,8 @@ export class AgentWorkspaceProxy {
         return;
       }
 
-      if (conversation.provider !== "codex") {
-        this.addItem(conversation.id, {
-          id: id("error"),
-          conversationId: conversation.id,
-          type: "error",
-          error: `${command.title} 暂无 ${providerLabel(conversation.provider)} 原生实现。`,
-          createdAt: now,
-        });
+      if (isGitNativeCommand(command.name)) {
+        await this.executeGitNativeCommand(conversation, command.name, args);
         return;
       }
 
@@ -2006,6 +2113,22 @@ export class AgentWorkspaceProxy {
         this.emitStatus(conversation.id, "idle", command.name === "plan"
           ? "已进入 Plan mode。下一条消息会先制定计划。"
           : "已退出 Plan mode。");
+        return;
+      }
+
+      if (command.name === "review" || command.name === "subagents") {
+        const prompt = command.name === "review"
+          ? args || "Review the current local changes."
+          : args || "Run subagents for distinct tasks in parallel when useful, then synthesize the results.";
+        await this.sendPrompt({
+          conversationId: conversation.id,
+          clientMessageId: id(command.name),
+          contentBlocks: [{ type: "text", text: prompt }],
+          model: conversation.model,
+          reasoningEffort: conversation.reasoningEffort,
+          permissionMode: conversation.permissionMode,
+          collaborationMode: conversation.collaborationMode,
+        });
         return;
       }
 
@@ -2046,22 +2169,6 @@ export class AgentWorkspaceProxy {
         return;
       }
 
-      if (command.name === "review" || command.name === "subagents") {
-        const prompt = command.name === "review"
-          ? args || "Review the current local changes."
-          : args || "Run subagents for distinct tasks in parallel when useful, then synthesize the results.";
-        await this.sendPrompt({
-          conversationId: conversation.id,
-          clientMessageId: id(command.name),
-          contentBlocks: [{ type: "text", text: prompt }],
-          model: conversation.model,
-          reasoningEffort: conversation.reasoningEffort,
-          permissionMode: conversation.permissionMode,
-          collaborationMode: conversation.collaborationMode,
-        });
-        return;
-      }
-
       throw new Error(`命令暂未实现：/${command.name}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2074,6 +2181,46 @@ export class AgentWorkspaceProxy {
         createdAt: Date.now(),
       });
     }
+  }
+
+  private async executeGitNativeCommand(
+    conversation: AgentConversation,
+    commandName: string,
+    args?: string,
+  ): Promise<void> {
+    const git = gitCommandArgs(commandName, args);
+    const toolId = id(commandName);
+    const now = Date.now();
+    conversation.status = "running";
+    conversation.lastMessagePreview = git.display;
+    conversation.lastActivityAt = now;
+    this.emitConversation(conversation);
+    this.upsertTool(conversation.id, {
+      id: toolId,
+      name: "命令",
+      input: `${git.display}\n\ncwd: ${conversation.cwd}`,
+      createdAt: now,
+      status: "running",
+    });
+    const result = await runProcess("git", git.argv, {
+      cwd: conversation.cwd,
+      maxBytes: COMMAND_OUTPUT_MAX_BYTES,
+    });
+    const ok = result.exitCode === 0;
+    this.upsertTool(conversation.id, {
+      id: toolId,
+      name: "命令",
+      input: `${git.display}\n\ncwd: ${conversation.cwd}`,
+      output: result.output || (ok ? "完成" : `退出码 ${result.exitCode ?? "unknown"}`),
+      createdAt: now,
+      status: ok ? "completed" : "failed",
+    });
+    conversation.status = ok ? "idle" : "error";
+    conversation.lastMessagePreview = ok
+      ? `${git.display} 完成`
+      : `${git.display} 失败`;
+    conversation.lastActivityAt = Date.now();
+    this.emitConversation(conversation);
   }
 
   private handleRequest(method: string, params: unknown): Promise<unknown> | unknown {

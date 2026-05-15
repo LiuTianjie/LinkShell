@@ -126,6 +126,7 @@ function visibleConversationStatus(status: string | undefined, theme: Theme) {
 function toolStatusMeta(status: AgentToolCall["status"], theme: Theme) {
   if (status === "running") return { label: "运行中", color: theme.accent, bg: theme.accentLight };
   if (status === "failed") return { label: "失败", color: theme.error, bg: theme.errorLight };
+  if (status === "completed") return { label: "完成", color: theme.success, bg: theme.accentLight };
   return null;
 }
 
@@ -611,6 +612,65 @@ function diffLineColors(line: string, theme: Theme) {
 
 function commandLanguage(toolName: string): string {
   return toolName.includes("命令") ? "shell" : "text";
+}
+
+function parsedToolInput(input: string | undefined): Record<string, unknown> | undefined {
+  if (!input?.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(input);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function firstToolString(input: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!input) return undefined;
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function isFileToolName(name: string): boolean {
+  const token = normalizedToken(name);
+  return (
+    token.includes("filechange") ||
+    token.includes("applypatch") ||
+    token.includes("multiedit") ||
+    token === "edit" ||
+    token === "write" ||
+    token === "notebookedit" ||
+    name.includes("文件")
+  );
+}
+
+function humanizeToolCall(tool: AgentToolCall): { icon: string; title: string; subtitle?: string } {
+  const input = parsedToolInput(tool.input);
+  const token = normalizedToken(tool.name);
+  const rawTarget =
+    firstToolString(input, ["path", "file_path", "filePath", "relativePath", "pattern", "query", "command", "url"]) ??
+    tool.input?.trim();
+  const target = rawTarget ? rawTarget.split("\n")[0] : undefined;
+  if (token.includes("mcp")) {
+    return { icon: "server.rack", title: tool.name, subtitle: target };
+  }
+  if (token.includes("websearch") || token.includes("webfetch") || token.includes("browser") || token.includes("openurl")) {
+    return { icon: "globe", title: token.includes("search") ? "搜索网页" : "读取网页", subtitle: target };
+  }
+  if (token.includes("grep") || token.includes("glob") || token.includes("search") || token.includes("find")) {
+    return { icon: "magnifyingglass", title: tool.status === "running" ? "正在搜索" : "搜索了", subtitle: target };
+  }
+  if (token.includes("read") || token.includes("cat") || token.includes("openfile")) {
+    return { icon: "doc.text", title: tool.status === "running" ? "正在读取" : "读取了", subtitle: target };
+  }
+  if (token.includes("exec") || token.includes("terminal") || token.includes("bash") || token.includes("shell")) {
+    return { icon: "terminal.fill", title: tool.status === "running" ? "正在运行" : "运行了", subtitle: target };
+  }
+  return { icon: "terminal.fill", title: tool.name, subtitle: target };
 }
 
 function unwrapShell(raw: string): string {
@@ -1529,7 +1589,7 @@ const FileChangeCard = memo(function FileChangeCard({
 
 const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; theme: Theme }) {
   const [expanded, setExpanded] = useState(false);
-  if (tool.name.includes("文件")) return <FileChangeCard tool={tool} theme={theme} />;
+  if (isFileToolName(tool.name)) return <FileChangeCard tool={tool} theme={theme} />;
   const input = tool.input?.trim();
   const output = tool.output?.trim();
   const meta = toolStatusMeta(tool.status, theme);
@@ -1537,8 +1597,10 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
   const canExpand = Boolean(input || output);
   const isCommand = tool.name.includes("命令");
   const commandSummary = isCommand && input ? humanizeCommand(input, tool.status === "running") : null;
-  const title = commandSummary ? commandSummary.verb : tool.name;
-  const subtitle = commandSummary ? commandSummary.target : input || output || "";
+  const presentation = commandSummary ? null : humanizeToolCall(tool);
+  const title = commandSummary ? commandSummary.verb : presentation?.title ?? tool.name;
+  const subtitle = commandSummary ? commandSummary.target : (presentation?.subtitle ?? input ?? output ?? "");
+  const icon = commandSummary ? "terminal.fill" : presentation?.icon ?? "terminal.fill";
 
   return (
     <View
@@ -1563,7 +1625,7 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
           gap: 9,
         }}
       >
-        <AppSymbol name={tool.name.includes("MCP") ? "server.rack" : "terminal.fill"} size={15} color={theme.textTertiary} />
+        <AppSymbol name={icon} size={15} color={theme.textTertiary} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text selectable style={{ color: theme.textSecondary, fontSize: 13, fontWeight: "700" }} numberOfLines={1}>
             {title}
@@ -2170,6 +2232,50 @@ function SlashCommandPanel({
   );
 }
 
+function QuickActionChip({
+  icon,
+  label,
+  active,
+  disabled,
+  theme,
+  onPress,
+}: {
+  icon: string;
+  label: string;
+  active?: boolean;
+  disabled?: boolean;
+  theme: Theme;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={() => {
+        Haptics.selectionAsync().catch(() => {});
+        onPress();
+      }}
+      style={({ pressed }) => ({
+        height: 32,
+        borderRadius: 999,
+        borderCurve: "continuous",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        paddingHorizontal: 10,
+        backgroundColor: active
+          ? (pressed ? theme.accentSecondary : theme.accent)
+          : (pressed ? theme.accentLight : theme.bgInput),
+        opacity: disabled ? 0.45 : 1,
+      })}
+    >
+      <AppSymbol name={icon} size={13} color={active ? theme.textInverse : theme.textSecondary} />
+      <Text style={{ color: active ? theme.textInverse : theme.textSecondary, fontSize: 11, fontWeight: "800" }} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function AssistantMessage({
   item,
   text,
@@ -2456,6 +2562,7 @@ function FilePreviewDrawer({
   topInset,
   bottomInset,
   onClose,
+  onInsertReference,
 }: {
   visible: boolean;
   conversationId: string;
@@ -2465,6 +2572,7 @@ function FilePreviewDrawer({
   topInset: number;
   bottomInset: number;
   onClose: () => void;
+  onInsertReference?: (path: string) => void;
 }) {
   const [currentPath, setCurrentPath] = useState(cwd);
   const [entries, setEntries] = useState<AgentFileEntry[]>([]);
@@ -2541,6 +2649,8 @@ function FilePreviewDrawer({
       if (!ok) Alert.alert("复制失败", "系统剪贴板暂不可用，请长按文本手动复制。");
     }).catch(() => Alert.alert("复制失败", "系统剪贴板暂不可用，请长按文本手动复制。"));
   }, [preview?.content]);
+
+  const referencePath = preview?.path ?? selectedPath;
 
   if (!visible) return null;
 
@@ -2740,6 +2850,24 @@ function FilePreviewDrawer({
               {preview?.content ? (
                 <Pressable onPress={copyPreview} hitSlop={8}>
                   <AppSymbol name="doc.on.doc" size={15} color={theme.textSecondary} />
+                </Pressable>
+              ) : null}
+              {referencePath && onInsertReference ? (
+                <Pressable
+                  onPress={() => onInsertReference(referencePath)}
+                  hitSlop={8}
+                  style={({ pressed }) => ({
+                    borderRadius: 999,
+                    paddingHorizontal: 9,
+                    paddingVertical: 6,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 5,
+                    backgroundColor: pressed ? theme.accentSecondary : theme.accentLight,
+                  })}
+                >
+                  <AppSymbol name="at" size={13} color={theme.accent} />
+                  <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "800" }}>引用</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -3058,6 +3186,46 @@ export function AgentConversationScreen({
     }
     run();
   }, [conversation, scrollTimelineToBottom, workspace]);
+
+  const commandByName = useCallback((name: string) =>
+    availableCommands.find((command) => command.name === name || command.title === `/${name}`),
+    [availableCommands],
+  );
+
+  const runCommandByName = useCallback((name: string, args = "") => {
+    const command = commandByName(name);
+    if (!command) return false;
+    executeSlashCommand(command, args);
+    return true;
+  }, [commandByName, executeSlashCommand]);
+
+  const useDraftForCommand = useCallback((name: string) => {
+    const command = commandByName(name);
+    if (!command) return;
+    const draft = text.trim();
+    const run = (args = "") => executeSlashCommand(command, args);
+    if (!draft || draft.startsWith("/")) {
+      setText(commandRawText(command, ""));
+      return;
+    }
+    Alert.alert(
+      command.title,
+      "用当前草稿作为这条命令的参数吗？",
+      [
+        { text: "继续编辑", style: "cancel" },
+        { text: "使用草稿", onPress: () => run(draft) },
+      ],
+    );
+  }, [commandByName, executeSlashCommand, text]);
+
+  const insertFileReference = useCallback((path: string) => {
+    setText((current) => {
+      const prefix = current.trimEnd();
+      const next = `@${path}`;
+      return prefix ? `${prefix} ${next} ` : `${next} `;
+    });
+    setFileDrawerOpen(false);
+  }, []);
 
   const selectSlashCommand = useCallback((command: AgentCommandDescriptor) => {
     if (!commandToken) return;
@@ -3563,6 +3731,71 @@ export function AgentConversationScreen({
               paddingVertical: 4,
             }}
           />
+          <ScrollView
+            horizontal
+            bounces={false}
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ flexDirection: "row", alignItems: "center", gap: 7, paddingRight: 2 }}
+          >
+            {commandByName("review") ? (
+              <QuickActionChip
+                icon="doc.text.magnifyingglass"
+                label="Review"
+                theme={theme}
+                disabled={running}
+                onPress={() => runCommandByName("review")}
+              />
+            ) : null}
+            {commandByName("git-status") ? (
+              <QuickActionChip
+                icon="point.3.connected.trianglepath.dotted"
+                label="Git"
+                theme={theme}
+                disabled={running}
+                onPress={() => runCommandByName("git-status")}
+              />
+            ) : null}
+            {commandByName("git-diff") ? (
+              <QuickActionChip
+                icon="plus.forwardslash.minus"
+                label="Diff"
+                theme={theme}
+                disabled={running}
+                onPress={() => runCommandByName("git-diff")}
+              />
+            ) : null}
+            {commandByName("git-commit") ? (
+              <QuickActionChip
+                icon="checkmark.circle.fill"
+                label="提交"
+                theme={theme}
+                disabled={running}
+                onPress={() => useDraftForCommand("git-commit")}
+              />
+            ) : null}
+            {commandByName("git-push") ? (
+              <QuickActionChip
+                icon="arrow.up.circle"
+                label="推送"
+                theme={theme}
+                disabled={running}
+                onPress={() => runCommandByName("git-push")}
+              />
+            ) : null}
+            <QuickActionChip
+              icon="doc.text.magnifyingglass"
+              label="文件"
+              theme={theme}
+              onPress={() => setFileDrawerOpen(true)}
+            />
+            <QuickActionChip
+              icon="safari"
+              label="预览"
+              theme={theme}
+              onPress={() => setPreviewOpen(true)}
+            />
+          </ScrollView>
           {running ? (
             <Text style={{ color: theme.textTertiary, fontSize: 11, lineHeight: 15 }}>
               当前任务运行中，停止后再发送这条消息。
@@ -3789,6 +4022,7 @@ export function AgentConversationScreen({
         topInset={insets.top}
         bottomInset={insets.bottom}
         onClose={() => setFileDrawerOpen(false)}
+        onInsertReference={insertFileReference}
       />
     </KeyboardAvoidingView>
   );
