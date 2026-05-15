@@ -2,7 +2,10 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@linkshell/protocol": ["../../packages/shared-protocol/src/index.ts"]
+    }
   },
   "include": ["**/*.ts", "**/*.tsx"]
 }

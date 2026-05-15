@@ -174,6 +174,9 @@ program
         .replace(/^wss:/, "https:")
         .replace(/^ws:/, "http:");
     }
+    if (!gatewayUrl) {
+      throw new Error("Gateway URL was not resolved");
+    }
 
     // Save PID for status/stop
     daemon.savePid("bridge", process.pid);

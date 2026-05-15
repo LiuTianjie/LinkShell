@@ -8,6 +8,8 @@ export interface ConnectedDevice {
   socket: WebSocket;
   role: "host" | "client";
   deviceId: string;
+  token?: string;
+  authorizationId?: string;
   connectedAt: number;
 }
 
@@ -113,6 +115,26 @@ export class DeviceManager {
       device.controllerId = next.done ? undefined : next.value;
     }
     this.maybeDelete(hostDeviceId);
+  }
+
+  disconnectAuthorization(hostDeviceId: string, authorizationId: string): number {
+    const device = this.devices.get(hostDeviceId);
+    if (!device) return 0;
+    let closed = 0;
+    for (const [deviceId, client] of device.clients) {
+      if (client.authorizationId !== authorizationId) continue;
+      try {
+        client.socket.close(4001, "authorization revoked");
+      } catch {}
+      device.clients.delete(deviceId);
+      closed++;
+    }
+    if (device.controllerId && !device.clients.has(device.controllerId)) {
+      const next = device.clients.keys().next();
+      device.controllerId = next.done ? undefined : next.value;
+    }
+    this.maybeDelete(hostDeviceId);
+    return closed;
   }
 
   forceDelete(hostDeviceId: string): boolean {

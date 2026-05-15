@@ -240,7 +240,24 @@ export function startEmbeddedGateway(
         }
         const summary = sessionManager.getSummary(targetId);
         if (!summary) {
-          json(res, 404, { error: "device_not_found" });
+          json(res, 200, {
+            id: targetId,
+            hostDeviceId: targetId,
+            state: "host_disconnected",
+            online: false,
+            hasHost: false,
+            clientCount: 0,
+            controllerId: null,
+            lastActivity: null,
+            createdAt: null,
+            bufferSize: 0,
+            machineId: null,
+            hostname: null,
+            platform: null,
+            cwd: null,
+            capabilities: [],
+            authorizationId: tokenManager.getAuthorizationId(token, targetId) ?? null,
+          });
           return;
         }
         json(res, 200, {
@@ -255,13 +272,18 @@ export function startEmbeddedGateway(
         const token = extractBearerToken(req);
         const hostDeviceId = decodeURIComponent(revokeMatch[1]!);
         const authorizationId = decodeURIComponent(revokeMatch[2]!);
-        if (!token || !tokenManager.revoke(token, hostDeviceId, authorizationId)) {
+        if (
+          !token ||
+          tokenManager.getAuthorizationId(token, hostDeviceId) !== authorizationId ||
+          !tokenManager.revoke(token, hostDeviceId, authorizationId)
+        ) {
           json(res, 401, {
             error: "unauthorized",
             message: "Valid device authorization required",
           });
           return;
         }
+        sessionManager.disconnectAuthorization(hostDeviceId, authorizationId);
         json(res, 200, { ok: true });
         return;
       }
@@ -374,15 +396,27 @@ export function startEmbeddedGateway(
 
       const deviceId = url.searchParams.get("deviceId") ?? randomUUID();
 
+      let clientToken: string | undefined;
+      let clientAuthorizationId: string | undefined;
+
       if (role === "client") {
         const token = url.searchParams.get("token");
         if (!token || !tokenManager.owns(token, hostDeviceId)) {
           socket.close(4001, "unauthorized");
           return;
         }
+        clientToken = token;
+        clientAuthorizationId = tokenManager.getAuthorizationId(token, hostDeviceId);
       }
 
-      const device = { socket, role, deviceId, connectedAt: Date.now() };
+      const device = {
+        socket,
+        role,
+        deviceId,
+        token: clientToken,
+        authorizationId: clientAuthorizationId,
+        connectedAt: Date.now(),
+      };
 
       if (role === "host") {
         const existingSession = sessionManager.get(hostDeviceId);

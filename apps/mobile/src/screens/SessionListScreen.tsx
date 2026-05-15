@@ -46,6 +46,7 @@ interface SessionInfo {
   hostname: string | null;
   platform: string | null;
   cwd: string | null;
+  authorizationId: string | null;
 }
 
 interface GatewayGroup {
@@ -173,7 +174,7 @@ function GatewaySection({
   group: GatewayGroup;
   theme: Theme;
   onSelect: (sessionId: string, serverUrl: string) => void;
-  onDelete: (sessionId: string, serverUrl: string, hasHost: boolean) => void;
+  onDelete: (session: SessionInfo, serverUrl: string) => void;
   index: number;
 }) {
   const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
@@ -380,7 +381,7 @@ function GatewaySection({
                         }}
                         onPress={() => {
                           swipeableRefs.current.get(session.id)?.close();
-                          onDelete(session.id, group.server.url, session.hasHost);
+                          onDelete(session, group.server.url);
                         }}
                       >
                         <Animated.View style={{ transform: [{ scale }] }}>
@@ -625,28 +626,43 @@ export function SessionListScreen({
   }, [fetchAllGateways]);
 
   const handleDeleteSession = useCallback(
-    (sessionId: string, serverUrl: string, hasHost: boolean) => {
+    (session: SessionInfo, serverUrl: string) => {
       const doDelete = async () => {
         try {
-          const session = await getValidSession();
-          if (session?.accessToken) {
-            await fetchWithTimeout(`${serverUrl}/devices/${sessionId}`, {
+          if (session.authorizationId && deviceToken) {
+            await fetchWithTimeout(`${serverUrl}/devices/${encodeURIComponent(session.hostDeviceId)}/authorizations/${encodeURIComponent(session.authorizationId)}`, {
               method: "DELETE",
-              headers: { Authorization: `Bearer ${session.accessToken}` },
+              headers: { Authorization: `Bearer ${deviceToken}` },
             }, 5_000);
+          } else {
+            const authSession = await getValidSession();
+            if (authSession?.accessToken) {
+              await fetchWithTimeout(`${serverUrl}/devices/${encodeURIComponent(session.hostDeviceId)}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${authSession.accessToken}` },
+              }, 5_000);
+            }
           }
         } catch {}
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setGroups((prev) =>
           prev.map((g) => ({
             ...g,
-            sessions: g.sessions.filter((s) => s.id !== sessionId),
+            sessions: g.sessions.filter((s) => s.hostDeviceId !== session.hostDeviceId),
           })),
         );
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       };
 
-      if (hasHost) {
+      if (session.authorizationId && deviceToken) {
+        Alert.alert("取消设备授权", "取消后，这台手机需要重新扫码或输入配对码才能连接该主机。", [
+          { text: "取消", style: "cancel" },
+          { text: "取消授权", style: "destructive", onPress: doDelete },
+        ]);
+        return;
+      }
+
+      if (session.hasHost) {
         Alert.alert("删除设备", "该设备主机仍在线，确定要强制删除吗？", [
           { text: "取消", style: "cancel" },
           { text: "删除", style: "destructive", onPress: doDelete },
@@ -655,7 +671,7 @@ export function SessionListScreen({
         doDelete();
       }
     },
-    [],
+    [deviceToken],
   );
 
   const totalSessions = groups.reduce((sum, g) => sum + g.sessions.length, 0);

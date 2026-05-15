@@ -321,9 +321,14 @@ async function handleRequest(
   // Authorized host device list
   if (method === "GET" && url.pathname === "/devices") {
     const token = extractBearerToken(req);
-    const allowedIds = token && tokenManager.validate(token)
-      ? tokenManager.getHostDeviceIds(token)
-      : new Set<string>();
+    if (!token || !tokenManager.validate(token)) {
+      json(res, 401, {
+        error: "unauthorized",
+        message: "Valid device token required",
+      });
+      return;
+    }
+    const allowedIds = tokenManager.getHostDeviceIds(token);
     const devices = [...allowedIds].map((hostDeviceId) => {
       const summary = sessionManager.getSummary(hostDeviceId);
       return summary ?? {
@@ -342,11 +347,11 @@ async function handleRequest(
         platform: null,
         cwd: null,
         capabilities: [],
-        authorizationId: token ? tokenManager.getAuthorizationId(token, hostDeviceId) ?? null : null,
+        authorizationId: tokenManager.getAuthorizationId(token, hostDeviceId) ?? null,
       };
     }).map((device) => ({
       ...device,
-      authorizationId: token ? tokenManager.getAuthorizationId(token, device.hostDeviceId) ?? null : null,
+      authorizationId: tokenManager.getAuthorizationId(token, device.hostDeviceId) ?? null,
     }));
     json(res, 200, { devices });
     return;
@@ -366,7 +371,24 @@ async function handleRequest(
     }
     const summary = sessionManager.getSummary(targetId);
     if (!summary) {
-      json(res, 404, { error: "device_not_found" });
+      json(res, 200, {
+        id: targetId,
+        hostDeviceId: targetId,
+        state: "host_disconnected",
+        online: false,
+        hasHost: false,
+        clientCount: 0,
+        controllerId: null,
+        lastActivity: null,
+        createdAt: null,
+        bufferSize: 0,
+        machineId: null,
+        hostname: null,
+        platform: null,
+        cwd: null,
+        capabilities: [],
+        authorizationId: tokenManager.getAuthorizationId(token, targetId) ?? null,
+      });
       return;
     }
     json(res, 200, {
@@ -381,13 +403,18 @@ async function handleRequest(
     const token = extractBearerToken(req);
     const hostDeviceId = decodeURIComponent(revokeMatch[1]!);
     const authorizationId = decodeURIComponent(revokeMatch[2]!);
-    if (!token || !tokenManager.revoke(token, hostDeviceId, authorizationId)) {
+    if (
+      !token ||
+      tokenManager.getAuthorizationId(token, hostDeviceId) !== authorizationId ||
+      !tokenManager.revoke(token, hostDeviceId, authorizationId)
+    ) {
       json(res, 401, {
         error: "unauthorized",
         message: "Valid device authorization required",
       });
       return;
     }
+    sessionManager.disconnectAuthorization(hostDeviceId, authorizationId);
     json(res, 200, { ok: true });
     return;
   }
@@ -503,6 +530,9 @@ wss.on(
 
     const deviceId = url.searchParams.get("deviceId") ?? randomUUID();
 
+    let clientToken: string | undefined;
+    let clientAuthorizationId: string | undefined;
+
     if (role === "client") {
       const token = url.searchParams.get("token");
       const authResult = (_request as any).__authResult as
@@ -511,7 +541,7 @@ wss.on(
       const device = sessionManager.get(hostDeviceId);
 
       // Allow if: device token owns host device, OR auth user owns host device
-      const tokenOwns = token && tokenManager.owns(token, hostDeviceId);
+      const tokenOwns = Boolean(token && tokenManager.owns(token, hostDeviceId));
       const authOwns =
         AUTH_REQUIRED &&
         authResult?.userId &&
@@ -527,12 +557,18 @@ wss.on(
         tokenManager.bind(token, hostDeviceId);
         log("info", `bound authenticated device token to host device ${hostDeviceId}`);
       }
+      if (token && (tokenOwns || authOwns)) {
+        clientToken = token;
+        clientAuthorizationId = tokenManager.getAuthorizationId(token, hostDeviceId);
+      }
     }
 
     const device = {
       socket,
       role,
       deviceId,
+      token: clientToken,
+      authorizationId: clientAuthorizationId,
       connectedAt: Date.now(),
     };
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import WebSocket from "ws";
@@ -751,5 +751,60 @@ describe("Device list", () => {
     expect(found!.cwd).toBe("/repo");
 
     host.close();
+  });
+});
+
+describe("Device authorization revocation", () => {
+  it("disconnects live clients for the revoked authorization", () => {
+    const manager = new SessionManager();
+    const closeA = vi.fn();
+    const closeB = vi.fn();
+
+    try {
+      manager.setHost("host-revoke", {
+        role: "host",
+        deviceId: "host-revoke-device",
+        connectedAt: Date.now(),
+        socket: {
+          OPEN: 1,
+          readyState: 1,
+        } as unknown as WebSocket,
+      });
+      manager.addClient("host-revoke", {
+        role: "client",
+        deviceId: "client-a",
+        token: "token-a",
+        authorizationId: "auth-a",
+        connectedAt: Date.now(),
+        socket: {
+          OPEN: 1,
+          readyState: 1,
+          close: closeA,
+        } as unknown as WebSocket,
+      });
+      manager.addClient("host-revoke", {
+        role: "client",
+        deviceId: "client-b",
+        token: "token-b",
+        authorizationId: "auth-b",
+        connectedAt: Date.now(),
+        socket: {
+          OPEN: 1,
+          readyState: 1,
+          close: closeB,
+        } as unknown as WebSocket,
+      });
+
+      const closed = manager.disconnectAuthorization("host-revoke", "auth-a");
+      const summary = manager.getSummary("host-revoke");
+
+      expect(closed).toBe(1);
+      expect(closeA).toHaveBeenCalledWith(4001, "authorization revoked");
+      expect(closeB).not.toHaveBeenCalled();
+      expect(summary?.clientCount).toBe(1);
+      expect(summary?.controllerId).toBe("client-b");
+    } finally {
+      manager.destroy();
+    }
   });
 });
