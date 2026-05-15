@@ -5,6 +5,7 @@ import {
   Keyboard,
   Linking,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -19,7 +20,7 @@ type ViewportMode = "mobile" | "desktop";
 
 interface BrowserViewProps {
   gatewayUrl: string;
-  sessionId: string;
+  hostDeviceId: string;
   deviceToken: string | null;
   authToken: string | null;
   onToggleFullscreen?: () => void;
@@ -29,9 +30,11 @@ interface BrowserViewProps {
 const DESKTOP_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+const COMMON_PORTS = ["3000", "5173", "8000", "8080", "8787"];
+
 export function BrowserView({
   gatewayUrl,
-  sessionId,
+  hostDeviceId,
   deviceToken,
   authToken,
   onToggleFullscreen,
@@ -53,7 +56,7 @@ export function BrowserView({
   // Build tunnel URL with available auth params
   const tunnelUrl = activePort
     ? (() => {
-        const base = `${gatewayUrl}/tunnel/${encodeURIComponent(sessionId)}/${activePort}`;
+        const base = `${gatewayUrl}/tunnel/${encodeURIComponent(hostDeviceId)}/${activePort}`;
         const params: string[] = [];
         if (deviceToken) params.push(`token=${encodeURIComponent(deviceToken)}`);
         if (authToken) params.push(`auth_token=${encodeURIComponent(authToken)}`);
@@ -71,6 +74,12 @@ export function BrowserView({
     setActivePort(p);
     Keyboard.dismiss();
   }, [port]);
+
+  const openPort = useCallback((nextPort: string) => {
+    setPort(nextPort);
+    setActivePort(nextPort);
+    Keyboard.dismiss();
+  }, []);
 
   const handleRefresh = useCallback(() => {
     webViewRef.current?.reload();
@@ -268,9 +277,33 @@ export function BrowserView({
           >
             例如: 3000, 5173, 8080
           </Text>
+          <View style={styles.quickPorts}>
+            {COMMON_PORTS.map((item) => (
+              <Pressable
+                key={item}
+                onPress={() => openPort(item)}
+                style={({ pressed }) => [
+                  styles.quickPortChip,
+                  {
+                    backgroundColor: pressed ? theme.accentLight : theme.bgInput,
+                    borderColor: item === activePort ? theme.accent : theme.borderLight,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.quickPortText,
+                    { color: item === activePort ? theme.accent : theme.textSecondary },
+                  ]}
+                >
+                  :{item}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
           <View style={styles.versionHint}>
             <Text style={[styles.versionText, { color: theme.textTertiary }]}>
-              需要 linkshell-cli {"\u2265"} 0.2.53 / gateway {"\u2265"} 0.2.17
+              需要 linkshell-cli {"\u2265"} 0.3.1 / gateway {"\u2265"} 0.3.0
             </Text>
             <Text style={[styles.versionText, { color: theme.textTertiary }]}>
               npm i -g linkshell-cli 更新
@@ -290,6 +323,42 @@ export function BrowserView({
           },
         ]}
       >
+        <ScrollView
+          horizontal
+          bounces={false}
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          style={styles.quickPortStrip}
+          contentContainerStyle={styles.quickPortStripContent}
+        >
+          {COMMON_PORTS.map((item) => (
+            <Pressable
+              key={item}
+              onPress={() => openPort(item)}
+              style={({ pressed }) => [
+                styles.compactPortChip,
+                {
+                  backgroundColor:
+                    item === activePort
+                      ? theme.accent
+                      : pressed
+                        ? theme.accentLight
+                        : theme.bgInput,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.compactPortText,
+                  { color: item === activePort ? "#fff" : theme.textSecondary },
+                ]}
+              >
+                {item}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
         {/* Nav buttons */}
         <Pressable
           onPress={handleGoBack}
@@ -409,6 +478,27 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 4,
+    flexWrap: "wrap",
+  },
+  quickPortStrip: {
+    width: "100%",
+    marginBottom: 2,
+  },
+  quickPortStripContent: {
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  compactPortChip: {
+    height: 28,
+    borderRadius: 14,
+    paddingHorizontal: 11,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactPortText: {
+    fontSize: 12,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
   },
   navBtn: {
     width: 30,
@@ -476,6 +566,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 12,
+    paddingHorizontal: 24,
+  },
+  quickPorts: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 6,
+  },
+  quickPortChip: {
+    height: 34,
+    borderRadius: 17,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickPortText: {
+    fontSize: 13,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
   },
   placeholderText: {
     fontSize: 15,

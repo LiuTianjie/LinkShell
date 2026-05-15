@@ -1,5 +1,37 @@
 # LinkShell Device-Agent Refactor Plan
 
+## Current Status
+
+Updated: 2026-05-16
+
+### Completed
+
+- Protocol v2 envelope now routes by `hostDeviceId`; old `session.connect` / `session.ack` / `session.resume` / `session.heartbeat` / `session.error` message types are removed from the registry.
+- Gateway websocket, pairing, device authorization, tunnel proxy, permission HTTP forwarding, and tests are host-device based.
+- Supabase gateway state migrated to v2 tables:
+  - `linkshell_gateway_device_authorizations`
+  - `linkshell_gateway_pairing_challenges`
+- CLI startup is shell-first and device-based. The old terminal Agent v1 proxy was deleted; only Agent Workspace v2 remains.
+- Mobile storage has best-effort migration to `hostDeviceId` keys for history, projects, and Agent conversations.
+- Agent conversation UI includes the port preview modal routed through `/tunnel/{hostDeviceId}/{port}`, with common-port quick chips plus manual port entry.
+- Agent Workspace home now visually groups projects under host devices, then provider, then conversations.
+- Published releases:
+  - `@linkshell/protocol@0.3.0`
+  - `@linkshell/gateway@0.3.0`
+  - `linkshell-cli@0.3.1`
+
+### In Progress
+
+- Mobile UI terminology still exposes `sessionId` in several internal prop/function names. Runtime data is host-device based, but the public screen/hook naming should be cleaned up as follow-up work.
+- Port preview is inside Agent conversation UI; the next pass is mostly visual refinement and full-screen ergonomics.
+
+### Remaining Plan
+
+1. Rename mobile screen/hook APIs from `sessionId` to `hostDeviceId` where they cross component boundaries, keeping storage migration compatibility only at the edge.
+2. Polish Agent port preview full-screen ergonomics and empty/loading states.
+3. Move any remaining terminal-oriented Agent affordances out of Terminal screens and verify there is no old v1 `agent.*` network path.
+4. Add or update mobile-focused tests where practical; keep `pnpm typecheck`, gateway tests, CLI tests, and full build green.
+
 ## Summary
 
 - First execution step: write this plan to `docs/refactor-device-agent-v2.md`, then implement by phases.

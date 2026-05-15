@@ -93,6 +93,16 @@ interface AgentProjectGroup {
   lastActivityAt: number;
 }
 
+interface AgentDeviceProjectGroup {
+  id: string;
+  serverUrl: string;
+  hostDeviceId: string;
+  hostname?: string;
+  online: boolean;
+  projects: AgentProjectGroup[];
+  lastActivityAt: number;
+}
+
 function normalizeServerUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
@@ -232,6 +242,10 @@ function projectHiddenKey(project: AgentProjectGroup): string {
 
 function shortConversationId(conversation: AgentConversationRecord): string {
   return (conversation.agentSessionId || conversation.id).replace(/^agent-remote-/, "").slice(0, 8);
+}
+
+function deviceTitle(group: AgentDeviceProjectGroup): string {
+  return group.hostname || group.hostDeviceId.slice(0, 8);
 }
 
 function relativeTime(timestamp: number): string {
@@ -820,6 +834,35 @@ export function AgentWorkspaceScreen({
     });
   }, [hiddenProjectKeys, projects, targets, workspace.conversations]);
 
+  const deviceProjectGroups = useMemo(() => {
+    const groups = new Map<string, AgentDeviceProjectGroup>();
+    for (const project of projectGroups) {
+      const key = `${normalizeServerUrl(project.serverUrl)}\u0000${project.hostDeviceId}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.projects.push(project);
+        existing.online = existing.online || Boolean(project.target);
+        existing.hostname = existing.hostname ?? project.hostname;
+        existing.lastActivityAt = Math.max(existing.lastActivityAt, project.lastActivityAt);
+        continue;
+      }
+      groups.set(key, {
+        id: key,
+        serverUrl: project.serverUrl,
+        hostDeviceId: project.hostDeviceId,
+        hostname: project.hostname,
+        online: Boolean(project.target),
+        projects: [project],
+        lastActivityAt: project.lastActivityAt,
+      });
+    }
+    return [...groups.values()].sort((a, b) => {
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      if (a.lastActivityAt !== b.lastActivityAt) return b.lastActivityAt - a.lastActivityAt;
+      return deviceTitle(a).localeCompare(deviceTitle(b));
+    });
+  }, [projectGroups]);
+
   const archivedItems = useMemo(
     () => (archivedExpanded ? workspace.archivedConversations : workspace.archivedConversations.slice(0, 3)),
     [archivedExpanded, workspace.archivedConversations],
@@ -1242,9 +1285,9 @@ export function AgentWorkspaceScreen({
         </View>
 
         <View style={{ gap: 8 }}>
-          <SectionTitle theme={theme}>项目</SectionTitle>
+          <SectionTitle theme={theme}>设备 / 项目</SectionTitle>
           <View style={{ paddingHorizontal: 20, gap: 12 }}>
-            {projectGroups.length === 0 ? (
+            {deviceProjectGroups.length === 0 ? (
               <View
                 style={{
                   paddingVertical: 20,
@@ -1257,10 +1300,55 @@ export function AgentWorkspaceScreen({
                   还没有项目
                 </Text>
                 <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
-                  新建 Agent 对话后，这里会按项目显示最近的会话。
+                  新建 Agent 对话后，这里会按设备和项目显示最近的会话。
                 </Text>
               </View>
-            ) : projectGroups.map((project) => {
+            ) : deviceProjectGroups.map((device) => (
+              <View key={device.id} style={{ gap: 10 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 9,
+                    paddingHorizontal: 2,
+                    paddingTop: 2,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 8,
+                      borderCurve: "continuous",
+                      backgroundColor: device.online ? theme.accentLight : theme.bgInput,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <AppSymbol
+                      name="desktopcomputer"
+                      size={14}
+                      color={device.online ? theme.accent : theme.textTertiary}
+                    />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                      <Text style={{ color: theme.text, fontSize: 15, fontWeight: "800" }} numberOfLines={1}>
+                        {deviceTitle(device)}
+                      </Text>
+                      <StatusPill
+                        label={device.online ? "在线" : "离线"}
+                        color={device.online ? theme.success : theme.textTertiary}
+                        bg={device.online ? theme.accentLight : theme.bgInput}
+                      />
+                    </View>
+                    <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+                      {device.projects.length} 个项目 · {device.serverUrl}
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ gap: 12, paddingLeft: 10, borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.separator }}>
+                  {device.projects.map((project) => {
               const online = Boolean(project.target);
               const groups = providerGroups(project.conversations);
               const collapsed = collapsedProjectKeys.has(project.id);
@@ -1445,7 +1533,10 @@ export function AgentWorkspaceScreen({
                   ) : null}
                 </View>
               );
-            })}
+                  })}
+                </View>
+              </View>
+            ))}
           </View>
         </View>
         {workspace.archivedConversations.length > 0 ? (

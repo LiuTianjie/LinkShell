@@ -3529,7 +3529,7 @@ export function AgentConversationScreen({
           </View>
           <BrowserView
             gatewayUrl={conversation.serverUrl}
-            sessionId={conversation.hostDeviceId}
+            hostDeviceId={conversation.hostDeviceId}
             deviceToken={deviceToken ?? null}
             authToken={authToken ?? null}
             isFullscreen={false}
