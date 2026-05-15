@@ -15,22 +15,24 @@ Updated: 2026-05-16
 - Mobile storage has best-effort migration to `hostDeviceId` keys for history, projects, and Agent conversations.
 - Agent conversation UI includes the port preview modal routed through `/tunnel/{hostDeviceId}/{port}`, with common-port quick chips plus manual port entry.
 - Agent Workspace home now visually groups projects under host devices, then provider, then conversations.
+- Agent Workspace now auto-requests provider conversation lists from online devices; CLI Claude adapters scan all local `~/.claude/projects` history and Codex sessions are grouped by provider through the existing provider list sync.
 - Published releases:
-  - `@linkshell/protocol@0.3.0`
-  - `@linkshell/gateway@0.3.0`
-  - `linkshell-cli@0.3.1`
+  - `@linkshell/protocol@0.3.2`
+  - `@linkshell/gateway@0.3.2`
+  - `linkshell-cli@0.3.4`
 
 ### In Progress
 
 - Mobile UI terminology still exposes `sessionId` in several internal prop/function names. Runtime data is host-device based, but the public screen/hook naming should be cleaned up as follow-up work.
 - Port preview is inside Agent conversation UI; the next pass is mostly visual refinement and full-screen ergonomics.
+- Provider history sync is now automatic, but still needs fixture coverage for Claude JSONL variants and Codex app-server `thread/list` responses.
 
 ### Remaining Plan
 
 1. Rename mobile screen/hook APIs from `sessionId` to `hostDeviceId` where they cross component boundaries, keeping storage migration compatibility only at the edge.
 2. Polish Agent port preview full-screen ergonomics and empty/loading states.
 3. Move any remaining terminal-oriented Agent affordances out of Terminal screens and verify there is no old v1 `agent.*` network path.
-4. Add or update mobile-focused tests where practical; keep `pnpm typecheck`, gateway tests, CLI tests, and full build green.
+4. Add Claude/Codex provider history fixtures and update mobile-focused tests where practical; keep `pnpm typecheck`, gateway tests, CLI tests, and full build green.
 
 ## Summary
 

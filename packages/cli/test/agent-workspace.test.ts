@@ -4,7 +4,7 @@ import { AgentWorkspaceProxy } from "../src/runtime/acp/agent-workspace.js";
 function makeProxy() {
   const sent: any[] = [];
   const proxy = new AgentWorkspaceProxy({
-    sessionId: "session-1",
+    hostDeviceId: "host-1",
     cwd: "/tmp",
     availableProviders: ["codex"],
     send: (envelope) => sent.push(envelope),
@@ -16,6 +16,7 @@ function makeProxy() {
     cwd: "/tmp",
     title: "A",
     status: "running",
+    archived: false,
     createdAt: 1,
     lastActivityAt: 1,
   });
@@ -26,6 +27,7 @@ function makeProxy() {
     cwd: "/tmp",
     title: "B",
     status: "running",
+    archived: false,
     createdAt: 1,
     lastActivityAt: 1,
   });
@@ -89,5 +91,28 @@ describe("AgentWorkspaceProxy event routing", () => {
       { type: "image", data: "data:image/png;base64,AAAA", mimeType: "image/png" },
     ]);
     expect(sent[0].payload.item.text).toBe("Here is the image.\n[image/png attachment]");
+  });
+
+  it("only returns archived conversations when the list request asks for them", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.get("conversation-b").archived = true;
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.conversation.list",
+      hostDeviceId: "host-1",
+      payload: { includeArchived: false },
+    });
+    await proxy.handleEnvelope({
+      type: "agent.v2.conversation.list",
+      hostDeviceId: "host-1",
+      payload: { includeArchived: true },
+    });
+
+    const results = sent.filter((envelope) => envelope.type === "agent.v2.conversation.list.result");
+    expect(results[0].payload.conversations.map((conversation: any) => conversation.id)).toEqual(["conversation-a"]);
+    expect(results[1].payload.conversations.map((conversation: any) => conversation.id)).toEqual([
+      "conversation-a",
+      "conversation-b",
+    ]);
   });
 });

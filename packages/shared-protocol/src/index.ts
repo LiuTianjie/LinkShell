@@ -102,7 +102,7 @@ export const sessionResumePayloadSchema = z.object({
   // Backward-compatible single-terminal cursor.
   lastAckedSeq: z.number().int().min(-1).optional().default(-1),
   // Multi-terminal resume cursor keyed by terminalId.
-  lastAckedSeqByTerminal: z.record(z.number().int().min(-1)).optional().default({}),
+  lastAckedSeqByTerminal: z.record(z.string(), z.number().int().min(-1)).optional().default({}),
   machineId: z.string().min(1).optional(),
 });
 
@@ -325,7 +325,7 @@ export const tunnelRequestPayloadSchema = z.object({
   requestId: z.string().min(1),
   method: z.string().min(1),
   url: z.string(),
-  headers: z.record(z.string()),
+  headers: z.record(z.string(), z.string()),
   body: z.string().nullable(), // base64 encoded
   port: z.number().int().min(1).max(65535),
 });
@@ -333,7 +333,7 @@ export const tunnelRequestPayloadSchema = z.object({
 export const tunnelResponsePayloadSchema = z.object({
   requestId: z.string().min(1),
   statusCode: z.number().int(),
-  headers: z.record(z.string()),
+  headers: z.record(z.string(), z.string()),
   body: z.string(), // base64 encoded chunk
   isFinal: z.boolean(),
 });
@@ -458,7 +458,7 @@ export const agentProviderCapabilitySchema = z.object({
   commands: z.array(agentCommandDescriptorSchema).optional(),
   modes: z.array(agentModeDescriptorSchema).optional(),
   currentMode: z.string().optional(),
-  features: z.record(z.boolean()).optional(),
+  features: z.record(z.string(), z.boolean()).optional(),
 });
 
 export const agentCapabilitiesPayloadSchema = z.object({
@@ -566,7 +566,7 @@ export const agentV2SubagentActionSchema = z.object({
   model: z.string().optional(),
   receiverThreadIds: z.array(z.string().min(1)).default([]),
   receiverAgents: z.array(agentV2SubagentRefSchema).default([]),
-  agentStates: z.record(agentV2SubagentStateSchema).default({}),
+  agentStates: z.record(z.string(), agentV2SubagentStateSchema).default({}),
 });
 
 export const agentV2TimelineItemSchema = z.object({
@@ -592,7 +592,7 @@ export const agentV2TimelineItemSchema = z.object({
   permission: agentPermissionSchema.optional(),
   status: agentV2StatusSchema.optional(),
   error: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   createdAt: z.number(),
   updatedAt: z.number().optional(),
   isStreaming: z.boolean().optional(),
@@ -678,7 +678,7 @@ export const agentV2PermissionRespondPayloadSchema = z.object({
 export const agentV2StructuredInputRespondPayloadSchema = z.object({
   conversationId: z.string().min(1),
   requestId: z.string().min(1),
-  answers: z.record(z.array(z.string())),
+  answers: z.record(z.string(), z.array(z.string())),
 });
 
 export const agentV2SnapshotRequestPayloadSchema = z.object({
@@ -716,7 +716,7 @@ export const agentV2EventPayloadSchema = z.object({
     })).optional(),
     permission: agentPermissionSchema.optional(),
     error: z.string().optional(),
-    metadata: z.record(z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
     updatedAt: z.number().optional(),
     isStreaming: z.boolean().optional(),
   }).optional(),
@@ -847,5 +847,6 @@ export function parseTypedPayload<TType extends ProtocolMessageType>(
   type: TType,
   payload: unknown,
 ): z.infer<(typeof protocolMessageSchemas)[TType]> {
-  return protocolMessageSchemas[type].parse(payload);
+  const schema = protocolMessageSchemas[type] as unknown as z.ZodType<z.infer<(typeof protocolMessageSchemas)[TType]>>;
+  return schema.parse(payload);
 }

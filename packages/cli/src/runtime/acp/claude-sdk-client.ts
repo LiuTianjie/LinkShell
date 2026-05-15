@@ -1,6 +1,5 @@
-import { homedir } from "node:os";
-import { readdirSync, existsSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
+import { listClaudeStoredSessions } from "./claude-sessions.js";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
@@ -41,15 +40,6 @@ type AgentInputContentBlock = {
 
 function id(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function projectHash(cwd: string): string {
-  return (
-    "-" +
-    resolve(cwd)
-      .replace(/\/$/, "")
-      .replace(/\//g, "-")
-  );
 }
 
 function extractToolResultText(content: unknown): string {
@@ -333,23 +323,7 @@ export class ClaudeSdkClient {
   }
 
   async listSessions(): Promise<unknown> {
-    const projectDir = join(homedir(), ".claude", "projects", projectHash(this.input.cwd));
-    if (!existsSync(projectDir)) return { sessions: [] };
-    const sessions: Array<{ id: string; cwd: string; lastModified: number }> = [];
-    try {
-      for (const entry of readdirSync(projectDir)) {
-        if (entry.endsWith(".jsonl")) {
-          sessions.push({
-            id: entry.replace(".jsonl", ""),
-            cwd: this.input.cwd,
-            lastModified: 0,
-          });
-        }
-      }
-    } catch {
-      // Ignore unreadable Claude project storage.
-    }
-    return { sessions };
+    return listClaudeStoredSessions(this.input.cwd);
   }
 
   async listModels(): Promise<unknown> {

@@ -6,6 +6,7 @@ const FALLBACK_ICONS: Record<string, React.ComponentProps<typeof MaterialCommuni
   "app.badge.fill": "apps",
   "apple.logo": "apple",
   archivebox: "archive-outline",
+  "archivebox.fill": "archive",
   "arrow.clockwise": "refresh",
   "arrow.counterclockwise.circle.fill": "backup-restore",
   "arrow.down.right.and.arrow.up.left": "arrow-collapse",

@@ -1,8 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import { homedir } from "node:os";
-import { readdirSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { listClaudeStoredSessions } from "./claude-sessions.js";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
@@ -35,16 +33,6 @@ interface ClaudeContentBlock {
   content?: string;
   is_error?: boolean;
   signature?: string;
-}
-
-// Hash a directory path the same way Claude Code does for project storage
-function projectHash(cwd: string): string {
-  return (
-    "-" +
-    resolve(cwd)
-      .replace(/\/$/, "")
-      .replace(/\//g, "-")
-  );
 }
 
 function id(prefix: string): string {
@@ -474,30 +462,7 @@ export class ClaudeStreamJsonClient {
   }
 
   async listSessions(): Promise<unknown> {
-    const home = homedir();
-    const projectDir = join(home, ".claude", "projects", projectHash(this.input.cwd));
-
-    if (!existsSync(projectDir)) {
-      return { sessions: [] };
-    }
-
-    const sessions: Array<{ id: string; cwd: string; lastModified: number }> = [];
-    try {
-      for (const entry of readdirSync(projectDir)) {
-        if (entry.endsWith(".jsonl")) {
-          const sessionId = entry.replace(".jsonl", "");
-          sessions.push({
-            id: sessionId,
-            cwd: this.input.cwd,
-            lastModified: 0, // would need fs.statSync for accurate time
-          });
-        }
-      }
-    } catch {
-      // directory read failed
-    }
-
-    return { sessions };
+    return listClaudeStoredSessions(this.input.cwd);
   }
 
   async listModels(): Promise<unknown> {

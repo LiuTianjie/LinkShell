@@ -76,6 +76,7 @@ export interface AgentWorkspaceHandle {
   connectedSessions: SessionInfo[];
   refresh: () => Promise<void>;
   requestCapabilities: (sessionId?: string) => void;
+  requestConversationList: (sessionId?: string) => void;
   openConversation: (input: OpenConversationInput) => Promise<OpenConversationResult>;
   openProject: (record: ProjectRecord) => Promise<string | null>;
   resumeConversation: (conversationId: string) => Promise<string | null>;
@@ -406,10 +407,29 @@ export function useAgentWorkspace(
     [],
   );
 
+  const requestConversationList = useCallback(
+    (sessionId?: string) => {
+      const currentManager = managerRef.current;
+      const targets = sessionId
+        ? [currentManager.sessions.get(sessionId)].filter((item): item is SessionInfo => Boolean(item))
+        : [...currentManager.sessions.values()];
+      for (const session of targets) {
+        currentManager.sendAgentWorkspaceEnvelope(
+          session.sessionId,
+          "agent.v2.conversation.list",
+          { includeArchived: false },
+          { queue: true, dedupeKey: "agent-v2-conversation-list" },
+        );
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     if (connectedSessions.length === 0) return;
     requestCapabilities();
-  }, [connectedSessions.length, requestCapabilities]);
+    requestConversationList();
+  }, [connectedSessions.length, requestCapabilities, requestConversationList]);
 
   const handleEnvelope = useCallback(
     (envelope: Envelope) => {
@@ -1562,6 +1582,7 @@ export function useAgentWorkspace(
     connectedSessions,
     refresh,
     requestCapabilities,
+    requestConversationList,
     openConversation,
     openProject,
     resumeConversation,

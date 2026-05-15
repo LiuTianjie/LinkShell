@@ -7,12 +7,13 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared-protocol/package.json packages/shared-protocol/
 COPY packages/gateway/package.json packages/gateway/
 
-RUN pnpm install --frozen-lockfile --filter @linkshell/gateway --filter @linkshell/protocol
+RUN pnpm install --frozen-lockfile --filter @linkshell/protocol... --filter @linkshell/gateway...
 
 COPY packages/shared-protocol/ packages/shared-protocol/
 COPY packages/gateway/ packages/gateway/
 COPY tsconfig.base.json ./
 
+RUN pnpm install --offline --frozen-lockfile --filter @linkshell/protocol... --filter @linkshell/gateway...
 RUN pnpm --filter @linkshell/protocol build && pnpm --filter @linkshell/gateway build
 
 # Prune to production deps only

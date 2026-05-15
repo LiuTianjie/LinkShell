@@ -593,8 +593,9 @@ export function AgentWorkspaceScreen({
   useEffect(() => {
     for (const session of onlineSessions) {
       workspace.requestCapabilities(session.sessionId);
+      workspace.requestConversationList(session.sessionId);
     }
-  }, [onlineSessions, sessionSignature, workspace.requestCapabilities]);
+  }, [onlineSessions, sessionSignature, workspace.requestCapabilities, workspace.requestConversationList]);
 
   useEffect(() => {
     let cancelled = false;
@@ -725,8 +726,9 @@ export function AgentWorkspaceScreen({
   useEffect(() => {
     for (const target of targets) {
       workspace.requestCapabilities(target.sessionId);
+      workspace.requestConversationList(target.sessionId);
     }
-  }, [targets, workspace.requestCapabilities]);
+  }, [targets, workspace.requestCapabilities, workspace.requestConversationList]);
 
   const projectGroups = useMemo(() => {
     const targetBySession = new Map(targets.map((target) => [target.sessionId, target]));
@@ -1163,7 +1165,7 @@ export function AgentWorkspaceScreen({
     );
   }, [workspace]);
 
-  const restoreArchivedConversation = useCallback(async (conversation: AgentConversationRecord) => {
+  const unarchiveConversation = useCallback(async (conversation: AgentConversationRecord) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setHiddenProjectKeys((prev) => {
       const next = new Set(prev);
@@ -1171,13 +1173,19 @@ export function AgentWorkspaceScreen({
       saveHiddenAgentProjectKeys(next).catch(() => {});
       return next;
     });
+    await workspace.archive(conversation.id, false);
+    setManualRefreshToken((value) => value + 1);
+  }, [workspace]);
+
+  const restoreArchivedConversation = useCallback(async (conversation: AgentConversationRecord) => {
+    await unarchiveConversation(conversation);
     const result = await workspace.resumeConversation(conversation.id);
     if (result) {
       onOpenConversation(result);
       return;
     }
-    Alert.alert("设备离线", "这条历史会话所在的设备当前不在线。请先在该设备上启动 linkshell。");
-  }, [onOpenConversation, workspace]);
+    Alert.alert("已取消归档", "会话已经回到首页；这台设备当前离线，启动 linkshell 后可以继续打开。");
+  }, [onOpenConversation, unarchiveConversation, workspace]);
 
   const refreshWorkspace = useCallback(async () => {
     Haptics.selectionAsync().catch(() => {});
@@ -1187,6 +1195,7 @@ export function AgentWorkspaceScreen({
       setManualRefreshToken((value) => value + 1);
       for (const session of allSessions) {
         workspace.requestCapabilities(session.sessionId);
+        workspace.requestConversationList(session.sessionId);
       }
     } finally {
       setTimeout(() => setRefreshing(false), 350);
@@ -1562,41 +1571,95 @@ export function AgentWorkspaceScreen({
               </Text>
               <AppSymbol name={archivedExpanded ? "chevron.down" : "chevron.right"} size={12} color={theme.textTertiary} />
             </Pressable>
-            {archivedExpanded ? (
-              <View style={{ paddingLeft: 28, gap: 4 }}>
-                {archivedItems.map((conversation) => {
-                  const target = targets.find((item) => item.hostDeviceId === (conversation.hostDeviceId ?? conversation.sessionId));
-                  return (
-                    <Pressable
-                      key={conversation.id}
-                      onPress={() => restoreArchivedConversation(conversation).catch(() => {
-                        Alert.alert("无法恢复会话", "请确认主机端 linkshell 仍在线。");
-                      })}
-                      style={({ pressed }) => ({
-                        minHeight: 32,
-                        borderRadius: 8,
-                        borderCurve: "continuous",
-                        backgroundColor: pressed ? theme.bgInput : "transparent",
-                        paddingVertical: 5,
-                        paddingHorizontal: 2,
-                        opacity: target ? 1 : 0.62,
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                      })}
-                    >
-                      <ProviderBadge provider={conversation.provider} theme={theme} />
-                      <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 14 }} numberOfLines={1}>
+            <View style={{ paddingLeft: 28, gap: 6 }}>
+              {archivedItems.map((conversation) => {
+                const target = targets.find((item) => item.hostDeviceId === (conversation.hostDeviceId ?? conversation.sessionId));
+                return (
+                  <Pressable
+                    key={conversation.id}
+                    onPress={() => restoreArchivedConversation(conversation).catch(() => {
+                      Alert.alert("无法恢复会话", "请确认主机端 linkshell 仍在线。");
+                    })}
+                    style={({ pressed }) => ({
+                      minHeight: 40,
+                      borderRadius: 8,
+                      borderCurve: "continuous",
+                      borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: theme.borderLight,
+                      backgroundColor: pressed ? theme.bgInput : "rgba(120,120,128,0.06)",
+                      paddingVertical: 6,
+                      paddingHorizontal: 8,
+                      opacity: target ? 1 : 0.7,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    })}
+                  >
+                    <ProviderBadge provider={conversation.provider} theme={theme} />
+                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                      <Text style={{ color: theme.textSecondary, fontSize: 14 }} numberOfLines={1}>
                         {conversationSummary(conversation, workspace.getTimeline(conversation.id))}
                       </Text>
-                      <Text style={{ color: theme.textTertiary, fontSize: 12, minWidth: 42, textAlign: "right" }}>
-                        {relativeTime(conversation.lastActivityAt)}
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <Text style={{ color: theme.textTertiary, fontSize: 11 }} numberOfLines={1}>
+                          {target ? shortPath(conversation.cwd) : "设备离线"}
+                        </Text>
+                        <View
+                          style={{
+                            borderRadius: 999,
+                            borderCurve: "continuous",
+                            backgroundColor: theme.bgInput,
+                            paddingHorizontal: 6,
+                            paddingVertical: 1,
+                          }}
+                        >
+                          <Text style={{ color: theme.textTertiary, fontSize: 10, fontWeight: "800" }}>
+                            已归档
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                    <Text style={{ color: theme.textTertiary, fontSize: 12, minWidth: 42, textAlign: "right" }}>
+                      {relativeTime(conversation.lastActivityAt)}
+                    </Text>
+                    <Pressable
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        unarchiveConversation(conversation).catch(() => {});
+                      }}
+                      style={({ pressed }) => ({
+                        borderRadius: 999,
+                        borderCurve: "continuous",
+                        backgroundColor: pressed ? theme.bgInput : theme.accentLight,
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                      })}
+                    >
+                      <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "800" }}>
+                        取消归档
                       </Text>
                     </Pressable>
-                  );
-                })}
-              </View>
-            ) : null}
+                  </Pressable>
+                );
+              })}
+              {!archivedExpanded && workspace.archivedConversations.length > archivedItems.length ? (
+                <Pressable
+                  onPress={() => setArchivedExpanded(true)}
+                  style={({ pressed }) => ({
+                    alignSelf: "flex-start",
+                    borderRadius: 999,
+                    borderCurve: "continuous",
+                    backgroundColor: pressed ? theme.bgInput : "transparent",
+                    paddingVertical: 5,
+                    paddingHorizontal: 2,
+                  })}
+                >
+                  <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "800" }}>
+                    查看全部 {workspace.archivedConversations.length} 条
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
             </View>
         ) : null}
       </ScrollView>
