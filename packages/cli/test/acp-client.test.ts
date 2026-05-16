@@ -115,6 +115,7 @@ describe("AcpClient codex app-server protocol", () => {
       content: [{ type: "text", text: "hello" }],
       clientMessageId: "client-msg-1",
       reasoningEffort: "high",
+      serviceTier: "fast",
       permissionMode: "workspace_write",
       collaborationMode: "plan",
       cwd: fake.cwd,
@@ -156,10 +157,12 @@ describe("AcpClient codex app-server protocol", () => {
     expect(entries[6].params).toMatchObject({
       threadId: "thread-1",
       effort: "high",
+      service_tier: "fast",
       collaborationMode: {
         mode: "plan",
         settings: {
           reasoning_effort: "high",
+          service_tier: "fast",
         },
       },
       permissions: {

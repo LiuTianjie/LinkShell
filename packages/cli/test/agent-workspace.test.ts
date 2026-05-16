@@ -62,6 +62,55 @@ function makeProxy() {
 }
 
 describe("AgentWorkspaceProxy event routing", () => {
+  it("parses Codex app-server model/list data into runtime capabilities", async () => {
+    const sent: any[] = [];
+    const proxy = new AgentWorkspaceProxy({
+      hostDeviceId: "host-1",
+      cwd: "/tmp",
+      availableProviders: ["codex"],
+      send: (envelope) => sent.push(envelope),
+    }) as any;
+
+    await proxy.refreshProviderCapabilities("codex", {
+      listModels: async () => ({
+        data: [
+          {
+            id: "gpt-5.5",
+            displayName: "GPT-5.5",
+            description: "Frontier model",
+            hidden: false,
+            isDefault: true,
+            inputModalities: ["text", "image"],
+            additionalSpeedTiers: ["fast"],
+            supportedReasoningEfforts: [
+              { reasoningEffort: "low" },
+              { reasoningEffort: "high" },
+            ],
+            defaultReasoningEffort: "high",
+          },
+          { id: "hidden-model", displayName: "Hidden", hidden: true },
+        ],
+      }),
+    }, "codex-app-server");
+    proxy.sendCapabilities();
+
+    const capability = sent.find((envelope) => envelope.type === "agent.v2.capabilities");
+    const codex = capability.payload.providers.find((provider: any) => provider.id === "codex");
+    expect(codex.modelsSource).toBe("runtime");
+    expect(codex.defaultModel).toBe("gpt-5.5");
+    expect(codex.models).toEqual([
+      expect.objectContaining({
+        id: "gpt-5.5",
+        label: "GPT-5.5",
+        supportsImages: true,
+        defaultReasoningEffort: "high",
+        speedTiers: ["standard", "fast"],
+      }),
+    ]);
+    expect(codex.reasoningEfforts).toEqual(["low", "high"]);
+    expect(codex.speedTiers).toEqual(["standard", "fast"]);
+  });
+
   it("does not route id-less streaming events to the active conversation when multiple turns are live", () => {
     const { proxy, sent } = makeProxy();
 

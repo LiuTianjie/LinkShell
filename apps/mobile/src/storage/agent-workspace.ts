@@ -4,6 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 export type AgentProvider = "codex" | "claude" | "custom";
 export type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
 export type AgentReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type AgentServiceTier = "standard" | "fast";
 export type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
 export type AgentCollaborationMode = "default" | "plan";
 export type AgentTimelineKind =
@@ -150,6 +151,7 @@ export interface AgentConversationRecord {
   title?: string;
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
+  serviceTier?: AgentServiceTier;
   permissionMode?: AgentPermissionMode;
   collaborationMode?: AgentCollaborationMode;
   status: AgentStatus;
@@ -215,6 +217,11 @@ export interface AgentCapabilities {
 export interface AgentModelOption {
   id: string;
   label: string;
+  reasoningEfforts?: AgentReasoningEffort[];
+  defaultReasoningEffort?: AgentReasoningEffort;
+  speedTiers?: AgentServiceTier[];
+  supportsImages?: boolean;
+  description?: string;
 }
 
 export interface AgentProviderCapability {
@@ -232,6 +239,8 @@ export interface AgentProviderCapability {
   models?: AgentModelOption[];
   defaultModel?: string;
   reasoningEfforts?: AgentReasoningEffort[];
+  speedTiers?: AgentServiceTier[];
+  defaultServiceTier?: AgentServiceTier;
   permissionModes?: AgentPermissionMode[];
   commands?: AgentCommandDescriptor[];
   modes?: AgentModeDescriptor[];
@@ -517,6 +526,7 @@ export async function replaceAgentConversationsForDevice(input: {
     hostDeviceId?: string;
     schemaVersion?: 1 | 2;
   }>;
+  providers?: AgentProvider[];
   preserveLocalArchived?: boolean;
 }): Promise<AgentConversationRecord[]> {
   const conversations = await loadAgentConversations();
@@ -529,7 +539,7 @@ export async function replaceAgentConversationsForDevice(input: {
     schemaVersion: 2,
   }));
   const incomingIds = new Set(normalized.map((conversation) => conversation.id));
-  const incomingProviders = new Set(normalized.map((conversation) => conversation.provider));
+  const incomingProviders = new Set(input.providers ?? normalized.map((conversation) => conversation.provider));
   const previousById = new Map(conversations.map((conversation) => [conversation.id, conversation]));
   const preserveLocalArchived = input.preserveLocalArchived ?? true;
   const mergedIncoming = normalized.map((conversation) => {

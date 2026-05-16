@@ -223,6 +223,7 @@ export class AcpClient {
     clientMessageId: string;
     model?: string;
     reasoningEffort?: string;
+    serviceTier?: string;
     permissionMode?: AgentPermissionMode;
     collaborationMode?: AgentCollaborationMode;
     cwd: string;
@@ -231,6 +232,7 @@ export class AcpClient {
       const collaborationSettings = {
         ...(input.model ? { model: input.model } : {}),
         ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
+        ...(input.serviceTier ? { service_tier: input.serviceTier } : {}),
       };
       const collaborationMode = input.collaborationMode && input.collaborationMode !== "default"
         ? {
@@ -242,6 +244,7 @@ export class AcpClient {
         threadId: input.sessionId,
         model: input.model,
         effort: input.reasoningEffort,
+        service_tier: input.serviceTier,
         permissions: permissionsForMode(input.permissionMode, input.cwd),
         collaborationMode,
         input: input.content.map((block) => {

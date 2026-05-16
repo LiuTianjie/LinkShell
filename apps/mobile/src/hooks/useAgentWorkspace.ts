@@ -19,9 +19,13 @@ import {
   type AgentCommandDescriptor,
   type AgentContentBlock,
   type AgentConversationRecord,
+  type AgentFileChange,
+  type AgentModelOption,
   type AgentProvider,
+  type AgentProviderCapability,
   type AgentPermissionMode,
   type AgentReasoningEffort,
+  type AgentServiceTier,
   type AgentStructuredInput,
   type AgentStructuredInputOption,
   type AgentStructuredInputQuestion,
@@ -40,6 +44,7 @@ interface OpenConversationInput {
   title?: string;
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
+  serviceTier?: AgentServiceTier;
   permissionMode?: AgentPermissionMode;
   collaborationMode?: AgentCollaborationMode;
 }
@@ -70,6 +75,8 @@ interface CodexMessageItem {
   role?: "user" | "assistant" | "system";
   type: "message" | "command" | "file_change" | "tool" | "approval" | "structured_input" | "status" | "error";
   text?: string;
+  content?: AgentContentBlock[];
+  fileChange?: AgentFileChange;
   command?: string;
   output?: string;
   diff?: string;
@@ -136,6 +143,7 @@ export interface AgentWorkspaceHandle {
   refresh: () => Promise<void>;
   requestCapabilities: (sessionId?: string) => void;
   requestConversationList: (sessionId?: string) => void;
+  refreshConversation: (conversationId: string) => void;
   openConversation: (input: OpenConversationInput) => Promise<OpenConversationResult>;
   openProject: (record: ProjectRecord) => Promise<string | null>;
   resumeConversation: (conversationId: string) => Promise<string | null>;
@@ -148,6 +156,7 @@ export interface AgentWorkspaceHandle {
     options?: {
       model?: string;
       reasoningEffort?: AgentReasoningEffort;
+      serviceTier?: AgentServiceTier;
       permissionMode?: AgentPermissionMode;
       collaborationMode?: AgentCollaborationMode;
       attachments?: AgentContentBlock[];
@@ -164,6 +173,7 @@ export interface AgentWorkspaceHandle {
     settings: {
       model?: string;
       reasoningEffort?: AgentReasoningEffort;
+      serviceTier?: AgentServiceTier;
       permissionMode?: AgentPermissionMode;
       collaborationMode?: AgentCollaborationMode;
     },
@@ -202,6 +212,16 @@ function textFromBlocks(blocks: AgentContentBlock[] | undefined): string {
     .map((block) => block.type === "text" ? block.text ?? "" : `[${block.mimeType ?? "image"} attachment]`)
     .filter(Boolean)
     .join("\n");
+}
+
+function titleFromCwd(cwd: string | undefined): string {
+  return cwd?.split("/").filter(Boolean).pop() || "Codex";
+}
+
+function stableCodexTitle(incoming: string | undefined, previous: string | undefined, cwd: string): string {
+  const title = incoming?.trim();
+  if (title && title !== "Codex") return title;
+  return previous?.trim() || titleFromCwd(cwd);
 }
 
 function previewFromItem(item: AgentTimelineItem): string | undefined {
@@ -261,6 +281,19 @@ function firstNumber(value: unknown, keys: string[]): number | undefined {
   return undefined;
 }
 
+function codexTimestamp(value: unknown, fallback = Date.now()): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 10_000_000_000 ? value * 1000 : value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 function arrayFromKeys(value: unknown, keys: string[]): unknown[] {
   const record = asRecord(value);
   if (!record) return [];
@@ -283,6 +316,190 @@ function codexText(value: unknown): string {
   return codexText(record.content ?? record.message ?? record.parts ?? record.items);
 }
 
+function codexContentBlocks(value: unknown): AgentContentBlock[] {
+  if (typeof value === "string") return value.trim() ? [{ type: "text", text: value }] : [];
+  if (Array.isArray(value)) return value.flatMap((entry) => codexContentBlocks(entry));
+  const record = asRecord(value);
+  if (!record) return [];
+  const rawType = firstString(record, ["type", "kind"]);
+  const normalizedType = rawType?.toLowerCase().replace(/[_\-\s/]+/g, "");
+  if (normalizedType === "image" || normalizedType === "inputimage" || normalizedType === "outputimage") {
+    const data = firstString(record, ["data", "url", "uri", "imageUrl", "image_url", "base64"]);
+    const mimeType = firstString(record, ["mimeType", "mime_type", "mediaType", "media_type"]);
+    const text = firstString(record, ["text", "alt", "caption", "name"]);
+    return [{ type: "image", data, mimeType, text }];
+  }
+  if (normalizedType === "text" || normalizedType === "inputtext" || normalizedType === "outputtext") {
+    const text = firstString(record, ["text", "content", "message"]);
+    return text ? [{ type: "text", text }] : [];
+  }
+  const nested = codexContentBlocks(record.content ?? record.message ?? record.parts ?? record.items);
+  if (nested.length > 0) return nested;
+  const text = firstString(record, ["text", "delta", "output"]);
+  return text ? [{ type: "text", text }] : [];
+}
+
+function codexInitializeErrorIsBenign(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /already\s+initialized/i.test(message) || message.includes("Codex request timed out: initialize");
+}
+
+function codexPreviewIsControlNoise(value: string | undefined): boolean {
+  if (!value) return false;
+  return /already\s+initialized/i.test(value) || value.includes("Codex request timed out: initialize");
+}
+
+function codexStatus(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return firstString(record, ["status", "state", "phase", "lifecycle", "type"]) ??
+    firstString(asRecord(record.status), ["type", "status", "state"]) ??
+    firstString(asRecord(record.state), ["type", "status", "state"]);
+}
+
+function codexRunningTurnId(value: unknown): string | undefined {
+  return firstString(value, [
+    "runningTurnId",
+    "running_turn_id",
+    "activeTurnId",
+    "active_turn_id",
+    "currentTurnId",
+    "current_turn_id",
+    "turnId",
+  ]) ?? firstString(asRecord(value)?.activeTurn, ["id", "turnId"]);
+}
+
+function codexThreadIsRunning(value: unknown): boolean {
+  const status = codexStatus(value)?.toLowerCase();
+  return Boolean(codexRunningTurnId(value)) ||
+    status === "active" ||
+    status === "inprogress" ||
+    status === "in_progress" ||
+    status === "in-progress" ||
+    status === "running" ||
+    status === "busy" ||
+    status === "streaming";
+}
+
+function codexThreadIsWaitingForUser(value: unknown): boolean {
+  const statusRecord = asRecord(asRecord(value)?.status) ?? asRecord(value);
+  const flags = Array.isArray(statusRecord?.activeFlags) ? statusRecord.activeFlags : [];
+  return flags.some((flag) => flag === "waitingOnApproval" || flag === "waitingOnUserInput");
+}
+
+function summarizeCodexFileChanges(changes: unknown[]): string | undefined {
+  const lines = changes
+    .map((change) => {
+      const raw = asRecord(change);
+      if (!raw) return undefined;
+      const path =
+        firstString(raw, ["path", "file", "filePath", "absolutePath", "relativePath"]) ??
+        firstString(asRecord(raw.update), ["path", "file", "filePath"]);
+      const kind = firstString(raw, ["kind", "type", "operation", "action"]);
+      return [kind, path].filter(Boolean).join(" ") || path;
+    })
+    .filter((line): line is string => Boolean(line));
+  return lines.length > 0 ? lines.slice(0, 12).join("\n") : undefined;
+}
+
+function codexFileChangeEntriesFromValue(value: unknown): AgentFileChange["entries"] {
+  const item = asRecord(value);
+  if (!item) return [];
+  const changes = [
+    ...(Array.isArray(item.changes) ? item.changes : []),
+    ...(Array.isArray(item.entries) ? item.entries : []),
+    ...(Array.isArray(item.files) ? item.files : []),
+    ...(Array.isArray(item.fileChanges) ? item.fileChanges : []),
+  ];
+  const entries: AgentFileChange["entries"] = [];
+  for (const change of changes) {
+    const raw = asRecord(change);
+    if (!raw) continue;
+    const path =
+      firstString(raw, ["path", "file", "filePath", "absolutePath", "relativePath"]) ??
+      firstString(asRecord(raw.update), ["path", "file", "filePath"]);
+    if (!path) continue;
+    const totals = asRecord(raw.totals) ?? asRecord(raw.diffStats) ?? asRecord(raw.stats);
+    const kind = firstString(raw, ["kind", "type", "operation", "action"]);
+    const added = firstNumber(raw, ["added", "additions"]) ?? firstNumber(totals, ["added", "additions"]);
+    const removed = firstNumber(raw, ["removed", "deletions"]) ?? firstNumber(totals, ["removed", "deletions"]);
+    entries.push({
+      path,
+      kind,
+      added,
+      removed,
+    });
+  }
+  const directPath = firstString(item, ["path", "file", "filePath", "absolutePath", "relativePath"]);
+  if (entries.length === 0 && directPath) {
+    entries.push({
+      path: directPath,
+      kind: firstString(item, ["kind", "type", "operation", "action"]),
+    });
+  }
+  return entries;
+}
+
+function codexLooksLikeDiff(text: string): boolean {
+  const value = text.trim();
+  return value.startsWith("diff --git ") ||
+    value.startsWith("*** Begin Patch") ||
+    value.startsWith("@@ ") ||
+    value.includes("\n@@ ") ||
+    (value.includes("\n--- ") && value.includes("\n+++ "));
+}
+
+function codexCollectDiffStrings(value: unknown, depth = 0): string[] {
+  if (depth > 6 || value === undefined || value === null) return [];
+  if (typeof value === "string") return codexLooksLikeDiff(value) ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap((entry) => codexCollectDiffStrings(entry, depth + 1));
+  const raw = asRecord(value);
+  if (!raw) return [];
+  const direct: string[] = [];
+  const nested: string[] = [];
+  for (const [key, entry] of Object.entries(raw)) {
+    const lowerKey = key.toLowerCase();
+    const isDiffField = lowerKey.includes("diff") || lowerKey.includes("patch") || lowerKey.includes("unified");
+    if (typeof entry === "string" && isDiffField && codexLooksLikeDiff(entry)) {
+      direct.push(entry);
+    } else if (entry && typeof entry === "object") {
+      nested.push(...codexCollectDiffStrings(entry, depth + 1));
+    }
+  }
+  return [...direct, ...nested];
+}
+
+function codexDiffText(value: unknown): string | undefined {
+  const diffs = codexCollectDiffStrings(value)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return diffs.length > 0
+    ? diffs.filter((entry, index, array) => array.indexOf(entry) === index).join("\n\n")
+    : undefined;
+}
+
+function codexFileChangeFromValue(
+  value: unknown,
+  status: AgentFileChange["status"],
+  fallbackDiff?: string,
+): AgentFileChange | undefined {
+  const item = asRecord(value);
+  const changes = item
+    ? [
+        ...(Array.isArray(item.changes) ? item.changes : []),
+        ...(Array.isArray(item.entries) ? item.entries : []),
+        ...(Array.isArray(item.files) ? item.files : []),
+        ...(Array.isArray(item.fileChanges) ? item.fileChanges : []),
+      ]
+    : [];
+  const entries = codexFileChangeEntriesFromValue(value);
+  const diff = fallbackDiff ?? codexDiffText(value);
+  const summary = changes.length > 0 ? summarizeCodexFileChanges(changes) : undefined;
+  const changeSetId = firstString(value, ["changeSetId", "changesetId", "patchId"]);
+  if (entries.length === 0 && !diff && !summary && !changeSetId) return undefined;
+  return { entries, diff, summary, changeSetId, status };
+}
+
 function codexThreadId(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
@@ -293,7 +510,7 @@ function codexThreadId(value: unknown): string | undefined {
 function codexTurnId(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
-  return firstString(record, ["turnId"]) ?? firstString(record.turn, ["id", "turnId"]);
+  return firstString(record, ["turnId", "id"]) ?? firstString(record.turn, ["id", "turnId"]);
 }
 
 function codexItemId(value: unknown): string | undefined {
@@ -317,6 +534,135 @@ function codexInputBlocks(blocks: AgentContentBlock[]): unknown[] {
     }
     return { type: "text", text: block.text ?? "" };
   });
+}
+
+function codexTurnToMessages(turn: unknown, threadId: string, turnIndex: number): CodexMessageItem[] {
+  const record = asRecord(turn);
+  const turnId = codexTurnId(turn) ?? `turn-${turnIndex + 1}`;
+  const baseCreatedAt = codexTimestamp(
+    record?.createdAt ?? record?.created_at ?? record?.startedAt ?? record?.completedAt,
+  );
+  const items = Array.isArray(record?.items) ? record.items : [];
+  const messages: CodexMessageItem[] = [];
+
+  if (items.length > 0) {
+    items.forEach((rawItem, itemIndex) => {
+      const item = asRecord(rawItem);
+      if (!item) return;
+      const type = firstString(item, ["type", "kind"]) ?? "";
+      const itemId = codexItemId(item) ?? `${turnId}:item-${itemIndex + 1}`;
+      const createdAt = codexTimestamp(
+        item.createdAt ?? item.created_at ?? item.startedAt ?? item.completedAt,
+        baseCreatedAt + itemIndex,
+      );
+      if (type === "userMessage") {
+        const content = codexContentBlocks(item.content ?? item.text ?? item);
+        const text = textFromBlocks(content) || codexText(item.content ?? item.text ?? item);
+        if (!text && content.length === 0) return;
+        messages.push({
+          threadId,
+          turnId,
+          itemId,
+          orderIndex: messages.length + 1,
+          role: "user",
+          type: "message",
+          text,
+          content,
+          deliveryState: "confirmed",
+          createdAt,
+        });
+        return;
+      }
+      if (type === "agentMessage" || type === "plan") {
+        const content = codexContentBlocks(item.content ?? item.text ?? item);
+        const text = textFromBlocks(content) || codexText(item.text ?? item.content ?? item);
+        if (!text && content.length === 0) return;
+        messages.push({
+          threadId,
+          turnId,
+          itemId,
+          orderIndex: messages.length + 1,
+          role: "assistant",
+          type: "message",
+          text,
+          content,
+          deliveryState: "confirmed",
+          createdAt,
+        });
+        return;
+      }
+      if (type.includes("commandExecution")) {
+        messages.push({
+          threadId,
+          turnId,
+          itemId,
+          orderIndex: messages.length + 1,
+          type: "command",
+          command: firstString(item, ["command", "name"]),
+          output: codexText(item.output ?? item.text ?? item.content),
+          raw: item,
+          deliveryState: "confirmed",
+          createdAt,
+        });
+        return;
+      }
+      if (type.includes("fileChange")) {
+        const diff = firstString(item, ["diff", "patch", "unified_diff"]) ?? codexDiffText(item);
+        const status = item.status === "failed" ? "failed" : item.status === "running" ? "running" : "completed";
+        const fileChange = codexFileChangeFromValue(item, status, diff);
+        messages.push({
+          threadId,
+          turnId,
+          itemId,
+          orderIndex: messages.length + 1,
+          type: "file_change",
+          text: fileChange?.summary ?? codexText(item.summary ?? item.text ?? item.content),
+          diff,
+          fileChange,
+          raw: item,
+          deliveryState: "confirmed",
+          createdAt,
+        });
+      }
+    });
+    return messages;
+  }
+
+  const input = Array.isArray(record?.input) ? record?.input : Array.isArray(record?.inputs) ? record?.inputs : [];
+  const output = Array.isArray(record?.output) ? record?.output : [];
+  const userContent = codexContentBlocks(input);
+  const userText = textFromBlocks(userContent) || codexText(input);
+  if (userText || userContent.length > 0) {
+    messages.push({
+      threadId,
+      turnId,
+      itemId: `${turnId}:user`,
+      orderIndex: messages.length + 1,
+      role: "user",
+      type: "message",
+      text: userText,
+      content: userContent,
+      deliveryState: "confirmed",
+      createdAt: baseCreatedAt,
+    });
+  }
+  const assistantContent = codexContentBlocks(output);
+  const assistantText = textFromBlocks(assistantContent) || codexText(output);
+  if (assistantText || assistantContent.length > 0) {
+    messages.push({
+      threadId,
+      turnId,
+      itemId: `${turnId}:assistant`,
+      orderIndex: messages.length + 1,
+      role: "assistant",
+      type: "message",
+      text: assistantText,
+      content: assistantContent,
+      deliveryState: "confirmed",
+      createdAt: baseCreatedAt + 1,
+    });
+  }
+  return messages;
 }
 
 function parseCodexStructuredInputOption(value: unknown, index: number): AgentStructuredInputOption | undefined {
@@ -382,6 +728,150 @@ function isCodexStructuredInputRequest(method: string): boolean {
     method === "tool/requestUserInput" ||
     method === "mcpServer/elicitation/request"
   );
+}
+
+function hasJsonRpcId(message: CodexRpcMessage): message is CodexRpcMessage & { id: CodexRpcId } {
+  return Object.prototype.hasOwnProperty.call(message, "id") &&
+    (typeof message.id === "string" || typeof message.id === "number");
+}
+
+function isCodexJsonRpcResponse(message: CodexRpcMessage): message is CodexRpcMessage & { id: CodexRpcId } {
+  return hasJsonRpcId(message) &&
+    typeof message.method !== "string" &&
+    (
+      Object.prototype.hasOwnProperty.call(message, "result") ||
+      Object.prototype.hasOwnProperty.call(message, "error")
+    );
+}
+
+function isCodexJsonRpcRequest(message: CodexRpcMessage): message is CodexRpcMessage & { id: CodexRpcId; method: string } {
+  return hasJsonRpcId(message) && typeof message.method === "string";
+}
+
+function parseCodexReasoningEffort(value: unknown): AgentReasoningEffort | undefined {
+  return value === "none" ||
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh"
+    ? value
+    : undefined;
+}
+
+function parseCodexServiceTier(value: unknown): AgentServiceTier | undefined {
+  return value === "standard" || value === "fast" ? value : undefined;
+}
+
+const CODEX_REASONING_EFFORTS: AgentReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh"];
+const CODEX_PERMISSION_MODES: AgentPermissionMode[] = ["read_only", "workspace_write", "full_access"];
+const CODEX_DEFAULT_SPEED_TIERS: AgentServiceTier[] = ["standard"];
+
+function parseCodexModelList(value: unknown): {
+  models: AgentModelOption[];
+  defaultModel?: string;
+  reasoningEfforts: AgentReasoningEffort[];
+  speedTiers: AgentServiceTier[];
+  supportsImages: boolean;
+} {
+  const raw = asRecord(value);
+  const entries = Array.isArray(raw?.data)
+    ? raw.data
+    : Array.isArray(raw?.models)
+    ? raw.models
+    : Array.isArray(value)
+    ? value
+    : [];
+  const effortSet = new Set<AgentReasoningEffort>();
+  const speedTierSet = new Set<AgentServiceTier>(CODEX_DEFAULT_SPEED_TIERS);
+  let defaultModel: string | undefined;
+  let supportsImages = false;
+  const models = entries
+    .map((entry): AgentModelOption | undefined => {
+      const item = asRecord(entry);
+      if (!item || item.hidden === true) return undefined;
+      const id = firstString(item, ["id", "model", "name"]);
+      if (!id) return undefined;
+      const efforts = arrayFromKeys(item, ["supportedReasoningEfforts", "reasoningEfforts"])
+        .map((effort) => parseCodexReasoningEffort(
+          asRecord(effort)?.reasoningEffort ?? asRecord(effort)?.id ?? effort,
+        ))
+        .filter((effort): effort is AgentReasoningEffort => Boolean(effort));
+      efforts.forEach((effort) => effortSet.add(effort));
+      const defaultReasoningEffort = parseCodexReasoningEffort(item.defaultReasoningEffort);
+      if (defaultReasoningEffort) effortSet.add(defaultReasoningEffort);
+      const inputModalities = arrayFromKeys(item, ["inputModalities", "modalities"]);
+      const speedTiers = arrayFromKeys(item, ["additionalSpeedTiers", "additional_speed_tiers", "serviceTiers", "service_tiers"])
+        .map(parseCodexServiceTier)
+        .filter((tier): tier is AgentServiceTier => Boolean(tier));
+      speedTiers.forEach((tier) => speedTierSet.add(tier));
+      const modelSupportsImages = inputModalities.includes("image");
+      supportsImages = supportsImages || modelSupportsImages;
+      if (item.isDefault === true) defaultModel = id;
+      return {
+        id,
+        label: firstString(item, ["displayName", "label", "title", "model"]) ?? id,
+        reasoningEfforts: efforts.length > 0 ? efforts : undefined,
+        defaultReasoningEffort,
+        speedTiers: speedTiers.length > 0 ? ["standard", ...speedTiers.filter((tier) => tier !== "standard")] : undefined,
+        supportsImages: modelSupportsImages,
+        description: firstString(item, ["description"]),
+      };
+    })
+    .filter((model): model is AgentModelOption => Boolean(model));
+  return {
+    models,
+    defaultModel,
+    reasoningEfforts: [...effortSet],
+    speedTiers: [...speedTierSet],
+    supportsImages,
+  };
+}
+
+function codexConfigModel(value: unknown): string | undefined {
+  const config = asRecord(asRecord(value)?.config);
+  return firstString(config, ["model"]);
+}
+
+function codexConfigReasoningEffort(value: unknown): AgentReasoningEffort | undefined {
+  const config = asRecord(asRecord(value)?.config);
+  return parseCodexReasoningEffort(config?.model_reasoning_effort ?? config?.reasoningEffort);
+}
+
+function codexConfigServiceTier(value: unknown): AgentServiceTier | undefined {
+  const config = asRecord(asRecord(value)?.config);
+  return parseCodexServiceTier(config?.service_tier ?? config?.serviceTier);
+}
+
+function codexRpcErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  const record = asRecord(error);
+  return firstString(record, ["message", "error"]) ?? "Codex runtime request failed";
+}
+
+function mergeAgentCapabilities(existing: AgentCapabilities | undefined, incoming: AgentCapabilities): AgentCapabilities {
+  const existingCodex = existing?.providers?.find((provider) => provider.id === "codex");
+  if (
+    existingCodex?.modelsSource === "runtime" &&
+    existingCodex.models?.length &&
+    incoming.providers?.some((provider) =>
+      provider.id === "codex" &&
+      (provider.modelsSource === "fallback" || provider.modelsSource === "unavailable" || !provider.models?.length)
+    )
+  ) {
+    const providers = incoming.providers.map((provider) =>
+      provider.id === "codex" ? { ...provider, ...existingCodex } : provider,
+    );
+    return {
+      ...incoming,
+      providers,
+      supportsImages: providers.some((provider) => Boolean(provider.supportsImages)),
+      supportsPermission: providers.some((provider) => Boolean(provider.supportsPermission)),
+      supportsPlan: providers.some((provider) => Boolean(provider.supportsPlan)),
+      supportsCancel: providers.some((provider) => Boolean(provider.supportsCancel)),
+    };
+  }
+  return incoming;
 }
 
 function formatCodexStructuredInputResult(
@@ -488,9 +978,10 @@ function codexMessageToTimeline(item: CodexMessageItem, conversationId: string):
       turnId: item.turnId,
       itemId: item.itemId,
       fileChange: {
-        entries: [],
-        diff: item.diff ?? item.text,
-        summary: item.output,
+        entries: item.fileChange?.entries ?? [],
+        diff: item.fileChange?.diff ?? item.diff ?? item.text,
+        summary: item.fileChange?.summary ?? item.output,
+        changeSetId: item.fileChange?.changeSetId,
         status: item.isStreaming ? "running" : item.deliveryState === "failed" ? "failed" : "completed",
       },
       createdAt: item.createdAt,
@@ -517,7 +1008,7 @@ function codexMessageToTimeline(item: CodexMessageItem, conversationId: string):
     turnId: item.turnId,
     itemId: item.itemId,
     role: item.role,
-    content: item.text ? [{ type: "text", text: item.text }] : [],
+    content: item.content ?? (item.text ? [{ type: "text", text: item.text }] : []),
     text: item.text,
     metadata: { provider: "codex", deliveryState: item.deliveryState },
     createdAt: item.createdAt,
@@ -616,6 +1107,7 @@ function codexTimelineToMessage(
       type: "file_change",
       text: item.fileChange?.summary,
       diff: item.fileChange?.diff,
+      fileChange: item.fileChange,
       deliveryState,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
@@ -644,6 +1136,7 @@ function codexTimelineToMessage(
       role: item.role,
       type: "message",
       text: item.text ?? textFromBlocks(item.content),
+      content: item.content,
       deliveryState,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
@@ -860,8 +1353,10 @@ export function useAgentWorkspace(
         ...items[index],
         ...item,
         text: item.text ?? items[index].text,
+        content: item.content ?? items[index].content,
         output: item.output ?? items[index].output,
         diff: item.diff ?? items[index].diff,
+        fileChange: item.fileChange ?? items[index].fileChange,
         structuredInput: item.structuredInput ?? items[index].structuredInput,
         answers: item.answers ?? items[index].answers,
         updatedAt: item.updatedAt ?? Date.now(),
@@ -973,17 +1468,182 @@ export function useAgentWorkspace(
     });
   }, [sendCodexRpc]);
 
+  const updateCodexRuntimeCapabilities = useCallback((
+    sessionId: string,
+    update: (previous?: AgentProviderCapability) => AgentProviderCapability,
+  ) => {
+    const session = managerRef.current.sessions.get(sessionId);
+    const keys = Array.from(new Set([sessionId, session?.hostDeviceId].filter((key): key is string => Boolean(key))));
+    setCapabilitiesBySessionId((prev) => {
+      const existing = keys
+        .map((key) => prev.get(key))
+        .find((capability): capability is AgentCapabilities => Boolean(capability));
+      const previousProviders = existing?.providers ?? [];
+      const codexProvider = update(previousProviders.find((provider) => provider.id === "codex"));
+      const providers = [
+        ...previousProviders.filter((provider) => provider.id !== "codex"),
+        codexProvider,
+      ];
+      const nextCapability: AgentCapabilities = {
+        enabled: true,
+        provider: existing?.provider ?? "codex",
+        machineId: existing?.machineId ?? session?.machineId ?? undefined,
+        providers,
+        protocolVersion: existing?.protocolVersion,
+        workspaceProtocolVersion: existing?.workspaceProtocolVersion ?? 2,
+        capabilitiesRevision: (existing?.capabilitiesRevision ?? 0) + 1,
+        error: existing?.error,
+        supportsSessionList: existing?.supportsSessionList ?? true,
+        supportsSessionLoad: existing?.supportsSessionLoad ?? true,
+        supportsImages: providers.some((provider) => Boolean(provider.supportsImages)),
+        supportsAudio: existing?.supportsAudio ?? false,
+        supportsPermission: providers.some((provider) => Boolean(provider.supportsPermission)),
+        supportsPlan: providers.some((provider) => Boolean(provider.supportsPlan)),
+        supportsCancel: providers.some((provider) => Boolean(provider.supportsCancel)),
+      };
+      const next = new Map(prev);
+      keys.forEach((key) => next.set(key, nextCapability));
+      return next;
+    });
+  }, []);
+
+  const refreshCodexRuntimeCapabilities = useCallback(async (sessionId: string) => {
+    const [modelListResult, configResult] = await Promise.allSettled([
+      requestCodexRpc(sessionId, "model/list", {}, { timeoutMs: 15_000 }),
+      requestCodexRpc(sessionId, "config/read", {}, { timeoutMs: 15_000 }),
+    ]);
+
+    if (modelListResult.status === "rejected") {
+      const error = codexRpcErrorMessage(modelListResult.reason);
+      updateCodexRuntimeCapabilities(sessionId, (previous) => ({
+        id: "codex",
+        label: previous?.label ?? "Codex",
+        enabled: true,
+        supportsImages: previous?.supportsImages ?? true,
+        supportsPermission: true,
+        supportsPlan: true,
+        supportsCancel: true,
+        providerProtocol: "codex-app-server",
+        modelsSource: previous?.models?.length ? previous.modelsSource : "unavailable",
+        modelListError: error,
+        models: previous?.models,
+        defaultModel: previous?.defaultModel,
+        reasoningEfforts: previous?.reasoningEfforts ?? CODEX_REASONING_EFFORTS,
+        speedTiers: previous?.speedTiers ?? CODEX_DEFAULT_SPEED_TIERS,
+        defaultServiceTier: previous?.defaultServiceTier,
+        permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
+        commands: previous?.commands,
+        modes: previous?.modes,
+        currentMode: previous?.currentMode,
+        features: {
+          ...(previous?.features ?? {}),
+          images: previous?.supportsImages ?? true,
+          permissions: true,
+          plan: true,
+          cancel: true,
+          reasoningEffort: true,
+          serviceTier: true,
+        },
+      }));
+      return;
+    }
+
+    const parsed = parseCodexModelList(modelListResult.value.result);
+    const config = configResult.status === "fulfilled" ? configResult.value.result : undefined;
+    const configModel = codexConfigModel(config);
+    const configReasoningEffort = codexConfigReasoningEffort(config);
+    const configServiceTier = codexConfigServiceTier(config);
+    const reasoningEfforts = parsed.reasoningEfforts.length > 0
+      ? parsed.reasoningEfforts
+      : CODEX_REASONING_EFFORTS;
+    const speedTiers = parsed.speedTiers.length > 0
+      ? parsed.speedTiers
+      : CODEX_DEFAULT_SPEED_TIERS;
+    const defaultReasoningEffort = configReasoningEffort ?? parsed.models.find((model) =>
+      model.id === (configModel ?? parsed.defaultModel),
+    )?.defaultReasoningEffort;
+    const supportsImages = parsed.supportsImages || parsed.models.length === 0;
+
+    updateCodexRuntimeCapabilities(sessionId, (previous) => ({
+      id: "codex",
+      label: previous?.label ?? "Codex",
+      enabled: true,
+      supportsImages,
+      supportsPermission: true,
+      supportsPlan: true,
+      supportsCancel: true,
+      providerProtocol: "codex-app-server",
+      modelsSource: parsed.models.length > 0 ? "runtime" : "unavailable",
+      modelListError: parsed.models.length > 0 ? undefined : "Codex runtime returned no models",
+      models: parsed.models.length > 0 ? parsed.models : previous?.models,
+      defaultModel: configModel ?? parsed.defaultModel ?? parsed.models[0]?.id ?? previous?.defaultModel,
+      reasoningEfforts,
+      speedTiers,
+      defaultServiceTier: configServiceTier ?? previous?.defaultServiceTier,
+      permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
+      commands: previous?.commands,
+      modes: previous?.modes,
+      currentMode: previous?.currentMode,
+      features: {
+        ...(previous?.features ?? {}),
+        images: supportsImages,
+        permissions: true,
+        plan: true,
+        cancel: true,
+        reasoningEffort: true,
+        serviceTier: speedTiers.length > 1,
+        ...(defaultReasoningEffort ? { defaultReasoningEffort: true } : {}),
+      },
+    }));
+  }, [requestCodexRpc, updateCodexRuntimeCapabilities]);
+
   const ensureCodexInitialized = useCallback(async (sessionId: string) => {
     if (initializedCodexSessionsRef.current.has(sessionId)) return;
     const existing = initializingCodexSessionsRef.current.get(sessionId);
     if (existing) return existing;
     const initializing = (async () => {
-      await requestCodexRpc(sessionId, "initialize", {
-        clientInfo: { name: "linkshell_mobile", title: null, version: "0.1" },
-        capabilities: { experimentalApi: true },
-      }, { timeoutMs: 30_000 });
+      try {
+        await requestCodexRpc(sessionId, "initialize", {
+          clientInfo: { name: "linkshell_mobile", title: null, version: "0.1" },
+          capabilities: { experimentalApi: true },
+        }, { timeoutMs: 30_000 });
+      } catch (error) {
+        if (!codexInitializeErrorIsBenign(error)) throw error;
+      }
       sendCodexRpc(sessionId, { method: "initialized", params: {} });
       initializedCodexSessionsRef.current.add(sessionId);
+      refreshCodexRuntimeCapabilities(sessionId).catch((error) => {
+        updateCodexRuntimeCapabilities(sessionId, (previous) => ({
+          id: "codex",
+          label: previous?.label ?? "Codex",
+          enabled: true,
+          supportsImages: previous?.supportsImages ?? true,
+          supportsPermission: true,
+          supportsPlan: true,
+          supportsCancel: true,
+          providerProtocol: "codex-app-server",
+          modelsSource: previous?.models?.length ? previous.modelsSource : "unavailable",
+          modelListError: codexRpcErrorMessage(error),
+          models: previous?.models,
+          defaultModel: previous?.defaultModel,
+          reasoningEfforts: previous?.reasoningEfforts ?? CODEX_REASONING_EFFORTS,
+          speedTiers: previous?.speedTiers ?? CODEX_DEFAULT_SPEED_TIERS,
+          defaultServiceTier: previous?.defaultServiceTier,
+          permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
+          commands: previous?.commands,
+          modes: previous?.modes,
+          currentMode: previous?.currentMode,
+          features: {
+            ...(previous?.features ?? {}),
+            images: previous?.supportsImages ?? true,
+            permissions: true,
+            plan: true,
+            cancel: true,
+            reasoningEffort: true,
+            serviceTier: true,
+          },
+        }));
+      });
     })();
     initializingCodexSessionsRef.current.set(sessionId, initializing);
     try {
@@ -991,7 +1651,7 @@ export function useAgentWorkspace(
     } finally {
       initializingCodexSessionsRef.current.delete(sessionId);
     }
-  }, [requestCodexRpc, sendCodexRpc]);
+  }, [refreshCodexRuntimeCapabilities, requestCodexRpc, sendCodexRpc, updateCodexRuntimeCapabilities]);
 
   const requestCodexTurns = useCallback(async (
     sessionId: string,
@@ -1032,42 +1692,24 @@ export function useAgentWorkspace(
     historyHasMoreRef.current.set(conversationId, Boolean(nextCursor));
     const items: CodexMessageItem[] = [];
     turns.slice().reverse().forEach((turn, turnIndex) => {
-      const turnId = codexTurnId(turn) ?? `turn-${turnIndex + 1}`;
-      const record = asRecord(turn);
-      const createdAt = Date.parse(String(record?.createdAt ?? record?.created_at ?? "")) || Date.now();
-      const input = Array.isArray(record?.input) ? record?.input : Array.isArray(record?.inputs) ? record?.inputs : [];
-      const output = Array.isArray(record?.output) ? record?.output : Array.isArray(record?.items) ? record?.items : [];
-      const userText = codexText(input);
-      if (userText) {
-        items.push({
-          threadId,
-          turnId,
-          itemId: `${turnId}:user`,
-          orderIndex: items.length + 1,
-          role: "user",
-          type: "message",
-          text: userText,
-          deliveryState: "confirmed",
-          createdAt,
-        });
-      }
-      const assistantText = codexText(output);
-      if (assistantText) {
-        items.push({
-          threadId,
-          turnId,
-          itemId: `${turnId}:assistant`,
-          orderIndex: items.length + 1,
-          role: "assistant",
-          type: "message",
-          text: assistantText,
-          deliveryState: "confirmed",
-          createdAt: createdAt + 1,
-        });
-      }
+      items.push(...codexTurnToMessages(turn, threadId, turnIndex));
     });
     replaceCodexHistory(conversationId, threadId, items, nextCursor, cursor ? "prepend" : "replace");
   }, [replaceCodexHistory, requestCodexRpc]);
+
+  const resumeCodexThread = useCallback(async (
+    sessionId: string,
+    threadId: string,
+    cwd?: string,
+    conversationId?: string,
+  ): Promise<string> => {
+    const response = await requestCodexRpc(sessionId, "thread/resume", {
+      threadId,
+      cwd,
+      excludeTurns: true,
+    }, { conversationId, timeoutMs: 30_000 });
+    return codexThreadId(response.result) ?? threadId;
+  }, [requestCodexRpc]);
 
   const ensureConversationSession = useCallback(
     (conversationId: string, preferredSessionId?: string) => {
@@ -1164,6 +1806,16 @@ export function useAgentWorkspace(
         ? [currentManager.sessions.get(sessionId)].filter((item): item is SessionInfo => Boolean(item))
         : [...currentManager.sessions.values()];
       for (const session of targets) {
+        const hasCodexConversation = conversationsRef.current.some((conversation) =>
+          conversation.provider === "codex" &&
+          findSessionForConversation(conversation, currentManager.sessions)?.sessionId === session.sessionId
+        );
+        if (session.provider === "codex" || hasCodexConversation) {
+          ensureCodexInitialized(session.sessionId)
+            .then(() => refreshCodexRuntimeCapabilities(session.sessionId))
+            .catch(() => {});
+          continue;
+        }
         currentManager.sendAgentWorkspaceEnvelope(
           session.sessionId,
           "agent.v2.capabilities.request",
@@ -1172,7 +1824,7 @@ export function useAgentWorkspace(
         );
       }
     },
-    [],
+    [ensureCodexInitialized, refreshCodexRuntimeCapabilities],
   );
 
   const requestConversationList = useCallback(
@@ -1182,72 +1834,99 @@ export function useAgentWorkspace(
         ? [currentManager.sessions.get(sessionId)].filter((item): item is SessionInfo => Boolean(item))
         : [...currentManager.sessions.values()];
       for (const session of targets) {
-        ensureCodexInitialized(session.sessionId)
-          .then(() => requestCodexRpc(session.sessionId, "thread/list", {
-            limit: 50,
-            includeArchived: true,
-          }, { timeoutMs: 30_000 }))
-          .then((response) => {
-            const raw = asRecord(response.result);
-            const threads = Array.isArray(raw?.threads)
-              ? raw.threads
-              : Array.isArray(raw?.items)
-              ? raw.items
-              : Array.isArray(raw?.data)
-              ? raw.data
-              : Array.isArray(raw?.sessions)
-              ? raw.sessions
-              : [];
-            const records = threads
-              .map((thread): AgentConversationRecord | undefined => {
-                const threadId = codexThreadId(thread) ?? firstString(thread, ["id", "threadId"]);
-                const record = asRecord(thread);
-                if (!threadId) return undefined;
-                const conversationId = makeAgentConversationId({
-                  serverUrl: normalizeServerUrl(session.gatewayUrl),
-                  hostDeviceId: session.hostDeviceId,
-                  sessionId: session.sessionId,
-                  agentSessionId: threadId,
-                  cwd: firstString(record, ["cwd", "workingDirectory", "workspacePath"]) ?? session.cwd ?? "",
-                  provider: "codex",
+        const hasCodexConversation = conversationsRef.current.some((conversation) =>
+          conversation.provider === "codex" &&
+          findSessionForConversation(conversation, currentManager.sessions)?.sessionId === session.sessionId
+        );
+        if (session.provider === "codex" || hasCodexConversation) {
+          ensureCodexInitialized(session.sessionId)
+            .then(() => requestCodexRpc(session.sessionId, "thread/list", {
+              limit: 50,
+              includeArchived: true,
+            }, { timeoutMs: 30_000 }))
+            .then((response) => {
+              const raw = asRecord(response.result);
+              const threads = Array.isArray(raw?.threads)
+                ? raw.threads
+                : Array.isArray(raw?.items)
+                ? raw.items
+                : Array.isArray(raw?.data)
+                ? raw.data
+                : Array.isArray(raw?.sessions)
+                ? raw.sessions
+                : [];
+              const records = threads
+                .map((thread): AgentConversationRecord | undefined => {
+                  const threadId = codexThreadId(thread) ?? firstString(thread, ["id", "threadId"]);
+                  const record = asRecord(thread);
+                  if (!threadId) return undefined;
+                  const cwd = firstString(record, ["cwd", "workingDirectory", "workspacePath"]) ?? session.cwd ?? "";
+                  const conversationId = makeAgentConversationId({
+                    serverUrl: normalizeServerUrl(session.gatewayUrl),
+                    hostDeviceId: session.hostDeviceId,
+                    sessionId: session.sessionId,
+                    agentSessionId: threadId,
+                    cwd,
+                    provider: "codex",
+                  });
+                  const previous = conversationsRef.current.find((item) => item.id === conversationId);
+                  codexThreadConversationRef.current.set(threadId, conversationId);
+                  return {
+                    id: conversationId,
+                    serverUrl: normalizeServerUrl(session.gatewayUrl),
+                    hostDeviceId: session.hostDeviceId,
+                    sessionId: session.sessionId,
+                    machineId: session.machineId ?? undefined,
+                    agentSessionId: threadId,
+                    provider: "codex",
+                    cwd,
+                    title: stableCodexTitle(firstString(record, ["title", "name"]), previous?.title, cwd),
+                    status: codexThreadIsWaitingForUser(record)
+                      ? "waiting_permission"
+                      : codexThreadIsRunning(record) ? "running" : "idle",
+                    archived: Boolean(record?.archived),
+                    runningTurnId: codexRunningTurnId(record),
+                    syncStatus: "complete",
+                    source: "app-server",
+                    lastMessagePreview: firstString(record, ["preview", "lastMessagePreview", "summary"]),
+                    lastActivityAt: Date.parse(String(record?.lastActivityAt ?? record?.updatedAt ?? record?.modifiedAt ?? "")) || Date.now(),
+                    createdAt: Date.parse(String(record?.createdAt ?? "")) || Date.now(),
+                    schemaVersion: 2,
+                  };
+                })
+                .filter((record): record is AgentConversationRecord => Boolean(record));
+              if (records.length > 0) {
+                setConversations((prev) => {
+                  const byId = new Map(prev.map((item) => [item.id, item]));
+                  for (const record of records) {
+                    const previous = byId.get(record.id);
+                    byId.set(record.id, {
+                    ...previous,
+                    ...record,
+                    title: stableCodexTitle(record.title, previous?.title, record.cwd),
+                    lastMessagePreview: record.lastMessagePreview ??
+                      (codexPreviewIsControlNoise(previous?.lastMessagePreview) ? undefined : previous?.lastMessagePreview),
+                  });
+                  }
+                  return [...byId.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
                 });
-                codexThreadConversationRef.current.set(threadId, conversationId);
-                return {
-                  id: conversationId,
+                replaceAgentConversationsForDevice({
                   serverUrl: normalizeServerUrl(session.gatewayUrl),
                   hostDeviceId: session.hostDeviceId,
-                  sessionId: session.sessionId,
-                  machineId: session.machineId ?? undefined,
-                  agentSessionId: threadId,
-                  provider: "codex",
-                  cwd: firstString(record, ["cwd", "workingDirectory", "workspacePath"]) ?? session.cwd ?? "",
-                  title: firstString(record, ["title", "name", "summary"]) ?? "Codex",
-                  status: firstString(record, ["status", "state"]) === "running" ? "running" : "idle",
-                  archived: Boolean(record?.archived),
-                  runningTurnId: firstString(record, ["runningTurnId", "activeTurnId"]),
-                  syncStatus: "complete",
-                  source: "app-server",
-                  lastMessagePreview: firstString(record, ["preview", "lastMessagePreview", "summary"]),
-                  lastActivityAt: Date.parse(String(record?.lastActivityAt ?? record?.updatedAt ?? record?.modifiedAt ?? "")) || Date.now(),
-                  createdAt: Date.parse(String(record?.createdAt ?? "")) || Date.now(),
-                  schemaVersion: 2,
-                };
-              })
-              .filter((record): record is AgentConversationRecord => Boolean(record));
-            if (records.length > 0) {
-              setConversations((prev) => {
-                const byId = new Map(prev.map((item) => [item.id, item]));
-                for (const record of records) byId.set(record.id, { ...byId.get(record.id), ...record });
-                return [...byId.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-              });
-              replaceAgentConversationsForDevice({
-                serverUrl: normalizeServerUrl(session.gatewayUrl),
-                hostDeviceId: session.hostDeviceId,
-                conversations: records,
-              }).catch(() => {});
-            }
-          })
-          .catch(() => {});
+                  conversations: records,
+                  providers: ["codex"],
+                }).catch(() => {});
+                records
+                  .filter((record) => record.agentSessionId && record.status === "running")
+                  .slice(0, 6)
+                  .forEach((record) => {
+                    requestCodexTurns(session.sessionId, record.id, record.agentSessionId!).catch(() => {});
+                  });
+              }
+            })
+            .catch(() => {});
+          continue;
+        }
         currentManager.sendAgentWorkspaceEnvelope(
           session.sessionId,
           "agent.v2.conversation.list",
@@ -1256,7 +1935,7 @@ export function useAgentWorkspace(
         );
       }
     },
-    [ensureCodexInitialized, requestCodexRpc],
+    [ensureCodexInitialized, requestCodexRpc, requestCodexTurns],
   );
 
   const markConversationSync = useCallback(
@@ -1278,13 +1957,15 @@ export function useAgentWorkspace(
         return false;
       }
       if (conversation.provider === "codex" && conversation.agentSessionId) {
-        pendingHistoryRef.current.add(`${conversationId}:${cursor ?? "latest"}`);
+        const pendingKey = `${conversationId}:${cursor ?? "latest"}`;
+        if (pendingHistoryRef.current.has(pendingKey)) return true;
+        pendingHistoryRef.current.add(pendingKey);
         markConversationSync(conversationId, "syncing");
         ensureCodexInitialized(session.sessionId)
           .then(() => requestCodexTurns(session.sessionId, conversationId, conversation.agentSessionId!, cursor))
           .then(() => markConversationSync(conversationId, "complete"))
           .catch(() => markConversationSync(conversationId, "stale"))
-          .finally(() => pendingHistoryRef.current.delete(`${conversationId}:${cursor ?? "latest"}`));
+          .finally(() => pendingHistoryRef.current.delete(pendingKey));
         return true;
       }
       const pendingKey = `${conversationId}:${cursor ?? "latest"}`;
@@ -1320,6 +2001,18 @@ export function useAgentWorkspace(
         markConversationSync(conversationId, "deferred");
         return false;
       }
+      if (conversation.provider === "codex" && conversation.agentSessionId) {
+        const pendingKey = `${conversationId}:latest`;
+        if (pendingHistoryRef.current.has(pendingKey)) return true;
+        pendingHistoryRef.current.add(pendingKey);
+        markConversationSync(conversationId, "syncing");
+        ensureCodexInitialized(session.sessionId)
+          .then(() => requestCodexTurns(session.sessionId, conversationId, conversation.agentSessionId!))
+          .then(() => markConversationSync(conversationId, "complete"))
+          .catch(() => markConversationSync(conversationId, "stale"))
+          .finally(() => pendingHistoryRef.current.delete(pendingKey));
+        return true;
+      }
       markConversationSync(conversationId, "syncing");
       const accepted = managerRef.current.sendAgentWorkspaceEnvelope(
         session.sessionId,
@@ -1334,7 +2027,7 @@ export function useAgentWorkspace(
       if (!accepted) markConversationSync(conversationId, "stale");
       return accepted;
     },
-    [markConversationSync],
+    [ensureCodexInitialized, markConversationSync, requestCodexTurns],
   );
 
   useEffect(() => {
@@ -1376,12 +2069,13 @@ export function useAgentWorkspace(
         const session = findSessionForConversation(conversation, managerRef.current.sessions);
         if (!session || session.status !== "connected") continue;
         const isActive = activeConversationId === conversation.id;
+        const isCodex = conversation.provider === "codex";
         const interval = running
           ? foreground && isActive
-            ? 2_500
+            ? isCodex ? 8_000 : 2_500
             : foreground
-            ? 12_000
-            : 15_000
+            ? isCodex ? 20_000 : 12_000
+            : isCodex ? 30_000 : 15_000
           : 45_000;
         const last = lastRunningSyncRef.current.get(conversation.id) ?? 0;
         if (now - last < interval) continue;
@@ -1419,6 +2113,7 @@ export function useAgentWorkspace(
           title: conversation.title,
           model: conversation.model,
           reasoningEffort: conversation.reasoningEffort,
+          serviceTier: conversation.serviceTier,
           permissionMode: conversation.permissionMode,
           collaborationMode: conversation.collaborationMode,
           status: conversation.status ?? "idle",
@@ -1445,7 +2140,7 @@ export function useAgentWorkspace(
         }
         setCapabilitiesBySessionId((prev) => {
           const next = new Map(prev);
-          next.set(envelope.hostDeviceId, payload);
+          next.set(envelope.hostDeviceId, mergeAgentCapabilities(prev.get(envelope.hostDeviceId), payload));
           return next;
         });
         return;
@@ -1453,7 +2148,7 @@ export function useAgentWorkspace(
 
       if (envelope.type === "agent.codex.rpc") {
         const payload = parseTypedPayload("agent.codex.rpc" as any, envelope.payload) as CodexRpcMessage;
-        if (payload.id !== undefined && !payload.method) {
+        if (isCodexJsonRpcResponse(payload)) {
           const pending = pendingCodexRef.current.get(payload.id);
           if (pending) {
             pendingCodexRef.current.delete(payload.id);
@@ -1541,6 +2236,45 @@ export function useAgentWorkspace(
         }
         const itemId = codexItemId(params) ?? (payload.id !== undefined ? String(payload.id) : undefined);
         const method = payload.method ?? "";
+        const isServerRequest = isCodexJsonRpcRequest(payload);
+
+        const sendServerRequestError = (message: string, code = -32000) => {
+          if (!isServerRequest) return;
+          sendCodexRpc(envelope.hostDeviceId, {
+            id: payload.id,
+            error: { code, message },
+          });
+        };
+
+        if (method === "thread/status/changed" && conversationId && threadId) {
+          const isRunning = codexThreadIsRunning(params);
+          const isWaiting = codexThreadIsWaitingForUser(params);
+          setCodexThreadsByConversationId((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(conversationId) ?? { conversationId, threadId, items: [], isRunning };
+            next.set(conversationId, {
+              ...existing,
+              threadId,
+              isRunning,
+              activeTurnId: isRunning ? existing.activeTurnId : undefined,
+            });
+            return next;
+          });
+          setConversations((prev) => prev.map((conversation) =>
+            conversation.id === conversationId
+              ? {
+                  ...conversation,
+                  status: isWaiting ? "waiting_permission" : isRunning ? "running" : "idle",
+                  runningTurnId: isRunning ? conversation.runningTurnId : undefined,
+                  lastActivityAt: Date.now(),
+                }
+              : conversation
+          ));
+          if (isRunning && serverSession) {
+            requestCodexTurns(serverSession.sessionId, conversationId, threadId).catch(() => {});
+          }
+          return;
+        }
 
         if (method === "turn/started" && conversationId && threadId) {
           const activeTurnId = turnId ?? `turn-${Date.now().toString(36)}`;
@@ -1603,13 +2337,16 @@ export function useAgentWorkspace(
           const rawItem = asRecord(params?.item) ?? params;
           const type = firstString(rawItem, ["type", "kind"]) ?? "tool";
           if (type.toLowerCase().includes("message")) return;
+          const isFileChange = type.toLowerCase().includes("file");
+          const fileChange = isFileChange ? codexFileChangeFromValue(rawItem, "running") : undefined;
           upsertCodexItem(conversationId, {
             threadId,
             turnId,
             itemId: itemId ?? `item:${Date.now().toString(36)}`,
             orderIndex: (codexThreadsRef.current.get(conversationId)?.items.length ?? 0) + 1,
-            type: type.toLowerCase().includes("file") ? "file_change" : type.toLowerCase().includes("command") ? "command" : "tool",
-            text: codexText(rawItem),
+            type: isFileChange ? "file_change" : type.toLowerCase().includes("command") ? "command" : "tool",
+            text: fileChange?.summary ?? codexText(rawItem),
+            fileChange,
             command: firstString(rawItem, ["command", "name", "toolName"]),
             raw: rawItem,
             isStreaming: true,
@@ -1622,9 +2359,22 @@ export function useAgentWorkspace(
         if ((method === "item/completed" || method.endsWith("/completed")) && conversationId && itemId) {
           const existing = codexThreadsRef.current.get(conversationId)?.items.find((item) => item.itemId === itemId);
           if (existing) {
+            const completedContent = codexContentBlocks(params?.item ?? params);
+            const completedStatus = existing.type === "file_change"
+              ? existing.deliveryState === "failed" ? "failed" : "completed"
+              : undefined;
+            const completedFileChange = completedStatus
+              ? codexFileChangeFromValue(params?.item ?? params, completedStatus, existing.diff)
+              : undefined;
             upsertCodexItem(conversationId, {
               ...existing,
-              text: existing.text ?? codexText(params),
+              text: existing.text ?? (textFromBlocks(completedContent) || codexText(params)),
+              content: completedContent.length > 0 ? completedContent : existing.content,
+              fileChange: completedFileChange ?? (
+                existing.fileChange
+                  ? { ...existing.fileChange, status: completedStatus }
+                  : existing.fileChange
+              ),
               isStreaming: false,
               deliveryState: "confirmed",
               updatedAt: Date.now(),
@@ -1656,13 +2406,17 @@ export function useAgentWorkspace(
         if (method === "item/fileChange/patchUpdated" && conversationId && threadId) {
           const id = itemId ?? `file:${turnId ?? "active"}`;
           const existing = codexThreadsRef.current.get(conversationId)?.items.find((item) => item.itemId === id);
+          const diff = firstString(params, ["patch", "diff", "unified_diff"]) ?? codexDiffText(params) ?? codexText(params);
+          const fileChange = codexFileChangeFromValue(params, "running", diff);
           upsertCodexItem(conversationId, {
             threadId,
             turnId: turnId ?? existing?.turnId,
             itemId: id,
             orderIndex: existing?.orderIndex ?? (codexThreadsRef.current.get(conversationId)?.items.length ?? 0) + 1,
             type: "file_change",
-            diff: firstString(params, ["patch", "diff", "unified_diff"]) ?? codexText(params),
+            text: fileChange?.summary ?? existing?.text,
+            diff,
+            fileChange: fileChange ?? existing?.fileChange,
             isStreaming: true,
             deliveryState: "confirmed",
             createdAt: existing?.createdAt ?? Date.now(),
@@ -1683,7 +2437,7 @@ export function useAgentWorkspace(
           for (const [candidateId, thread] of targetEntries) {
             const matching = thread?.items.find((item) =>
               (item.type === "approval" || item.type === "structured_input") &&
-              item.requestId === requestId
+              (item.requestId === requestId || String(item.rpcId ?? "") === requestId)
             );
             if (!matching) continue;
             upsertCodexItem(candidateId, {
@@ -1742,9 +2496,18 @@ export function useAgentWorkspace(
           return;
         }
 
-        if (payload.id !== undefined && method.includes("requestApproval") && conversationId && threadId) {
+        if (isServerRequest && isCodexStructuredInputRequest(method) && !conversationId) {
+          sendServerRequestError("Cannot route Codex structured input request to a conversation.");
+          return;
+        }
+
+        if (payload.id !== undefined && method.includes("requestApproval") && conversationId) {
+          const existingThread = codexThreadsRef.current.get(conversationId);
+          const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+          const resolvedThreadId = threadId ?? existingThread?.threadId ?? conversation?.agentSessionId ?? conversationId;
+          codexThreadConversationRef.current.set(resolvedThreadId, conversationId);
           upsertCodexItem(conversationId, {
-            threadId,
+            threadId: resolvedThreadId,
             turnId,
             itemId: `approval:${String(payload.id)}`,
             orderIndex: (codexThreadsRef.current.get(conversationId)?.items.length ?? 0) + 1,
@@ -1764,6 +2527,16 @@ export function useAgentWorkspace(
               ? { ...conversation, status: "waiting_permission", lastActivityAt: Date.now() }
               : conversation
           ));
+          return;
+        }
+
+        if (isServerRequest && method.includes("requestApproval") && !conversationId) {
+          sendServerRequestError("Cannot route Codex approval request to a conversation.");
+          return;
+        }
+
+        if (isServerRequest) {
+          sendServerRequestError(`Unsupported Codex server request: ${method}`, -32601);
           return;
         }
 
@@ -1850,19 +2623,33 @@ export function useAgentWorkspace(
 
       if (envelope.type === "agent.v2.conversation.list.result") {
         const payload = parseTypedPayload("agent.v2.conversation.list.result", envelope.payload) as any;
-        const records = (payload.conversations ?? [])
+        const records: AgentConversationRecord[] = (payload.conversations ?? [])
           .map((conversation: any) => ({
             ...toRecord(conversation),
             syncStatus: "complete" as const,
           }))
-          .filter((conversation: AgentConversationRecord) => conversation.id && conversation.cwd);
+          .filter((conversation: AgentConversationRecord) =>
+            conversation.id && conversation.cwd && conversation.provider !== "codex"
+          );
+        const providers = records.length > 0
+          ? [...new Set(records.map((record) => record.provider))]
+          : ["claude", "custom"] as AgentProvider[];
         replaceAgentConversationsForDevice({
           serverUrl,
           hostDeviceId: serverSession?.hostDeviceId ?? envelope.hostDeviceId,
           conversations: records,
+          providers,
           preserveLocalArchived: true,
         })
-          .then((nextConversations) => setConversations(nextConversations))
+          .then((nextConversations) => {
+            setConversations((prev) => {
+              const byId = new Map(prev.map((item) => [item.id, item]));
+              for (const conversation of nextConversations) {
+                byId.set(conversation.id, { ...byId.get(conversation.id), ...conversation });
+              }
+              return [...byId.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+            });
+          })
           .catch(() => {
             for (const record of records) {
               persistConversation(record).catch(() => {});
@@ -2358,7 +3145,7 @@ export function useAgentWorkspace(
         }).catch(() => {});
       }
     },
-    [activeConversationId, persistConversation, persistTimelineItem, requestDelta, requestHistoryPage, upsertCodexItem],
+    [activeConversationId, persistConversation, persistTimelineItem, requestCodexTurns, requestDelta, requestHistoryPage, sendCodexRpc, upsertCodexItem],
   );
 
   useEffect(() => {
@@ -2404,6 +3191,7 @@ export function useAgentWorkspace(
           title: input.title || existing?.title || input.cwd.split("/").filter(Boolean).pop() || "Codex",
           model: input.model ?? existing?.model,
           reasoningEffort: input.reasoningEffort ?? existing?.reasoningEffort,
+          serviceTier: input.serviceTier ?? existing?.serviceTier,
           permissionMode: input.permissionMode ?? existing?.permissionMode,
           collaborationMode: input.collaborationMode ?? existing?.collaborationMode ?? "default",
           status: existing?.status ?? "idle",
@@ -2411,7 +3199,7 @@ export function useAgentWorkspace(
           runningTurnId: existing?.runningTurnId,
           syncStatus: session ? "syncing" : "deferred",
           source: existing?.source ?? "cache",
-          lastMessagePreview: existing?.lastMessagePreview,
+          lastMessagePreview: codexPreviewIsControlNoise(existing?.lastMessagePreview) ? undefined : existing?.lastMessagePreview,
           lastActivityAt: existing?.lastActivityAt ?? now,
           createdAt: existing?.createdAt ?? now,
           schemaVersion: 2,
@@ -2445,8 +3233,10 @@ export function useAgentWorkspace(
         try {
           await ensureCodexInitialized(session.sessionId);
           const response = input.agentSessionId
-            ? await requestCodexRpc(session.sessionId, "thread/read", {
+            ? await requestCodexRpc(session.sessionId, "thread/resume", {
                 threadId: input.agentSessionId,
+                cwd: input.cwd,
+                excludeTurns: true,
               }, { conversationId, timeoutMs: 30_000 })
             : await requestCodexRpc(session.sessionId, "thread/start", {
                 cwd: input.cwd,
@@ -2505,6 +3295,18 @@ export function useAgentWorkspace(
           requestCodexTurns(session.sessionId, stableConversationId, threadId).catch(() => {});
           return { conversationId: stableConversationId, status: "idle" as const };
         } catch (error) {
+          if (codexInitializeErrorIsBenign(error)) {
+            await persistConversation({
+              ...baseRecord,
+              syncStatus: "stale",
+              source: "cache",
+              lastMessagePreview: codexPreviewIsControlNoise(baseRecord.lastMessagePreview)
+                ? undefined
+                : baseRecord.lastMessagePreview,
+              lastActivityAt: existing?.lastActivityAt ?? Date.now(),
+            }, { preserveLocalArchived: false });
+            return { conversationId, status: baseRecord.status };
+          }
           await persistConversation({
             ...baseRecord,
             status: "error",
@@ -2534,6 +3336,7 @@ export function useAgentWorkspace(
             provider: input.provider ?? "codex",
             model: input.model,
             reasoningEffort: input.reasoningEffort,
+            serviceTier: input.serviceTier,
             permissionMode: input.permissionMode,
             collaborationMode: input.collaborationMode,
             title: input.title || input.cwd.split("/").filter(Boolean).pop() || "Agent",
@@ -2604,6 +3407,7 @@ export function useAgentWorkspace(
         provider: conversation.provider,
         model: conversation.model,
         reasoningEffort: conversation.reasoningEffort,
+        serviceTier: conversation.serviceTier,
         permissionMode: conversation.permissionMode,
         collaborationMode: conversation.collaborationMode,
         title: conversation.title,
@@ -2620,6 +3424,7 @@ export function useAgentWorkspace(
       options?: {
         model?: string;
         reasoningEffort?: AgentReasoningEffort;
+        serviceTier?: AgentServiceTier;
         permissionMode?: AgentPermissionMode;
         collaborationMode?: AgentCollaborationMode;
         attachments?: AgentContentBlock[];
@@ -2656,12 +3461,14 @@ export function useAgentWorkspace(
 
       const hasModel = Object.prototype.hasOwnProperty.call(options ?? {}, "model");
       const hasEffort = Object.prototype.hasOwnProperty.call(options ?? {}, "reasoningEffort");
+      const hasServiceTier = Object.prototype.hasOwnProperty.call(options ?? {}, "serviceTier");
       const hasPermission = Object.prototype.hasOwnProperty.call(options ?? {}, "permissionMode");
       const hasCollaboration = Object.prototype.hasOwnProperty.call(options ?? {}, "collaborationMode");
       const nextConversation: AgentConversationRecord = {
         ...conversation,
         model: hasModel ? options?.model : conversation.model,
         reasoningEffort: hasEffort ? options?.reasoningEffort : conversation.reasoningEffort,
+        serviceTier: hasServiceTier ? options?.serviceTier : conversation.serviceTier,
         permissionMode: hasPermission ? options?.permissionMode : conversation.permissionMode,
         collaborationMode: hasCollaboration ? options?.collaborationMode : conversation.collaborationMode,
         status: "running",
@@ -2694,10 +3501,15 @@ export function useAgentWorkspace(
       }
 
       if (conversation.provider === "codex") {
-        const threadId = conversation.agentSessionId ?? conversation.id;
+        const existingThread = codexThreadsRef.current.get(conversationId);
+        const threadId = existingThread?.threadId ?? conversation.agentSessionId ?? conversation.id;
+        const activeTurnId = conversation.runningTurnId ?? existingThread?.activeTurnId;
+        const steerTurnId = conversation.status === "running" && activeTurnId ? activeTurnId : undefined;
+        const shouldSteerActiveTurn = Boolean(steerTurnId);
         codexThreadConversationRef.current.set(threadId, conversationId);
         upsertCodexItem(conversationId, {
           threadId,
+          turnId: steerTurnId,
           itemId: clientMessageId,
           orderIndex: (codexThreadsRef.current.get(conversationId)?.items.length ?? 0) + 1,
           role: "user",
@@ -2707,22 +3519,34 @@ export function useAgentWorkspace(
           createdAt: now,
         });
         ensureCodexInitialized(session.sessionId)
+          .then(() => resumeCodexThread(session.sessionId, threadId, conversation.cwd, conversationId))
           .then(() => {
             const params = {
               threadId,
               model: hasModel ? options?.model ?? undefined : conversation.model,
               effort: hasEffort ? options?.reasoningEffort ?? undefined : conversation.reasoningEffort,
+              service_tier: hasServiceTier ? options?.serviceTier ?? undefined : conversation.serviceTier,
               input: codexInputBlocks(contentBlocks),
             };
-            return requestCodexRpc(session.sessionId, "turn/start", params, {
-              conversationId,
-              clientMessageId,
-              timeoutMs: 60_000,
-            });
+            return shouldSteerActiveTurn
+              ? requestCodexRpc(session.sessionId, "turn/steer", {
+                  threadId,
+                  expectedTurnId: steerTurnId!,
+                  input: params.input,
+                }, {
+                  conversationId,
+                  clientMessageId,
+                  timeoutMs: 60_000,
+                })
+              : requestCodexRpc(session.sessionId, "turn/start", params, {
+                  conversationId,
+                  clientMessageId,
+                  timeoutMs: 60_000,
+                });
           })
           .then((response) => {
             const startedThreadId = codexThreadId(response.result) ?? threadId;
-            const turnId = codexTurnId(response.result);
+            const turnId = codexTurnId(response.result) ?? steerTurnId;
             if (startedThreadId !== threadId) {
               codexThreadConversationRef.current.set(startedThreadId, conversationId);
             }
@@ -2740,13 +3564,14 @@ export function useAgentWorkspace(
             });
             setConversations((prev) => prev.map((item) =>
               item.id === conversationId
-                ? { ...item, agentSessionId: startedThreadId, runningTurnId: turnId, status: "running" }
+                ? { ...item, agentSessionId: startedThreadId, runningTurnId: turnId ?? item.runningTurnId, status: "running" }
                 : item
             ));
           })
           .catch((error) => {
             upsertCodexItem(conversationId, {
               threadId,
+              turnId: steerTurnId,
               itemId: clientMessageId,
               orderIndex: (codexThreadsRef.current.get(conversationId)?.items.find((item) => item.itemId === clientMessageId)?.orderIndex) ?? 1,
               role: "user",
@@ -2766,7 +3591,7 @@ export function useAgentWorkspace(
               createdAt: Date.now(),
             });
             setConversations((prev) => prev.map((item) =>
-              item.id === conversationId ? { ...item, status: "error" } : item
+              item.id === conversationId ? { ...item, status: shouldSteerActiveTurn ? "running" : "error" } : item
             ));
           });
         return;
@@ -2781,6 +3606,7 @@ export function useAgentWorkspace(
           contentBlocks,
           model: hasModel ? options?.model ?? null : undefined,
           reasoningEffort: hasEffort ? options?.reasoningEffort ?? null : undefined,
+          serviceTier: hasServiceTier ? options?.serviceTier ?? null : undefined,
           permissionMode: hasPermission ? options?.permissionMode ?? null : undefined,
           collaborationMode: hasCollaboration ? options?.collaborationMode ?? null : undefined,
         },
@@ -2802,7 +3628,7 @@ export function useAgentWorkspace(
         upsertAgentTimelineItem(failedItem).catch(() => {});
       }
     },
-    [manager],
+    [ensureCodexInitialized, manager, requestCodexRpc, resumeCodexThread, upsertCodexItem],
   );
 
   const executeCommand = useCallback(
@@ -2891,6 +3717,7 @@ export function useAgentWorkspace(
       settings: {
         model?: string;
         reasoningEffort?: AgentReasoningEffort;
+        serviceTier?: AgentServiceTier;
         permissionMode?: AgentPermissionMode;
         collaborationMode?: AgentCollaborationMode;
       },
@@ -2899,12 +3726,14 @@ export function useAgentWorkspace(
       if (!conversation) return;
       const hasModel = Object.prototype.hasOwnProperty.call(settings, "model");
       const hasEffort = Object.prototype.hasOwnProperty.call(settings, "reasoningEffort");
+      const hasServiceTier = Object.prototype.hasOwnProperty.call(settings, "serviceTier");
       const hasPermission = Object.prototype.hasOwnProperty.call(settings, "permissionMode");
       const hasCollaboration = Object.prototype.hasOwnProperty.call(settings, "collaborationMode");
       await persistConversation({
         ...conversation,
         model: hasModel ? settings.model : conversation.model,
         reasoningEffort: hasEffort ? settings.reasoningEffort : conversation.reasoningEffort,
+        serviceTier: hasServiceTier ? settings.serviceTier : conversation.serviceTier,
         permissionMode: hasPermission ? settings.permissionMode : conversation.permissionMode,
         collaborationMode: hasCollaboration ? settings.collaborationMode : conversation.collaborationMode,
         lastActivityAt: conversation.lastActivityAt,
@@ -2920,8 +3749,9 @@ export function useAgentWorkspace(
       const session = findSessionForConversation(conversation, manager.sessions);
       if (!session) return;
       if (conversation.provider === "codex") {
-        const threadId = conversation.agentSessionId;
-        const turnId = conversation.runningTurnId ?? codexThreadsRef.current.get(conversationId)?.activeTurnId;
+        const existingThread = codexThreadsRef.current.get(conversationId);
+        const threadId = existingThread?.threadId ?? conversation.agentSessionId;
+        const turnId = conversation.runningTurnId ?? existingThread?.activeTurnId;
         if (!threadId || !turnId) return;
         ensureCodexInitialized(session.sessionId)
           .then(() => requestCodexRpc(session.sessionId, "turn/interrupt", { threadId, turnId }, {
@@ -3321,6 +4151,23 @@ export function useAgentWorkspace(
     [requestHistoryPage],
   );
 
+  const refreshConversation = useCallback(
+    (conversationId: string) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation) return;
+      const revision = conversation.timelineRevision ?? 0;
+      if (conversation.provider === "codex") {
+        requestHistoryPage(conversationId);
+        return;
+      }
+      const session = findSessionForConversation(conversation, managerRef.current.sessions);
+      if (session) requestCapabilities(session.sessionId);
+      if (revision > 0) requestDelta(conversationId, revision);
+      else requestHistoryPage(conversationId);
+    },
+    [requestCapabilities, requestDelta, requestHistoryPage],
+  );
+
   const archive = useCallback(async (conversationId: string, archived: boolean) => {
     await archiveAgentConversation(conversationId, archived);
     setConversations((prev) =>
@@ -3344,20 +4191,14 @@ export function useAgentWorkspace(
     refresh,
     requestCapabilities,
     requestConversationList,
+    refreshConversation,
     openConversation,
     openProject,
     resumeConversation,
     ensureConversationSession,
     getConversation: (conversationId) =>
       conversationsRef.current.find((item) => item.id === conversationId),
-    getTimeline: (conversationId) => {
-      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-      const codexThread = codexThreadsRef.current.get(conversationId);
-      if (conversation?.provider === "codex" && codexThread) {
-        return codexThread.items.map((item) => codexMessageToTimeline(item, conversationId));
-      }
-      return timelineRef.current.get(conversationId) ?? [];
-    },
+    getTimeline: (conversationId) => timelineRef.current.get(conversationId) ?? [],
     sendPrompt,
     executeCommand,
     updateConversationSettings,

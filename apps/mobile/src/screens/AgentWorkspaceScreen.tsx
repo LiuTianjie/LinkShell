@@ -240,6 +240,10 @@ function projectHiddenKey(project: AgentProjectGroup): string {
   return `project:${project.id}`;
 }
 
+function providerFoldKey(projectId: string, provider: AgentProvider, scope = "active"): string {
+  return `${scope}:provider:${projectId}:${provider}`;
+}
+
 function shortConversationId(conversation: AgentConversationRecord): string {
   return (conversation.agentSessionId || conversation.id).replace(/^agent-remote-/, "").slice(0, 8);
 }
@@ -268,7 +272,11 @@ function conversationSummary(
 ): string {
   const storedPreview = conversation.lastMessagePreview?.trim();
   const titleFallback = conversation.title || titleFromCwd(conversation.cwd);
-  if (storedPreview && storedPreview !== conversation.title && storedPreview !== titleFallback) {
+  const previewIsControlNoise = conversation.provider === "codex" && (
+    /already\s+initialized/i.test(storedPreview ?? "") ||
+    (storedPreview ?? "").includes("Codex request timed out: initialize")
+  );
+  if (storedPreview && !previewIsControlNoise && storedPreview !== conversation.title && storedPreview !== titleFallback) {
     return storedPreview;
   }
   const latestPreview = [...(timeline ?? [])]
@@ -276,6 +284,10 @@ function conversationSummary(
     .map(previewFromWorkspaceItem)
     .find((preview) => preview && preview !== conversation.title);
   return latestPreview || conversation.title || "暂无对话摘要";
+}
+
+function conversationDisplayTitle(conversation: AgentConversationRecord): string {
+  return conversation.title?.trim() || titleFromCwd(conversation.cwd);
 }
 
 function providerGroups(conversations: AgentConversationRecord[]) {
@@ -478,6 +490,55 @@ function ConversationStateIndicator({
   return null;
 }
 
+function ConversationGroupStateIndicator({
+  conversations,
+  theme,
+}: {
+  conversations: AgentConversationRecord[];
+  theme: Theme;
+}) {
+  if (conversations.some((conversation) => conversation.status === "running")) {
+    return <SpinningRing color={theme.accent} />;
+  }
+  if (conversations.some((conversation) => conversation.status === "waiting_permission")) {
+    return (
+      <View
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: theme.warning,
+        }}
+      />
+    );
+  }
+  if (conversations.some((conversation) => conversation.status === "error")) {
+    return (
+      <View
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: theme.error,
+        }}
+      />
+    );
+  }
+  if (conversations.some((conversation) => conversation.syncStatus === "stale")) {
+    return (
+      <View
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: theme.warning,
+        }}
+      />
+    );
+  }
+  return null;
+}
+
 async function loadHiddenAgentProjectKeys(): Promise<Set<string>> {
   try {
     const raw = await AsyncStorage.getItem(HIDDEN_AGENT_PROJECT_KEYS);
@@ -556,7 +617,9 @@ export function AgentWorkspaceScreen({
   const [knownGatewayCount, setKnownGatewayCount] = useState(0);
   const [hiddenProjectKeys, setHiddenProjectKeys] = useState<Set<string>>(() => new Set());
   const [archivedExpanded, setArchivedExpanded] = useState(false);
+  const [collapsedDeviceKeys, setCollapsedDeviceKeys] = useState<Set<string>>(() => new Set());
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(() => new Set());
+  const [collapsedProviderKeys, setCollapsedProviderKeys] = useState<Set<string>>(() => new Set());
   const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
   const autoConnectedHostKeysRef = useRef<Set<string>>(new Set());
   const didInitializeCollapsedProjectsRef = useRef(false);
@@ -878,11 +941,21 @@ export function AgentWorkspaceScreen({
   }, [projectGroups]);
 
   const archivedItems = useMemo(
-    () => (archivedExpanded ? workspace.archivedConversations : workspace.archivedConversations.slice(0, 3)),
+    () => (archivedExpanded ? workspace.archivedConversations : []),
     [archivedExpanded, workspace.archivedConversations],
   );
   const projectGroupIdsSignature = useMemo(
     () => JSON.stringify(projectGroups.map((project) => project.id)),
+    [projectGroups],
+  );
+  const deviceGroupIdsSignature = useMemo(
+    () => JSON.stringify(deviceProjectGroups.map((device) => device.id)),
+    [deviceProjectGroups],
+  );
+  const providerGroupIdsSignature = useMemo(
+    () => JSON.stringify(projectGroups.flatMap((project) =>
+      providerGroups(project.conversations).map((group) => providerFoldKey(project.id, group.provider)),
+    )),
     [projectGroups],
   );
 
@@ -910,6 +983,22 @@ export function AgentWorkspaceScreen({
       return areStringSetsEqual(prev, next) ? prev : next;
     });
   }, [projectGroupIdsSignature]);
+
+  useEffect(() => {
+    const deviceIds = new Set(JSON.parse(deviceGroupIdsSignature) as string[]);
+    setCollapsedDeviceKeys((prev) => {
+      const next = new Set([...prev].filter((key) => deviceIds.has(key)));
+      return areStringSetsEqual(prev, next) ? prev : next;
+    });
+  }, [deviceGroupIdsSignature]);
+
+  useEffect(() => {
+    const providerIds = new Set(JSON.parse(providerGroupIdsSignature) as string[]);
+    setCollapsedProviderKeys((prev) => {
+      const next = new Set([...prev].filter((key) => providerIds.has(key)));
+      return areStringSetsEqual(prev, next) ? prev : next;
+    });
+  }, [providerGroupIdsSignature]);
 
   const selectedTarget = useMemo(
     () => targets.find((target) => target.sessionId === selectedSessionId) ?? targets[0],
@@ -1204,6 +1293,36 @@ export function AgentWorkspaceScreen({
     Alert.alert("已取消归档", "会话已经回到首页；这台设备当前离线，启动 linkshell 后可以继续打开。");
   }, [onOpenConversation, unarchiveConversation, workspace]);
 
+  const toggleDeviceCollapsed = useCallback((deviceId: string) => {
+    setCollapsedDeviceKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(deviceId)) next.delete(deviceId);
+      else next.add(deviceId);
+      return next;
+    });
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+
+  const toggleProjectCollapsed = useCallback((projectId: string) => {
+    setCollapsedProjectKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+
+  const toggleProviderCollapsed = useCallback((key: string) => {
+    setCollapsedProviderKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+
   const refreshWorkspace = useCallback(async () => {
     Haptics.selectionAsync().catch(() => {});
     setRefreshing(true);
@@ -1329,16 +1448,23 @@ export function AgentWorkspaceScreen({
                   新建 Agent 对话后，这里会按设备和项目显示最近的会话。
                 </Text>
               </View>
-            ) : deviceProjectGroups.map((device) => (
+            ) : deviceProjectGroups.map((device) => {
+              const deviceCollapsed = collapsedDeviceKeys.has(device.id);
+              const deviceConversations = device.projects.flatMap((project) => project.conversations);
+              return (
               <View key={device.id} style={{ gap: 10 }}>
-                <View
-                  style={{
+                <Pressable
+                  onPress={() => toggleDeviceCollapsed(device.id)}
+                  style={({ pressed }) => ({
                     flexDirection: "row",
                     alignItems: "center",
                     gap: 9,
                     paddingHorizontal: 2,
                     paddingTop: 2,
-                  }}
+                    borderRadius: 10,
+                    borderCurve: "continuous",
+                    backgroundColor: pressed ? "rgba(120,120,128,0.08)" : "transparent",
+                  })}
                 >
                   <View
                     style={{
@@ -1372,7 +1498,10 @@ export function AgentWorkspaceScreen({
                       {device.projects.length} 个项目 · {device.serverUrl}
                     </Text>
                   </View>
-                </View>
+                  <ConversationGroupStateIndicator conversations={deviceConversations} theme={theme} />
+                  <AppSymbol name={deviceCollapsed ? "chevron.right" : "chevron.down"} size={12} color={theme.textTertiary} />
+                </Pressable>
+                {!deviceCollapsed ? (
                 <View style={{ gap: 12, paddingLeft: 10, borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.separator }}>
                   {device.projects.map((project) => {
               const online = Boolean(project.target);
@@ -1394,12 +1523,7 @@ export function AgentWorkspaceScreen({
                         openCreate(project.target, project);
                         return;
                       }
-                      setCollapsedProjectKeys((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(project.id)) next.delete(project.id);
-                        else next.add(project.id);
-                        return next;
-                      });
+                      toggleProjectCollapsed(project.id);
                     }}
                     style={({ pressed }) => ({
                       borderRadius: 10,
@@ -1425,6 +1549,9 @@ export function AgentWorkspaceScreen({
                         ) : null}
                       </View>
                     </View>
+                    {project.conversations.length > 0 ? (
+                      <ConversationGroupStateIndicator conversations={project.conversations} theme={theme} />
+                    ) : null}
                     {project.conversations.length > 0 ? (
                       <AppSymbol name={collapsed ? "chevron.right" : "chevron.down"} size={12} color={theme.textTertiary} />
                     ) : null}
@@ -1459,16 +1586,39 @@ export function AgentWorkspaceScreen({
                   </Pressable>
                   {!collapsed && groups.length > 0 ? (
                     <View style={{ paddingLeft: 8, gap: 9 }}>
-                      {groups.map(({ provider, conversations }) => (
+                      {groups.map(({ provider, conversations }) => {
+                        const providerKey = providerFoldKey(project.id, provider);
+                        const providerCollapsed = collapsedProviderKeys.has(providerKey);
+                        return (
                         <View key={`${project.id}:${provider}`} style={{ gap: 4 }}>
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingTop: 2, paddingBottom: 1 }}>
+                          <Pressable
+                            onPress={() => toggleProviderCollapsed(providerKey)}
+                            style={({ pressed }) => ({
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 7,
+                              paddingTop: 2,
+                              paddingBottom: 1,
+                              borderRadius: 8,
+                              borderCurve: "continuous",
+                              backgroundColor: pressed ? "rgba(120,120,128,0.08)" : "transparent",
+                            })}
+                          >
                             <ProviderBadge provider={provider} theme={theme} />
-                            <Text style={{ color: theme.textSecondary, fontSize: 13, fontWeight: "800" }}>
+                            <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 13, fontWeight: "800" }}>
                               {PROVIDER_META[provider].label}
                             </Text>
-                          </View>
-                          {conversations.map((conversation) => {
+                            <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
+                              {conversations.length}
+                            </Text>
+                            <ConversationGroupStateIndicator conversations={conversations} theme={theme} />
+                            <AppSymbol name={providerCollapsed ? "chevron.right" : "chevron.down"} size={11} color={theme.textTertiary} />
+                          </Pressable>
+                          {!providerCollapsed ? conversations.map((conversation) => {
                             const rowKey = conversationHiddenKey(conversation.id);
+                            const rowTitle = conversationDisplayTitle(conversation);
+                            const rowSummary = conversationSummary(conversation, workspace.getTimeline(conversation.id));
+                            const showRowSummary = Boolean(rowSummary && rowSummary !== rowTitle);
                             return (
                               <Swipeable
                                 key={conversation.id}
@@ -1528,9 +1678,16 @@ export function AgentWorkspaceScreen({
                                     gap: 8,
                                   })}
                                 >
-                                  <Text style={{ flex: 1, color: theme.text, fontSize: 14 }} numberOfLines={1}>
-                                    {conversationSummary(conversation, workspace.getTimeline(conversation.id))}
-                                  </Text>
+                                  <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                                    <Text style={{ color: theme.text, fontSize: 14, fontWeight: "700" }} numberOfLines={1}>
+                                      {rowTitle}
+                                    </Text>
+                                    {showRowSummary ? (
+                                      <Text style={{ color: theme.textTertiary, fontSize: 11, lineHeight: 15 }} numberOfLines={1}>
+                                        {rowSummary}
+                                      </Text>
+                                    ) : null}
+                                  </View>
                                   <ConversationStateIndicator conversation={conversation} theme={theme} />
                                   <Text style={{ color: theme.textTertiary, fontSize: 12, minWidth: 42, textAlign: "right" }}>
                                     {relativeTime(conversation.lastActivityAt)}
@@ -1538,9 +1695,10 @@ export function AgentWorkspaceScreen({
                                 </Pressable>
                               </Swipeable>
                             );
-                          })}
+                          }) : null}
                         </View>
-                      ))}
+                      );
+                      })}
                     </View>
                   ) : !collapsed ? (
                     <Pressable
@@ -1561,8 +1719,10 @@ export function AgentWorkspaceScreen({
               );
                   })}
                 </View>
+                ) : null}
               </View>
-            ))}
+              );
+            })}
           </View>
         </View>
         {workspace.archivedConversations.length > 0 ? (
@@ -1588,9 +1748,13 @@ export function AgentWorkspaceScreen({
               </Text>
               <AppSymbol name={archivedExpanded ? "chevron.down" : "chevron.right"} size={12} color={theme.textTertiary} />
             </Pressable>
+            {archivedExpanded ? (
             <View style={{ paddingLeft: 28, gap: 6 }}>
               {archivedItems.map((conversation) => {
                 const target = targets.find((item) => item.hostDeviceId === (conversation.hostDeviceId ?? conversation.sessionId));
+                const rowTitle = conversationDisplayTitle(conversation);
+                const rowSummary = conversationSummary(conversation, workspace.getTimeline(conversation.id));
+                const showRowSummary = Boolean(rowSummary && rowSummary !== rowTitle);
                 return (
                   <Pressable
                     key={conversation.id}
@@ -1614,9 +1778,14 @@ export function AgentWorkspaceScreen({
                   >
                     <ProviderBadge provider={conversation.provider} theme={theme} />
                     <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                      <Text style={{ color: theme.textSecondary, fontSize: 14 }} numberOfLines={1}>
-                        {conversationSummary(conversation, workspace.getTimeline(conversation.id))}
+                      <Text style={{ color: theme.textSecondary, fontSize: 14, fontWeight: "700" }} numberOfLines={1}>
+                        {rowTitle}
                       </Text>
+                      {showRowSummary ? (
+                        <Text style={{ color: theme.textTertiary, fontSize: 11, lineHeight: 15 }} numberOfLines={1}>
+                          {rowSummary}
+                        </Text>
+                      ) : null}
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                         <Text style={{ color: theme.textTertiary, fontSize: 11 }} numberOfLines={1}>
                           {target ? shortPath(conversation.cwd) : "设备离线"}
@@ -1659,24 +1828,8 @@ export function AgentWorkspaceScreen({
                   </Pressable>
                 );
               })}
-              {!archivedExpanded && workspace.archivedConversations.length > archivedItems.length ? (
-                <Pressable
-                  onPress={() => setArchivedExpanded(true)}
-                  style={({ pressed }) => ({
-                    alignSelf: "flex-start",
-                    borderRadius: 999,
-                    borderCurve: "continuous",
-                    backgroundColor: pressed ? theme.bgInput : "transparent",
-                    paddingVertical: 5,
-                    paddingHorizontal: 2,
-                  })}
-                >
-                  <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "800" }}>
-                    查看全部 {workspace.archivedConversations.length} 条
-                  </Text>
-                </Pressable>
-              ) : null}
             </View>
+            ) : null}
             </View>
         ) : null}
       </ScrollView>

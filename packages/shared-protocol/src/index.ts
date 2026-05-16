@@ -372,6 +372,7 @@ export const agentReasoningEffortSchema = z.enum([
   "high",
   "xhigh",
 ]);
+export const agentServiceTierSchema = z.enum(["standard", "fast"]);
 export const agentPermissionModeSchema = z.enum([
   "read_only",
   "workspace_write",
@@ -419,6 +420,11 @@ export const agentPermissionSchema = z.object({
 export const agentModelOptionSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
+  reasoningEfforts: z.array(agentReasoningEffortSchema).optional(),
+  defaultReasoningEffort: agentReasoningEffortSchema.optional(),
+  speedTiers: z.array(agentServiceTierSchema).optional(),
+  supportsImages: z.boolean().optional(),
+  description: z.string().optional(),
 });
 
 export const agentCommandDescriptorSchema = z.object({
@@ -457,6 +463,8 @@ export const agentProviderCapabilitySchema = z.object({
   models: z.array(agentModelOptionSchema).optional(),
   defaultModel: z.string().min(1).optional(),
   reasoningEfforts: z.array(agentReasoningEffortSchema).optional(),
+  speedTiers: z.array(agentServiceTierSchema).optional(),
+  defaultServiceTier: agentServiceTierSchema.optional(),
   permissionModes: z.array(agentPermissionModeSchema).optional(),
   commands: z.array(agentCommandDescriptorSchema).optional(),
   modes: z.array(agentModeDescriptorSchema).optional(),
@@ -613,6 +621,7 @@ export const agentV2ConversationSchema = z.object({
   title: z.string().optional(),
   model: z.string().optional(),
   reasoningEffort: agentReasoningEffortSchema.optional(),
+  serviceTier: agentServiceTierSchema.optional(),
   permissionMode: agentPermissionModeSchema.optional(),
   collaborationMode: agentCollaborationModeSchema.optional(),
   status: agentV2StatusSchema.default("idle"),
@@ -640,6 +649,7 @@ export const agentV2ConversationOpenPayloadSchema = z.object({
   provider: agentProviderSchema.optional(),
   model: z.string().optional(),
   reasoningEffort: agentReasoningEffortSchema.optional(),
+  serviceTier: agentServiceTierSchema.optional(),
   permissionMode: agentPermissionModeSchema.optional(),
   collaborationMode: agentCollaborationModeSchema.optional(),
   title: z.string().optional(),
@@ -669,6 +679,7 @@ export const agentV2PromptPayloadSchema = z.object({
   contentBlocks: z.array(agentContentBlockSchema).min(1),
   model: z.string().min(1).nullable().optional(),
   reasoningEffort: agentReasoningEffortSchema.nullable().optional(),
+  serviceTier: agentServiceTierSchema.nullable().optional(),
   permissionMode: agentPermissionModeSchema.nullable().optional(),
   collaborationMode: agentCollaborationModeSchema.nullable().optional(),
 });

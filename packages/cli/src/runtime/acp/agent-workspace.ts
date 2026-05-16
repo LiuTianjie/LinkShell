@@ -163,6 +163,7 @@ interface AgentConversation {
   title?: string;
   model?: string;
   reasoningEffort?: string;
+  serviceTier?: string;
   permissionMode?: AgentPermissionMode;
   collaborationMode?: AgentCollaborationMode;
   status: AgentStatus;
@@ -868,12 +869,19 @@ function providerLabel(provider: AgentProvider): string {
 interface AgentModelOption {
   id: string;
   label: string;
+  reasoningEfforts?: string[];
+  defaultReasoningEffort?: string;
+  speedTiers?: string[];
+  supportsImages?: boolean;
+  description?: string;
 }
 
 interface ProviderRuntimeCapabilities {
   models?: AgentModelOption[];
   defaultModel?: string;
   reasoningEfforts?: string[];
+  speedTiers?: string[];
+  defaultServiceTier?: string;
   commands?: AgentCommandDescriptor[];
   modes?: AgentModeDescriptor[];
   currentMode?: string;
@@ -881,6 +889,7 @@ interface ProviderRuntimeCapabilities {
 
 const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 const CLAUDE_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+const ALL_SERVICE_TIERS = ["standard", "fast"] as const;
 const AGENT_PERMISSION_MODES: AgentPermissionMode[] = ["read_only", "workspace_write", "full_access"];
 const COMMAND_OUTPUT_MAX_BYTES = 96 * 1024;
 const LINKSHELL_NATIVE_COMMANDS: Array<{
@@ -1338,10 +1347,14 @@ function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities
   const raw = asRecord(value);
   const modelsValue =
     Array.isArray(value) ? value :
+    Array.isArray(raw?.data) ? raw.data :
     Array.isArray(raw?.models) ? raw.models :
     Array.isArray(raw?.items) ? raw.items :
     Array.isArray(raw?.modelOptions) ? raw.modelOptions :
     [];
+  const effortSet = new Set<string>();
+  const speedTierSet = new Set<string>(["standard"]);
+  let defaultModelFromEntry: string | undefined;
   const models = modelsValue
     .map((entry, index) => {
       const model = asRecord(entry);
@@ -1351,13 +1364,40 @@ function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities
           : undefined;
       }
       const modelId = firstString(model, ["id", "model", "name", "value"]) ?? `model-${index + 1}`;
-      const label = firstString(model, ["label", "title", "displayName", "name"]) ?? modelId;
-      return { id: modelId, label };
+      const label = firstString(model, ["displayName", "label", "title", "name", "model"]) ?? modelId;
+      if (model.hidden === true) return undefined;
+      const modelEfforts = arrayFromKeys(model, ["supportedReasoningEfforts", "reasoningEfforts"])
+        .map((effort) => {
+          const rawEffort = asRecord(effort);
+          return firstString(rawEffort, ["reasoningEffort", "id", "value"]) ?? (typeof effort === "string" ? effort : undefined);
+        })
+        .filter((effort): effort is string => Boolean(effort) && ALL_REASONING_EFFORTS.includes(effort as typeof ALL_REASONING_EFFORTS[number]));
+      modelEfforts.forEach((effort) => effortSet.add(effort));
+      const defaultReasoningEffort = firstString(model, ["defaultReasoningEffort", "default_reasoning_effort"]);
+      if (defaultReasoningEffort && ALL_REASONING_EFFORTS.includes(defaultReasoningEffort as typeof ALL_REASONING_EFFORTS[number])) {
+        effortSet.add(defaultReasoningEffort);
+      }
+      const modalities = arrayFromKeys(model, ["inputModalities", "modalities"]);
+      const speedTiers = arrayFromKeys(model, ["additionalSpeedTiers", "additional_speed_tiers", "serviceTiers", "service_tiers"])
+        .map((tier) => typeof tier === "string" ? tier : firstString(asRecord(tier), ["id", "tier", "value"]))
+        .filter((tier): tier is string => Boolean(tier) && ALL_SERVICE_TIERS.includes(tier as typeof ALL_SERVICE_TIERS[number]));
+      speedTiers.forEach((tier) => speedTierSet.add(tier));
+      if (model.isDefault === true) defaultModelFromEntry = modelId;
+      return {
+        id: modelId,
+        label,
+        ...(modelEfforts.length > 0 ? { reasoningEfforts: modelEfforts } : {}),
+        ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
+        ...(speedTiers.length > 0 ? { speedTiers: ["standard", ...speedTiers.filter((tier) => tier !== "standard")] } : {}),
+        ...(modalities.length > 0 ? { supportsImages: modalities.includes("image") } : {}),
+        ...(firstString(model, ["description"]) ? { description: firstString(model, ["description"]) } : {}),
+      };
     })
     .filter((entry): entry is AgentModelOption => Boolean(entry));
   const defaultModel =
     firstString(raw, ["defaultModel", "default_model", "currentModel"]) ??
-    firstString(asRecord(raw?.defaults), ["model"]);
+    firstString(asRecord(raw?.defaults), ["model"]) ??
+    defaultModelFromEntry;
   const effortsValue =
     Array.isArray(raw?.reasoningEfforts) ? raw.reasoningEfforts :
     Array.isArray(raw?.reasoning_efforts) ? raw.reasoning_efforts :
@@ -1365,11 +1405,14 @@ function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities
     undefined;
   const reasoningEfforts = effortsValue
     ?.filter((entry): entry is string => typeof entry === "string" && ALL_REASONING_EFFORTS.includes(entry as typeof ALL_REASONING_EFFORTS[number]));
-  if (models.length === 0 && !defaultModel && !reasoningEfforts?.length) return undefined;
+  const resolvedReasoningEfforts = reasoningEfforts?.length ? reasoningEfforts : [...effortSet];
+  const resolvedSpeedTiers = [...speedTierSet];
+  if (models.length === 0 && !defaultModel && resolvedReasoningEfforts.length === 0 && resolvedSpeedTiers.length <= 1) return undefined;
   return {
-    ...(models.length > 0 ? { models: [{ id: "default", label: "默认模型" }, ...models] } : {}),
+    ...(models.length > 0 ? { models } : {}),
     ...(defaultModel ? { defaultModel } : {}),
-    ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
+    ...(resolvedReasoningEfforts.length > 0 ? { reasoningEfforts: resolvedReasoningEfforts } : {}),
+    ...(resolvedSpeedTiers.length > 0 ? { speedTiers: resolvedSpeedTiers } : {}),
   };
 }
 
@@ -1774,6 +1817,7 @@ export class AgentWorkspaceProxy {
         title: remote.title ?? existing?.title ?? titleFromCwd(cwd),
         model: remote.model ?? existing?.model,
         reasoningEffort: existing?.reasoningEffort,
+        serviceTier: existing?.serviceTier,
         permissionMode: existing?.permissionMode,
         collaborationMode: existing?.collaborationMode,
         status: remote.status ?? existing?.status ?? "idle",
@@ -1828,6 +1872,8 @@ export class AgentWorkspaceProxy {
         reasoningEfforts: supportsReasoningEffort
           ? runtimeCapabilities?.reasoningEfforts ?? (provider === "claude" ? [...CLAUDE_REASONING_EFFORTS] : [...ALL_REASONING_EFFORTS])
           : [],
+        speedTiers: provider === "codex" ? runtimeCapabilities?.speedTiers ?? ["standard"] : [],
+        defaultServiceTier: provider === "codex" ? runtimeCapabilities?.defaultServiceTier : undefined,
         permissionModes: supportsPermission ? AGENT_PERMISSION_MODES : [],
         commands,
         modes: runtimeCapabilities?.modes ?? [],
@@ -1838,6 +1884,7 @@ export class AgentWorkspaceProxy {
           plan: enabled,
           cancel: enabled,
           reasoningEffort: supportsReasoningEffort,
+          serviceTier: provider === "codex" && Boolean(runtimeCapabilities?.speedTiers?.includes("fast")),
           claudeSdk: isClaudeSdk,
           streamJsonFallback: isClaudeFallback,
         },
@@ -1874,6 +1921,7 @@ export class AgentWorkspaceProxy {
     provider?: AgentProvider;
     model?: string;
     reasoningEffort?: string;
+    serviceTier?: string;
     permissionMode?: AgentPermissionMode;
     collaborationMode?: AgentCollaborationMode;
     title?: string;
@@ -1942,6 +1990,7 @@ export class AgentWorkspaceProxy {
         title: payload.title ?? existingConversation?.title ?? titleFromCwd(cwd),
         model: payload.model ?? existingConversation?.model,
         reasoningEffort: payload.reasoningEffort ?? existingConversation?.reasoningEffort,
+        serviceTier: payload.serviceTier ?? existingConversation?.serviceTier,
         permissionMode: payload.permissionMode ?? existingConversation?.permissionMode,
         collaborationMode: payload.collaborationMode ?? existingConversation?.collaborationMode,
         status: "idle",
@@ -2046,6 +2095,7 @@ export class AgentWorkspaceProxy {
     contentBlocks: AgentContentBlock[];
     model?: string | null;
     reasoningEffort?: string | null;
+    serviceTier?: string | null;
     permissionMode?: AgentPermissionMode | null;
     collaborationMode?: AgentCollaborationMode | null;
   }): Promise<void> {
@@ -2096,6 +2146,9 @@ export class AgentWorkspaceProxy {
     if (Object.prototype.hasOwnProperty.call(payload, "reasoningEffort")) {
       conversation.reasoningEffort = payload.reasoningEffort ?? undefined;
     }
+    if (Object.prototype.hasOwnProperty.call(payload, "serviceTier")) {
+      conversation.serviceTier = payload.serviceTier ?? undefined;
+    }
     if (Object.prototype.hasOwnProperty.call(payload, "permissionMode")) {
       conversation.permissionMode = payload.permissionMode ?? undefined;
     }
@@ -2125,6 +2178,7 @@ export class AgentWorkspaceProxy {
         clientMessageId: payload.clientMessageId,
         model: conversation.model,
         reasoningEffort: conversation.reasoningEffort,
+        serviceTier: conversation.serviceTier,
         permissionMode: conversation.permissionMode,
         collaborationMode: conversation.collaborationMode,
         cwd: conversation.cwd,
@@ -2219,6 +2273,7 @@ export class AgentWorkspaceProxy {
         contentBlocks: [{ type: "text", text: rawText }],
         model: conversation.model,
         reasoningEffort: conversation.reasoningEffort,
+        serviceTier: conversation.serviceTier,
         permissionMode: conversation.permissionMode,
         collaborationMode: conversation.collaborationMode,
       });
@@ -2290,6 +2345,7 @@ export class AgentWorkspaceProxy {
           contentBlocks: [{ type: "text", text: prompt }],
           model: conversation.model,
           reasoningEffort: conversation.reasoningEffort,
+          serviceTier: conversation.serviceTier,
           permissionMode: conversation.permissionMode,
           collaborationMode: conversation.collaborationMode,
         });
@@ -3496,6 +3552,7 @@ export class AgentWorkspaceProxy {
       conversation.title = conversation.title ?? target.title;
       conversation.model = conversation.model ?? target.model;
       conversation.reasoningEffort = conversation.reasoningEffort ?? target.reasoningEffort;
+      conversation.serviceTier = conversation.serviceTier ?? target.serviceTier;
       conversation.permissionMode = conversation.permissionMode ?? target.permissionMode;
       conversation.lastMessagePreview = conversation.lastMessagePreview ?? target.lastMessagePreview;
       conversation.createdAt = Math.min(conversation.createdAt, target.createdAt);

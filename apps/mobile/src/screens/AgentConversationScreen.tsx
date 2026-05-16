@@ -18,6 +18,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
+import { LinearGradient } from "expo-linear-gradient";
 import { LegendList, type LegendListRef, type LegendListRenderItemProps } from "@legendapp/list";
 import { MenuView, type MenuAction } from "@react-native-menu/menu";
 import Markdown from "react-native-markdown-display";
@@ -32,10 +33,10 @@ import type {
   AgentCommandDescriptor,
   AgentConversationRecord,
   AgentCollaborationMode,
-  AgentProviderCapability,
   AgentFileChange,
   AgentPermissionMode,
   AgentReasoningEffort,
+  AgentServiceTier,
   AgentStructuredInput,
   AgentSubagentAction,
   AgentTimelineItem,
@@ -52,6 +53,30 @@ interface AgentConversationScreenProps {
 }
 
 type Option<T extends string> = { label: string; value?: T; image?: string };
+interface QueuedCodexPrompt {
+  id: string;
+  text: string;
+  attachments: AgentContentBlock[];
+  model?: string;
+  reasoningEffort?: AgentReasoningEffort;
+  serviceTier?: AgentServiceTier;
+  permissionMode?: AgentPermissionMode;
+  collaborationMode: AgentCollaborationMode;
+}
+
+function createQueuedPromptId(): string {
+  return `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function queuedPromptPreview(item: QueuedCodexPrompt): string {
+  const text = item.text.trim();
+  if (text) return text;
+  return item.attachments.length > 0 ? `${item.attachments.length} 张图片` : "空消息";
+}
+
+const DEFAULT_PERMISSION_ICON = "hand.raised";
+const AUTO_REVIEW_PERMISSION_ICON = "checkmark.shield";
+const FULL_ACCESS_PERMISSION_ICON = "exclamationmark.shield";
 const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
   { label: "默认强度", value: undefined },
   { label: "无", value: "none" },
@@ -63,10 +88,14 @@ const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
 ];
 
 const PERMISSION_OPTIONS: Option<AgentPermissionMode>[] = [
-  { label: "默认权限", value: undefined, image: "hand.raised.fill" },
+  { label: "默认权限", value: undefined, image: DEFAULT_PERMISSION_ICON },
   { label: "只读", value: "read_only", image: "eye.fill" },
-  { label: "自动审查", value: "workspace_write", image: "lock.shield.fill" },
-  { label: "完全访问权限", value: "full_access", image: "lock.open.fill" },
+  { label: "自动审查", value: "workspace_write", image: AUTO_REVIEW_PERMISSION_ICON },
+  { label: "完全访问权限", value: "full_access", image: FULL_ACCESS_PERMISSION_ICON },
+];
+const SPEED_OPTIONS: Option<AgentServiceTier>[] = [
+  { label: "标准", value: "standard", image: "speedometer" },
+  { label: "快速", value: "fast", image: "bolt.fill" },
 ];
 const DEFAULT_MODEL_OPTIONS: Option<string>[] = [{ label: "默认模型", value: undefined }];
 const CLAUDE_MODEL_OPTIONS: Option<string>[] = [
@@ -156,15 +185,15 @@ function toolStatusMeta(status: AgentToolCall["status"], theme: Theme) {
 
 function permissionMeta(mode: AgentPermissionMode | undefined, theme: Theme) {
   if (mode === "full_access") {
-    return { label: "完全访问权限", icon: "lock.open.fill", color: theme.warning, bg: theme.accentLight };
+    return { label: "完全访问权限", icon: FULL_ACCESS_PERMISSION_ICON, color: theme.warning, bg: theme.accentLight };
   }
   if (mode === "workspace_write") {
-    return { label: "自动审查", icon: "lock.shield.fill", color: theme.accent, bg: theme.accentLight };
+    return { label: "自动审查", icon: AUTO_REVIEW_PERMISSION_ICON, color: theme.accent, bg: theme.accentLight };
   }
   if (mode === "read_only") {
     return { label: "只读", icon: "eye.fill", color: theme.textSecondary, bg: theme.bgInput };
   }
-  return { label: "默认权限", icon: "hand.raised.fill", color: theme.textSecondary, bg: theme.bgInput };
+  return { label: "默认权限", icon: DEFAULT_PERMISSION_ICON, color: theme.textSecondary, bg: theme.bgInput };
 }
 
 function providerCapabilityFor(
@@ -188,7 +217,7 @@ function modelOptionsFor(
     }));
   }
   if (provider === "claude") return CLAUDE_MODEL_OPTIONS;
-  if (provider === "codex") return DEFAULT_MODEL_OPTIONS;
+  if (provider === "codex") return [];
   return [];
 }
 
@@ -206,7 +235,7 @@ function effortOptionsFor(
       ),
     ];
   }
-  if (!providerCapability && provider === "codex") return EFFORT_OPTIONS;
+  if (!providerCapability && provider === "codex") return [];
   if (!providerCapability && provider === "claude") {
     return [
       { label: "默认强度", value: undefined },
@@ -221,6 +250,22 @@ function effortOptionsFor(
   return [];
 }
 
+function speedOptionsFor(
+  provider: AgentConversationRecord["provider"],
+  capabilities: AgentCapabilities | undefined,
+  model: string | undefined,
+): Option<AgentServiceTier>[] {
+  if (provider !== "codex") return [];
+  const providerCapability = providerCapabilityFor(provider, capabilities);
+  const modelId = model ?? providerCapability?.defaultModel;
+  const modelCapability = modelId
+    ? providerCapability?.models?.find((item) => item.id === modelId)
+    : undefined;
+  const speedTiers = modelCapability?.speedTiers ?? providerCapability?.speedTiers;
+  if (!speedTiers?.includes("fast")) return [];
+  return SPEED_OPTIONS.filter((option) => option.value && speedTiers.includes(option.value));
+}
+
 function permissionOptionsFor(
   provider: AgentConversationRecord["provider"],
   capabilities: AgentCapabilities | undefined,
@@ -229,7 +274,7 @@ function permissionOptionsFor(
   if (providerCapability?.permissionModes) {
     if (providerCapability.permissionModes.length === 0) return [];
     return [
-      { label: "默认权限", value: undefined, image: "hand.raised.fill" },
+      { label: "默认权限", value: undefined, image: DEFAULT_PERMISSION_ICON },
       ...PERMISSION_OPTIONS.filter((option) =>
         option.value ? providerCapability.permissionModes?.includes(option.value) : false,
       ),
@@ -250,22 +295,31 @@ function formatEffort(effort?: AgentReasoningEffort): string {
   return "极低";
 }
 
-function formatRuntime(model: string | undefined, effort: AgentReasoningEffort | undefined, modelOptions: Option<string>[]): string {
-  const modelLabel = modelOptions.find((item) => item.value === model)?.label ?? model ?? "默认模型";
-  return `${modelLabel.replace(/^GPT-/, "")} · ${formatEffort(effort)}`;
-}
-
-function formatModelCapabilityStatus(providerCapability: AgentProviderCapability | undefined): string | undefined {
-  if (!providerCapability) return "能力同步中";
-  if (providerCapability.modelListError) return "模型同步失败";
-  if (providerCapability.modelsSource === "fallback") return "主机仅返回默认模型";
-  if (providerCapability.modelsSource === "unavailable") return "模型不可用";
-  return undefined;
-}
-
 function formatModel(model: string | undefined, modelOptions: Option<string>[]): string {
   const label = modelOptions.find((item) => item.value === model)?.label ?? model ?? "默认模型";
   return label.replace(/^GPT-/, "");
+}
+
+function formatModelCompact(model: string | undefined, modelOptions: Option<string>[]): string {
+  const label = formatModel(model, modelOptions)
+    .replace(/^gpt-/i, "")
+    .replace(/-codex/i, "")
+    .replace(/-mini/i, " Mini")
+    .replace(/-spark/i, " Spark");
+  return label === "默认模型" ? "模型" : label;
+}
+
+function formatRuntimeCompact(
+  model: string | undefined,
+  modelOptions: Option<string>[],
+  effort: AgentReasoningEffort | undefined,
+  tier: AgentServiceTier | undefined,
+): string {
+  return [
+    formatModelCompact(model, modelOptions),
+    effort ? formatEffort(effort) : undefined,
+    tier === "fast" ? "快" : undefined,
+  ].filter(Boolean).join(" ");
 }
 
 function permissionModeNeedsAttention(mode: AgentPermissionMode | undefined): boolean {
@@ -370,6 +424,19 @@ type FileDiffEntry = {
   removed: number;
   kind?: string;
   patch?: string;
+};
+
+type ToolActivityEntry = {
+  id: string;
+  icon: string;
+  title: string;
+  subtitle?: string;
+  category: "read" | "search" | "list" | "command" | "tool";
+  status: AgentToolCall["status"];
+  input?: string;
+  output?: string;
+  language: string;
+  createdAt?: number;
 };
 
 function displayProvider(provider: AgentConversationRecord["provider"]): string {
@@ -543,6 +610,41 @@ function fileName(path: string): string {
   return path.split("/").filter(Boolean).pop() || path || "/";
 }
 
+function normalizeFileReference(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let value = raw.trim();
+  if (!value) return undefined;
+  if (/^(https?:|mailto:|tel:|sms:|linkshell:)/i.test(value)) return undefined;
+  if (/^file:\/\//i.test(value)) value = value.replace(/^file:\/\//i, "");
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    // Keep the original value if it is not URI-encoded.
+  }
+  value = value
+    .replace(/[#?].*$/, "")
+    .replace(/:(\d+)(?::\d+)?$/, "")
+    .trim();
+  if (!value || /\s/.test(value)) return undefined;
+  if (value.startsWith("/") || value.startsWith("~") || value.startsWith("./") || value.startsWith("../")) return value;
+  if (value.includes("/") || /^[\w.-]+\.[A-Za-z0-9]+$/.test(value)) return value;
+  return undefined;
+}
+
+function resolveFileReference(path: string, cwd: string): string {
+  if (path.startsWith("/") || path.startsWith("~")) return path;
+  const base = cwd && cwd !== "~" ? cwd.replace(/\/+$/, "") : "~";
+  return `${base}/${path.replace(/^\.\//, "")}`;
+}
+
+function imageUriFromValue(value: string | undefined): string | undefined {
+  const uri = value?.trim();
+  if (!uri) return undefined;
+  if (/^(data:|https?:\/\/|file:\/\/|asset:\/\/|content:\/\/|ph:\/\/)/i.test(uri)) return uri;
+  if (uri.startsWith("/")) return `file://${uri}`;
+  return uri;
+}
+
 function formatBytes(value: number | undefined): string {
   if (typeof value !== "number") return "";
   if (value < 1024) return `${value} B`;
@@ -665,6 +767,31 @@ function firstToolString(input: Record<string, unknown> | undefined, keys: strin
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return undefined;
+}
+
+function fileEntriesFromToolInput(input: string | undefined): FileDiffEntry[] {
+  const parsed = parsedToolInput(input);
+  if (!parsed) return [];
+  const directPath = firstToolString(parsed, ["path", "file_path", "filePath", "relativePath"]);
+  if (directPath) return [{ path: directPath, added: 0, removed: 0 }];
+
+  const rawFiles = parsed.files ?? parsed.paths ?? parsed.entries;
+  if (!Array.isArray(rawFiles)) return [];
+  return rawFiles
+    .map((entry) => {
+      if (typeof entry === "string") return { path: entry, added: 0, removed: 0 };
+      if (!entry || typeof entry !== "object") return null;
+      const record = entry as Record<string, unknown>;
+      const path = firstToolString(record, ["path", "file_path", "filePath", "relativePath"]);
+      if (!path) return null;
+      return {
+        path,
+        added: typeof record.added === "number" ? record.added : 0,
+        removed: typeof record.removed === "number" ? record.removed : 0,
+        kind: typeof record.kind === "string" ? record.kind : undefined,
+      };
+    })
+    .filter((entry): entry is FileDiffEntry => Boolean(entry?.path));
 }
 
 function isFileToolName(name: string): boolean {
@@ -940,6 +1067,124 @@ function aggregateFileChangeItems(group: AgentTimelineItem[]): AgentTimelineItem
   };
 }
 
+function toolFromTimelineItem(item: AgentTimelineItem): AgentToolCall | null {
+  if (item.fileChange || item.kind === "file_change") return null;
+  if (item.commandExecution) {
+    return {
+      id: item.itemId ?? item.id,
+      name: "命令",
+      input: [
+        item.commandExecution.command,
+        item.commandExecution.cwd ? `cwd: ${item.commandExecution.cwd}` : undefined,
+      ].filter(Boolean).join("\n\n"),
+      output: item.commandExecution.output,
+      createdAt: item.createdAt,
+      status: item.commandExecution.status ?? "running",
+    };
+  }
+  if (item.type !== "tool_call" || !item.toolCall || isFileToolName(item.toolCall.name)) return null;
+  return item.toolCall;
+}
+
+function toolActivityCategory(title: string, tool: AgentToolCall): ToolActivityEntry["category"] {
+  const token = normalizedToken(tool.name);
+  if (title.includes("读取") || token.includes("read") || token.includes("cat")) return "read";
+  if (title.includes("搜索") || token.includes("grep") || token.includes("search") || token.includes("glob")) return "search";
+  if (title.includes("列出") || token.includes("list") || token.includes("ls")) return "list";
+  if (title.includes("运行") || token.includes("bash") || token.includes("shell") || token.includes("exec")) return "command";
+  return "tool";
+}
+
+function toolActivityEntryFromItem(item: AgentTimelineItem): ToolActivityEntry | null {
+  const tool = toolFromTimelineItem(item);
+  if (!tool) return null;
+  const input = tool.input?.trim();
+  const output = tool.output?.trim();
+  const isCommand = tool.name.includes("命令");
+  const commandSummary = isCommand && input ? humanizeCommand(input, tool.status === "running") : null;
+  const presentation = commandSummary ? null : humanizeToolCall(tool);
+  const title = commandSummary ? commandSummary.verb : presentation?.title ?? tool.name;
+  const subtitle = commandSummary ? commandSummary.target : (presentation?.subtitle ?? input ?? output ?? "");
+  const icon = commandSummary ? "terminal.fill" : presentation?.icon ?? "terminal.fill";
+  return {
+    id: item.itemId ?? item.id,
+    icon,
+    title,
+    subtitle,
+    category: toolActivityCategory(title, tool),
+    status: tool.status,
+    input,
+    output,
+    language: commandLanguage(tool.name),
+    createdAt: tool.createdAt ?? item.createdAt,
+  };
+}
+
+function toolActivityGroupKey(item: AgentTimelineItem): string {
+  return item.turnId || `near:${Math.floor(item.createdAt / 4000)}`;
+}
+
+function summarizeToolActivity(entries: ToolActivityEntry[]): string {
+  const fileTargets = new Set<string>();
+  let searches = 0;
+  let commands = 0;
+  let tools = 0;
+  for (const entry of entries) {
+    if ((entry.category === "read" || entry.category === "list") && entry.subtitle) {
+      fileTargets.add(entry.subtitle);
+    } else if (entry.category === "search") {
+      searches += 1;
+    } else if (entry.category === "command") {
+      commands += 1;
+    } else {
+      tools += 1;
+    }
+  }
+  const parts = [
+    fileTargets.size > 0 ? `${fileTargets.size} 个文件` : null,
+    searches > 0 ? `${searches} 次搜索` : null,
+    commands > 0 ? `${commands} 条命令` : null,
+    tools > 0 ? `${tools} 个工具` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? `已探索 ${parts.join(" ")}` : `已运行 ${entries.length} 个操作`;
+}
+
+function aggregateToolActivityItems(group: AgentTimelineItem[]): AgentTimelineItem {
+  if (group.length < 2) return group[0]!;
+  const first = group[0]!;
+  const entries = group
+    .map(toolActivityEntryFromItem)
+    .filter((entry): entry is ToolActivityEntry => Boolean(entry));
+  if (entries.length < 2) return first;
+  const hasRunning = entries.some((entry) => entry.status === "running" || entry.status === "pending");
+  const hasFailed = entries.some((entry) => entry.status === "failed");
+  const status: AgentToolCall["status"] = hasRunning ? "running" : hasFailed ? "failed" : "completed";
+  const text = summarizeToolActivity(entries);
+  return {
+    ...first,
+    id: `tool-activity-group:${group.map((item) => item.id).join("|")}`,
+    type: "tool_call",
+    kind: "tool_activity",
+    text,
+    toolCall: {
+      id: first.itemId ?? first.id,
+      name: "探索",
+      input: entries.map((entry) => [entry.title, entry.subtitle].filter(Boolean).join(" ")).join("\n"),
+      createdAt: first.createdAt,
+      status,
+    },
+    commandExecution: undefined,
+    createdAt: Math.min(...group.map((item) => item.createdAt)),
+    updatedAt: Math.max(...group.map((item) => item.updatedAt ?? item.createdAt)),
+    isStreaming: hasRunning,
+    metadata: {
+      ...(first.metadata ?? {}),
+      groupedItemIds: group.map((item) => item.id),
+      toolActivityEntries: entries,
+    },
+  };
+}
+
 function groupFileChangeItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
   const out: AgentTimelineItem[] = [];
   let pending: AgentTimelineItem[] = [];
@@ -966,8 +1211,37 @@ function groupFileChangeItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
   return out;
 }
 
+function groupToolActivityItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
+  const out: AgentTimelineItem[] = [];
+  let pending: AgentTimelineItem[] = [];
+  let pendingKey: string | undefined;
+
+  const flush = () => {
+    if (pending.length > 0) {
+      out.push(pending.length > 1 ? aggregateToolActivityItems(pending) : pending[0]!);
+    }
+    pending = [];
+    pendingKey = undefined;
+  };
+
+  for (const item of items) {
+    const entry = toolActivityEntryFromItem(item);
+    if (!entry) {
+      flush();
+      out.push(item);
+      continue;
+    }
+    const key = toolActivityGroupKey(item);
+    if (pending.length > 0 && pendingKey !== key) flush();
+    pending.push(item);
+    pendingKey = key;
+  }
+  flush();
+  return out;
+}
+
 function prepareTimelineItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
-  return groupFileChangeItems(dedupeTimelineItems(items));
+  return groupToolActivityItems(groupFileChangeItems(dedupeTimelineItems(items)));
 }
 
 function CodeBlock({
@@ -1121,12 +1395,14 @@ function MessageContent({
   theme,
   inverse = false,
   monospace = true,
+  onOpenFile,
 }: {
   blocks?: AgentContentBlock[];
   fallbackText?: string;
   theme: Theme;
   inverse?: boolean;
   monospace?: boolean;
+  onOpenFile?: (path: string) => void;
 }) {
   const normalized = blocks?.length
     ? blocks
@@ -1138,6 +1414,7 @@ function MessageContent({
     <View style={{ gap: 9 }}>
       {normalized.map((block, index) => {
         if (block.type === "image") {
+          const imageUri = imageUriFromValue(block.data);
           return (
             <View
               key={`image-${index}`}
@@ -1150,11 +1427,12 @@ function MessageContent({
                 backgroundColor: inverse ? "rgba(255,255,255,0.12)" : theme.bgInput,
               }}
             >
-              {block.data ? (
+              {imageUri ? (
                 <Image
-                  source={{ uri: block.data }}
+                  source={{ uri: imageUri }}
                   contentFit="cover"
-                  style={{ width: 220, maxWidth: "100%", aspectRatio: 4 / 3 }}
+                  transition={120}
+                  style={{ width: 260, maxWidth: "100%", aspectRatio: 4 / 3 }}
                 />
               ) : (
                 <View style={{ width: 220, maxWidth: "100%", aspectRatio: 4 / 3, alignItems: "center", justifyContent: "center", gap: 6 }}>
@@ -1169,7 +1447,14 @@ function MessageContent({
         }
 
         return block.text ? (
-          <MarkdownContent key={`text-${index}`} text={block.text} theme={theme} inverse={inverse} monospace={monospace} />
+          <MarkdownContent
+            key={`text-${index}`}
+            text={block.text}
+            theme={theme}
+            inverse={inverse}
+            monospace={monospace}
+            onOpenFile={onOpenFile}
+          />
         ) : null;
       })}
     </View>
@@ -1197,6 +1482,7 @@ function UserMessageContent({
     <View style={{ gap: 8 }}>
       {normalized.map((block, index) => {
         if (block.type === "image") {
+          const imageUri = imageUriFromValue(block.data);
           return (
             <View
               key={`image-${index}`}
@@ -1209,11 +1495,12 @@ function UserMessageContent({
                 backgroundColor: inverse ? "rgba(255,255,255,0.14)" : theme.bgInput,
               }}
             >
-              {block.data ? (
+              {imageUri ? (
                 <Image
-                  source={{ uri: block.data }}
+                  source={{ uri: imageUri }}
                   contentFit="cover"
-                  style={{ width: 220, maxWidth: "100%", aspectRatio: 4 / 3 }}
+                  transition={120}
+                  style={{ width: 260, maxWidth: "100%", aspectRatio: 4 / 3 }}
                 />
               ) : (
                 <View style={{ width: 220, maxWidth: "100%", aspectRatio: 4 / 3, alignItems: "center", justifyContent: "center", gap: 6 }}>
@@ -1251,11 +1538,13 @@ function MarkdownContent({
   theme,
   inverse = false,
   monospace = true,
+  onOpenFile,
 }: {
   text: string;
   theme: Theme;
   inverse?: boolean;
   monospace?: boolean;
+  onOpenFile?: (path: string) => void;
 }) {
   const color = inverse ? "#fff" : theme.text;
   const secondaryColor = inverse ? "rgba(255,255,255,0.82)" : theme.textSecondary;
@@ -1385,6 +1674,33 @@ function MarkdownContent({
     },
   }), [color, inverse, monospace, secondaryColor, theme]);
   const rules = useMemo(() => ({
+    image: (node: any) => {
+      const source = imageUriFromValue(
+        node.attributes?.src ?? node.attrs?.src ?? node.src ?? node.content,
+      );
+      if (!source) return null;
+      return (
+        <View
+          key={node.key}
+          style={{
+            marginBottom: 8,
+            borderRadius: 12,
+            borderCurve: "continuous",
+            overflow: "hidden",
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: inverse ? "rgba(255,255,255,0.28)" : theme.separator,
+            backgroundColor: inverse ? "rgba(255,255,255,0.12)" : theme.bgInput,
+          }}
+        >
+          <Image
+            source={{ uri: source }}
+            contentFit="cover"
+            transition={120}
+            style={{ width: 260, maxWidth: "100%", aspectRatio: 4 / 3 }}
+          />
+        </View>
+      );
+    },
     fence: (node: any) => (
       <CodeBlock
         key={node.key}
@@ -1401,7 +1717,7 @@ function MarkdownContent({
         theme={theme}
       />
     ),
-  }), [theme]);
+  }), [inverse, theme]);
   return (
     <View style={{ width: "100%" }}>
       <Markdown
@@ -1409,6 +1725,11 @@ function MarkdownContent({
         style={markdownStyle}
         rules={rules}
         onLinkPress={(url) => {
+          const filePath = normalizeFileReference(url);
+          if (filePath && onOpenFile) {
+            onOpenFile(filePath);
+            return false;
+          }
           if (!/^https?:\/\//i.test(url)) return false;
           Linking.openURL(url).catch(() => {});
           return false;
@@ -1424,10 +1745,12 @@ const FileChangeCard = memo(function FileChangeCard({
   tool,
   theme,
   fileChange,
+  onOpenFile,
 }: {
   tool: AgentToolCall;
   theme: Theme;
   fileChange?: AgentFileChange;
+  onOpenFile?: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [showDetails, setShowDetails] = useState(false);
@@ -1438,6 +1761,7 @@ const FileChangeCard = memo(function FileChangeCard({
   const diffLineCount = patchText ? patchText.split("\n").length : 0;
   const structuredEntries = fileChange?.entries?.filter((entry) => entry.path?.trim()) ?? [];
   const patchChunks = useMemo(() => splitPatchIntoFileChunks(patchText), [patchText]);
+  const inputEntries = useMemo(() => fileEntriesFromToolInput(input), [input]);
   const entries = useMemo(() => {
     if (structuredEntries.length > 0) {
       return structuredEntries.map((entry) => ({
@@ -1448,11 +1772,12 @@ const FileChangeCard = memo(function FileChangeCard({
         patch: patchChunks.get(entry.path) ?? patchChunks.get(shortPath(entry.path)),
       }));
     }
+    if (inputEntries.length > 0) return inputEntries;
     return patchText ? diffEntries(patchText, input).map((entry) => ({
       ...entry,
       patch: patchChunks.get(entry.path) ?? patchChunks.get(shortPath(entry.path)),
     })) : diffEntries("", input);
-  }, [input, patchChunks, patchText, structuredEntries]);
+  }, [input, inputEntries, patchChunks, patchText, structuredEntries]);
   const stats = useMemo(() => {
     if (structuredEntries.length > 0) {
       return {
@@ -1515,8 +1840,10 @@ const FileChangeCard = memo(function FileChangeCard({
       {entries.length > 0 && expanded ? (
         <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: subtleDivider(theme) }}>
           {entries.slice(0, expanded ? entries.length : 4).map((entry, index) => (
-            <View
+            <Pressable
               key={`${entry.path}-${index}`}
+              disabled={!onOpenFile}
+              onPress={() => onOpenFile?.(entry.path)}
               style={{
                 minHeight: 38,
                 paddingHorizontal: 12,
@@ -1530,11 +1857,12 @@ const FileChangeCard = memo(function FileChangeCard({
             >
               <Text
                 selectable
-                style={{ flex: 1, color: theme.text, fontSize: 13 }}
+                style={{ flex: 1, color: onOpenFile ? theme.accent : theme.text, fontSize: 13, fontWeight: onOpenFile ? "700" : "400" }}
                 numberOfLines={1}
               >
                 {shortPath(entry.path)}
               </Text>
+              {onOpenFile ? <AppSymbol name="doc.text.magnifyingglass" size={13} color={theme.textTertiary} /> : null}
               {entry.kind ? (
                 <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
                   {entryKindLabel(entry.kind)}
@@ -1547,7 +1875,7 @@ const FileChangeCard = memo(function FileChangeCard({
                   <Text style={{ color: theme.error }}>-{entry.removed}</Text>
                 </Text>
               ) : null}
-            </View>
+            </Pressable>
           ))}
           {!expanded && entries.length > 4 ? (
             <Text style={{ paddingHorizontal: 12, paddingBottom: 9, color: theme.textTertiary, fontSize: 12 }}>
@@ -1609,9 +1937,17 @@ const FileChangeCard = memo(function FileChangeCard({
   );
 });
 
-const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; theme: Theme }) {
+const ToolCard = memo(function ToolCard({
+  tool,
+  theme,
+  onOpenFile,
+}: {
+  tool: AgentToolCall;
+  theme: Theme;
+  onOpenFile?: (path: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
-  if (isFileToolName(tool.name)) return <FileChangeCard tool={tool} theme={theme} />;
+  if (isFileToolName(tool.name)) return <FileChangeCard tool={tool} theme={theme} onOpenFile={onOpenFile} />;
   const input = tool.input?.trim();
   const output = tool.output?.trim();
   const meta = toolStatusMeta(tool.status, theme);
@@ -1718,6 +2054,175 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
     </View>
   );
 });
+
+function toolActivityEntriesFromTimelineItem(item: AgentTimelineItem): ToolActivityEntry[] {
+  const raw = item.metadata?.toolActivityEntries;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry): entry is ToolActivityEntry => {
+    if (!entry || typeof entry !== "object") return false;
+    const record = entry as Partial<ToolActivityEntry>;
+    return typeof record.id === "string" &&
+      typeof record.title === "string" &&
+      typeof record.status === "string" &&
+      typeof record.language === "string";
+  });
+}
+
+function ToolActivityEntryRow({
+  entry,
+  theme,
+}: {
+  entry: ToolActivityEntry;
+  theme: Theme;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const canExpand = Boolean(entry.input || entry.output);
+  const meta = toolStatusMeta(entry.status, theme);
+  return (
+    <View>
+      <Pressable
+        disabled={!canExpand}
+        onPress={() => setExpanded((value) => !value)}
+        style={({ pressed }) => ({
+          minHeight: 40,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 9,
+          backgroundColor: pressed ? timelinePressedSurface(theme) : "transparent",
+        })}
+      >
+        <View
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 7,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: conversationInset(theme),
+          }}
+        >
+          <AppSymbol name={entry.icon} size={12} color={theme.textTertiary} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
+            {entry.title}
+          </Text>
+          {entry.subtitle ? (
+            <Text style={{ color: remodexMuted(theme), fontSize: 11, lineHeight: 15 }} numberOfLines={1}>
+              {entry.subtitle}
+            </Text>
+          ) : null}
+        </View>
+        {meta ? (
+          <Text style={{ color: entry.status === "failed" ? theme.error : theme.textTertiary, fontSize: 11, fontWeight: "800" }} numberOfLines={1}>
+            {meta.label}
+          </Text>
+        ) : null}
+        {canExpand ? <AppSymbol name={expanded ? "chevron.down" : "chevron.right"} size={10} color={theme.textTertiary} /> : null}
+      </Pressable>
+      {expanded ? (
+        <View style={{ paddingHorizontal: 10, paddingBottom: 10, gap: 8 }}>
+          {entry.input ? <CodeBlock label={`输入 · ${entry.language}`} code={entry.input} theme={theme} maxLines={16} /> : null}
+          {entry.output ? <CodeBlock label={`输出 · ${entry.language}`} code={entry.output} theme={theme} maxLines={18} /> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function ToolActivityGroupCard({
+  item,
+  theme,
+}: {
+  item: AgentTimelineItem;
+  theme: Theme;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const entries = toolActivityEntriesFromTimelineItem(item);
+  const meta = toolStatusMeta(item.toolCall?.status ?? "completed", theme);
+  return (
+    <View
+      style={{
+        alignSelf: "stretch",
+        borderLeftWidth: StyleSheet.hairlineWidth,
+        borderLeftColor: subtleDivider(theme),
+        marginLeft: 3,
+        paddingLeft: 10,
+      }}
+    >
+      <Pressable
+        onPress={() => setExpanded((value) => !value)}
+        style={({ pressed }) => ({
+          minHeight: 42,
+          borderRadius: 9,
+          borderCurve: "continuous",
+          paddingHorizontal: 6,
+          paddingVertical: 7,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 9,
+          backgroundColor: pressed ? timelinePressedSurface(theme) : "transparent",
+        })}
+      >
+        <View
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 7,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: conversationInset(theme),
+          }}
+        >
+          <AppSymbol name="terminal.fill" size={12} color={theme.textTertiary} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text style={{ color: remodexMuted(theme), fontSize: 13, fontWeight: "800" }} numberOfLines={1}>
+            {item.text || summarizeToolActivity(entries)}
+          </Text>
+          <Text style={{ color: theme.textTertiary, fontSize: 11, lineHeight: 15 }} numberOfLines={1}>
+            {entries.slice(0, 3).map((entry) => entry.subtitle || entry.title).filter(Boolean).join(" · ")}
+          </Text>
+        </View>
+        {meta ? (
+          <Text style={{ color: item.toolCall?.status === "failed" ? theme.error : theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
+            {meta.label}
+          </Text>
+        ) : null}
+        <AppSymbol name={expanded ? "chevron.down" : "chevron.right"} size={11} color={theme.textTertiary} />
+      </Pressable>
+      {expanded ? (
+        <View
+          style={{
+            marginTop: 4,
+            marginRight: 2,
+            marginBottom: 6,
+            borderRadius: 12,
+            borderCurve: "continuous",
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: subtleDivider(theme),
+            backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.72)" : "rgba(255,255,255,0.035)",
+            overflow: "hidden",
+          }}
+        >
+          {entries.map((entry, index) => (
+            <View
+              key={`${entry.id}-${index}`}
+              style={{
+                borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
+                borderTopColor: subtleDivider(theme),
+              }}
+            >
+              <ToolActivityEntryRow entry={entry} theme={theme} />
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 function SystemActivityCard({
   icon,
@@ -2030,10 +2535,12 @@ function PermissionRequestCard({
   item,
   theme,
   onPermission,
+  onOpenFile,
 }: {
   item: AgentTimelineItem;
   theme: Theme;
   onPermission: (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => void;
+  onOpenFile?: (path: string) => void;
 }) {
   const outcome = item.metadata?.permissionOutcome;
   const permissionPending = item.metadata?.permissionPending === true;
@@ -2118,7 +2625,7 @@ function PermissionRequestCard({
       {item.permission!.context || item.permission!.toolInput || permissionError ? (
         <View style={{ padding: 12, gap: 9 }}>
           {item.permission!.context ? (
-            <MarkdownContent text={item.permission!.context} theme={theme} />
+            <MarkdownContent text={item.permission!.context} theme={theme} onOpenFile={onOpenFile} />
           ) : null}
           {item.permission!.toolInput ? (
             <CodeBlock label="请求内容" code={item.permission!.toolInput} theme={theme} maxLines={8} />
@@ -2301,10 +2808,12 @@ function AssistantMessage({
   item,
   text,
   theme,
+  onOpenFile,
 }: {
   item: AgentTimelineItem;
   text: string;
   theme: Theme;
+  onOpenFile?: (path: string) => void;
 }) {
   const hasBody = Boolean(text || item.content?.length);
   return (
@@ -2335,7 +2844,21 @@ function AssistantMessage({
             paddingLeft: 11,
           }}
         >
-          <MessageContent blocks={item.content} fallbackText={text} theme={theme} monospace />
+          {item.isStreaming && !item.content?.some((block) => block.type === "image") ? (
+            <Text
+              selectable
+              style={{
+                color: theme.text,
+                fontFamily: MONO_FONT,
+                fontSize: 13,
+                lineHeight: 20,
+              }}
+            >
+              {text}
+            </Text>
+          ) : (
+            <MessageContent blocks={item.content} fallbackText={text} theme={theme} monospace onOpenFile={onOpenFile} />
+          )}
         </View>
       ) : null}
       {!hasBody && item.isStreaming ? <StreamingPill theme={theme} /> : null}
@@ -2356,11 +2879,13 @@ function TimelineItemView({
   theme,
   onPermission,
   onStructuredInput,
+  onOpenFile,
 }: {
   item: AgentTimelineItem;
   theme: Theme;
   onPermission: (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => void;
   onStructuredInput: (requestId: string, answers: Record<string, string[]>) => void;
+  onOpenFile?: (path: string) => void;
 }) {
   if (item.kind === "subagent_action" && item.subagent) {
     return (
@@ -2396,6 +2921,17 @@ function TimelineItemView({
         running={item.isStreaming}
       />
     );
+  }
+
+  if (item.kind === "tool_activity") {
+    const entries = toolActivityEntriesFromTimelineItem(item);
+    if (entries.length > 0) {
+      return (
+        <AgentTimelineBlock>
+          <ToolActivityGroupCard item={item} theme={theme} />
+        </AgentTimelineBlock>
+      );
+    }
   }
 
   if (item.kind === "review" || item.kind === "context_compaction" || item.kind === "tool_activity") {
@@ -2441,7 +2977,7 @@ function TimelineItemView({
       ) : null;
     }
     if (!isUser) {
-      return <AssistantMessage item={item} text={text} theme={theme} />;
+      return <AssistantMessage item={item} text={text} theme={theme} onOpenFile={onOpenFile} />;
     }
     return (
       <View
@@ -2471,7 +3007,7 @@ function TimelineItemView({
   if (item.type === "tool_call" && item.toolCall && !item.commandExecution && !item.fileChange) {
     return (
       <AgentTimelineBlock>
-        <ToolCard tool={item.toolCall} theme={theme} />
+        <ToolCard tool={item.toolCall} theme={theme} onOpenFile={onOpenFile} />
       </AgentTimelineBlock>
     );
   }
@@ -2492,6 +3028,7 @@ function TimelineItemView({
             status: item.commandExecution.status ?? "running",
           }}
           theme={theme}
+          onOpenFile={onOpenFile}
         />
       </AgentTimelineBlock>
     );
@@ -2500,7 +3037,7 @@ function TimelineItemView({
   if (item.fileChange) {
     const summary = item.fileChange.entries
       .map((entry) => [entry.kind, entry.path].filter(Boolean).join(" ") || entry.path)
-      .join("\n");
+      .join("\n") || item.fileChange.summary;
     return (
       <AgentTimelineBlock>
         <FileChangeCard
@@ -2514,6 +3051,7 @@ function TimelineItemView({
           }}
           theme={theme}
           fileChange={item.fileChange}
+          onOpenFile={onOpenFile}
         />
       </AgentTimelineBlock>
     );
@@ -2544,7 +3082,7 @@ function TimelineItemView({
   if (item.type === "permission" && item.permission) {
     return (
       <AgentTimelineBlock>
-        <PermissionRequestCard item={item} theme={theme} onPermission={onPermission} />
+        <PermissionRequestCard item={item} theme={theme} onPermission={onPermission} onOpenFile={onOpenFile} />
       </AgentTimelineBlock>
     );
   }
@@ -2609,6 +3147,7 @@ function FilePreviewDrawer({
   theme,
   topInset,
   bottomInset,
+  initialFilePath,
   onClose,
   onInsertReference,
 }: {
@@ -2619,6 +3158,7 @@ function FilePreviewDrawer({
   theme: Theme;
   topInset: number;
   bottomInset: number;
+  initialFilePath?: string | null;
   onClose: () => void;
   onInsertReference?: (path: string) => void;
 }) {
@@ -2650,28 +3190,13 @@ function FilePreviewDrawer({
     setBrowseLoading(false);
   }, [conversationId, workspace]);
 
-  useEffect(() => {
-    if (!visible) return;
-    loadDirectory(cwd).catch(() => {
-      setBrowseLoading(false);
-      setBrowseError("读取目录失败。");
-    });
-  }, [cwd, loadDirectory, visible]);
-
-  const openEntry = useCallback((entry: AgentFileEntry) => {
-    if (entry.isDirectory) {
-      loadDirectory(entry.path).catch(() => {
-        setBrowseLoading(false);
-        setBrowseError("读取目录失败。");
-      });
-      return;
-    }
-    setSelectedPath(entry.path);
+  const openFilePath = useCallback((path: string) => {
+    setSelectedPath(path);
     setPreviewLoading(true);
     setPreview(null);
     const readSeq = readSeqRef.current + 1;
     readSeqRef.current = readSeq;
-    workspace.readFile(conversationId, entry.path, FILE_PREVIEW_MAX_BYTES)
+    workspace.readFile(conversationId, path, FILE_PREVIEW_MAX_BYTES)
       .then((result) => {
         if (readSeqRef.current !== readSeq) return;
         setPreview(result);
@@ -2679,7 +3204,7 @@ function FilePreviewDrawer({
       .catch((error) => {
         if (readSeqRef.current !== readSeq) return;
         setPreview({
-          path: entry.path,
+          path,
           content: "",
           encoding: "utf8",
           truncated: false,
@@ -2689,7 +3214,28 @@ function FilePreviewDrawer({
       .finally(() => {
         if (readSeqRef.current === readSeq) setPreviewLoading(false);
       });
-  }, [conversationId, loadDirectory, workspace]);
+  }, [conversationId, workspace]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const target = initialFilePath ? resolveFileReference(initialFilePath, cwd) : undefined;
+    loadDirectory(target ? parentPath(target) : cwd).catch(() => {
+      setBrowseLoading(false);
+      setBrowseError("读取目录失败。");
+    });
+    if (target) openFilePath(target);
+  }, [cwd, initialFilePath, loadDirectory, openFilePath, visible]);
+
+  const openEntry = useCallback((entry: AgentFileEntry) => {
+    if (entry.isDirectory) {
+      loadDirectory(entry.path).catch(() => {
+        setBrowseLoading(false);
+        setBrowseError("读取目录失败。");
+      });
+      return;
+    }
+    openFilePath(entry.path);
+  }, [loadDirectory, openFilePath]);
 
   const copyPreview = useCallback(() => {
     if (!preview?.content) return;
@@ -2969,18 +3515,25 @@ export function AgentConversationScreen({
   const conversation = workspace.getConversation(conversationId);
   const timeline = workspace.getTimeline(conversationId);
   const visibleTimeline = useMemo(() => prepareTimelineItems(timeline), [timeline]);
+  const visibleTimelineRef = useRef<AgentTimelineItem[]>(visibleTimeline);
+  visibleTimelineRef.current = visibleTimeline;
   const timelineRef = useRef<LegendListRef>(null);
   const timelineNearBottomRef = useRef(true);
+  const runtimeCapabilityRequestRef = useRef<string | null>(null);
   const [isTimelineNearBottom, setIsTimelineNearBottom] = useState(true);
   const [hasNewOutput, setHasNewOutput] = useState(false);
   const [text, setText] = useState("");
   const [model, setModel] = useState<string | undefined>(conversation?.model);
   const [effort, setEffort] = useState<AgentReasoningEffort | undefined>(conversation?.reasoningEffort);
+  const [serviceTier, setServiceTier] = useState<AgentServiceTier | undefined>(conversation?.serviceTier);
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode | undefined>(
     conversation?.permissionMode,
   );
   const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
+  const [queuedCodexPrompts, setQueuedCodexPrompts] = useState<QueuedCodexPrompt[]>([]);
+  const queuedAutoSendInFlightRef = useRef(false);
   const [fileDrawerOpen, setFileDrawerOpen] = useState(false);
+  const [fileDrawerInitialPath, setFileDrawerInitialPath] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const capabilities = useMemo(() => {
     if (!conversation) return undefined;
@@ -2988,7 +3541,6 @@ export function AgentConversationScreen({
       workspace.capabilitiesBySessionId.get(conversation.hostDeviceId);
   }, [conversation, workspace.capabilitiesBySessionId]);
   const providerCapability = conversation ? providerCapabilityFor(conversation.provider, capabilities) : undefined;
-  const modelCapabilityStatus = formatModelCapabilityStatus(providerCapability);
   const providerSupportsImageInput = conversation?.provider === "claude" || conversation?.provider === "codex";
   const supportsImages = Boolean(
     providerSupportsImageInput ||
@@ -3003,8 +3555,16 @@ export function AgentConversationScreen({
     : conversation?.syncStatus === "syncing" && !running
     ? "同步中"
     : undefined;
+  const topFadeColors: [string, string, string, string] = theme.mode === "light"
+    ? ["#fbfbfb", "rgba(251,251,251,0.92)", "rgba(251,251,251,0.52)", "rgba(251,251,251,0)"]
+    : [theme.bg, "rgba(19,19,20,0.92)", "rgba(19,19,20,0.52)", "rgba(19,19,20,0)"];
   const permission = permissionMeta(permissionMode, theme);
   const canSend = Boolean(text.trim() || attachments.length > 0);
+  const canGuideRunningCodex = conversation?.provider === "codex" &&
+    conversation.status === "running" &&
+    Boolean(conversation.runningTurnId);
+  const canQueueRunningCodex = conversation?.provider === "codex" && conversation.status === "running";
+  const canSubmitComposer = canSend && (!running || canQueueRunningCodex);
   const modelOpts = useMemo(
     () => modelOptionsFor(conversation?.provider ?? "codex", capabilities),
     [capabilities, conversation?.provider],
@@ -3013,6 +3573,11 @@ export function AgentConversationScreen({
     () => effortOptionsFor(conversation?.provider ?? "codex", capabilities),
     [capabilities, conversation?.provider],
   );
+  const speedOpts = useMemo(
+    () => speedOptionsFor(conversation?.provider ?? "codex", capabilities, model),
+    [capabilities, conversation?.provider, model],
+  );
+  const effectiveServiceTier = serviceTier ?? providerCapability?.defaultServiceTier ?? "standard";
   const permissionOpts = useMemo(
     () => permissionOptionsFor(conversation?.provider ?? "codex", capabilities),
     [capabilities, conversation?.provider],
@@ -3026,6 +3591,12 @@ export function AgentConversationScreen({
   );
   const commandPanelVisible = Boolean(commandToken && availableCommands.length > 0 && attachments.length === 0);
   const currentCollaborationMode = (conversation?.collaborationMode ?? providerCapability?.currentMode ?? "default") as AgentCollaborationMode;
+  const runtimeModelReady = conversation?.provider !== "codex" || modelOpts.length > 0;
+  const runtimeLabel = runtimeModelReady
+    ? formatRuntimeCompact(model, modelOpts, effort, speedOpts.length > 0 ? effectiveServiceTier : undefined)
+    : providerCapability?.modelListError
+    ? "模型失败"
+    : "同步中";
 
   useEffect(() => {
     if (commandPanelVisible) {
@@ -3034,10 +3605,28 @@ export function AgentConversationScreen({
   }, [commandPanelVisible]);
 
   useEffect(() => {
+    if (!conversation || conversation.provider !== "codex" || runtimeModelReady) return;
+    const key = `${conversation.sessionId}:${conversation.hostDeviceId}`;
+    if (runtimeCapabilityRequestRef.current === key) return;
+    runtimeCapabilityRequestRef.current = key;
+    workspace.requestCapabilities(conversation.sessionId);
+  }, [conversation, runtimeModelReady, workspace]);
+
+  useEffect(() => {
     setModel(conversation?.model);
     setEffort(conversation?.reasoningEffort);
+    setServiceTier(conversation?.serviceTier);
     setPermissionMode(conversation?.permissionMode);
-  }, [conversation?.id, conversation?.model, conversation?.permissionMode, conversation?.reasoningEffort]);
+  }, [conversation?.id, conversation?.model, conversation?.permissionMode, conversation?.reasoningEffort, conversation?.serviceTier]);
+
+  useEffect(() => {
+    if (model && modelOpts.length > 0 && !modelOpts.some((option) => option.value === model)) {
+      setModel(undefined);
+      if (conversation) {
+        workspace.updateConversationSettings(conversation.id, { model: undefined }).catch(() => {});
+      }
+    }
+  }, [conversation, model, modelOpts, workspace]);
 
   useEffect(() => {
     if (effort && !effortOpts.some((option) => option.value === effort)) {
@@ -3047,6 +3636,15 @@ export function AgentConversationScreen({
       }
     }
   }, [conversation, effort, effortOpts, workspace]);
+
+  useEffect(() => {
+    if (serviceTier && speedOpts.length > 0 && !speedOpts.some((option) => option.value === serviceTier)) {
+      setServiceTier(undefined);
+      if (conversation) {
+        workspace.updateConversationSettings(conversation.id, { serviceTier: undefined }).catch(() => {});
+      }
+    }
+  }, [conversation, serviceTier, speedOpts, workspace]);
 
   useEffect(() => {
     if (permissionMode && !permissionOpts.some((option) => option.value === permissionMode)) {
@@ -3077,53 +3675,70 @@ export function AgentConversationScreen({
       })),
     [effortOpts, effort],
   );
+  const speedMenuActions = useMemo(
+    () =>
+      speedOpts.map((option) => ({
+        id: `speed:${option.value ?? DEFAULT_OPTION_ID}`,
+        title: option.label,
+        image: option.image,
+        state: option.value === effectiveServiceTier ? "on" as const : "off" as const,
+      })),
+    [effectiveServiceTier, speedOpts],
+  );
   const runtimeMenuActions = useMemo<MenuAction[]>(() => [
-    ...(modelMenuActions.length > 0
+    ...(runtimeModelReady && modelMenuActions.length > 0
       ? [{
           title: "模型",
-          image: "square.stack.3d.up",
+          image: "cpu",
           subactions: modelMenuActions,
         }]
       : []),
-    ...(effortMenuActions.length > 0
+    ...(runtimeModelReady && effortMenuActions.length > 0
       ? [{
-          title: "思考强度",
+          title: "智能",
           image: "brain.head.profile",
           subactions: effortMenuActions,
         }]
       : []),
-    ...(permissionOpts.length > 0
+    ...(runtimeModelReady && speedMenuActions.length > 0
       ? [{
-          title: "权限",
-          image: permission.icon,
-          subactions: menuActions(permissionOpts, permissionMode),
+          title: "速度",
+          image: "speedometer",
+          subactions: speedMenuActions,
         }]
       : []),
-  ], [effortMenuActions, modelMenuActions, permission.icon, permissionMode, permissionOpts]);
+  ], [effortMenuActions, modelMenuActions, runtimeModelReady, speedMenuActions]);
+  const permissionMenuActions = useMemo(
+    () => menuActions(permissionOpts, permissionMode),
+    [permissionMode, permissionOpts],
+  );
   const timelineAutoScrollKey = useMemo(
-    () =>
-      visibleTimeline
-        .map((item) => {
-          const tool = item.toolCall;
-          return [
-            item.id,
-            item.updatedAt ?? item.createdAt,
-            item.text?.length ?? 0,
-            tool?.output?.length ?? 0,
-            item.isStreaming ? 1 : 0,
-          ].join(":");
-        })
-        .join("|"),
+    () => {
+      const item = visibleTimeline[visibleTimeline.length - 1];
+      if (!item) return "empty";
+      const tool = item.toolCall;
+      return [
+        item.id,
+        item.updatedAt ?? item.createdAt,
+        item.text?.length ?? 0,
+        item.content?.length ?? 0,
+        tool?.output?.length ?? 0,
+        item.isStreaming ? 1 : 0,
+      ].join(":");
+    },
     [visibleTimeline],
   );
   const handleTimelineScroll = useCallback((event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
     const nearBottom = distanceFromBottom < 96;
+    const previousNearBottom = timelineNearBottomRef.current;
     timelineNearBottomRef.current = nearBottom;
-    setIsTimelineNearBottom(nearBottom);
+    if (previousNearBottom !== nearBottom) {
+      setIsTimelineNearBottom(nearBottom);
+    }
     if (nearBottom) {
-      setHasNewOutput(false);
+      setHasNewOutput((current) => current ? false : current);
     }
     if (contentOffset.y < 80) {
       workspace.loadOlderHistory(conversationId);
@@ -3134,9 +3749,8 @@ export function AgentConversationScreen({
     const ref = timelineRef.current;
     if (!ref) return;
     const nativeScrollRef = ref.getNativeScrollRef() as { scrollToEnd?: (options?: { animated?: boolean }) => void } | null;
-    ref.scrollToEnd({ animated, viewOffset: 0 });
+    ref.scrollToEnd({ animated });
     nativeScrollRef?.scrollToEnd?.({ animated });
-    ref.scrollToOffset({ offset: Number.MAX_SAFE_INTEGER, animated });
   }, []);
 
   const scrollTimelineToBottom = useCallback((animated = true, stick = true) => {
@@ -3151,8 +3765,16 @@ export function AgentConversationScreen({
     setTimeout(scroll, 220);
   }, [forceTimelineToBottom]);
 
+  const openFileReference = useCallback((path: string) => {
+    if (!conversation) return;
+    const normalized = normalizeFileReference(path);
+    if (!normalized) return;
+    setFileDrawerInitialPath(resolveFileReference(normalized, conversation.cwd || "~"));
+    setFileDrawerOpen(true);
+  }, [conversation]);
+
   const renderTimelineItem = useCallback(({ item, index }: LegendListRenderItemProps<AgentTimelineItem>) => {
-    const previous = visibleTimeline[index - 1];
+    const previous = visibleTimelineRef.current[index - 1];
     const startsTurn = Boolean(item.turnId && previous?.turnId && item.turnId !== previous.turnId);
     return (
       <View style={{ gap: 8 }}>
@@ -3166,6 +3788,7 @@ export function AgentConversationScreen({
         <TimelineItemView
           item={item}
           theme={theme}
+          onOpenFile={openFileReference}
           onPermission={(requestId, outcome, optionId) =>
             workspace.respondPermission(conversationId, requestId, outcome, optionId)
           }
@@ -3175,7 +3798,7 @@ export function AgentConversationScreen({
         />
       </View>
     );
-  }, [conversationId, theme, visibleTimeline, workspace]);
+  }, [conversationId, openFileReference, theme, workspace]);
 
   const timelineEmpty = useMemo(() => (
     <View style={{ paddingVertical: 36, alignItems: "center", gap: 9 }}>
@@ -3208,10 +3831,45 @@ export function AgentConversationScreen({
     forceTimelineToBottom(false);
   }, [forceTimelineToBottom, timelineAutoScrollKey, visibleTimeline.length]);
 
+  useEffect(() => {
+    setQueuedCodexPrompts([]);
+    queuedAutoSendInFlightRef.current = false;
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (running) {
+      queuedAutoSendInFlightRef.current = false;
+    }
+  }, [running]);
+
+  const submitPromptToWorkspace = useCallback((prompt: QueuedCodexPrompt) => {
+    if (!conversation) return;
+    workspace.sendPrompt(conversation.id, prompt.text, {
+      model: prompt.model,
+      reasoningEffort: prompt.reasoningEffort,
+      serviceTier: prompt.serviceTier,
+      permissionMode: prompt.permissionMode,
+      collaborationMode: prompt.collaborationMode,
+      attachments: prompt.attachments,
+    });
+    scrollTimelineToBottom(true);
+  }, [conversation, scrollTimelineToBottom, workspace]);
+
+  useEffect(() => {
+    if (!conversation || running || queuedCodexPrompts.length === 0 || queuedAutoSendInFlightRef.current) return;
+    const [nextPrompt] = queuedCodexPrompts;
+    if (!nextPrompt) return;
+    queuedAutoSendInFlightRef.current = true;
+    setQueuedCodexPrompts((current) => current.filter((item) => item.id !== nextPrompt.id));
+    submitPromptToWorkspace(nextPrompt);
+  }, [conversation, queuedCodexPrompts, running, submitPromptToWorkspace]);
+
   const send = useCallback(() => {
     const value = text.trim();
     if (!canSend || !conversation) return;
-    const commandMatch = attachments.length === 0 ? commandFromMessage(value, availableCommands) : null;
+    const commandMatch = attachments.length === 0 && !canQueueRunningCodex
+      ? commandFromMessage(value, availableCommands)
+      : null;
     if (commandMatch) {
       const run = () => {
         workspace.executeCommand(conversation.id, commandMatch.command, value, commandMatch.args);
@@ -3237,17 +3895,38 @@ export function AgentConversationScreen({
     const nextPermissionMode = permissionMode && permissionOpts.some((option) => option.value === permissionMode)
       ? permissionMode
       : undefined;
-    workspace.sendPrompt(conversation.id, value, {
+    const prompt: QueuedCodexPrompt = {
+      id: createQueuedPromptId(),
+      text: value,
+      attachments,
       model,
       reasoningEffort: nextEffort,
+      serviceTier: speedOpts.length > 0 ? effectiveServiceTier : undefined,
       permissionMode: nextPermissionMode,
       collaborationMode: currentCollaborationMode,
-      attachments,
-    });
+    };
+    if (canQueueRunningCodex) {
+      setQueuedCodexPrompts((current) => [...current, prompt]);
+      Haptics.selectionAsync().catch(() => {});
+    } else {
+      submitPromptToWorkspace(prompt);
+    }
     setText("");
     setAttachments([]);
     scrollTimelineToBottom(true);
-  }, [attachments, availableCommands, canSend, conversation, currentCollaborationMode, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToBottom, text, workspace]);
+  }, [attachments, availableCommands, canQueueRunningCodex, canSend, conversation, currentCollaborationMode, effectiveServiceTier, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToBottom, speedOpts.length, submitPromptToWorkspace, text, workspace]);
+
+  const guideQueuedPrompt = useCallback((prompt: QueuedCodexPrompt) => {
+    if (!canGuideRunningCodex) return;
+    setQueuedCodexPrompts((current) => current.filter((item) => item.id !== prompt.id));
+    submitPromptToWorkspace(prompt);
+    Haptics.selectionAsync().catch(() => {});
+  }, [canGuideRunningCodex, submitPromptToWorkspace]);
+
+  const removeQueuedPrompt = useCallback((promptId: string) => {
+    setQueuedCodexPrompts((current) => current.filter((item) => item.id !== promptId));
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
 
   const executeSlashCommand = useCallback((command: AgentCommandDescriptor, args = "") => {
     if (!conversation) return;
@@ -3342,6 +4021,13 @@ export function AgentConversationScreen({
     setEffort(nextEffort);
     if (conversation) {
       workspace.updateConversationSettings(conversation.id, { reasoningEffort: nextEffort }).catch(() => {});
+    }
+  }, [conversation, workspace]);
+
+  const commitServiceTier = useCallback((nextTier: AgentServiceTier | undefined) => {
+    setServiceTier(nextTier);
+    if (conversation) {
+      workspace.updateConversationSettings(conversation.id, { serviceTier: nextTier }).catch(() => {});
     }
   }, [conversation, workspace]);
 
@@ -3555,6 +4241,7 @@ export function AgentConversationScreen({
       return;
     }
     if (event === "open-files") {
+      setFileDrawerInitialPath(null);
       setFileDrawerOpen(true);
       return;
     }
@@ -3655,7 +4342,10 @@ export function AgentConversationScreen({
           }}
         >
           <Pressable
-            onPress={() => setFileDrawerOpen(true)}
+            onPress={() => {
+              setFileDrawerInitialPath(null);
+              setFileDrawerOpen(true);
+            }}
             hitSlop={8}
             style={({ pressed }) => ({
               width: 34,
@@ -3716,7 +4406,7 @@ export function AgentConversationScreen({
             ]}
             onPressAction={({ nativeEvent }) => {
               if (nativeEvent.event === "refresh") {
-                workspace.requestCapabilities(conversation.sessionId);
+                workspace.refreshConversation(conversation.id);
               }
               if (nativeEvent.event === "archive") {
                 workspace.archive(conversation.id, !conversation.archived).then(onBack).catch(() => {});
@@ -3746,10 +4436,10 @@ export function AgentConversationScreen({
           renderItem={renderTimelineItem}
           ListEmptyComponent={timelineEmpty}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 18, paddingTop: insets.top + 64, paddingBottom: 20 }}
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 18, paddingTop: insets.top + 64, paddingBottom: 28 }}
           contentInsetAdjustmentBehavior="never"
           automaticallyAdjustContentInsets={false}
-          scrollIndicatorInsets={{ top: insets.top + 60, bottom: 18 }}
+          scrollIndicatorInsets={{ top: insets.top + 60, bottom: 28 }}
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
           onScroll={handleTimelineScroll}
@@ -3761,12 +4451,29 @@ export function AgentConversationScreen({
           }}
           scrollEventThrottle={16}
           estimatedItemSize={96}
-          drawDistance={420}
+          drawDistance={720}
           alignItemsAtEnd
           maintainScrollAtEnd={{ onDataChange: true, onItemLayout: true, onLayout: true }}
           maintainScrollAtEndThreshold={0.2}
           maintainVisibleContentPosition={false}
         />
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: insets.top + 92,
+            zIndex: 8,
+          }}
+        >
+          <LinearGradient
+            colors={topFadeColors}
+            locations={[0, 0.38, 0.72, 1]}
+            style={StyleSheet.absoluteFillObject}
+          />
+        </View>
         {!isTimelineNearBottom || hasNewOutput ? (
           <View
             pointerEvents="box-none"
@@ -3879,10 +4586,103 @@ export function AgentConversationScreen({
               onClose={closeSlashCommandPanel}
             />
           ) : null}
+          {queuedCodexPrompts.length > 0 ? (
+            <View
+              style={{
+                borderRadius: 14,
+                borderCurve: "continuous",
+                overflow: "hidden",
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: subtleDivider(theme),
+                backgroundColor: theme.mode === "light" ? "#f7f7f8" : "rgba(255,255,255,0.055)",
+              }}
+            >
+              <View
+                style={{
+                  minHeight: 32,
+                  paddingHorizontal: 10,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  borderBottomWidth: StyleSheet.hairlineWidth,
+                  borderBottomColor: subtleDivider(theme),
+                }}
+              >
+                <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
+                  {queuedCodexPrompts.length} 条消息已排队
+                </Text>
+                <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>
+                  {canGuideRunningCodex ? "可引导当前任务" : "等待当前任务结束"}
+                </Text>
+              </View>
+              {queuedCodexPrompts.slice(0, 3).map((prompt, index) => (
+                <View
+                  key={prompt.id}
+                  style={{
+                    minHeight: 46,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
+                    borderTopColor: subtleDivider(theme),
+                  }}
+                >
+                  <AppSymbol name="arrow.turn.down.right" size={14} color={theme.textTertiary} />
+                  <Text
+                    style={{ flex: 1, color: theme.textSecondary, fontSize: 13, lineHeight: 18, fontWeight: "600" }}
+                    numberOfLines={2}
+                  >
+                    {queuedPromptPreview(prompt)}
+                  </Text>
+                  <Pressable
+                    onPress={() => guideQueuedPrompt(prompt)}
+                    disabled={!canGuideRunningCodex}
+                    hitSlop={8}
+                    style={({ pressed }) => ({
+                      minHeight: 30,
+                      borderRadius: 15,
+                      paddingHorizontal: 9,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                      backgroundColor: pressed
+                        ? theme.bgInput
+                        : canGuideRunningCodex ? theme.bgCard : "transparent",
+                      opacity: canGuideRunningCodex ? 1 : 0.45,
+                    })}
+                  >
+                    <AppSymbol name="arrow.turn.down.right" size={13} color={theme.textSecondary} />
+                    <Text style={{ color: theme.textSecondary, fontSize: 13, fontWeight: "800" }}>引导</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => removeQueuedPrompt(prompt.id)}
+                    hitSlop={8}
+                    style={({ pressed }) => ({
+                      width: 30,
+                      height: 30,
+                      borderRadius: 15,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: pressed ? theme.bgInput : "transparent",
+                    })}
+                  >
+                    <AppSymbol name="trash.fill" size={14} color={theme.textTertiary} />
+                  </Pressable>
+                </View>
+              ))}
+              {queuedCodexPrompts.length > 3 ? (
+                <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700", paddingHorizontal: 10, paddingBottom: 8 }}>
+                  另有 {queuedCodexPrompts.length - 3} 条等待发送
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
           <TextInput
             value={text}
             onChangeText={setText}
-            placeholder={running ? "Agent 运行中，可先编辑草稿" : "询问 Agent，@文件，/命令"}
+            placeholder={canQueueRunningCodex ? "要求后续变更，@文件，/命令" : running ? "Agent 运行中，可先编辑草稿" : "询问 Agent，@文件，/命令"}
             placeholderTextColor={theme.textTertiary}
             multiline
             keyboardType="default"
@@ -3904,10 +4704,10 @@ export function AgentConversationScreen({
           />
           {running ? (
             <Text style={{ color: theme.textTertiary, fontSize: 11, lineHeight: 15 }}>
-              当前任务运行中，停止后再发送这条消息。
+              {canQueueRunningCodex ? "当前任务运行中，发送会先排队；可在队列里点“引导”。" : "当前任务运行中，停止后再发送这条消息。"}
             </Text>
           ) : null}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
             <MenuView
               actions={composerMenuActions}
               onPressAction={({ nativeEvent }) => handleComposerMenuAction(nativeEvent.event)}
@@ -3924,7 +4724,31 @@ export function AgentConversationScreen({
                 <AppSymbol name="plus" size={18} color={theme.textSecondary} />
               </View>
             </MenuView>
-            {runtimeMenuActions.length > 0 ? (
+            {permissionMenuActions.length > 0 ? (
+              <MenuView
+                actions={permissionMenuActions}
+                onPressAction={({ nativeEvent }) => {
+                  setPermissionModeWithGuard(valueFromMenuId<AgentPermissionMode>(nativeEvent.event));
+                }}
+              >
+                <View
+                  style={{
+                    minWidth: 38,
+                    height: 34,
+                    borderRadius: 17,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 2,
+                    paddingHorizontal: 5,
+                  }}
+                >
+                  <AppSymbol name={permission.icon} size={16} color={permission.color} />
+                  <AppSymbol name="chevron.down" size={8} color={permission.color} />
+                </View>
+              </MenuView>
+            ) : null}
+            {runtimeModelReady && runtimeMenuActions.length > 0 ? (
               <MenuView
                 actions={runtimeMenuActions}
                 onPressAction={({ nativeEvent }) => {
@@ -3933,37 +4757,47 @@ export function AgentConversationScreen({
                     commitModel(valueFromMenuId<string>(event.slice("model:".length)));
                   } else if (event.startsWith("effort:")) {
                     commitEffort(valueFromMenuId<AgentReasoningEffort>(event.slice("effort:".length)));
-                  } else {
-                    setPermissionModeWithGuard(valueFromMenuId<AgentPermissionMode>(event));
+                  } else if (event.startsWith("speed:")) {
+                    commitServiceTier(valueFromMenuId<AgentServiceTier>(event.slice("speed:".length)));
                   }
                 }}
               >
                 <View
                   style={{
-                    height: modelCapabilityStatus ? 40 : 34,
-                    maxWidth: 188,
+                    height: 34,
+                    maxWidth: 190,
                     borderRadius: 999,
                     flexDirection: "row",
                     alignItems: "center",
-                    gap: 6,
-                    paddingHorizontal: 9,
-                    backgroundColor: theme.bgInput,
+                    gap: 4,
+                    paddingHorizontal: 8,
                   }}
                 >
-                  <View style={{ flexShrink: 1, minWidth: 0 }}>
-                    <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700" }} numberOfLines={1}>
-                      {formatRuntime(model, effort, modelOpts)}
-                    </Text>
-                    {modelCapabilityStatus ? (
-                      <Text style={{ color: theme.textTertiary, fontSize: 9, fontWeight: "800", marginTop: -1 }} numberOfLines={1}>
-                        {modelCapabilityStatus}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
+                  <Text
+                    style={{ color: theme.text, fontSize: 15, lineHeight: 20, fontWeight: "700", fontFamily: MONO_FONT, flexShrink: 1 }}
+                    numberOfLines={1}
+                  >
+                    {runtimeLabel}
+                  </Text>
+                  <AppSymbol name="chevron.down" size={10} color={theme.textTertiary} />
                 </View>
               </MenuView>
-            ) : null}
+            ) : (
+              <View
+                style={{
+                  height: 34,
+                  justifyContent: "center",
+                  paddingHorizontal: 8,
+                }}
+              >
+                <Text
+                  style={{ color: theme.textTertiary, fontSize: 14, lineHeight: 20, fontWeight: "700", fontFamily: MONO_FONT }}
+                  numberOfLines={1}
+                >
+                  {runtimeLabel}
+                </Text>
+              </View>
+            )}
             {currentCollaborationMode === "plan" ? (
               <View
                 style={{
@@ -3981,35 +4815,39 @@ export function AgentConversationScreen({
               </View>
             ) : null}
             <View style={{ flex: 1 }} />
-            {running ? (
+            {running && !canSubmitComposer ? (
               <Pressable
                 onPress={cancelRunningTurn}
                 style={({ pressed }) => ({
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
+                  width: 42,
+                  height: 42,
+                  borderRadius: 21,
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: pressed ? theme.errorLight : theme.bgInput,
+                  backgroundColor: pressed
+                    ? theme.textSecondary
+                    : theme.mode === "light" ? "#111113" : "#f5f5f7",
                 })}
               >
-                <AppSymbol name="stop.circle.fill" size={20} color={theme.error} />
+                <AppSymbol name="stop.fill" size={16} color={theme.mode === "light" ? "#fff" : "#111113"} />
               </Pressable>
             ) : (
               <Pressable
                 onPress={send}
-                disabled={!canSend}
+                disabled={!canSubmitComposer}
                 style={({ pressed }) => ({
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
+                  width: 42,
+                  height: 42,
+                  borderRadius: 21,
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: pressed ? theme.accentSecondary : theme.accent,
-                  opacity: canSend ? 1 : 0.45,
+                  backgroundColor: pressed
+                    ? theme.textSecondary
+                    : theme.mode === "light" ? "#111113" : "#f5f5f7",
+                  opacity: canSubmitComposer ? 1 : 0.45,
                 })}
               >
-                <AppSymbol name="arrow.up" size={18} color="#fff" />
+                <AppSymbol name="arrow.up" size={18} color={theme.mode === "light" ? "#fff" : "#111113"} />
               </Pressable>
             )}
           </View>
@@ -4067,7 +4905,11 @@ export function AgentConversationScreen({
         theme={theme}
         topInset={insets.top}
         bottomInset={insets.bottom}
-        onClose={() => setFileDrawerOpen(false)}
+        initialFilePath={fileDrawerInitialPath}
+        onClose={() => {
+          setFileDrawerOpen(false);
+          setFileDrawerInitialPath(null);
+        }}
         onInsertReference={insertFileReference}
       />
     </KeyboardAvoidingView>
