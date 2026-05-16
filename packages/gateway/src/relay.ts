@@ -85,6 +85,7 @@ function shouldValidatePayload(type: string): type is ProtocolMessageType {
     type === "device.resume" ||
     type === "terminal.input" ||
     type === "terminal.resize" ||
+    type === "agent.codex.rpc" ||
     type === "permission.decision" ||
     type === "permission.decision.result" ||
     type === "control.claim" ||
@@ -187,6 +188,8 @@ function handleHostMessage(
     case "screen.status":
     case "screen.offer":
     case "screen.ice":
+    // Codex app-server JSON-RPC: host → clients.
+    case "agent.codex.rpc":
     // Agent Workspace: host → clients
     case "agent.v2.capabilities":
     case "agent.v2.conversation.opened":
@@ -354,6 +357,8 @@ function handleClientMessage(
     case "agent.v2.snapshot.request":
     case "agent.v2.history.request":
     case "agent.v2.delta.request":
+    // Codex app-server JSON-RPC: client → host.
+    case "agent.codex.rpc":
       sendToHost(session, envelope, raw);
       break;
     default:

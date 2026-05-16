@@ -174,7 +174,7 @@ describe("AgentWorkspaceProxy event routing", () => {
     }));
   });
 
-  it("preserves device-side Codex archived state in conversation lists", async () => {
+  it("does not expose device-side Codex sessions through Agent v2 conversation lists", async () => {
     const home = useTempHome();
     const codexRoot = join(home, ".codex");
     const activeDir = join(codexRoot, "sessions", "2026", "05", "16");
@@ -233,37 +233,14 @@ describe("AgentWorkspaceProxy event routing", () => {
     });
 
     const results = sent.filter((envelope) => envelope.type === "agent.v2.conversation.list.result");
-    expect(results[0].payload.conversations).toContainEqual(expect.objectContaining({
-      agentSessionId: "019e-active",
-      archived: false,
-    }));
+    expect(results[0].payload.conversations).toEqual([]);
     expect(results[0].payload.conversations).not.toContainEqual(expect.objectContaining({
       agentSessionId: "019e-archived",
     }));
-    expect(results[1].payload.conversations).toContainEqual(expect.objectContaining({
-      agentSessionId: "019e-archived",
-      provider: "codex",
-      archived: true,
-    }));
-
-    await proxy.handleEnvelope({
-      type: "agent.v2.conversation.open",
-      hostDeviceId: "host-1",
-      payload: {
-        conversationId: "agent:019e-active",
-        agentSessionId: "019e-active",
-        provider: "codex",
-      },
-    });
-
-    const opened = sent.find((envelope) => envelope.type === "agent.v2.conversation.opened");
-    expect(opened.payload.snapshot).toEqual([
-      expect.objectContaining({ role: "user", text: "Open active history" }),
-      expect.objectContaining({ role: "assistant", text: "Active history is open" }),
-    ]);
+    expect(results[1].payload.conversations).toEqual([]);
   });
 
-  it("serves canonical history pages and live deltas by revision", async () => {
+  it("does not serve Codex stored history through Agent v2 history pages", async () => {
     const home = useTempHome();
     const activeDir = join(home, ".codex", "sessions", "2026", "05", "16");
     mkdirSync(activeDir, { recursive: true });
@@ -312,34 +289,7 @@ describe("AgentWorkspaceProxy event routing", () => {
       payload: { conversationId: "agent:019e-history", limit: 2 },
     });
 
-    const page = sent.find((envelope) => envelope.type === "agent.v2.history.page");
-    expect(page.payload.items.map((item: any) => item.text)).toEqual(["Second", "Third"]);
-    expect(page.payload.cursor).toBe("1");
-    expect(page.payload.hasMore).toBe(true);
-    expect(page.payload.revision).toBeGreaterThanOrEqual(3);
-
-    proxy.handleAgentMessageDelta({ sessionId: "019e-history", itemId: "assistant-live", delta: "Live" });
-    await proxy.handleEnvelope({
-      type: "agent.v2.delta.request",
-      hostDeviceId: "host-1",
-      payload: { conversationId: "agent:019e-history", sinceRevision: page.payload.revision },
-    });
-
-    const delta = sent.filter((envelope) => envelope.type === "agent.v2.delta").at(-1);
-    expect(delta.payload.items).toContainEqual(expect.objectContaining({
-      id: "assistant-live",
-      text: "Live",
-    }));
-    expect(delta.payload.revision).toBeGreaterThan(page.payload.revision);
-
-    await proxy.handleEnvelope({
-      type: "agent.v2.delta.request",
-      hostDeviceId: "host-1",
-      payload: { conversationId: "agent:019e-history", sinceRevision: delta.payload.revision + 100 },
-    });
-    const reset = sent.filter((envelope) => envelope.type === "agent.v2.delta").at(-1);
-    expect(reset.payload.reset).toBe(true);
-    expect(reset.payload.items.length).toBeGreaterThan(0);
+    expect(sent.find((envelope) => envelope.type === "agent.v2.history.page")).toBeUndefined();
   });
 
   it("uses Codex app-server turns as canonical history when available", async () => {
@@ -413,12 +363,48 @@ describe("AgentWorkspaceProxy event routing", () => {
         models: [{ id: "default", label: "默认模型" }, { id: "sonnet", label: "Sonnet" }],
         reasoningEfforts: ["low", "medium", "high", "xhigh"],
         permissionModes: ["read_only", "workspace_write", "full_access"],
+        supportsPermission: true,
+        features: expect.objectContaining({
+          claudeSdk: true,
+          streamJsonFallback: false,
+        }),
         commands: expect.arrayContaining([
           expect.objectContaining({ name: "git-status", executionKind: "native" }),
           expect.objectContaining({ name: "review", executionKind: "native" }),
         ]),
       }),
     ]);
+  });
+
+  it("marks Claude stream-json fallback as non-interactive for permissions", async () => {
+    const sent: any[] = [];
+    const proxy = new AgentWorkspaceProxy({
+      hostDeviceId: "host-1",
+      cwd: "/tmp",
+      availableProviders: ["claude"],
+      send: (envelope) => sent.push(envelope),
+    }) as any;
+    proxy.initialized = true;
+    proxy.clients.set("claude", {});
+    proxy.agentProtocols.set("claude", "claude-stream-json");
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.capabilities.request",
+      hostDeviceId: "host-1",
+      payload: {},
+    });
+
+    const capabilities = sent.find((envelope) => envelope.type === "agent.v2.capabilities")?.payload;
+    expect(capabilities.providers[0]).toEqual(expect.objectContaining({
+      id: "claude",
+      providerProtocol: "claude-stream-json",
+      supportsPermission: false,
+      permissionModes: [],
+      features: expect.objectContaining({
+        claudeSdk: false,
+        streamJsonFallback: true,
+      }),
+    }));
   });
 
   it("executes native git status as a command timeline item", async () => {

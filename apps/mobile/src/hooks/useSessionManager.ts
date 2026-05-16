@@ -989,6 +989,7 @@ export function useSessionManager(): SessionManagerHandle {
         case "agent.v2.history.page":
         case "agent.v2.delta":
         case "agent.v2.running_state":
+        case "agent.codex.rpc":
           agentWorkspaceCbRef.current?.(envelope);
           break;
         case "agent.v2.snapshot": {

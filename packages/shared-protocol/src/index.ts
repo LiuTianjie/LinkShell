@@ -800,6 +800,67 @@ export const agentV2PermissionRequestPayloadSchema = agentPermissionSchema.exten
   item: agentV2TimelineItemSchema.optional(),
 });
 
+const jsonValueSchema: z.ZodType<
+  string | number | boolean | null | { [key: string]: unknown } | unknown[]
+> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number().finite(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema),
+  ])
+);
+
+export const codexJsonRpcErrorSchema = z.object({
+  code: z.number().int(),
+  message: z.string(),
+  data: jsonValueSchema.optional(),
+}).passthrough();
+
+export const agentCodexRpcPayloadSchema = z
+  .object({
+    jsonrpc: z.string().optional(),
+    id: z.union([z.string(), z.number().int()]).optional(),
+    method: z.string().min(1).optional(),
+    params: jsonValueSchema.optional(),
+    result: jsonValueSchema.optional(),
+    error: codexJsonRpcErrorSchema.optional(),
+  })
+  .passthrough()
+  .superRefine((value, ctx) => {
+    const hasMethod = typeof value.method === "string";
+    const hasId = Object.prototype.hasOwnProperty.call(value, "id");
+    const hasResult = Object.prototype.hasOwnProperty.call(value, "result");
+    const hasError = Object.prototype.hasOwnProperty.call(value, "error");
+
+    if (hasMethod) {
+      if (hasResult || hasError) {
+        ctx.addIssue({
+          code: "custom",
+          message: "JSON-RPC request/notification cannot include result or error",
+        });
+      }
+      return;
+    }
+
+    if (!hasId) {
+      ctx.addIssue({
+        code: "custom",
+        message: "JSON-RPC response must include id",
+      });
+      return;
+    }
+
+    if (hasResult === hasError) {
+      ctx.addIssue({
+        code: "custom",
+        message: "JSON-RPC response must include exactly one of result or error",
+      });
+    }
+  });
+
 // ── Protocol message type registry ──────────────────────────────────
 
 export const protocolMessageSchemas = {
@@ -869,6 +930,7 @@ export const protocolMessageSchemas = {
   "agent.v2.delta": agentV2DeltaPayloadSchema,
   "agent.v2.running_state": agentV2RunningStatePayloadSchema,
   "agent.v2.event": agentV2EventPayloadSchema,
+  "agent.codex.rpc": agentCodexRpcPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

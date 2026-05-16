@@ -71,10 +71,13 @@ const output = parseTypedPayload("terminal.output", parsed.payload);
 | `file.upload` | 文件上传 |
 | `tunnel.request` / `tunnel.response` | HTTP 端口转发 |
 | `tunnel.ws.data` / `tunnel.ws.close` | WebSocket 端口转发 |
-| `agent.v2.capabilities` / `agent.v2.conversation.*` / `agent.v2.prompt` / `agent.v2.event` | Agent Workspace v2 |
+| `agent.codex.rpc` | Codex app-server JSON-RPC passthrough |
+| `agent.v2.capabilities` / `agent.v2.conversation.*` / `agent.v2.prompt` / `agent.v2.event` | Agent Workspace v2 (Claude/custom) |
 | `agent.v2.permission.*` / `agent.v2.structured_input.respond` | Agent 权限与结构化输入 |
 
 所有 payload 使用 Zod schema 做运行时校验。
+
+Codex 使用 `agent.codex.rpc` 承载 OpenAI Codex app-server JSON-RPC 对象，LinkShell envelope 只负责 host/session/client routing。请求和通知保留 app-server 原始 `method`，响应保留原始 `id`、`result` 或 `error`，用于 approval 和 structured input 等端到端回包。
 
 Agent Workspace v2 的 timeline 支持 `chat`、`thinking`、`tool_activity`、`command_execution`、`file_change`、`subagent_action`、`plan`、`user_input_prompt`、`review` 和 `context_compaction`。Provider capability 会携带可用模型、默认模型、reasoning effort、permission mode 和 provider feature flags，供移动端动态渲染控制项。
 

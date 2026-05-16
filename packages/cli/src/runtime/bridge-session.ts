@@ -603,6 +603,33 @@ export class BridgeSession {
         this.screenShare?.handleIceCandidate(p.candidate, p.sdpMid, p.sdpMLineIndex);
         break;
       }
+      case "agent.codex.rpc": {
+        if (!this.agentWorkspace) {
+          const payload = parseTypedPayload("agent.codex.rpc", envelope.payload);
+          const idValue = payload && typeof payload === "object" && "id" in payload
+            ? (payload as { id?: unknown }).id
+            : undefined;
+          if (typeof idValue === "string" || typeof idValue === "number") {
+            this.send(
+              createEnvelope({
+                type: "agent.codex.rpc",
+                hostDeviceId: this.sessionId,
+                payload: {
+                  jsonrpc: "2.0",
+                  id: idValue,
+                  error: {
+                    code: -32000,
+                    message: "Codex RPC is not enabled. Start CLI with --agent-ui.",
+                  },
+                },
+              }),
+            );
+          }
+          break;
+        }
+        await this.agentWorkspace.handleEnvelope(envelope);
+        break;
+      }
       case "agent.v2.capabilities.request":
       case "agent.v2.conversation.open":
       case "agent.v2.conversation.list":

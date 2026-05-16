@@ -1,9 +1,9 @@
 {
   "name": "linkshell-cli",
-  "version": "0.3.15",
+  "version": "0.3.16",
   "description": "Remote terminal bridge for Claude Code / Codex / Gemini / Copilot — control from your phone",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/cli/src/index.js",
   "bin": {
     "linkshell": "dist/cli/src/index.js"
   },

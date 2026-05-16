@@ -1086,17 +1086,21 @@ export function AgentWorkspaceScreen({
   const openProject = useCallback(
     async (project: AgentProjectGroup, conversation?: AgentConversationRecord) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      if (!project.target) {
-        Alert.alert("主机不在线", "请先在这个项目所在的主机上启动 linkshell，再继续使用 Agent。");
-        return;
-      }
       const latest = conversation ?? project.conversations[0];
       if (!latest) {
+        if (!project.target) {
+          Alert.alert("主机不在线", "请先在这个项目所在的主机上启动 linkshell，再继续使用 Agent。");
+          return;
+        }
         openCreate(project.target, project);
         return;
       }
 
-      const result = await workspace.openConversation({
+      onOpenConversation(latest.id);
+
+      if (!project.target) return;
+
+      workspace.openConversation({
         conversationId: latest.id,
         agentSessionId: latest.agentSessionId,
         sessionId: project.target.sessionId,
@@ -1109,12 +1113,13 @@ export function AgentWorkspaceScreen({
         reasoningEffort: latest.reasoningEffort,
         permissionMode: latest.permissionMode,
         title: latest.title || project.title,
+      }).then((result) => {
+        if (!result.conversationId) {
+          console.warn("[AgentWorkspace] background conversation open failed", result.error);
+        }
+      }).catch((error) => {
+        console.warn("[AgentWorkspace] background conversation open failed", error);
       });
-      if (result.conversationId) {
-        onOpenConversation(result.conversationId);
-        return;
-      }
-      Alert.alert("无法恢复 Agent 对话", result.error ?? "请确认主机端会话在线，并且 Agent GUI 已启用。");
     },
     [onOpenConversation, openCreate, workspace],
   );

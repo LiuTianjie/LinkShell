@@ -85,19 +85,31 @@ const DEFAULT_OPTION_ID = "__default__";
 const MONO_FONT = Platform.select({ ios: "Menlo", android: "monospace" });
 
 function timelineSurface(theme: Theme): string {
-  return theme.mode === "light" ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.055)";
+  return theme.mode === "light" ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.055)";
 }
 
 function timelineMaterial(theme: Theme): string {
-  return theme.mode === "light" ? "rgba(255,255,255,0.68)" : "rgba(255,255,255,0.06)";
+  return theme.mode === "light" ? "rgba(248,248,249,0.92)" : "rgba(255,255,255,0.06)";
 }
 
 function timelinePressedSurface(theme: Theme): string {
-  return theme.mode === "light" ? "rgba(60,60,67,0.06)" : "rgba(255,255,255,0.06)";
+  return theme.mode === "light" ? "rgba(60,60,67,0.055)" : "rgba(255,255,255,0.06)";
 }
 
 function subtleDivider(theme: Theme): string {
   return theme.mode === "light" ? "rgba(60,60,67,0.11)" : "rgba(255,255,255,0.10)";
+}
+
+function conversationPaper(theme: Theme): string {
+  return theme.mode === "light" ? "#fbfbfb" : theme.bg;
+}
+
+function remodexMuted(theme: Theme): string {
+  return theme.mode === "light" ? "rgba(90,90,96,0.62)" : theme.textTertiary;
+}
+
+function conversationInset(theme: Theme): string {
+  return theme.mode === "light" ? "rgba(60,60,67,0.075)" : "rgba(255,255,255,0.075)";
 }
 
 function menuActions<T extends string>(options: Option<T>[], currentValue: T | undefined) {
@@ -1216,13 +1228,18 @@ function UserMessageContent({
         }
 
         return block.text ? (
-          <MarkdownContent
+          <Text
             key={`text-${index}`}
-            text={block.text.trim()}
-            theme={theme}
-            inverse={inverse}
-            monospace={false}
-          />
+            selectable
+            style={{
+              color: inverse ? "#fff" : theme.text,
+              fontSize: 14,
+              lineHeight: 21,
+              fontWeight: "500",
+            }}
+          >
+            {block.text.trim()}
+          </Text>
         ) : null;
       })}
     </View>
@@ -1612,45 +1629,46 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
   return (
     <View
       style={{
-        borderRadius: 14,
-        borderCurve: "continuous",
-        backgroundColor: timelineMaterial(theme),
-        overflow: "hidden",
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: subtleDivider(theme),
+        alignSelf: "stretch",
+        borderLeftWidth: StyleSheet.hairlineWidth,
+        borderLeftColor: subtleDivider(theme),
+        marginLeft: 3,
+        paddingLeft: 10,
       }}
     >
       <Pressable
         onPress={() => canExpand && setExpanded((value) => !value)}
         disabled={!canExpand}
         style={({ pressed }) => ({
-          minHeight: 48,
-          paddingHorizontal: 12,
-          paddingVertical: 9,
+          minHeight: 36,
+          borderRadius: 9,
+          borderCurve: "continuous",
+          paddingHorizontal: 6,
+          paddingVertical: 6,
           flexDirection: "row",
           alignItems: "center",
-          gap: 9,
+          gap: 8,
           backgroundColor: pressed ? timelinePressedSurface(theme) : "transparent",
         })}
       >
         <View
           style={{
-            width: 28,
-            height: 28,
-            borderRadius: 8,
+            width: 22,
+            height: 22,
+            borderRadius: 6,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: theme.bgInput,
+            backgroundColor: conversationInset(theme),
           }}
         >
-          <AppSymbol name={icon} size={14} color={theme.textSecondary} />
+          <AppSymbol name={icon} size={12} color={theme.textTertiary} />
         </View>
         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-          <Text selectable style={{ color: theme.text, fontSize: 13, fontWeight: "800" }} numberOfLines={1}>
+          <Text selectable style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
             {title}
           </Text>
           {subtitle ? (
-            <Text selectable style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 16 }} numberOfLines={1}>
+            <Text selectable style={{ color: remodexMuted(theme), fontSize: 11, lineHeight: 15 }} numberOfLines={1}>
               {subtitle}
             </Text>
           ) : null}
@@ -1666,13 +1684,13 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
         <View
           style={{
             gap: 8,
-            marginTop: 6,
-            marginHorizontal: 10,
-            marginBottom: 10,
+            marginTop: 4,
+            marginRight: 2,
+            marginBottom: 6,
             padding: 10,
             borderRadius: 10,
             borderCurve: "continuous",
-            backgroundColor: timelineMaterial(theme),
+            backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.72)" : "rgba(255,255,255,0.035)",
             borderWidth: StyleSheet.hairlineWidth,
             borderColor: subtleDivider(theme),
           }}
@@ -1721,13 +1739,12 @@ function SystemActivityCard({
       onPress={() => canExpand && setExpanded((value) => !value)}
       disabled={!canExpand}
       style={{
-        borderRadius: 12,
-        borderCurve: "continuous",
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: subtleDivider(theme),
-        backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.035)",
-        paddingHorizontal: 11,
-        paddingVertical: 9,
+        borderLeftWidth: StyleSheet.hairlineWidth,
+        borderLeftColor: subtleDivider(theme),
+        marginLeft: 3,
+        paddingLeft: 10,
+        paddingRight: 6,
+        paddingVertical: 5,
         flexDirection: "row",
         alignItems: "flex-start",
         gap: 8,
@@ -1737,17 +1754,17 @@ function SystemActivityCard({
         style={{
           width: 24,
           height: 24,
-          borderRadius: 8,
+          borderRadius: 6,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: theme.bgInput,
+          backgroundColor: conversationInset(theme),
         }}
       >
-        <AppSymbol name={icon} size={13} color={theme.textTertiary} />
+        <AppSymbol name={icon} size={12} color={theme.textTertiary} />
       </View>
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
+          <Text style={{ color: remodexMuted(theme), fontSize: 11, fontWeight: "800" }} numberOfLines={1}>
             {title}
           </Text>
           {running ? <ActivityIndicator size="small" color={theme.textTertiary} /> : null}
@@ -1755,7 +1772,7 @@ function SystemActivityCard({
         {text ? (
           <Text
             selectable
-            style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}
+            style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17, fontFamily: MONO_FONT }}
             numberOfLines={expanded ? undefined : 2}
           >
             {text}
@@ -2294,30 +2311,14 @@ function AssistantMessage({
     <View
       style={{
         alignSelf: "stretch",
-        borderRadius: 16,
-        borderCurve: "continuous",
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: subtleDivider(theme),
-        backgroundColor: timelineSurface(theme),
-        padding: 12,
-        gap: 10,
+        paddingVertical: 3,
+        paddingRight: 2,
+        gap: 7,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <View
-          style={{
-            width: 24,
-            height: 24,
-            borderRadius: 12,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: theme.accentLight,
-          }}
-        >
-          <AppSymbol name="sparkles" size={13} color={theme.accent} />
-        </View>
-        <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 12, fontWeight: "900" }} numberOfLines={1}>
-          Agent 回复
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 7, minHeight: 16 }}>
+        <Text style={{ color: remodexMuted(theme), fontSize: 11, fontWeight: "800", letterSpacing: 0 }} numberOfLines={1}>
+          assistant
         </Text>
         {item.isStreaming ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
@@ -2327,7 +2328,15 @@ function AssistantMessage({
         ) : null}
       </View>
       {hasBody ? (
-        <MessageContent blocks={item.content} fallbackText={text} theme={theme} monospace={false} />
+        <View
+          style={{
+            borderLeftWidth: StyleSheet.hairlineWidth,
+            borderLeftColor: subtleDivider(theme),
+            paddingLeft: 11,
+          }}
+        >
+          <MessageContent blocks={item.content} fallbackText={text} theme={theme} monospace />
+        </View>
       ) : null}
       {!hasBody && item.isStreaming ? <StreamingPill theme={theme} /> : null}
     </View>
@@ -2438,18 +2447,20 @@ function TimelineItemView({
       <View
         style={{
           alignSelf: "flex-end",
-          maxWidth: "84%",
-          borderRadius: 22,
+          maxWidth: "88%",
+          minWidth: 42,
+          borderRadius: 18,
           borderCurve: "continuous",
-          backgroundColor: theme.accent,
-          borderWidth: 0,
-          paddingVertical: 11,
-          paddingHorizontal: 15,
+          backgroundColor: theme.mode === "light" ? "#ececef" : "rgba(255,255,255,0.08)",
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: subtleDivider(theme),
+          paddingVertical: 9,
+          paddingHorizontal: 13,
           gap: 6,
         }}
       >
         {text || item.content?.length ? (
-          <UserMessageContent blocks={item.content} fallbackText={text} theme={theme} inverse />
+          <UserMessageContent blocks={item.content} fallbackText={text} theme={theme} />
         ) : item.isStreaming ? (
           <StreamingPill theme={theme} />
         ) : null}
@@ -3576,7 +3587,7 @@ export function AgentConversationScreen({
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={0}
-      style={{ flex: 1, backgroundColor: theme.bg }}
+      style={{ flex: 1, backgroundColor: conversationPaper(theme) }}
     >
       <View
         style={{
@@ -3734,8 +3745,8 @@ export function AgentConversationScreen({
           keyExtractor={(item) => item.id}
           renderItem={renderTimelineItem}
           ListEmptyComponent={timelineEmpty}
-          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16, paddingTop: insets.top + 60, paddingBottom: 18 }}
+          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 18, paddingTop: insets.top + 64, paddingBottom: 20 }}
           contentInsetAdjustmentBehavior="never"
           automaticallyAdjustContentInsets={false}
           scrollIndicatorInsets={{ top: insets.top + 60, bottom: 18 }}
@@ -3798,25 +3809,25 @@ export function AgentConversationScreen({
           paddingHorizontal: 12,
           paddingTop: 8,
           paddingBottom: Math.max(insets.bottom + 2, 12),
-          backgroundColor: theme.bg,
+          backgroundColor: conversationPaper(theme),
         }}
       >
         <View
           style={{
-            borderRadius: 24,
+            borderRadius: 20,
             borderCurve: "continuous",
             borderWidth: StyleSheet.hairlineWidth,
-            borderColor: theme.separator,
-            backgroundColor: theme.bgCard,
+            borderColor: subtleDivider(theme),
+            backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.94)" : theme.bgCard,
             paddingHorizontal: 12,
-            paddingTop: 10,
-            paddingBottom: 10,
+            paddingTop: 9,
+            paddingBottom: 9,
             gap: 7,
             shadowColor: "#000",
-            shadowOpacity: theme.mode === "dark" ? 0.28 : 0.08,
-            shadowRadius: 24,
-            shadowOffset: { width: 0, height: 10 },
-            elevation: 8,
+            shadowOpacity: theme.mode === "dark" ? 0.2 : 0.055,
+            shadowRadius: 18,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 5,
           }}
         >
           {attachments.length > 0 ? (
@@ -3871,7 +3882,7 @@ export function AgentConversationScreen({
           <TextInput
             value={text}
             onChangeText={setText}
-            placeholder={running ? "Agent 运行中，可先编辑草稿" : "给 Agent 发送消息"}
+            placeholder={running ? "Agent 运行中，可先编辑草稿" : "询问 Agent，@文件，/命令"}
             placeholderTextColor={theme.textTertiary}
             multiline
             keyboardType="default"

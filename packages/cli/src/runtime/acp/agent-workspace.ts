@@ -10,8 +10,9 @@ import {
 import { AcpClient } from "./acp-client.js";
 import { ClaudeSdkClient } from "./claude-sdk-client.js";
 import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
+import { CodexRpcBridge } from "./codex-rpc-bridge.js";
 import { listClaudeStoredSessions, loadClaudeStoredTimeline } from "./claude-sessions.js";
-import { listCodexStoredSessions, loadCodexStoredTimeline } from "./codex-sessions.js";
+import { loadCodexStoredTimeline } from "./codex-sessions.js";
 import type { AgentProtocol, AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
 
@@ -1449,6 +1450,7 @@ function normalizeAgentStatus(value: string | undefined): AgentStatus | undefine
 
 export class AgentWorkspaceProxy {
   private clients = new Map<AgentProvider, AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient>();
+  private codexRpcBridge: CodexRpcBridge | undefined;
   private agentProtocols = new Map<AgentProvider, AgentProtocol>();
   private providerCapabilities = new Map<AgentProvider, ProviderRuntimeCapabilities>();
   private providerCapabilityErrors = new Map<AgentProvider, string>();
@@ -1486,6 +1488,31 @@ export class AgentWorkspaceProxy {
 
   async handleEnvelope(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
+      case "agent.codex.rpc": {
+        const payload = parseTypedPayload("agent.codex.rpc", envelope.payload);
+        try {
+          this.codexRpc().send(payload as never);
+        } catch (error) {
+          const idValue = payload && typeof payload === "object" && "id" in payload
+            ? (payload as { id?: unknown }).id
+            : undefined;
+          if (typeof idValue === "string" || typeof idValue === "number") {
+            this.input.send(createEnvelope({
+              type: "agent.codex.rpc",
+              hostDeviceId: this.input.hostDeviceId,
+              payload: {
+                jsonrpc: "2.0",
+                id: idValue,
+                error: {
+                  code: -32000,
+                  message: error instanceof Error ? error.message : String(error),
+                },
+              },
+            }));
+          }
+        }
+        break;
+      }
       case "agent.v2.capabilities.request":
         await this.initialize();
         this.sendCapabilities();
@@ -1561,6 +1588,8 @@ export class AgentWorkspaceProxy {
   }
 
   stop(): void {
+    this.codexRpcBridge?.stop();
+    this.codexRpcBridge = undefined;
     for (const client of this.clients.values()) {
       client.stop();
     }
@@ -1571,6 +1600,17 @@ export class AgentWorkspaceProxy {
     return this.clients.get(provider);
   }
 
+  private codexRpc(): CodexRpcBridge {
+    this.codexRpcBridge ??= new CodexRpcBridge({
+      command: this.input.command,
+      cwd: this.input.cwd,
+      hostDeviceId: this.input.hostDeviceId,
+      send: this.input.send,
+      verbose: this.input.verbose,
+    });
+    return this.codexRpcBridge;
+  }
+
   private protocolForProvider(provider: AgentProvider): AgentProtocol | undefined {
     return this.agentProtocols.get(provider);
   }
@@ -1579,7 +1619,9 @@ export class AgentWorkspaceProxy {
     if (this.initialized) return;
     this.initialized = true;
     // Eagerly start all detected providers so capabilities report real status
-    const startPromises = this.input.availableProviders.map((p) => this.ensureProviderClient(p));
+    const startPromises = this.input.availableProviders
+      .filter((provider) => provider !== "codex")
+      .map((p) => this.ensureProviderClient(p));
     await Promise.allSettled(startPromises);
     this.status = "idle";
     this.error = undefined;
@@ -1703,7 +1745,6 @@ export class AgentWorkspaceProxy {
 
   private async syncProviderSessions(): Promise<void> {
     await this.initialize();
-    this.upsertProviderSessions("codex", listCodexStoredSessions(this.input.cwd));
     this.upsertProviderSessions("claude", listClaudeStoredSessions(this.input.cwd));
     for (const [provider, client] of this.clients) {
       try {
@@ -1756,13 +1797,14 @@ export class AgentWorkspaceProxy {
   private sendCapabilities(): void {
     const providers = this.input.availableProviders.map((provider) => {
       const client = this.clients.get(provider);
-      const protocol = this.agentProtocols.get(provider);
+      const protocol = provider === "codex" ? "codex-app-server" : this.agentProtocols.get(provider);
       const runtimeCapabilities = this.providerCapabilities.get(provider);
-      const enabled = Boolean(client);
+      const enabled = provider === "codex" ? true : Boolean(client);
       const hasRuntimeModels = Boolean(runtimeCapabilities?.models?.length);
       const supportsImages = enabled && protocolSupportsImages(protocol);
+      const isClaudeSdk = protocol === "claude-agent-sdk";
       const isClaudeFallback = protocol === "claude-stream-json";
-      const supportsPermission = enabled && !isClaudeFallback;
+      const supportsPermission = enabled && (isClaudeSdk || !isClaudeFallback);
       const supportsReasoningEffort = enabled;
       const commands = mergeCommands(
         defaultProviderCommands(provider, this.input.cwd, enabled),
@@ -1796,6 +1838,7 @@ export class AgentWorkspaceProxy {
           plan: enabled,
           cancel: enabled,
           reasoningEffort: supportsReasoningEffort,
+          claudeSdk: isClaudeSdk,
           streamJsonFallback: isClaudeFallback,
         },
       };
@@ -2410,6 +2453,9 @@ export class AgentWorkspaceProxy {
         this.conversationByAgentSessionId.set(agentSessionId, conversationId);
         const conversation = this.conversations.get(conversationId);
         if (conversation) {
+          if (conversation.agentSessionId && conversation.agentSessionId !== agentSessionId) {
+            this.conversationByAgentSessionId.delete(conversation.agentSessionId);
+          }
           conversation.agentSessionId = agentSessionId;
           conversation.lastActivityAt = Date.now();
           this.emitConversation(conversation);
@@ -3370,6 +3416,8 @@ export class AgentWorkspaceProxy {
       ...existing,
       ...toolCall,
       id: targetToolId,
+      input: toolCall.input ?? existing?.input,
+      output: toolCall.output ?? existing?.output,
       createdAt: existing?.createdAt ?? toolCall.createdAt ?? Date.now(),
     };
     this.toolConversationIds.set(toolCall.id, conversationId);

@@ -87,6 +87,22 @@ function claudePermissionMode(
   return "default";
 }
 
+function isClaudeFileTool(toolName: string): boolean {
+  return toolName === "Write" ||
+    toolName === "Edit" ||
+    toolName === "MultiEdit" ||
+    toolName === "NotebookEdit";
+}
+
+function filePathFromToolInput(toolInput: Record<string, unknown> | undefined): string | undefined {
+  const filePath = toolInput?.file_path ?? toolInput?.path ?? toolInput?.notebook_path;
+  return typeof filePath === "string" && filePath.trim() ? filePath : undefined;
+}
+
+function fileChangeKind(toolName: string): string {
+  return toolName === "Write" ? "create" : "update";
+}
+
 export class ClaudeStreamJsonClient {
   private child: ChildProcessWithoutNullStreams | undefined;
   private claudeSessionId: string | undefined;
@@ -332,10 +348,17 @@ export class ClaudeStreamJsonClient {
                     sessionId: this.claudeSessionId,
                     item: {
                       id: block.id ?? id("tool"),
-                      type: toolName === "Bash" ? "commandExecution" : toolName === "Write" || toolName === "Edit" ? "fileChange" : "toolCall",
+                      type: toolName === "Bash" ? "commandExecution" : isClaudeFileTool(toolName) ? "fileChange" : "toolCall",
                       toolName: block.name,
                       tool: block.name,
                       input: block.input,
+                      path: isClaudeFileTool(toolName) ? filePathFromToolInput(block.input) : undefined,
+                      changes: isClaudeFileTool(toolName)
+                        ? [{
+                            path: filePathFromToolInput(block.input),
+                            kind: fileChangeKind(toolName),
+                          }].filter((entry) => Boolean(entry.path))
+                        : undefined,
                       command: block.input?.command as string | undefined,
                       cwd: block.input?.cwd as string | undefined ?? cwd,
                       status: "running",
@@ -384,7 +407,7 @@ export class ClaudeStreamJsonClient {
                   sessionId: this.claudeSessionId,
                   item: {
                     id: toolId ?? id("tool"),
-                    type: "toolCall",
+                    type: toolName === "Bash" ? "commandExecution" : toolName && isClaudeFileTool(toolName) ? "fileChange" : "toolCall",
                     toolName,
                     tool: toolName,
                     status: isError ? "failed" : "completed",

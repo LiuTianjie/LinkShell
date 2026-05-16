@@ -131,6 +131,25 @@ function isInsideCwd(cwd: string, candidate: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
+function samePath(left: string, right: string): boolean {
+  return resolve(left) === resolve(right);
+}
+
+function isClaudeFileTool(toolName: string): boolean {
+  return toolName === "Write" ||
+    toolName === "Edit" ||
+    toolName === "MultiEdit" ||
+    toolName === "NotebookEdit";
+}
+
+function filePathFromToolInput(toolInput: unknown): string | undefined {
+  return stringField(toolInput, ["file_path", "path", "notebook_path"]);
+}
+
+function fileChangeKind(toolName: string): string {
+  return toolName === "Write" ? "create" : "update";
+}
+
 function claudeEffort(value: string | undefined): "low" | "medium" | "high" | "xhigh" | undefined {
   if (value === "low" || value === "medium" || value === "high" || value === "xhigh") return value;
   if (value === "minimal") return "low";
@@ -205,6 +224,11 @@ export class ClaudeSdkClient {
   }
 
   async loadSession(input: { sessionId: string; cwd: string; mcpServers?: unknown }): Promise<unknown> {
+    if (!isRealClaudeSessionId(input.sessionId)) {
+      this.claudeSessionId = undefined;
+      return { sessionId: undefined, status: "ready", cwd: input.cwd };
+    }
+    this.assertResumeCwd(input.sessionId, input.cwd);
     this.claudeSessionId = input.sessionId;
     return { sessionId: input.sessionId, status: "loaded", cwd: input.cwd };
   }
@@ -221,6 +245,10 @@ export class ClaudeSdkClient {
   }): Promise<unknown> {
     if (!this.query) await this.initialize();
     if (!this.query) throw new Error("Claude Agent SDK is not initialized");
+    const resumeSessionId = isRealClaudeSessionId(input.sessionId ?? this.claudeSessionId)
+      ? input.sessionId ?? this.claudeSessionId
+      : undefined;
+    if (resumeSessionId) this.assertResumeCwd(resumeSessionId, input.cwd ?? this.input.cwd);
 
     this.abortController?.abort();
     const abortController = new AbortController();
@@ -244,11 +272,11 @@ export class ClaudeSdkClient {
         if (["Read", "Glob", "Grep", "LS", "NotebookRead", "TodoRead"].includes(toolName)) {
           return { behavior: "allow" };
         }
-        if (input.permissionMode === "read_only" && ["Write", "Edit", "MultiEdit", "Bash"].includes(toolName)) {
+        if (input.permissionMode === "read_only" && ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"].includes(toolName)) {
           return { behavior: "deny", message: "Read-only mode is active." };
         }
-        if (input.permissionMode === "workspace_write" && ["Write", "Edit", "MultiEdit"].includes(toolName)) {
-          const filePath = stringField(toolInput, ["file_path", "path", "notebook_path"]);
+        if (input.permissionMode === "workspace_write" && isClaudeFileTool(toolName)) {
+          const filePath = filePathFromToolInput(toolInput);
           if (filePath && isInsideCwd(input.cwd ?? this.input.cwd, filePath)) {
             return { behavior: "allow" };
           }
@@ -278,8 +306,8 @@ export class ClaudeSdkClient {
       sdkOptions.permissionMode = permissionMode;
       if (permissionMode === "bypassPermissions") sdkOptions.allowDangerouslySkipPermissions = true;
     }
-    if (isRealClaudeSessionId(input.sessionId ?? this.claudeSessionId)) {
-      sdkOptions.resume = input.sessionId ?? this.claudeSessionId;
+    if (resumeSessionId) {
+      sdkOptions.resume = resumeSessionId;
     }
 
     const toolNames = new Map<string, string>();
@@ -429,10 +457,17 @@ export class ClaudeSdkClient {
               sessionId: this.claudeSessionId,
               item: {
                 id: toolId,
-                type: toolName === "Bash" ? "commandExecution" : toolName === "Write" || toolName === "Edit" || toolName === "MultiEdit" ? "fileChange" : "toolCall",
+                type: toolName === "Bash" ? "commandExecution" : isClaudeFileTool(toolName) ? "fileChange" : "toolCall",
                 toolName,
                 tool: toolName,
                 input: block.input,
+                path: isClaudeFileTool(toolName) ? filePathFromToolInput(block.input) : undefined,
+                changes: isClaudeFileTool(toolName)
+                  ? [{
+                      path: filePathFromToolInput(block.input),
+                      kind: fileChangeKind(toolName),
+                    }].filter((entry) => Boolean(entry.path))
+                  : undefined,
                 command: block.input?.command as string | undefined,
                 cwd: block.input?.cwd as string | undefined ?? state.cwd,
                 status: "running",
@@ -461,7 +496,7 @@ export class ClaudeSdkClient {
             sessionId: this.claudeSessionId,
             item: {
               id: toolId ?? id("tool"),
-              type: "toolCall",
+              type: toolName === "Bash" ? "commandExecution" : toolName && isClaudeFileTool(toolName) ? "fileChange" : "toolCall",
               toolName,
               tool: toolName,
               status: block.is_error ? "failed" : "completed",
@@ -485,5 +520,13 @@ export class ClaudeSdkClient {
         break;
       }
     }
+  }
+
+  private assertResumeCwd(sessionId: string, cwd: string): void {
+    const stored = listClaudeStoredSessions(cwd).sessions.find((session) => session.id === sessionId);
+    if (!stored || samePath(stored.cwd, cwd)) return;
+    throw new Error(
+      `Claude session ${sessionId} belongs to ${stored.cwd}. Reopen that workspace or start a new Claude session from ${cwd}.`,
+    );
   }
 }

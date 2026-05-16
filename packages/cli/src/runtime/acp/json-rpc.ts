@@ -1,27 +1,27 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AgentFraming } from "./provider-resolver.js";
 
-interface JsonRpcRequest {
+export interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: number | string;
   method: string;
   params?: unknown;
 }
 
-interface JsonRpcResponse {
+export interface JsonRpcResponse {
   jsonrpc: "2.0";
   id: number | string;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
 }
 
-interface JsonRpcNotification {
+export interface JsonRpcNotification {
   jsonrpc: "2.0";
   method: string;
   params?: unknown;
 }
 
-type JsonRpcMessage = JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
+export type JsonRpcMessage = JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
 
 export class JsonRpcStdioTransport {
   private child: ChildProcessWithoutNullStreams | undefined;
@@ -42,6 +42,7 @@ export class JsonRpcStdioTransport {
     private readonly onNotification: (method: string, params: unknown) => void,
     private readonly onRequest: (method: string, params: unknown) => Promise<unknown> | unknown,
     private readonly onExit: (message: string) => void,
+    private readonly onMessage?: (message: JsonRpcMessage) => boolean | void,
   ) {}
 
   start(cwd: string): void {
@@ -85,6 +86,10 @@ export class JsonRpcStdioTransport {
 
   notify(method: string, params?: unknown): void {
     this.write({ jsonrpc: "2.0", method, params });
+  }
+
+  send(message: JsonRpcMessage): void {
+    this.write(message);
   }
 
   stop(): void {
@@ -133,6 +138,10 @@ export class JsonRpcStdioTransport {
     try {
       message = JSON.parse(raw) as JsonRpcMessage;
     } catch {
+      return;
+    }
+
+    if (this.onMessage?.(message)) {
       return;
     }
 
