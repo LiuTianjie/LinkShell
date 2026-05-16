@@ -85,7 +85,6 @@ function shouldValidatePayload(type: string): type is ProtocolMessageType {
     type === "device.resume" ||
     type === "terminal.input" ||
     type === "terminal.resize" ||
-    type === "agent.codex.rpc" ||
     type === "permission.decision" ||
     type === "permission.decision.result" ||
     type === "control.claim" ||

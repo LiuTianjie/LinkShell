@@ -382,10 +382,12 @@ export const agentPermissionModeSchema = z.enum([
 export const agentCollaborationModeSchema = z.enum(["default", "plan"]);
 
 export const agentContentBlockSchema = z.object({
-  type: z.enum(["text", "image"]),
+  type: z.enum(["text", "image", "file"]),
   text: z.string().optional(),
   data: z.string().optional(),
   mimeType: z.string().optional(),
+  path: z.string().optional(),
+  name: z.string().optional(),
 });
 
 export const agentMessageSchema = z.object({
@@ -811,23 +813,10 @@ export const agentV2PermissionRequestPayloadSchema = agentPermissionSchema.exten
   item: agentV2TimelineItemSchema.optional(),
 });
 
-const jsonValueSchema: z.ZodType<
-  string | number | boolean | null | { [key: string]: unknown } | unknown[]
-> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number().finite(),
-    z.boolean(),
-    z.null(),
-    z.array(jsonValueSchema),
-    z.record(z.string(), jsonValueSchema),
-  ])
-);
-
 export const codexJsonRpcErrorSchema = z.object({
   code: z.number().int(),
   message: z.string(),
-  data: jsonValueSchema.optional(),
+  data: z.unknown().optional(),
 }).passthrough();
 
 export const agentCodexRpcPayloadSchema = z
@@ -835,8 +824,8 @@ export const agentCodexRpcPayloadSchema = z
     jsonrpc: z.string().optional(),
     id: z.union([z.string(), z.number().int()]).optional(),
     method: z.string().min(1).optional(),
-    params: jsonValueSchema.optional(),
-    result: jsonValueSchema.optional(),
+    params: z.unknown().optional(),
+    result: z.unknown().optional(),
     error: codexJsonRpcErrorSchema.optional(),
   })
   .passthrough()
