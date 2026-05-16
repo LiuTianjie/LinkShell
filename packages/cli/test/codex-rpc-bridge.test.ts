@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Envelope } from "@linkshell/protocol";
 import { CodexRpcBridge } from "../src/runtime/acp/codex-rpc-bridge.js";
+import type { AgentCommandConfig } from "../src/runtime/acp/provider-resolver.js";
 
 const bridges: CodexRpcBridge[] = [];
 
@@ -93,5 +94,46 @@ describe("CodexRpcBridge", () => {
       .map((line) => JSON.parse(line));
     expect(logged[0]).toMatchObject({ id: "mobile-init-1", method: "initialize" });
     expect(logged[1]).toMatchObject({ id: "approval-1", result: { decision: "accept" } });
+  });
+
+  it("falls back to a private app-server when the Codex App proxy is unavailable", async () => {
+    const fake = makeFakeAppServer();
+    const envelopes: Envelope[] = [];
+    const candidates: AgentCommandConfig[] = [
+      {
+        provider: "codex",
+        command: "node -e \"process.exit(1)\"",
+        protocol: "codex-app-server",
+        framing: "newline",
+      },
+      {
+        provider: "codex",
+        command: fake.command,
+        protocol: "codex-app-server",
+        framing: "newline",
+      },
+    ];
+    const bridge = new CodexRpcBridge({
+      commandCandidates: candidates,
+      cwd: fake.cwd,
+      hostDeviceId: "host-1",
+      send: (envelope) => envelopes.push(envelope),
+    });
+    bridges.push(bridge);
+
+    bridge.send({
+      jsonrpc: "2.0",
+      id: "mobile-init-fallback",
+      method: "initialize",
+      params: { clientInfo: { name: "linkshell_mobile" }, capabilities: { experimentalApi: true } },
+    });
+
+    const received = await waitForEnvelopes(envelopes, 3);
+    expect(received[0]?.payload).toMatchObject({ id: "mobile-init-fallback", result: { ok: true } });
+    const logged = readFileSync(fake.logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(logged[0]).toMatchObject({ id: "mobile-init-fallback", method: "initialize" });
   });
 });

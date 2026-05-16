@@ -1,4 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   Alert,
@@ -12,6 +13,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -72,6 +74,76 @@ function queuedPromptPreview(item: QueuedCodexPrompt): string {
   const text = item.text.trim();
   if (text) return text;
   return item.attachments.length > 0 ? `${item.attachments.length} 张图片` : "空消息";
+}
+
+const CODEX_PROMPT_QUEUE_KEY_PREFIX = "@linkshell/codex-prompt-queue:v1:";
+
+function codexPromptQueueKey(conversationId: string): string {
+  return `${CODEX_PROMPT_QUEUE_KEY_PREFIX}${conversationId}`;
+}
+
+function parseQueuedCodexPrompt(value: unknown): QueuedCodexPrompt | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const id = typeof record.id === "string" && record.id ? record.id : createQueuedPromptId();
+  const text = typeof record.text === "string" ? record.text : "";
+  const rawAttachments = Array.isArray(record.attachments) ? record.attachments : [];
+  const attachments = rawAttachments.filter((block): block is AgentContentBlock => {
+    if (!block || typeof block !== "object" || Array.isArray(block)) return false;
+    const candidate = block as Partial<AgentContentBlock>;
+    return candidate.type === "text" || candidate.type === "image";
+  });
+  const collaborationMode = record.collaborationMode === "plan" ? "plan" : "default";
+  if (!text.trim() && attachments.length === 0) return undefined;
+  return {
+    id,
+    text,
+    attachments,
+    model: typeof record.model === "string" ? record.model : undefined,
+    reasoningEffort: record.reasoningEffort === "none" || record.reasoningEffort === "minimal" || record.reasoningEffort === "low" || record.reasoningEffort === "medium" || record.reasoningEffort === "high" || record.reasoningEffort === "xhigh"
+      ? record.reasoningEffort
+      : undefined,
+    serviceTier: record.serviceTier === "standard" || record.serviceTier === "fast" ? record.serviceTier : undefined,
+    permissionMode: record.permissionMode === "read_only" || record.permissionMode === "workspace_write" || record.permissionMode === "full_access"
+      ? record.permissionMode
+      : undefined,
+    collaborationMode,
+  };
+}
+
+async function loadQueuedCodexPrompts(conversationId: string): Promise<QueuedCodexPrompt[]> {
+  const raw = await AsyncStorage.getItem(codexPromptQueueKey(conversationId));
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.map(parseQueuedCodexPrompt).filter((item): item is QueuedCodexPrompt => Boolean(item))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveQueuedCodexPrompts(conversationId: string, prompts: QueuedCodexPrompt[]): Promise<void> {
+  const key = codexPromptQueueKey(conversationId);
+  if (prompts.length === 0) {
+    await AsyncStorage.removeItem(key);
+    return;
+  }
+  await AsyncStorage.setItem(key, JSON.stringify(prompts.slice(0, 50)));
+}
+
+function markdownHasParent(parent: unknown, type: string): boolean {
+  return Array.isArray(parent) && parent.some((entry) => entry && typeof entry === "object" && (entry as { type?: unknown }).type === type);
+}
+
+function markdownOrderedListIndex(node: any, parent: unknown): string {
+  const orderedList = Array.isArray(parent)
+    ? parent.find((entry) => entry && typeof entry === "object" && (entry as { type?: unknown }).type === "ordered_list")
+    : undefined;
+  const start = typeof orderedList?.attributes?.start === "number" ? orderedList.attributes.start : 1;
+  const index = typeof node.index === "number" ? node.index : 0;
+  return `${start + index}${typeof node.markup === "string" ? node.markup : "."}`;
 }
 
 const DEFAULT_PERMISSION_ICON = "hand.raised";
@@ -424,6 +496,12 @@ type FileDiffEntry = {
   removed: number;
   kind?: string;
   patch?: string;
+};
+
+type OpenFileReferenceOptions = {
+  diff?: string;
+  title?: string;
+  autoRead?: boolean;
 };
 
 type ToolActivityEntry = {
@@ -1244,6 +1322,83 @@ function prepareTimelineItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
   return groupToolActivityItems(groupFileChangeItems(dedupeTimelineItems(items)));
 }
 
+function utf8ByteLength(value: string): number {
+  try {
+    return encodeURIComponent(value).replace(/%[0-9A-F]{2}/gi, "x").length;
+  } catch {
+    return value.length;
+  }
+}
+
+function sliceWithinByteLimit(value: string, limit: number, fromEnd = false): string {
+  let bytes = 0;
+  const chars = fromEnd ? [...value].reverse() : [...value];
+  const out: string[] = [];
+  for (const char of chars) {
+    const nextBytes = utf8ByteLength(char);
+    if (bytes + nextBytes > limit) break;
+    bytes += nextBytes;
+    out.push(char);
+  }
+  return fromEnd ? out.reverse().join("") : out.join("");
+}
+
+function clippedTextWindow(text: string, limit: number): { text: string; hiddenByteCount: number } {
+  const total = utf8ByteLength(text);
+  if (total <= limit) return { text, hiddenByteCount: 0 };
+  const marker = "\n\n...\n\n";
+  const markerBytes = utf8ByteLength(marker);
+  const contentLimit = Math.max(2, limit - markerBytes);
+  const head = sliceWithinByteLimit(text, Math.max(1, Math.floor(contentLimit / 3)));
+  const tail = sliceWithinByteLimit(text, Math.max(1, contentLimit - utf8ByteLength(head)), true);
+  return {
+    text: `${head}${marker}${tail}`,
+    hiddenByteCount: Math.max(0, total - utf8ByteLength(head) - utf8ByteLength(tail)),
+  };
+}
+
+function timelineTextLimit(item: AgentTimelineItem | undefined, fallback: number): number {
+  if (!item) return fallback;
+  if (item.kind === "file_change" || item.fileChange) return 48_000;
+  if (item.kind === "thinking") return 16_000;
+  if (item.kind === "tool_activity" || item.kind === "command_execution" || item.commandExecution || item.toolCall) return 8_000;
+  return 32_000;
+}
+
+function expandedLimit(baseLimit: number, level: number): number {
+  return baseLimit * Math.pow(2, Math.max(0, Math.min(level, 12)));
+}
+
+function useDisplayWindow(text: string | undefined, baseLimit: number) {
+  const [level, setLevel] = useState(0);
+  const window = useMemo(() => clippedTextWindow(text ?? "", expandedLimit(baseLimit, level)), [baseLimit, level, text]);
+  const canExpand = window.hiddenByteCount > 0;
+  const expand = useCallback(() => setLevel((value) => value + 1), []);
+  return { text: window.text, hiddenByteCount: window.hiddenByteCount, canExpand, expand };
+}
+
+function ExpandTextButton({
+  hiddenByteCount,
+  theme,
+  inverse,
+  onPress,
+}: {
+  hiddenByteCount: number;
+  theme: Theme;
+  inverse?: boolean;
+  onPress: () => void;
+}) {
+  if (hiddenByteCount <= 0) return null;
+  const kb = Math.max(1, Math.ceil(hiddenByteCount / 1024));
+  return (
+    <Pressable onPress={onPress} hitSlop={8} style={{ alignSelf: "flex-start", paddingVertical: 4 }}>
+      <Text style={{ color: inverse ? "rgba(255,255,255,0.86)" : theme.accent, fontSize: 12, fontWeight: "800" }}>
+        展开更多（约 {kb} KB）
+      </Text>
+    </Pressable>
+  );
+}
+
 function CodeBlock({
   label,
   code,
@@ -1256,6 +1411,7 @@ function CodeBlock({
   maxLines?: number;
 }) {
   const [copied, setCopied] = useState(false);
+  const display = useDisplayWindow(code, 8_000);
   const onCopy = useCallback(() => {
     copy(code).then((ok) => {
       if (!ok) {
@@ -1318,9 +1474,12 @@ function CodeBlock({
             lineHeight: 17,
           }}
         >
-          {code}
+          {display.text}
         </Text>
       </ScrollView>
+      <View style={{ paddingHorizontal: 10, paddingBottom: display.canExpand ? 6 : 0 }}>
+        <ExpandTextButton hiddenByteCount={display.hiddenByteCount} theme={theme} onPress={display.expand} />
+      </View>
     </View>
   );
 }
@@ -1394,7 +1553,7 @@ function MessageContent({
   fallbackText,
   theme,
   inverse = false,
-  monospace = true,
+  monospace = false,
   onOpenFile,
 }: {
   blocks?: AgentContentBlock[];
@@ -1402,7 +1561,7 @@ function MessageContent({
   theme: Theme;
   inverse?: boolean;
   monospace?: boolean;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, options?: OpenFileReferenceOptions) => void;
 }) {
   const normalized = blocks?.length
     ? blocks
@@ -1537,14 +1696,14 @@ function MarkdownContent({
   text,
   theme,
   inverse = false,
-  monospace = true,
+  monospace = false,
   onOpenFile,
 }: {
   text: string;
   theme: Theme;
   inverse?: boolean;
   monospace?: boolean;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, options?: OpenFileReferenceOptions) => void;
 }) {
   const color = inverse ? "#fff" : theme.text;
   const secondaryColor = inverse ? "rgba(255,255,255,0.82)" : theme.textSecondary;
@@ -1558,6 +1717,11 @@ function MarkdownContent({
     paragraph: {
       marginTop: 0,
       marginBottom: 8,
+      flexDirection: "row" as const,
+      flexWrap: "wrap" as const,
+      alignItems: "flex-start" as const,
+      width: "auto" as const,
+      minWidth: 0,
     },
     heading1: {
       color,
@@ -1619,28 +1783,48 @@ function MarkdownContent({
       marginBottom: 8,
     },
     bullet_list: {
+      marginTop: 2,
       marginBottom: 8,
     },
     ordered_list: {
+      marginTop: 2,
       marginBottom: 8,
     },
     list_item: {
-      marginBottom: 3,
+      marginBottom: 4,
+      flexDirection: "row" as const,
+      alignItems: "flex-start" as const,
     },
     bullet_list_icon: {
       color: secondaryColor,
+      marginLeft: 0,
+      marginRight: 8,
     },
     ordered_list_icon: {
       color: secondaryColor,
+      marginLeft: 0,
+      marginRight: 8,
+      minWidth: 22,
+      textAlign: "right" as const,
+    },
+    bullet_list_content: {
+      flex: 1,
+      minWidth: 0,
+    },
+    ordered_list_content: {
+      flex: 1,
+      minWidth: 0,
     },
     code_inline: {
       color,
       backgroundColor: inverse ? "rgba(255,255,255,0.18)" : theme.bgInput,
       borderWidth: 0,
-      borderRadius: 5,
-      paddingHorizontal: 4,
+      borderRadius: 4,
+      paddingHorizontal: 3,
+      paddingVertical: 1,
       fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
-      fontSize: 13,
+      fontSize: inverse ? 13 : 12,
+      lineHeight: inverse ? 18 : 17,
     },
     fence: {
       backgroundColor: "transparent",
@@ -1674,6 +1858,75 @@ function MarkdownContent({
     },
   }), [color, inverse, monospace, secondaryColor, theme]);
   const rules = useMemo(() => ({
+    paragraph: (node: any, children: React.ReactNode, parent: unknown) => {
+      const inList = markdownHasParent(parent, "list_item");
+      return (
+        <View
+          key={node.key}
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            alignItems: "flex-start",
+            flexShrink: 1,
+            minWidth: 0,
+            marginTop: 0,
+            marginBottom: inList ? 2 : 8,
+          }}
+        >
+          {children}
+        </View>
+      );
+    },
+    list_item: (node: any, children: React.ReactNode, parent: unknown) => {
+      const ordered = markdownHasParent(parent, "ordered_list");
+      const marker = ordered ? markdownOrderedListIndex(node, parent) : "•";
+      return (
+        <View
+          key={node.key}
+          style={{
+            flexDirection: "row",
+            alignItems: "flex-start",
+            width: "100%",
+            marginBottom: 5,
+          }}
+        >
+          <Text
+            accessible={false}
+            style={{
+              color: secondaryColor,
+              width: ordered ? 24 : 14,
+              marginRight: ordered ? 9 : 8,
+              textAlign: ordered ? "right" : "center",
+              fontSize: inverse ? 14 : 13,
+              lineHeight: inverse ? 21 : 20,
+              fontWeight: "700",
+            }}
+          >
+            {marker}
+          </Text>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            {children}
+          </View>
+        </View>
+      );
+    },
+    code_inline: (node: any) => (
+      <Text
+        key={node.key}
+        style={{
+          color,
+          backgroundColor: inverse ? "rgba(255,255,255,0.18)" : theme.bgInput,
+          borderRadius: 4,
+          paddingHorizontal: 3,
+          paddingVertical: 1,
+          fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+          fontSize: inverse ? 13 : 12,
+          lineHeight: inverse ? 18 : 17,
+        }}
+      >
+        {node.content}
+      </Text>
+    ),
     image: (node: any) => {
       const source = imageUriFromValue(
         node.attributes?.src ?? node.attrs?.src ?? node.src ?? node.content,
@@ -1702,22 +1955,24 @@ function MarkdownContent({
       );
     },
     fence: (node: any) => (
-      <CodeBlock
-        key={node.key}
-        label={node.sourceInfo || "代码"}
-        code={node.content ?? ""}
-        theme={theme}
-      />
+      <View key={node.key} style={{ marginTop: 3, marginBottom: 13 }}>
+        <CodeBlock
+          label={node.sourceInfo || "代码"}
+          code={node.content ?? ""}
+          theme={theme}
+        />
+      </View>
     ),
     code_block: (node: any) => (
-      <CodeBlock
-        key={node.key}
-        label="代码"
-        code={node.content ?? ""}
-        theme={theme}
-      />
+      <View key={node.key} style={{ marginTop: 3, marginBottom: 13 }}>
+        <CodeBlock
+          label="代码"
+          code={node.content ?? ""}
+          theme={theme}
+        />
+      </View>
     ),
-  }), [inverse, theme]);
+  }), [color, inverse, secondaryColor, theme]);
   return (
     <View style={{ width: "100%" }}>
       <Markdown
@@ -1727,7 +1982,7 @@ function MarkdownContent({
         onLinkPress={(url) => {
           const filePath = normalizeFileReference(url);
           if (filePath && onOpenFile) {
-            onOpenFile(filePath);
+            onOpenFile(filePath, { autoRead: false });
             return false;
           }
           if (!/^https?:\/\//i.test(url)) return false;
@@ -1750,7 +2005,7 @@ const FileChangeCard = memo(function FileChangeCard({
   tool: AgentToolCall;
   theme: Theme;
   fileChange?: AgentFileChange;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, options?: OpenFileReferenceOptions) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [showDetails, setShowDetails] = useState(false);
@@ -1839,44 +2094,47 @@ const FileChangeCard = memo(function FileChangeCard({
 
       {entries.length > 0 && expanded ? (
         <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: subtleDivider(theme) }}>
-          {entries.slice(0, expanded ? entries.length : 4).map((entry, index) => (
-            <Pressable
-              key={`${entry.path}-${index}`}
-              disabled={!onOpenFile}
-              onPress={() => onOpenFile?.(entry.path)}
-              style={{
-                minHeight: 38,
-                paddingHorizontal: 12,
-                paddingVertical: 9,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-                borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
-                borderTopColor: subtleDivider(theme),
-              }}
-            >
-              <Text
-                selectable
-                style={{ flex: 1, color: onOpenFile ? theme.accent : theme.text, fontSize: 13, fontWeight: onOpenFile ? "700" : "400" }}
-                numberOfLines={1}
+          {entries.slice(0, expanded ? entries.length : 4).map((entry, index) => {
+            const entryDiff = entry.patch ?? (entries.length === 1 ? patchText : undefined);
+            return (
+              <Pressable
+                key={`${entry.path}-${index}`}
+                disabled={!onOpenFile}
+                onPress={() => onOpenFile?.(entry.path, entryDiff ? { diff: entryDiff, title: shortPath(entry.path) } : undefined)}
+                style={{
+                  minHeight: 38,
+                  paddingHorizontal: 12,
+                  paddingVertical: 9,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
+                  borderTopColor: subtleDivider(theme),
+                }}
               >
-                {shortPath(entry.path)}
-              </Text>
-              {onOpenFile ? <AppSymbol name="doc.text.magnifyingglass" size={13} color={theme.textTertiary} /> : null}
-              {entry.kind ? (
-                <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
-                  {entryKindLabel(entry.kind)}
+                <Text
+                  selectable
+                  style={{ flex: 1, color: onOpenFile ? theme.accent : theme.text, fontSize: 13, fontWeight: onOpenFile ? "700" : "400" }}
+                  numberOfLines={1}
+                >
+                  {shortPath(entry.path)}
                 </Text>
-              ) : null}
-              {entry.added > 0 || entry.removed > 0 ? (
-                <Text style={{ color: theme.textTertiary, fontSize: 12, fontFamily: MONO_FONT, fontWeight: "700" }}>
-                  <Text style={{ color: theme.success }}>+{entry.added}</Text>
-                  <Text> </Text>
-                  <Text style={{ color: theme.error }}>-{entry.removed}</Text>
-                </Text>
-              ) : null}
-            </Pressable>
-          ))}
+                {onOpenFile ? <AppSymbol name="doc.text.magnifyingglass" size={13} color={theme.textTertiary} /> : null}
+                {entry.kind ? (
+                  <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
+                    {entryKindLabel(entry.kind)}
+                  </Text>
+                ) : null}
+                {entry.added > 0 || entry.removed > 0 ? (
+                  <Text style={{ color: theme.textTertiary, fontSize: 12, fontFamily: MONO_FONT, fontWeight: "700" }}>
+                    <Text style={{ color: theme.success }}>+{entry.added}</Text>
+                    <Text> </Text>
+                    <Text style={{ color: theme.error }}>-{entry.removed}</Text>
+                  </Text>
+                ) : null}
+              </Pressable>
+            );
+          })}
           {!expanded && entries.length > 4 ? (
             <Text style={{ paddingHorizontal: 12, paddingBottom: 9, color: theme.textTertiary, fontSize: 12 }}>
               再显示 {entries.length - 4} 个文件
@@ -1944,7 +2202,7 @@ const ToolCard = memo(function ToolCard({
 }: {
   tool: AgentToolCall;
   theme: Theme;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, options?: OpenFileReferenceOptions) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (isFileToolName(tool.name)) return <FileChangeCard tool={tool} theme={theme} onOpenFile={onOpenFile} />;
@@ -2238,6 +2496,7 @@ function SystemActivityCard({
   running?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const display = useDisplayWindow(text, running ? 16_000 : 8_000);
   const canExpand = Boolean(text && text.length > 120);
   return (
     <Pressable
@@ -2280,8 +2539,11 @@ function SystemActivityCard({
             style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17, fontFamily: MONO_FONT }}
             numberOfLines={expanded ? undefined : 2}
           >
-            {text}
+            {expanded ? display.text : text}
           </Text>
+        ) : null}
+        {expanded ? (
+          <ExpandTextButton hiddenByteCount={display.hiddenByteCount} theme={theme} onPress={display.expand} />
         ) : null}
       </View>
       {canExpand ? <AppSymbol name={expanded ? "chevron.down" : "chevron.right"} size={12} color={theme.textTertiary} /> : null}
@@ -2540,7 +2802,7 @@ function PermissionRequestCard({
   item: AgentTimelineItem;
   theme: Theme;
   onPermission: (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => void;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, options?: OpenFileReferenceOptions) => void;
 }) {
   const outcome = item.metadata?.permissionOutcome;
   const permissionPending = item.metadata?.permissionPending === true;
@@ -2813,52 +3075,57 @@ function AssistantMessage({
   item: AgentTimelineItem;
   text: string;
   theme: Theme;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, options?: OpenFileReferenceOptions) => void;
 }) {
+  const display = useDisplayWindow(text, timelineTextLimit(item, 32_000));
+  const displayBlocks = useMemo(() => {
+    if (!item.content?.length) return undefined;
+    let replacedFirstText = false;
+    return item.content.map((block) => {
+      if (block.type !== "text" || replacedFirstText) return block;
+      replacedFirstText = true;
+      return { ...block, text: display.text };
+    });
+  }, [display.text, item.content]);
   const hasBody = Boolean(text || item.content?.length);
   return (
     <View
       style={{
         alignSelf: "stretch",
-        paddingVertical: 3,
+        paddingVertical: 4,
         paddingRight: 2,
-        gap: 7,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 7, minHeight: 16 }}>
-        <Text style={{ color: remodexMuted(theme), fontSize: 11, fontWeight: "800", letterSpacing: 0 }} numberOfLines={1}>
-          assistant
-        </Text>
-        {item.isStreaming ? (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-            <ActivityIndicator size="small" color={theme.accent} />
-            <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "800" }}>生成中</Text>
-          </View>
-        ) : null}
-      </View>
       {hasBody ? (
         <View
           style={{
             borderLeftWidth: StyleSheet.hairlineWidth,
             borderLeftColor: subtleDivider(theme),
             paddingLeft: 11,
+            gap: item.isStreaming ? 6 : 0,
           }}
         >
+          {item.isStreaming ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingBottom: 1 }}>
+              <ActivityIndicator size="small" color={theme.accent} />
+              <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "800" }}>生成中</Text>
+            </View>
+          ) : null}
           {item.isStreaming && !item.content?.some((block) => block.type === "image") ? (
             <Text
               selectable
               style={{
                 color: theme.text,
-                fontFamily: MONO_FONT,
-                fontSize: 13,
-                lineHeight: 20,
+                fontSize: 14,
+                lineHeight: 21,
               }}
             >
-              {text}
+              {display.text}
             </Text>
           ) : (
-            <MessageContent blocks={item.content} fallbackText={text} theme={theme} monospace onOpenFile={onOpenFile} />
+            <MessageContent blocks={displayBlocks ?? item.content} fallbackText={display.text} theme={theme} onOpenFile={onOpenFile} />
           )}
+          <ExpandTextButton hiddenByteCount={display.hiddenByteCount} theme={theme} onPress={display.expand} />
         </View>
       ) : null}
       {!hasBody && item.isStreaming ? <StreamingPill theme={theme} /> : null}
@@ -2885,7 +3152,7 @@ function TimelineItemView({
   theme: Theme;
   onPermission: (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => void;
   onStructuredInput: (requestId: string, answers: Record<string, string[]>) => void;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, options?: OpenFileReferenceOptions) => void;
 }) {
   if (item.kind === "subagent_action" && item.subagent) {
     return (
@@ -3102,7 +3369,50 @@ function TimelineItemView({
   return null;
 }
 
-function HighlightedCodeLine({
+const TimelineItemRow = memo(function TimelineItemRow({
+  item,
+  previousTurnId,
+  theme,
+  onPermission,
+  onStructuredInput,
+  onOpenFile,
+}: {
+  item: AgentTimelineItem;
+  previousTurnId?: string;
+  theme: Theme;
+  onPermission: (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => void;
+  onStructuredInput: (requestId: string, answers: Record<string, string[]>) => void;
+  onOpenFile?: (path: string, options?: OpenFileReferenceOptions) => void;
+}) {
+  const startsTurn = Boolean(item.turnId && previousTurnId && item.turnId !== previousTurnId);
+  return (
+    <View style={{ gap: 8 }}>
+      {startsTurn ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}>
+          <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
+          <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>新一轮</Text>
+          <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
+        </View>
+      ) : null}
+      <TimelineItemView
+        item={item}
+        theme={theme}
+        onOpenFile={onOpenFile}
+        onPermission={onPermission}
+        onStructuredInput={onStructuredInput}
+      />
+    </View>
+  );
+}, (prev, next) =>
+  prev.item === next.item &&
+  prev.previousTurnId === next.previousTurnId &&
+  prev.theme === next.theme &&
+  prev.onPermission === next.onPermission &&
+  prev.onStructuredInput === next.onStructuredInput &&
+  prev.onOpenFile === next.onOpenFile
+);
+
+const HighlightedCodeLine = memo(function HighlightedCodeLine({
   line,
   lineNumber,
   language,
@@ -3137,6 +3447,157 @@ function HighlightedCodeLine({
       </Text>
     </View>
   );
+});
+
+function FilePreviewCodeContent({
+  previewLoading,
+  preview,
+  language,
+  theme,
+  height,
+  referenceOnlyPath,
+  onReadReference,
+}: {
+  previewLoading: boolean;
+  preview: AgentFileReadResult | null;
+  language: string;
+  theme: Theme;
+  height?: number;
+  referenceOnlyPath?: string | null;
+  onReadReference?: (path: string) => void;
+}) {
+  const lines = useMemo(() => preview?.content.split("\n") ?? [], [preview?.content]);
+  const renderLine = useCallback(({ item, index }: { item: string; index: number }) => (
+    <HighlightedCodeLine
+      line={item}
+      lineNumber={index + 1}
+      language={language}
+      theme={theme}
+    />
+  ), [language, theme]);
+
+  if (previewLoading) {
+    return (
+      <View style={{ paddingVertical: 28, alignItems: "center" }}>
+        <ActivityIndicator color={theme.accent} />
+      </View>
+    );
+  }
+
+  if (preview?.error) {
+    return (
+      <View style={{ padding: 12 }}>
+        <Text selectable style={{ color: theme.error, fontSize: 12, lineHeight: 17 }}>
+          {preview.error}
+        </Text>
+      </View>
+    );
+  }
+
+  if (!preview) {
+    if (referenceOnlyPath) {
+      return (
+        <View style={{ padding: 12, gap: 10 }}>
+          <Text selectable style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 17, fontFamily: MONO_FONT }}>
+            {referenceOnlyPath}
+          </Text>
+          <Text style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}>
+            这条链接来自消息记录，先作为文件引用打开。需要查看当前主机文件内容时再读取。
+          </Text>
+          {onReadReference ? (
+            <Pressable
+              onPress={() => onReadReference(referenceOnlyPath)}
+              style={({ pressed }) => ({
+                alignSelf: "flex-start",
+                borderRadius: 999,
+                paddingHorizontal: 10,
+                paddingVertical: 7,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                backgroundColor: pressed ? theme.accentSecondary : theme.accentLight,
+              })}
+            >
+              <AppSymbol name="arrow.down.circle" size={13} color={theme.accent} />
+              <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "800" }}>读取当前文件</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      );
+    }
+    return (
+      <View style={{ padding: 12 }}>
+        <Text style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}>
+          从上方列表选择文件后会在这里显示内容。
+        </Text>
+      </View>
+    );
+  }
+
+  const listHeight = height ?? Math.min(360, Math.max(120, lines.length * 19 + 16));
+  return (
+    <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator style={{ height: listHeight }}>
+      <View style={{ width: 900, minWidth: 520, height: listHeight, paddingVertical: 8, paddingRight: 14 }}>
+        <LegendList
+          data={lines}
+          keyExtractor={(_line, index) => `${preview.path}:${index}`}
+          renderItem={renderLine}
+          estimatedItemSize={19}
+          drawDistance={360}
+          recycleItems
+          style={{ flex: 1 }}
+        />
+      </View>
+    </ScrollView>
+  );
+}
+
+function FilePreviewDiffContent({
+  diff,
+  theme,
+  height,
+}: {
+  diff: string;
+  theme: Theme;
+  height: number;
+}) {
+  const lines = useMemo(() => diff.split("\n"), [diff]);
+  const renderLine = useCallback(({ item, index }: { item: string; index: number }) => {
+    const colors = diffLineColors(item, theme);
+    return (
+      <Text
+        selectable
+        style={{
+          paddingHorizontal: 10,
+          paddingVertical: 1,
+          minWidth: "100%",
+          color: colors.color,
+          backgroundColor: colors.backgroundColor,
+          fontFamily: MONO_FONT,
+          fontSize: 11,
+          lineHeight: 16,
+        }}
+      >
+        {item || " "}
+      </Text>
+    );
+  }, [theme]);
+
+  return (
+    <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator style={{ height }}>
+      <View style={{ width: 900, minWidth: 520, height, paddingVertical: 8, paddingRight: 14 }}>
+        <LegendList
+          data={lines}
+          keyExtractor={(_line, index) => `diff:${index}`}
+          renderItem={renderLine}
+          estimatedItemSize={16}
+          drawDistance={360}
+          recycleItems
+          style={{ flex: 1 }}
+        />
+      </View>
+    </ScrollView>
+  );
 }
 
 function FilePreviewDrawer({
@@ -3148,6 +3609,8 @@ function FilePreviewDrawer({
   topInset,
   bottomInset,
   initialFilePath,
+  initialDiff,
+  initialLiveRead = true,
   onClose,
   onInsertReference,
 }: {
@@ -3159,9 +3622,12 @@ function FilePreviewDrawer({
   topInset: number;
   bottomInset: number;
   initialFilePath?: string | null;
+  initialDiff?: { path: string; diff: string; title?: string } | null;
+  initialLiveRead?: boolean;
   onClose: () => void;
   onInsertReference?: (path: string) => void;
 }) {
+  const { height: windowHeight } = useWindowDimensions();
   const [currentPath, setCurrentPath] = useState(cwd);
   const [entries, setEntries] = useState<AgentFileEntry[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -3171,10 +3637,26 @@ function FilePreviewDrawer({
   const [previewLoading, setPreviewLoading] = useState(false);
   const requestSeqRef = useRef(0);
   const readSeqRef = useRef(0);
+  const browseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workspaceRef = useRef(workspace);
+  const directFileMode = Boolean(initialFilePath);
+  const directDiffMode = Boolean(initialDiff?.diff);
+  const directLiveRead = initialLiveRead !== false;
+
+  useEffect(() => {
+    workspaceRef.current = workspace;
+  }, [workspace]);
+
+  useEffect(() => () => {
+    if (browseTimeoutRef.current) clearTimeout(browseTimeoutRef.current);
+    if (readTimeoutRef.current) clearTimeout(readTimeoutRef.current);
+  }, []);
 
   const loadDirectory = useCallback(async (path: string) => {
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
+    if (browseTimeoutRef.current) clearTimeout(browseTimeoutRef.current);
     setCurrentPath(path);
     setBrowseLoading(true);
     setBrowseError(undefined);
@@ -3182,13 +3664,35 @@ function FilePreviewDrawer({
     setPreview(null);
     readSeqRef.current += 1;
     setPreviewLoading(false);
-    const result = await workspace.browseFiles(conversationId, path);
-    if (requestSeqRef.current !== requestSeq) return;
-    setEntries(result.entries);
-    setBrowseError(result.error);
-    setCurrentPath(result.path || path);
-    setBrowseLoading(false);
-  }, [conversationId, workspace]);
+    browseTimeoutRef.current = setTimeout(() => {
+      if (requestSeqRef.current !== requestSeq) return;
+      requestSeqRef.current += 1;
+      setEntries([]);
+      setBrowseError("读取目录超时：主机端没有返回文件列表，请确认 Codex/LinkShell 会话仍在线。");
+      setBrowseLoading(false);
+    }, 15_000);
+    try {
+      const result = await workspaceRef.current.browseFiles(conversationId, path);
+      if (requestSeqRef.current !== requestSeq) return;
+      if (browseTimeoutRef.current) {
+        clearTimeout(browseTimeoutRef.current);
+        browseTimeoutRef.current = null;
+      }
+      setEntries(result.entries);
+      setBrowseError(result.error);
+      setCurrentPath(result.path || path);
+      setBrowseLoading(false);
+    } catch (error) {
+      if (requestSeqRef.current !== requestSeq) return;
+      if (browseTimeoutRef.current) {
+        clearTimeout(browseTimeoutRef.current);
+        browseTimeoutRef.current = null;
+      }
+      setEntries([]);
+      setBrowseError(error instanceof Error ? error.message : "读取目录失败。");
+      setBrowseLoading(false);
+    }
+  }, [conversationId]);
 
   const openFilePath = useCallback((path: string) => {
     setSelectedPath(path);
@@ -3196,13 +3700,34 @@ function FilePreviewDrawer({
     setPreview(null);
     const readSeq = readSeqRef.current + 1;
     readSeqRef.current = readSeq;
-    workspace.readFile(conversationId, path, FILE_PREVIEW_MAX_BYTES)
+    if (readTimeoutRef.current) clearTimeout(readTimeoutRef.current);
+    readTimeoutRef.current = setTimeout(() => {
+      if (readSeqRef.current !== readSeq) return;
+      readSeqRef.current += 1;
+      setPreview({
+        path,
+        content: "",
+        encoding: "utf8",
+        truncated: false,
+        error: "读取文件超时：主机端没有返回文件内容，请确认 Codex app-server / LinkShell 会话仍在线。",
+      });
+      setPreviewLoading(false);
+    }, 15_000);
+    workspaceRef.current.readFile(conversationId, path, FILE_PREVIEW_MAX_BYTES)
       .then((result) => {
         if (readSeqRef.current !== readSeq) return;
+        if (readTimeoutRef.current) {
+          clearTimeout(readTimeoutRef.current);
+          readTimeoutRef.current = null;
+        }
         setPreview(result);
       })
       .catch((error) => {
         if (readSeqRef.current !== readSeq) return;
+        if (readTimeoutRef.current) {
+          clearTimeout(readTimeoutRef.current);
+          readTimeoutRef.current = null;
+        }
         setPreview({
           path,
           content: "",
@@ -3214,17 +3739,42 @@ function FilePreviewDrawer({
       .finally(() => {
         if (readSeqRef.current === readSeq) setPreviewLoading(false);
       });
-  }, [conversationId, workspace]);
+  }, [conversationId]);
 
   useEffect(() => {
     if (!visible) return;
     const target = initialFilePath ? resolveFileReference(initialFilePath, cwd) : undefined;
-    loadDirectory(target ? parentPath(target) : cwd).catch(() => {
+    if (target) {
+      setCurrentPath(parentPath(target));
+      setEntries([]);
+      setBrowseLoading(false);
+      setBrowseError(undefined);
+      if (initialDiff?.diff) {
+        readSeqRef.current += 1;
+        setSelectedPath(target);
+        setPreview(null);
+        setPreviewLoading(false);
+        return;
+      }
+      if (!directLiveRead) {
+        readSeqRef.current += 1;
+        if (readTimeoutRef.current) {
+          clearTimeout(readTimeoutRef.current);
+          readTimeoutRef.current = null;
+        }
+        setSelectedPath(target);
+        setPreview(null);
+        setPreviewLoading(false);
+        return;
+      }
+      openFilePath(target);
+      return;
+    }
+    loadDirectory(cwd).catch(() => {
       setBrowseLoading(false);
       setBrowseError("读取目录失败。");
     });
-    if (target) openFilePath(target);
-  }, [cwd, initialFilePath, loadDirectory, openFilePath, visible]);
+  }, [cwd, directLiveRead, initialDiff?.diff, initialFilePath, loadDirectory, openFilePath, visible]);
 
   const openEntry = useCallback((entry: AgentFileEntry) => {
     if (entry.isDirectory) {
@@ -3248,10 +3798,13 @@ function FilePreviewDrawer({
 
   if (!visible) return null;
 
-  const language = preview ? languageFromPath(preview.path) : "text";
-  const lines = preview?.content.split("\n") ?? [];
+  const language = preview ? languageFromPath(preview.path) : selectedPath ? languageFromPath(selectedPath) : "text";
   const directoryCount = entries.filter((entry) => entry.isDirectory).length;
   const fileCount = entries.length - directoryCount;
+  const directPreviewHeight = Math.max(260, windowHeight - topInset - Math.max(bottomInset, 12) - 118);
+  const referenceOnlyPath = directFileMode && !directDiffMode && !directLiveRead && selectedPath && !preview && !previewLoading
+    ? selectedPath
+    : null;
 
   return (
     <View
@@ -3300,23 +3853,25 @@ function FilePreviewDrawer({
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: theme.text, fontSize: 16, fontWeight: "800" }}>文件预览</Text>
               <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 2, fontFamily: MONO_FONT }} numberOfLines={1}>
-                {directoryCount} 个目录 · {fileCount} 个文件
+                {directDiffMode && selectedPath ? `Diff · ${selectedPath}` : directFileMode && selectedPath ? selectedPath : `${directoryCount} 个目录 · ${fileCount} 个文件`}
               </Text>
             </View>
-            <Pressable
-              onPress={() => loadDirectory(currentPath)}
-              hitSlop={8}
-              style={({ pressed }) => ({
-                width: 32,
-                height: 32,
-                borderRadius: 16,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: pressed ? theme.accentLight : theme.bgInput,
-              })}
-            >
-              {browseLoading ? <ActivityIndicator size="small" color={theme.accent} /> : <AppSymbol name="arrow.clockwise" size={15} color={theme.textSecondary} />}
-            </Pressable>
+            {!directFileMode ? (
+              <Pressable
+                onPress={() => loadDirectory(currentPath)}
+                hitSlop={8}
+                style={({ pressed }) => ({
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: pressed ? theme.accentLight : theme.bgInput,
+                })}
+              >
+                {browseLoading ? <ActivityIndicator size="small" color={theme.accent} /> : <AppSymbol name="arrow.clockwise" size={15} color={theme.textSecondary} />}
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={onClose}
               hitSlop={8}
@@ -3333,47 +3888,50 @@ function FilePreviewDrawer({
             </Pressable>
           </View>
 
-          <View
-            style={{
-              borderRadius: 12,
-              borderCurve: "continuous",
-              backgroundColor: theme.bgInput,
-              paddingHorizontal: 10,
-              paddingVertical: 8,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Pressable
-              onPress={() => loadDirectory(parentPath(currentPath))}
-              disabled={currentPath === "/"}
-              style={{ opacity: currentPath === "/" ? 0.35 : 1 }}
+          {!directFileMode ? (
+            <View
+              style={{
+                borderRadius: 12,
+                borderCurve: "continuous",
+                backgroundColor: theme.bgInput,
+                paddingHorizontal: 10,
+                paddingVertical: 8,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              }}
             >
-              <AppSymbol name="chevron.left" size={15} color={theme.textSecondary} />
-            </Pressable>
-            <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 11, fontFamily: MONO_FONT }} numberOfLines={1}>
-              {currentPath}
-            </Text>
-          </View>
+              <Pressable
+                onPress={() => loadDirectory(parentPath(currentPath))}
+                disabled={currentPath === "/"}
+                style={{ opacity: currentPath === "/" ? 0.35 : 1 }}
+              >
+                <AppSymbol name="chevron.left" size={15} color={theme.textSecondary} />
+              </Pressable>
+              <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 11, fontFamily: MONO_FONT }} numberOfLines={1}>
+                {currentPath}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         <ScrollView
           style={{ flex: 1, marginTop: 10 }}
           contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12, gap: 6 }}
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={!directFileMode}
         >
-          {browseError ? (
+          {!directFileMode && browseError ? (
             <View style={{ borderRadius: 10, padding: 10, backgroundColor: theme.errorLight }}>
               <Text style={{ color: theme.error, fontSize: 12, lineHeight: 17 }}>{browseError}</Text>
             </View>
           ) : null}
-          {browseLoading && entries.length === 0 ? (
+          {!directFileMode && browseLoading && entries.length === 0 ? (
             <View style={{ paddingVertical: 24, alignItems: "center" }}>
               <ActivityIndicator color={theme.accent} />
             </View>
           ) : null}
-          {entries.map((entry) => {
+          {!directFileMode ? entries.map((entry) => {
             const selected = selectedPath === entry.path;
             return (
               <Pressable
@@ -3408,11 +3966,13 @@ function FilePreviewDrawer({
                 {entry.isDirectory ? <AppSymbol name="chevron.right" size={13} color={theme.textTertiary} /> : null}
               </Pressable>
             );
-          })}
+          }) : null}
 
           <View
             style={{
-              marginTop: 8,
+              marginTop: directFileMode ? 0 : 8,
+              flex: directFileMode ? 1 : undefined,
+              minHeight: directFileMode ? 0 : undefined,
               borderRadius: 12,
               borderCurve: "continuous",
               borderWidth: StyleSheet.hairlineWidth,
@@ -3435,13 +3995,17 @@ function FilePreviewDrawer({
             >
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ color: theme.text, fontSize: 13, fontWeight: "800" }} numberOfLines={1}>
-                  {preview ? fileName(preview.path) : selectedPath ? fileName(selectedPath) : "选择一个文件"}
+                  {directDiffMode
+                    ? initialDiff?.title ?? (selectedPath ? fileName(selectedPath) : "Diff")
+                    : preview ? fileName(preview.path) : selectedPath ? fileName(selectedPath) : "选择一个文件"}
                 </Text>
                 <Text style={{ color: theme.textTertiary, fontSize: 10, marginTop: 2, fontFamily: MONO_FONT }} numberOfLines={1}>
-                  {preview ? [language, formatBytes(preview.size), preview.truncated ? "已截断" : null].filter(Boolean).join(" · ") : "支持常见代码文件高亮"}
+                  {directDiffMode
+                    ? `${initialDiff?.diff.split("\n").length ?? 0} 行 diff`
+                    : preview ? [language, formatBytes(preview.size), preview.truncated ? "已截断" : null].filter(Boolean).join(" · ") : referenceOnlyPath ? "文件引用 · 未读取" : "支持常见代码文件高亮"}
                 </Text>
               </View>
-              {preview?.content ? (
+              {!directDiffMode && preview?.content ? (
                 <Pressable onPress={copyPreview} hitSlop={8}>
                   <AppSymbol name="doc.on.doc" size={15} color={theme.textSecondary} />
                 </Pressable>
@@ -3465,36 +4029,18 @@ function FilePreviewDrawer({
                 </Pressable>
               ) : null}
             </View>
-            {previewLoading ? (
-              <View style={{ paddingVertical: 28, alignItems: "center" }}>
-                <ActivityIndicator color={theme.accent} />
-              </View>
-            ) : preview?.error ? (
-              <View style={{ padding: 12 }}>
-                <Text selectable style={{ color: theme.error, fontSize: 12, lineHeight: 17 }}>
-                  {preview.error}
-                </Text>
-              </View>
-            ) : preview ? (
-              <ScrollView horizontal bounces={false}>
-                <View style={{ minWidth: 520, paddingVertical: 8, paddingRight: 14 }}>
-                  {lines.map((line, index) => (
-                    <HighlightedCodeLine
-                      key={`${preview.path}:${index}`}
-                      line={line}
-                      lineNumber={index + 1}
-                      language={language}
-                      theme={theme}
-                    />
-                  ))}
-                </View>
-              </ScrollView>
+            {directDiffMode && initialDiff?.diff ? (
+              <FilePreviewDiffContent diff={initialDiff.diff} theme={theme} height={directPreviewHeight} />
             ) : (
-              <View style={{ padding: 12 }}>
-                <Text style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}>
-                  从上方列表选择文件后会在这里显示内容。
-                </Text>
-              </View>
+              <FilePreviewCodeContent
+                previewLoading={previewLoading}
+                preview={preview}
+                language={language}
+                theme={theme}
+                height={directFileMode ? directPreviewHeight : undefined}
+                referenceOnlyPath={referenceOnlyPath}
+                onReadReference={openFilePath}
+              />
             )}
           </View>
         </ScrollView>
@@ -3514,6 +4060,9 @@ export function AgentConversationScreen({
   const insets = useSafeAreaInsets();
   const conversation = workspace.getConversation(conversationId);
   const timeline = workspace.getTimeline(conversationId);
+  const loadOlderHistory = workspace.loadOlderHistory;
+  const respondPermission = workspace.respondPermission;
+  const respondStructuredInput = workspace.respondStructuredInput;
   const visibleTimeline = useMemo(() => prepareTimelineItems(timeline), [timeline]);
   const visibleTimelineRef = useRef<AgentTimelineItem[]>(visibleTimeline);
   visibleTimelineRef.current = visibleTimeline;
@@ -3532,8 +4081,11 @@ export function AgentConversationScreen({
   const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
   const [queuedCodexPrompts, setQueuedCodexPrompts] = useState<QueuedCodexPrompt[]>([]);
   const queuedAutoSendInFlightRef = useRef(false);
+  const queuedPersistenceReadyRef = useRef(false);
   const [fileDrawerOpen, setFileDrawerOpen] = useState(false);
   const [fileDrawerInitialPath, setFileDrawerInitialPath] = useState<string | null>(null);
+  const [fileDrawerInitialDiff, setFileDrawerInitialDiff] = useState<{ path: string; diff: string; title?: string } | null>(null);
+  const [fileDrawerInitialLiveRead, setFileDrawerInitialLiveRead] = useState(true);
   const [previewOpen, setPreviewOpen] = useState(false);
   const capabilities = useMemo(() => {
     if (!conversation) return undefined;
@@ -3560,10 +4112,8 @@ export function AgentConversationScreen({
     : [theme.bg, "rgba(19,19,20,0.92)", "rgba(19,19,20,0.52)", "rgba(19,19,20,0)"];
   const permission = permissionMeta(permissionMode, theme);
   const canSend = Boolean(text.trim() || attachments.length > 0);
-  const canGuideRunningCodex = conversation?.provider === "codex" &&
-    conversation.status === "running" &&
-    Boolean(conversation.runningTurnId);
-  const canQueueRunningCodex = conversation?.provider === "codex" && conversation.status === "running";
+  const canGuideRunningCodex = conversation?.provider === "codex" && conversation.status === "running" && Boolean(conversation.runningTurnId);
+  const canQueueRunningCodex = conversation?.provider === "codex" && conversation.status === "running" && Boolean(conversation.runningTurnId);
   const canSubmitComposer = canSend && (!running || canQueueRunningCodex);
   const modelOpts = useMemo(
     () => modelOptionsFor(conversation?.provider ?? "codex", capabilities),
@@ -3741,9 +4291,9 @@ export function AgentConversationScreen({
       setHasNewOutput((current) => current ? false : current);
     }
     if (contentOffset.y < 80) {
-      workspace.loadOlderHistory(conversationId);
+      loadOlderHistory(conversationId);
     }
-  }, [conversationId, workspace]);
+  }, [conversationId, loadOlderHistory]);
 
   const forceTimelineToBottom = useCallback((animated = true) => {
     const ref = timelineRef.current;
@@ -3752,6 +4302,15 @@ export function AgentConversationScreen({
     ref.scrollToEnd({ animated });
     nativeScrollRef?.scrollToEnd?.({ animated });
   }, []);
+
+  const settleTimelineAtBottom = useCallback(() => {
+    if (!timelineNearBottomRef.current) return;
+    requestAnimationFrame(() => {
+      if (timelineNearBottomRef.current) {
+        forceTimelineToBottom(false);
+      }
+    });
+  }, [forceTimelineToBottom]);
 
   const scrollTimelineToBottom = useCallback((animated = true, stick = true) => {
     if (stick) {
@@ -3765,40 +4324,38 @@ export function AgentConversationScreen({
     setTimeout(scroll, 220);
   }, [forceTimelineToBottom]);
 
-  const openFileReference = useCallback((path: string) => {
+  const openFileReference = useCallback((path: string, options?: OpenFileReferenceOptions) => {
     if (!conversation) return;
     const normalized = normalizeFileReference(path);
     if (!normalized) return;
-    setFileDrawerInitialPath(resolveFileReference(normalized, conversation.cwd || "~"));
+    const resolved = resolveFileReference(normalized, conversation.cwd || "~");
+    setFileDrawerInitialPath(resolved);
+    setFileDrawerInitialDiff(options?.diff ? { path: resolved, diff: options.diff, title: options.title } : null);
+    setFileDrawerInitialLiveRead(options?.diff ? false : options?.autoRead ?? true);
     setFileDrawerOpen(true);
   }, [conversation]);
 
+  const handleTimelinePermission = useCallback((requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => {
+    respondPermission(conversationId, requestId, outcome, optionId);
+  }, [conversationId, respondPermission]);
+
+  const handleTimelineStructuredInput = useCallback((requestId: string, answers: Record<string, string[]>) => {
+    respondStructuredInput(conversationId, requestId, answers);
+  }, [conversationId, respondStructuredInput]);
+
   const renderTimelineItem = useCallback(({ item, index }: LegendListRenderItemProps<AgentTimelineItem>) => {
     const previous = visibleTimelineRef.current[index - 1];
-    const startsTurn = Boolean(item.turnId && previous?.turnId && item.turnId !== previous.turnId);
     return (
-      <View style={{ gap: 8 }}>
-        {startsTurn ? (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}>
-            <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
-            <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>新一轮</Text>
-            <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.separator }} />
-          </View>
-        ) : null}
-        <TimelineItemView
-          item={item}
-          theme={theme}
-          onOpenFile={openFileReference}
-          onPermission={(requestId, outcome, optionId) =>
-            workspace.respondPermission(conversationId, requestId, outcome, optionId)
-          }
-          onStructuredInput={(requestId, answers) =>
-            workspace.respondStructuredInput(conversationId, requestId, answers)
-          }
-        />
-      </View>
+      <TimelineItemRow
+        item={item}
+        previousTurnId={previous?.turnId}
+        theme={theme}
+        onOpenFile={openFileReference}
+        onPermission={handleTimelinePermission}
+        onStructuredInput={handleTimelineStructuredInput}
+      />
     );
-  }, [conversationId, openFileReference, theme, workspace]);
+  }, [handleTimelinePermission, handleTimelineStructuredInput, openFileReference, theme]);
 
   const timelineEmpty = useMemo(() => (
     <View style={{ paddingVertical: 36, alignItems: "center", gap: 9 }}>
@@ -3832,9 +4389,27 @@ export function AgentConversationScreen({
   }, [forceTimelineToBottom, timelineAutoScrollKey, visibleTimeline.length]);
 
   useEffect(() => {
-    setQueuedCodexPrompts([]);
+    let cancelled = false;
+    queuedPersistenceReadyRef.current = false;
     queuedAutoSendInFlightRef.current = false;
+    setQueuedCodexPrompts([]);
+    loadQueuedCodexPrompts(conversationId)
+      .then((items) => {
+        if (cancelled) return;
+        setQueuedCodexPrompts((current) => current.length > 0 ? current : items);
+      })
+      .finally(() => {
+        if (!cancelled) queuedPersistenceReadyRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId]);
+
+  useEffect(() => {
+    if (!queuedPersistenceReadyRef.current) return;
+    saveQueuedCodexPrompts(conversationId, queuedCodexPrompts).catch(() => {});
+  }, [conversationId, queuedCodexPrompts]);
 
   useEffect(() => {
     if (running) {
@@ -3842,7 +4417,7 @@ export function AgentConversationScreen({
     }
   }, [running]);
 
-  const submitPromptToWorkspace = useCallback((prompt: QueuedCodexPrompt) => {
+  const submitPromptToWorkspace = useCallback((prompt: QueuedCodexPrompt, options?: { forceSteer?: boolean }) => {
     if (!conversation) return;
     workspace.sendPrompt(conversation.id, prompt.text, {
       model: prompt.model,
@@ -3851,6 +4426,7 @@ export function AgentConversationScreen({
       permissionMode: prompt.permissionMode,
       collaborationMode: prompt.collaborationMode,
       attachments: prompt.attachments,
+      forceSteer: options?.forceSteer,
     });
     scrollTimelineToBottom(true);
   }, [conversation, scrollTimelineToBottom, workspace]);
@@ -3875,6 +4451,7 @@ export function AgentConversationScreen({
         workspace.executeCommand(conversation.id, commandMatch.command, value, commandMatch.args);
         setText("");
         setAttachments([]);
+        Keyboard.dismiss();
         scrollTimelineToBottom(true);
       };
       if (commandMatch.command.destructive) {
@@ -3913,13 +4490,14 @@ export function AgentConversationScreen({
     }
     setText("");
     setAttachments([]);
+    Keyboard.dismiss();
     scrollTimelineToBottom(true);
   }, [attachments, availableCommands, canQueueRunningCodex, canSend, conversation, currentCollaborationMode, effectiveServiceTier, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToBottom, speedOpts.length, submitPromptToWorkspace, text, workspace]);
 
   const guideQueuedPrompt = useCallback((prompt: QueuedCodexPrompt) => {
     if (!canGuideRunningCodex) return;
     setQueuedCodexPrompts((current) => current.filter((item) => item.id !== prompt.id));
-    submitPromptToWorkspace(prompt);
+    submitPromptToWorkspace(prompt, { forceSteer: true });
     Haptics.selectionAsync().catch(() => {});
   }, [canGuideRunningCodex, submitPromptToWorkspace]);
 
@@ -3986,10 +4564,13 @@ export function AgentConversationScreen({
   const insertFileReference = useCallback((path: string) => {
     setText((current) => {
       const prefix = current.trimEnd();
-      const next = `@${path}`;
+      const next = /\s/.test(path) ? `@${JSON.stringify(path)}` : `@${path}`;
       return prefix ? `${prefix} ${next} ` : `${next} `;
     });
     setFileDrawerOpen(false);
+    setFileDrawerInitialPath(null);
+    setFileDrawerInitialDiff(null);
+    setFileDrawerInitialLiveRead(true);
   }, []);
 
   const selectSlashCommand = useCallback((command: AgentCommandDescriptor) => {
@@ -4072,6 +4653,24 @@ export function AgentConversationScreen({
 
   const cancelRunningTurn = useCallback(() => {
     if (!conversation) return;
+    if (queuedCodexPrompts.length > 0) {
+      Alert.alert(
+        "打断并执行队首？",
+        "Agent 会中断当前任务，然后继续发送队列中的第一条消息。",
+        [
+          { text: "继续运行", style: "cancel" },
+          {
+            text: "打断并继续",
+            style: "destructive",
+            onPress: () => {
+              queuedAutoSendInFlightRef.current = false;
+              workspace.cancel(conversation.id);
+            },
+          },
+        ],
+      );
+      return;
+    }
     Alert.alert(
       "停止当前任务？",
       "Agent 会中断当前运行中的回复和工具调用。",
@@ -4084,7 +4683,7 @@ export function AgentConversationScreen({
         },
       ],
     );
-  }, [conversation, workspace]);
+  }, [conversation, queuedCodexPrompts.length, workspace]);
 
   const appendImageBlocks = useCallback((assets: ImagePicker.ImagePickerAsset[]) => {
     const blocks = assets
@@ -4179,7 +4778,7 @@ export function AgentConversationScreen({
       commandAction("review", "Review 当前改动", "doc.text.magnifyingglass"),
       commandAction("subagents", "Subagents", "person.2.fill"),
       commandAction("compact", "压缩上下文", "square.stack.3d.up"),
-      commandAction("clear", "新上下文", "trash.fill", { destructive: true }),
+      commandAction("new", "新上下文", "trash.fill", { destructive: true }),
     ].filter((action): action is MenuAction => Boolean(action));
     const gitActions = [
       commandAction("git-status", "Git 状态", "point.3.connected.trianglepath.dotted"),
@@ -4190,16 +4789,19 @@ export function AgentConversationScreen({
       commandAction("git-stash", "Stash", "tray"),
       commandAction("git-stash-pop", "Stash Pop", "arrow.counterclockwise"),
     ].filter((action): action is MenuAction => Boolean(action));
-    return [
-      {
+    const planAction: MenuAction | undefined = providerCapability?.supportsPlan || availableCommands.some((command) => command.name === "plan")
+      ? {
         id: "toggle-plan",
         title: currentCollaborationMode === "plan" ? "退出 Plan mode" : "Plan mode",
         image: "checklist",
         state: currentCollaborationMode === "plan" ? "on" : "off",
         attributes: {
-          disabled: running || !(providerCapability?.supportsPlan || availableCommands.some((command) => command.name === "plan")),
+          disabled: running,
         },
-      },
+      }
+      : undefined;
+    return [
+      ...(planAction ? [planAction] : []),
       {
         id: "attach-library",
         title: "从相册选择",
@@ -4242,6 +4844,8 @@ export function AgentConversationScreen({
     }
     if (event === "open-files") {
       setFileDrawerInitialPath(null);
+      setFileDrawerInitialDiff(null);
+      setFileDrawerInitialLiveRead(true);
       setFileDrawerOpen(true);
       return;
     }
@@ -4344,6 +4948,8 @@ export function AgentConversationScreen({
           <Pressable
             onPress={() => {
               setFileDrawerInitialPath(null);
+              setFileDrawerInitialDiff(null);
+              setFileDrawerInitialLiveRead(true);
               setFileDrawerOpen(true);
             }}
             hitSlop={8}
@@ -4409,7 +5015,9 @@ export function AgentConversationScreen({
                 workspace.refreshConversation(conversation.id);
               }
               if (nativeEvent.event === "archive") {
-                workspace.archive(conversation.id, !conversation.archived).then(onBack).catch(() => {});
+                workspace.archive(conversation.id, !conversation.archived).then(onBack).catch((error) => {
+                  Alert.alert("无法更新归档状态", error instanceof Error ? error.message : String(error));
+                });
               }
             }}
           >
@@ -4443,17 +5051,13 @@ export function AgentConversationScreen({
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
           onScroll={handleTimelineScroll}
-          onContentSizeChange={() => {
-            if (timelineNearBottomRef.current) forceTimelineToBottom(false);
-          }}
-          onLayout={() => {
-            if (timelineNearBottomRef.current) forceTimelineToBottom(false);
-          }}
+          onContentSizeChange={settleTimelineAtBottom}
+          onLayout={settleTimelineAtBottom}
           scrollEventThrottle={16}
           estimatedItemSize={96}
           drawDistance={720}
           alignItemsAtEnd
-          maintainScrollAtEnd={{ onDataChange: true, onItemLayout: true, onLayout: true }}
+          maintainScrollAtEnd={{ onDataChange: true, onLayout: true }}
           maintainScrollAtEndThreshold={0.2}
           maintainVisibleContentPosition={false}
         />
@@ -4615,68 +5219,71 @@ export function AgentConversationScreen({
                   {canGuideRunningCodex ? "可引导当前任务" : "等待当前任务结束"}
                 </Text>
               </View>
-              {queuedCodexPrompts.slice(0, 3).map((prompt, index) => (
-                <View
-                  key={prompt.id}
-                  style={{
-                    minHeight: 46,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
-                    paddingHorizontal: 10,
-                    paddingVertical: 8,
-                    borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
-                    borderTopColor: subtleDivider(theme),
-                  }}
-                >
-                  <AppSymbol name="arrow.turn.down.right" size={14} color={theme.textTertiary} />
-                  <Text
-                    style={{ flex: 1, color: theme.textSecondary, fontSize: 13, lineHeight: 18, fontWeight: "600" }}
-                    numberOfLines={2}
-                  >
-                    {queuedPromptPreview(prompt)}
-                  </Text>
-                  <Pressable
-                    onPress={() => guideQueuedPrompt(prompt)}
-                    disabled={!canGuideRunningCodex}
-                    hitSlop={8}
-                    style={({ pressed }) => ({
-                      minHeight: 30,
-                      borderRadius: 15,
-                      paddingHorizontal: 9,
+              <ScrollView
+                style={{ maxHeight: 46 * 3 }}
+                bounces={queuedCodexPrompts.length > 3}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={queuedCodexPrompts.length > 3}
+              >
+                {queuedCodexPrompts.map((prompt, index) => (
+                  <View
+                    key={prompt.id}
+                    style={{
+                      minHeight: 46,
                       flexDirection: "row",
                       alignItems: "center",
-                      gap: 4,
-                      backgroundColor: pressed
-                        ? theme.bgInput
-                        : canGuideRunningCodex ? theme.bgCard : "transparent",
-                      opacity: canGuideRunningCodex ? 1 : 0.45,
-                    })}
+                      gap: 8,
+                      paddingHorizontal: 10,
+                      paddingVertical: 8,
+                      borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
+                      borderTopColor: subtleDivider(theme),
+                    }}
                   >
-                    <AppSymbol name="arrow.turn.down.right" size={13} color={theme.textSecondary} />
-                    <Text style={{ color: theme.textSecondary, fontSize: 13, fontWeight: "800" }}>引导</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => removeQueuedPrompt(prompt.id)}
-                    hitSlop={8}
-                    style={({ pressed }) => ({
-                      width: 30,
-                      height: 30,
-                      borderRadius: 15,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      backgroundColor: pressed ? theme.bgInput : "transparent",
-                    })}
-                  >
-                    <AppSymbol name="trash.fill" size={14} color={theme.textTertiary} />
-                  </Pressable>
-                </View>
-              ))}
-              {queuedCodexPrompts.length > 3 ? (
-                <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700", paddingHorizontal: 10, paddingBottom: 8 }}>
-                  另有 {queuedCodexPrompts.length - 3} 条等待发送
-                </Text>
-              ) : null}
+                    <AppSymbol name="arrow.turn.down.right" size={14} color={theme.textTertiary} />
+                    <Text
+                      style={{ flex: 1, color: theme.textSecondary, fontSize: 13, lineHeight: 18, fontWeight: "600" }}
+                      numberOfLines={2}
+                    >
+                      {queuedPromptPreview(prompt)}
+                    </Text>
+                    <Pressable
+                      onPress={() => guideQueuedPrompt(prompt)}
+                      disabled={!canGuideRunningCodex}
+                      hitSlop={8}
+                      style={({ pressed }) => ({
+                        minHeight: 30,
+                        borderRadius: 15,
+                        paddingHorizontal: 9,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 4,
+                        backgroundColor: pressed
+                          ? theme.bgInput
+                          : canGuideRunningCodex ? theme.bgCard : "transparent",
+                        opacity: canGuideRunningCodex ? 1 : 0.45,
+                      })}
+                    >
+                      <AppSymbol name="arrow.turn.down.right" size={13} color={theme.textSecondary} />
+                      <Text style={{ color: theme.textSecondary, fontSize: 13, fontWeight: "800" }}>引导</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => removeQueuedPrompt(prompt.id)}
+                      hitSlop={8}
+                      style={({ pressed }) => ({
+                        width: 30,
+                        height: 30,
+                        borderRadius: 15,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: pressed ? theme.bgInput : "transparent",
+                      })}
+                    >
+                      <AppSymbol name="trash.fill" size={14} color={theme.textTertiary} />
+                    </Pressable>
+                  </View>
+                ))}
+              </ScrollView>
             </View>
           ) : null}
           <TextInput
@@ -4798,7 +5405,7 @@ export function AgentConversationScreen({
                 </Text>
               </View>
             )}
-            {currentCollaborationMode === "plan" ? (
+            {currentCollaborationMode === "plan" && (providerCapability?.supportsPlan || availableCommands.some((command) => command.name === "plan")) ? (
               <View
                 style={{
                   height: 34,
@@ -4906,9 +5513,13 @@ export function AgentConversationScreen({
         topInset={insets.top}
         bottomInset={insets.bottom}
         initialFilePath={fileDrawerInitialPath}
+        initialDiff={fileDrawerInitialDiff}
+        initialLiveRead={fileDrawerInitialLiveRead}
         onClose={() => {
           setFileDrawerOpen(false);
           setFileDrawerInitialPath(null);
+          setFileDrawerInitialDiff(null);
+          setFileDrawerInitialLiveRead(true);
         }}
         onInsertReference={insertFileReference}
       />

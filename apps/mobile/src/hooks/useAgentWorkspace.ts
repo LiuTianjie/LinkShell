@@ -6,11 +6,13 @@ import type { ProjectRecord } from "../storage/projects";
 import type { SessionInfo, SessionManagerHandle } from "./useSessionManager";
 import {
   archiveAgentConversation,
+  loadAgentHistoryPageState,
   loadAgentConversations,
   loadAgentTimeline,
   makeAgentConversationId,
   replaceAgentConversationsForDevice,
   renameAgentConversation,
+  saveAgentHistoryPageState,
   saveAgentTimeline,
   upsertAgentConversation,
   upsertAgentTimelineItem,
@@ -30,6 +32,7 @@ import {
   type AgentStructuredInputOption,
   type AgentStructuredInputQuestion,
   type AgentTimelineItem,
+  type AgentToolCall,
 } from "../storage/agent-workspace";
 
 interface OpenConversationInput {
@@ -73,7 +76,19 @@ interface CodexMessageItem {
   itemId: string;
   orderIndex: number;
   role?: "user" | "assistant" | "system";
-  type: "message" | "command" | "file_change" | "tool" | "approval" | "structured_input" | "status" | "error";
+  type:
+    | "message"
+    | "command"
+    | "file_change"
+    | "tool"
+    | "approval"
+    | "structured_input"
+    | "status"
+    | "error"
+    | "reasoning"
+    | "plan"
+    | "review"
+    | "context_compaction";
   text?: string;
   content?: AgentContentBlock[];
   fileChange?: AgentFileChange;
@@ -85,11 +100,19 @@ interface CodexMessageItem {
   requestMethod?: string;
   structuredInput?: AgentTimelineItem["structuredInput"];
   answers?: Record<string, string[]>;
+  permissionOutcome?: "allow" | "deny" | "cancelled";
+  permissionSubmitting?: boolean;
+  permissionError?: string;
   raw?: unknown;
   isStreaming?: boolean;
   deliveryState: CodexDeliveryState;
   createdAt: number;
   updatedAt?: number;
+}
+
+interface PendingCodexDelta {
+  conversationId: string;
+  item: CodexMessageItem;
 }
 
 interface CodexThreadState {
@@ -160,6 +183,7 @@ export interface AgentWorkspaceHandle {
       permissionMode?: AgentPermissionMode;
       collaborationMode?: AgentCollaborationMode;
       attachments?: AgentContentBlock[];
+      forceSteer?: boolean;
     },
   ) => void;
   executeCommand: (
@@ -209,9 +233,99 @@ function normalizeServerUrl(url: string): string {
 
 function textFromBlocks(blocks: AgentContentBlock[] | undefined): string {
   return (blocks ?? [])
-    .map((block) => block.type === "text" ? block.text ?? "" : `[${block.mimeType ?? "image"} attachment]`)
+    .map((block) => {
+      if (block.type === "text") return block.text ?? "";
+      if (block.type === "image") return `[${block.mimeType ?? "image"} attachment]`;
+      return "";
+    })
     .filter(Boolean)
     .join("\n");
+}
+
+function normalizePromptFileReference(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let value = raw.trim();
+  if (!value) return undefined;
+  if (/^(https?:|mailto:|tel:|sms:|linkshell:)/i.test(value)) return undefined;
+  if (/^file:\/\//i.test(value)) value = value.replace(/^file:\/\//i, "");
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    // Keep non-URI text as-is.
+  }
+  value = value
+    .replace(/[#?].*$/, "")
+    .replace(/:(\d+)(?::\d+)?$/, "")
+    .trim();
+  if (!value || value.includes("\0")) return undefined;
+  if (value.startsWith("/") || value.startsWith("~") || value.startsWith("./") || value.startsWith("../")) return value;
+  if (value.includes("/") || /^[\w.-]+\.[A-Za-z0-9]+$/.test(value)) return value;
+  return undefined;
+}
+
+function fileNameFromPath(path: string): string {
+  return path.split("/").filter(Boolean).pop() || path;
+}
+
+function normalizePosixPath(path: string): string {
+  const absolute = path.startsWith("/");
+  const segments: string[] = [];
+  for (const segment of path.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (segments.length > 0 && segments[segments.length - 1] !== "..") {
+        segments.pop();
+      } else if (!absolute) {
+        segments.push(segment);
+      }
+      continue;
+    }
+    segments.push(segment);
+  }
+  return `${absolute ? "/" : ""}${segments.join("/")}` || (absolute ? "/" : ".");
+}
+
+function base64ToUtf8(data: string): string {
+  const atobFn = (globalThis as { atob?: (value: string) => string }).atob;
+  if (typeof atobFn !== "function") return "";
+  const binary = atobFn(data);
+  const bytes = Array.from(binary, (char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`).join("");
+  try {
+    return decodeURIComponent(bytes);
+  } catch {
+    return binary;
+  }
+}
+
+function resolvePromptFileReference(path: string, cwd: string | undefined): string {
+  if (path.startsWith("/") || path.startsWith("~")) return path;
+  const root = cwd?.replace(/\/+$/, "") || "";
+  if (!root) return path;
+  if (path.startsWith("./")) return normalizePosixPath(`${root}/${path.slice(2)}`);
+  if (path.startsWith("../")) return normalizePosixPath(`${root}/${path}`);
+  return normalizePosixPath(`${root}/${path}`);
+}
+
+function extractPromptFileBlocks(text: string, cwd: string | undefined): AgentContentBlock[] {
+  const blocks: AgentContentBlock[] = [];
+  const seen = new Set<string>();
+  const pattern = /(^|\s)@(?:"([^"]+)"|'([^']+)'|([^\s]+))/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const raw = match[2] ?? match[3] ?? match[4];
+    const normalized = normalizePromptFileReference(raw);
+    if (!normalized) continue;
+    const path = resolvePromptFileReference(normalized, cwd);
+    if (seen.has(path)) continue;
+    seen.add(path);
+    blocks.push({
+      type: "file",
+      path,
+      name: fileNameFromPath(path),
+      text: `@${normalized}`,
+    });
+  }
+  return blocks;
 }
 
 function titleFromCwd(cwd: string | undefined): string {
@@ -294,6 +408,11 @@ function codexTimestamp(value: unknown, fallback = Date.now()): number {
   return fallback;
 }
 
+function codexOptionalTimestamp(value: unknown): number | undefined {
+  const parsed = codexTimestamp(value, Number.NaN);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function arrayFromKeys(value: unknown, keys: string[]): unknown[] {
   const record = asRecord(value);
   if (!record) return [];
@@ -316,6 +435,38 @@ function codexText(value: unknown): string {
   return codexText(record.content ?? record.message ?? record.parts ?? record.items);
 }
 
+function normalizedCodexToken(value: unknown): string {
+  return typeof value === "string"
+    ? value.toLowerCase().replace(/[_\-\s/]+/g, "")
+    : "";
+}
+
+function codexItemType(value: unknown): string {
+  const record = asRecord(value);
+  return normalizedCodexToken(firstString(record, ["type", "kind", "name"]) ?? "");
+}
+
+function codexMessageMergeKey(item: Pick<CodexMessageItem, "turnId" | "itemId" | "requestId" | "type">): string {
+  if ((item.type === "approval" || item.type === "structured_input") && item.requestId) {
+    return `${item.type}:${item.requestId}`;
+  }
+  return `${item.turnId ?? "no-turn"}:${item.itemId}`;
+}
+
+function codexTimelineItemId(item: CodexMessageItem): string {
+  if (item.type === "approval" && item.requestId) return `approval:${item.requestId}`;
+  if (item.type === "structured_input" && item.requestId) return `input:${item.requestId}`;
+  return `codex:${codexMessageMergeKey(item)}`;
+}
+
+function codexItemStatus(value: unknown): AgentToolCall["status"] {
+  const normalized = normalizedCodexToken(codexStatus(value));
+  if (normalized === "failed" || normalized === "error") return "failed";
+  if (normalized === "running" || normalized === "inprogress" || normalized === "active" || normalized === "streaming") return "running";
+  if (normalized === "pending" || normalized === "queued") return "pending";
+  return "completed";
+}
+
 function codexContentBlocks(value: unknown): AgentContentBlock[] {
   if (typeof value === "string") return value.trim() ? [{ type: "text", text: value }] : [];
   if (Array.isArray(value)) return value.flatMap((entry) => codexContentBlocks(entry));
@@ -332,6 +483,11 @@ function codexContentBlocks(value: unknown): AgentContentBlock[] {
   if (normalizedType === "text" || normalizedType === "inputtext" || normalizedType === "outputtext") {
     const text = firstString(record, ["text", "content", "message"]);
     return text ? [{ type: "text", text }] : [];
+  }
+  if (normalizedType === "file" || normalizedType === "inputfile" || normalizedType === "filereference") {
+    const path = firstString(record, ["path", "file", "filePath", "file_path", "absolutePath", "relativePath"]);
+    const text = firstString(record, ["text", "name", "label"]);
+    return path ? [{ type: "file", path, name: text, text: text ?? `@${path}` }] : [];
   }
   const nested = codexContentBlocks(record.content ?? record.message ?? record.parts ?? record.items);
   if (nested.length > 0) return nested;
@@ -500,6 +656,62 @@ function codexFileChangeFromValue(
   return { entries, diff, summary, changeSetId, status };
 }
 
+function codexPlanStepsFromValue(value: unknown): AgentTimelineItem["plan"] | undefined {
+  const record = asRecord(value);
+  const candidates = [
+    ...(Array.isArray(value) ? value : []),
+    ...(Array.isArray(record?.steps) ? record.steps : []),
+    ...(Array.isArray(record?.plan) ? record.plan : []),
+    ...(Array.isArray(record?.items) ? record.items : []),
+  ];
+  const steps = candidates
+    .map((entry, index) => {
+      const raw = asRecord(entry);
+      const text = raw
+        ? firstString(raw, ["text", "content", "description", "title", "step"])
+        : typeof entry === "string"
+          ? entry
+          : undefined;
+      if (!text?.trim()) return undefined;
+      const statusToken = normalizedCodexToken(firstString(raw, ["status", "state"]) ?? "");
+      return {
+        id: firstString(raw, ["id", "stepId", "step_id"]) ?? `step-${index + 1}`,
+        text: text.trim(),
+        status: statusToken === "completed" || statusToken === "done"
+          ? "completed" as const
+          : statusToken === "inprogress" || statusToken === "running" || statusToken === "active"
+            ? "in_progress" as const
+            : "pending" as const,
+      };
+    })
+    .filter((entry): entry is NonNullable<AgentTimelineItem["plan"]>[number] => Boolean(entry));
+  return steps.length > 0 ? steps : undefined;
+}
+
+function codexToolNameFromValue(value: unknown): string | undefined {
+  const raw = asRecord(value);
+  return firstString(raw, ["toolName", "tool_name", "name", "command", "title", "label"]) ??
+    firstString(asRecord(raw?.tool), ["name", "toolName"]);
+}
+
+function codexToolInputFromValue(value: unknown): string | undefined {
+  const raw = asRecord(value);
+  return codexText(raw?.input ?? raw?.arguments ?? raw?.args ?? raw?.params ?? raw?.content);
+}
+
+function codexGeneratedImageMarkdown(value: unknown): string | undefined {
+  const raw = asRecord(value);
+  const candidates = [
+    firstString(raw, ["url", "uri", "imageUrl", "image_url", "data"]),
+    firstString(asRecord(raw?.image), ["url", "uri", "data"]),
+    firstString(asRecord(raw?.output), ["url", "uri", "data"]),
+  ].filter((entry): entry is string => Boolean(entry));
+  const source = candidates[0];
+  if (!source) return undefined;
+  const alt = firstString(raw, ["alt", "caption", "prompt", "text"]) ?? "Generated image";
+  return `![${alt.replace(/[\]\n\r]/g, " ")}](${source})`;
+}
+
 function codexThreadId(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
@@ -511,6 +723,27 @@ function codexTurnId(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
   return firstString(record, ["turnId", "id"]) ?? firstString(record.turn, ["id", "turnId"]);
+}
+
+function codexTurnStatus(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return firstString(record, ["status", "state"]) ?? firstString(record.turn, ["status", "state"]);
+}
+
+function codexTurnStatusIsRunning(status: string | undefined): boolean {
+  const normalized = status?.toLowerCase();
+  return normalized === "inprogress" ||
+    normalized === "in_progress" ||
+    normalized === "in-progress" ||
+    normalized === "running" ||
+    normalized === "active" ||
+    normalized === "streaming";
+}
+
+function codexTurnStatusIsFailed(status: string | undefined): boolean {
+  const normalized = status?.toLowerCase();
+  return normalized === "failed" || normalized === "error";
 }
 
 function codexItemId(value: unknown): string | undefined {
@@ -532,7 +765,10 @@ function codexInputBlocks(blocks: AgentContentBlock[]): unknown[] {
     if (block.type === "image" && block.data) {
       return { type: "image", url: block.data };
     }
-    return { type: "text", text: block.text ?? "" };
+    if (block.type === "file" && block.path) {
+      return { type: "mention", path: block.path, name: block.name ?? fileNameFromPath(block.path) };
+    }
+    return { type: "text", text: block.text ?? "", text_elements: [] };
   });
 }
 
@@ -549,79 +785,152 @@ function codexTurnToMessages(turn: unknown, threadId: string, turnIndex: number)
     items.forEach((rawItem, itemIndex) => {
       const item = asRecord(rawItem);
       if (!item) return;
-      const type = firstString(item, ["type", "kind"]) ?? "";
+      const type = codexItemType(item);
       const itemId = codexItemId(item) ?? `${turnId}:item-${itemIndex + 1}`;
       const createdAt = codexTimestamp(
         item.createdAt ?? item.created_at ?? item.startedAt ?? item.completedAt,
         baseCreatedAt + itemIndex,
       );
-      if (type === "userMessage") {
+      const baseItem = {
+        threadId,
+        turnId,
+        itemId,
+        orderIndex: messages.length + 1,
+        raw: item,
+        deliveryState: "confirmed" as const,
+        createdAt,
+      };
+      if (type === "usermessage" || (type === "message" && normalizedCodexToken(item.role) === "user")) {
         const content = codexContentBlocks(item.content ?? item.text ?? item);
         const text = textFromBlocks(content) || codexText(item.content ?? item.text ?? item);
         if (!text && content.length === 0) return;
         messages.push({
-          threadId,
-          turnId,
-          itemId,
-          orderIndex: messages.length + 1,
+          ...baseItem,
           role: "user",
           type: "message",
           text,
           content,
-          deliveryState: "confirmed",
-          createdAt,
         });
         return;
       }
-      if (type === "agentMessage" || type === "plan") {
+      if (
+        type === "agentmessage" ||
+        type === "assistantmessage" ||
+        (type === "message" && normalizedCodexToken(item.role) !== "user")
+      ) {
         const content = codexContentBlocks(item.content ?? item.text ?? item);
         const text = textFromBlocks(content) || codexText(item.text ?? item.content ?? item);
         if (!text && content.length === 0) return;
         messages.push({
-          threadId,
-          turnId,
-          itemId,
-          orderIndex: messages.length + 1,
+          ...baseItem,
           role: "assistant",
           type: "message",
           text,
           content,
-          deliveryState: "confirmed",
-          createdAt,
         });
         return;
       }
-      if (type.includes("commandExecution")) {
+      if (type === "plan" || type === "planupdate" || type === "updateplan") {
+        const plan = codexPlanStepsFromValue(item);
+        const text = codexText(item.plan ?? item.steps ?? item.content ?? item.text ?? item);
+        if (!plan && !text) return;
         messages.push({
-          threadId,
-          turnId,
-          itemId,
-          orderIndex: messages.length + 1,
-          type: "command",
-          command: firstString(item, ["command", "name"]),
-          output: codexText(item.output ?? item.text ?? item.content),
-          raw: item,
-          deliveryState: "confirmed",
-          createdAt,
+          ...baseItem,
+          role: "assistant",
+          type: "plan",
+          text,
+          raw: { ...item, plan },
         });
         return;
       }
-      if (type.includes("fileChange")) {
+      if (type === "reasoning" || type === "thinking" || type === "reasoningsummary") {
+        const text = codexText(item.summary ?? item.text ?? item.content ?? item);
+        if (!text) return;
+        messages.push({
+          ...baseItem,
+          role: "system",
+          type: "reasoning",
+          text,
+        });
+        return;
+      }
+      if (type === "imagegeneration" || type === "imagegenerationcall" || type === "imagegenerationend" || type === "imageview") {
+        const text = codexGeneratedImageMarkdown(item);
+        if (!text) return;
+        messages.push({
+          ...baseItem,
+          role: "assistant",
+          type: "message",
+          text,
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (type === "commandexecution" || type.includes("command")) {
+        messages.push({
+          ...baseItem,
+          type: "command",
+          command: firstString(item, ["command", "name"]) ?? codexToolNameFromValue(item),
+          output: codexText(item.output ?? item.text ?? item.content ?? item.result),
+        });
+        return;
+      }
+      if (type === "filechange" || type === "diff" || type.includes("filechange")) {
         const diff = firstString(item, ["diff", "patch", "unified_diff"]) ?? codexDiffText(item);
-        const status = item.status === "failed" ? "failed" : item.status === "running" ? "running" : "completed";
+        const status = codexItemStatus(item);
         const fileChange = codexFileChangeFromValue(item, status, diff);
         messages.push({
-          threadId,
-          turnId,
-          itemId,
-          orderIndex: messages.length + 1,
+          ...baseItem,
           type: "file_change",
-          text: fileChange?.summary ?? codexText(item.summary ?? item.text ?? item.content),
+          text: fileChange?.summary ?? codexText(item.summary ?? item.text ?? item.content ?? item),
           diff,
           fileChange,
-          raw: item,
-          deliveryState: "confirmed",
-          createdAt,
+        });
+        return;
+      }
+      if (type === "toolcall" || type.includes("tool")) {
+        const name = codexToolNameFromValue(item) ?? "工具";
+        const inputText = codexToolInputFromValue(item);
+        const output = codexText(item.output ?? item.result ?? item.text ?? item.content);
+        messages.push({
+          ...baseItem,
+          type: "tool",
+          command: name,
+          text: inputText,
+          output,
+        });
+        return;
+      }
+      if (type === "enteredreviewmode" || type === "review") {
+        const text = codexText(item.review ?? item.text ?? item.content) || "Reviewing changes...";
+        messages.push({
+          ...baseItem,
+          role: "system",
+          type: "review",
+          text,
+        });
+        return;
+      }
+      if (type === "exitedreviewmode") {
+        const content = codexContentBlocks(item.review ?? item.text ?? item.content);
+        const text = textFromBlocks(content) || codexText(item.review ?? item.text ?? item.content);
+        if (!text) return;
+        messages.push({
+          ...baseItem,
+          role: "assistant",
+          type: "message",
+          text,
+          content,
+        });
+        return;
+      }
+      if (type === "contextcompaction" || type === "compact" || type === "compaction") {
+        const text = codexText(item.summary ?? item.text ?? item.content ?? item);
+        messages.push({
+          ...baseItem,
+          role: "system",
+          type: "context_compaction",
+          text: text || "上下文已压缩",
         });
       }
     });
@@ -730,6 +1039,65 @@ function isCodexStructuredInputRequest(method: string): boolean {
   );
 }
 
+function isCodexApprovalRequest(method: string): boolean {
+  return (
+    method === "item/commandExecution/requestApproval" ||
+    method === "item/fileChange/requestApproval" ||
+    method === "item/permissions/requestApproval" ||
+    method === "applyPatchApproval" ||
+    method === "execCommandApproval" ||
+    method.includes("requestApproval")
+  );
+}
+
+function codexApprovalToolName(method: string, params: unknown): string {
+  if (method === "item/fileChange/requestApproval" || method === "applyPatchApproval") return "文件修改";
+  if (method === "item/permissions/requestApproval") return "请求更多权限";
+  if (method === "item/commandExecution/requestApproval" || method === "execCommandApproval") return "运行命令";
+  return firstString(params, ["toolName", "name"]) ?? "Codex 权限";
+}
+
+function codexApprovalToolInput(method: string, params: unknown): string | undefined {
+  const raw = asRecord(params);
+  if (!raw) return undefined;
+  if (method === "item/commandExecution/requestApproval") {
+    return firstString(raw, ["command"]);
+  }
+  if (method === "execCommandApproval") {
+    const command = raw.command;
+    if (Array.isArray(command)) return command.map(String).join(" ");
+    return firstString(raw, ["command"]);
+  }
+  if (method === "item/fileChange/requestApproval") {
+    return [
+      firstString(raw, ["grantRoot"]) ? `允许写入：${firstString(raw, ["grantRoot"])}` : undefined,
+      firstString(raw, ["itemId"]) ? `item: ${firstString(raw, ["itemId"])}` : undefined,
+    ].filter(Boolean).join("\n") || undefined;
+  }
+  if (method === "applyPatchApproval") {
+    const changes = asRecord(raw.fileChanges);
+    const files = changes ? Object.keys(changes) : [];
+    return files.length > 0 ? files.join("\n") : codexText(raw.fileChanges);
+  }
+  if (method === "item/permissions/requestApproval") {
+    const text = codexText(raw.permissions);
+    if (text) return text;
+    try {
+      return JSON.stringify(raw.permissions ?? {}, null, 2);
+    } catch {
+      return undefined;
+    }
+  }
+  return codexText(raw.command ?? raw.fileChanges ?? raw.permissions ?? raw);
+}
+
+function codexApprovalContext(params: unknown): string | undefined {
+  const raw = asRecord(params);
+  if (!raw) return undefined;
+  return firstString(raw, ["reason", "context", "message"]) ??
+    firstString(raw.networkApprovalContext, ["description", "reason", "message", "target", "host"]);
+}
+
 function hasJsonRpcId(message: CodexRpcMessage): message is CodexRpcMessage & { id: CodexRpcId } {
   return Object.prototype.hasOwnProperty.call(message, "id") &&
     (typeof message.id === "string" || typeof message.id === "number");
@@ -766,6 +1134,183 @@ function parseCodexServiceTier(value: unknown): AgentServiceTier | undefined {
 const CODEX_REASONING_EFFORTS: AgentReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh"];
 const CODEX_PERMISSION_MODES: AgentPermissionMode[] = ["read_only", "workspace_write", "full_access"];
 const CODEX_DEFAULT_SPEED_TIERS: AgentServiceTier[] = ["standard"];
+const CODEX_TIMELINE_CACHE_ENABLED = true;
+const CODEX_STREAMING_DELTA_FLUSH_MS = 16;
+const CODEX_RPC_COMMANDS: AgentCommandDescriptor[] = [
+  {
+    id: "codex:rpc:plan",
+    name: "plan",
+    title: "/plan",
+    description: "Enter Codex Plan mode for the next turn",
+    provider: "codex",
+    source: "built_in",
+    category: "Codex",
+    argsMode: "none",
+    executionKind: "local_ui",
+  },
+  {
+    id: "codex:rpc:exit-plan",
+    name: "exit-plan",
+    title: "/exit-plan",
+    description: "Exit Codex Plan mode",
+    provider: "codex",
+    source: "built_in",
+    category: "Codex",
+    argsMode: "none",
+    executionKind: "local_ui",
+  },
+  {
+    id: "codex:rpc:review",
+    name: "review",
+    title: "/review",
+    description: "Review current changes with Codex",
+    provider: "codex",
+    source: "built_in",
+    category: "Codex",
+    argsMode: "optional",
+    executionKind: "native",
+  },
+  {
+    id: "codex:rpc:compact",
+    name: "compact",
+    title: "/compact",
+    description: "Compact the current Codex thread",
+    provider: "codex",
+    source: "built_in",
+    category: "Codex",
+    argsMode: "none",
+    requiresIdle: true,
+    executionKind: "native",
+  },
+  {
+    id: "codex:rpc:new",
+    name: "new",
+    title: "/new",
+    description: "Start a fresh Codex thread",
+    provider: "codex",
+    source: "built_in",
+    category: "Codex",
+    argsMode: "none",
+    destructive: true,
+    executionKind: "native",
+  },
+];
+
+function codexRpcCommands(supportsPlan: boolean): AgentCommandDescriptor[] {
+  return supportsPlan
+    ? CODEX_RPC_COMMANDS
+    : CODEX_RPC_COMMANDS.filter((command) => command.name !== "plan" && command.name !== "exit-plan");
+}
+
+function codexSandboxPolicy(mode: AgentPermissionMode | undefined, cwd: string): unknown {
+  if (mode === "full_access") return { type: "dangerFullAccess" };
+  if (mode === "read_only") return { type: "readOnly", networkAccess: false };
+  if (mode === "workspace_write") {
+    return {
+      type: "workspaceWrite",
+      writableRoots: [cwd],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    };
+  }
+  return undefined;
+}
+
+function codexApprovalPolicy(mode: AgentPermissionMode | undefined): unknown {
+  if (mode === "full_access") return "never";
+  if (mode === "read_only" || mode === "workspace_write") return "on-request";
+  return undefined;
+}
+
+function codexSandboxMode(mode: AgentPermissionMode | undefined): string | undefined {
+  if (mode === "full_access") return "danger-full-access";
+  if (mode === "read_only") return "read-only";
+  if (mode === "workspace_write") return "workspace-write";
+  return undefined;
+}
+
+function codexThreadStartParams(input: {
+  cwd: string;
+  model?: string;
+  serviceTier?: AgentServiceTier;
+  permissionMode?: AgentPermissionMode;
+}) {
+  return {
+    cwd: input.cwd,
+    sessionStartSource: "startup",
+    ...(input.model ? { model: input.model } : {}),
+    ...(input.serviceTier === "fast" ? { serviceTier: input.serviceTier } : {}),
+    ...(codexApprovalPolicy(input.permissionMode) ? { approvalPolicy: codexApprovalPolicy(input.permissionMode) } : {}),
+    ...(codexSandboxMode(input.permissionMode) ? { sandbox: codexSandboxMode(input.permissionMode) } : {}),
+  };
+}
+
+function codexTurnStartParams(input: {
+  threadId: string;
+  cwd: string;
+  contentBlocks: AgentContentBlock[];
+  model?: string;
+  reasoningEffort?: AgentReasoningEffort;
+  serviceTier?: AgentServiceTier;
+  permissionMode?: AgentPermissionMode;
+  collaborationMode?: AgentCollaborationMode;
+  includeCollaborationMode?: boolean;
+}) {
+  const collaborationMode = input.includeCollaborationMode === false || !input.collaborationMode || !input.model
+    ? undefined
+    : {
+        mode: input.collaborationMode,
+        settings: {
+          model: input.model,
+          reasoning_effort: input.reasoningEffort ?? null,
+          developer_instructions: null,
+        },
+      };
+  return {
+    threadId: input.threadId,
+    cwd: input.cwd,
+    input: codexInputBlocks(input.contentBlocks),
+    ...(input.model ? { model: input.model } : {}),
+    ...(input.reasoningEffort ? { effort: input.reasoningEffort } : {}),
+    ...(input.serviceTier === "fast" ? { serviceTier: input.serviceTier } : {}),
+    ...(codexApprovalPolicy(input.permissionMode) ? { approvalPolicy: codexApprovalPolicy(input.permissionMode) } : {}),
+    ...(codexSandboxPolicy(input.permissionMode, input.cwd) ? { sandboxPolicy: codexSandboxPolicy(input.permissionMode, input.cwd) } : {}),
+    ...(collaborationMode ? { collaborationMode } : {}),
+  };
+}
+
+function codexResponseContainsPlanCollaborationMode(value: unknown): boolean {
+  const raw = asRecord(value);
+  const candidates = [
+    Array.isArray(value) ? value : undefined,
+    Array.isArray(raw?.data) ? raw.data : undefined,
+    Array.isArray(raw?.modes) ? raw.modes : undefined,
+    Array.isArray(raw?.collaborationModes) ? raw.collaborationModes : undefined,
+    Array.isArray(raw?.items) ? raw.items : undefined,
+  ].filter((entry): entry is unknown[] => Array.isArray(entry));
+
+  return candidates.some((entries) => entries.some((entry) => {
+    if (typeof entry === "string") return entry === "plan";
+    const record = asRecord(entry);
+    return firstString(record, ["mode", "name", "id"]) === "plan";
+  }));
+}
+
+function codexShouldRetryWithoutCollaborationMode(error: unknown): boolean {
+  const message = codexRpcErrorMessage(error).toLowerCase();
+  if (!message.includes("collaborationmode") && !message.includes("collaboration_mode")) return false;
+  return (
+    message.includes("experimentalapi") ||
+    message.includes("unsupported") ||
+    message.includes("unknown") ||
+    message.includes("unexpected") ||
+    message.includes("unrecognized") ||
+    message.includes("invalid") ||
+    message.includes("field") ||
+    message.includes("mode")
+  );
+}
 
 function parseCodexModelList(value: unknown): {
   models: AgentModelOption[];
@@ -847,6 +1392,51 @@ function codexRpcErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   const record = asRecord(error);
   return firstString(record, ["message", "error"]) ?? "Codex runtime request failed";
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function humanizeCodexRpcError(message: string): string {
+  if (
+    message.includes("TokenRefreshFailed") ||
+    message.includes("Failed to parse server response") ||
+    message.includes("Transport channel closed")
+  ) {
+    return "Codex 登录状态已失效或刷新失败，请在主机端重新运行 codex login 后重试。";
+  }
+  return message;
+}
+
+function failPendingCodexRequestsForSession(
+  pendingMap: Map<CodexRpcId, PendingCodexRequest>,
+  sessionId: string,
+  message: string,
+): Array<{ conversationId?: string; clientMessageId?: string }> {
+  const failed: Array<{ conversationId?: string; clientMessageId?: string }> = [];
+  for (const [id, pending] of pendingMap) {
+    if (pending.sessionId !== sessionId) continue;
+    pendingMap.delete(id);
+    clearTimeout(pending.timer);
+    failed.push({
+      conversationId: pending.conversationId,
+      clientMessageId: pending.clientMessageId,
+    });
+    pending.reject?.(message);
+  }
+  return failed;
 }
 
 function mergeAgentCapabilities(existing: AgentCapabilities | undefined, incoming: AgentCapabilities): AgentCapabilities {
@@ -946,6 +1536,11 @@ function codexMessageToTimeline(item: CodexMessageItem, conversationId: string):
         codexRpcId: item.rpcId ?? item.requestId,
         codexRequestMethod: item.requestMethod,
         deliveryState: item.deliveryState,
+        permissionLive: item.deliveryState !== "confirmed" && item.deliveryState !== "failed",
+        permissionExpired: false,
+        permissionPending: item.permissionSubmitting === true,
+        permissionOutcome: item.permissionOutcome,
+        permissionError: item.permissionError,
       },
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
@@ -953,7 +1548,7 @@ function codexMessageToTimeline(item: CodexMessageItem, conversationId: string):
   }
   if (item.type === "command") {
     return {
-      id: item.itemId,
+      id: codexTimelineItemId(item),
       conversationId,
       type: "tool_call",
       kind: "command_execution",
@@ -971,7 +1566,7 @@ function codexMessageToTimeline(item: CodexMessageItem, conversationId: string):
   }
   if (item.type === "file_change") {
     return {
-      id: item.itemId,
+      id: codexTimelineItemId(item),
       conversationId,
       type: "tool_call",
       kind: "file_change",
@@ -991,7 +1586,7 @@ function codexMessageToTimeline(item: CodexMessageItem, conversationId: string):
   }
   if (item.type === "error") {
     return {
-      id: item.itemId,
+      id: codexTimelineItemId(item),
       conversationId,
       type: "error",
       error: item.text ?? "Codex request failed",
@@ -1000,8 +1595,81 @@ function codexMessageToTimeline(item: CodexMessageItem, conversationId: string):
       updatedAt: item.updatedAt,
     };
   }
+  if (item.type === "reasoning") {
+    return {
+      id: codexTimelineItemId(item),
+      conversationId,
+      type: "status",
+      kind: "thinking",
+      turnId: item.turnId,
+      itemId: item.itemId,
+      role: "system",
+      text: item.text,
+      metadata: { provider: "codex", deliveryState: item.deliveryState },
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      isStreaming: item.isStreaming,
+    };
+  }
+  if (item.type === "plan") {
+    const plan = codexPlanStepsFromValue(asRecord(item.raw)?.plan ?? item.raw ?? item.text);
+    return {
+      id: codexTimelineItemId(item),
+      conversationId,
+      type: plan ? "plan" : "status",
+      kind: "plan",
+      turnId: item.turnId,
+      itemId: item.itemId,
+      role: "assistant",
+      text: item.text,
+      plan,
+      metadata: { provider: "codex", deliveryState: item.deliveryState },
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      isStreaming: item.isStreaming,
+    };
+  }
+  if (item.type === "review" || item.type === "context_compaction" || item.type === "status") {
+    return {
+      id: codexTimelineItemId(item),
+      conversationId,
+      type: "status",
+      kind: item.type === "context_compaction" ? "context_compaction" : item.type === "review" ? "review" : "tool_activity",
+      turnId: item.turnId,
+      itemId: item.itemId,
+      role: "system",
+      text: item.text,
+      metadata: { provider: "codex", deliveryState: item.deliveryState },
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      isStreaming: item.isStreaming,
+    };
+  }
+  if (item.type === "tool") {
+    return {
+      id: codexTimelineItemId(item),
+      conversationId,
+      type: "tool_call",
+      kind: "tool_activity",
+      turnId: item.turnId,
+      itemId: item.itemId,
+      text: item.text || item.output || item.command,
+      toolCall: {
+        id: item.itemId,
+        name: item.command ?? "工具",
+        input: item.text,
+        output: item.output,
+        createdAt: item.createdAt,
+        status: item.isStreaming ? "running" : item.deliveryState === "failed" ? "failed" : "completed",
+      },
+      metadata: { provider: "codex", deliveryState: item.deliveryState },
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      isStreaming: item.isStreaming,
+    };
+  }
   return {
-    id: item.itemId,
+    id: codexTimelineItemId(item),
     conversationId,
     type: "message",
     kind: "chat",
@@ -1077,6 +1745,11 @@ function codexTimelineToMessage(
       requestId: requestId ?? item.permission.requestId,
       rpcId,
       requestMethod,
+      permissionOutcome: metadata.permissionOutcome === "allow" || metadata.permissionOutcome === "deny" || metadata.permissionOutcome === "cancelled"
+        ? metadata.permissionOutcome
+        : undefined,
+      permissionSubmitting: metadata.permissionPending === true,
+      permissionError: typeof metadata.permissionError === "string" ? metadata.permissionError : undefined,
       deliveryState,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
@@ -1108,6 +1781,68 @@ function codexTimelineToMessage(
       text: item.fileChange?.summary,
       diff: item.fileChange?.diff,
       fileChange: item.fileChange,
+      deliveryState,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      isStreaming: item.isStreaming,
+    };
+  }
+  if (item.kind === "thinking") {
+    return {
+      threadId,
+      turnId: item.turnId,
+      itemId: item.itemId ?? item.id,
+      orderIndex: index + 1,
+      role: "system",
+      type: "reasoning",
+      text: item.text,
+      deliveryState,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      isStreaming: item.isStreaming,
+    };
+  }
+  if (item.type === "plan" || item.kind === "plan") {
+    return {
+      threadId,
+      turnId: item.turnId,
+      itemId: item.itemId ?? item.id,
+      orderIndex: index + 1,
+      role: "assistant",
+      type: "plan",
+      text: item.text,
+      raw: { plan: item.plan },
+      deliveryState,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      isStreaming: item.isStreaming,
+    };
+  }
+  if (item.kind === "review" || item.kind === "context_compaction") {
+    return {
+      threadId,
+      turnId: item.turnId,
+      itemId: item.itemId ?? item.id,
+      orderIndex: index + 1,
+      role: "system",
+      type: item.kind === "review" ? "review" : "context_compaction",
+      text: item.text,
+      deliveryState,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      isStreaming: item.isStreaming,
+    };
+  }
+  if (item.kind === "tool_activity" && item.toolCall) {
+    return {
+      threadId,
+      turnId: item.turnId,
+      itemId: item.itemId ?? item.id,
+      orderIndex: index + 1,
+      type: "tool",
+      command: item.toolCall.name,
+      text: item.toolCall.input,
+      output: item.toolCall.output,
       deliveryState,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
@@ -1189,6 +1924,129 @@ function normalizeSnapshotItems(items: AgentTimelineItem[]): AgentTimelineItem[]
   });
 }
 
+function completedIfStale(status: AgentToolCall["status"] | undefined): AgentToolCall["status"] | undefined {
+  return status === "running" || status === "pending" ? "completed" : status;
+}
+
+function normalizeCachedCodexTimelineItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
+  return normalizeSnapshotItems(items).map((item) => {
+    if (item.type === "permission" || item.kind === "user_input_prompt") return item;
+    if (
+      item.isStreaming !== true &&
+      item.commandExecution?.status !== "running" &&
+      item.commandExecution?.status !== "pending" &&
+      item.toolCall?.status !== "running" &&
+      item.toolCall?.status !== "pending" &&
+      item.fileChange?.status !== "running" &&
+      item.fileChange?.status !== "pending"
+    ) {
+      return item;
+    }
+    return {
+      ...item,
+      isStreaming: false,
+      commandExecution: item.commandExecution
+        ? { ...item.commandExecution, status: completedIfStale(item.commandExecution.status) }
+        : item.commandExecution,
+      toolCall: item.toolCall
+        ? { ...item.toolCall, status: completedIfStale(item.toolCall.status) ?? "completed" }
+        : item.toolCall,
+      fileChange: item.fileChange
+        ? { ...item.fileChange, status: completedIfStale(item.fileChange.status) ?? "completed" }
+        : item.fileChange,
+      metadata: {
+        ...(item.metadata ?? {}),
+        deliveryState: item.metadata?.deliveryState === "pending" ? "confirmed" : item.metadata?.deliveryState,
+      },
+      updatedAt: item.updatedAt ?? Date.now(),
+    };
+  });
+}
+
+function codexShouldPreserveLocalItem(item: CodexMessageItem): boolean {
+  return item.deliveryState === "pending" ||
+    item.deliveryState === "failed" ||
+    item.isStreaming === true ||
+    item.type === "approval" ||
+    item.type === "structured_input";
+}
+
+function mergeCodexMessageItem(existing: CodexMessageItem | undefined, incoming: CodexMessageItem): CodexMessageItem {
+  if (!existing) return incoming;
+  if (codexShouldPreserveLocalItem(existing) && incoming.deliveryState === "confirmed" && incoming.type !== existing.type) {
+    return existing;
+  }
+  return {
+    ...existing,
+    ...incoming,
+    text: incoming.text ?? existing.text,
+    content: incoming.content ?? existing.content,
+    command: incoming.command ?? existing.command,
+    output: incoming.output ?? existing.output,
+    diff: incoming.diff ?? existing.diff,
+    structuredInput: incoming.structuredInput ?? existing.structuredInput,
+    answers: incoming.answers ?? existing.answers,
+    permissionOutcome: incoming.permissionOutcome ?? existing.permissionOutcome,
+    permissionSubmitting: incoming.permissionSubmitting ?? existing.permissionSubmitting,
+    permissionError: incoming.permissionError ?? existing.permissionError,
+    raw: incoming.raw ?? existing.raw,
+    isStreaming: incoming.isStreaming === true
+      ? true
+      : incoming.deliveryState === "confirmed"
+        ? false
+        : existing.isStreaming,
+    fileChange: incoming.fileChange
+      ? {
+          ...incoming.fileChange,
+          status: incoming.isStreaming === true
+            ? "running"
+            : incoming.deliveryState === "confirmed"
+              ? completedIfStale(incoming.fileChange.status) ?? "completed"
+              : incoming.fileChange.status,
+        }
+      : existing.fileChange,
+    createdAt: Math.min(existing.createdAt, incoming.createdAt),
+    updatedAt: incoming.updatedAt ?? existing.updatedAt,
+  };
+}
+
+function canonicalCodexMerge(
+  existingItems: CodexMessageItem[],
+  incomingItems: CodexMessageItem[],
+): CodexMessageItem[] {
+  const byKey = new Map<string, CodexMessageItem>();
+  for (const item of existingItems) {
+    byKey.set(codexMessageMergeKey(item), item);
+  }
+  for (const item of incomingItems) {
+    const key = codexMessageMergeKey(item);
+    byKey.set(key, mergeCodexMessageItem(byKey.get(key), item));
+  }
+  return [...byKey.values()]
+    .sort((a, b) =>
+      a.createdAt - b.createdAt ||
+      a.orderIndex - b.orderIndex ||
+      codexMessageMergeKey(a).localeCompare(codexMessageMergeKey(b))
+    )
+    .map((entry, index) => ({ ...entry, orderIndex: index + 1 }));
+}
+
+function finalizeCodexThreadItems(items: CodexMessageItem[], turnId?: string): CodexMessageItem[] {
+  return items.map((item) => {
+    if (turnId && item.turnId && item.turnId !== turnId) return item;
+    if (!item.isStreaming && item.deliveryState !== "pending") return item;
+    return {
+      ...item,
+      isStreaming: false,
+      deliveryState: item.deliveryState === "pending" ? "confirmed" : item.deliveryState,
+      fileChange: item.fileChange
+        ? { ...item.fileChange, status: completedIfStale(item.fileChange.status) ?? "completed" }
+        : item.fileChange,
+      updatedAt: item.updatedAt ?? Date.now(),
+    };
+  });
+}
+
 export function useAgentWorkspace(
   manager: SessionManagerHandle,
 ): AgentWorkspaceHandle {
@@ -1201,10 +2059,12 @@ export function useAgentWorkspace(
   const conversationsRef = useRef(conversations);
   const timelineRef = useRef(timelineById);
   const codexThreadsRef = useRef(codexThreadsByConversationId);
+  const codexTimelineItemCacheRef = useRef(new WeakMap<CodexMessageItem, AgentTimelineItem>());
   const codexThreadConversationRef = useRef(new Map<string, string>());
   const pendingCodexRef = useRef(new Map<CodexRpcId, PendingCodexRequest>());
   const initializedCodexSessionsRef = useRef(new Set<string>());
   const initializingCodexSessionsRef = useRef(new Map<string, Promise<void>>());
+  const codexPlanUnsupportedSessionsRef = useRef(new Set<string>());
   const codexRpcSeqRef = useRef(1);
   const pendingOpenRef = useRef(new Map<string, {
     resolve: (result: OpenConversationResult) => void;
@@ -1221,6 +2081,9 @@ export function useAgentWorkspace(
   const historyCursorRef = useRef(new Map<string, string | undefined>());
   const historyHasMoreRef = useRef(new Map<string, boolean>());
   const pendingHistoryRef = useRef(new Set<string>());
+  const historyPageSignatureRef = useRef(new Map<string, string>());
+  const pendingCodexDeltaRef = useRef(new Map<string, PendingCodexDelta>());
+  const pendingCodexDeltaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSyncTokenRef = useRef(new Map<string, string>());
   const appStateRef = useRef(AppState.currentState);
   const lastRunningSyncRef = useRef(new Map<string, number>());
@@ -1260,12 +2123,20 @@ export function useAgentWorkspace(
   );
 
   const refresh = useCallback(async () => {
-    const stored = await loadAgentConversations();
+    const stored = (await loadAgentConversations()).map((conversation) =>
+      conversation.provider === "codex" && conversation.status === "running"
+        ? { ...conversation, status: "idle" as const, runningTurnId: undefined }
+        : conversation
+    );
     setConversations(stored);
     const pairs = await Promise.all(
       stored.slice(0, 20).map(async (conversation) => [
         conversation.id,
-        await loadAgentTimeline(conversation.id),
+        conversation.provider === "codex" && !CODEX_TIMELINE_CACHE_ENABLED
+          ? []
+          : conversation.provider === "codex"
+            ? normalizeCachedCodexTimelineItems(await loadAgentTimeline(conversation.id))
+            : await loadAgentTimeline(conversation.id),
       ] as const),
     );
     const timelineMap = new Map(pairs);
@@ -1274,6 +2145,16 @@ export function useAgentWorkspace(
     const restoredCodexThreads = new Map<string, CodexThreadState>();
     for (const conversation of stored) {
       if (conversation.provider !== "codex") continue;
+      if (!CODEX_TIMELINE_CACHE_ENABLED) {
+        saveAgentTimeline(conversation.id, []).catch(() => {});
+        historyHasMoreRef.current.delete(conversation.id);
+        continue;
+      }
+      const historyPageState = await loadAgentHistoryPageState(conversation.id);
+      historyCursorRef.current.set(conversation.id, historyPageState.nextCursor);
+      if (typeof historyPageState.hasMore === "boolean") {
+        historyHasMoreRef.current.set(conversation.id, historyPageState.hasMore);
+      }
       const timeline = timelineMap.get(conversation.id) ?? [];
       const threadId = conversation.agentSessionId ?? conversation.id;
       const items = timeline
@@ -1283,13 +2164,12 @@ export function useAgentWorkspace(
       restoredCodexThreads.set(conversation.id, {
         conversationId: conversation.id,
         threadId,
-        nextCursor: historyCursorRef.current.get(conversation.id),
-        activeTurnId: conversation.runningTurnId,
-        isRunning: conversation.status === "running" || conversation.status === "waiting_permission",
+        nextCursor: historyPageState.nextCursor,
+        activeTurnId: undefined,
+        isRunning: false,
         items,
       });
       codexThreadConversationRef.current.set(threadId, conversation.id);
-      historyHasMoreRef.current.delete(conversation.id);
     }
     setCodexThreadsByConversationId(restoredCodexThreads);
     codexThreadsRef.current = restoredCodexThreads;
@@ -1321,12 +2201,21 @@ export function useAgentWorkspace(
   }, []);
 
   const persistCodexThread = useCallback((conversationId: string, threadState: CodexThreadState) => {
-    const items = threadState.items.map((item) => codexMessageToTimeline(item, conversationId));
+    const cache = codexTimelineItemCacheRef.current;
+    const items = threadState.items.map((item) => {
+      const cached = cache.get(item);
+      if (cached) return cached;
+      const timelineItem = codexMessageToTimeline(item, conversationId);
+      cache.set(item, timelineItem);
+      return timelineItem;
+    });
     const nextTimeline = new Map(timelineRef.current);
     nextTimeline.set(conversationId, items);
     timelineRef.current = nextTimeline;
     setTimelineById(nextTimeline);
-    saveAgentTimeline(conversationId, items).catch(() => {});
+    if (CODEX_TIMELINE_CACHE_ENABLED) {
+      saveAgentTimeline(conversationId, items).catch(() => {});
+    }
   }, []);
 
   const sessionForConversation = useCallback(
@@ -1347,20 +2236,10 @@ export function useAgentWorkspace(
       items: [],
     };
     const items = [...existing.items];
-    const index = items.findIndex((entry) => entry.itemId === item.itemId);
+    const incomingKey = codexMessageMergeKey(item);
+    const index = items.findIndex((entry) => codexMessageMergeKey(entry) === incomingKey);
     if (index >= 0) {
-      items[index] = {
-        ...items[index],
-        ...item,
-        text: item.text ?? items[index].text,
-        content: item.content ?? items[index].content,
-        output: item.output ?? items[index].output,
-        diff: item.diff ?? items[index].diff,
-        fileChange: item.fileChange ?? items[index].fileChange,
-        structuredInput: item.structuredInput ?? items[index].structuredInput,
-        answers: item.answers ?? items[index].answers,
-        updatedAt: item.updatedAt ?? Date.now(),
-      };
+      items[index] = mergeCodexMessageItem(items[index], { ...item, updatedAt: item.updatedAt ?? Date.now() });
     } else {
       items.push(item);
     }
@@ -1373,36 +2252,47 @@ export function useAgentWorkspace(
     persistCodexThread(conversationId, nextThread);
   }, [persistCodexThread]);
 
+  const flushPendingCodexDeltas = useCallback(() => {
+    pendingCodexDeltaTimerRef.current = null;
+    const pending = [...pendingCodexDeltaRef.current.values()];
+    pendingCodexDeltaRef.current.clear();
+    for (const entry of pending) {
+      upsertCodexItem(entry.conversationId, entry.item);
+    }
+  }, [upsertCodexItem]);
+
+  const queueCodexDeltaItem = useCallback((conversationId: string, item: CodexMessageItem) => {
+    pendingCodexDeltaRef.current.set(`${conversationId}:${codexMessageMergeKey(item)}`, { conversationId, item });
+    if (pendingCodexDeltaTimerRef.current) return;
+    pendingCodexDeltaTimerRef.current = setTimeout(flushPendingCodexDeltas, CODEX_STREAMING_DELTA_FLUSH_MS);
+  }, [flushPendingCodexDeltas]);
+
+  useEffect(() => () => {
+    if (pendingCodexDeltaTimerRef.current) {
+      clearTimeout(pendingCodexDeltaTimerRef.current);
+      pendingCodexDeltaTimerRef.current = null;
+    }
+  }, []);
+
   const replaceCodexHistory = useCallback((
     conversationId: string,
     threadId: string,
     items: CodexMessageItem[],
     nextCursor?: string,
     mode: "replace" | "prepend" = "replace",
+    activeTurnId?: string | null,
   ) => {
     const next = new Map(codexThreadsRef.current);
     const existing = next.get(conversationId);
-    const incomingIds = new Set(items.map((item) => item.itemId));
-    const preservedExisting = (existing?.items ?? []).filter((item) =>
-      !incomingIds.has(item.itemId) &&
-      (
-        item.type !== "message" ||
-        item.deliveryState !== "confirmed" ||
-        item.isStreaming === true
-      )
-    );
-    const merged = mode === "prepend"
-      ? [...items, ...(existing?.items ?? [])]
-      : [...items, ...preservedExisting];
+    const shouldResetForThreadSwitch = mode === "replace" && Boolean(existing?.threadId && existing.threadId !== threadId);
+    const merged = canonicalCodexMerge(shouldResetForThreadSwitch ? [] : existing?.items ?? [], items);
     const nextThread = {
       conversationId,
       threadId,
       nextCursor,
-      activeTurnId: existing?.activeTurnId,
-      isRunning: existing?.isRunning ?? false,
-      items: merged
-        .map((entry, index) => ({ ...entry, orderIndex: index + 1 }))
-        .sort((a, b) => a.orderIndex - b.orderIndex || a.createdAt - b.createdAt),
+      activeTurnId: activeTurnId === undefined ? existing?.activeTurnId : activeTurnId ?? undefined,
+      isRunning: activeTurnId === undefined ? (existing?.isRunning ?? false) : Boolean(activeTurnId),
+      items: merged,
     };
     next.set(conversationId, nextThread);
     codexThreadConversationRef.current.set(threadId, conversationId);
@@ -1508,10 +2398,18 @@ export function useAgentWorkspace(
   }, []);
 
   const refreshCodexRuntimeCapabilities = useCallback(async (sessionId: string) => {
-    const [modelListResult, configResult] = await Promise.allSettled([
+    const [modelListResult, configResult, collaborationModeResult] = await Promise.allSettled([
       requestCodexRpc(sessionId, "model/list", {}, { timeoutMs: 15_000 }),
       requestCodexRpc(sessionId, "config/read", {}, { timeoutMs: 15_000 }),
+      requestCodexRpc(sessionId, "collaborationMode/list", {}, { timeoutMs: 5_000 }),
     ]);
+    if (collaborationModeResult.status === "fulfilled") {
+      codexResponseContainsPlanCollaborationMode(collaborationModeResult.value.result);
+    }
+    // Remodex keeps plan enabled after experimental initialize even when the
+    // metadata probe is inconclusive, and only disables it after turn/start
+    // rejects collaborationMode.
+    const supportsPlan = !codexPlanUnsupportedSessionsRef.current.has(sessionId);
 
     if (modelListResult.status === "rejected") {
       const error = codexRpcErrorMessage(modelListResult.reason);
@@ -1521,7 +2419,7 @@ export function useAgentWorkspace(
         enabled: true,
         supportsImages: previous?.supportsImages ?? true,
         supportsPermission: true,
-        supportsPlan: true,
+        supportsPlan,
         supportsCancel: true,
         providerProtocol: "codex-app-server",
         modelsSource: previous?.models?.length ? previous.modelsSource : "unavailable",
@@ -1532,14 +2430,14 @@ export function useAgentWorkspace(
         speedTiers: previous?.speedTiers ?? CODEX_DEFAULT_SPEED_TIERS,
         defaultServiceTier: previous?.defaultServiceTier,
         permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
-        commands: previous?.commands,
+        commands: codexRpcCommands(supportsPlan),
         modes: previous?.modes,
         currentMode: previous?.currentMode,
         features: {
           ...(previous?.features ?? {}),
           images: previous?.supportsImages ?? true,
           permissions: true,
-          plan: true,
+          plan: supportsPlan,
           cancel: true,
           reasoningEffort: true,
           serviceTier: true,
@@ -1570,7 +2468,7 @@ export function useAgentWorkspace(
       enabled: true,
       supportsImages,
       supportsPermission: true,
-      supportsPlan: true,
+      supportsPlan,
       supportsCancel: true,
       providerProtocol: "codex-app-server",
       modelsSource: parsed.models.length > 0 ? "runtime" : "unavailable",
@@ -1581,14 +2479,14 @@ export function useAgentWorkspace(
       speedTiers,
       defaultServiceTier: configServiceTier ?? previous?.defaultServiceTier,
       permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
-      commands: previous?.commands,
+      commands: codexRpcCommands(supportsPlan),
       modes: previous?.modes,
       currentMode: previous?.currentMode,
       features: {
         ...(previous?.features ?? {}),
         images: supportsImages,
         permissions: true,
-        plan: true,
+        plan: supportsPlan,
         cancel: true,
         reasoningEffort: true,
         serviceTier: speedTiers.length > 1,
@@ -1617,11 +2515,11 @@ export function useAgentWorkspace(
           id: "codex",
           label: previous?.label ?? "Codex",
           enabled: true,
-          supportsImages: previous?.supportsImages ?? true,
-          supportsPermission: true,
-          supportsPlan: true,
-          supportsCancel: true,
-          providerProtocol: "codex-app-server",
+            supportsImages: previous?.supportsImages ?? true,
+            supportsPermission: true,
+            supportsPlan: !codexPlanUnsupportedSessionsRef.current.has(sessionId),
+            supportsCancel: true,
+            providerProtocol: "codex-app-server",
           modelsSource: previous?.models?.length ? previous.modelsSource : "unavailable",
           modelListError: codexRpcErrorMessage(error),
           models: previous?.models,
@@ -1630,15 +2528,15 @@ export function useAgentWorkspace(
           speedTiers: previous?.speedTiers ?? CODEX_DEFAULT_SPEED_TIERS,
           defaultServiceTier: previous?.defaultServiceTier,
           permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
-          commands: previous?.commands,
-          modes: previous?.modes,
-          currentMode: previous?.currentMode,
-          features: {
-            ...(previous?.features ?? {}),
-            images: previous?.supportsImages ?? true,
-            permissions: true,
-            plan: true,
-            cancel: true,
+            commands: codexRpcCommands(!codexPlanUnsupportedSessionsRef.current.has(sessionId)),
+            modes: previous?.modes,
+            currentMode: previous?.currentMode,
+            features: {
+              ...(previous?.features ?? {}),
+              images: previous?.supportsImages ?? true,
+              permissions: true,
+              plan: !codexPlanUnsupportedSessionsRef.current.has(sessionId),
+              cancel: true,
             reasoningEffort: true,
             serviceTier: true,
           },
@@ -1672,6 +2570,7 @@ export function useAgentWorkspace(
       if (isCodexUnmaterializedThreadError(error)) {
         historyCursorRef.current.delete(conversationId);
         historyHasMoreRef.current.set(conversationId, false);
+        saveAgentHistoryPageState(conversationId, { hasMore: false }).catch(() => {});
         if (!codexThreadsRef.current.has(conversationId)) {
           replaceCodexHistory(conversationId, threadId, [], undefined, cursor ? "prepend" : "replace");
         }
@@ -1688,13 +2587,56 @@ export function useAgentWorkspace(
       ? raw.data
       : [];
     const nextCursor = typeof raw?.nextCursor === "string" ? raw.nextCursor : undefined;
-    historyCursorRef.current.set(conversationId, nextCursor);
-    historyHasMoreRef.current.set(conversationId, Boolean(nextCursor));
     const items: CodexMessageItem[] = [];
+    const activeTurnId = turns
+      .map((turn) => codexTurnStatusIsRunning(codexTurnStatus(turn)) ? codexTurnId(turn) : undefined)
+      .find((id): id is string => Boolean(id));
+    const latestTurnStatus = turns.length > 0 ? codexTurnStatus(turns[0]) : undefined;
     turns.slice().reverse().forEach((turn, turnIndex) => {
       items.push(...codexTurnToMessages(turn, threadId, turnIndex));
     });
-    replaceCodexHistory(conversationId, threadId, items, nextCursor, cursor ? "prepend" : "replace");
+    const pageSignature = items.map(codexMessageMergeKey).join("|");
+    const signatureKey = `${conversationId}:${cursor ?? "initial"}`;
+    if (cursor && pageSignature && historyPageSignatureRef.current.get(signatureKey) === pageSignature) {
+      historyHasMoreRef.current.set(conversationId, false);
+      return;
+    }
+    historyPageSignatureRef.current.set(signatureKey, pageSignature);
+    historyCursorRef.current.set(conversationId, nextCursor);
+    historyHasMoreRef.current.set(conversationId, Boolean(nextCursor));
+    saveAgentHistoryPageState(conversationId, { nextCursor, hasMore: Boolean(nextCursor) }).catch(() => {});
+    replaceCodexHistory(
+      conversationId,
+      threadId,
+      items,
+      nextCursor,
+      cursor ? "prepend" : "replace",
+      activeTurnId ?? (cursor ? undefined : null),
+    );
+    if (!cursor) {
+      setConversations((prev) => prev.map((conversation) => {
+        if (conversation.id !== conversationId) return conversation;
+        if (activeTurnId) {
+          const unchanged = conversation.status === "running" && conversation.runningTurnId === activeTurnId;
+          return {
+            ...conversation,
+            status: "running",
+            runningTurnId: activeTurnId,
+            lastActivityAt: unchanged ? conversation.lastActivityAt : Date.now(),
+          };
+        }
+        if (conversation.status !== "running" && conversation.status !== "waiting_permission") {
+          return conversation;
+        }
+        const nextStatus = codexTurnStatusIsFailed(latestTurnStatus) ? "error" : "idle";
+        return {
+          ...conversation,
+          status: nextStatus,
+          runningTurnId: undefined,
+          lastActivityAt: Date.now(),
+        };
+      }));
+    }
   }, [replaceCodexHistory, requestCodexRpc]);
 
   const resumeCodexThread = useCallback(async (
@@ -1775,28 +2717,37 @@ export function useAgentWorkspace(
       }
       return false;
     },
-    [manager],
+    [ensureCodexInitialized, manager, persistConversation, replaceCodexHistory, requestCodexRpc],
   );
 
   function findSessionForConversation(
     conversation: AgentConversationRecord,
     sessions: Map<string, SessionInfo>,
   ): SessionInfo | undefined {
-    const exact = sessions.get(conversation.hostDeviceId ?? conversation.sessionId);
-    if (exact && (!conversation.machineId || exact.machineId === conversation.machineId)) {
+    const matchesMachine = (session: SessionInfo | undefined) =>
+      Boolean(session) &&
+      (!conversation.machineId || !session!.machineId || session!.machineId === conversation.machineId);
+    const sessionIsUsable = (session: SessionInfo | undefined) =>
+      Boolean(session) &&
+      session!.status !== "session_exited" &&
+      !session!.status.startsWith("error:");
+
+    const exact = sessions.get(conversation.sessionId) ?? sessions.get(conversation.hostDeviceId ?? "");
+    if (sessionIsUsable(exact) && matchesMachine(exact)) {
       return exact;
     }
     const serverUrl = normalizeServerUrl(conversation.serverUrl);
     const sameGateway = [...sessions.values()].filter((session) =>
-      normalizeServerUrl(session.gatewayUrl) === serverUrl
+      sessionIsUsable(session) && normalizeServerUrl(session.gatewayUrl) === serverUrl
     );
     if (conversation.machineId) {
-      return sameGateway.find((session) => session.machineId === conversation.machineId);
+      const machineMatch = sameGateway.find((session) => session.machineId === conversation.machineId);
+      if (machineMatch) return machineMatch;
     }
     return sameGateway.find((session) =>
       session.cwd === conversation.cwd ||
       [...session.terminals.values()].some((terminal) => terminal.cwd === conversation.cwd)
-    );
+    ) ?? sameGateway[0];
   }
 
   const requestCapabilities = useCallback(
@@ -1840,26 +2791,43 @@ export function useAgentWorkspace(
         );
         if (session.provider === "codex" || hasCodexConversation) {
           ensureCodexInitialized(session.sessionId)
-            .then(() => requestCodexRpc(session.sessionId, "thread/list", {
-              limit: 50,
-              includeArchived: true,
-            }, { timeoutMs: 30_000 }))
-            .then((response) => {
-              const raw = asRecord(response.result);
-              const threads = Array.isArray(raw?.threads)
-                ? raw.threads
-                : Array.isArray(raw?.items)
-                ? raw.items
-                : Array.isArray(raw?.data)
-                ? raw.data
-                : Array.isArray(raw?.sessions)
-                ? raw.sessions
-                : [];
+            .then(() => Promise.all([
+              requestCodexRpc(session.sessionId, "thread/list", {
+                limit: 50,
+                archived: false,
+                sortKey: "updated_at",
+                sortDirection: "desc",
+              }, { timeoutMs: 30_000 }),
+              requestCodexRpc(session.sessionId, "thread/list", {
+                limit: 50,
+                archived: true,
+                sortKey: "updated_at",
+                sortDirection: "desc",
+              }, { timeoutMs: 30_000 }).catch(() => undefined),
+            ]))
+            .then((responses) => {
+              const threads = responses.flatMap((response, index) => {
+                const raw = asRecord(response?.result);
+                const archived = index === 1;
+                const entries = Array.isArray(raw?.threads)
+                  ? raw.threads
+                  : Array.isArray(raw?.items)
+                  ? raw.items
+                  : Array.isArray(raw?.data)
+                  ? raw.data
+                  : Array.isArray(raw?.sessions)
+                  ? raw.sessions
+                  : [];
+                return entries.map((thread) => ({ thread, archived }));
+              });
+              const seenThreadIds = new Set<string>();
               const records = threads
-                .map((thread): AgentConversationRecord | undefined => {
+                .map(({ thread, archived }): AgentConversationRecord | undefined => {
                   const threadId = codexThreadId(thread) ?? firstString(thread, ["id", "threadId"]);
                   const record = asRecord(thread);
                   if (!threadId) return undefined;
+                  if (seenThreadIds.has(threadId)) return undefined;
+                  seenThreadIds.add(threadId);
                   const cwd = firstString(record, ["cwd", "workingDirectory", "workspacePath"]) ?? session.cwd ?? "";
                   const conversationId = makeAgentConversationId({
                     serverUrl: normalizeServerUrl(session.gatewayUrl),
@@ -1870,6 +2838,10 @@ export function useAgentWorkspace(
                     provider: "codex",
                   });
                   const previous = conversationsRef.current.find((item) => item.id === conversationId);
+                  const serverLastActivityAt = codexOptionalTimestamp(
+                    record?.lastActivityAt ?? record?.updatedAt ?? record?.modifiedAt,
+                  );
+                  const serverCreatedAt = codexOptionalTimestamp(record?.createdAt);
                   codexThreadConversationRef.current.set(threadId, conversationId);
                   return {
                     id: conversationId,
@@ -1884,45 +2856,44 @@ export function useAgentWorkspace(
                     status: codexThreadIsWaitingForUser(record)
                       ? "waiting_permission"
                       : codexThreadIsRunning(record) ? "running" : "idle",
-                    archived: Boolean(record?.archived),
+                    archived: typeof record?.archived === "boolean" ? record.archived : archived,
                     runningTurnId: codexRunningTurnId(record),
                     syncStatus: "complete",
                     source: "app-server",
                     lastMessagePreview: firstString(record, ["preview", "lastMessagePreview", "summary"]),
-                    lastActivityAt: Date.parse(String(record?.lastActivityAt ?? record?.updatedAt ?? record?.modifiedAt ?? "")) || Date.now(),
-                    createdAt: Date.parse(String(record?.createdAt ?? "")) || Date.now(),
+                    lastActivityAt: serverLastActivityAt ?? previous?.lastActivityAt ?? serverCreatedAt ?? Date.now(),
+                    createdAt: serverCreatedAt ?? previous?.createdAt ?? serverLastActivityAt ?? Date.now(),
                     schemaVersion: 2,
                   };
                 })
                 .filter((record): record is AgentConversationRecord => Boolean(record));
-              if (records.length > 0) {
-                setConversations((prev) => {
-                  const byId = new Map(prev.map((item) => [item.id, item]));
-                  for (const record of records) {
-                    const previous = byId.get(record.id);
-                    byId.set(record.id, {
+              setConversations((prev) => {
+                const byId = new Map(prev.map((item) => [item.id, item]));
+                for (const record of records) {
+                  const previous = byId.get(record.id);
+                  byId.set(record.id, {
                     ...previous,
                     ...record,
                     title: stableCodexTitle(record.title, previous?.title, record.cwd),
                     lastMessagePreview: record.lastMessagePreview ??
                       (codexPreviewIsControlNoise(previous?.lastMessagePreview) ? undefined : previous?.lastMessagePreview),
+                    lastActivityAt: Math.max(previous?.lastActivityAt ?? 0, record.lastActivityAt),
                   });
-                  }
-                  return [...byId.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+                }
+                return [...byId.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+              });
+              replaceAgentConversationsForDevice({
+                serverUrl: normalizeServerUrl(session.gatewayUrl),
+                hostDeviceId: session.hostDeviceId,
+                conversations: records,
+                providers: ["codex"],
+              }).catch(() => {});
+              records
+                .filter((record) => record.agentSessionId && record.status === "running")
+                .slice(0, 6)
+                .forEach((record) => {
+                  requestCodexTurns(session.sessionId, record.id, record.agentSessionId!).catch(() => {});
                 });
-                replaceAgentConversationsForDevice({
-                  serverUrl: normalizeServerUrl(session.gatewayUrl),
-                  hostDeviceId: session.hostDeviceId,
-                  conversations: records,
-                  providers: ["codex"],
-                }).catch(() => {});
-                records
-                  .filter((record) => record.agentSessionId && record.status === "running")
-                  .slice(0, 6)
-                  .forEach((record) => {
-                    requestCodexTurns(session.sessionId, record.id, record.agentSessionId!).catch(() => {});
-                  });
-              }
             })
             .catch(() => {});
           continue;
@@ -2035,6 +3006,25 @@ export function useAgentWorkspace(
     requestCapabilities();
     requestConversationList();
   }, [connectedSessions.length, requestCapabilities, requestConversationList]);
+
+  useEffect(() => {
+    if (connectedSessions.length === 0) return;
+    const timer = setInterval(() => {
+      const foreground = appStateRef.current === "active";
+      for (const session of managerRef.current.sessions.values()) {
+        if (session.status !== "connected") continue;
+        const hasCodexConversation = conversationsRef.current.some((conversation) =>
+          conversation.provider === "codex" &&
+          !conversation.archived &&
+          findSessionForConversation(conversation, managerRef.current.sessions)?.sessionId === session.sessionId
+        );
+        if (session.provider !== "codex" && !hasCodexConversation) continue;
+        requestConversationList(session.sessionId);
+        if (!foreground) break;
+      }
+    }, appStateRef.current === "active" ? 5_000 : 20_000);
+    return () => clearInterval(timer);
+  }, [connectedSessions.length, requestConversationList]);
 
   useEffect(() => {
     for (const session of connectedSessions) {
@@ -2154,6 +3144,7 @@ export function useAgentWorkspace(
             pendingCodexRef.current.delete(payload.id);
             clearTimeout(pending.timer);
             if (payload.error) {
+              const message = humanizeCodexRpcError(payload.error.message ?? "Codex request failed");
               if (pending.clientMessageId && pending.conversationId) {
                 const existing = codexThreadsRef.current.get(pending.conversationId);
                 const failed = existing?.items.find((item) => item.itemId === pending.clientMessageId);
@@ -2165,13 +3156,22 @@ export function useAgentWorkspace(
                     updatedAt: Date.now(),
                   });
                 }
+                upsertCodexItem(pending.conversationId, {
+                  threadId: codexThreadsRef.current.get(pending.conversationId)?.threadId ?? pending.conversationId,
+                  itemId: `error:${pending.clientMessageId}`,
+                  orderIndex: (codexThreadsRef.current.get(pending.conversationId)?.items.length ?? 0) + 1,
+                  type: "error",
+                  text: message,
+                  deliveryState: "failed",
+                  createdAt: Date.now(),
+                });
                 setConversations((prev) => prev.map((conversation) =>
                   conversation.id === pending.conversationId
                     ? { ...conversation, status: "error", lastActivityAt: Date.now() }
-                    : conversation
+                  : conversation
                 ));
               }
-              pending.reject?.(payload.error.message ?? "Codex request failed");
+              pending.reject?.(message);
             } else {
               if (pending.clientMessageId && pending.conversationId) {
                 const existing = codexThreadsRef.current.get(pending.conversationId);
@@ -2188,6 +3188,42 @@ export function useAgentWorkspace(
             }
           }
           if (!pending) {
+            if (payload.error && payload.id === "linkshell-codex-rpc-error") {
+              const message = humanizeCodexRpcError(payload.error.message ?? "Codex app-server transport failed");
+              const failed = failPendingCodexRequestsForSession(pendingCodexRef.current, envelope.hostDeviceId, message);
+              for (const item of failed) {
+                if (!item.conversationId) continue;
+                if (item.clientMessageId) {
+                  const existing = codexThreadsRef.current.get(item.conversationId);
+                  const failedMessage = existing?.items.find((entry) => entry.itemId === item.clientMessageId);
+                  if (failedMessage) {
+                    upsertCodexItem(item.conversationId, {
+                      ...failedMessage,
+                      deliveryState: "failed",
+                      isStreaming: false,
+                      updatedAt: Date.now(),
+                    });
+                  }
+                  upsertCodexItem(item.conversationId, {
+                    threadId: existing?.threadId ?? item.conversationId,
+                    itemId: `error:${item.clientMessageId}`,
+                    orderIndex: (existing?.items.length ?? 0) + 1,
+                    type: "error",
+                    text: message,
+                    deliveryState: "failed",
+                    createdAt: Date.now(),
+                  });
+                }
+                if (item.clientMessageId) {
+                  setConversations((prev) => prev.map((conversation) =>
+                    conversation.id === item.conversationId
+                      ? { ...conversation, status: "error", lastMessagePreview: message, lastActivityAt: Date.now() }
+                      : conversation
+                  ));
+                }
+              }
+              return;
+            }
             for (const [conversationId, thread] of codexThreadsRef.current) {
               const matching = thread.items.find((item) =>
                 (item.type === "approval" || item.type === "structured_input") &&
@@ -2198,6 +3234,8 @@ export function useAgentWorkspace(
                 ...matching,
                 deliveryState: payload.error ? "failed" : "confirmed",
                 output: payload.error?.message ?? matching.output,
+                permissionSubmitting: matching.type === "approval" ? false : matching.permissionSubmitting,
+                permissionError: matching.type === "approval" ? payload.error?.message : matching.permissionError,
                 isStreaming: false,
                 updatedAt: Date.now(),
               });
@@ -2212,6 +3250,13 @@ export function useAgentWorkspace(
         const turnId = codexTurnId(params);
         let conversationId = threadId ? codexThreadConversationRef.current.get(threadId) : undefined;
         conversationId = conversationId ?? firstString(params, ["conversationId"]);
+        if (!conversationId && threadId) {
+          conversationId = conversationsRef.current.find((item) =>
+            item.provider === "codex" &&
+            !item.archived &&
+            (item.agentSessionId === threadId || item.id === threadId)
+          )?.id;
+        }
         if (!conversationId && turnId) {
           for (const [candidateId, thread] of codexThreadsRef.current) {
             if (thread.activeTurnId === turnId || thread.items.some((item) => item.turnId === turnId)) {
@@ -2249,14 +3294,16 @@ export function useAgentWorkspace(
         if (method === "thread/status/changed" && conversationId && threadId) {
           const isRunning = codexThreadIsRunning(params);
           const isWaiting = codexThreadIsWaitingForUser(params);
+          const activeTurnIdFromStatus = codexRunningTurnId(params);
           setCodexThreadsByConversationId((prev) => {
             const next = new Map(prev);
             const existing = next.get(conversationId) ?? { conversationId, threadId, items: [], isRunning };
+            const activeTurnId = activeTurnIdFromStatus ?? existing.activeTurnId;
             next.set(conversationId, {
               ...existing,
               threadId,
               isRunning,
-              activeTurnId: isRunning ? existing.activeTurnId : undefined,
+              activeTurnId: isRunning ? activeTurnId : undefined,
             });
             return next;
           });
@@ -2265,7 +3312,9 @@ export function useAgentWorkspace(
               ? {
                   ...conversation,
                   status: isWaiting ? "waiting_permission" : isRunning ? "running" : "idle",
-                  runningTurnId: isRunning ? conversation.runningTurnId : undefined,
+                  runningTurnId: isRunning
+                    ? activeTurnIdFromStatus ?? conversation.runningTurnId
+                    : undefined,
                   lastActivityAt: Date.now(),
                 }
               : conversation
@@ -2293,11 +3342,22 @@ export function useAgentWorkspace(
         }
 
         if (method === "turn/completed" && conversationId && threadId) {
+          flushPendingCodexDeltas();
           const status = firstString(params, ["status"]);
           setCodexThreadsByConversationId((prev) => {
             const next = new Map(prev);
             const existing = next.get(conversationId);
-            if (existing) next.set(conversationId, { ...existing, isRunning: false, activeTurnId: undefined });
+            if (existing) {
+              const nextThread = {
+                ...existing,
+                items: finalizeCodexThreadItems(existing.items, turnId ?? existing.activeTurnId),
+                isRunning: false,
+                activeTurnId: undefined,
+              };
+              next.set(conversationId, nextThread);
+              codexThreadsRef.current = next;
+              persistCodexThread(conversationId, nextThread);
+            }
             return next;
           });
           setConversations((prev) => prev.map((conversation) =>
@@ -2317,7 +3377,7 @@ export function useAgentWorkspace(
           const id = itemId ?? `assistant:${turnId ?? "active"}`;
           const existing = codexThreadsRef.current.get(conversationId)?.items.find((item) => item.itemId === id);
           const delta = firstString(params, ["delta", "text", "content"]) ?? codexText(params?.delta);
-          upsertCodexItem(conversationId, {
+          queueCodexDeltaItem(conversationId, {
             threadId,
             turnId: turnId ?? existing?.turnId,
             itemId: id,
@@ -2357,6 +3417,7 @@ export function useAgentWorkspace(
         }
 
         if ((method === "item/completed" || method.endsWith("/completed")) && conversationId && itemId) {
+          flushPendingCodexDeltas();
           const existing = codexThreadsRef.current.get(conversationId)?.items.find((item) => item.itemId === itemId);
           if (existing) {
             const completedContent = codexContentBlocks(params?.item ?? params);
@@ -2387,7 +3448,7 @@ export function useAgentWorkspace(
           const id = itemId ?? `tool:${turnId ?? "active"}`;
           const existing = codexThreadsRef.current.get(conversationId)?.items.find((item) => item.itemId === id);
           const delta = firstString(params, ["delta", "text", "output"]) ?? codexText(params);
-          upsertCodexItem(conversationId, {
+          queueCodexDeltaItem(conversationId, {
             threadId,
             turnId: turnId ?? existing?.turnId,
             itemId: id,
@@ -2408,7 +3469,7 @@ export function useAgentWorkspace(
           const existing = codexThreadsRef.current.get(conversationId)?.items.find((item) => item.itemId === id);
           const diff = firstString(params, ["patch", "diff", "unified_diff"]) ?? codexDiffText(params) ?? codexText(params);
           const fileChange = codexFileChangeFromValue(params, "running", diff);
-          upsertCodexItem(conversationId, {
+          queueCodexDeltaItem(conversationId, {
             threadId,
             turnId: turnId ?? existing?.turnId,
             itemId: id,
@@ -2443,6 +3504,7 @@ export function useAgentWorkspace(
             upsertCodexItem(candidateId, {
               ...matching,
               deliveryState: "confirmed",
+              permissionSubmitting: matching.type === "approval" ? false : matching.permissionSubmitting,
               isStreaming: false,
               updatedAt: Date.now(),
             });
@@ -2501,7 +3563,7 @@ export function useAgentWorkspace(
           return;
         }
 
-        if (payload.id !== undefined && method.includes("requestApproval") && conversationId) {
+        if (payload.id !== undefined && isCodexApprovalRequest(method) && conversationId) {
           const existingThread = codexThreadsRef.current.get(conversationId);
           const conversation = conversationsRef.current.find((item) => item.id === conversationId);
           const resolvedThreadId = threadId ?? existingThread?.threadId ?? conversation?.agentSessionId ?? conversationId;
@@ -2515,28 +3577,52 @@ export function useAgentWorkspace(
             requestId: String(payload.id),
             rpcId: payload.id,
             requestMethod: method,
-            command: firstString(params, ["toolName", "command", "name"]) ?? method,
-            text: codexText(params?.command ?? params?.fileChanges ?? params),
-            output: firstString(params, ["reason", "context", "message"]),
+            command: codexApprovalToolName(method, params),
+            text: codexApprovalToolInput(method, params),
+            output: codexApprovalContext(params),
             raw: params,
             deliveryState: "pending",
             createdAt: Date.now(),
           });
-          setConversations((prev) => prev.map((conversation) =>
-            conversation.id === conversationId
-              ? { ...conversation, status: "waiting_permission", lastActivityAt: Date.now() }
-              : conversation
-          ));
+          if (conversation) {
+            persistConversation({
+              ...conversation,
+              status: "waiting_permission",
+              lastMessagePreview: "Codex 需要授权",
+              lastActivityAt: Date.now(),
+            }).catch(() => {});
+          }
           return;
         }
 
-        if (isServerRequest && method.includes("requestApproval") && !conversationId) {
+        if (isServerRequest && isCodexApprovalRequest(method) && !conversationId) {
           sendServerRequestError("Cannot route Codex approval request to a conversation.");
           return;
         }
 
         if (isServerRequest) {
           sendServerRequestError(`Unsupported Codex server request: ${method}`, -32601);
+          return;
+        }
+
+        if ((method === "thread/archived" || method === "thread/unarchived") && threadId) {
+          const archived = method === "thread/archived";
+          setConversations((prev) => prev.map((conversation) =>
+            conversation.provider === "codex" && conversation.agentSessionId === threadId
+              ? { ...conversation, archived, lastActivityAt: Date.now(), syncStatus: "complete" }
+              : conversation
+          ));
+          return;
+        }
+
+        if (method === "thread/name/updated" && threadId) {
+          const name = firstString(params, ["name", "title"]);
+          if (!name) return;
+          setConversations((prev) => prev.map((conversation) =>
+            conversation.provider === "codex" && conversation.agentSessionId === threadId
+              ? { ...conversation, title: name, lastActivityAt: Date.now(), syncStatus: "complete" }
+              : conversation
+          ));
           return;
         }
 
@@ -3145,7 +4231,7 @@ export function useAgentWorkspace(
         }).catch(() => {});
       }
     },
-    [activeConversationId, persistConversation, persistTimelineItem, requestCodexTurns, requestDelta, requestHistoryPage, sendCodexRpc, upsertCodexItem],
+    [activeConversationId, flushPendingCodexDeltas, persistCodexThread, persistConversation, persistTimelineItem, queueCodexDeltaItem, requestCodexTurns, requestDelta, requestHistoryPage, sendCodexRpc, upsertCodexItem],
   );
 
   useEffect(() => {
@@ -3194,9 +4280,9 @@ export function useAgentWorkspace(
           serviceTier: input.serviceTier ?? existing?.serviceTier,
           permissionMode: input.permissionMode ?? existing?.permissionMode,
           collaborationMode: input.collaborationMode ?? existing?.collaborationMode ?? "default",
-          status: existing?.status ?? "idle",
+          status: existing?.status === "waiting_permission" ? "waiting_permission" : "idle",
           archived: false,
-          runningTurnId: existing?.runningTurnId,
+          runningTurnId: undefined,
           syncStatus: session ? "syncing" : "deferred",
           source: existing?.source ?? "cache",
           lastMessagePreview: codexPreviewIsControlNoise(existing?.lastMessagePreview) ? undefined : existing?.lastMessagePreview,
@@ -3205,29 +4291,33 @@ export function useAgentWorkspace(
           schemaVersion: 2,
         };
         await persistConversation(baseRecord, { preserveLocalArchived: false });
-        const cachedTimeline = await loadAgentTimeline(conversationId);
-        const cachedThreadId = baseRecord.agentSessionId ?? conversationId;
-        const cachedItems = cachedTimeline
-          .map((item, index) => codexTimelineToMessage(item, cachedThreadId, index))
-          .filter((item): item is CodexMessageItem => Boolean(item));
-        if (cachedItems.length > 0) {
-          const cachedThread: CodexThreadState = {
-            conversationId,
-            threadId: cachedThreadId,
-            activeTurnId: baseRecord.runningTurnId,
-            isRunning: baseRecord.status === "running" || baseRecord.status === "waiting_permission",
-            items: cachedItems,
-          };
-          const next = new Map(codexThreadsRef.current);
-          next.set(conversationId, cachedThread);
-          codexThreadsRef.current = next;
-          codexThreadConversationRef.current.set(cachedThreadId, conversationId);
-          setCodexThreadsByConversationId(next);
-          const timelineNext = new Map(timelineRef.current);
-          timelineNext.set(conversationId, cachedTimeline);
-          timelineRef.current = timelineNext;
-          setTimelineById(timelineNext);
-          historyHasMoreRef.current.delete(conversationId);
+        if (CODEX_TIMELINE_CACHE_ENABLED) {
+          const cachedTimeline = normalizeCachedCodexTimelineItems(await loadAgentTimeline(conversationId));
+          const cachedThreadId = baseRecord.agentSessionId ?? conversationId;
+          const cachedItems = cachedTimeline
+            .map((item, index) => codexTimelineToMessage(item, cachedThreadId, index))
+            .filter((item): item is CodexMessageItem => Boolean(item));
+          if (cachedItems.length > 0) {
+            const cachedThread: CodexThreadState = {
+              conversationId,
+              threadId: cachedThreadId,
+              activeTurnId: undefined,
+              isRunning: false,
+              items: cachedItems,
+            };
+            const next = new Map(codexThreadsRef.current);
+            next.set(conversationId, cachedThread);
+            codexThreadsRef.current = next;
+            codexThreadConversationRef.current.set(cachedThreadId, conversationId);
+            setCodexThreadsByConversationId(next);
+            const timelineNext = new Map(timelineRef.current);
+            timelineNext.set(conversationId, cachedTimeline);
+            timelineRef.current = timelineNext;
+            setTimelineById(timelineNext);
+            historyHasMoreRef.current.delete(conversationId);
+          }
+        } else {
+          saveAgentTimeline(conversationId, []).catch(() => {});
         }
         if (!session) return { conversationId, status: baseRecord.status };
         try {
@@ -3238,10 +4328,12 @@ export function useAgentWorkspace(
                 cwd: input.cwd,
                 excludeTurns: true,
               }, { conversationId, timeoutMs: 30_000 })
-            : await requestCodexRpc(session.sessionId, "thread/start", {
+            : await requestCodexRpc(session.sessionId, "thread/start", codexThreadStartParams({
                 cwd: input.cwd,
-                sessionStartSource: "startup",
-              }, { conversationId, timeoutMs: 30_000 });
+                model: input.model,
+                serviceTier: input.serviceTier,
+                permissionMode: input.permissionMode,
+              }), { conversationId, timeoutMs: 30_000 });
           const threadId = codexThreadId(response.result) ?? input.agentSessionId ?? conversationId;
           const stableConversationId = input.conversationId
             ? conversationId
@@ -3428,6 +4520,7 @@ export function useAgentWorkspace(
         permissionMode?: AgentPermissionMode;
         collaborationMode?: AgentCollaborationMode;
         attachments?: AgentContentBlock[];
+        forceSteer?: boolean;
       },
     ) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
@@ -3435,8 +4528,10 @@ export function useAgentWorkspace(
       const attachments = (options?.attachments ?? []).filter((block) => block.type === "image" && block.data);
       if (!conversation || (!trimmed && attachments.length === 0)) return;
       const clientMessageId = `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const fileBlocks = trimmed ? extractPromptFileBlocks(trimmed, conversation.cwd) : [];
       const contentBlocks: AgentContentBlock[] = [
         ...(trimmed ? [{ type: "text" as const, text: trimmed }] : []),
+        ...fileBlocks,
         ...attachments,
       ];
 
@@ -3452,12 +4547,16 @@ export function useAgentWorkspace(
         metadata: { optimistic: true },
         createdAt: now,
       };
-      setTimelineById((prev) => {
-        const next = new Map(prev);
-        next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [optimisticItem]));
-        return next;
-      });
-      upsertAgentTimelineItem(optimisticItem).catch(() => {});
+      const session = findSessionForConversation(conversation, manager.sessions);
+      const useGenericOptimisticTimeline = conversation.provider !== "codex" || !session;
+      if (useGenericOptimisticTimeline) {
+        setTimelineById((prev) => {
+          const next = new Map(prev);
+          next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [optimisticItem]));
+          return next;
+        });
+        upsertAgentTimelineItem(optimisticItem).catch(() => {});
+      }
 
       const hasModel = Object.prototype.hasOwnProperty.call(options ?? {}, "model");
       const hasEffort = Object.prototype.hasOwnProperty.call(options ?? {}, "reasoningEffort");
@@ -3482,7 +4581,6 @@ export function useAgentWorkspace(
       });
       upsertAgentConversation(nextConversation).catch(() => {});
 
-      const session = findSessionForConversation(conversation, manager.sessions);
       if (!session) {
         const failedItem: AgentTimelineItem = {
           id: `error:${clientMessageId}`,
@@ -3506,7 +4604,45 @@ export function useAgentWorkspace(
         const activeTurnId = conversation.runningTurnId ?? existingThread?.activeTurnId;
         const steerTurnId = conversation.status === "running" && activeTurnId ? activeTurnId : undefined;
         const shouldSteerActiveTurn = Boolean(steerTurnId);
+        const mustSteerActiveTurn = options?.forceSteer === true;
+        const capability = capabilitiesBySessionId.get(session.sessionId) ?? capabilitiesBySessionId.get(session.hostDeviceId);
+        const codexProvider = capability?.providers?.find((provider) => provider.id === "codex");
+        const effectiveModel = hasModel
+          ? options?.model ?? undefined
+          : conversation.model ?? codexProvider?.defaultModel ?? codexProvider?.models?.[0]?.id;
+        const effectiveReasoningEffort = hasEffort
+          ? options?.reasoningEffort ?? undefined
+          : conversation.reasoningEffort ?? codexProvider?.models?.find((model) => model.id === effectiveModel)?.defaultReasoningEffort;
+        const effectiveCollaborationMode = hasCollaboration
+          ? options?.collaborationMode ?? undefined
+          : conversation.collaborationMode;
         codexThreadConversationRef.current.set(threadId, conversationId);
+        if (mustSteerActiveTurn && !shouldSteerActiveTurn) {
+          upsertCodexItem(conversationId, {
+            threadId,
+            itemId: clientMessageId,
+            orderIndex: (codexThreadsRef.current.get(conversationId)?.items.length ?? 0) + 1,
+            role: "user",
+            type: "message",
+            text: textFromBlocks(contentBlocks),
+            deliveryState: "failed",
+            createdAt: now,
+            updatedAt: Date.now(),
+          });
+          upsertCodexItem(conversationId, {
+            threadId,
+            itemId: `error:${clientMessageId}`,
+            orderIndex: (codexThreadsRef.current.get(conversationId)?.items.length ?? 0) + 2,
+            type: "error",
+            text: "当前任务还没有可引导的 turn id，请稍后重试。",
+            deliveryState: "failed",
+            createdAt: Date.now(),
+          });
+          setConversations((prev) => prev.map((item) =>
+            item.id === conversationId ? { ...item, status: conversation.status } : item
+          ));
+          return;
+        }
         upsertCodexItem(conversationId, {
           threadId,
           turnId: steerTurnId,
@@ -3519,30 +4655,70 @@ export function useAgentWorkspace(
           createdAt: now,
         });
         ensureCodexInitialized(session.sessionId)
-          .then(() => resumeCodexThread(session.sessionId, threadId, conversation.cwd, conversationId))
           .then(() => {
-            const params = {
-              threadId,
-              model: hasModel ? options?.model ?? undefined : conversation.model,
-              effort: hasEffort ? options?.reasoningEffort ?? undefined : conversation.reasoningEffort,
-              service_tier: hasServiceTier ? options?.serviceTier ?? undefined : conversation.serviceTier,
-              input: codexInputBlocks(contentBlocks),
+            const sendCodexTurn = (includeCollaborationMode: boolean): Promise<CodexRpcMessage> => {
+              const params = codexTurnStartParams({
+                threadId,
+                cwd: conversation.cwd,
+                contentBlocks,
+                model: effectiveModel,
+                reasoningEffort: effectiveReasoningEffort,
+                serviceTier: hasServiceTier ? options?.serviceTier ?? undefined : conversation.serviceTier,
+                permissionMode: hasPermission ? options?.permissionMode ?? undefined : conversation.permissionMode,
+                collaborationMode: effectiveCollaborationMode,
+                includeCollaborationMode: includeCollaborationMode && !codexPlanUnsupportedSessionsRef.current.has(session.sessionId),
+              });
+              return shouldSteerActiveTurn
+                ? requestCodexRpc(session.sessionId, "turn/steer", {
+                    threadId,
+                    expectedTurnId: steerTurnId!,
+                    input: params.input,
+                    ...(params.collaborationMode ? { collaborationMode: params.collaborationMode } : {}),
+                  }, {
+                    conversationId,
+                    clientMessageId,
+                    timeoutMs: 60_000,
+                  })
+                : requestCodexRpc(session.sessionId, "turn/start", params, {
+                    conversationId,
+                    clientMessageId,
+                    timeoutMs: 60_000,
+                  });
             };
-            return shouldSteerActiveTurn
-              ? requestCodexRpc(session.sessionId, "turn/steer", {
-                  threadId,
-                  expectedTurnId: steerTurnId!,
-                  input: params.input,
-                }, {
-                  conversationId,
-                  clientMessageId,
-                  timeoutMs: 60_000,
-                })
-              : requestCodexRpc(session.sessionId, "turn/start", params, {
-                  conversationId,
-                  clientMessageId,
-                  timeoutMs: 60_000,
-                });
+            return sendCodexTurn(true).catch((error) => {
+              if (!codexShouldRetryWithoutCollaborationMode(error)) throw error;
+              codexPlanUnsupportedSessionsRef.current.add(session.sessionId);
+              if (session.hostDeviceId) codexPlanUnsupportedSessionsRef.current.add(session.hostDeviceId);
+              updateCodexRuntimeCapabilities(session.sessionId, (previous) => ({
+                id: "codex",
+                label: previous?.label ?? "Codex",
+                enabled: true,
+                supportsImages: previous?.supportsImages ?? true,
+                supportsPermission: true,
+                supportsPlan: false,
+                supportsCancel: true,
+                providerProtocol: "codex-app-server",
+                modelsSource: previous?.modelsSource,
+                modelListError: previous?.modelListError,
+                models: previous?.models,
+                defaultModel: previous?.defaultModel,
+                reasoningEfforts: previous?.reasoningEfforts ?? CODEX_REASONING_EFFORTS,
+                speedTiers: previous?.speedTiers ?? CODEX_DEFAULT_SPEED_TIERS,
+                defaultServiceTier: previous?.defaultServiceTier,
+                permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
+                commands: codexRpcCommands(false),
+                modes: previous?.modes,
+                currentMode: "default",
+                features: {
+                  ...(previous?.features ?? {}),
+                  plan: false,
+                },
+              }));
+              setConversations((prev) => prev.map((item) =>
+                item.id === conversationId ? { ...item, collaborationMode: "default" } : item
+              ));
+              return sendCodexTurn(false);
+            });
           })
           .then((response) => {
             const startedThreadId = codexThreadId(response.result) ?? threadId;
@@ -3628,7 +4804,7 @@ export function useAgentWorkspace(
         upsertAgentTimelineItem(failedItem).catch(() => {});
       }
     },
-    [ensureCodexInitialized, manager, requestCodexRpc, resumeCodexThread, upsertCodexItem],
+    [capabilitiesBySessionId, ensureCodexInitialized, manager, requestCodexRpc, updateCodexRuntimeCapabilities, upsertCodexItem],
   );
 
   const executeCommand = useCallback(
@@ -3643,6 +4819,167 @@ export function useAgentWorkspace(
       const session = findSessionForConversation(conversation, manager.sessions);
       if (!session) return;
       const clientMessageId = `cmd-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const now = Date.now();
+      if (conversation.provider === "codex") {
+        if (command.name === "plan" || command.name === "exit-plan") {
+          const nextMode: AgentCollaborationMode = command.name === "plan" ? "plan" : "default";
+          const statusItem: AgentTimelineItem = {
+            id: clientMessageId,
+            conversationId,
+            type: "status",
+            kind: "chat",
+            status: "idle",
+            text: nextMode === "plan"
+              ? "已进入 Plan mode。下一条消息会通过 Codex collaborationMode=plan 发送。"
+              : "已退出 Plan mode。",
+            metadata: {
+              commandId: command.id,
+              commandExecutionKind: command.executionKind,
+              protocol: "codex-app-server",
+            },
+            createdAt: now,
+          };
+          const nextConversation = {
+            ...conversation,
+            collaborationMode: nextMode,
+            status: "idle" as const,
+            lastMessagePreview: nextMode === "plan" ? "已进入 Plan mode" : "已退出 Plan mode",
+            lastActivityAt: now,
+          };
+          setConversations((prev) => prev.map((item) => item.id === conversationId ? nextConversation : item));
+          upsertAgentConversation(nextConversation).catch(() => {});
+          setTimelineById((prev) => {
+            const next = new Map(prev);
+            next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [statusItem]));
+            return next;
+          });
+          upsertAgentTimelineItem(statusItem).catch(() => {});
+          return;
+        }
+        const threadId = codexThreadsRef.current.get(conversationId)?.threadId ?? conversation.agentSessionId;
+        if (!threadId) return;
+        const optimisticItem: AgentTimelineItem = {
+          id: clientMessageId,
+          conversationId,
+          type: "message",
+          kind: command.name === "compact" ? "context_compaction" : command.name === "review" ? "review" : "chat",
+          role: "user",
+          content: [{ type: "text", text: rawText }],
+          text: rawText,
+          metadata: {
+            optimistic: true,
+            commandId: command.id,
+            commandExecutionKind: command.executionKind,
+            protocol: "codex-app-server",
+          },
+          createdAt: now,
+        };
+        setTimelineById((prev) => {
+          const next = new Map(prev);
+          next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [optimisticItem]));
+          return next;
+        });
+        upsertAgentTimelineItem(optimisticItem).catch(() => {});
+        setConversations((prev) => prev.map((item) =>
+          item.id === conversationId
+            ? {
+                ...item,
+                status: command.name === "new" ? "idle" : "running",
+                lastMessagePreview: previewFromItem(optimisticItem) ?? item.lastMessagePreview,
+                lastActivityAt: now,
+              }
+            : item
+        ));
+
+        const fail = (message: string) => {
+          const failedItem: AgentTimelineItem = {
+            id: `error:${clientMessageId}`,
+            conversationId,
+            type: "error",
+            error: message,
+            createdAt: Date.now(),
+          };
+          setTimelineById((prev) => {
+            const next = new Map(prev);
+            next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [failedItem]));
+            return next;
+          });
+          upsertAgentTimelineItem(failedItem).catch(() => {});
+          setConversations((prev) => prev.map((item) =>
+            item.id === conversationId ? { ...item, status: "error", lastActivityAt: Date.now() } : item
+          ));
+        };
+
+        ensureCodexInitialized(session.sessionId)
+          .then(() => {
+            if (command.name === "compact") {
+              return requestCodexRpc(session.sessionId, "thread/compact/start", { threadId }, {
+                conversationId,
+                clientMessageId,
+                timeoutMs: 60_000,
+              }).then(() => {
+                setConversations((prev) => prev.map((item) =>
+                  item.id === conversationId ? { ...item, status: "idle", lastActivityAt: Date.now() } : item
+                ));
+              });
+            }
+            if (command.name === "new") {
+              return requestCodexRpc(session.sessionId, "thread/start", codexThreadStartParams({
+                cwd: conversation.cwd,
+                model: conversation.model,
+                serviceTier: conversation.serviceTier,
+                permissionMode: conversation.permissionMode,
+              }), {
+                conversationId,
+                clientMessageId,
+                timeoutMs: 30_000,
+              }).then((response) => {
+                const nextThreadId = codexThreadId(response.result);
+                if (!nextThreadId) throw new Error("Codex did not return a new thread id.");
+                codexThreadConversationRef.current.set(nextThreadId, conversationId);
+                historyCursorRef.current.delete(conversationId);
+                historyHasMoreRef.current.set(conversationId, false);
+                saveAgentHistoryPageState(conversationId, { hasMore: false }).catch(() => {});
+                replaceCodexHistory(conversationId, nextThreadId, [], undefined, "replace", null);
+                persistConversation({
+                  ...conversation,
+                  agentSessionId: nextThreadId,
+                  runningTurnId: undefined,
+                  status: "idle",
+                  lastMessagePreview: "新 Codex thread 已创建",
+                  lastActivityAt: Date.now(),
+                  syncStatus: "complete",
+                  source: "app-server",
+                }, { preserveLocalArchived: false }).catch(() => {});
+              });
+            }
+            if (command.name === "review") {
+              return requestCodexRpc(session.sessionId, "review/start", {
+                threadId,
+                target: args?.trim()
+                  ? { type: "custom", instructions: args.trim() }
+                  : { type: "uncommittedChanges" },
+                delivery: "inline",
+              }, {
+                conversationId,
+                clientMessageId,
+                timeoutMs: 60_000,
+              }).then((response) => {
+                const turnId = codexTurnId(response.result) ?? firstString(asRecord(response.result)?.turn, ["id"]);
+                if (turnId) {
+                  setConversations((prev) => prev.map((item) =>
+                    item.id === conversationId
+                      ? { ...item, status: "running", runningTurnId: turnId, lastActivityAt: Date.now() }
+                      : item
+                  ));
+                }
+              });
+            }
+            throw new Error(`Codex app-server 不支持命令：/${command.name}`);
+          })
+          .catch((error) => fail(error instanceof Error ? error.message : String(error)));
+        return;
+      }
       const accepted = manager.sendAgentWorkspaceEnvelope(
         session.sessionId,
         "agent.v2.command.execute",
@@ -3656,7 +4993,6 @@ export function useAgentWorkspace(
         { queue: true },
       );
       if (accepted) {
-        const now = Date.now();
         const optimisticItem: AgentTimelineItem = {
           id: clientMessageId,
           conversationId,
@@ -3708,7 +5044,7 @@ export function useAgentWorkspace(
         upsertAgentTimelineItem(failedItem).catch(() => {});
       }
     },
-    [manager],
+    [ensureCodexInitialized, manager, persistConversation, replaceCodexHistory, requestCodexRpc],
   );
 
   const updateConversationSettings = useCallback(
@@ -3870,22 +5206,30 @@ export function useAgentWorkspace(
           ?.items.find((item) => item.type === "approval" && item.requestId === requestId);
         const method = codexItem?.requestMethod ?? "";
         const decision = outcome === "allow" ? "accept" : outcome === "cancelled" ? "cancel" : "decline";
+        const legacyDecision = outcome === "allow" ? "approved" : outcome === "cancelled" ? "abort" : "denied";
         const result = method.includes("permissions")
           ? {
               permissions: outcome === "allow" ? {} : { network: {}, fileSystem: {} },
               scope: "turn",
             }
+          : method === "applyPatchApproval" || method === "execCommandApproval"
+            ? { decision: legacyDecision }
           : { decision };
         const accepted = sendCodexRpc(session.sessionId, {
           id: codexItem?.rpcId ?? requestId,
           result,
         });
-        if (accepted && codexItem) {
+        if (codexItem) {
           upsertCodexItem(conversationId, {
             ...codexItem,
-            deliveryState: "confirmed",
+            permissionOutcome: outcome,
+            permissionSubmitting: accepted,
+            permissionError: accepted ? undefined : "授权未发送：连接未就绪，请稍后重试。",
+            deliveryState: accepted ? "pending" : "failed",
             updatedAt: Date.now(),
           });
+        }
+        if (accepted) {
           persistConversation({
             ...conversation,
             status: "running",
@@ -4072,6 +5416,41 @@ export function useAgentWorkspace(
           error: "设备连接已失效，请重新打开会话。",
         });
       }
+      if (conversation.provider === "codex") {
+        return withTimeout(
+          ensureCodexInitialized(session.sessionId),
+          5_000,
+          "Codex 初始化超时：无法读取目录，请确认主机端 codex app-server 仍在响应。",
+        )
+          .then(() => requestCodexRpc(session.sessionId, "fs/readDirectory", { path }, {
+            conversationId,
+            timeoutMs: 12_000,
+          }))
+          .then((response): AgentFileBrowseResult => {
+            const raw = asRecord(response.result);
+            const entries = (Array.isArray(raw?.entries) ? raw.entries : [])
+              .map((entry): AgentFileEntry | undefined => {
+                const item = asRecord(entry);
+                const name = firstString(item, ["fileName", "name"]);
+                if (!name) return undefined;
+                const isDirectory = item?.isDirectory === true;
+                const childPath = path.endsWith("/") ? `${path}${name}` : `${path}/${name}`;
+                return {
+                  name,
+                  path: childPath,
+                  isDirectory,
+                };
+              })
+              .filter((entry): entry is AgentFileEntry => Boolean(entry))
+              .sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name));
+            return { path, entries };
+          })
+          .catch((error): AgentFileBrowseResult => ({
+            path,
+            entries: [],
+            error: error instanceof Error ? error.message : String(error),
+          }));
+      }
       const requestId = `browse-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       return new Promise<AgentFileBrowseResult>((resolve) => {
         const timer = setTimeout(() => {
@@ -4092,7 +5471,7 @@ export function useAgentWorkspace(
         }
       });
     },
-    [manager],
+    [ensureCodexInitialized, manager, requestCodexRpc],
   );
 
   const readFile = useCallback(
@@ -4107,6 +5486,37 @@ export function useAgentWorkspace(
           truncated: false,
           error: "设备连接已失效，请重新打开会话。",
         });
+      }
+      if (conversation.provider === "codex") {
+        return withTimeout(
+          ensureCodexInitialized(session.sessionId),
+          5_000,
+          "Codex 初始化超时：无法读取文件，请确认主机端 codex app-server 仍在响应。",
+        )
+          .then(() => requestCodexRpc(session.sessionId, "fs/readFile", { path }, {
+            conversationId,
+            timeoutMs: 12_000,
+          }))
+          .then((response): AgentFileReadResult => {
+            const raw = asRecord(response.result);
+            const dataBase64 = firstString(raw, ["dataBase64", "base64", "data"]) ?? "";
+            const fullContent = base64ToUtf8(dataBase64);
+            const truncated = fullContent.length > maxBytes;
+            return {
+              path,
+              content: truncated ? fullContent.slice(0, maxBytes) : fullContent,
+              encoding: "utf8",
+              size: fullContent.length,
+              truncated,
+            };
+          })
+          .catch((error): AgentFileReadResult => ({
+            path,
+            content: "",
+            encoding: "utf8",
+            truncated: false,
+            error: error instanceof Error ? error.message : String(error),
+          }));
       }
       const requestId = `read-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       return new Promise<AgentFileReadResult>((resolve) => {
@@ -4140,7 +5550,7 @@ export function useAgentWorkspace(
         }
       });
     },
-    [manager],
+    [ensureCodexInitialized, manager, requestCodexRpc],
   );
 
   const loadOlderHistory = useCallback(
@@ -4169,18 +5579,44 @@ export function useAgentWorkspace(
   );
 
   const archive = useCallback(async (conversationId: string, archived: boolean) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    if (conversation?.provider === "codex") {
+      const session = findSessionForConversation(conversation, managerRef.current.sessions);
+      const threadId = codexThreadsRef.current.get(conversationId)?.threadId ?? conversation.agentSessionId;
+      if (!session || !threadId) {
+        throw new Error("Codex thread 不在线，无法通过 app-server 归档。");
+      }
+      await ensureCodexInitialized(session.sessionId);
+      await requestCodexRpc(session.sessionId, archived ? "thread/archive" : "thread/unarchive", { threadId }, {
+        conversationId,
+        timeoutMs: 15_000,
+      });
+    }
     await archiveAgentConversation(conversationId, archived);
     setConversations((prev) =>
-      prev.map((item) => item.id === conversationId ? { ...item, archived } : item),
+      prev.map((item) => item.id === conversationId ? { ...item, archived, syncStatus: "complete" } : item),
     );
-  }, []);
+  }, [ensureCodexInitialized, requestCodexRpc]);
 
   const rename = useCallback(async (conversationId: string, title: string) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    if (conversation?.provider === "codex") {
+      const session = findSessionForConversation(conversation, managerRef.current.sessions);
+      const threadId = codexThreadsRef.current.get(conversationId)?.threadId ?? conversation.agentSessionId;
+      if (!session || !threadId) {
+        throw new Error("Codex thread 不在线，无法通过 app-server 重命名。");
+      }
+      await ensureCodexInitialized(session.sessionId);
+      await requestCodexRpc(session.sessionId, "thread/name/set", { threadId, name: title }, {
+        conversationId,
+        timeoutMs: 15_000,
+      });
+    }
     await renameAgentConversation(conversationId, title);
     setConversations((prev) =>
-      prev.map((item) => item.id === conversationId ? { ...item, title } : item),
+      prev.map((item) => item.id === conversationId ? { ...item, title, syncStatus: "complete" } : item),
     );
-  }, []);
+  }, [ensureCodexInitialized, requestCodexRpc]);
 
   return {
     conversations: conversations.filter((item) => !item.archived),

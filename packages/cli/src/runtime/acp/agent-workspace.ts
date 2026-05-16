@@ -24,10 +24,12 @@ type AgentCommandSource = "built_in" | "custom" | "project" | "user" | "linkshel
 type AgentSyncSource = "device" | "device-history" | "device-live" | "app-server" | "cache";
 
 interface AgentContentBlock {
-  type: "text" | "image";
+  type: "text" | "image" | "file";
   text?: string;
   data?: string;
   mimeType?: string;
+  path?: string;
+  name?: string;
 }
 
 interface AgentToolCall {
@@ -641,7 +643,12 @@ function titleFromCwd(cwd: string): string {
 
 function textFromBlocks(blocks: AgentContentBlock[]): string {
   return blocks
-    .map((block) => block.type === "text" ? block.text ?? "" : `[${block.mimeType ?? "image"} attachment]`)
+    .map((block) => {
+      if (block.type === "text") return block.text ?? "";
+      if (block.type === "image") return `[${block.mimeType ?? "image"} attachment]`;
+      if (block.type === "file" && block.path) return `@${block.path}`;
+      return "";
+    })
     .filter(Boolean)
     .join("\n");
 }
@@ -673,6 +680,11 @@ function contentBlocksFromValue(value: unknown): AgentContentBlock[] {
   if (normalizedType === "text" || normalizedType === "outputtext" || normalizedType === "inputtext") {
     const text = firstString(raw, ["text", "content", "message"]);
     return text ? [{ type: "text", text }] : [];
+  }
+  if (normalizedType === "file" || normalizedType === "inputfile" || normalizedType === "filereference") {
+    const path = firstString(raw, ["path", "file", "filePath", "file_path", "absolutePath", "relativePath"]);
+    const text = firstString(raw, ["text", "name", "label"]);
+    return path ? [{ type: "file", path, name: text, text: text ?? `@${path}` }] : [];
   }
   const nested = raw.content ?? raw.contentItems ?? raw.parts;
   if (Array.isArray(nested)) return contentBlocksFromValue(nested);
@@ -906,6 +918,7 @@ const LINKSHELL_NATIVE_COMMANDS: Array<{
   { name: "review", description: "Ask the Agent to review current local changes", category: "Agent", argsMode: "optional" },
   { name: "subagents", description: "Ask the Agent to split work across subagents when useful", category: "Agent", argsMode: "optional" },
   { name: "compact", description: "Compact the active Codex context", category: "Codex", argsMode: "none", providers: ["codex"] },
+  { name: "new", description: "Start a fresh Codex thread", category: "Codex", argsMode: "none", providers: ["codex"], destructive: true },
   { name: "clear", description: "Start a fresh Agent context for this conversation", category: "Agent", argsMode: "none", destructive: true },
   { name: "git-status", description: "Show branch and working tree status", category: "Git", argsMode: "none" },
   { name: "git-diff", description: "Show a compact diffstat for current changes", category: "Git", argsMode: "none" },
@@ -915,6 +928,7 @@ const LINKSHELL_NATIVE_COMMANDS: Array<{
   { name: "git-stash", description: "Stash current working tree changes", category: "Git", argsMode: "optional" },
   { name: "git-stash-pop", description: "Pop the latest stash", category: "Git", argsMode: "none" },
 ];
+const CODEX_JSON_RPC_COMMANDS = new Set(["plan", "exit-plan", "review", "compact", "new"]);
 const CLAUDE_REMOTE_HIDDEN_COMMANDS = new Set([
   "add-dir",
   "agents",
@@ -1188,6 +1202,7 @@ function customClaudeCommands(cwd: string): AgentCommandDescriptor[] {
 function defaultProviderCommands(provider: AgentProvider, cwd: string, enabled: boolean): AgentCommandDescriptor[] {
   const disabledReason = enabled ? undefined : `${providerLabel(provider)} 未安装或启动失败`;
   const linkshellCommands = LINKSHELL_NATIVE_COMMANDS
+    .filter((command) => provider !== "codex" || CODEX_JSON_RPC_COMMANDS.has(command.name))
     .filter((command) => !command.providers || command.providers.includes(provider))
     .map((command) => makeCommand({
       provider,
@@ -2372,7 +2387,7 @@ export class AgentWorkspaceProxy {
         return;
       }
 
-      if (command.name === "clear") {
+      if (command.name === "clear" || command.name === "new") {
         if (!client) throw new Error("Agent provider 不在线。");
         const result = await client.newSession({ cwd: conversation.cwd });
         const nextAgentSessionId = this.extractSessionId(result) ?? id("agent-session");

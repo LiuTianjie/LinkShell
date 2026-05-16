@@ -114,6 +114,7 @@ describe("AcpClient codex app-server protocol", () => {
       sessionId: "thread-1",
       content: [{ type: "text", text: "hello" }],
       clientMessageId: "client-msg-1",
+      model: "gpt-5.5",
       reasoningEffort: "high",
       serviceTier: "fast",
       permissionMode: "workspace_write",
@@ -156,22 +157,22 @@ describe("AcpClient codex app-server protocol", () => {
     });
     expect(entries[6].params).toMatchObject({
       threadId: "thread-1",
+      model: "gpt-5.5",
       effort: "high",
-      service_tier: "fast",
+      serviceTier: "fast",
       collaborationMode: {
         mode: "plan",
         settings: {
+          model: "gpt-5.5",
           reasoning_effort: "high",
-          service_tier: "fast",
+          developer_instructions: null,
         },
       },
-      permissions: {
-        type: "managed",
-        fileSystem: {
-          type: "restricted",
-          entries: [{ access: "write" }],
-        },
-      },
+      approvalPolicy: "on-request",
+      sandboxPolicy: expect.objectContaining({
+        type: "workspaceWrite",
+        writableRoots: [fake.cwd],
+      }),
     });
     expect(entries[5].params).toMatchObject({ threadId: "thread-1", limit: 200 });
     expect(entries[7].params).toEqual({ threadId: "thread-1" });
@@ -213,7 +214,7 @@ describe("AcpClient codex app-server protocol", () => {
     expect(entries[3].params).not.toHaveProperty("effort");
   });
 
-  it("sends an empty settings object for plan mode without optional strings", async () => {
+  it("omits collaboration mode when no model is available for Codex app-server turns", async () => {
     const fake = makeFakeAppServer();
     const client = new AcpClient({
       command: fake.command,
@@ -238,10 +239,40 @@ describe("AcpClient codex app-server protocol", () => {
 
     const entries = await waitForLogEntries(fake.logPath, 4);
     expect(entries[3].method).toBe("turn/start");
-    expect(entries[3].params.collaborationMode).toEqual({
-      mode: "plan",
-      settings: {},
+    expect(entries[3].params).not.toHaveProperty("collaborationMode");
+  });
+
+  it("passes file reference content blocks through to turn/start input", async () => {
+    const fake = makeFakeAppServer();
+    const client = new AcpClient({
+      command: fake.command,
+      protocol: "codex-app-server",
+      framing: "newline",
+      cwd: fake.cwd,
+      onNotification: () => {},
+      onRequest: () => ({}),
+      onExit: () => {},
     });
+    clients.push(client);
+
+    await client.initialize();
+    await client.newSession({ cwd: fake.cwd });
+    await client.prompt({
+      sessionId: "thread-1",
+      content: [
+        { type: "text", text: "review @src/app.ts" },
+        { type: "file", path: join(fake.cwd, "src/app.ts"), name: "app.ts" },
+      ],
+      clientMessageId: "client-msg-file",
+      cwd: fake.cwd,
+    });
+
+    const entries = await waitForLogEntries(fake.logPath, 4);
+    expect(entries[3].method).toBe("turn/start");
+    expect(entries[3].params.input).toEqual([
+      { type: "text", text: "review @src/app.ts", text_elements: [] },
+      { type: "mention", path: join(fake.cwd, "src/app.ts"), name: "app.ts" },
+    ]);
   });
 });
 
@@ -264,6 +295,14 @@ describe("resolveAgentCommand", () => {
   it("keeps explicit claude commands on the stream-json fallback path", () => {
     expect(resolveAgentCommand({ provider: "claude", command: "claude" })).toMatchObject({
       protocol: "claude-stream-json",
+      framing: "newline",
+    });
+  });
+
+  it("uses the Codex App proxy before starting a private app-server", () => {
+    expect(resolveAgentCommand({ provider: "codex" })).toMatchObject({
+      command: "codex app-server proxy",
+      protocol: "codex-app-server",
       framing: "newline",
     });
   });

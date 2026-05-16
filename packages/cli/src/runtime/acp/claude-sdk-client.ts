@@ -37,6 +37,7 @@ type AgentInputContentBlock = {
   text?: string;
   data?: string;
   mimeType?: string;
+  path?: string;
 };
 
 function id(prefix: string): string {
@@ -84,6 +85,9 @@ function toClaudeMessageContent(blocks: AgentInputContentBlock[]): Record<string
             data: image.data,
           },
         };
+      }
+      if (block.type === "file" && block.path) {
+        return { type: "text", text: block.text ?? `@${block.path}` };
       }
       return { type: "text", text: block.text ?? "" };
     })
@@ -259,6 +263,7 @@ export class ClaudeSdkClient {
     const prompt = inputBlocks
       .map((block) => {
         if (block.type === "image") return `[${block.mimeType ?? "image"} attachment]`;
+        if (block.type === "file" && block.path) return block.text ?? `@${block.path}`;
         return block.text ?? "";
       })
       .filter(Boolean)

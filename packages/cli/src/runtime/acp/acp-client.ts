@@ -114,6 +114,37 @@ function permissionsForMode(
   };
 }
 
+function sandboxPolicyForMode(
+  mode: AgentPermissionMode | undefined,
+  cwd: string,
+): unknown | undefined {
+  if (mode === "full_access") return { type: "dangerFullAccess" };
+  if (mode === "read_only") return { type: "readOnly", networkAccess: false };
+  if (mode === "workspace_write") {
+    return {
+      type: "workspaceWrite",
+      writableRoots: [cwd],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    };
+  }
+  return undefined;
+}
+
+function approvalPolicyForMode(mode: AgentPermissionMode | undefined): unknown | undefined {
+  if (mode === "full_access") return "never";
+  if (mode === "read_only" || mode === "workspace_write") return "on-request";
+  return undefined;
+}
+
+function sandboxModeForMode(mode: AgentPermissionMode | undefined): unknown | undefined {
+  if (mode === "full_access") return "danger-full-access";
+  if (mode === "read_only") return "read-only";
+  if (mode === "workspace_write") return "workspace-write";
+  return undefined;
+}
+
 export class AcpClient {
   private readonly transport: JsonRpcStdioTransport;
   private readonly protocol: AgentProtocol;
@@ -229,30 +260,33 @@ export class AcpClient {
     cwd: string;
   }): Promise<unknown> {
     if (this.protocol === "codex-app-server") {
-      const collaborationSettings = {
-        ...(input.model ? { model: input.model } : {}),
-        ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
-        ...(input.serviceTier ? { service_tier: input.serviceTier } : {}),
-      };
-      const collaborationMode = input.collaborationMode && input.collaborationMode !== "default"
+      const collaborationMode = input.collaborationMode && input.model
         ? {
             mode: input.collaborationMode,
-            settings: collaborationSettings,
+            settings: {
+              model: input.model,
+              reasoning_effort: input.reasoningEffort ?? null,
+              developer_instructions: null,
+            },
           }
         : undefined;
       return this.transport.request("turn/start", {
         threadId: input.sessionId,
         model: input.model,
         effort: input.reasoningEffort,
-        service_tier: input.serviceTier,
-        permissions: permissionsForMode(input.permissionMode, input.cwd),
-        collaborationMode,
+        ...(input.serviceTier === "fast" ? { serviceTier: input.serviceTier } : {}),
+        ...(approvalPolicyForMode(input.permissionMode) ? { approvalPolicy: approvalPolicyForMode(input.permissionMode) } : {}),
+        ...(sandboxPolicyForMode(input.permissionMode, input.cwd) ? { sandboxPolicy: sandboxPolicyForMode(input.permissionMode, input.cwd) } : {}),
+        ...(collaborationMode ? { collaborationMode } : {}),
         input: input.content.map((block) => {
-          const raw = block as { type?: string; text?: string; data?: string };
+          const raw = block as { type?: string; text?: string; data?: string; path?: string; name?: string };
           if (raw.type === "image" && raw.data) {
             return { type: "image", url: raw.data };
           }
-          return { type: "text", text: raw.text ?? "" };
+          if (raw.type === "file" && raw.path) {
+            return { type: "mention", path: raw.path, name: raw.name };
+          }
+          return { type: "text", text: raw.text ?? "", text_elements: [] };
         }),
       }, null);
     }

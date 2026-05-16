@@ -401,10 +401,13 @@ describe("AgentWorkspaceProxy event routing", () => {
         models: [{ id: "default", label: "默认模型" }],
         reasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
         permissionModes: ["read_only", "workspace_write", "full_access"],
+        supportsPlan: true,
         commands: expect.arrayContaining([
-          expect.objectContaining({ name: "git-status", executionKind: "native" }),
-          expect.objectContaining({ name: "review", executionKind: "native" }),
           expect.objectContaining({ name: "plan", executionKind: "native" }),
+          expect.objectContaining({ name: "exit-plan", executionKind: "native" }),
+          expect.objectContaining({ name: "review", executionKind: "native" }),
+          expect.objectContaining({ name: "compact", executionKind: "native" }),
+          expect.objectContaining({ name: "new", executionKind: "native" }),
         ]),
       }),
       expect.objectContaining({
@@ -471,7 +474,7 @@ describe("AgentWorkspaceProxy event routing", () => {
       proxy.conversations.set("conversation-a", {
         id: "conversation-a",
         agentSessionId: "thread-a",
-        provider: "codex",
+        provider: "claude",
         cwd,
         title: "A",
         status: "idle",

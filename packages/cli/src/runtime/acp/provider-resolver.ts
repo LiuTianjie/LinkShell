@@ -16,6 +16,34 @@ export interface AgentCommandConfig {
   framing: AgentFraming;
 }
 
+export function resolveCodexAppServerCommands(input: {
+  command?: string;
+}): AgentCommandConfig[] {
+  const explicit = input.command?.trim();
+  if (explicit) {
+    return [{
+      provider: "codex",
+      command: explicit,
+      protocol: "codex-app-server",
+      framing: "newline",
+    }];
+  }
+  return [
+    {
+      provider: "codex",
+      command: "codex app-server proxy",
+      protocol: "codex-app-server",
+      framing: "newline",
+    },
+    {
+      provider: "codex",
+      command: "codex app-server --listen stdio://",
+      protocol: "codex-app-server",
+      framing: "newline",
+    },
+  ];
+}
+
 export function resolveAgentCommand(input: {
   provider: AgentProvider;
   command?: string;
@@ -33,12 +61,7 @@ export function resolveAgentCommand(input: {
   }
 
   if (input.provider === "codex") {
-    return {
-      provider: "codex",
-      command: "codex app-server --listen stdio://",
-      protocol: "codex-app-server",
-      framing: "newline",
-    };
+    return resolveCodexAppServerCommands({ command: input.command })[0] ?? null;
   }
 
   if (input.provider === "claude") {

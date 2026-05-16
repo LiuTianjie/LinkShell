@@ -20,10 +20,12 @@ export type AgentTimelineKind =
   | "context_compaction";
 
 export interface AgentContentBlock {
-  type: "text" | "image";
+  type: "text" | "image" | "file";
   text?: string;
   data?: string;
   mimeType?: string;
+  path?: string;
+  name?: string;
 }
 
 export interface AgentToolCall {
@@ -251,8 +253,9 @@ export interface AgentProviderCapability {
 const CONVERSATIONS_KEY = "@linkshell/agent-conversations:v2";
 const LEGACY_CONVERSATIONS_KEY = "@linkshell/agent-conversations:v1";
 const TIMELINE_PREFIX = "@linkshell/agent-timeline:v1:";
+const HISTORY_PAGE_PREFIX = "@linkshell/agent-history-page:v1:";
 const MAX_CONVERSATIONS = 100;
-const MAX_TIMELINE_ITEMS = 200;
+const MAX_TIMELINE_ITEMS = 500;
 const MAX_TIMELINE_BYTES = 100 * 1024 * 1024;
 const IMAGE_CACHE_DIR = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ""}agent-images`;
 
@@ -647,4 +650,27 @@ export async function upsertAgentTimelineItem(item: AgentTimelineItem): Promise<
   if (index >= 0) timeline[index] = item;
   else timeline.push(item);
   await saveAgentTimeline(item.conversationId, timeline);
+}
+
+export async function loadAgentHistoryPageState(
+  conversationId: string,
+): Promise<{ nextCursor?: string; hasMore?: boolean }> {
+  try {
+    const raw = await AsyncStorage.getItem(`${HISTORY_PAGE_PREFIX}${conversationId}`);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { nextCursor?: unknown; hasMore?: unknown };
+    return {
+      nextCursor: typeof parsed.nextCursor === "string" ? parsed.nextCursor : undefined,
+      hasMore: typeof parsed.hasMore === "boolean" ? parsed.hasMore : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+export async function saveAgentHistoryPageState(
+  conversationId: string,
+  state: { nextCursor?: string; hasMore?: boolean },
+): Promise<void> {
+  await AsyncStorage.setItem(`${HISTORY_PAGE_PREFIX}${conversationId}`, JSON.stringify(state));
 }

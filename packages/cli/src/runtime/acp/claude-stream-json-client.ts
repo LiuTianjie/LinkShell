@@ -11,6 +11,7 @@ type AgentInputContentBlock = {
   text?: string;
   data?: string;
   mimeType?: string;
+  path?: string;
 };
 
 interface ClaudeStreamEvent {
@@ -196,6 +197,9 @@ export class ClaudeStreamJsonClient {
         if (block.type === "image" && block.data) {
           const image = splitImageDataUrl(block.data, block.mimeType);
           return { type: "image", source: { type: "base64", media_type: image.mimeType, data: image.data } };
+        }
+        if (block.type === "file" && block.path) {
+          return { type: "text", text: block.text ?? `@${block.path}` };
         }
         return { type: "text", text: block.text ?? "" };
       },

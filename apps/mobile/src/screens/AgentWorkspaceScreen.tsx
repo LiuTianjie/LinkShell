@@ -290,6 +290,12 @@ function conversationDisplayTitle(conversation: AgentConversationRecord): string
   return conversation.title?.trim() || titleFromCwd(conversation.cwd);
 }
 
+function compareConversationsByActivity(a: AgentConversationRecord, b: AgentConversationRecord): number {
+  if (a.lastActivityAt !== b.lastActivityAt) return b.lastActivityAt - a.lastActivityAt;
+  if ((a.createdAt ?? 0) !== (b.createdAt ?? 0)) return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+  return conversationDisplayTitle(a).localeCompare(conversationDisplayTitle(b)) || a.id.localeCompare(b.id);
+}
+
 function providerGroups(conversations: AgentConversationRecord[]) {
   const order: AgentProvider[] = ["codex", "claude", "custom"];
   return order
@@ -297,7 +303,7 @@ function providerGroups(conversations: AgentConversationRecord[]) {
       provider,
       conversations: conversations
         .filter((conversation) => conversation.provider === provider)
-        .sort((a, b) => b.lastActivityAt - a.lastActivityAt),
+        .sort(compareConversationsByActivity),
     }))
     .filter((group) => group.conversations.length > 0);
 }
@@ -476,55 +482,6 @@ function ConversationStateIndicator({
     );
   }
   if (conversation.syncStatus === "stale") {
-    return (
-      <View
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: theme.warning,
-        }}
-      />
-    );
-  }
-  return null;
-}
-
-function ConversationGroupStateIndicator({
-  conversations,
-  theme,
-}: {
-  conversations: AgentConversationRecord[];
-  theme: Theme;
-}) {
-  if (conversations.some((conversation) => conversation.status === "running")) {
-    return <SpinningRing color={theme.accent} />;
-  }
-  if (conversations.some((conversation) => conversation.status === "waiting_permission")) {
-    return (
-      <View
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: theme.warning,
-        }}
-      />
-    );
-  }
-  if (conversations.some((conversation) => conversation.status === "error")) {
-    return (
-      <View
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: theme.error,
-        }}
-      />
-    );
-  }
-  if (conversations.some((conversation) => conversation.syncStatus === "stale")) {
     return (
       <View
         style={{
@@ -907,7 +864,7 @@ export function AgentWorkspaceScreen({
     return [...groups.values()].sort((a, b) => {
       if (Boolean(a.target) !== Boolean(b.target)) return a.target ? -1 : 1;
       if (a.lastActivityAt !== b.lastActivityAt) return b.lastActivityAt - a.lastActivityAt;
-      return a.title.localeCompare(b.title);
+      return a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
     });
   }, [hiddenProjectKeys, projects, targets, workspace.conversations]);
 
@@ -936,7 +893,7 @@ export function AgentWorkspaceScreen({
     return [...groups.values()].sort((a, b) => {
       if (a.online !== b.online) return a.online ? -1 : 1;
       if (a.lastActivityAt !== b.lastActivityAt) return b.lastActivityAt - a.lastActivityAt;
-      return deviceTitle(a).localeCompare(deviceTitle(b));
+      return deviceTitle(a).localeCompare(deviceTitle(b)) || a.id.localeCompare(b.id);
     });
   }, [projectGroups]);
 
@@ -1222,13 +1179,18 @@ export function AgentWorkspaceScreen({
         {
           text: "归档",
           onPress: () => {
-            setHiddenProjectKeys((prev) => {
-              const next = new Set(prev);
-              next.add(conversationHiddenKey(conversation.id));
-              saveHiddenAgentProjectKeys(next).catch(() => {});
-              return next;
-            });
-            workspace.archive(conversation.id, true).catch(() => {});
+            workspace.archive(conversation.id, true)
+              .then(() => {
+                setHiddenProjectKeys((prev) => {
+                  const next = new Set(prev);
+                  next.add(conversationHiddenKey(conversation.id));
+                  saveHiddenAgentProjectKeys(next).catch(() => {});
+                  return next;
+                });
+              })
+              .catch((error) => {
+                Alert.alert("无法归档会话", error instanceof Error ? error.message : String(error));
+              });
           },
         },
       ],
@@ -1249,22 +1211,26 @@ export function AgentWorkspaceScreen({
           style: "destructive",
           onPress: () => {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-            setHiddenProjectKeys((prev) => {
-              const next = new Set(prev);
-              next.add(projectHiddenKey(project));
-              for (const conversation of project.conversations) {
-                next.add(conversationHiddenKey(conversation.id));
-              }
-              saveHiddenAgentProjectKeys(next).catch(() => {});
-              return next;
-            });
-            setProjects((prev) => prev.filter((item) => item.id !== project.project?.id));
-            if (project.project?.id) removeProject(project.project.id).catch(() => {});
             Promise.all(project.conversations.map((conversation) =>
               workspace.archive(conversation.id, true),
             ))
-              .then(() => setManualRefreshToken((value) => value + 1))
-              .catch(() => {});
+              .then(() => {
+                setHiddenProjectKeys((prev) => {
+                  const next = new Set(prev);
+                  next.add(projectHiddenKey(project));
+                  for (const conversation of project.conversations) {
+                    next.add(conversationHiddenKey(conversation.id));
+                  }
+                  saveHiddenAgentProjectKeys(next).catch(() => {});
+                  return next;
+                });
+                setProjects((prev) => prev.filter((item) => item.id !== project.project?.id));
+                if (project.project?.id) removeProject(project.project.id).catch(() => {});
+                setManualRefreshToken((value) => value + 1);
+              })
+              .catch((error) => {
+                Alert.alert("无法移除项目", error instanceof Error ? error.message : String(error));
+              });
           },
         },
       ],
@@ -1450,7 +1416,6 @@ export function AgentWorkspaceScreen({
               </View>
             ) : deviceProjectGroups.map((device) => {
               const deviceCollapsed = collapsedDeviceKeys.has(device.id);
-              const deviceConversations = device.projects.flatMap((project) => project.conversations);
               return (
               <View key={device.id} style={{ gap: 10 }}>
                 <Pressable
@@ -1498,7 +1463,6 @@ export function AgentWorkspaceScreen({
                       {device.projects.length} 个项目 · {device.serverUrl}
                     </Text>
                   </View>
-                  <ConversationGroupStateIndicator conversations={deviceConversations} theme={theme} />
                   <AppSymbol name={deviceCollapsed ? "chevron.right" : "chevron.down"} size={12} color={theme.textTertiary} />
                 </Pressable>
                 {!deviceCollapsed ? (
@@ -1549,9 +1513,6 @@ export function AgentWorkspaceScreen({
                         ) : null}
                       </View>
                     </View>
-                    {project.conversations.length > 0 ? (
-                      <ConversationGroupStateIndicator conversations={project.conversations} theme={theme} />
-                    ) : null}
                     {project.conversations.length > 0 ? (
                       <AppSymbol name={collapsed ? "chevron.right" : "chevron.down"} size={12} color={theme.textTertiary} />
                     ) : null}
@@ -1611,7 +1572,6 @@ export function AgentWorkspaceScreen({
                             <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
                               {conversations.length}
                             </Text>
-                            <ConversationGroupStateIndicator conversations={conversations} theme={theme} />
                             <AppSymbol name={providerCollapsed ? "chevron.right" : "chevron.down"} size={11} color={theme.textTertiary} />
                           </Pressable>
                           {!providerCollapsed ? conversations.map((conversation) => {
