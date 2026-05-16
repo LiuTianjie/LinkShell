@@ -32,6 +32,7 @@ import type {
   AgentCommandDescriptor,
   AgentConversationRecord,
   AgentCollaborationMode,
+  AgentProviderCapability,
   AgentFileChange,
   AgentPermissionMode,
   AgentReasoningEffort,
@@ -240,6 +241,14 @@ function formatEffort(effort?: AgentReasoningEffort): string {
 function formatRuntime(model: string | undefined, effort: AgentReasoningEffort | undefined, modelOptions: Option<string>[]): string {
   const modelLabel = modelOptions.find((item) => item.value === model)?.label ?? model ?? "默认模型";
   return `${modelLabel.replace(/^GPT-/, "")} · ${formatEffort(effort)}`;
+}
+
+function formatModelCapabilityStatus(providerCapability: AgentProviderCapability | undefined): string | undefined {
+  if (!providerCapability) return "能力同步中";
+  if (providerCapability.modelListError) return "模型同步失败";
+  if (providerCapability.modelsSource === "fallback") return "主机仅返回默认模型";
+  if (providerCapability.modelsSource === "unavailable") return "模型不可用";
+  return undefined;
 }
 
 function formatModel(model: string | undefined, modelOptions: Option<string>[]): string {
@@ -1603,37 +1612,51 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
   return (
     <View
       style={{
-        borderRadius: 8,
+        borderRadius: 14,
         borderCurve: "continuous",
-        backgroundColor: "transparent",
+        backgroundColor: timelineMaterial(theme),
         overflow: "hidden",
-        borderWidth: 0,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: subtleDivider(theme),
       }}
     >
       <Pressable
         onPress={() => canExpand && setExpanded((value) => !value)}
         disabled={!canExpand}
         style={({ pressed }) => ({
-          minHeight: 28,
-          paddingHorizontal: 2,
-          paddingVertical: 3,
+          minHeight: 48,
+          paddingHorizontal: 12,
+          paddingVertical: 9,
           flexDirection: "row",
           alignItems: "center",
-          gap: 7,
+          gap: 9,
           backgroundColor: pressed ? timelinePressedSurface(theme) : "transparent",
         })}
       >
-        <AppSymbol name={icon} size={13} color={theme.textTertiary} />
-        <Text selectable style={{ flexShrink: 0, color: theme.textSecondary, fontSize: 14, fontWeight: "600" }} numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text selectable style={{ flex: 1, minWidth: 0, color: theme.textTertiary, fontSize: 14 }} numberOfLines={1}>
-            {subtitle}
+        <View
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: theme.bgInput,
+          }}
+        >
+          <AppSymbol name={icon} size={14} color={theme.textSecondary} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text selectable style={{ color: theme.text, fontSize: 13, fontWeight: "800" }} numberOfLines={1}>
+            {title}
           </Text>
-        ) : <View style={{ flex: 1 }} />}
+          {subtitle ? (
+            <Text selectable style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 16 }} numberOfLines={1}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
         {statusLabel ? (
-          <Text style={{ color: statusColor, fontSize: 12, fontWeight: "500" }} numberOfLines={1}>
+          <Text style={{ color: statusColor, fontSize: 11, fontWeight: "800" }} numberOfLines={1}>
             {statusLabel}
           </Text>
         ) : null}
@@ -1644,7 +1667,8 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
           style={{
             gap: 8,
             marginTop: 6,
-            marginLeft: 22,
+            marginHorizontal: 10,
+            marginBottom: 10,
             padding: 10,
             borderRadius: 10,
             borderCurve: "continuous",
@@ -1665,7 +1689,7 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
             minHeight: expanded ? 34 : 0,
             alignItems: "center",
             justifyContent: "center",
-            marginLeft: 22,
+            marginHorizontal: 10,
           }}
         >
           <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "700" }}>
@@ -1697,13 +1721,30 @@ function SystemActivityCard({
       onPress={() => canExpand && setExpanded((value) => !value)}
       disabled={!canExpand}
       style={{
-        paddingVertical: 4,
+        borderRadius: 12,
+        borderCurve: "continuous",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: subtleDivider(theme),
+        backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.035)",
+        paddingHorizontal: 11,
+        paddingVertical: 9,
         flexDirection: "row",
         alignItems: "flex-start",
         gap: 8,
       }}
     >
-      <AppSymbol name={icon} size={14} color={theme.textTertiary} />
+      <View
+        style={{
+          width: 24,
+          height: 24,
+          borderRadius: 8,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: theme.bgInput,
+        }}
+      >
+        <AppSymbol name={icon} size={13} color={theme.textTertiary} />
+      </View>
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
@@ -2250,11 +2291,45 @@ function AssistantMessage({
 }) {
   const hasBody = Boolean(text || item.content?.length);
   return (
-    <View style={{ paddingVertical: 3 }}>
+    <View
+      style={{
+        alignSelf: "stretch",
+        borderRadius: 16,
+        borderCurve: "continuous",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: subtleDivider(theme),
+        backgroundColor: timelineSurface(theme),
+        padding: 12,
+        gap: 10,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: theme.accentLight,
+          }}
+        >
+          <AppSymbol name="sparkles" size={13} color={theme.accent} />
+        </View>
+        <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 12, fontWeight: "900" }} numberOfLines={1}>
+          Agent 回复
+        </Text>
+        {item.isStreaming ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+            <ActivityIndicator size="small" color={theme.accent} />
+            <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "800" }}>生成中</Text>
+          </View>
+        ) : null}
+      </View>
       {hasBody ? (
         <MessageContent blocks={item.content} fallbackText={text} theme={theme} monospace={false} />
       ) : null}
-      {item.isStreaming ? <StreamingPill theme={theme} /> : null}
+      {!hasBody && item.isStreaming ? <StreamingPill theme={theme} /> : null}
     </View>
   );
 }
@@ -2896,8 +2971,13 @@ export function AgentConversationScreen({
   const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
   const [fileDrawerOpen, setFileDrawerOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const capabilities = conversation ? workspace.capabilitiesBySessionId.get(conversation.sessionId) : undefined;
+  const capabilities = useMemo(() => {
+    if (!conversation) return undefined;
+    return workspace.capabilitiesBySessionId.get(conversation.sessionId) ??
+      workspace.capabilitiesBySessionId.get(conversation.hostDeviceId);
+  }, [conversation, workspace.capabilitiesBySessionId]);
   const providerCapability = conversation ? providerCapabilityFor(conversation.provider, capabilities) : undefined;
+  const modelCapabilityStatus = formatModelCapabilityStatus(providerCapability);
   const providerSupportsImageInput = conversation?.provider === "claude" || conversation?.provider === "codex";
   const supportsImages = Boolean(
     providerSupportsImageInput ||
@@ -3849,7 +3929,7 @@ export function AgentConversationScreen({
               >
                 <View
                   style={{
-                    height: 34,
+                    height: modelCapabilityStatus ? 40 : 34,
                     maxWidth: 188,
                     borderRadius: 999,
                     flexDirection: "row",
@@ -3859,9 +3939,16 @@ export function AgentConversationScreen({
                     backgroundColor: theme.bgInput,
                   }}
                 >
-                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
-                    {formatRuntime(model, effort, modelOpts)}
-                  </Text>
+                  <View style={{ flexShrink: 1, minWidth: 0 }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700" }} numberOfLines={1}>
+                      {formatRuntime(model, effort, modelOpts)}
+                    </Text>
+                    {modelCapabilityStatus ? (
+                      <Text style={{ color: theme.textTertiary, fontSize: 9, fontWeight: "800", marginTop: -1 }} numberOfLines={1}>
+                        {modelCapabilityStatus}
+                      </Text>
+                    ) : null}
+                  </View>
                   <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
                 </View>
               </MenuView>

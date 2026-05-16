@@ -986,6 +986,9 @@ export function useSessionManager(): SessionManagerHandle {
         case "agent.v2.conversation.list.result":
         case "agent.v2.event":
         case "agent.v2.permission.request":
+        case "agent.v2.history.page":
+        case "agent.v2.delta":
+        case "agent.v2.running_state":
           agentWorkspaceCbRef.current?.(envelope);
           break;
         case "agent.v2.snapshot": {

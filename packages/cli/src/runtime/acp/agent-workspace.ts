@@ -1451,6 +1451,8 @@ export class AgentWorkspaceProxy {
   private clients = new Map<AgentProvider, AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient>();
   private agentProtocols = new Map<AgentProvider, AgentProtocol>();
   private providerCapabilities = new Map<AgentProvider, ProviderRuntimeCapabilities>();
+  private providerCapabilityErrors = new Map<AgentProvider, string>();
+  private capabilitiesRevision = 0;
   private initialized = false;
   private status: AgentStatus = "unavailable";
   private error: string | undefined;
@@ -1687,8 +1689,12 @@ export class AgentWorkspaceProxy {
     try {
       const result = await listModels.call(client);
       const runtimeCapabilities = parseModelListCapabilities(result);
-      if (runtimeCapabilities) this.providerCapabilities.set(provider, runtimeCapabilities);
+      if (runtimeCapabilities) {
+        this.providerCapabilities.set(provider, runtimeCapabilities);
+        this.providerCapabilityErrors.delete(provider);
+      }
     } catch (error) {
+      this.providerCapabilityErrors.set(provider, error instanceof Error ? error.message : String(error));
       if (this.input.verbose) {
         process.stderr.write(`[agent:v2] model/list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
       }
@@ -1753,6 +1759,7 @@ export class AgentWorkspaceProxy {
       const protocol = this.agentProtocols.get(provider);
       const runtimeCapabilities = this.providerCapabilities.get(provider);
       const enabled = Boolean(client);
+      const hasRuntimeModels = Boolean(runtimeCapabilities?.models?.length);
       const supportsImages = enabled && protocolSupportsImages(protocol);
       const isClaudeFallback = protocol === "claude-stream-json";
       const supportsPermission = enabled && !isClaudeFallback;
@@ -1767,12 +1774,15 @@ export class AgentWorkspaceProxy {
         label: providerLabel(provider),
         enabled,
         reason: enabled ? undefined : `${providerLabel(provider)} 未安装或启动失败`,
+        providerProtocol: protocol,
         supportsImages,
         supportsPermission,
         supportsPlan: enabled,
         supportsCancel: enabled,
         models: runtimeCapabilities?.models ?? [{ id: "default", label: "默认模型" }],
         defaultModel: runtimeCapabilities?.defaultModel,
+        modelsSource: hasRuntimeModels ? "runtime" : enabled ? "fallback" : "unavailable",
+        modelListError: this.providerCapabilityErrors.get(provider),
         reasoningEfforts: supportsReasoningEffort
           ? runtimeCapabilities?.reasoningEfforts ?? (provider === "claude" ? [...CLAUDE_REASONING_EFFORTS] : [...ALL_REASONING_EFFORTS])
           : [],
@@ -1801,6 +1811,7 @@ export class AgentWorkspaceProxy {
         providers,
         protocolVersion: 1,
         workspaceProtocolVersion: 2,
+        capabilitiesRevision: ++this.capabilitiesRevision,
         error: anyEnabled ? undefined : "没有可用的 Agent provider。请安装 Claude Code 或 Codex CLI。",
         supportsSessionList: anyEnabled,
         supportsSessionLoad: anyEnabled,

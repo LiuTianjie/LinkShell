@@ -201,6 +201,7 @@ export interface AgentCapabilities {
   providers?: AgentProviderCapability[];
   protocolVersion?: number;
   workspaceProtocolVersion?: number;
+  capabilitiesRevision?: number;
   error?: string;
   supportsSessionList: boolean;
   supportsSessionLoad: boolean;
@@ -225,6 +226,9 @@ export interface AgentProviderCapability {
   supportsPermission?: boolean;
   supportsPlan?: boolean;
   supportsCancel?: boolean;
+  providerProtocol?: string;
+  modelsSource?: "runtime" | "fallback" | "static" | "unavailable";
+  modelListError?: string;
   models?: AgentModelOption[];
   defaultModel?: string;
   reasoningEfforts?: AgentReasoningEffort[];

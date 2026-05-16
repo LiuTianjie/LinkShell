@@ -656,7 +656,7 @@ export function useAgentWorkspace(
             ? payload.revision
             : payload.conversation?.timelineRevision,
           historyComplete: payload.hasMore === true ? false : payload.conversation?.historyComplete,
-          syncStatus: payload.hasMore === true ? "syncing" as const : "complete" as const,
+          syncStatus: "complete" as const,
           source: payload.source ?? payload.conversation?.source,
           canonical: typeof payload.canonical === "boolean" ? payload.canonical : payload.conversation?.canonical,
         };
@@ -692,7 +692,10 @@ export function useAgentWorkspace(
       if (envelope.type === "agent.v2.conversation.list.result") {
         const payload = parseTypedPayload("agent.v2.conversation.list.result", envelope.payload) as any;
         const records = (payload.conversations ?? [])
-          .map((conversation: any) => toRecord(conversation))
+          .map((conversation: any) => ({
+            ...toRecord(conversation),
+            syncStatus: "complete" as const,
+          }))
           .filter((conversation: AgentConversationRecord) => conversation.id && conversation.cwd);
         replaceAgentConversationsForDevice({
           serverUrl,
@@ -715,7 +718,7 @@ export function useAgentWorkspace(
         for (const conversation of payload.conversations ?? []) {
           persistConversation({
             ...toRecord(conversation),
-            syncStatus: payload.hasMore === true ? "syncing" : "complete",
+            syncStatus: "complete",
           }).catch(() => {});
         }
         if (payload.activeConversationId || typeof payload.revision === "number") {
@@ -755,7 +758,7 @@ export function useAgentWorkspace(
             ...toRecord(payload.conversation),
             timelineRevision: payload.revision,
             historyComplete: !payload.hasMore,
-            syncStatus: payload.hasMore ? "syncing" : "complete",
+            syncStatus: "complete",
             source: payload.source,
             canonical: payload.canonical,
           }).catch(() => {});
@@ -780,7 +783,7 @@ export function useAgentWorkspace(
             ...toRecord(payload.conversation),
             timelineRevision: payload.revision,
             historyComplete: payload.hasMore ? false : payload.conversation.historyComplete,
-            syncStatus: payload.hasMore ? "syncing" : "complete",
+            syncStatus: "complete",
             source: payload.source,
             canonical: payload.canonical,
           }).catch(() => {});
