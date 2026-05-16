@@ -303,12 +303,19 @@ function codexItemId(value: unknown): string | undefined {
     firstString(record.item, ["id", "itemId"]);
 }
 
+function isCodexUnmaterializedThreadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("not materialized yet") ||
+    message.includes("unavailable before first user message") ||
+    message.includes("no rollout found for thread id");
+}
+
 function codexInputBlocks(blocks: AgentContentBlock[]): unknown[] {
   return blocks.map((block) => {
     if (block.type === "image" && block.data) {
-      return { type: "input_image", image_url: block.data };
+      return { type: "image", url: block.data };
     }
-    return { type: "input_text", text: block.text ?? "" };
+    return { type: "text", text: block.text ?? "" };
   });
 }
 
@@ -992,18 +999,33 @@ export function useAgentWorkspace(
     threadId: string,
     cursor?: string,
   ) => {
-    const response = await requestCodexRpc(sessionId, "thread/turns/list", {
-      threadId,
-      sortDirection: "desc",
-      itemsView: "summary",
-      limit: 5,
-      cursor,
-    }, { conversationId, timeoutMs: 30_000 });
+    let response: CodexRpcMessage;
+    try {
+      response = await requestCodexRpc(sessionId, "thread/turns/list", {
+        threadId,
+        sortDirection: "desc",
+        itemsView: "summary",
+        limit: 5,
+        cursor,
+      }, { conversationId, timeoutMs: 30_000 });
+    } catch (error) {
+      if (isCodexUnmaterializedThreadError(error)) {
+        historyCursorRef.current.delete(conversationId);
+        historyHasMoreRef.current.set(conversationId, false);
+        if (!codexThreadsRef.current.has(conversationId)) {
+          replaceCodexHistory(conversationId, threadId, [], undefined, cursor ? "prepend" : "replace");
+        }
+        return;
+      }
+      throw error;
+    }
     const raw = asRecord(response.result);
     const turns = Array.isArray(raw?.turns)
       ? raw.turns
       : Array.isArray(raw?.items)
       ? raw.items
+      : Array.isArray(raw?.data)
+      ? raw.data
       : [];
     const nextCursor = typeof raw?.nextCursor === "string" ? raw.nextCursor : undefined;
     historyCursorRef.current.set(conversationId, nextCursor);
@@ -1171,6 +1193,8 @@ export function useAgentWorkspace(
               ? raw.threads
               : Array.isArray(raw?.items)
               ? raw.items
+              : Array.isArray(raw?.data)
+              ? raw.data
               : Array.isArray(raw?.sessions)
               ? raw.sessions
               : [];
@@ -2421,9 +2445,8 @@ export function useAgentWorkspace(
         try {
           await ensureCodexInitialized(session.sessionId);
           const response = input.agentSessionId
-            ? await requestCodexRpc(session.sessionId, "thread/resume", {
+            ? await requestCodexRpc(session.sessionId, "thread/read", {
                 threadId: input.agentSessionId,
-                cwd: input.cwd,
               }, { conversationId, timeoutMs: 30_000 })
             : await requestCodexRpc(session.sessionId, "thread/start", {
                 cwd: input.cwd,

@@ -529,6 +529,7 @@ export async function replaceAgentConversationsForDevice(input: {
     schemaVersion: 2,
   }));
   const incomingIds = new Set(normalized.map((conversation) => conversation.id));
+  const incomingProviders = new Set(normalized.map((conversation) => conversation.provider));
   const previousById = new Map(conversations.map((conversation) => [conversation.id, conversation]));
   const preserveLocalArchived = input.preserveLocalArchived ?? true;
   const mergedIncoming = normalized.map((conversation) => {
@@ -546,7 +547,8 @@ export async function replaceAgentConversationsForDevice(input: {
     const sameDevice =
       normalizeServerUrl(conversation.serverUrl) === serverUrl &&
       (conversation.hostDeviceId ?? conversation.sessionId) === input.hostDeviceId;
-    return !sameDevice || incomingIds.has(conversation.id);
+    const sameProvider = incomingProviders.has(conversation.provider);
+    return !sameDevice || !sameProvider || incomingIds.has(conversation.id);
   });
   const next = [
     ...mergedIncoming,
