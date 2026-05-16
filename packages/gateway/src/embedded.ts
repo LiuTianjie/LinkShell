@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
 import { randomUUID } from "node:crypto";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { WebSocketServer } from "ws";
 import type WebSocket from "ws";
 import {
@@ -113,6 +114,8 @@ export function startEmbeddedGateway(
   const sessionManager = new DeviceManager();
   const pairingManager = new PairingManager();
   const tokenManager = new TokenManager();
+  const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+  eventLoopDelay.enable();
 
   const server = createServer(async (req, res) => {
     if (req.method === "OPTIONS") {
@@ -131,7 +134,30 @@ export function startEmbeddedGateway(
       const method = req.method ?? "GET";
 
       if (method === "GET" && url.pathname === "/healthz") {
-        json(res, 200, { ok: true });
+        const memory = process.memoryUsage();
+        const detailed = url.searchParams.get("detail") === "1" || url.searchParams.get("detailed") === "true";
+        json(res, 200, {
+          ok: true,
+          uptime: Math.round(process.uptime()),
+          memory: {
+            rss: memory.rss,
+            heapUsed: memory.heapUsed,
+            heapTotal: memory.heapTotal,
+            external: memory.external,
+          },
+          sessions: sessionManager.getStats(),
+          ...(detailed ? {
+            eventLoop: {
+              delayMeanMs: Number((eventLoopDelay.mean / 1_000_000).toFixed(2)),
+              delayMaxMs: Number((eventLoopDelay.max / 1_000_000).toFixed(2)),
+              delayP99Ms: Number((eventLoopDelay.percentile(99) / 1_000_000).toFixed(2)),
+            },
+            websocket: {
+              maxPayloadBytes: MAX_WS_MESSAGE_SIZE,
+              perMessageDeflate: false,
+            },
+          } : {}),
+        });
         return;
       }
 
@@ -347,6 +373,7 @@ export function startEmbeddedGateway(
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_WS_MESSAGE_SIZE,
+    perMessageDeflate: false,
   });
 
   server.on("upgrade", (request, socket, head) => {
@@ -535,6 +562,7 @@ export function startEmbeddedGateway(
             sessionManager.destroy();
             pairingManager.destroy();
             tokenManager.destroy();
+            eventLoopDelay.disable();
             server.close(() => res());
           }),
       });

@@ -611,7 +611,9 @@ export class BridgeSession {
       case "agent.v2.cancel":
       case "agent.v2.permission.respond":
       case "agent.v2.structured_input.respond":
-      case "agent.v2.snapshot.request": {
+      case "agent.v2.snapshot.request":
+      case "agent.v2.history.request":
+      case "agent.v2.delta.request": {
         if (!this.agentWorkspace) {
           this.send(
             createEnvelope({
@@ -970,10 +972,7 @@ export class BridgeSession {
       return;
     }
     const machineId = this.machineIdentity?.machineId;
-    const enriched = machineId && (
-      message.type === "agent.v2.capabilities" ||
-      message.type === "agent.v2.snapshot"
-    )
+    const enriched = machineId && message.type.startsWith("agent.v2.")
       ? {
           ...message,
           payload: {

@@ -42,6 +42,7 @@ const CLEANUP_INTERVAL = 30_000;
 export class DeviceManager {
   private devices = new Map<string, HostDevice>();
   private cleanupTimer: ReturnType<typeof setInterval>;
+  private droppedClients = 0;
 
   constructor() {
     this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL);
@@ -109,7 +110,7 @@ export class DeviceManager {
   removeClient(hostDeviceId: string, deviceId: string): void {
     const device = this.devices.get(hostDeviceId);
     if (!device) return;
-    device.clients.delete(deviceId);
+    if (device.clients.delete(deviceId)) this.droppedClients++;
     if (device.controllerId === deviceId) {
       const next = device.clients.keys().next();
       device.controllerId = next.done ? undefined : next.value;
@@ -129,6 +130,7 @@ export class DeviceManager {
       device.clients.delete(deviceId);
       closed++;
     }
+    this.droppedClients += closed;
     if (device.controllerId && !device.clients.has(device.controllerId)) {
       const next = device.clients.keys().next();
       device.controllerId = next.done ? undefined : next.value;
@@ -271,18 +273,23 @@ export class DeviceManager {
   getStats() {
     let clientCount = 0;
     let bufferedTerminalFrames = 0;
+    let hostAbsentDevices = 0;
     let terminalCount = 0;
     for (const device of this.devices.values()) {
       clientCount += device.clients.size;
       terminalCount += device.outputBuffers.size;
       bufferedTerminalFrames += [...device.outputBuffers.values()].reduce((sum, buf) => sum + buf.length, 0);
+      if (!device.host || device.host.socket.readyState !== device.host.socket.OPEN) hostAbsentDevices++;
     }
     return {
       devices: this.devices.size,
       activeDevices: this.listActive().length,
       clients: clientCount,
+      droppedClients: this.droppedClients,
+      hostAbsentDevices,
       terminalsWithReplay: terminalCount,
       bufferedTerminalFrames,
+      bufferedAgentFrames: 0,
     };
   }
 

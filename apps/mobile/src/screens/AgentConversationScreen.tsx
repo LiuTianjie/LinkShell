@@ -2905,6 +2905,13 @@ export function AgentConversationScreen({
   );
   const running = conversation?.status === "running" || conversation?.status === "waiting_permission";
   const meta = visibleConversationStatus(conversation?.status, theme);
+  const syncLabel = conversation?.syncStatus === "stale"
+    ? "未同步"
+    : conversation?.syncStatus === "deferred"
+    ? "离线缓存"
+    : conversation?.syncStatus === "syncing" && !running
+    ? "同步中"
+    : undefined;
   const permission = permissionMeta(permissionMode, theme);
   const canSend = Boolean(text.trim() || attachments.length > 0);
   const modelOpts = useMemo(
@@ -3027,7 +3034,10 @@ export function AgentConversationScreen({
     if (nearBottom) {
       setHasNewOutput(false);
     }
-  }, []);
+    if (contentOffset.y < 80) {
+      workspace.loadOlderHistory(conversationId);
+    }
+  }, [conversationId, workspace]);
 
   const forceTimelineToBottom = useCallback((animated = true) => {
     const ref = timelineRef.current;
@@ -3592,6 +3602,11 @@ export function AgentConversationScreen({
                 {[displayProvider(conversation.provider), shortPath(conversation.cwd)].filter(Boolean).join(" · ")}
               </Text>
             </View>
+            {syncLabel ? (
+              <Text style={{ color: theme.textTertiary, fontSize: 10, fontWeight: "800", fontFamily: MONO_FONT }} numberOfLines={1}>
+                {syncLabel}
+              </Text>
+            ) : null}
             {running ? <ActivityIndicator size="small" color={theme.accent} /> : null}
           </View>
         </GlassBar>

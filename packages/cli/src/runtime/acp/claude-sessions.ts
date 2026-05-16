@@ -102,6 +102,7 @@ function extractMessageText(value: unknown): string | undefined {
       .map((part) => {
         if (typeof part === "string") return part;
         const record = asRecord(part);
+        if (record?.type === "tool_use" || record?.type === "tool_result") return "";
         return typeof record?.text === "string" ? record.text : "";
       })
       .join(" ");
@@ -372,15 +373,18 @@ function claudeFileEntry(name: string | undefined, input: Record<string, unknown
   if (typeof rawPath !== "string" || !rawPath.trim()) return undefined;
   const path = rawPath.trim();
   const kind = name === "Write" ? "create" : "update";
+  const edits = Array.isArray(input.edits) ? input.edits.map((entry) => asRecord(entry)).filter(Boolean) : [];
   const added = typeof input.new_string === "string"
-    ? input.new_string.split(/\r?\n/).filter((line) => line.length > 0).length
+    ? countNonEmptyLines(input.new_string)
     : typeof input.content === "string"
-    ? input.content.split(/\r?\n/).filter((line) => line.length > 0).length
-    : Array.isArray(input.edits)
-    ? input.edits.length
+    ? countNonEmptyLines(input.content)
+    : edits.length > 0
+    ? edits.reduce((sum, edit) => sum + countNonEmptyLines(typeof edit?.new_string === "string" ? edit.new_string : ""), 0)
     : undefined;
   const removed = typeof input.old_string === "string"
-    ? input.old_string.split(/\r?\n/).filter((line) => line.length > 0).length
+    ? countNonEmptyLines(input.old_string)
+    : edits.length > 0
+    ? edits.reduce((sum, edit) => sum + countNonEmptyLines(typeof edit?.old_string === "string" ? edit.old_string : ""), 0)
     : undefined;
   const entry: NonNullable<StoredAgentTimelineItem["fileChange"]>["entries"][number] = { path, kind };
   if (added && added > 0) entry.added = added;
@@ -390,6 +394,10 @@ function claudeFileEntry(name: string | undefined, input: Record<string, unknown
     summary: [kind, path].filter(Boolean).join(" "),
     status: "running",
   };
+}
+
+function countNonEmptyLines(value: string): number {
+  return value.split(/\r?\n/).filter((line) => line.length > 0).length;
 }
 
 function claudeCommandExecution(input: Record<string, unknown> | undefined): StoredAgentTimelineItem["commandExecution"] | undefined {
@@ -473,6 +481,7 @@ function completeClaudeToolItem(
 export function loadClaudeStoredTimeline(
   sessionId: string,
   conversationId: string,
+  options: { maxItems?: number } = {},
 ): { items: StoredAgentTimelineItem[] } {
   const filePath = findClaudeSessionFile(sessionId);
   if (!filePath) return { items: [] };
@@ -549,6 +558,6 @@ export function loadClaudeStoredTimeline(
   return {
     items: [...itemsById.values()]
       .sort((a, b) => a.createdAt - b.createdAt)
-      .slice(-MAX_HISTORY_ITEMS),
+      .slice(-Math.max(1, options.maxItems ?? MAX_HISTORY_ITEMS)),
   };
 }

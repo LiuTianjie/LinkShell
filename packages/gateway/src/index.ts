@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { WebSocketServer } from "ws";
 import type WebSocket from "ws";
 import {
@@ -61,6 +62,9 @@ const WS_CONNECT_RATE_LIMIT_MAX = Number(
 const WS_CONNECT_RATE_LIMIT_WINDOW_MS = Number(
   process.env.WS_CONNECT_RATE_LIMIT_WINDOW_MS ?? 60_000,
 );
+const DETAILED_HEALTH = process.env.DETAILED_HEALTH === "true";
+const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+eventLoopDelay.enable();
 
 // ── Rate limiter ────────────────────────────────────────────────────
 
@@ -182,6 +186,7 @@ async function handleRequest(
   // Health check
   if (method === "GET" && url.pathname === "/healthz") {
     const memory = process.memoryUsage();
+    const detailed = DETAILED_HEALTH || url.searchParams.get("detail") === "1" || url.searchParams.get("detailed") === "true";
     json(res, 200, {
       ok: true,
       uptime: Math.round(process.uptime()),
@@ -192,6 +197,17 @@ async function handleRequest(
         external: memory.external,
       },
       sessions: sessionManager.getStats(),
+      ...(detailed ? {
+        eventLoop: {
+          delayMeanMs: Number((eventLoopDelay.mean / 1_000_000).toFixed(2)),
+          delayMaxMs: Number((eventLoopDelay.max / 1_000_000).toFixed(2)),
+          delayP99Ms: Number((eventLoopDelay.percentile(99) / 1_000_000).toFixed(2)),
+        },
+        websocket: {
+          maxPayloadBytes: MAX_WS_MESSAGE_SIZE,
+          perMessageDeflate: false,
+        },
+      } : {}),
     });
     return;
   }
@@ -452,6 +468,7 @@ async function handleRequest(
 const wss = new WebSocketServer({
   noServer: true,
   maxPayload: MAX_WS_MESSAGE_SIZE,
+  perMessageDeflate: false,
 });
 
 server.on("upgrade", (request, socket, head) => {

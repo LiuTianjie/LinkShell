@@ -20,6 +20,7 @@ type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
 type AgentCollaborationMode = "default" | "plan";
 type AgentCommandExecutionKind = "prompt" | "native" | "local_ui";
 type AgentCommandSource = "built_in" | "custom" | "project" | "user" | "linkshell";
+type AgentSyncSource = "device" | "device-history" | "device-live" | "app-server" | "cache";
 
 interface AgentContentBlock {
   type: "text" | "image";
@@ -165,6 +166,11 @@ interface AgentConversation {
   collaborationMode?: AgentCollaborationMode;
   status: AgentStatus;
   archived: boolean;
+  timelineRevision?: number;
+  historyComplete?: boolean;
+  runningTurnId?: string;
+  source?: AgentSyncSource;
+  canonical?: boolean;
   lastMessagePreview?: string;
   lastActivityAt: number;
   createdAt: number;
@@ -175,6 +181,9 @@ interface AgentTimelineItem {
   conversationId: string;
   type: "message" | "tool_call" | "plan" | "permission" | "status" | "error";
   kind?: AgentTimelineKind;
+  revision?: number;
+  source?: AgentSyncSource;
+  canonical?: boolean;
   turnId?: string;
   itemId?: string;
   role?: "user" | "assistant" | "system";
@@ -206,13 +215,49 @@ interface PendingStructuredInputWaiter {
   source?: string;
 }
 
+interface AgentRevisionEvent {
+  revision: number;
+  item?: AgentTimelineItem;
+  conversation?: AgentConversation;
+}
+
 const PERMISSION_TIMEOUT_MS = 5 * 60_000;
 const MAX_TIMELINE_ITEMS = 200;
 const MAX_SNAPSHOT_ITEMS = 80;
 const MAX_SNAPSHOT_TEXT_BYTES = 128 * 1024;
+const MAX_DELTA_EVENTS = 500;
+const HISTORY_PAGE_MAX_ITEMS = 500;
 
 function id(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function clampHistoryCursor(value: string | undefined, fallback: number, max: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(max, parsed));
+}
+
+function appServerText(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text || undefined;
+  }
+  if (Array.isArray(value)) {
+    const text = value
+      .map((part) => appServerText(part))
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    return text || undefined;
+  }
+  const record = asRecord(value);
+  if (!record) return undefined;
+  if (typeof record.text === "string") return appServerText(record.text);
+  if (typeof record.content === "string") return appServerText(record.content);
+  if (typeof record.message === "string") return appServerText(record.message);
+  return appServerText(record.content ?? record.message ?? record.parts);
 }
 
 function stringify(value: unknown): string {
@@ -1346,6 +1391,8 @@ function parseRemoteSessions(value: unknown): Array<{
   createdAt?: number;
   lastActivityAt?: number;
   archived?: boolean;
+  status?: AgentStatus;
+  runningTurnId?: string;
 }> {
   const raw = asRecord(value);
   const sessionsValue =
@@ -1362,6 +1409,8 @@ function parseRemoteSessions(value: unknown): Array<{
     createdAt?: number;
     lastActivityAt?: number;
     archived?: boolean;
+    status?: AgentStatus;
+    runningTurnId?: string;
   }> = [];
   for (const entry of sessionsValue) {
     const session = asRecord(entry);
@@ -1381,9 +1430,21 @@ function parseRemoteSessions(value: unknown): Array<{
       createdAt: parseTimestamp(source.createdAt ?? source.created_at),
       lastActivityAt: parseTimestamp(source.lastActivityAt ?? source.updatedAt ?? source.modifiedAt ?? source.lastModified ?? source.updated_at),
       archived: typeof source.archived === "boolean" ? source.archived : undefined,
+      status: normalizeAgentStatus(firstString(source, ["status", "state", "phase"])),
+      runningTurnId: firstString(source, ["runningTurnId", "running_turn_id", "turnId", "activeTurnId"]),
     });
   }
   return result;
+}
+
+function normalizeAgentStatus(value: string | undefined): AgentStatus | undefined {
+  if (!value) return undefined;
+  const normalized = value.toLowerCase();
+  if (normalized === "running" || normalized === "in_progress" || normalized === "busy") return "running";
+  if (normalized === "waiting_permission" || normalized === "waiting" || normalized === "blocked") return "waiting_permission";
+  if (normalized === "error" || normalized === "failed") return "error";
+  if (normalized === "idle" || normalized === "completed" || normalized === "done") return "idle";
+  return undefined;
 }
 
 export class AgentWorkspaceProxy {
@@ -1399,6 +1460,8 @@ export class AgentWorkspaceProxy {
   private conversations = new Map<string, AgentConversation>();
   private conversationByAgentSessionId = new Map<string, string>();
   private timelines = new Map<string, AgentTimelineItem[]>();
+  private conversationRevisions = new Map<string, number>();
+  private revisionEvents = new Map<string, AgentRevisionEvent[]>();
   private toolOutputBuffers = new Map<string, string>();
   private pendingPermissions = new Map<string, AgentPermission>();
   private permissionWaiters = new Map<string, PendingPermissionWaiter>();
@@ -1439,13 +1502,23 @@ export class AgentWorkspaceProxy {
         this.input.send(createEnvelope({
           type: "agent.v2.conversation.list.result",
           hostDeviceId: this.input.hostDeviceId,
-          payload: { conversations },
+          payload: { conversations: conversations.map((conversation) => this.conversationSnapshot(conversation)) },
         }));
         break;
       }
       case "agent.v2.snapshot.request": {
         const payload = parseTypedPayload("agent.v2.snapshot.request", envelope.payload);
         this.sendSnapshot(payload.conversationId);
+        break;
+      }
+      case "agent.v2.history.request": {
+        const payload = parseTypedPayload("agent.v2.history.request", envelope.payload);
+        await this.sendHistoryPage(payload);
+        break;
+      }
+      case "agent.v2.delta.request": {
+        const payload = parseTypedPayload("agent.v2.delta.request", envelope.payload);
+        this.sendDelta(payload);
         break;
       }
       case "agent.v2.prompt": {
@@ -1656,14 +1729,20 @@ export class AgentWorkspaceProxy {
         reasoningEffort: existing?.reasoningEffort,
         permissionMode: existing?.permissionMode,
         collaborationMode: existing?.collaborationMode,
-        status: existing?.status ?? "idle",
+        status: remote.status ?? existing?.status ?? "idle",
         archived: remote.archived ?? existing?.archived ?? false,
+        timelineRevision: existing?.timelineRevision ?? this.getRevision(conversationId),
+        historyComplete: existing?.historyComplete ?? false,
+        runningTurnId: remote.runningTurnId ?? this.currentTurnIds.get(conversationId),
+        source: "device",
+        canonical: true,
         lastMessagePreview: existing?.lastMessagePreview,
         lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
         createdAt: remote.createdAt ?? existing?.createdAt ?? now,
       };
       this.conversations.set(conversation.id, conversation);
       this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
+      if (remote.runningTurnId) this.rememberTurnConversationId(conversation.id, remote.runningTurnId);
       this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
     }
   }
@@ -1758,12 +1837,18 @@ export class AgentWorkspaceProxy {
       }
       this.hydrateStoredTimeline(existingConversation);
       this.activeConversationId = existingConversation.id;
+      const snapshot = this.latestSnapshot(existingConversation.id);
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.opened",
         hostDeviceId: this.input.hostDeviceId,
         payload: {
-          conversation: existingConversation,
-          snapshot: snapshotTimelineItems(this.timelines.get(existingConversation.id) ?? []),
+          conversation: this.conversationSnapshot(existingConversation),
+          snapshot: snapshot.items,
+          revision: this.getRevision(existingConversation.id),
+          cursor: snapshot.cursor,
+          hasMore: snapshot.hasMore,
+          source: "device-history",
+          canonical: true,
         },
       }));
       return existingConversation;
@@ -1807,6 +1892,11 @@ export class AgentWorkspaceProxy {
         collaborationMode: payload.collaborationMode ?? existingConversation?.collaborationMode,
         status: "idle",
         archived: existingConversation?.archived ?? false,
+        timelineRevision: existingConversation?.timelineRevision ?? this.getRevision(conversationId),
+        historyComplete: existingConversation?.historyComplete ?? false,
+        runningTurnId: this.currentTurnIds.get(conversationId),
+        source: "device",
+        canonical: true,
         lastMessagePreview: existingConversation?.status === "error" ? undefined : existingConversation?.lastMessagePreview,
         lastActivityAt: now,
         createdAt: existingConversation?.createdAt ?? now,
@@ -1816,10 +1906,19 @@ export class AgentWorkspaceProxy {
       this.activeConversationId = conversation.id;
       this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
       this.hydrateStoredTimeline(conversation);
+      const snapshot = this.latestSnapshot(conversation.id);
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.opened",
         hostDeviceId: this.input.hostDeviceId,
-        payload: { conversation, snapshot: snapshotTimelineItems(this.timelines.get(conversation.id) ?? []) },
+        payload: {
+          conversation: this.conversationSnapshot(conversation),
+          snapshot: snapshot.items,
+          revision: this.getRevision(conversation.id),
+          cursor: snapshot.cursor,
+          hasMore: snapshot.hasMore,
+          source: "device-history",
+          canonical: true,
+        },
       }));
       return conversation;
     } catch (error) {
@@ -1855,6 +1954,10 @@ export class AgentWorkspaceProxy {
       collaborationMode: payload.collaborationMode,
       status: "error",
       archived: false,
+      timelineRevision: this.getRevision(fallbackId),
+      historyComplete: false,
+      source: "device",
+      canonical: true,
       lastMessagePreview: message,
       lastActivityAt: now,
       createdAt: now,
@@ -1871,7 +1974,14 @@ export class AgentWorkspaceProxy {
     this.input.send(createEnvelope({
       type: "agent.v2.conversation.opened",
       hostDeviceId: this.input.hostDeviceId,
-      payload: { conversation, snapshot: snapshotTimelineItems(this.timelines.get(conversation.id) ?? []) },
+      payload: {
+        conversation: this.conversationSnapshot(conversation),
+        snapshot: snapshotTimelineItems(this.timelines.get(conversation.id) ?? []),
+        revision: this.getRevision(conversation.id),
+        hasMore: false,
+        source: "device",
+        canonical: true,
+      },
     }));
     return conversation;
   }
@@ -2881,6 +2991,14 @@ export class AgentWorkspaceProxy {
         this.permissionWaiters.delete(requestId);
         this.permissionSources.delete(requestId);
         resolve(formatPermissionResponse(source, "cancelled", "cancelled"));
+        this.markPermission(conversationId, requestId, {
+          permissionOutcome: "cancelled",
+          optionId: "cancelled",
+          permissionLive: false,
+          permissionPending: false,
+          permissionExpired: true,
+          permissionError: "等待授权超时",
+        });
         this.updateConversationStatus(conversationId, "idle");
       }, PERMISSION_TIMEOUT_MS);
       this.permissionWaiters.set(requestId, { resolve, timer });
@@ -2920,6 +3038,8 @@ export class AgentWorkspaceProxy {
     this.markPermission(payload.conversationId, payload.requestId, {
       permissionOutcome: payload.outcome,
       optionId: selectedOptionId,
+      permissionLive: false,
+      permissionExpired: false,
       permissionError: undefined,
       permissionPending: false,
     });
@@ -2978,6 +3098,228 @@ export class AgentWorkspaceProxy {
       metadata: { ...(item.metadata ?? {}), ...metadata },
       updatedAt: Date.now(),
     });
+  }
+
+  private getRevision(conversationId: string): number {
+    return this.conversationRevisions.get(conversationId) ??
+      this.conversations.get(conversationId)?.timelineRevision ??
+      0;
+  }
+
+  private setRevisionFloor(conversationId: string, revision: number): number {
+    const nextRevision = Math.max(this.getRevision(conversationId), revision);
+    this.conversationRevisions.set(conversationId, nextRevision);
+    const conversation = this.conversations.get(conversationId);
+    if (conversation) {
+      conversation.timelineRevision = nextRevision;
+      conversation.runningTurnId = this.currentTurnIds.get(conversationId);
+    }
+    return nextRevision;
+  }
+
+  private conversationSnapshot(conversation: AgentConversation): AgentConversation {
+    return {
+      ...conversation,
+      timelineRevision: this.getRevision(conversation.id),
+      historyComplete: conversation.historyComplete ?? false,
+      runningTurnId: this.currentTurnIds.get(conversation.id),
+      source: conversation.source ?? "device",
+      canonical: conversation.canonical ?? true,
+    };
+  }
+
+  private annotateTimelineItem(
+    item: AgentTimelineItem,
+    revision: number | undefined,
+    source: AgentSyncSource,
+  ): AgentTimelineItem {
+    return {
+      ...item,
+      revision: revision ?? item.revision,
+      source: item.source ?? source,
+      canonical: item.canonical ?? true,
+    };
+  }
+
+  private recordRevisionEvent(
+    conversationId: string,
+    change: { item?: AgentTimelineItem; conversation?: AgentConversation },
+  ): AgentRevisionEvent {
+    const revision = this.getRevision(conversationId) + 1;
+    this.conversationRevisions.set(conversationId, revision);
+    const conversation = this.conversations.get(conversationId);
+    if (conversation) {
+      conversation.timelineRevision = revision;
+      conversation.runningTurnId = this.currentTurnIds.get(conversationId);
+    }
+    const event: AgentRevisionEvent = {
+      revision,
+      item: change.item ? this.annotateTimelineItem(change.item, revision, "device-live") : undefined,
+      conversation: change.conversation ? this.conversationSnapshot(change.conversation) : undefined,
+    };
+    const events = this.revisionEvents.get(conversationId) ?? [];
+    events.push(event);
+    if (events.length > MAX_DELTA_EVENTS) {
+      events.splice(0, events.length - MAX_DELTA_EVENTS);
+    }
+    this.revisionEvents.set(conversationId, events);
+    return event;
+  }
+
+  private storedTimeline(conversation: AgentConversation, maxItems = HISTORY_PAGE_MAX_ITEMS): AgentTimelineItem[] {
+    if (!conversation.agentSessionId) return [];
+    const result = conversation.provider === "codex"
+      ? loadCodexStoredTimeline(conversation.agentSessionId, conversation.id, conversation.cwd || this.input.cwd, { maxItems })
+      : conversation.provider === "claude"
+      ? loadClaudeStoredTimeline(conversation.agentSessionId, conversation.id, { maxItems })
+      : { items: [] };
+    return result.items
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((item, index) => this.annotateTimelineItem(item as AgentTimelineItem, index + 1, "device-history"));
+  }
+
+  private canonicalTimeline(conversation: AgentConversation, maxItems = HISTORY_PAGE_MAX_ITEMS): AgentTimelineItem[] {
+    const merged = new Map<string, AgentTimelineItem>();
+    for (const item of this.storedTimeline(conversation, maxItems)) {
+      merged.set(item.id, item);
+    }
+    for (const item of this.timelines.get(conversation.id) ?? []) {
+      merged.set(item.id, this.annotateTimelineItem(item, item.revision, item.source ?? "device-live"));
+    }
+    const items = [...merged.values()]
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(-maxItems);
+    this.setRevisionFloor(conversation.id, Math.max(this.getRevision(conversation.id), items.length));
+    return items;
+  }
+
+  private async appServerTimeline(conversation: AgentConversation, maxItems = HISTORY_PAGE_MAX_ITEMS): Promise<AgentTimelineItem[]> {
+    if (conversation.provider !== "codex" || !conversation.agentSessionId) return [];
+    if (this.protocolForProvider(conversation.provider) !== "codex-app-server") return [];
+    const client = this.clientForProvider(conversation.provider);
+    const listTurns = (client as { listTurns?: (input: { sessionId: string; limit?: number }) => Promise<unknown> } | undefined)?.listTurns;
+    if (typeof listTurns !== "function") return [];
+    try {
+      const result = await listTurns.call(client, { sessionId: conversation.agentSessionId, limit: maxItems });
+      return this.timelineFromAppServerTurns(conversation.id, conversation.agentSessionId, result);
+    } catch (error) {
+      if (this.input.verbose) {
+        process.stderr.write(`[agent:v2] thread/turns/list failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+      return [];
+    }
+  }
+
+  private timelineFromAppServerTurns(
+    conversationId: string,
+    agentSessionId: string,
+    value: unknown,
+  ): AgentTimelineItem[] {
+    const raw = asRecord(value);
+    const turns =
+      Array.isArray(value) ? value :
+      Array.isArray(raw?.turns) ? raw.turns :
+      Array.isArray(raw?.items) ? raw.items :
+      Array.isArray(raw?.entries) ? raw.entries :
+      [];
+    const items: AgentTimelineItem[] = [];
+    turns.forEach((entry, index) => {
+      const turn = asRecord(entry);
+      if (!turn) return;
+      const turnId = firstString(turn, ["id", "turnId", "turn_id"]) ?? `turn-${index + 1}`;
+      const createdAt = parseTimestamp(turn.createdAt ?? turn.created_at ?? turn.startedAt ?? turn.started_at) ?? Date.now() + index;
+      const updatedAt = parseTimestamp(turn.updatedAt ?? turn.updated_at ?? turn.completedAt ?? turn.completed_at);
+      const userText = appServerText(turn.input ?? turn.prompt ?? turn.user ?? turn.userMessage ?? turn.request);
+      if (userText) {
+        items.push({
+          id: `app-server:${agentSessionId}:${turnId}:user`,
+          conversationId,
+          type: "message",
+          kind: "chat",
+          turnId,
+          role: "user",
+          content: [{ type: "text", text: userText }],
+          text: userText,
+          createdAt,
+          updatedAt,
+          metadata: { source: "app-server", provider: "codex" },
+        });
+      }
+      const assistantText = appServerText(turn.output ?? turn.response ?? turn.assistant ?? turn.assistantMessage ?? turn.result);
+      if (assistantText) {
+        items.push({
+          id: `app-server:${agentSessionId}:${turnId}:assistant`,
+          conversationId,
+          type: "message",
+          kind: "chat",
+          turnId,
+          role: "assistant",
+          content: [{ type: "text", text: assistantText }],
+          text: assistantText,
+          createdAt: updatedAt ?? createdAt + 1,
+          updatedAt,
+          metadata: { source: "app-server", provider: "codex" },
+        });
+      }
+      const nestedItems = Array.isArray(turn.items) ? turn.items : Array.isArray(turn.messages) ? turn.messages : [];
+      for (const nested of nestedItems) {
+        const nestedRecord = asRecord(nested);
+        if (!nestedRecord) continue;
+        const text = appServerText(nestedRecord.content ?? nestedRecord.text ?? nestedRecord.message);
+        const role = nestedRecord.role === "user" || nestedRecord.role === "assistant" || nestedRecord.role === "system"
+          ? nestedRecord.role
+          : undefined;
+        if (!text || !role) continue;
+        const itemId = firstString(nestedRecord, ["id", "itemId", "messageId"]) ?? `${role}-${items.length + 1}`;
+        items.push({
+          id: `app-server:${agentSessionId}:${turnId}:${itemId}`,
+          conversationId,
+          type: "message",
+          kind: "chat",
+          turnId,
+          itemId,
+          role,
+          content: [{ type: "text", text }],
+          text,
+          createdAt: parseTimestamp(nestedRecord.createdAt ?? nestedRecord.created_at) ?? createdAt + items.length,
+          updatedAt: parseTimestamp(nestedRecord.updatedAt ?? nestedRecord.updated_at),
+          metadata: { source: "app-server", provider: "codex" },
+        });
+      }
+    });
+    return items
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((item, index) => this.annotateTimelineItem(item, index + 1, "app-server"));
+  }
+
+  private mergeCanonicalTimelineItems(items: AgentTimelineItem[], maxItems: number): AgentTimelineItem[] {
+    const byKey = new Map<string, AgentTimelineItem>();
+    for (const item of items.sort((a, b) => a.createdAt - b.createdAt)) {
+      const key = item.type === "message" && item.role && item.text
+        ? `${item.role}:${item.text.replace(/\s+/g, " ").trim().slice(0, 500)}`
+        : item.id;
+      const existing = byKey.get(key);
+      if (!existing || item.source === "app-server" || (item.updatedAt ?? item.createdAt) >= (existing.updatedAt ?? existing.createdAt)) {
+        byKey.set(key, item);
+      }
+    }
+    return [...byKey.values()]
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(-maxItems);
+  }
+
+  private latestSnapshot(conversationId: string): {
+    items: AgentTimelineItem[];
+    cursor?: string;
+    hasMore: boolean;
+  } {
+    const timeline = this.timelines.get(conversationId) ?? [];
+    const start = Math.max(0, timeline.length - MAX_SNAPSHOT_ITEMS);
+    return {
+      items: timeline.slice(start).map((item) => snapshotTimelineItem(item)),
+      cursor: start > 0 ? String(start) : undefined,
+      hasMore: start > 0,
+    };
   }
 
   private addItem(conversationId: string, item: AgentTimelineItem): void {
@@ -3111,6 +3453,17 @@ export class AgentWorkspaceProxy {
         .sort((a, b) => a.createdAt - b.createdAt)
         .slice(-MAX_TIMELINE_ITEMS),
     );
+    const oldRevision = this.conversationRevisions.get(oldId) ?? 0;
+    if (oldRevision > 0) {
+      this.conversationRevisions.delete(oldId);
+      this.setRevisionFloor(newId, oldRevision);
+    }
+    const oldEvents = this.revisionEvents.get(oldId);
+    if (oldEvents) {
+      this.revisionEvents.delete(oldId);
+      const existingEvents = this.revisionEvents.get(newId) ?? [];
+      this.revisionEvents.set(newId, [...existingEvents, ...oldEvents].slice(-MAX_DELTA_EVENTS));
+    }
 
     for (const [agentSessionId, conversationId] of this.conversationByAgentSessionId) {
       if (conversationId === oldId) {
@@ -3146,18 +3499,48 @@ export class AgentWorkspaceProxy {
 
   private emitItem(conversationId: string, item: AgentTimelineItem): void {
     const conversation = this.conversations.get(conversationId);
+    const itemSnapshot = snapshotTimelineItem(item, { stripImages: false });
+    const event = this.recordRevisionEvent(conversationId, { conversation, item: itemSnapshot });
     this.input.send(createEnvelope({
       type: "agent.v2.event",
       hostDeviceId: this.input.hostDeviceId,
-      payload: { conversationId, conversation, item: snapshotTimelineItem(item, { stripImages: false }) },
+      payload: {
+        conversationId,
+        conversation: event.conversation,
+        item: event.item,
+        revision: event.revision,
+        source: "device-live",
+        canonical: true,
+      },
     }));
   }
 
   private emitConversation(conversation: AgentConversation): void {
+    const event = this.recordRevisionEvent(conversation.id, { conversation });
     this.input.send(createEnvelope({
       type: "agent.v2.event",
       hostDeviceId: this.input.hostDeviceId,
-      payload: { conversationId: conversation.id, conversation },
+      payload: {
+        conversationId: conversation.id,
+        conversation: event.conversation,
+        revision: event.revision,
+        source: "device-live",
+        canonical: true,
+      },
+    }));
+    this.input.send(createEnvelope({
+      type: "agent.v2.running_state",
+      hostDeviceId: this.input.hostDeviceId,
+      payload: {
+        conversationId: conversation.id,
+        status: conversation.status,
+        runningTurnId: this.currentTurnIds.get(conversation.id),
+        revision: event.revision,
+        error: conversation.status === "error" ? conversation.lastMessagePreview : undefined,
+        updatedAt: conversation.lastActivityAt,
+        source: "device-live",
+        canonical: true,
+      },
     }));
   }
 
@@ -3206,17 +3589,143 @@ export class AgentWorkspaceProxy {
       const conversation = this.conversations.get(this.activeConversationId);
       if (conversation) this.hydrateStoredTimeline(conversation);
     }
-    const conversations = [...this.conversations.values()];
-    const items = conversationId
-      ? snapshotTimelineItems(this.timelines.get(conversationId) ?? [])
-      : [];
+    const conversations = [...this.conversations.values()].map((conversation) => this.conversationSnapshot(conversation));
+    const snapshot = conversationId ? this.latestSnapshot(conversationId) : { items: [], cursor: undefined, hasMore: false };
     this.input.send(createEnvelope({
       type: "agent.v2.snapshot",
       hostDeviceId: this.input.hostDeviceId,
       payload: {
         conversations,
         activeConversationId: this.activeConversationId,
-        items,
+        items: snapshot.items,
+        revision: conversationId ? this.getRevision(conversationId) : undefined,
+        cursor: snapshot.cursor,
+        hasMore: snapshot.hasMore,
+        source: "device-history",
+        canonical: true,
+      },
+    }));
+  }
+
+  private async sendHistoryPage(payload: {
+    conversationId: string;
+    cursor?: string;
+    limit?: number;
+    direction?: "older" | "newer";
+  }): Promise<void> {
+    const conversation = this.conversations.get(payload.conversationId);
+    if (!conversation) return;
+    const limit = Math.min(Math.max(payload.limit ?? MAX_SNAPSHOT_ITEMS, 1), 200);
+    const items = this.mergeCanonicalTimelineItems([
+      ...this.canonicalTimeline(conversation, HISTORY_PAGE_MAX_ITEMS),
+      ...await this.appServerTimeline(conversation, HISTORY_PAGE_MAX_ITEMS),
+    ], HISTORY_PAGE_MAX_ITEMS);
+    this.timelines.set(
+      conversation.id,
+      items.slice(-MAX_TIMELINE_ITEMS).map((item) => this.annotateTimelineItem(item, item.revision, item.source ?? "device-history")),
+    );
+    for (const item of this.timelines.get(conversation.id) ?? []) {
+      this.rememberItemConversationId(conversation.id, item);
+    }
+
+    const direction = payload.direction ?? "older";
+    let page: AgentTimelineItem[];
+    let cursor: string | undefined;
+    let hasMore = false;
+    if (direction === "newer") {
+      const start = clampHistoryCursor(payload.cursor, 0, items.length);
+      const end = Math.min(items.length, start + limit);
+      page = items.slice(start, end);
+      hasMore = end < items.length;
+      cursor = hasMore ? String(end) : undefined;
+    } else {
+      const end = clampHistoryCursor(payload.cursor, items.length, items.length);
+      const start = Math.max(0, end - limit);
+      page = items.slice(start, end);
+      hasMore = start > 0;
+      cursor = hasMore ? String(start) : undefined;
+    }
+    conversation.historyComplete = !hasMore;
+    const revision = this.setRevisionFloor(conversation.id, Math.max(this.getRevision(conversation.id), items.length));
+    this.input.send(createEnvelope({
+      type: "agent.v2.history.page",
+      hostDeviceId: this.input.hostDeviceId,
+      payload: {
+        conversationId: conversation.id,
+        conversation: this.conversationSnapshot(conversation),
+        items: page.map((item) => snapshotTimelineItem(item)),
+        revision,
+        cursor,
+        hasMore,
+        source: "device-history",
+        canonical: true,
+      },
+    }));
+  }
+
+  private sendDelta(payload: {
+    conversationId: string;
+    sinceRevision?: number;
+    limit?: number;
+  }): void {
+    const conversation = this.conversations.get(payload.conversationId);
+    if (!conversation) return;
+    this.hydrateStoredTimeline(conversation);
+    const sinceRevision = payload.sinceRevision ?? 0;
+    const limit = Math.min(Math.max(payload.limit ?? 100, 1), 500);
+    const events = this.revisionEvents.get(conversation.id) ?? [];
+    const oldestAvailable = events[0]?.revision ?? this.getRevision(conversation.id);
+    const newestRevision = this.getRevision(conversation.id);
+    const reset = sinceRevision > 0 &&
+      (
+        sinceRevision > newestRevision ||
+        (
+          sinceRevision < newestRevision &&
+          (events.length === 0 || sinceRevision < oldestAvailable - 1)
+        )
+      );
+
+    if (reset) {
+      const snapshot = this.latestSnapshot(conversation.id);
+      this.input.send(createEnvelope({
+        type: "agent.v2.delta",
+        hostDeviceId: this.input.hostDeviceId,
+        payload: {
+          conversationId: conversation.id,
+          conversation: this.conversationSnapshot(conversation),
+          items: snapshot.items,
+          sinceRevision,
+          revision: newestRevision,
+          reset: true,
+          cursor: snapshot.cursor,
+          hasMore: snapshot.hasMore,
+          source: "device-history",
+          canonical: true,
+        },
+      }));
+      return;
+    }
+
+    const changed = events
+      .filter((event) => event.revision > sinceRevision)
+      .slice(-limit);
+    const itemsById = new Map<string, AgentTimelineItem>();
+    for (const event of changed) {
+      if (event.item) itemsById.set(event.item.id, event.item);
+    }
+    this.input.send(createEnvelope({
+      type: "agent.v2.delta",
+      hostDeviceId: this.input.hostDeviceId,
+      payload: {
+        conversationId: conversation.id,
+        conversation: this.conversationSnapshot(conversation),
+        items: [...itemsById.values()].map((item) => snapshotTimelineItem(item)),
+        sinceRevision,
+        revision: newestRevision,
+        reset: false,
+        hasMore: changed.length === limit && events.some((event) => event.revision > sinceRevision && event.revision < changed[0]!.revision),
+        source: "device-live",
+        canonical: true,
       },
     }));
   }
@@ -3224,18 +3733,25 @@ export class AgentWorkspaceProxy {
   private hydrateStoredTimeline(conversation: AgentConversation): void {
     if (!conversation.agentSessionId) return;
     const existing = this.timelines.get(conversation.id) ?? [];
-    if (existing.length > 0) return;
-    const result = conversation.provider === "codex"
-      ? loadCodexStoredTimeline(conversation.agentSessionId, conversation.id, conversation.cwd || this.input.cwd)
-      : conversation.provider === "claude"
-      ? loadClaudeStoredTimeline(conversation.agentSessionId, conversation.id)
-      : { items: [] };
-    if (result.items.length === 0) return;
-    const items = result.items
+    if (existing.length > 0) {
+      this.setRevisionFloor(conversation.id, Math.max(
+        existing.length,
+        ...existing.map((item) => item.revision ?? 0),
+      ));
+      return;
+    }
+    const stored = this.storedTimeline(conversation, MAX_TIMELINE_ITEMS);
+    conversation.historyComplete = stored.length <= MAX_SNAPSHOT_ITEMS;
+    if (stored.length === 0) {
+      this.setRevisionFloor(conversation.id, this.getRevision(conversation.id));
+      return;
+    }
+    const items = stored
       .sort((a, b) => a.createdAt - b.createdAt)
-      .slice(-MAX_TIMELINE_ITEMS) as AgentTimelineItem[];
+      .slice(-MAX_TIMELINE_ITEMS);
     this.timelines.set(conversation.id, items);
     for (const item of items) this.rememberItemConversationId(conversation.id, item);
+    this.setRevisionFloor(conversation.id, Math.max(items.length, ...items.map((item) => item.revision ?? 0)));
     const lastMessage = [...items].reverse().find((item) => item.text?.trim());
     if (lastMessage?.text && !conversation.lastMessagePreview) {
       conversation.lastMessagePreview = previewText(lastMessage.text);
@@ -3303,6 +3819,8 @@ export class AgentWorkspaceProxy {
   private rememberTurnConversationId(conversationId: string, turnId: string): void {
     this.currentTurnIds.set(conversationId, turnId);
     this.turnConversationIds.set(turnId, conversationId);
+    const conversation = this.conversations.get(conversationId);
+    if (conversation) conversation.runningTurnId = turnId;
   }
 
   private forgetCurrentTurn(conversationId: string, turnId?: string): void {
@@ -3310,6 +3828,8 @@ export class AgentWorkspaceProxy {
     this.currentTurnIds.delete(conversationId);
     if (turnId) this.turnConversationIds.delete(turnId);
     if (currentTurnId && currentTurnId !== turnId) this.turnConversationIds.delete(currentTurnId);
+    const conversation = this.conversations.get(conversationId);
+    if (conversation) conversation.runningTurnId = undefined;
   }
 
   private rememberItemConversationId(conversationId: string, item: AgentTimelineItem): void {
@@ -3351,30 +3871,52 @@ export class AgentWorkspaceProxy {
 
   private cancelPendingPermissions(conversationId?: string): void {
     for (const [requestId, waiter] of this.permissionWaiters) {
+      const ownerConversationId = this.conversationIdForPermissionRequest(requestId);
+      if (conversationId && ownerConversationId && ownerConversationId !== conversationId) continue;
       clearTimeout(waiter.timer);
       waiter.resolve(formatPermissionResponse(
         this.permissionSources.get(requestId),
         "cancelled",
         "cancelled",
       ));
+      if (ownerConversationId) {
+        this.markPermission(ownerConversationId, requestId, {
+          permissionOutcome: "cancelled",
+          optionId: "cancelled",
+          permissionLive: false,
+          permissionPending: false,
+          permissionExpired: false,
+          permissionError: "已停止",
+        });
+      }
+      this.permissionWaiters.delete(requestId);
       this.pendingPermissions.delete(requestId);
       this.permissionSources.delete(requestId);
     }
-    this.permissionWaiters.clear();
     for (const [requestId, waiter] of this.structuredInputWaiters) {
+      const pending = this.pendingStructuredInputs.get(requestId);
+      if (conversationId && pending?.conversationId && pending.conversationId !== conversationId) continue;
       clearTimeout(waiter.timer);
       waiter.resolve(formatStructuredInputResponse({}));
-      const pending = this.pendingStructuredInputs.get(requestId);
       if (pending) {
         this.markStructuredInput(pending.conversationId, requestId, {
           inputPending: false,
           inputError: "已停止",
         });
       }
+      this.structuredInputWaiters.delete(requestId);
       this.pendingStructuredInputs.delete(requestId);
     }
-    this.structuredInputWaiters.clear();
     if (conversationId) this.updateConversationStatus(conversationId, "idle");
+  }
+
+  private conversationIdForPermissionRequest(requestId: string): string | undefined {
+    for (const [conversationId, timeline] of this.timelines) {
+      if (timeline.some((item) => item.type === "permission" && item.permission?.requestId === requestId)) {
+        return conversationId;
+      }
+    }
+    return undefined;
   }
 
   private extractSessionId(value: unknown): string | undefined {

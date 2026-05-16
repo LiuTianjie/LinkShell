@@ -154,6 +154,12 @@ export interface AgentConversationRecord {
   collaborationMode?: AgentCollaborationMode;
   status: AgentStatus;
   archived: boolean;
+  timelineRevision?: number;
+  historyComplete?: boolean;
+  runningTurnId?: string;
+  syncStatus?: "syncing" | "complete" | "stale" | "deferred";
+  source?: "device" | "device-history" | "device-live" | "app-server" | "cache";
+  canonical?: boolean;
   lastMessagePreview?: string;
   lastActivityAt: number;
   createdAt: number;
@@ -165,6 +171,9 @@ export interface AgentTimelineItem {
   conversationId: string;
   type: "message" | "tool_call" | "plan" | "permission" | "status" | "error";
   kind?: AgentTimelineKind;
+  revision?: number;
+  source?: "device" | "device-history" | "device-live" | "app-server" | "cache";
+  canonical?: boolean;
   turnId?: string;
   itemId?: string;
   role?: "user" | "assistant" | "system";

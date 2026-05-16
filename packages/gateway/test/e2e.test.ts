@@ -203,6 +203,26 @@ describe("Health check", () => {
   });
 });
 
+describe("Device manager metrics", () => {
+  it("reports host absence, dropped clients, and bounded agent relay buffers", () => {
+    const manager = new DeviceManager();
+    manager.addClient("host-metrics", {
+      socket: { readyState: WebSocket.OPEN, OPEN: WebSocket.OPEN, close: vi.fn() } as unknown as WebSocket,
+      role: "client",
+      deviceId: "client-1",
+      connectedAt: Date.now(),
+    });
+    let stats = manager.getStats();
+    expect(stats.hostAbsentDevices).toBe(1);
+    expect(stats.bufferedAgentFrames).toBe(0);
+
+    manager.removeClient("host-metrics", "client-1");
+    stats = manager.getStats();
+    expect(stats.droppedClients).toBe(1);
+    manager.destroy();
+  });
+});
+
 describe("Protocol schemas", () => {
   it("keeps provider capability fields for agent v2", () => {
     const payload = parseLocalTypedPayload("agent.v2.capabilities", {
@@ -304,6 +324,7 @@ describe("Protocol schemas", () => {
   it("keeps structured agent v2 patch fields", () => {
     const payload = parseLocalTypedPayload("agent.v2.event", {
       conversationId: "conversation-1",
+      revision: 4,
       patch: {
         itemId: "tool-1",
         kind: "command_execution",
@@ -322,6 +343,49 @@ describe("Protocol schemas", () => {
     expect(payload.patch?.commandExecution?.command).toBe("pnpm typecheck");
     expect(payload.patch?.fileChange?.entries[0]?.path).toBe("packages/shared-protocol/src/index.ts");
     expect(payload.patch?.metadata?.inputPending).toBe(false);
+    expect(payload.revision).toBe(4);
+  });
+
+  it("validates agent v2 history, delta, and running state payloads", () => {
+    const page = parseLocalTypedPayload("agent.v2.history.page", {
+      conversationId: "conversation-1",
+      revision: 7,
+      cursor: "40",
+      hasMore: true,
+      source: "device-history",
+      canonical: true,
+      items: [{
+        id: "history:1",
+        conversationId: "conversation-1",
+        type: "message",
+        role: "assistant",
+        text: "done",
+        revision: 7,
+        source: "device-history",
+        canonical: true,
+        createdAt: 1,
+      }],
+    });
+    expect(page.cursor).toBe("40");
+    expect(page.items[0]?.canonical).toBe(true);
+
+    const delta = parseLocalTypedPayload("agent.v2.delta", {
+      conversationId: "conversation-1",
+      sinceRevision: 6,
+      revision: 8,
+      items: [],
+      reset: false,
+    });
+    expect(delta.revision).toBe(8);
+
+    const running = parseLocalTypedPayload("agent.v2.running_state", {
+      conversationId: "conversation-1",
+      status: "running",
+      runningTurnId: "turn-1",
+      revision: 9,
+      updatedAt: 1,
+    });
+    expect(running.runningTurnId).toBe("turn-1");
   });
 });
 

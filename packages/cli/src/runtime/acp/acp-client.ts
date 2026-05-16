@@ -69,6 +69,8 @@ function normalizeRemoteSession(entry: unknown, fallback?: CodexStoredSession): 
       fallback?.lastModified ??
       Date.now(),
     archived: typeof source.archived === "boolean" ? source.archived : fallback?.archived,
+    status: firstString(source, ["status", "state", "phase"]) ?? fallback?.status,
+    runningTurnId: firstString(source, ["runningTurnId", "running_turn_id", "turnId", "activeTurnId"]) ?? fallback?.runningTurnId,
   };
 }
 
@@ -201,6 +203,16 @@ export class AcpClient {
   listModels(): Promise<unknown> {
     if (this.protocol === "codex-app-server") {
       return this.transport.request("model/list", {});
+    }
+    return Promise.resolve(undefined);
+  }
+
+  listTurns(input: { sessionId: string; limit?: number }): Promise<unknown> {
+    if (this.protocol === "codex-app-server") {
+      return this.transport.request("thread/turns/list", {
+        threadId: input.sessionId,
+        limit: input.limit ?? 200,
+      });
     }
     return Promise.resolve(undefined);
   }

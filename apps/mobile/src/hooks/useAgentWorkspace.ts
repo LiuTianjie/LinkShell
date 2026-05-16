@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { createEnvelope, parseTypedPayload } from "@linkshell/protocol";
 import type { Envelope } from "@linkshell/protocol";
 import type { ProjectRecord } from "../storage/projects";
@@ -130,6 +131,7 @@ export interface AgentWorkspaceHandle {
   ) => void;
   browseFiles: (conversationId: string, path: string) => Promise<AgentFileBrowseResult>;
   readFile: (conversationId: string, path: string, maxBytes?: number) => Promise<AgentFileReadResult>;
+  loadOlderHistory: (conversationId: string) => void;
   archive: (conversationId: string, archived: boolean) => Promise<void>;
   rename: (conversationId: string, title: string) => Promise<void>;
 }
@@ -226,6 +228,12 @@ export function useAgentWorkspace(
     resolve: (result: AgentFileReadResult) => void;
     timer: ReturnType<typeof setTimeout>;
   }>());
+  const historyCursorRef = useRef(new Map<string, string | undefined>());
+  const historyHasMoreRef = useRef(new Map<string, boolean>());
+  const pendingHistoryRef = useRef(new Set<string>());
+  const sessionSyncTokenRef = useRef(new Map<string, string>());
+  const appStateRef = useRef(AppState.currentState);
+  const lastRunningSyncRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     managerRef.current = manager;
@@ -238,6 +246,13 @@ export function useAgentWorkspace(
   useEffect(() => {
     timelineRef.current = timelineById;
   }, [timelineById]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      appStateRef.current = state;
+    });
+    return () => subscription.remove();
+  }, []);
 
   const connectedSessions = useMemo(
     () =>
@@ -420,37 +435,168 @@ export function useAgentWorkspace(
     [],
   );
 
+  const markConversationSync = useCallback(
+    (conversationId: string, syncStatus: AgentConversationRecord["syncStatus"]) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation || conversation.syncStatus === syncStatus) return;
+      persistConversation({ ...conversation, syncStatus }).catch(() => {});
+    },
+    [persistConversation],
+  );
+
+  const requestHistoryPage = useCallback(
+    (conversationId: string, cursor?: string) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation) return false;
+      const session = findSessionForConversation(conversation, managerRef.current.sessions);
+      if (!session) {
+        markConversationSync(conversationId, "deferred");
+        return false;
+      }
+      const pendingKey = `${conversationId}:${cursor ?? "latest"}`;
+      if (pendingHistoryRef.current.has(pendingKey)) return true;
+      pendingHistoryRef.current.add(pendingKey);
+      markConversationSync(conversationId, "syncing");
+      const accepted = managerRef.current.sendAgentWorkspaceEnvelope(
+        session.sessionId,
+        "agent.v2.history.request",
+        {
+          conversationId,
+          cursor,
+          limit: 80,
+          direction: "older",
+        },
+        { queue: true, dedupeKey: `agent-v2-history:${conversationId}:${cursor ?? "latest"}` },
+      );
+      if (!accepted) {
+        pendingHistoryRef.current.delete(pendingKey);
+        markConversationSync(conversationId, "stale");
+      }
+      return accepted;
+    },
+    [markConversationSync],
+  );
+
+  const requestDelta = useCallback(
+    (conversationId: string, sinceRevision: number) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation) return false;
+      const session = findSessionForConversation(conversation, managerRef.current.sessions);
+      if (!session) {
+        markConversationSync(conversationId, "deferred");
+        return false;
+      }
+      markConversationSync(conversationId, "syncing");
+      const accepted = managerRef.current.sendAgentWorkspaceEnvelope(
+        session.sessionId,
+        "agent.v2.delta.request",
+        {
+          conversationId,
+          sinceRevision,
+          limit: 100,
+        },
+        { queue: true, dedupeKey: `agent-v2-delta:${conversationId}:${sinceRevision}` },
+      );
+      if (!accepted) markConversationSync(conversationId, "stale");
+      return accepted;
+    },
+    [markConversationSync],
+  );
+
   useEffect(() => {
     if (connectedSessions.length === 0) return;
     requestCapabilities();
     requestConversationList();
   }, [connectedSessions.length, requestCapabilities, requestConversationList]);
 
+  useEffect(() => {
+    for (const session of connectedSessions) {
+      if (session.status !== "connected") continue;
+      const token = `${session.sessionId}:${session.machineId ?? ""}:${session.cwd ?? ""}`;
+      if (sessionSyncTokenRef.current.get(session.sessionId) === token) continue;
+      sessionSyncTokenRef.current.set(session.sessionId, token);
+      for (const conversation of conversationsRef.current) {
+        if (conversation.archived) continue;
+        const resolved = findSessionForConversation(conversation, managerRef.current.sessions);
+        if (resolved?.sessionId !== session.sessionId) continue;
+        const revision = conversation.timelineRevision ?? 0;
+        if (revision > 0) requestDelta(conversation.id, revision);
+        else requestHistoryPage(conversation.id);
+      }
+    }
+  }, [connectedSessions, requestDelta, requestHistoryPage]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const foreground = appStateRef.current === "active";
+      for (const conversation of conversationsRef.current) {
+        if (conversation.archived) continue;
+        const running =
+          conversation.status === "running" ||
+          conversation.status === "waiting_permission";
+        const needsRecovery =
+          conversation.syncStatus === "stale" ||
+          conversation.syncStatus === "deferred";
+        if (!running && !needsRecovery) continue;
+        const session = findSessionForConversation(conversation, managerRef.current.sessions);
+        if (!session || session.status !== "connected") continue;
+        const isActive = activeConversationId === conversation.id;
+        const interval = running
+          ? foreground && isActive
+            ? 2_500
+            : foreground
+            ? 12_000
+            : 15_000
+          : 45_000;
+        const last = lastRunningSyncRef.current.get(conversation.id) ?? 0;
+        if (now - last < interval) continue;
+        lastRunningSyncRef.current.set(conversation.id, now);
+        const revision = conversation.timelineRevision ?? 0;
+        if (revision > 0) requestDelta(conversation.id, revision);
+        else requestHistoryPage(conversation.id);
+      }
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [activeConversationId, requestDelta, requestHistoryPage]);
+
   const handleEnvelope = useCallback(
     (envelope: Envelope) => {
       const serverSession = managerRef.current.sessions.get(envelope.hostDeviceId);
       const serverUrl = normalizeServerUrl(serverSession?.gatewayUrl ?? "");
-      const toRecord = (conversation: any): AgentConversationRecord => ({
-        id: conversation.id,
-        serverUrl,
-        hostDeviceId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.hostDeviceId,
-        sessionId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.hostDeviceId,
-        machineId: serverSession?.machineId ?? conversation.machineId,
-        agentSessionId: conversation.agentSessionId,
-        provider: conversation.provider ?? "codex",
-        cwd: conversation.cwd ?? serverSession?.cwd ?? "",
-        title: conversation.title,
-        model: conversation.model,
-        reasoningEffort: conversation.reasoningEffort,
-        permissionMode: conversation.permissionMode,
-        collaborationMode: conversation.collaborationMode,
-        status: conversation.status ?? "idle",
-        archived: Boolean(conversation.archived),
-        lastMessagePreview: conversation.lastMessagePreview,
-        lastActivityAt: conversation.lastActivityAt ?? Date.now(),
-        createdAt: conversation.createdAt ?? Date.now(),
-        schemaVersion: 2,
-      });
+      const toRecord = (conversation: any): AgentConversationRecord => {
+        const previous = conversationsRef.current.find((item) => item.id === conversation.id);
+        const rawRevision = typeof conversation.timelineRevision === "number" ? conversation.timelineRevision : undefined;
+        return {
+          id: conversation.id,
+          serverUrl,
+          hostDeviceId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.hostDeviceId,
+          sessionId: serverSession?.hostDeviceId ?? envelope.hostDeviceId ?? envelope.hostDeviceId,
+          machineId: serverSession?.machineId ?? conversation.machineId,
+          agentSessionId: conversation.agentSessionId,
+          provider: conversation.provider ?? "codex",
+          cwd: conversation.cwd ?? serverSession?.cwd ?? "",
+          title: conversation.title,
+          model: conversation.model,
+          reasoningEffort: conversation.reasoningEffort,
+          permissionMode: conversation.permissionMode,
+          collaborationMode: conversation.collaborationMode,
+          status: conversation.status ?? "idle",
+          archived: Boolean(conversation.archived),
+          timelineRevision: rawRevision === undefined
+            ? previous?.timelineRevision
+            : Math.max(previous?.timelineRevision ?? 0, rawRevision),
+          historyComplete: typeof conversation.historyComplete === "boolean" ? conversation.historyComplete : previous?.historyComplete,
+          runningTurnId: typeof conversation.runningTurnId === "string" ? conversation.runningTurnId : undefined,
+          syncStatus: conversation.syncStatus ?? previous?.syncStatus ?? "deferred",
+          source: conversation.source ?? previous?.source,
+          canonical: typeof conversation.canonical === "boolean" ? conversation.canonical : previous?.canonical,
+          lastMessagePreview: conversation.lastMessagePreview,
+          lastActivityAt: conversation.lastActivityAt ?? Date.now(),
+          createdAt: conversation.createdAt ?? Date.now(),
+          schemaVersion: 2,
+        };
+      };
 
       if (envelope.type === "agent.v2.capabilities") {
         const payload = parseTypedPayload("agent.v2.capabilities", envelope.payload) as AgentCapabilities;
@@ -504,7 +650,18 @@ export function useAgentWorkspace(
 
       if (envelope.type === "agent.v2.conversation.opened") {
         const payload = parseTypedPayload("agent.v2.conversation.opened", envelope.payload) as any;
-        const record = toRecord(payload.conversation);
+        const record = {
+          ...toRecord(payload.conversation),
+          timelineRevision: typeof payload.revision === "number"
+            ? payload.revision
+            : payload.conversation?.timelineRevision,
+          historyComplete: payload.hasMore === true ? false : payload.conversation?.historyComplete,
+          syncStatus: payload.hasMore === true ? "syncing" as const : "complete" as const,
+          source: payload.source ?? payload.conversation?.source,
+          canonical: typeof payload.canonical === "boolean" ? payload.canonical : payload.conversation?.canonical,
+        };
+        historyCursorRef.current.set(record.id, payload.cursor);
+        historyHasMoreRef.current.set(record.id, Boolean(payload.hasMore));
         persistConversation(record).catch(() => {});
         setActiveConversationId(record.id);
         const pending = pendingOpenRef.current.get(record.id);
@@ -528,6 +685,7 @@ export function useAgentWorkspace(
             return next;
           });
         }
+        requestHistoryPage(record.id);
         return;
       }
 
@@ -555,7 +713,17 @@ export function useAgentWorkspace(
         const payload = parseTypedPayload("agent.v2.snapshot", envelope.payload) as any;
         if (payload.activeConversationId) setActiveConversationId(payload.activeConversationId);
         for (const conversation of payload.conversations ?? []) {
-          persistConversation(toRecord(conversation)).catch(() => {});
+          persistConversation({
+            ...toRecord(conversation),
+            syncStatus: payload.hasMore === true ? "syncing" : "complete",
+          }).catch(() => {});
+        }
+        if (payload.activeConversationId || typeof payload.revision === "number") {
+          const snapshotConversationId = payload.activeConversationId as string | undefined;
+          if (snapshotConversationId) {
+            historyCursorRef.current.set(snapshotConversationId, payload.cursor);
+            historyHasMoreRef.current.set(snapshotConversationId, Boolean(payload.hasMore));
+          }
         }
         const grouped = new Map<string, AgentTimelineItem[]>();
         for (const item of normalizeSnapshotItems((payload.items ?? []) as AgentTimelineItem[])) {
@@ -573,10 +741,108 @@ export function useAgentWorkspace(
         return;
       }
 
+      if (envelope.type === "agent.v2.history.page") {
+        const payload = parseTypedPayload("agent.v2.history.page", envelope.payload) as any;
+        for (const pendingKey of pendingHistoryRef.current) {
+          if (pendingKey.startsWith(`${payload.conversationId}:`)) {
+            pendingHistoryRef.current.delete(pendingKey);
+          }
+        }
+        historyCursorRef.current.set(payload.conversationId, payload.cursor);
+        historyHasMoreRef.current.set(payload.conversationId, Boolean(payload.hasMore));
+        if (payload.conversation) {
+          persistConversation({
+            ...toRecord(payload.conversation),
+            timelineRevision: payload.revision,
+            historyComplete: !payload.hasMore,
+            syncStatus: payload.hasMore ? "syncing" : "complete",
+            source: payload.source,
+            canonical: payload.canonical,
+          }).catch(() => {});
+        }
+        const items = normalizeSnapshotItems((payload.items ?? []) as AgentTimelineItem[]);
+        setTimelineById((prev) => {
+          const next = new Map(prev);
+          const merged = mergeTimeline(next.get(payload.conversationId) ?? [], items);
+          next.set(payload.conversationId, merged);
+          saveAgentTimeline(payload.conversationId, merged).catch(() => {});
+          return next;
+        });
+        return;
+      }
+
+      if (envelope.type === "agent.v2.delta") {
+        const payload = parseTypedPayload("agent.v2.delta", envelope.payload) as any;
+        historyCursorRef.current.set(payload.conversationId, payload.cursor);
+        historyHasMoreRef.current.set(payload.conversationId, Boolean(payload.hasMore));
+        if (payload.conversation) {
+          persistConversation({
+            ...toRecord(payload.conversation),
+            timelineRevision: payload.revision,
+            historyComplete: payload.hasMore ? false : payload.conversation.historyComplete,
+            syncStatus: payload.hasMore ? "syncing" : "complete",
+            source: payload.source,
+            canonical: payload.canonical,
+          }).catch(() => {});
+        }
+        const items = normalizeSnapshotItems((payload.items ?? []) as AgentTimelineItem[]);
+        if (items.length > 0 || payload.reset) {
+          setTimelineById((prev) => {
+            const next = new Map(prev);
+            const base = payload.reset ? [] : next.get(payload.conversationId) ?? [];
+            const merged = mergeTimeline(base, items);
+            next.set(payload.conversationId, merged);
+            saveAgentTimeline(payload.conversationId, merged).catch(() => {});
+            return next;
+          });
+        }
+        return;
+      }
+
+      if (envelope.type === "agent.v2.running_state") {
+        const payload = parseTypedPayload("agent.v2.running_state", envelope.payload) as any;
+        const existing = conversationsRef.current.find((item) => item.id === payload.conversationId);
+        if (existing) {
+          const localRevision = existing.timelineRevision ?? 0;
+          const hasRevisionGap = typeof payload.revision === "number" && localRevision > 0 && payload.revision > localRevision + 1;
+          if (hasRevisionGap) {
+            requestDelta(payload.conversationId, localRevision);
+          }
+          persistConversation({
+            ...existing,
+            status: payload.status,
+            runningTurnId: payload.runningTurnId,
+            timelineRevision: typeof payload.revision === "number"
+              ? Math.max(localRevision, payload.revision)
+              : existing.timelineRevision,
+            syncStatus: hasRevisionGap ? "stale" : "complete",
+            lastActivityAt: payload.updatedAt ?? Date.now(),
+          }).catch(() => {});
+        }
+        return;
+      }
+
       if (envelope.type === "agent.v2.event") {
         const payload = parseTypedPayload("agent.v2.event", envelope.payload) as any;
+        const incomingRevision =
+          typeof payload.revision === "number"
+            ? payload.revision
+            : typeof payload.item?.revision === "number"
+            ? payload.item.revision
+            : typeof payload.conversation?.timelineRevision === "number"
+            ? payload.conversation.timelineRevision
+            : undefined;
+        const existingConversation = conversationsRef.current.find((item) => item.id === payload.conversationId);
+        const localRevision = existingConversation?.timelineRevision ?? 0;
+        if (incomingRevision && localRevision > 0 && incomingRevision > localRevision + 1) {
+          requestDelta(payload.conversationId, localRevision);
+        }
         if (payload.conversation) {
-          persistConversation(toRecord(payload.conversation)).catch(() => {});
+          persistConversation({
+            ...toRecord(payload.conversation),
+            timelineRevision: incomingRevision ?? payload.conversation.timelineRevision,
+            syncStatus: incomingRevision && localRevision > 0 && incomingRevision > localRevision + 1 ? "stale" : "complete",
+          }).catch(() => {});
         }
         if (payload.item) {
           persistTimelineItem(payload.item as AgentTimelineItem).catch(() => {});
@@ -589,6 +855,12 @@ export function useAgentWorkspace(
                 lastMessagePreview: preview,
                 lastActivityAt: Date.now(),
                 status: payload.item.status ?? existing.status,
+                timelineRevision: incomingRevision
+                  ? Math.max(existing.timelineRevision ?? 0, incomingRevision)
+                  : existing.timelineRevision,
+                syncStatus: incomingRevision && (existing.timelineRevision ?? 0) > 0 && incomingRevision > (existing.timelineRevision ?? 0) + 1
+                  ? "stale"
+                  : "complete",
               }).catch(() => {});
             }
           }
@@ -661,6 +933,12 @@ export function useAgentWorkspace(
                 lastMessagePreview: preview,
                 lastActivityAt: Date.now(),
                 status: patchedItem.status ?? existing.status,
+                timelineRevision: incomingRevision
+                  ? Math.max(existing.timelineRevision ?? 0, incomingRevision)
+                  : existing.timelineRevision,
+                syncStatus: incomingRevision && (existing.timelineRevision ?? 0) > 0 && incomingRevision > (existing.timelineRevision ?? 0) + 1
+                  ? "stale"
+                  : "complete",
               }).catch(() => {});
             }
             const next = new Map(prev);
@@ -918,7 +1196,7 @@ export function useAgentWorkspace(
         }).catch(() => {});
       }
     },
-    [activeConversationId, persistConversation, persistTimelineItem],
+    [activeConversationId, persistConversation, persistTimelineItem, requestDelta, requestHistoryPage],
   );
 
   useEffect(() => {
@@ -1571,6 +1849,14 @@ export function useAgentWorkspace(
     [manager],
   );
 
+  const loadOlderHistory = useCallback(
+    (conversationId: string) => {
+      if (historyHasMoreRef.current.get(conversationId) === false) return;
+      requestHistoryPage(conversationId, historyCursorRef.current.get(conversationId));
+    },
+    [requestHistoryPage],
+  );
+
   const archive = useCallback(async (conversationId: string, archived: boolean) => {
     await archiveAgentConversation(conversationId, archived);
     setConversations((prev) =>
@@ -1610,6 +1896,7 @@ export function useAgentWorkspace(
     respondStructuredInput,
     browseFiles,
     readFile,
+    loadOlderHistory,
     archive,
     rename,
   };

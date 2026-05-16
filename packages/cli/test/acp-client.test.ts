@@ -49,7 +49,21 @@ rl.on("line", (line) => {
   } else if (message.method === "thread/compact/start") {
     send({ jsonrpc: "2.0", id: message.id, result: { ok: true } });
   } else if (message.method === "thread/list") {
-    send({ jsonrpc: "2.0", id: message.id, result: { threads: [{ id: "thread-1", cwd: ${JSON.stringify(cwd)}, title: "Test thread" }] } });
+    send({ jsonrpc: "2.0", id: message.id, result: { threads: [{ id: "thread-1", cwd: ${JSON.stringify(cwd)}, title: "Remote test thread", status: "running", runningTurnId: "turn-1", archived: false }] } });
+  } else if (message.method === "thread/turns/list") {
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        turns: [{
+          id: "turn-1",
+          createdAt: "2026-05-16T01:00:00.000Z",
+          input: [{ type: "text", text: "Remote user prompt" }],
+          output: [{ type: "text", text: "Remote assistant answer" }],
+          status: "completed"
+        }]
+      }
+    });
   } else {
     send({ jsonrpc: "2.0", id: message.id, result: {} });
   }
@@ -94,6 +108,8 @@ describe("AcpClient codex app-server protocol", () => {
     await client.initialize();
     const models = await client.listModels();
     const session = await client.newSession({ cwd: fake.cwd });
+    const sessions = await client.listSessions();
+    const turns = await client.listTurns({ sessionId: "thread-1" });
     await client.prompt({
       sessionId: "thread-1",
       content: [{ type: "text", text: "hello" }],
@@ -110,13 +126,26 @@ describe("AcpClient codex app-server protocol", () => {
       defaultModel: "gpt-5.5",
     });
     expect(session).toMatchObject({ thread: { id: "thread-1" } });
+    expect((sessions as any).sessions).toContainEqual(
+      expect.objectContaining({
+        id: "thread-1",
+        title: "Remote test thread",
+        status: "running",
+        runningTurnId: "turn-1",
+      }),
+    );
+    expect(turns).toMatchObject({
+      turns: [expect.objectContaining({ id: "turn-1" })],
+    });
 
-    const entries = await waitForLogEntries(fake.logPath, 6);
+    const entries = await waitForLogEntries(fake.logPath, 8);
     expect(entries.map((entry) => entry.method)).toEqual([
       "initialize",
       "initialized",
       "model/list",
       "thread/start",
+      "thread/list",
+      "thread/turns/list",
       "turn/start",
       "thread/compact/start",
     ]);
@@ -124,7 +153,7 @@ describe("AcpClient codex app-server protocol", () => {
       clientInfo: { name: "LinkShell", version: "0.1" },
       capabilities: { experimentalApi: true },
     });
-    expect(entries[4].params).toMatchObject({
+    expect(entries[6].params).toMatchObject({
       threadId: "thread-1",
       effort: "high",
       collaborationMode: {
@@ -141,8 +170,9 @@ describe("AcpClient codex app-server protocol", () => {
         },
       },
     });
-    expect(entries[5].params).toEqual({ threadId: "thread-1" });
-    expect(entries[4].params).not.toHaveProperty("permissionProfile");
+    expect(entries[5].params).toMatchObject({ threadId: "thread-1", limit: 200 });
+    expect(entries[7].params).toEqual({ threadId: "thread-1" });
+    expect(entries[6].params).not.toHaveProperty("permissionProfile");
   });
 
   it("omits default collaboration mode and null settings for ordinary turns", async () => {

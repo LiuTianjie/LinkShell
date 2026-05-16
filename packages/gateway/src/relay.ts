@@ -15,6 +15,10 @@ import {
 } from "./tunnel.js";
 import { resolveAgentPermissionHttpAck } from "./agent-permission-http.js";
 
+const AGENT_SNAPSHOT_WARN_BYTES = Number(
+  process.env.AGENT_SNAPSHOT_WARN_BYTES ?? 1024 * 1024,
+);
+
 export function handleSocketMessage(
   socket: WebSocket,
   raw: string,
@@ -189,6 +193,14 @@ function handleHostMessage(
     case "agent.v2.conversation.list.result":
     case "agent.v2.event":
     case "agent.v2.snapshot":
+      if (envelope.type === "agent.v2.snapshot" && Buffer.byteLength(raw, "utf8") > AGENT_SNAPSHOT_WARN_BYTES) {
+        process.stderr.write(`[gateway:warn] oversized agent snapshot host=${session.id} bytes=${Buffer.byteLength(raw, "utf8")}\n`);
+      }
+      broadcastToClients(session, envelope, raw);
+      break;
+    case "agent.v2.history.page":
+    case "agent.v2.delta":
+    case "agent.v2.running_state":
     case "agent.v2.permission.request":
     // Multi-terminal: host → clients
     case "terminal.spawned":
@@ -340,6 +352,8 @@ function handleClientMessage(
     case "agent.v2.capabilities.request":
     case "agent.v2.conversation.list":
     case "agent.v2.snapshot.request":
+    case "agent.v2.history.request":
+    case "agent.v2.delta.request":
       sendToHost(session, envelope, raw);
       break;
     default:

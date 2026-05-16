@@ -76,10 +76,13 @@ describe("AgentWorkspaceProxy event routing", () => {
 
     proxy.handleAgentMessageDelta({ turnId: "turn-a", itemId: "assistant-1", delta: "hello" });
 
-    expect(sent).toHaveLength(2);
-    expect(sent[0].payload.conversationId).toBe("conversation-a");
-    expect(sent[0].payload.item.text).toBe("hello");
-    expect(sent[1].payload.conversationId).toBe("conversation-a");
+    const events = sent.filter((envelope) => envelope.type === "agent.v2.event");
+    expect(events).toHaveLength(2);
+    expect(events[0].payload.conversationId).toBe("conversation-a");
+    expect(events[0].payload.item.text).toBe("hello");
+    expect(events[0].payload.revision).toBe(1);
+    expect(events[1].payload.conversationId).toBe("conversation-a");
+    expect(sent.find((envelope) => envelope.type === "agent.v2.running_state")?.payload.status).toBe("running");
   });
 
   it("emits a conversation update when Claude reports the real session id", () => {
@@ -90,8 +93,9 @@ describe("AgentWorkspaceProxy event routing", () => {
     proxy.handleNotification("thread/started", { sessionId: "claude-real-session" });
 
     expect(proxy.conversationByAgentSessionId.get("claude-real-session")).toBe("conversation-a");
-    expect(sent).toHaveLength(1);
-    expect(sent[0].payload.conversation.agentSessionId).toBe("claude-real-session");
+    const event = sent.find((envelope) => envelope.type === "agent.v2.event");
+    expect(event.payload.conversation.agentSessionId).toBe("claude-real-session");
+    expect(sent.find((envelope) => envelope.type === "agent.v2.running_state")?.payload.conversationId).toBe("conversation-a");
   });
 
   it("keeps assistant image content blocks for mobile rendering", () => {
@@ -259,6 +263,113 @@ describe("AgentWorkspaceProxy event routing", () => {
     ]);
   });
 
+  it("serves canonical history pages and live deltas by revision", async () => {
+    const home = useTempHome();
+    const activeDir = join(home, ".codex", "sessions", "2026", "05", "16");
+    mkdirSync(activeDir, { recursive: true });
+    writeJsonl(join(activeDir, "rollout-2026-05-16T01-00-00-019e-history.jsonl"), [
+      {
+        timestamp: "2026-05-16T01:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "019e-history",
+          cwd: "/Users/tifenxia/HistoryProject",
+          timestamp: "2026-05-16T01:00:00.000Z",
+        },
+      },
+      {
+        timestamp: "2026-05-16T01:01:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "First" },
+      },
+      {
+        timestamp: "2026-05-16T01:02:00.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "Second" },
+      },
+      {
+        timestamp: "2026-05-16T01:03:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Third" },
+      },
+    ]);
+    const sent: any[] = [];
+    const proxy = new AgentWorkspaceProxy({
+      hostDeviceId: "host-1",
+      cwd: "/tmp",
+      availableProviders: [],
+      send: (envelope) => sent.push(envelope),
+    }) as any;
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.conversation.list",
+      hostDeviceId: "host-1",
+      payload: { includeArchived: true },
+    });
+    await proxy.handleEnvelope({
+      type: "agent.v2.history.request",
+      hostDeviceId: "host-1",
+      payload: { conversationId: "agent:019e-history", limit: 2 },
+    });
+
+    const page = sent.find((envelope) => envelope.type === "agent.v2.history.page");
+    expect(page.payload.items.map((item: any) => item.text)).toEqual(["Second", "Third"]);
+    expect(page.payload.cursor).toBe("1");
+    expect(page.payload.hasMore).toBe(true);
+    expect(page.payload.revision).toBeGreaterThanOrEqual(3);
+
+    proxy.handleAgentMessageDelta({ sessionId: "019e-history", itemId: "assistant-live", delta: "Live" });
+    await proxy.handleEnvelope({
+      type: "agent.v2.delta.request",
+      hostDeviceId: "host-1",
+      payload: { conversationId: "agent:019e-history", sinceRevision: page.payload.revision },
+    });
+
+    const delta = sent.filter((envelope) => envelope.type === "agent.v2.delta").at(-1);
+    expect(delta.payload.items).toContainEqual(expect.objectContaining({
+      id: "assistant-live",
+      text: "Live",
+    }));
+    expect(delta.payload.revision).toBeGreaterThan(page.payload.revision);
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.delta.request",
+      hostDeviceId: "host-1",
+      payload: { conversationId: "agent:019e-history", sinceRevision: delta.payload.revision + 100 },
+    });
+    const reset = sent.filter((envelope) => envelope.type === "agent.v2.delta").at(-1);
+    expect(reset.payload.reset).toBe(true);
+    expect(reset.payload.items.length).toBeGreaterThan(0);
+  });
+
+  it("uses Codex app-server turns as canonical history when available", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.get("conversation-a").status = "idle";
+    proxy.agentProtocols.set("codex", "codex-app-server");
+    proxy.clients.set("codex", {
+      listTurns: async () => ({
+        turns: [{
+          id: "turn-remote",
+          createdAt: "2026-05-16T01:00:00.000Z",
+          input: [{ type: "text", text: "Remote prompt" }],
+          output: [{ type: "text", text: "Remote answer" }],
+        }],
+      }),
+    });
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.history.request",
+      hostDeviceId: "host-1",
+      payload: { conversationId: "conversation-a", limit: 10 },
+    });
+
+    const page = sent.find((envelope) => envelope.type === "agent.v2.history.page");
+    expect(page.payload.items).toEqual([
+      expect.objectContaining({ role: "user", text: "Remote prompt", source: "app-server" }),
+      expect.objectContaining({ role: "assistant", text: "Remote answer", source: "app-server" }),
+    ]);
+  });
+
   it("advertises selectable controls for enabled providers", async () => {
     const sent: any[] = [];
     const proxy = new AgentWorkspaceProxy({
@@ -418,5 +529,57 @@ describe("AgentWorkspaceProxy event routing", () => {
       permissionMode: undefined,
       collaborationMode: "default",
     }));
+  });
+
+  it("cancels only the target conversation's pending permission and emits a terminal outcome", async () => {
+    const { proxy, sent } = makeProxy();
+    let permissionBResolved = false;
+
+    const permissionA = proxy.handlePermission({
+      conversationId: "conversation-a",
+      requestId: "perm-a",
+      toolName: "Shell",
+      input: { command: "pnpm test" },
+    }, true, "session/request_permission") as Promise<unknown>;
+    const permissionB = proxy.handlePermission({
+      conversationId: "conversation-b",
+      requestId: "perm-b",
+      toolName: "Shell",
+      input: { command: "git status" },
+    }, true, "session/request_permission") as Promise<unknown>;
+    permissionB.then(() => {
+      permissionBResolved = true;
+    });
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.cancel",
+      hostDeviceId: "host-1",
+      payload: { conversationId: "conversation-a" },
+    });
+
+    await expect(permissionA).resolves.toEqual({ outcome: { outcome: "cancelled" } });
+    expect(permissionBResolved).toBe(false);
+    expect(sent.filter((envelope) =>
+      envelope.type === "agent.v2.event" &&
+      envelope.payload.item?.permission?.requestId === "perm-a" &&
+      envelope.payload.item?.metadata?.permissionOutcome === "cancelled"
+    )).toHaveLength(1);
+    expect(sent).toContainEqual(expect.objectContaining({
+      type: "agent.v2.event",
+      payload: expect.objectContaining({
+        conversationId: "conversation-a",
+        item: expect.objectContaining({
+          type: "status",
+          text: "已停止",
+        }),
+      }),
+    }));
+
+    await proxy.handleEnvelope({
+      type: "agent.v2.cancel",
+      hostDeviceId: "host-1",
+      payload: { conversationId: "conversation-b" },
+    });
+    await expect(permissionB).resolves.toEqual({ outcome: { outcome: "cancelled" } });
   });
 });

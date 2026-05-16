@@ -574,6 +574,9 @@ export const agentV2TimelineItemSchema = z.object({
   conversationId: z.string().min(1),
   type: z.enum(["message", "tool_call", "plan", "permission", "status", "error"]),
   kind: agentV2TimelineKindSchema.optional(),
+  revision: z.number().int().nonnegative().optional(),
+  source: z.enum(["device", "device-history", "device-live", "app-server", "cache"]).optional(),
+  canonical: z.boolean().optional(),
   turnId: z.string().optional(),
   itemId: z.string().optional(),
   role: z.enum(["user", "assistant", "system"]).optional(),
@@ -610,6 +613,11 @@ export const agentV2ConversationSchema = z.object({
   collaborationMode: agentCollaborationModeSchema.optional(),
   status: agentV2StatusSchema.default("idle"),
   archived: z.boolean().default(false),
+  timelineRevision: z.number().int().nonnegative().optional(),
+  historyComplete: z.boolean().optional(),
+  runningTurnId: z.string().optional(),
+  source: z.enum(["device", "device-history", "device-live", "app-server", "cache"]).optional(),
+  canonical: z.boolean().optional(),
   lastMessagePreview: z.string().optional(),
   lastActivityAt: z.number(),
   createdAt: z.number(),
@@ -636,6 +644,11 @@ export const agentV2ConversationOpenPayloadSchema = z.object({
 export const agentV2ConversationOpenedPayloadSchema = z.object({
   conversation: agentV2ConversationSchema,
   snapshot: z.array(agentV2TimelineItemSchema).default([]),
+  revision: z.number().int().nonnegative().optional(),
+  cursor: z.string().optional(),
+  hasMore: z.boolean().optional(),
+  source: z.enum(["device", "device-history", "device-live", "app-server", "cache"]).optional(),
+  canonical: z.boolean().optional(),
 });
 
 export const agentV2ConversationListPayloadSchema = z.object({
@@ -690,12 +703,68 @@ export const agentV2SnapshotPayloadSchema = z.object({
   activeConversationId: z.string().optional(),
   items: z.array(agentV2TimelineItemSchema).default([]),
   machineId: z.string().min(1).optional(),
+  revision: z.number().int().nonnegative().optional(),
+  cursor: z.string().optional(),
+  hasMore: z.boolean().optional(),
+  source: z.enum(["device", "device-history", "device-live", "app-server", "cache"]).optional(),
+  canonical: z.boolean().optional(),
+});
+
+export const agentV2HistoryRequestPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().max(200).optional().default(80),
+  direction: z.enum(["older", "newer"]).optional().default("older"),
+});
+
+export const agentV2HistoryPagePayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  conversation: agentV2ConversationSchema.optional(),
+  items: z.array(agentV2TimelineItemSchema).default([]),
+  revision: z.number().int().nonnegative(),
+  cursor: z.string().optional(),
+  hasMore: z.boolean().default(false),
+  source: z.enum(["device", "device-history", "device-live", "app-server", "cache"]).default("device-history"),
+  canonical: z.boolean().default(true),
+});
+
+export const agentV2DeltaRequestPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  sinceRevision: z.number().int().nonnegative().optional().default(0),
+  limit: z.number().int().positive().max(500).optional().default(100),
+});
+
+export const agentV2DeltaPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  conversation: agentV2ConversationSchema.optional(),
+  items: z.array(agentV2TimelineItemSchema).default([]),
+  sinceRevision: z.number().int().nonnegative().optional(),
+  revision: z.number().int().nonnegative(),
+  reset: z.boolean().optional().default(false),
+  cursor: z.string().optional(),
+  hasMore: z.boolean().default(false),
+  source: z.enum(["device", "device-history", "device-live", "app-server", "cache"]).default("device-live"),
+  canonical: z.boolean().default(true),
+});
+
+export const agentV2RunningStatePayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  status: agentV2StatusSchema,
+  runningTurnId: z.string().optional(),
+  revision: z.number().int().nonnegative().optional(),
+  error: z.string().optional(),
+  updatedAt: z.number(),
+  source: z.enum(["device", "device-history", "device-live", "app-server", "cache"]).default("device-live"),
+  canonical: z.boolean().default(true),
 });
 
 export const agentV2EventPayloadSchema = z.object({
   conversationId: z.string().min(1),
   conversation: agentV2ConversationSchema.optional(),
   item: agentV2TimelineItemSchema.optional(),
+  revision: z.number().int().nonnegative().optional(),
+  source: z.enum(["device", "device-history", "device-live", "app-server", "cache"]).optional(),
+  canonical: z.boolean().optional(),
   patch: z.object({
     itemId: z.string().min(1),
     kind: agentV2TimelineKindSchema.optional(),
@@ -790,6 +859,11 @@ export const protocolMessageSchemas = {
   "agent.v2.structured_input.respond": agentV2StructuredInputRespondPayloadSchema,
   "agent.v2.snapshot.request": agentV2SnapshotRequestPayloadSchema,
   "agent.v2.snapshot": agentV2SnapshotPayloadSchema,
+  "agent.v2.history.request": agentV2HistoryRequestPayloadSchema,
+  "agent.v2.history.page": agentV2HistoryPagePayloadSchema,
+  "agent.v2.delta.request": agentV2DeltaRequestPayloadSchema,
+  "agent.v2.delta": agentV2DeltaPayloadSchema,
+  "agent.v2.running_state": agentV2RunningStatePayloadSchema,
   "agent.v2.event": agentV2EventPayloadSchema,
 } as const;
 

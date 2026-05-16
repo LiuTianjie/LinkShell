@@ -14,6 +14,8 @@ export interface CodexStoredSession {
   createdAt?: number;
   lastModified: number;
   archived?: boolean;
+  status?: string;
+  runningTurnId?: string;
 }
 
 export interface StoredAgentTimelineItem {
@@ -693,6 +695,7 @@ export function loadCodexStoredTimeline(
   sessionId: string,
   conversationId: string,
   inputCwd: string,
+  options: { maxItems?: number } = {},
 ): { items: StoredAgentTimelineItem[] } {
   const file = findCodexSessionFile(sessionId, inputCwd);
   if (!file) return { items: [] };
@@ -794,6 +797,6 @@ export function loadCodexStoredTimeline(
   return {
     items: [...itemsById.values()]
       .sort((a, b) => a.createdAt - b.createdAt)
-      .slice(-MAX_HISTORY_ITEMS),
+      .slice(-Math.max(1, options.maxItems ?? MAX_HISTORY_ITEMS)),
   };
 }

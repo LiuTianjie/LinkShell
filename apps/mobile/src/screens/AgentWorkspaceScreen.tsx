@@ -463,6 +463,22 @@ function ConversationStateIndicator({
       />
     );
   }
+  if (conversation.syncStatus === "syncing") {
+    return <SpinningRing color={theme.textTertiary} />;
+  }
+  if (conversation.syncStatus === "stale" || conversation.syncStatus === "deferred") {
+    return (
+      <View
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: conversation.syncStatus === "stale" ? theme.warning : theme.textTertiary,
+          opacity: conversation.syncStatus === "deferred" ? 0.7 : 1,
+        }}
+      />
+    );
+  }
   return null;
 }
 
