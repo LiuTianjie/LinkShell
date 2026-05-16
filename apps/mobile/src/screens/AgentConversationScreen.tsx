@@ -182,6 +182,7 @@ const CLAUDE_MODEL_OPTIONS: Option<string>[] = [
 const MAX_IMAGE_ATTACHMENTS = 3;
 const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
 const FILE_PREVIEW_MAX_BYTES = 256_000;
+const FILE_PREVIEW_TIMEOUT_MS = 30_000;
 const DEFAULT_OPTION_ID = "__default__";
 const MONO_FONT = Platform.select({ ios: "Menlo", android: "monospace" });
 
@@ -703,7 +704,7 @@ function normalizeFileReference(raw: string | undefined): string | undefined {
     .replace(/[#?].*$/, "")
     .replace(/:(\d+)(?::\d+)?$/, "")
     .trim();
-  if (!value || /\s/.test(value)) return undefined;
+  if (!value) return undefined;
   if (value.startsWith("/") || value.startsWith("~") || value.startsWith("./") || value.startsWith("../")) return value;
   if (value.includes("/") || /^[\w.-]+\.[A-Za-z0-9]+$/.test(value)) return value;
   return undefined;
@@ -1982,7 +1983,7 @@ function MarkdownContent({
         onLinkPress={(url) => {
           const filePath = normalizeFileReference(url);
           if (filePath && onOpenFile) {
-            onOpenFile(filePath, { autoRead: false });
+            onOpenFile(filePath, { autoRead: true });
             return false;
           }
           if (!/^https?:\/\//i.test(url)) return false;
@@ -3670,7 +3671,7 @@ function FilePreviewDrawer({
       setEntries([]);
       setBrowseError("读取目录超时：主机端没有返回文件列表，请确认 Codex/LinkShell 会话仍在线。");
       setBrowseLoading(false);
-    }, 15_000);
+    }, FILE_PREVIEW_TIMEOUT_MS);
     try {
       const result = await workspaceRef.current.browseFiles(conversationId, path);
       if (requestSeqRef.current !== requestSeq) return;
@@ -3712,7 +3713,7 @@ function FilePreviewDrawer({
         error: "读取文件超时：主机端没有返回文件内容，请确认 Codex app-server / LinkShell 会话仍在线。",
       });
       setPreviewLoading(false);
-    }, 15_000);
+    }, FILE_PREVIEW_TIMEOUT_MS);
     workspaceRef.current.readFile(conversationId, path, FILE_PREVIEW_MAX_BYTES)
       .then((result) => {
         if (readSeqRef.current !== readSeq) return;

@@ -286,14 +286,25 @@ function normalizePosixPath(path: string): string {
 }
 
 function base64ToUtf8(data: string): string {
-  const atobFn = (globalThis as { atob?: (value: string) => string }).atob;
-  if (typeof atobFn !== "function") return "";
-  const binary = atobFn(data);
-  const bytes = Array.from(binary, (char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`).join("");
   try {
-    return decodeURIComponent(bytes);
+    const atobFn = (globalThis as { atob?: (value: string) => string }).atob;
+    if (typeof atobFn === "function") {
+      const binary = atobFn(data);
+      const bytes = Array.from(binary, (char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`).join("");
+      try {
+        return decodeURIComponent(bytes);
+      } catch {
+        return binary;
+      }
+    }
   } catch {
-    return binary;
+    // fallthrough
+  }
+  const buffer = (globalThis as { Buffer?: { from: (value: string, encoding: "base64") => { toString: (encoding: "utf8") => string } } }).Buffer;
+  try {
+    return buffer?.from(data, "base64").toString("utf8") ?? "";
+  } catch {
+    return "";
   }
 }
 
@@ -1413,11 +1424,21 @@ function humanizeCodexRpcError(message: string): string {
   if (
     message.includes("TokenRefreshFailed") ||
     message.includes("Failed to parse server response") ||
-    message.includes("Transport channel closed")
+    message.includes("Transport channel closed") ||
+    message.includes("timeout waiting for child process to exit")
   ) {
     return "Codex 登录状态已失效或刷新失败，请在主机端重新运行 codex login 后重试。";
   }
   return message;
+}
+
+function codexRpcErrorInvalidatesTransport(message: string): boolean {
+  return (
+    message.includes("TokenRefreshFailed") ||
+    message.includes("Failed to parse server response") ||
+    message.includes("Transport channel closed") ||
+    message.includes("timeout waiting for child process to exit")
+  );
 }
 
 function failPendingCodexRequestsForSession(
@@ -2064,6 +2085,7 @@ export function useAgentWorkspace(
   const pendingCodexRef = useRef(new Map<CodexRpcId, PendingCodexRequest>());
   const initializedCodexSessionsRef = useRef(new Set<string>());
   const initializingCodexSessionsRef = useRef(new Map<string, Promise<void>>());
+  const refreshingCodexCapabilitiesRef = useRef(new Map<string, Promise<void>>());
   const codexPlanUnsupportedSessionsRef = useRef(new Set<string>());
   const codexRpcSeqRef = useRef(1);
   const pendingOpenRef = useRef(new Map<string, {
@@ -2252,6 +2274,48 @@ export function useAgentWorkspace(
     persistCodexThread(conversationId, nextThread);
   }, [persistCodexThread]);
 
+  const resetCodexSessionState = useCallback((sessionId: string) => {
+    initializedCodexSessionsRef.current.delete(sessionId);
+    initializingCodexSessionsRef.current.delete(sessionId);
+    refreshingCodexCapabilitiesRef.current.delete(sessionId);
+    codexPlanUnsupportedSessionsRef.current.delete(sessionId);
+  }, []);
+
+  const failCodexSessionRequests = useCallback((sessionId: string, message: string) => {
+    const failed = failPendingCodexRequestsForSession(pendingCodexRef.current, sessionId, message);
+    for (const item of failed) {
+      if (!item.conversationId) continue;
+      if (item.clientMessageId) {
+        const existing = codexThreadsRef.current.get(item.conversationId);
+        const failedMessage = existing?.items.find((entry) => entry.itemId === item.clientMessageId);
+        if (failedMessage) {
+          upsertCodexItem(item.conversationId, {
+            ...failedMessage,
+            deliveryState: "failed",
+            isStreaming: false,
+            updatedAt: Date.now(),
+          });
+        }
+        upsertCodexItem(item.conversationId, {
+          threadId: existing?.threadId ?? item.conversationId,
+          itemId: `error:${item.clientMessageId}`,
+          orderIndex: (existing?.items.length ?? 0) + 1,
+          type: "error",
+          text: message,
+          deliveryState: "failed",
+          createdAt: Date.now(),
+        });
+      }
+      if (item.clientMessageId) {
+        setConversations((prev) => prev.map((conversation) =>
+          conversation.id === item.conversationId
+            ? { ...conversation, status: "error", lastMessagePreview: message, lastActivityAt: Date.now() }
+            : conversation
+        ));
+      }
+    }
+  }, [upsertCodexItem, setConversations]);
+
   const flushPendingCodexDeltas = useCallback(() => {
     pendingCodexDeltaTimerRef.current = null;
     const pending = [...pendingCodexDeltaRef.current.values()];
@@ -2398,101 +2462,112 @@ export function useAgentWorkspace(
   }, []);
 
   const refreshCodexRuntimeCapabilities = useCallback(async (sessionId: string) => {
-    const [modelListResult, configResult, collaborationModeResult] = await Promise.allSettled([
-      requestCodexRpc(sessionId, "model/list", {}, { timeoutMs: 15_000 }),
-      requestCodexRpc(sessionId, "config/read", {}, { timeoutMs: 15_000 }),
-      requestCodexRpc(sessionId, "collaborationMode/list", {}, { timeoutMs: 5_000 }),
-    ]);
-    if (collaborationModeResult.status === "fulfilled") {
-      codexResponseContainsPlanCollaborationMode(collaborationModeResult.value.result);
-    }
-    // Remodex keeps plan enabled after experimental initialize even when the
-    // metadata probe is inconclusive, and only disables it after turn/start
-    // rejects collaborationMode.
-    const supportsPlan = !codexPlanUnsupportedSessionsRef.current.has(sessionId);
+    const existingRefresh = refreshingCodexCapabilitiesRef.current.get(sessionId);
+    if (existingRefresh) return existingRefresh;
+    const refreshing = (async () => {
+      const [modelListResult, configResult, collaborationModeResult] = await Promise.allSettled([
+        requestCodexRpc(sessionId, "model/list", {}, { timeoutMs: 15_000 }),
+        requestCodexRpc(sessionId, "config/read", {}, { timeoutMs: 15_000 }),
+        requestCodexRpc(sessionId, "collaborationMode/list", {}, { timeoutMs: 5_000 }),
+      ]);
+      if (collaborationModeResult.status === "fulfilled") {
+        codexResponseContainsPlanCollaborationMode(collaborationModeResult.value.result);
+      }
+      // Remodex keeps plan enabled after experimental initialize even when the
+      // metadata probe is inconclusive, and only disables it after turn/start
+      // rejects collaborationMode.
+      const supportsPlan = !codexPlanUnsupportedSessionsRef.current.has(sessionId);
 
-    if (modelListResult.status === "rejected") {
-      const error = codexRpcErrorMessage(modelListResult.reason);
+      if (modelListResult.status === "rejected") {
+        const error = codexRpcErrorMessage(modelListResult.reason);
+        updateCodexRuntimeCapabilities(sessionId, (previous) => ({
+          id: "codex",
+          label: previous?.label ?? "Codex",
+          enabled: true,
+          supportsImages: previous?.supportsImages ?? true,
+          supportsPermission: true,
+          supportsPlan,
+          supportsCancel: true,
+          providerProtocol: "codex-app-server",
+          modelsSource: previous?.models?.length ? previous.modelsSource : "unavailable",
+          modelListError: error,
+          models: previous?.models,
+          defaultModel: previous?.defaultModel,
+          reasoningEfforts: previous?.reasoningEfforts ?? CODEX_REASONING_EFFORTS,
+          speedTiers: previous?.speedTiers ?? CODEX_DEFAULT_SPEED_TIERS,
+          defaultServiceTier: previous?.defaultServiceTier,
+          permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
+          commands: codexRpcCommands(supportsPlan),
+          modes: previous?.modes,
+          currentMode: previous?.currentMode,
+          features: {
+            ...(previous?.features ?? {}),
+            images: previous?.supportsImages ?? true,
+            permissions: true,
+            plan: supportsPlan,
+            cancel: true,
+            reasoningEffort: true,
+            serviceTier: true,
+          },
+        }));
+        return;
+      }
+
+      const parsed = parseCodexModelList(modelListResult.value.result);
+      const config = configResult.status === "fulfilled" ? configResult.value.result : undefined;
+      const configModel = codexConfigModel(config);
+      const configReasoningEffort = codexConfigReasoningEffort(config);
+      const configServiceTier = codexConfigServiceTier(config);
+      const reasoningEfforts = parsed.reasoningEfforts.length > 0
+        ? parsed.reasoningEfforts
+        : CODEX_REASONING_EFFORTS;
+      const speedTiers = parsed.speedTiers.length > 0
+        ? parsed.speedTiers
+        : CODEX_DEFAULT_SPEED_TIERS;
+      const defaultReasoningEffort = configReasoningEffort ?? parsed.models.find((model) =>
+        model.id === (configModel ?? parsed.defaultModel),
+      )?.defaultReasoningEffort;
+      const supportsImages = parsed.supportsImages || parsed.models.length === 0;
+
       updateCodexRuntimeCapabilities(sessionId, (previous) => ({
         id: "codex",
         label: previous?.label ?? "Codex",
         enabled: true,
-        supportsImages: previous?.supportsImages ?? true,
+        supportsImages,
         supportsPermission: true,
         supportsPlan,
         supportsCancel: true,
         providerProtocol: "codex-app-server",
-        modelsSource: previous?.models?.length ? previous.modelsSource : "unavailable",
-        modelListError: error,
-        models: previous?.models,
-        defaultModel: previous?.defaultModel,
-        reasoningEfforts: previous?.reasoningEfforts ?? CODEX_REASONING_EFFORTS,
-        speedTiers: previous?.speedTiers ?? CODEX_DEFAULT_SPEED_TIERS,
-        defaultServiceTier: previous?.defaultServiceTier,
+        modelsSource: parsed.models.length > 0 ? "runtime" : "unavailable",
+        modelListError: parsed.models.length > 0 ? undefined : "Codex runtime returned no models",
+        models: parsed.models.length > 0 ? parsed.models : previous?.models,
+        defaultModel: configModel ?? parsed.defaultModel ?? parsed.models[0]?.id ?? previous?.defaultModel,
+        reasoningEfforts,
+        speedTiers,
+        defaultServiceTier: configServiceTier ?? previous?.defaultServiceTier,
         permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
         commands: codexRpcCommands(supportsPlan),
         modes: previous?.modes,
         currentMode: previous?.currentMode,
         features: {
           ...(previous?.features ?? {}),
-          images: previous?.supportsImages ?? true,
+          images: supportsImages,
           permissions: true,
           plan: supportsPlan,
           cancel: true,
           reasoningEffort: true,
-          serviceTier: true,
+          serviceTier: speedTiers.length > 1,
+          ...(defaultReasoningEffort ? { defaultReasoningEffort: true } : {}),
         },
       }));
-      return;
+    })();
+
+    refreshingCodexCapabilitiesRef.current.set(sessionId, refreshing);
+    try {
+      await refreshing;
+    } finally {
+      refreshingCodexCapabilitiesRef.current.delete(sessionId);
     }
-
-    const parsed = parseCodexModelList(modelListResult.value.result);
-    const config = configResult.status === "fulfilled" ? configResult.value.result : undefined;
-    const configModel = codexConfigModel(config);
-    const configReasoningEffort = codexConfigReasoningEffort(config);
-    const configServiceTier = codexConfigServiceTier(config);
-    const reasoningEfforts = parsed.reasoningEfforts.length > 0
-      ? parsed.reasoningEfforts
-      : CODEX_REASONING_EFFORTS;
-    const speedTiers = parsed.speedTiers.length > 0
-      ? parsed.speedTiers
-      : CODEX_DEFAULT_SPEED_TIERS;
-    const defaultReasoningEffort = configReasoningEffort ?? parsed.models.find((model) =>
-      model.id === (configModel ?? parsed.defaultModel),
-    )?.defaultReasoningEffort;
-    const supportsImages = parsed.supportsImages || parsed.models.length === 0;
-
-    updateCodexRuntimeCapabilities(sessionId, (previous) => ({
-      id: "codex",
-      label: previous?.label ?? "Codex",
-      enabled: true,
-      supportsImages,
-      supportsPermission: true,
-      supportsPlan,
-      supportsCancel: true,
-      providerProtocol: "codex-app-server",
-      modelsSource: parsed.models.length > 0 ? "runtime" : "unavailable",
-      modelListError: parsed.models.length > 0 ? undefined : "Codex runtime returned no models",
-      models: parsed.models.length > 0 ? parsed.models : previous?.models,
-      defaultModel: configModel ?? parsed.defaultModel ?? parsed.models[0]?.id ?? previous?.defaultModel,
-      reasoningEfforts,
-      speedTiers,
-      defaultServiceTier: configServiceTier ?? previous?.defaultServiceTier,
-      permissionModes: previous?.permissionModes ?? CODEX_PERMISSION_MODES,
-      commands: codexRpcCommands(supportsPlan),
-      modes: previous?.modes,
-      currentMode: previous?.currentMode,
-      features: {
-        ...(previous?.features ?? {}),
-        images: supportsImages,
-        permissions: true,
-        plan: supportsPlan,
-        cancel: true,
-        reasoningEffort: true,
-        serviceTier: speedTiers.length > 1,
-        ...(defaultReasoningEffort ? { defaultReasoningEffort: true } : {}),
-      },
-    }));
   }, [requestCodexRpc, updateCodexRuntimeCapabilities]);
 
   const ensureCodexInitialized = useCallback(async (sessionId: string) => {
@@ -3140,6 +3215,14 @@ export function useAgentWorkspace(
         const payload = parseTypedPayload("agent.codex.rpc" as any, envelope.payload) as CodexRpcMessage;
         if (isCodexJsonRpcResponse(payload)) {
           const pending = pendingCodexRef.current.get(payload.id);
+          const pendingErrorMessage = payload.error
+            ? humanizeCodexRpcError(payload.error.message ?? "Codex request failed")
+            : undefined;
+          if (pending && payload.error && codexRpcErrorInvalidatesTransport(payload.error.message ?? "")) {
+            pendingErrorMessage && resetCodexSessionState(envelope.hostDeviceId);
+            pendingErrorMessage && failCodexSessionRequests(envelope.hostDeviceId, pendingErrorMessage);
+            return;
+          }
           if (pending) {
             pendingCodexRef.current.delete(payload.id);
             clearTimeout(pending.timer);
@@ -3168,7 +3251,7 @@ export function useAgentWorkspace(
                 setConversations((prev) => prev.map((conversation) =>
                   conversation.id === pending.conversationId
                     ? { ...conversation, status: "error", lastActivityAt: Date.now() }
-                  : conversation
+                    : conversation
                 ));
               }
               pending.reject?.(message);
@@ -3186,44 +3269,15 @@ export function useAgentWorkspace(
               }
               pending.resolve?.(payload);
             }
-          }
-          if (!pending) {
-            if (payload.error && payload.id === "linkshell-codex-rpc-error") {
-              const message = humanizeCodexRpcError(payload.error.message ?? "Codex app-server transport failed");
-              const failed = failPendingCodexRequestsForSession(pendingCodexRef.current, envelope.hostDeviceId, message);
-              for (const item of failed) {
-                if (!item.conversationId) continue;
-                if (item.clientMessageId) {
-                  const existing = codexThreadsRef.current.get(item.conversationId);
-                  const failedMessage = existing?.items.find((entry) => entry.itemId === item.clientMessageId);
-                  if (failedMessage) {
-                    upsertCodexItem(item.conversationId, {
-                      ...failedMessage,
-                      deliveryState: "failed",
-                      isStreaming: false,
-                      updatedAt: Date.now(),
-                    });
-                  }
-                  upsertCodexItem(item.conversationId, {
-                    threadId: existing?.threadId ?? item.conversationId,
-                    itemId: `error:${item.clientMessageId}`,
-                    orderIndex: (existing?.items.length ?? 0) + 1,
-                    type: "error",
-                    text: message,
-                    deliveryState: "failed",
-                    createdAt: Date.now(),
-                  });
-                }
-                if (item.clientMessageId) {
-                  setConversations((prev) => prev.map((conversation) =>
-                    conversation.id === item.conversationId
-                      ? { ...conversation, status: "error", lastMessagePreview: message, lastActivityAt: Date.now() }
-                      : conversation
-                  ));
-                }
-              }
-              return;
+          } else if (payload.error && payload.id === "linkshell-codex-rpc-error") {
+            const message = humanizeCodexRpcError(payload.error.message ?? "Codex app-server transport failed");
+            const shouldReset = codexRpcErrorInvalidatesTransport(payload.error.message ?? "");
+            if (shouldReset) {
+              resetCodexSessionState(envelope.hostDeviceId);
             }
+            failCodexSessionRequests(envelope.hostDeviceId, message);
+            return;
+          } else if (!pending) {
             for (const [conversationId, thread] of codexThreadsRef.current) {
               const matching = thread.items.find((item) =>
                 (item.type === "approval" || item.type === "structured_input") &&
@@ -3233,9 +3287,9 @@ export function useAgentWorkspace(
               upsertCodexItem(conversationId, {
                 ...matching,
                 deliveryState: payload.error ? "failed" : "confirmed",
-                output: payload.error?.message ?? matching.output,
+                output: pendingErrorMessage ?? matching.output,
                 permissionSubmitting: matching.type === "approval" ? false : matching.permissionSubmitting,
-                permissionError: matching.type === "approval" ? payload.error?.message : matching.permissionError,
+                permissionError: matching.type === "approval" ? pendingErrorMessage : matching.permissionError,
                 isStreaming: false,
                 updatedAt: Date.now(),
               });
@@ -5424,7 +5478,7 @@ export function useAgentWorkspace(
         )
           .then(() => requestCodexRpc(session.sessionId, "fs/readDirectory", { path }, {
             conversationId,
-            timeoutMs: 12_000,
+            timeoutMs: 30_000,
           }))
           .then((response): AgentFileBrowseResult => {
             const raw = asRecord(response.result);
@@ -5488,25 +5542,50 @@ export function useAgentWorkspace(
         });
       }
       if (conversation.provider === "codex") {
+        const cappedMaxBytes = Math.max(1, maxBytes);
         return withTimeout(
           ensureCodexInitialized(session.sessionId),
           5_000,
           "Codex 初始化超时：无法读取文件，请确认主机端 codex app-server 仍在响应。",
         )
-          .then(() => requestCodexRpc(session.sessionId, "fs/readFile", { path }, {
+          .then(() => requestCodexRpc(session.sessionId, "fs/readFile", {
+            path,
+            maxBytes: cappedMaxBytes,
+          }, {
             conversationId,
-            timeoutMs: 12_000,
+            timeoutMs: 30_000,
           }))
           .then((response): AgentFileReadResult => {
             const raw = asRecord(response.result);
+            const responseError = firstString(raw, ["error", "message"])?.trim();
+            if (responseError) {
+              throw new Error(responseError);
+            }
             const dataBase64 = firstString(raw, ["dataBase64", "base64", "data"]) ?? "";
-            const fullContent = base64ToUtf8(dataBase64);
-            const truncated = fullContent.length > maxBytes;
+            if (!dataBase64) {
+              return {
+                path,
+                content: "",
+                encoding: "utf8",
+                size: 0,
+                truncated: false,
+              };
+            }
+            const maxBase64Chars = Math.max(4, Math.ceil(cappedMaxBytes / 3) * 4);
+            const clippedBase64 = dataBase64.length > maxBase64Chars
+              ? dataBase64.slice(0, maxBase64Chars)
+              : dataBase64;
+            const fullContent = base64ToUtf8(clippedBase64);
+            const byteLength = typeof Buffer !== "undefined"
+              ? Buffer.byteLength(fullContent, "utf8")
+              : fullContent.length;
+            const truncated = byteLength > cappedMaxBytes;
+            const safeContent = truncated ? fullContent.slice(0, cappedMaxBytes) : fullContent;
             return {
               path,
-              content: truncated ? fullContent.slice(0, maxBytes) : fullContent,
+              content: safeContent,
               encoding: "utf8",
-              size: fullContent.length,
+              size: byteLength,
               truncated,
             };
           })

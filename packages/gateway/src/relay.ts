@@ -27,6 +27,40 @@ export function handleSocketMessage(
   deviceId: string,
   sessions: DeviceManager,
 ): void {
+  const codexHeader = tryParseCodexRpcHeader(raw);
+  if (codexHeader && codexHeader.type === "agent.codex.rpc") {
+    if (codexHeader.hostDeviceId !== hostDeviceId) {
+      sendSessionError(
+        socket,
+        hostDeviceId,
+        "invalid_message",
+        "Envelope hostDeviceId does not match connection hostDeviceId",
+      );
+      return;
+    }
+
+    const session = sessions.get(hostDeviceId);
+    if (!session) {
+      sendSessionError(socket, hostDeviceId, "device_not_found", "Device not found");
+      return;
+    }
+
+    const routeEnvelope: Envelope = {
+      id: "",
+      type: "agent.codex.rpc",
+      hostDeviceId,
+      timestamp: new Date().toISOString(),
+      payload: {},
+    };
+
+    if (role === "host") {
+      broadcastToClients(session, routeEnvelope, raw);
+    } else {
+      sendToHost(session, routeEnvelope, raw);
+    }
+    return;
+  }
+
   let envelope: Envelope;
   try {
     envelope = parseEnvelope(raw);
@@ -76,6 +110,17 @@ export function handleSocketMessage(
     }
     sendSessionError(socket, hostDeviceId, "invalid_message", "Failed to handle message");
   }
+}
+
+function tryParseCodexRpcHeader(raw: string): { type: "agent.codex.rpc"; hostDeviceId: string } | undefined {
+  const trimmed = raw.trimStart();
+  if (!trimmed.startsWith("{")) return;
+  const snippet = trimmed.slice(0, 8192);
+  const hasType = /"type"\s*:\s*"agent\.codex\.rpc"/.test(snippet);
+  if (!hasType) return;
+  const hostMatch = /"hostDeviceId"\s*:\s*"([^"\\]*?)"/.exec(snippet);
+  if (!hostMatch?.[1]) return;
+  return { type: "agent.codex.rpc", hostDeviceId: hostMatch[1] };
 }
 
 function shouldValidatePayload(type: string): type is ProtocolMessageType {
