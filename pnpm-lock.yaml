@@ -179,11 +179,11 @@ importers:
   packages/cli:
     dependencies:
       '@linkshell/gateway':
-        specifier: ^0.3.10
-        version: 0.3.10
+        specifier: workspace:*
+        version: link:../gateway
       '@linkshell/protocol':
-        specifier: ^0.3.12
-        version: 0.3.12
+        specifier: workspace:*
+        version: link:../shared-protocol
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -220,8 +220,8 @@ importers:
   packages/gateway:
     dependencies:
       '@linkshell/protocol':
-        specifier: ^0.3.12
-        version: 0.3.12
+        specifier: workspace:*
+        version: link:../shared-protocol
       ws:
         specifier: ^8.18.1
         version: 8.20.0
@@ -244,6 +244,10 @@ importers:
       zod:
         specifier: ^3.24.3
         version: 3.25.76
+    devDependencies:
+      vitest:
+        specifier: ^3.2.1
+        version: 3.2.4(@types/node@22.19.17)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
 
 packages:
 
@@ -1369,12 +1373,6 @@ packages:
 
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
-
-  '@linkshell/gateway@0.3.10':
-    resolution: {integrity: sha512-i7nqJuBVCNMuamaXQrSkzyg+P7QQBjb9YaR9dGDkVlVjQ1FV1s5zQ3QOKc9I7moT5QWIg+gTvuXB/YsVsiusVA==}
-
-  '@linkshell/protocol@0.3.12':
-    resolution: {integrity: sha512-svdIGUPcj8tguLGsaz7qnXfmiMMs1zAk6NkVAOWBboWG+BuIta0YEn2mQQBTqizKgf+Oe3ZCNKpZXWRjaHFUug==}
 
   '@minhducsun2002/leb128@1.0.0':
     resolution: {integrity: sha512-eFrYUPDVHeuwWHluTG1kwNQUEUcFjVKYwPkU8z9DR1JH3AW7JtJsG9cRVGmwz809kKtGfwGJj58juCZxEvnI/g==}
@@ -6471,19 +6469,6 @@ snapshots:
 
   '@leichtgewicht/ip-codec@2.0.5':
     optional: true
-
-  '@linkshell/gateway@0.3.10':
-    dependencies:
-      '@linkshell/protocol': 0.3.12
-      ws: 8.20.0
-      zod: 3.25.76
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
-  '@linkshell/protocol@0.3.12':
-    dependencies:
-      zod: 3.25.76
 
   '@minhducsun2002/leb128@1.0.0':
     optional: true

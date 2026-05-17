@@ -17,6 +17,8 @@ import {
   type AgentCommandDescriptor,
   type AgentContentBlock,
   type AgentConversationRecord,
+  type AgentNotice,
+  type AgentNoticeKind,
   type AgentProvider,
   type AgentPermissionMode,
   type AgentReasoningEffort,
@@ -73,6 +75,8 @@ export interface AgentWorkspaceHandle {
   activeConversationId: string | null;
   capabilitiesBySessionId: Map<string, AgentCapabilities>;
   connectedSessions: SessionInfo[];
+  notices: AgentNotice[];
+  dismissNotice: (id: string) => void;
   refresh: () => Promise<void>;
   requestCapabilities: (sessionId?: string) => void;
   openConversation: (input: OpenConversationInput) => Promise<OpenConversationResult>;
@@ -208,6 +212,7 @@ export function useAgentWorkspace(
   const [timelineById, setTimelineById] = useState<Map<string, AgentTimelineItem[]>>(new Map());
   const [capabilitiesBySessionId, setCapabilitiesBySessionId] = useState<Map<string, AgentCapabilities>>(new Map());
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [notices, setNotices] = useState<AgentNotice[]>([]);
   const managerRef = useRef(manager);
   const conversationsRef = useRef(conversations);
   const timelineRef = useRef(timelineById);
@@ -434,6 +439,27 @@ export function useAgentWorkspace(
         createdAt: conversation.createdAt ?? Date.now(),
         schemaVersion: 1,
       });
+
+      if (envelope.type === "agent.v2.notice") {
+        const payload = parseTypedPayload("agent.v2.notice", envelope.payload) as {
+          conversationId?: string;
+          kind: AgentNoticeKind;
+          title: string;
+          detail?: string;
+          durationMs?: number;
+        };
+        const notice: AgentNotice = {
+          id: `notice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          conversationId: payload.conversationId,
+          kind: payload.kind,
+          title: payload.title,
+          detail: payload.detail,
+          durationMs: payload.durationMs ?? 1800,
+          createdAt: Date.now(),
+        };
+        setNotices((prev) => [...prev.slice(-4), notice]);
+        return;
+      }
 
       if (envelope.type === "agent.v2.capabilities") {
         const payload = parseTypedPayload("agent.v2.capabilities", envelope.payload) as AgentCapabilities;
@@ -1609,12 +1635,18 @@ export function useAgentWorkspace(
     );
   }, []);
 
+  const dismissNotice = useCallback((id: string) => {
+    setNotices((prev) => prev.filter((notice) => notice.id !== id));
+  }, []);
+
   return {
     conversations: conversations.filter((item) => !item.archived),
     archivedConversations: conversations.filter((item) => item.archived),
     activeConversationId,
     capabilitiesBySessionId,
     connectedSessions,
+    notices,
+    dismissNotice,
     refresh,
     requestCapabilities,
     openConversation,

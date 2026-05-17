@@ -90,4 +90,83 @@ describe("AgentWorkspaceProxy event routing", () => {
     ]);
     expect(sent[0].payload.item.text).toBe("Here is the image.\n[image/png attachment]");
   });
+
+  it("captures the real Claude model from the initialized notification", () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.get("conversation-a").model = undefined;
+
+    proxy.handleNotification("initialized", {
+      sessionId: "thread-a",
+      threadId: "thread-a",
+      model: "claude-sonnet-4-5",
+    });
+
+    expect(proxy.conversations.get("conversation-a").model).toBe("claude-sonnet-4-5");
+    const conversationEvents = sent.filter((envelope) => envelope.type === "agent.v2.event" && envelope.payload.conversation);
+    expect(conversationEvents.at(-1)?.payload.conversation.model).toBe("claude-sonnet-4-5");
+  });
+
+  it("captures the real Codex model from thread/started", () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.get("conversation-a").model = undefined;
+
+    proxy.handleNotification("thread/started", {
+      sessionId: "thread-a",
+      threadId: "thread-a",
+      model: "gpt-5.5-mini",
+    });
+
+    expect(proxy.conversations.get("conversation-a").model).toBe("gpt-5.5-mini");
+    const conversationEvents = sent.filter((envelope) => envelope.type === "agent.v2.event" && envelope.payload.conversation);
+    expect(conversationEvents.at(-1)?.payload.conversation.model).toBe("gpt-5.5-mini");
+  });
+
+  it("emits an agent.v2.notice when the user switches Codex models", () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.get("conversation-a").model = "gpt-5.5";
+    proxy.providerCapabilities.set("codex", {
+      models: [
+        { id: "gpt-5.5", label: "GPT-5.5" },
+        { id: "gpt-5.5-mini", label: "GPT-5.5 mini" },
+      ],
+    });
+    proxy.clients.set("codex", { prompt: async () => ({}) });
+
+    return proxy.sendPrompt({
+      conversationId: "conversation-a",
+      clientMessageId: "msg-1",
+      contentBlocks: [{ type: "text", text: "hi" }],
+      model: "gpt-5.5-mini",
+    }).then(() => {
+      const notice = sent.find((envelope) => envelope.type === "agent.v2.notice");
+      expect(notice).toBeDefined();
+      expect(notice?.payload.kind).toBe("model_changed");
+      expect(notice?.payload.title).toContain("GPT-5.5 mini");
+    });
+  });
+
+  it("emits an agent.v2.notice when a Claude session hits an unsupported native command", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.set("conversation-claude", {
+      id: "conversation-claude",
+      agentSessionId: "claude-thread",
+      provider: "claude",
+      cwd: "/tmp",
+      title: "Claude",
+      status: "idle",
+      createdAt: 1,
+      lastActivityAt: 1,
+    });
+    proxy.conversationByAgentSessionId.set("claude-thread", "conversation-claude");
+    proxy.clients.set("claude", { prompt: async () => ({}) });
+
+    await proxy.executeNativeCommand(
+      proxy.conversations.get("conversation-claude"),
+      { name: "plan", title: "/plan", executionKind: "native" },
+    );
+
+    const notice = sent.find((envelope) => envelope.type === "agent.v2.notice");
+    expect(notice?.payload.kind).toBe("native_unsupported");
+    expect(notice?.payload.title).toContain("plan");
+  });
 });

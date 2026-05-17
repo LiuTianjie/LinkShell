@@ -1,7 +1,7 @@
 {
   "name": "linkshell",
   "private": true,
-  "version": "0.3.29",
+  "version": "0.4.0",
   "packageManager": "pnpm@10.18.3",
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -13,6 +13,7 @@
     "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present --workspace-concurrency=1 test",
     "devbuild": "pnpm --filter @linkshell/app devbuild",
     "devbuild:ios": "pnpm --filter @linkshell/app devbuild:ios",
     "devbuild:iphone": "pnpm --filter @linkshell/app devbuild:ios:device",

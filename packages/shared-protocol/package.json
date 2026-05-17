@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/protocol",
-  "version": "0.3.12",
+  "version": "0.4.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,9 +21,13 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.1"
   }
 }

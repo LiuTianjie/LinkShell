@@ -793,6 +793,23 @@ export const agentV2PermissionRequestPayloadSchema = agentPermissionSchema.exten
   item: agentV2TimelineItemSchema.optional(),
 });
 
+// Lightweight one-shot notification from CLI to mobile (toast-style).
+// Used to confirm model switches, signal unsupported native commands, etc.
+export const agentV2NoticePayloadSchema = z.object({
+  conversationId: z.string().optional(),
+  kind: z.enum([
+    "model_changed",
+    "effort_changed",
+    "permission_changed",
+    "native_unsupported",
+    "info",
+    "warning",
+  ]),
+  title: z.string().min(1),
+  detail: z.string().optional(),
+  durationMs: z.number().int().positive().optional(),
+});
+
 // ── Protocol message type registry ──────────────────────────────────
 
 export const protocolMessageSchemas = {
@@ -866,6 +883,7 @@ export const protocolMessageSchemas = {
   "agent.v2.snapshot.request": agentV2SnapshotRequestPayloadSchema,
   "agent.v2.snapshot": agentV2SnapshotPayloadSchema,
   "agent.v2.event": agentV2EventPayloadSchema,
+  "agent.v2.notice": agentV2NoticePayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;

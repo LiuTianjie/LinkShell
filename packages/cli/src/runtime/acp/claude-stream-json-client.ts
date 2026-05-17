@@ -504,6 +504,7 @@ export class ClaudeStreamJsonClient {
     return {
       defaultModel: "default",
       models: [
+        { id: "default", label: "默认模型" },
         { id: "sonnet", label: "Sonnet" },
         { id: "opus", label: "Opus" },
         { id: "haiku", label: "Haiku" },

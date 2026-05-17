@@ -31,6 +31,7 @@ import type {
   AgentCommandDescriptor,
   AgentConversationRecord,
   AgentCollaborationMode,
+  AgentNotice,
   AgentPermissionMode,
   AgentReasoningEffort,
   AgentStructuredInput,
@@ -1832,6 +1833,70 @@ function StreamingPill({ theme }: { theme: Theme }) {
   );
 }
 
+function noticeAccent(kind: AgentNotice["kind"], theme: Theme): { bg: string; color: string; icon: string } {
+  if (kind === "warning" || kind === "native_unsupported") {
+    return { bg: theme.errorLight, color: theme.error, icon: "exclamationmark.triangle.fill" };
+  }
+  if (kind === "model_changed") {
+    return { bg: theme.accentLight, color: theme.accent, icon: "sparkles" };
+  }
+  if (kind === "effort_changed") {
+    return { bg: theme.accentLight, color: theme.accent, icon: "textformat.size.larger" };
+  }
+  if (kind === "permission_changed") {
+    return { bg: theme.accentLight, color: theme.accent, icon: "lock.shield.fill" };
+  }
+  return { bg: theme.bgInput, color: theme.textSecondary, icon: "info.circle.fill" };
+}
+
+function NoticeStrip({
+  notices,
+  theme,
+  onDismiss,
+}: {
+  notices: AgentNotice[];
+  theme: Theme;
+  onDismiss: (id: string) => void;
+}) {
+  if (notices.length === 0) return null;
+  return (
+    <View style={{ gap: 6, paddingBottom: 6 }}>
+      {notices.map((notice) => {
+        const accent = noticeAccent(notice.kind, theme);
+        return (
+          <Pressable
+            key={notice.id}
+            onPress={() => onDismiss(notice.id)}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 12,
+              borderCurve: "continuous",
+              backgroundColor: accent.bg,
+            }}
+          >
+            <AppSymbol name={accent.icon} size={13} color={accent.color} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: accent.color, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
+                {notice.title}
+              </Text>
+              {notice.detail ? (
+                <Text style={{ color: theme.textTertiary, fontSize: 11, marginTop: 1 }} numberOfLines={2}>
+                  {notice.detail}
+                </Text>
+              ) : null}
+            </View>
+            <AppSymbol name="xmark" size={11} color={theme.textTertiary} />
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function SlashCommandPanel({
   commands,
   query,
@@ -2627,6 +2692,104 @@ export function AgentConversationScreen({
       })),
     [effortOpts, effort],
   );
+  const permissionMenuActions = useMemo(
+    () =>
+      permissionOpts.map((option) => ({
+        id: `permission:${option.value ?? DEFAULT_OPTION_ID}`,
+        title: option.label,
+        image: option.image,
+        state: option.value === permissionMode ? "on" as const : "off" as const,
+      })),
+    [permissionOpts, permissionMode],
+  );
+  const commitModel = useCallback((nextModel: string | undefined) => {
+    setModel(nextModel);
+    if (conversation) {
+      workspace.updateConversationSettings(conversation.id, { model: nextModel }).catch(() => {});
+    }
+  }, [conversation, workspace]);
+  const commitEffort = useCallback((nextEffort: AgentReasoningEffort | undefined) => {
+    setEffort(nextEffort);
+    if (conversation) {
+      workspace.updateConversationSettings(conversation.id, { reasoningEffort: nextEffort }).catch(() => {});
+    }
+  }, [conversation, workspace]);
+  const commitPermissionMode = useCallback((nextMode: AgentPermissionMode | undefined) => {
+    setPermissionMode(nextMode);
+    if (conversation) {
+      workspace.updateConversationSettings(conversation.id, { permissionMode: nextMode }).catch(() => {});
+    }
+  }, [conversation, workspace]);
+  const setPermissionModeWithGuard = useCallback((nextMode: AgentPermissionMode | undefined) => {
+    if (nextMode === "full_access") {
+      Alert.alert(
+        "启用完全访问权限？",
+        "Agent 可能不再逐项请求文件或命令授权。只在你信任当前任务和工作区时使用。",
+        [
+          { text: "取消", style: "cancel" },
+          { text: "启用", onPress: () => commitPermissionMode(nextMode) },
+        ],
+      );
+      return;
+    }
+    commitPermissionMode(nextMode);
+  }, [commitPermissionMode]);
+  const settingsMenuActions = useMemo(() => {
+    const sections: Array<{ id: string; title: string; subactions: any[] }> = [];
+    if (modelMenuActions.length > 1) {
+      sections.push({ id: "model_section", title: "模型", subactions: modelMenuActions });
+    }
+    if (effortMenuActions.length > 0) {
+      sections.push({ id: "effort_section", title: "思考强度", subactions: effortMenuActions });
+    }
+    if (permissionMenuActions.length > 0) {
+      sections.push({ id: "permission_section", title: "权限模式", subactions: permissionMenuActions });
+    }
+    return sections;
+  }, [effortMenuActions, modelMenuActions, permissionMenuActions]);
+  const settingsChipLabel = useMemo(() => {
+    const parts: string[] = [];
+    if (modelMenuActions.length > 1) parts.push(formatModel(model, modelOpts));
+    if (effortMenuActions.length > 0) parts.push(`思考 ${formatEffort(effort)}`);
+    if (permissionMode && permissionMode !== undefined) parts.push(permission.label.replace("权限", ""));
+    return parts.join(" · ") || "设置";
+  }, [effort, effortMenuActions.length, model, modelMenuActions.length, modelOpts, permission.label, permissionMode]);
+  const handleSettingsMenu = useCallback((eventId: string) => {
+    if (eventId.startsWith("model:")) {
+      commitModel(valueFromMenuId<string>(eventId.slice("model:".length)));
+      return;
+    }
+    if (eventId.startsWith("effort:")) {
+      commitEffort(valueFromMenuId<AgentReasoningEffort>(eventId.slice("effort:".length)));
+      return;
+    }
+    if (eventId.startsWith("permission:")) {
+      setPermissionModeWithGuard(valueFromMenuId<AgentPermissionMode>(eventId.slice("permission:".length)));
+    }
+  }, [commitEffort, commitModel, setPermissionModeWithGuard]);
+  const nativePlanCommand = useMemo(
+    () =>
+      availableCommands.find(
+        (command) => command.name === "plan" && command.executionKind === "native" && !command.disabledReason,
+      ),
+    [availableCommands],
+  );
+  const visibleNotices = useMemo(
+    () =>
+      workspace.notices.filter(
+        (notice) => !notice.conversationId || notice.conversationId === conversationId,
+      ),
+    [conversationId, workspace.notices],
+  );
+  useEffect(() => {
+    if (visibleNotices.length === 0) return;
+    const timers = visibleNotices.map((notice) =>
+      setTimeout(() => workspace.dismissNotice(notice.id), notice.durationMs ?? 1800),
+    );
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+    };
+  }, [visibleNotices, workspace]);
   const timelineAutoScrollKey = useMemo(
     () =>
       visibleTimeline
@@ -2814,42 +2977,6 @@ export function AgentConversationScreen({
     if (!commandToken) return;
     setText((current) => `${current.slice(0, commandToken.start)}${current.slice(commandToken.end)}`.trimEnd());
   }, [commandToken]);
-
-  const commitModel = useCallback((nextModel: string | undefined) => {
-    setModel(nextModel);
-    if (conversation) {
-      workspace.updateConversationSettings(conversation.id, { model: nextModel }).catch(() => {});
-    }
-  }, [conversation, workspace]);
-
-  const commitEffort = useCallback((nextEffort: AgentReasoningEffort | undefined) => {
-    setEffort(nextEffort);
-    if (conversation) {
-      workspace.updateConversationSettings(conversation.id, { reasoningEffort: nextEffort }).catch(() => {});
-    }
-  }, [conversation, workspace]);
-
-  const commitPermissionMode = useCallback((nextMode: AgentPermissionMode | undefined) => {
-    setPermissionMode(nextMode);
-    if (conversation) {
-      workspace.updateConversationSettings(conversation.id, { permissionMode: nextMode }).catch(() => {});
-    }
-  }, [conversation, workspace]);
-
-  const setPermissionModeWithGuard = useCallback((nextMode: AgentPermissionMode | undefined) => {
-    if (nextMode === "full_access") {
-      Alert.alert(
-        "启用完全访问权限？",
-        "Agent 可能不再逐项请求文件或命令授权。只在你信任当前任务和工作区时使用。",
-        [
-          { text: "取消", style: "cancel" },
-          { text: "启用", onPress: () => commitPermissionMode(nextMode) },
-        ],
-      );
-      return;
-    }
-    commitPermissionMode(nextMode);
-  }, [commitPermissionMode]);
 
   const cancelRunningTurn = useCallback(() => {
     if (!conversation) return;
@@ -3055,7 +3182,7 @@ export function AgentConversationScreen({
                 {conversation.title || "Agent"}
               </Text>
               <Text style={{ color: theme.textTertiary, fontSize: 10, marginTop: 2, fontWeight: "700", fontFamily: MONO_FONT }} numberOfLines={1}>
-                {[displayProvider(conversation.provider), shortPath(conversation.cwd)].filter(Boolean).join(" · ")}
+                {[displayProvider(conversation.provider), formatModel(conversation.model, modelOpts), shortPath(conversation.cwd)].filter(Boolean).join(" · ")}
               </Text>
             </View>
             {running ? <ActivityIndicator size="small" color={theme.accent} /> : null}
@@ -3172,6 +3299,11 @@ export function AgentConversationScreen({
           backgroundColor: theme.bg,
         }}
       >
+        <NoticeStrip
+          notices={visibleNotices}
+          theme={theme}
+          onDismiss={(id) => workspace.dismissNotice(id)}
+        />
         <View
           style={{
             borderRadius: 24,
@@ -3268,14 +3400,7 @@ export function AgentConversationScreen({
             </Text>
           ) : null}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 }}>
-            <ScrollView
-              horizontal
-              bounces={false}
-              showsHorizontalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              style={{ flex: 1, minWidth: 0 }}
-              contentContainerStyle={{ flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 2 }}
-            >
+            <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}>
               {supportsImages ? (
                 <Pressable
                   onPress={showAttachSheet}
@@ -3291,45 +3416,16 @@ export function AgentConversationScreen({
                   <AppSymbol name="photo" size={17} color={theme.textSecondary} />
                 </Pressable>
               ) : null}
-              {permissionOpts.length > 0 ? (
-                <MenuView
-                  actions={menuActions(permissionOpts, permissionMode)}
-                  onPressAction={({ nativeEvent }) =>
-                    setPermissionModeWithGuard(valueFromMenuId<AgentPermissionMode>(nativeEvent.event))
-                  }
-                >
-                  <View
-                    style={{
-                      minWidth: permissionModeNeedsAttention(permissionMode) ? 82 : 34,
-                      height: 34,
-                      borderRadius: 999,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexDirection: "row",
-                      gap: 5,
-                      paddingHorizontal: permissionModeNeedsAttention(permissionMode) ? 10 : 0,
-                      backgroundColor: permissionMode === "full_access" ? theme.warning : permission.bg,
-                    }}
-                  >
-                    <AppSymbol name={permission.icon} size={13} color={permissionMode === "full_access" ? theme.textInverse : permission.color} />
-                    {permissionModeNeedsAttention(permissionMode) ? (
-                      <Text style={{ color: permissionMode === "full_access" ? theme.textInverse : permission.color, fontSize: 11, fontWeight: "800" }}>
-                        {permission.label.replace("权限", "")}
-                      </Text>
-                    ) : null}
-                  </View>
-                </MenuView>
-              ) : null}
-              {providerCapability?.supportsPlan || availableCommands.some((command) => command.name === "plan") ? (
+              {nativePlanCommand ? (
                 <Pressable
                   onPress={() => {
                     const targetName = currentCollaborationMode === "plan" ? "exit-plan" : "plan";
-                    const command = availableCommands.find((item) => item.name === targetName);
+                    const command = availableCommands.find((item) => item.name === targetName) ?? nativePlanCommand;
                     if (command?.disabledReason) {
                       Alert.alert("命令不可用", command.disabledReason);
                       return;
                     }
-                    if (command) executeSlashCommand(command);
+                    executeSlashCommand(command);
                   }}
                   style={({ pressed }) => ({
                     height: 34,
@@ -3351,62 +3447,46 @@ export function AgentConversationScreen({
                 </Pressable>
               ) : null}
               <MenuView
-                actions={modelMenuActions}
-                onPressAction={({ nativeEvent }) => {
-                  const event = nativeEvent.event;
-                  if (event.startsWith("model:")) {
-                    commitModel(valueFromMenuId<string>(event.slice("model:".length)));
-                  }
-                }}
+                actions={settingsMenuActions}
+                onPressAction={({ nativeEvent }) => handleSettingsMenu(nativeEvent.event)}
               >
                 <View
                   style={{
+                    flex: 1,
+                    minHeight: 34,
+                    borderRadius: 999,
+                    paddingHorizontal: 12,
+                    paddingVertical: 7,
                     flexDirection: "row",
                     alignItems: "center",
                     gap: 6,
-                    borderRadius: 999,
-                    paddingHorizontal: 9,
-                    paddingVertical: 7,
-                    backgroundColor: theme.bgInput,
-                    maxWidth: 132,
+                    backgroundColor: permissionMode === "full_access" ? theme.warning : theme.bgInput,
                   }}
                 >
-                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
-                    {formatModel(model, modelOpts)}
+                  <AppSymbol
+                    name={permission.icon}
+                    size={13}
+                    color={permissionMode === "full_access" ? theme.textInverse : theme.textSecondary}
+                  />
+                  <Text
+                    style={{
+                      flex: 1,
+                      color: permissionMode === "full_access" ? theme.textInverse : theme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: "700",
+                    }}
+                    numberOfLines={1}
+                  >
+                    {settingsChipLabel}
                   </Text>
-                  <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
+                  <AppSymbol
+                    name="chevron.down"
+                    size={9}
+                    color={permissionMode === "full_access" ? theme.textInverse : theme.textTertiary}
+                  />
                 </View>
               </MenuView>
-              {effortMenuActions.length > 0 ? (
-                <MenuView
-                  actions={effortMenuActions}
-                  onPressAction={({ nativeEvent }) => {
-                    const event = nativeEvent.event;
-                    if (event.startsWith("effort:")) {
-                      commitEffort(valueFromMenuId<AgentReasoningEffort>(event.slice("effort:".length)));
-                    }
-                  }}
-                >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 5,
-                      borderRadius: 999,
-                      paddingHorizontal: 9,
-                      paddingVertical: 7,
-                      backgroundColor: theme.bgInput,
-                      maxWidth: 94,
-                    }}
-                  >
-                    <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
-                      思考 {formatEffort(effort)}
-                    </Text>
-                    <AppSymbol name="chevron.down" size={9} color={theme.textTertiary} />
-                  </View>
-                </MenuView>
-              ) : null}
-            </ScrollView>
+            </View>
             {running ? (
               <Pressable
                 onPress={cancelRunningTurn}

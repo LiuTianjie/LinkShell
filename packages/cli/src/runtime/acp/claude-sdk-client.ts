@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { readdirSync, existsSync } from "node:fs";
+import { readdirSync, existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
@@ -353,9 +353,22 @@ export class ClaudeSdkClient {
   }
 
   async listModels(): Promise<unknown> {
+    let defaultModel: string = "default";
+    try {
+      const settingsPath = join(homedir(), ".claude", "settings.json");
+      if (existsSync(settingsPath)) {
+        const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as { model?: unknown };
+        if (typeof raw.model === "string" && raw.model.trim().length > 0) {
+          defaultModel = raw.model.trim();
+        }
+      }
+    } catch {
+      // Fallback to "default" if settings file is unreadable.
+    }
     return {
-      defaultModel: "default",
+      defaultModel,
       models: [
+        { id: "default", label: "默认模型" },
         { id: "sonnet", label: "Sonnet" },
         { id: "opus", label: "Opus" },
         { id: "haiku", label: "Haiku" },

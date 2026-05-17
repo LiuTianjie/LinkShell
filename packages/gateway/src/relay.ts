@@ -183,6 +183,7 @@ function handleHostMessage(
     case "agent.v2.event":
     case "agent.v2.snapshot":
     case "agent.v2.permission.request":
+    case "agent.v2.notice":
     // Multi-terminal: host → clients
     case "terminal.spawned":
     case "terminal.list":
@@ -321,19 +322,20 @@ function handleClientMessage(
     case "agent.v2.cancel":
     case "agent.v2.permission.respond":
     case "agent.v2.structured_input.respond":
-    // Multi-terminal: client → host
+    // Multi-terminal write ops: client → host (require controller)
     case "terminal.spawn":
     case "terminal.kill":
-    case "terminal.list":
-    case "terminal.browse":
-    case "terminal.file.read":
     case "terminal.mkdir":
-    case "terminal.history.request":
     case "file.upload":
     case "permission.decision":
       if (!requireController()) return;
       sendToHost(session, envelope);
       break;
+    // Read-only ops: any client may issue (no controller gate)
+    case "terminal.list":
+    case "terminal.browse":
+    case "terminal.file.read":
+    case "terminal.history.request":
     case "agent.initialize":
     case "agent.session.list":
     case "agent.v2.capabilities.request":

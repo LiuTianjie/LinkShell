@@ -117,6 +117,24 @@ export interface AgentSubagentAction {
   agentStates: Record<string, AgentSubagentState>;
 }
 
+export type AgentNoticeKind =
+  | "model_changed"
+  | "effort_changed"
+  | "permission_changed"
+  | "native_unsupported"
+  | "info"
+  | "warning";
+
+export interface AgentNotice {
+  id: string;
+  conversationId?: string;
+  kind: AgentNoticeKind;
+  title: string;
+  detail?: string;
+  durationMs?: number;
+  createdAt: number;
+}
+
 export interface AgentCommandDescriptor {
   id: string;
   name: string;

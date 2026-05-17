@@ -1776,6 +1776,11 @@ export class AgentWorkspaceProxy {
       return;
     }
 
+    const priorSettings = {
+      model: conversation.model,
+      reasoningEffort: conversation.reasoningEffort,
+      permissionMode: conversation.permissionMode,
+    };
     conversation.model = payload.model ?? conversation.model;
     conversation.reasoningEffort = payload.reasoningEffort ?? conversation.reasoningEffort;
     conversation.permissionMode = payload.permissionMode ?? conversation.permissionMode;
@@ -1783,6 +1788,31 @@ export class AgentWorkspaceProxy {
     conversation.status = "running";
     conversation.lastActivityAt = Date.now();
     this.activeConversationId = conversation.id;
+
+    if (payload.model && payload.model !== priorSettings.model) {
+      const runtimeCapabilities = this.providerCapabilities.get(conversation.provider);
+      const label = runtimeCapabilities?.models?.find((m) => m.id === payload.model)?.label ?? payload.model;
+      this.emitNotice({
+        conversationId: conversation.id,
+        kind: "model_changed",
+        title: `已切换模型 · ${label}`,
+        detail: `${providerLabel(conversation.provider)} 下次回复将使用 ${payload.model}`,
+      });
+    }
+    if (payload.reasoningEffort && payload.reasoningEffort !== priorSettings.reasoningEffort) {
+      this.emitNotice({
+        conversationId: conversation.id,
+        kind: "effort_changed",
+        title: `思考强度 · ${payload.reasoningEffort}`,
+      });
+    }
+    if (payload.permissionMode && payload.permissionMode !== priorSettings.permissionMode) {
+      this.emitNotice({
+        conversationId: conversation.id,
+        kind: "permission_changed",
+        title: `权限模式 · ${payload.permissionMode}`,
+      });
+    }
 
     const userText = textFromBlocks(payload.contentBlocks);
     this.addItem(conversation.id, {
@@ -1941,11 +1971,18 @@ export class AgentWorkspaceProxy {
       }
 
       if (conversation.provider !== "codex") {
+        const message = `${command.title} 暂无 ${providerLabel(conversation.provider)} 原生实现。`;
+        this.emitNotice({
+          conversationId: conversation.id,
+          kind: "native_unsupported",
+          title: `${command.title} 不支持`,
+          detail: `${providerLabel(conversation.provider)} 当前未实现这个命令。`,
+        });
         this.addItem(conversation.id, {
           id: id("error"),
           conversationId: conversation.id,
           type: "error",
-          error: `${command.title} 暂无 ${providerLabel(conversation.provider)} 原生实现。`,
+          error: message,
           createdAt: now,
         });
         return;
@@ -2065,6 +2102,15 @@ export class AgentWorkspaceProxy {
           this.sendCapabilities();
         }
       }
+      const initModel = firstString(asRecord(params), ["model", "currentModel"]);
+      if (initModel && conversationId) {
+        const conversation = this.conversations.get(conversationId);
+        if (conversation && conversation.model !== initModel) {
+          conversation.model = initModel;
+          conversation.lastActivityAt = Date.now();
+          this.emitConversation(conversation);
+        }
+      }
       return;
     }
     if (
@@ -2099,6 +2145,10 @@ export class AgentWorkspaceProxy {
         if (conversation) {
           conversation.agentSessionId = agentSessionId;
           conversation.lastActivityAt = Date.now();
+          const startedModel = firstString(asRecord(params), ["model", "currentModel"]);
+          if (startedModel && conversation.model !== startedModel) {
+            conversation.model = startedModel;
+          }
           this.emitConversation(conversation);
         }
       }
@@ -2978,6 +3028,26 @@ export class AgentWorkspaceProxy {
       text,
       createdAt: Date.now(),
     });
+  }
+
+  private emitNotice(input: {
+    conversationId?: string;
+    kind:
+      | "model_changed"
+      | "effort_changed"
+      | "permission_changed"
+      | "native_unsupported"
+      | "info"
+      | "warning";
+    title: string;
+    detail?: string;
+    durationMs?: number;
+  }): void {
+    this.input.send(createEnvelope({
+      type: "agent.v2.notice",
+      sessionId: this.input.sessionId,
+      payload: input,
+    }));
   }
 
   private updateConversationPreview(
