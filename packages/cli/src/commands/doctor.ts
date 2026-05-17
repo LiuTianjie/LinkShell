@@ -44,7 +44,6 @@ export async function runDoctor(gatewayUrl?: string): Promise<void> {
 
   const results: CheckResult[] = [];
 
-  // Node.js version
   results.push(check("Node.js", () => {
     const ver = process.versions.node;
     const major = Number(ver.split(".")[0]);
@@ -52,7 +51,6 @@ export async function runDoctor(gatewayUrl?: string): Promise<void> {
     return `v${ver}`;
   }));
 
-  // node-pty
   results.push(check("node-pty", () => {
     try {
       execSync("node -e \"require('node-pty')\"", { timeout: 5000, stdio: "pipe" });
@@ -62,26 +60,19 @@ export async function runDoctor(gatewayUrl?: string): Promise<void> {
     }
   }));
 
-  // Claude CLI
-  const claudePath = which("claude");
-  if (claudePath) {
-    results.push(check("Claude CLI", () => {
-      const ver = execSync("claude --version 2>&1", { encoding: "utf8", timeout: 5000 }).trim();
-      return `${ver} (${claudePath})`;
-    }));
-  } else {
-    results.push({ name: "Claude CLI", ok: false, detail: "not found — npm i -g @anthropic-ai/claude-code" });
+  // Optional CLI hints — not required, since LinkShell now bridges a plain shell.
+  for (const [label, bin, hint] of [
+    ["Claude CLI (optional)", "claude", "npm i -g @anthropic-ai/claude-code"],
+    ["Codex CLI (optional)", "codex", "npm i -g @openai/codex"],
+  ] as const) {
+    const path = which(bin);
+    if (path) {
+      results.push({ name: label, ok: true, detail: `found (${path})` });
+    } else {
+      results.push({ name: label, ok: true, detail: `not installed — ${hint}` });
+    }
   }
 
-  // Codex CLI
-  const codexPath = which("codex");
-  if (codexPath) {
-    results.push(check("Codex CLI", () => `found (${codexPath})`));
-  } else {
-    results.push({ name: "Codex CLI", ok: false, detail: "not found — npm i -g @openai/codex" });
-  }
-
-  // Config
   results.push(check("Config", () => {
     const path = getConfigPath();
     const cfg = loadConfig();
@@ -90,14 +81,12 @@ export async function runDoctor(gatewayUrl?: string): Promise<void> {
     return `${path} (${keys.join(", ")})`;
   }));
 
-  // Gateway
   if (gateway) {
     results.push(await checkGateway(gateway));
   } else {
     results.push({ name: "Gateway", ok: false, detail: "no gateway configured — run: linkshell setup" });
   }
 
-  // Print results
   for (const r of results) {
     const icon = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
     process.stdout.write(`  ${icon} ${r.name}: ${r.detail}\n`);

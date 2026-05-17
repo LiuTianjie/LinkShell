@@ -16,23 +16,11 @@ function ask(
   });
 }
 
-function choose(
-  rl: readline.Interface,
-  question: string,
-  options: string[],
-  defaultIdx = 0,
-): Promise<string> {
-  return new Promise((resolve) => {
-    process.stdout.write(`  ${question}\n`);
-    for (let i = 0; i < options.length; i++) {
-      const marker = i === defaultIdx ? "\x1b[36m>\x1b[0m" : " ";
-      process.stdout.write(`  ${marker} ${i + 1}. ${options[i]}\n`);
-    }
-    rl.question(`  Choice (${defaultIdx + 1}): `, (answer) => {
-      const idx = Number(answer.trim()) - 1;
-      resolve(options[idx >= 0 && idx < options.length ? idx : defaultIdx]!);
-    });
-  });
+function defaultShell(): string {
+  if (process.platform === "win32") {
+    return process.env.COMSPEC ?? "cmd.exe";
+  }
+  return process.env.SHELL ?? "/bin/bash";
 }
 
 export async function runSetup(): Promise<void> {
@@ -49,17 +37,11 @@ export async function runSetup(): Promise<void> {
 
   const gateway = await ask(rl, "Gateway URL (leave empty for built-in)", "");
 
-  const provider = (await choose(
+  const command = await ask(
     rl,
-    "Default provider:",
-    ["claude", "codex", "gemini", "copilot", "custom"],
-    ["claude", "codex", "gemini", "copilot", "custom"].indexOf(existing.provider ?? "claude"),
-  )) as LinkShellConfig["provider"];
-
-  let command: string | undefined;
-  if (provider === "custom") {
-    command = await ask(rl, "Custom command", existing.command ?? "bash");
-  }
+    "Terminal command (the shell or CLI you want to bridge)",
+    existing.command ?? defaultShell(),
+  );
 
   const clientName = await ask(
     rl,
@@ -76,8 +58,8 @@ export async function runSetup(): Promise<void> {
 
   const config: LinkShellConfig = {
     gateway: gateway || undefined,
-    provider,
-    command,
+    provider: "custom",
+    command: command || undefined,
     clientName,
     hostname: hostnameName || undefined,
   };

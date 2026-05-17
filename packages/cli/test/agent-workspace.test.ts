@@ -169,4 +169,56 @@ describe("AgentWorkspaceProxy event routing", () => {
     expect(notice?.payload.kind).toBe("native_unsupported");
     expect(notice?.payload.title).toContain("plan");
   });
+
+  it("syncs provider sessions when mobile requests a snapshot so conversations come from the host", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.clear();
+    proxy.conversationByAgentSessionId.clear();
+    proxy.initialized = true;
+    let listCalls = 0;
+    proxy.clients.set("codex", {
+      listSessions: async () => {
+        listCalls += 1;
+        return {
+          sessions: [
+            { id: "thread-remote-1", cwd: "/repo", title: "Remote A", lastActivityAt: 100 },
+            { id: "thread-remote-2", cwd: "/repo", title: "Remote B", lastActivityAt: 200 },
+          ],
+        };
+      },
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-1",
+      type: "agent.v2.snapshot.request",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {},
+    });
+
+    expect(listCalls).toBe(1);
+    expect(proxy.conversationByAgentSessionId.get("thread-remote-1")).toBeDefined();
+    const snapshot = sent.find((envelope) => envelope.type === "agent.v2.snapshot");
+    expect(snapshot?.payload.conversations.map((c: any) => c.agentSessionId).sort()).toEqual([
+      "thread-remote-1",
+      "thread-remote-2",
+    ]);
+  });
+
+  it("falls back to a built-in Codex model list when model/list returns nothing", async () => {
+    const { proxy } = makeProxy();
+    proxy.providerCapabilities.clear();
+    const stubClient = {
+      listModels: async () => undefined,
+    };
+
+    await proxy.refreshProviderCapabilities("codex", stubClient, "codex-app-server");
+
+    const caps = proxy.providerCapabilities.get("codex");
+    expect(caps).toBeDefined();
+    expect(caps.models.length).toBeGreaterThan(1);
+    expect(caps.models.some((m: any) => m.id === "gpt-5")).toBe(true);
+    expect(caps.defaultModel).toBe("gpt-5");
+    expect(caps.reasoningEfforts).toContain("high");
+  });
 });

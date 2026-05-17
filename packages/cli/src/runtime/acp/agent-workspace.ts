@@ -765,6 +765,17 @@ interface ProviderRuntimeCapabilities {
 
 const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 const ALL_PERMISSION_MODES = ["read_only", "workspace_write", "full_access"] as const;
+
+const CODEX_FALLBACK_MODELS: AgentModelOption[] = [
+  { id: "default", label: "默认模型" },
+  { id: "gpt-5", label: "GPT-5" },
+  { id: "gpt-5-codex", label: "GPT-5 Codex" },
+  { id: "gpt-5-pro", label: "GPT-5 Pro" },
+  { id: "gpt-5-high", label: "GPT-5 High" },
+  { id: "o3", label: "o3" },
+  { id: "o3-mini", label: "o3-mini" },
+];
+const CODEX_FALLBACK_DEFAULT_MODEL = "gpt-5";
 const CODEX_COMMAND_NAMES = ["plan", "exit-plan", "compact", "clear", "status", "review", "subagents"] as const;
 const CLAUDE_REMOTE_HIDDEN_COMMANDS = new Set([
   "add-dir",
@@ -1300,6 +1311,7 @@ export class AgentWorkspaceProxy {
       }
       case "agent.v2.snapshot.request": {
         const payload = parseTypedPayload("agent.v2.snapshot.request", envelope.payload);
+        await this.syncProviderSessions();
         this.sendSnapshot(payload.conversationId);
         break;
       }
@@ -1465,16 +1477,36 @@ export class AgentWorkspaceProxy {
   ): Promise<void> {
     if (client instanceof AcpClient && protocol !== "codex-app-server") return;
     const listModels = (client as { listModels?: () => Promise<unknown> }).listModels;
-    if (typeof listModels !== "function") return;
-    try {
-      const result = await listModels.call(client);
-      const runtimeCapabilities = parseModelListCapabilities(result);
-      if (runtimeCapabilities) this.providerCapabilities.set(provider, runtimeCapabilities);
-    } catch (error) {
-      if (this.input.verbose) {
-        process.stderr.write(`[agent:v2] model/list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+    let runtimeCapabilities: ProviderRuntimeCapabilities | undefined;
+    if (typeof listModels === "function") {
+      try {
+        const result = await listModels.call(client);
+        runtimeCapabilities = parseModelListCapabilities(result);
+      } catch (error) {
+        if (this.input.verbose) {
+          process.stderr.write(`[agent:v2] model/list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
       }
     }
+    if (provider === "codex") {
+      // Codex `model/list` is unreliable across versions — make sure mobile always
+      // sees a usable model picker by merging in a static fallback list.
+      const merged: ProviderRuntimeCapabilities = {
+        models: runtimeCapabilities?.models?.length
+          ? runtimeCapabilities.models
+          : [...CODEX_FALLBACK_MODELS],
+        defaultModel: runtimeCapabilities?.defaultModel ?? CODEX_FALLBACK_DEFAULT_MODEL,
+        reasoningEfforts: runtimeCapabilities?.reasoningEfforts?.length
+          ? runtimeCapabilities.reasoningEfforts
+          : [...ALL_REASONING_EFFORTS],
+        commands: runtimeCapabilities?.commands,
+        modes: runtimeCapabilities?.modes,
+        currentMode: runtimeCapabilities?.currentMode,
+      };
+      this.providerCapabilities.set(provider, merged);
+      return;
+    }
+    if (runtimeCapabilities) this.providerCapabilities.set(provider, runtimeCapabilities);
   }
 
   private async syncProviderSessions(): Promise<void> {

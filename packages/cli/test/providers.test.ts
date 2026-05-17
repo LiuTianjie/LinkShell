@@ -63,29 +63,29 @@ describe("resolveProviderConfig", () => {
     expect(config.command).toBe(executable);
   });
 
-  it("resolves Gemini as a first-class terminal provider", () => {
-    const executable = prependExecutableToPath("gemini");
+  it("downgrades a legacy provider flag (gemini/copilot/claude/codex) to a custom shell", () => {
+    const executable = prependExecutableToPath("agent-cli");
 
-    const config = resolveProviderConfig({
-      provider: "gemini",
-      args: ["--model", "flash"],
-    });
+    const warnings: string[] = [];
+    const originalWrite = process.stderr.write.bind(process.stderr) as typeof process.stderr.write;
+    process.stderr.write = ((chunk: any) => {
+      warnings.push(typeof chunk === "string" ? chunk : chunk.toString());
+      return true;
+    }) as typeof process.stderr.write;
 
-    expect(config.provider).toBe("gemini");
-    expect(config.command).toBe(executable);
-    expect(config.args).toEqual(["--model", "flash"]);
-  });
+    try {
+      const config = resolveProviderConfig({
+        provider: "gemini",
+        command: "agent-cli",
+        args: ["--model", "flash"],
+      });
 
-  it("resolves GitHub Copilot as a first-class terminal provider", () => {
-    const executable = prependExecutableToPath("github-copilot");
-
-    const config = resolveProviderConfig({
-      provider: "copilot",
-      args: ["suggest"],
-    });
-
-    expect(config.provider).toBe("copilot");
-    expect(config.command).toBe(executable);
-    expect(config.args).toEqual(["suggest"]);
+      expect(config.provider).toBe("custom");
+      expect(config.command).toBe(executable);
+      expect(config.args).toEqual(["--model", "flash"]);
+      expect(warnings.join("")).toContain("--provider=gemini is no longer supported");
+    } finally {
+      process.stderr.write = originalWrite;
+    }
   });
 });

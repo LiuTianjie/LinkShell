@@ -22,7 +22,7 @@ const program = new Command();
 program
   .name("linkshell")
   .description(
-    "Bridge a local Claude/Codex terminal session to a remote gateway",
+    "Bridge a local terminal session to a remote gateway. Launch any CLI (Claude/Codex/etc.) manually inside the shell.",
   )
   .version(pkg.version);
 
@@ -45,10 +45,14 @@ program
   .option("--session-id <id>", "Session identifier (auto-created if omitted)")
   .option(
     "--provider <provider>",
-    "claude | codex | gemini | copilot | custom",
-    config.provider ?? "claude",
+    "(deprecated — always custom; launch your CLI manually inside the shell)",
+    "custom",
   )
-  .option("--command <command>", "Override provider executable", config.command)
+  .option(
+    "--command <command>",
+    "Shell or CLI to spawn in the PTY (default: $SHELL)",
+    config.command,
+  )
   .option(
     "--client-name <name>",
     "Display name for this CLI",
@@ -485,12 +489,11 @@ program
       return;
     }
 
-    const provider = config.provider ?? "claude";
     const childArgs = [
       "start",
       "--_foreground-bridge",
       "--gateway", gwWsUrl,
-      "--provider", provider,
+      "--provider", "custom",
       "--client-name", config.clientName ?? "local-cli",
       "--cols", String(config.cols ?? 120),
       "--rows", String(config.rows ?? 36),
@@ -505,7 +508,7 @@ program
     daemon.saveMetadata("bridge", { keepAwake, startedAt: Date.now() });
     process.stderr.write(`\n  \x1b[32m✓\x1b[0m Bridge started in background (PID ${pid})\n`);
     process.stderr.write(`    Gateway: ${chosen.name}\n`);
-    process.stderr.write(`    Provider: ${provider}\n`);
+    process.stderr.write(`    Provider: custom (shell)\n`);
     process.stderr.write(`    Keep awake: ${keepAwake ? "enabled" : "disabled"}\n`);
     process.stderr.write(`    Desktop: enabled\n`);
     process.stderr.write(`    Agent GUI: enabled (Codex app-server)\n`);
@@ -607,7 +610,7 @@ program
     }
 
     process.stderr.write(
-      "  Connect: linkshell start --gateway <url> --provider claude\n\n",
+      "  Connect: linkshell start --gateway <url>\n\n",
     );
   });
 

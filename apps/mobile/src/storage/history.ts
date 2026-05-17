@@ -30,13 +30,23 @@ export async function addToHistory(
   record: Omit<ConnectionRecord, "connectedAt">,
 ): Promise<void> {
   const history = await loadHistory();
-  history.unshift({
+  const normalizedServerUrl = record.serverUrl.replace(/\/+$/, "");
+  // Same machine reconnecting from a fresh CLI session gets a new sessionId every time.
+  // Collapse those into a single row so the recents list doesn't grow unbounded.
+  const filtered = history.filter((item) => {
+    const sameServer = item.serverUrl.replace(/\/+$/, "") === normalizedServerUrl;
+    if (!sameServer) return true;
+    if (record.machineId && item.machineId && record.machineId === item.machineId) return false;
+    if (item.sessionId === record.sessionId) return false;
+    return true;
+  });
+  filtered.unshift({
     ...record,
-    serverUrl: record.serverUrl.replace(/\/+$/, ""),
+    serverUrl: normalizedServerUrl,
     connectedAt: Date.now(),
   });
-  if (history.length > MAX_RECORDS) history.length = MAX_RECORDS;
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  if (filtered.length > MAX_RECORDS) filtered.length = MAX_RECORDS;
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
 }
 
 export async function clearHistory(): Promise<void> {
@@ -111,7 +121,22 @@ export async function enrichHistory(
     record.cwd = meta.cwd;
     changed = true;
   }
+  let next = history;
+  if (record.machineId) {
+    // Once we know the machineId, fold any older entries that pointed at the same
+    // physical device on the same gateway into this single row.
+    const normalizedServer = record.serverUrl.replace(/\/+$/, "");
+    const deduped = history.filter((item) =>
+      item === record ||
+      item.machineId !== record.machineId ||
+      item.serverUrl.replace(/\/+$/, "") !== normalizedServer,
+    );
+    if (deduped.length !== history.length) {
+      next = deduped;
+      changed = true;
+    }
+  }
   if (changed) {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   }
 }
