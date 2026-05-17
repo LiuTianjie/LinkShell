@@ -766,16 +766,12 @@ interface ProviderRuntimeCapabilities {
 const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 const ALL_PERMISSION_MODES = ["read_only", "workspace_write", "full_access"] as const;
 
+// Codex `model/list` is the source of truth — these are only used when the RPC
+// returns nothing so mobile still sees a usable picker.
 const CODEX_FALLBACK_MODELS: AgentModelOption[] = [
   { id: "default", label: "默认模型" },
-  { id: "gpt-5", label: "GPT-5" },
-  { id: "gpt-5-codex", label: "GPT-5 Codex" },
-  { id: "gpt-5-pro", label: "GPT-5 Pro" },
-  { id: "gpt-5-high", label: "GPT-5 High" },
-  { id: "o3", label: "o3" },
-  { id: "o3-mini", label: "o3-mini" },
 ];
-const CODEX_FALLBACK_DEFAULT_MODEL = "gpt-5";
+const CODEX_FALLBACK_DEFAULT_MODEL = "default";
 const CODEX_COMMAND_NAMES = ["plan", "exit-plan", "compact", "clear", "status", "review", "subagents"] as const;
 const CLAUDE_REMOTE_HIDDEN_COMMANDS = new Set([
   "add-dir",
@@ -1161,10 +1157,13 @@ function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities
   const raw = asRecord(value);
   const modelsValue =
     Array.isArray(value) ? value :
+    Array.isArray(raw?.data) ? raw.data :
     Array.isArray(raw?.models) ? raw.models :
     Array.isArray(raw?.items) ? raw.items :
     Array.isArray(raw?.modelOptions) ? raw.modelOptions :
     [];
+  let inferredDefault: string | undefined;
+  const efforts = new Set<string>();
   const models = modelsValue
     .map((entry, index) => {
       const model = asRecord(entry);
@@ -1173,24 +1172,44 @@ function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities
           ? { id: entry, label: entry }
           : undefined;
       }
+      if (model.hidden === true) return undefined;
       const modelId = firstString(model, ["id", "model", "name", "value"]) ?? `model-${index + 1}`;
-      const label = firstString(model, ["label", "title", "displayName", "name"]) ?? modelId;
+      const label = firstString(model, ["displayName", "label", "title", "name"]) ?? modelId;
+      if (model.isDefault === true && !inferredDefault) inferredDefault = modelId;
+      const supported = Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts : [];
+      for (const item of supported) {
+        const effort = typeof item === "string"
+          ? item
+          : firstString(asRecord(item), ["reasoningEffort", "id", "value"]);
+        if (effort && ALL_REASONING_EFFORTS.includes(effort as typeof ALL_REASONING_EFFORTS[number])) {
+          efforts.add(effort);
+        }
+      }
       return { id: modelId, label };
     })
     .filter((entry): entry is AgentModelOption => Boolean(entry));
   const defaultModel =
     firstString(raw, ["defaultModel", "default_model", "currentModel"]) ??
-    firstString(asRecord(raw?.defaults), ["model"]);
-  const effortsValue =
+    firstString(asRecord(raw?.defaults), ["model"]) ??
+    inferredDefault;
+  const explicitEffortsValue =
     Array.isArray(raw?.reasoningEfforts) ? raw.reasoningEfforts :
     Array.isArray(raw?.reasoning_efforts) ? raw.reasoning_efforts :
     Array.isArray(raw?.efforts) ? raw.efforts :
     undefined;
-  const reasoningEfforts = effortsValue
-    ?.filter((entry): entry is string => typeof entry === "string" && ALL_REASONING_EFFORTS.includes(entry as typeof ALL_REASONING_EFFORTS[number]));
+  if (explicitEffortsValue) {
+    for (const item of explicitEffortsValue) {
+      if (typeof item === "string" && ALL_REASONING_EFFORTS.includes(item as typeof ALL_REASONING_EFFORTS[number])) {
+        efforts.add(item);
+      }
+    }
+  }
+  const reasoningEfforts = efforts.size
+    ? ALL_REASONING_EFFORTS.filter((effort) => efforts.has(effort))
+    : undefined;
   if (models.length === 0 && !defaultModel && !reasoningEfforts?.length) return undefined;
   return {
-    ...(models.length > 0 ? { models: [{ id: "default", label: "默认模型" }, ...models] } : {}),
+    ...(models.length > 0 ? { models } : {}),
     ...(defaultModel ? { defaultModel } : {}),
     ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
   };

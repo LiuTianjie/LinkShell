@@ -205,7 +205,7 @@ describe("AgentWorkspaceProxy event routing", () => {
     ]);
   });
 
-  it("falls back to a built-in Codex model list when model/list returns nothing", async () => {
+  it("falls back to a minimal Codex model list when model/list returns nothing", async () => {
     const { proxy } = makeProxy();
     proxy.providerCapabilities.clear();
     const stubClient = {
@@ -216,9 +216,52 @@ describe("AgentWorkspaceProxy event routing", () => {
 
     const caps = proxy.providerCapabilities.get("codex");
     expect(caps).toBeDefined();
-    expect(caps.models.length).toBeGreaterThan(1);
-    expect(caps.models.some((m: any) => m.id === "gpt-5")).toBe(true);
-    expect(caps.defaultModel).toBe("gpt-5");
+    expect(caps.models.length).toBeGreaterThanOrEqual(1);
+    expect(caps.defaultModel).toBe("default");
     expect(caps.reasoningEfforts).toContain("high");
+  });
+
+  it("parses the real Codex model/list response shape (data[] with displayName + supportedReasoningEfforts)", async () => {
+    const { proxy } = makeProxy();
+    proxy.providerCapabilities.clear();
+    const stubClient = {
+      listModels: async () => ({
+        data: [
+          {
+            id: "gpt-5.5",
+            displayName: "GPT-5.5",
+            isDefault: true,
+            hidden: false,
+            supportedReasoningEfforts: [
+              { reasoningEffort: "low" },
+              { reasoningEffort: "medium" },
+              { reasoningEffort: "high" },
+              { reasoningEffort: "xhigh" },
+            ],
+          },
+          {
+            id: "gpt-5.4-mini",
+            displayName: "GPT-5.4-Mini",
+            hidden: false,
+            supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+          },
+          { id: "hidden-model", displayName: "Hidden", hidden: true, supportedReasoningEfforts: [] },
+        ],
+        nextCursor: null,
+      }),
+    };
+
+    await proxy.refreshProviderCapabilities("codex", stubClient, "codex-app-server");
+
+    const caps = proxy.providerCapabilities.get("codex");
+    expect(caps).toBeDefined();
+    const ids = caps.models.map((m: any) => m.id);
+    expect(ids).toContain("gpt-5.5");
+    expect(ids).toContain("gpt-5.4-mini");
+    expect(ids).not.toContain("hidden-model");
+    const main = caps.models.find((m: any) => m.id === "gpt-5.5");
+    expect(main.label).toBe("GPT-5.5");
+    expect(caps.defaultModel).toBe("gpt-5.5");
+    expect(caps.reasoningEfforts).toEqual(["low", "medium", "high", "xhigh"]);
   });
 });
