@@ -42,19 +42,51 @@ pnpm build
 
 ## 4. 发布 npm 包
 
+> ⚠️ **必须使用 `pnpm publish`，绝不能用 `npm publish`**。
+> 这个仓库 workspace 里的内部依赖写的是 `workspace:*`（见 `packages/cli/package.json`、`packages/gateway/package.json`）。
+> `pnpm publish` 在打 tarball 时会把 `workspace:*` 重写成具体版本号；`npm publish` 不会，发出去的包到了用户机器上 `npm install` 会直接报 `EUNSUPPORTEDPROTOCOL "workspace:"`，整个 `linkshell upgrade` 链路就坏了。这种情况发生过一次（v0.4.0），当场只能 deprecate + bump 0.4.1 抢救。
+
 ```bash
 # 发布 protocol（如果有改动）
 cd packages/shared-protocol
-npm publish --access public
+pnpm publish --access public
 
 # 发布 gateway（如果有改动）
 cd ../gateway
-npm publish --access public
+pnpm publish --access public
 
 # 发布 CLI
 cd ../cli
-npm publish --access public
+pnpm publish --access public
 ```
+
+### 4.1 发布后立即抽检 tarball
+
+每发完一个包，下载下来检查 `dependencies`，确认没有任何 `workspace:` 字面量泄漏：
+
+```bash
+# 替换成刚发的版本号
+VERSION=0.4.1
+
+cd /tmp && rm -rf ls-publish-check && mkdir ls-publish-check && cd ls-publish-check
+npm pack linkshell-cli@$VERSION
+tar -xzf linkshell-cli-$VERSION.tgz
+grep -n "workspace:" package/package.json && echo "❌ workspace: leaked, DO NOT release; deprecate this version" || echo "✅ deps look clean"
+
+npm pack @linkshell/gateway@$VERSION
+tar -xzf linkshell-gateway-$VERSION.tgz
+grep -n "workspace:" package/package.json && echo "❌ workspace: leaked" || echo "✅ deps look clean"
+```
+
+发现 `workspace:` 就立刻：
+
+```bash
+npm deprecate linkshell-cli@$VERSION "broken: workspace:* deps not rewritten; use next patch"
+npm deprecate @linkshell/gateway@$VERSION "broken: workspace:* deps not rewritten; use next patch"
+npm deprecate @linkshell/protocol@$VERSION "use next patch"
+```
+
+然后 bump patch、改用 `pnpm publish` 重发。
 
 ## 5. 发布 Docker 镜像
 
@@ -179,9 +211,11 @@ linkshell start --agent-ui --provider custom --command bash
 ## 快速发版 Checklist
 
 - [ ] 代码通过 typecheck
-- [ ] 版本号已更新
+- [ ] `pnpm test` 全部通过
+- [ ] 版本号已更新（protocol、gateway、cli、根 package.json，按依赖链）
 - [ ] `pnpm build` 成功
-- [ ] npm 包已发布
+- [ ] **使用 `pnpm publish`（不是 `npm publish`）发布 npm 包**
+- [ ] 抽检 tarball 里没有残留的 `workspace:` 字面量（见 §4.1）
 - [ ] Docker tag 已推送（CI 自动构建）
 - [ ] Homebrew formula 已更新 sha256
 - [ ] GitHub Release 已创建
