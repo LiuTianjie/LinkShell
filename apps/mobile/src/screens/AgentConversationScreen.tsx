@@ -3214,7 +3214,7 @@ export function AgentConversationScreen({
   );
   const commandPanelVisible = Boolean(commandToken && availableCommands.length > 0 && attachments.length === 0 && !running);
   const currentCollaborationMode = (conversation?.collaborationMode ?? providerCapability?.currentMode ?? "default") as AgentCollaborationMode;
-  const composerBottomOffset = Math.max(0, keyboardInset - insets.bottom);
+  const composerBottomOffset = Platform.OS === "ios" ? Math.max(0, keyboardInset - insets.bottom) : 0;
   const timelineBottomInset = Math.max(
     bottomComposerHeight + composerBottomOffset,
     Math.max(insets.bottom + 116, 132) + composerBottomOffset,
