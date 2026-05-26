@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AcpClient } from "../src/runtime/acp/acp-client.js";
+import { claudePermissionModeFor, parseClaudeJsonlSession } from "../src/runtime/acp/claude-sdk-client.js";
 import { resolveAgentCommand } from "../src/runtime/acp/provider-resolver.js";
 
 const clients: AcpClient[] = [];
@@ -50,6 +51,8 @@ rl.on("line", (line) => {
     send({ jsonrpc: "2.0", id: message.id, result: { ok: true } });
   } else if (message.method === "thread/list") {
     send({ jsonrpc: "2.0", id: message.id, result: { threads: [{ id: "thread-1", cwd: ${JSON.stringify(cwd)}, title: "Test thread" }] } });
+  } else if (message.method === "thread/turns/list") {
+    send({ jsonrpc: "2.0", id: message.id, result: { turns: [] } });
   } else {
     send({ jsonrpc: "2.0", id: message.id, result: {} });
   }
@@ -127,9 +130,11 @@ describe("AcpClient codex app-server protocol", () => {
     expect(entries[4].params).toMatchObject({
       threadId: "thread-1",
       effort: "high",
+      model: "default",
       collaborationMode: {
         mode: "plan",
         settings: {
+          model: "default",
           reasoning_effort: "high",
         },
       },
@@ -176,11 +181,11 @@ describe("AcpClient codex app-server protocol", () => {
       "turn/start",
     ]);
     expect(entries[3].params).not.toHaveProperty("collaborationMode");
-    expect(entries[3].params).not.toHaveProperty("model");
+    expect(entries[3].params.model).toBe("default");
     expect(entries[3].params).not.toHaveProperty("effort");
   });
 
-  it("sends an empty settings object for plan mode without optional strings", async () => {
+  it("sends a model fallback for plan mode without an explicit model", async () => {
     const fake = makeFakeAppServer();
     const client = new AcpClient({
       command: fake.command,
@@ -205,9 +210,41 @@ describe("AcpClient codex app-server protocol", () => {
 
     const entries = await waitForLogEntries(fake.logPath, 4);
     expect(entries[3].method).toBe("turn/start");
+    expect(entries[3].params.model).toBe("default");
     expect(entries[3].params.collaborationMode).toEqual({
       mode: "plan",
-      settings: {},
+      settings: { model: "default" },
+    });
+  });
+
+  it("uses thread/turns/list for paged Codex history", async () => {
+    const fake = makeFakeAppServer();
+    const client = new AcpClient({
+      command: fake.command,
+      protocol: "codex-app-server",
+      framing: "newline",
+      cwd: fake.cwd,
+      onNotification: () => {},
+      onRequest: () => ({}),
+      onExit: () => {},
+    });
+    clients.push(client);
+
+    await client.initialize();
+    await client.listTurns({ sessionId: "thread-1", limit: 25, cursor: "cursor-1" });
+
+    const entries = await waitForLogEntries(fake.logPath, 3);
+    expect(entries.map((entry) => entry.method)).toEqual([
+      "initialize",
+      "initialized",
+      "thread/turns/list",
+    ]);
+    expect(entries[2].params).toEqual({
+      threadId: "thread-1",
+      limit: 25,
+      cursor: "cursor-1",
+      sortDirection: "desc",
+      itemsView: "full",
     });
   });
 });
@@ -240,5 +277,127 @@ describe("resolveAgentCommand", () => {
       protocol: "codex-app-server",
       framing: "newline",
     });
+  });
+});
+
+describe("Claude SDK option mapping", () => {
+  it("maps LinkShell permission and collaboration modes onto Claude SDK modes", () => {
+    expect(claudePermissionModeFor({})).toBe("default");
+    expect(claudePermissionModeFor({ permissionMode: "workspace_write" })).toBe("acceptEdits");
+    expect(claudePermissionModeFor({ permissionMode: "full_access" })).toBe("bypassPermissions");
+    expect(claudePermissionModeFor({ permissionMode: "read_only" })).toBe("plan");
+    expect(claudePermissionModeFor({ permissionMode: "full_access", collaborationMode: "plan" })).toBe("plan");
+  });
+});
+
+describe("Claude JSONL history parsing", () => {
+  it("converts Claude Code transcript entries into provider thread items", () => {
+    const parsed = parseClaudeJsonlSession({
+      cwd: "/repo",
+      sessionId: "claude-session-1",
+      text: [
+        JSON.stringify({
+          type: "user",
+          uuid: "user-uuid",
+          timestamp: "2026-05-25T10:00:00.000Z",
+          message: {
+            role: "user",
+            content: "run the tests",
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          uuid: "assistant-uuid",
+          timestamp: "2026-05-25T10:00:01.000Z",
+          message: {
+            id: "msg-1",
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [
+              { type: "text", text: "I will run them." },
+              { type: "tool_use", id: "tool-1", name: "Bash", input: { command: "pnpm test" } },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "tool-result-uuid",
+          timestamp: "2026-05-25T10:00:02.000Z",
+          message: {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "tool-1", content: "ok", is_error: false },
+            ],
+          },
+        }),
+      ].join("\n"),
+    }) as any;
+
+    expect(parsed.thread).toMatchObject({
+      id: "claude-session-1",
+      cwd: "/repo",
+      model: "claude-sonnet-4-5",
+      title: "run the tests",
+      preview: "I will run them.",
+    });
+    expect(parsed.thread.turns.flatMap((turn: any) => turn.items)).toEqual([
+      {
+        id: "user-uuid",
+        type: "userMessage",
+        content: [{ type: "text", text: "run the tests" }],
+      },
+      {
+        id: "msg-1",
+        type: "agentMessage",
+        content: [{ type: "text", text: "I will run them." }],
+        status: "completed",
+      },
+      {
+        id: "tool-1",
+        type: "commandExecution",
+        toolName: "Bash",
+        tool: "Bash",
+        input: { command: "pnpm test" },
+        toolInput: { command: "pnpm test" },
+        command: "pnpm test",
+        cwd: "/repo",
+        path: undefined,
+        status: "running",
+      },
+      {
+        id: "tool-1",
+        type: "commandExecution",
+        toolName: "Bash",
+        tool: "Bash",
+        input: { command: "pnpm test" },
+        toolInput: { command: "pnpm test" },
+        command: "pnpm test",
+        cwd: "/repo",
+        path: undefined,
+        status: "completed",
+        output: "ok",
+        aggregatedOutput: "ok",
+        isError: false,
+      },
+    ]);
+  });
+
+  it("uses the transcript cwd when Claude history is listed from another project", () => {
+    const parsed = parseClaudeJsonlSession({
+      cwd: "/fallback",
+      sessionId: "claude-session-cwd",
+      text: JSON.stringify({
+        type: "user",
+        uuid: "user-uuid",
+        timestamp: "2026-05-25T10:00:00.000Z",
+        cwd: "/actual/project",
+        message: {
+          role: "user",
+          content: "hello",
+        },
+      }),
+    }) as any;
+
+    expect(parsed.thread.cwd).toBe("/actual/project");
   });
 });

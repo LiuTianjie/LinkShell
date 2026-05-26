@@ -5,13 +5,14 @@ import {
   Alert,
   Clipboard,
   Keyboard,
-  KeyboardAvoidingView,
+  KeyboardEvent,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -33,6 +34,7 @@ import type {
   AgentCollaborationMode,
   AgentNotice,
   AgentPermissionMode,
+  AgentPlanStep,
   AgentReasoningEffort,
   AgentStructuredInput,
   AgentSubagentAction,
@@ -44,8 +46,17 @@ import { useTheme, type Theme } from "../theme";
 interface AgentConversationScreenProps {
   conversationId: string;
   workspace: AgentWorkspaceHandle;
+  isRestoring?: boolean;
   onBack: () => void;
 }
+
+type TimelineBottomSpacer = {
+  id: "__timeline-bottom-spacer";
+  type: "bottom_spacer";
+  spacerHeight: number;
+};
+
+type TimelineListItem = AgentTimelineItem | TimelineBottomSpacer;
 
 type Option<T extends string> = { label: string; value?: T; image?: string };
 const EFFORT_OPTIONS: Option<AgentReasoningEffort>[] = [
@@ -73,6 +84,14 @@ const MONO_FONT = Platform.select({ ios: "Menlo", android: "monospace" });
 
 function timelineSurface(theme: Theme): string {
   return theme.mode === "light" ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.055)";
+}
+
+function agentEventSurface(theme: Theme): string {
+  return theme.mode === "light" ? "rgba(255,255,255,0.64)" : "rgba(255,255,255,0.038)";
+}
+
+function agentEventBorder(theme: Theme): string {
+  return theme.mode === "light" ? "rgba(60,60,67,0.13)" : "rgba(255,255,255,0.08)";
 }
 
 function menuActions<T extends string>(options: Option<T>[], currentValue: T | undefined) {
@@ -113,6 +132,14 @@ function visibleConversationStatus(status: string | undefined, theme: Theme) {
 function toolStatusMeta(status: AgentToolCall["status"], theme: Theme) {
   if (status === "running") return { label: "运行中", color: theme.accent, bg: theme.accentLight };
   if (status === "failed") return { label: "失败", color: theme.error, bg: theme.errorLight };
+  if (status === "completed") {
+    return {
+      label: "完成",
+      color: theme.success,
+      bg: theme.mode === "light" ? "rgba(26, 171, 110, 0.10)" : "rgba(78, 222, 163, 0.12)",
+    };
+  }
+  if (status === "pending") return { label: "待执行", color: theme.textTertiary, bg: theme.bgInput };
   return null;
 }
 
@@ -826,7 +853,7 @@ function MessageContent({
   fallbackText,
   theme,
   inverse = false,
-  monospace = true,
+  monospace = false,
 }: {
   blocks?: AgentContentBlock[];
   fallbackText?: string;
@@ -954,7 +981,7 @@ function MarkdownContent({
   text,
   theme,
   inverse = false,
-  monospace = true,
+  monospace = false,
 }: {
   text: string;
   theme: Theme;
@@ -967,12 +994,12 @@ function MarkdownContent({
     body: {
       color,
       fontFamily: !inverse && monospace ? MONO_FONT : undefined,
-      fontSize: inverse ? 14 : 13,
-      lineHeight: inverse ? 21 : 20,
+      fontSize: inverse ? 14 : 14,
+      lineHeight: inverse ? 21 : 21,
     },
     paragraph: {
       marginTop: 0,
-      marginBottom: 8,
+      marginBottom: 9,
     },
     heading1: {
       color,
@@ -1138,12 +1165,12 @@ const FileChangeCard = memo(function FileChangeCard({ tool, theme }: { tool: Age
   return (
     <View
       style={{
-        borderRadius: 10,
+        borderRadius: 8,
         borderCurve: "continuous",
-        backgroundColor: timelineSurface(theme),
+        backgroundColor: agentEventSurface(theme),
         overflow: "hidden",
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.separator,
+        borderColor: agentEventBorder(theme),
       }}
     >
       <Pressable
@@ -1282,16 +1309,17 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
   const commandSummary = isCommand && input ? humanizeCommand(input, tool.status === "running") : null;
   const title = commandSummary ? commandSummary.verb : tool.name;
   const subtitle = commandSummary ? commandSummary.target : input || output || "";
+  const iconName = tool.name.includes("MCP") ? "server.rack" : "terminal.fill";
 
   return (
     <View
       style={{
-        borderRadius: 10,
+        borderRadius: 8,
         borderCurve: "continuous",
-        backgroundColor: timelineSurface(theme),
+        backgroundColor: agentEventSurface(theme),
         overflow: "hidden",
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.separator,
+        borderColor: agentEventBorder(theme),
       }}
     >
       <Pressable
@@ -1306,9 +1334,20 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
           gap: 9,
         }}
       >
-        <AppSymbol name={tool.name.includes("MCP") ? "server.rack" : "terminal.fill"} size={15} color={theme.textTertiary} />
+        <View
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 7,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: tool.status === "running" ? theme.accentLight : theme.bgInput,
+          }}
+        >
+          <AppSymbol name={iconName} size={14} color={tool.status === "running" ? theme.accent : theme.textTertiary} />
+        </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text selectable style={{ color: theme.textSecondary, fontSize: 13, fontWeight: "700" }} numberOfLines={1}>
+          <Text selectable style={{ color: theme.text, fontSize: 13, fontWeight: "800" }} numberOfLines={1}>
             {title}
           </Text>
           {subtitle ? (
@@ -1318,7 +1357,8 @@ const ToolCard = memo(function ToolCard({ tool, theme }: { tool: AgentToolCall; 
           ) : null}
         </View>
         {meta ? (
-          <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: meta.bg }}>
+            {tool.status === "running" ? <ActivityIndicator size="small" color={meta.color} /> : null}
             <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>{meta.label}</Text>
           </View>
         ) : null}
@@ -1371,19 +1411,36 @@ function SystemActivityCard({
       onPress={() => canExpand && setExpanded((value) => !value)}
       disabled={!canExpand}
       style={{
-        paddingVertical: 4,
+        borderRadius: 8,
+        borderCurve: "continuous",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: agentEventBorder(theme),
+        backgroundColor: agentEventSurface(theme),
+        paddingHorizontal: 10,
+        paddingVertical: 9,
         flexDirection: "row",
         alignItems: "flex-start",
         gap: 8,
       }}
     >
-      <AppSymbol name={icon} size={14} color={theme.textTertiary} />
+      <View
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 11,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: running ? theme.accentLight : theme.bgInput,
+        }}
+      >
+        <AppSymbol name={icon} size={13} color={running ? theme.accent : theme.textTertiary} />
+      </View>
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
+          <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
             {title}
           </Text>
-          {running ? <ActivityIndicator size="small" color={theme.textTertiary} /> : null}
+          {running ? <ActivityIndicator size="small" color={theme.accent} /> : null}
         </View>
         {text ? (
           <Text
@@ -1409,11 +1466,11 @@ function SubagentCard({ action, theme, running }: { action: AgentSubagentAction;
   return (
     <View
       style={{
-        borderRadius: 10,
+        borderRadius: 8,
         borderCurve: "continuous",
-        backgroundColor: timelineSurface(theme),
+        backgroundColor: agentEventSurface(theme),
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.separator,
+        borderColor: agentEventBorder(theme),
         padding: 12,
         gap: 9,
       }}
@@ -1515,11 +1572,11 @@ function StructuredInputCard({
   return (
     <View
       style={{
-        borderRadius: 10,
+        borderRadius: 8,
         borderCurve: "continuous",
-        backgroundColor: timelineSurface(theme),
+        backgroundColor: agentEventSurface(theme),
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.separator,
+        borderColor: agentEventBorder(theme),
         padding: 12,
         gap: 10,
       }}
@@ -1688,11 +1745,11 @@ function PermissionRequestCard({
   return (
     <View
       style={{
-        borderRadius: 10,
+        borderRadius: 8,
         borderCurve: "continuous",
-        backgroundColor: timelineSurface(theme),
+        backgroundColor: agentEventSurface(theme),
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.separator,
+        borderColor: agentEventBorder(theme),
         overflow: "hidden",
       }}
     >
@@ -1826,9 +1883,20 @@ function PermissionRequestCard({
 
 function StreamingPill({ theme }: { theme: Theme }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 }}>
-      <ActivityIndicator size="small" color={theme.textTertiary} />
-      <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>正在生成</Text>
+    <View
+      style={{
+        alignSelf: "flex-start",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 7,
+        borderRadius: 999,
+        backgroundColor: theme.accentLight,
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+      }}
+    >
+      <ActivityIndicator size="small" color={theme.accent} />
+      <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "800" }}>正在生成</Text>
     </View>
   );
 }
@@ -1986,21 +2054,485 @@ function AssistantMessage({
   text: string;
   theme: Theme;
 }) {
+  const [copied, setCopied] = useState(false);
   const hasBody = Boolean(text || item.content?.length);
+  const copyText = (text || (item.content ?? [])
+    .map((block) => block.type === "text" ? block.text ?? "" : "")
+    .filter(Boolean)
+    .join("\n"))
+    .trim();
+  const canCopy = copyText.length > 0;
+  const copyAssistantMessage = useCallback(() => {
+    if (!canCopy) return;
+    copy(copyText).then((ok) => {
+      if (!ok) {
+        Alert.alert("复制失败", "系统剪贴板暂不可用，请长按文本手动复制。");
+        return;
+      }
+      Haptics.selectionAsync().catch(() => {});
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }).catch(() => {
+      Alert.alert("复制失败", "系统剪贴板暂不可用，请长按文本手动复制。");
+    });
+  }, [canCopy, copyText]);
+
   return (
-    <View style={{ paddingVertical: 4 }}>
+    <View style={{ gap: 7, paddingVertical: 3 }}>
       {hasBody ? (
-        <MessageContent blocks={item.content} fallbackText={text} theme={theme} />
+        <View
+          style={{
+            borderRadius: 10,
+            borderCurve: "continuous",
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: agentEventBorder(theme),
+            backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.72)" : "rgba(255,255,255,0.045)",
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+          }}
+        >
+          <MessageContent blocks={item.content} fallbackText={text} theme={theme} monospace={false} />
+        </View>
       ) : null}
       {item.isStreaming ? <StreamingPill theme={theme} /> : null}
+      {canCopy ? (
+        <Pressable
+          onPress={copyAssistantMessage}
+          hitSlop={8}
+          style={({ pressed }) => ({
+            alignSelf: "flex-start",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+            borderRadius: 999,
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            backgroundColor: pressed ? theme.bgInput : "transparent",
+            opacity: pressed ? 0.72 : 1,
+          })}
+        >
+          <AppSymbol name={copied ? "checkmark" : "doc.on.doc"} size={12} color={copied ? theme.success : theme.textTertiary} />
+          <Text style={{ color: copied ? theme.success : theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
+            {copied ? "已复制" : "复制回复"}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
-function AgentTimelineBlock({ children }: { children: React.ReactNode }) {
+function userMessageDeliveryLabel(item: AgentTimelineItem): { text: string; pending: boolean } | null {
+  const delivery = item.metadata?.delivery;
+  if (delivery !== "steer" && delivery !== "queued" && delivery !== "new_turn") return null;
+  if (item.metadata?.fallbackFrom === "steer") {
+    return { text: "已作为新消息发送", pending: false };
+  }
+  if (delivery === "queued") {
+    return { text: "排队中", pending: false };
+  }
+  if (delivery === "steer") {
+    return { text: "已引导", pending: false };
+  }
+  return null;
+}
+
+function isQueuedFollowUpItem(item: AgentTimelineItem, conversationStatus?: string): boolean {
+  return item.type === "message" &&
+    item.role === "user" &&
+    (item.metadata?.delivery === "queued" || item.metadata?.delivery === "steer") &&
+    item.metadata?.fallbackFrom !== "steer" &&
+    item.metadata?.queuedSent !== true &&
+    item.metadata?.queuedDiscarded !== true &&
+    (item.metadata?.optimistic === true || conversationStatus === "running");
+}
+
+function isQueuedFollowUpPlaceholder(item: AgentTimelineItem): boolean {
+  return item.type === "message" &&
+    item.role === "user" &&
+    item.metadata?.delivery === "queued";
+}
+
+function queuedFollowUpText(blocks: AgentContentBlock[] | undefined): string {
+  const text = (blocks ?? [])
+    .map((block) => block.type === "text" ? block.text ?? "" : "图片附件")
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text;
+}
+
+function isTimelineBottomSpacer(item: TimelineListItem): item is TimelineBottomSpacer {
+  return item.type === "bottom_spacer";
+}
+
+function QueuedFollowUpList({
+  items,
+  theme,
+  onSteer,
+  onDiscard,
+}: {
+  items: AgentTimelineItem[];
+  theme: Theme;
+  onSteer: (item: AgentTimelineItem) => void;
+  onDiscard: (item: AgentTimelineItem) => void;
+}) {
+  if (items.length === 0) return null;
   return (
-    <View style={{ marginLeft: 0, marginRight: 0 }}>
-      {children}
+    <View
+      style={{
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: theme.separator,
+        overflow: "hidden",
+        backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.035)",
+      }}
+    >
+      <ScrollView
+        style={{ maxHeight: 108 }}
+        contentContainerStyle={{ paddingVertical: 2 }}
+        showsVerticalScrollIndicator={items.length > 3}
+        keyboardShouldPersistTaps="handled"
+      >
+        {items.map((item, index) => {
+          const text = item.text || queuedFollowUpText(item.content) || "后续指令";
+          const canInsert = text.trim().length > 0;
+          return (
+            <View
+              key={item.id}
+              style={{
+                minHeight: 36,
+                paddingHorizontal: 14,
+                paddingVertical: 7,
+                borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
+                borderTopColor: theme.separator,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 9,
+              }}
+            >
+              <AppSymbol name="arrow.up" size={12} color={theme.textTertiary} />
+              <Text
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  color: theme.textSecondary,
+                  fontSize: 12,
+                  lineHeight: 16,
+                }}
+                numberOfLines={2}
+              >
+                {text}
+              </Text>
+              <Pressable
+                disabled={!canInsert}
+                onPress={() => onSteer(item)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="立即引导当前回复"
+                style={({ pressed }) => ({
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  borderRadius: 999,
+                  backgroundColor: pressed ? theme.accentLight : "transparent",
+                  paddingHorizontal: 6,
+                  paddingVertical: 3,
+                  opacity: canInsert ? 1 : 0.45,
+                })}
+              >
+                <AppSymbol name="arrow.turn.up.right" size={10} color={theme.accent} />
+                <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "800" }}>
+                  引导
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => onDiscard(item)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="删除排队消息"
+                style={({ pressed }) => ({
+                  width: 24,
+                  height: 24,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: pressed ? theme.bgInput : "transparent",
+                })}
+              >
+                <AppSymbol name="trash" size={12} color={theme.textTertiary} />
+              </Pressable>
+            </View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+type AgentRailTone = "default" | "running" | "warning" | "error" | "success";
+
+function agentRailColor(tone: AgentRailTone, theme: Theme): string {
+  if (tone === "running") return theme.accent;
+  if (tone === "warning") return theme.warning;
+  if (tone === "error") return theme.error;
+  if (tone === "success") return theme.success;
+  return theme.textTertiary;
+}
+
+function AgentTimelineBlock({
+  children,
+  theme,
+  tone = "default",
+}: {
+  children: React.ReactNode;
+  theme: Theme;
+  tone?: AgentRailTone;
+}) {
+  const railColor = agentRailColor(tone, theme);
+  return (
+    <View style={{ flexDirection: "row", alignItems: "stretch", gap: 9 }}>
+      <View style={{ width: 28, alignItems: "center" }}>
+        <View style={{ width: StyleSheet.hairlineWidth, height: 8, backgroundColor: theme.separator }} />
+        <View
+          style={{
+            width: 9,
+            height: 9,
+            borderRadius: 5,
+            backgroundColor: railColor,
+            opacity: tone === "default" ? 0.55 : 1,
+          }}
+        />
+        <View style={{ width: StyleSheet.hairlineWidth, flex: 1, minHeight: 8, backgroundColor: theme.separator }} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
+function SystemMessageCard({ text, theme }: { text: string; theme: Theme }) {
+  return (
+    <View
+      style={{
+        borderRadius: 8,
+        borderCurve: "continuous",
+        backgroundColor: agentEventSurface(theme),
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: agentEventBorder(theme),
+        paddingHorizontal: 10,
+        paddingVertical: 9,
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 8,
+      }}
+    >
+      <View style={{ width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: theme.bgInput }}>
+        <AppSymbol name="info.circle" size={13} color={theme.textTertiary} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "900" }}>
+          系统
+        </Text>
+        <Text selectable style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}>
+          {text}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function UserMessageCard({
+  item,
+  text,
+  theme,
+  deliveryLabel,
+}: {
+  item: AgentTimelineItem;
+  text: string;
+  theme: Theme;
+  deliveryLabel: { text: string; pending: boolean } | null;
+}) {
+  const isSteer = item.metadata?.delivery === "steer";
+  return (
+    <View
+      style={{
+        alignSelf: "flex-end",
+        maxWidth: "78%",
+        minWidth: text.length < 10 ? 108 : undefined,
+        borderRadius: 13,
+        borderCurve: "continuous",
+        backgroundColor: theme.mode === "light" ? "#ffffff" : "rgba(255,255,255,0.08)",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: isSteer
+          ? theme.mode === "light" ? "rgba(58,95,200,0.22)" : "rgba(173,198,255,0.24)"
+          : theme.mode === "light"
+            ? "rgba(60,60,67,0.12)"
+            : "rgba(255,255,255,0.10)",
+        paddingVertical: 9,
+        paddingHorizontal: 12,
+        gap: 5,
+      }}
+    >
+      {text || item.content?.length ? (
+        <UserMessageContent blocks={item.content} fallbackText={text} theme={theme} />
+      ) : item.isStreaming ? (
+        <StreamingPill theme={theme} />
+      ) : null}
+      {deliveryLabel ? (
+        <View
+          style={{
+            alignSelf: "flex-end",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+            paddingTop: 1,
+          }}
+        >
+          {deliveryLabel.pending ? <ActivityIndicator size="small" color={theme.textTertiary} /> : null}
+          {isSteer ? <AppSymbol name="arrow.up" size={10} color={theme.accent} /> : null}
+          <Text style={{ color: isSteer ? theme.accent : theme.textTertiary, fontSize: 10, fontWeight: "800" }}>
+            {isSteer ? "已引导" : deliveryLabel.text}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function PlanCard({ steps, theme }: { steps: AgentPlanStep[]; theme: Theme }) {
+  const completed = steps.filter((step) => step.status === "completed").length;
+  const active = steps.find((step) => step.status === "in_progress");
+  return (
+    <View
+      style={{
+        borderRadius: 8,
+        borderCurve: "continuous",
+        backgroundColor: agentEventSurface(theme),
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: agentEventBorder(theme),
+        overflow: "hidden",
+      }}
+    >
+      <View
+        style={{
+          minHeight: 46,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.separator,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 9,
+        }}
+      >
+        <View style={{ width: 26, height: 26, borderRadius: 7, alignItems: "center", justifyContent: "center", backgroundColor: theme.accentLight }}>
+          <AppSymbol name="list.bullet.rectangle.fill" size={14} color={theme.accent} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: theme.text, fontSize: 14, fontWeight: "900" }} numberOfLines={1}>
+            执行计划
+          </Text>
+          <Text style={{ color: active ? theme.accent : theme.textTertiary, fontSize: 11, fontWeight: "700", marginTop: 2 }} numberOfLines={1}>
+            {active ? `正在进行：${active.text}` : `${completed}/${steps.length} 已完成`}
+          </Text>
+        </View>
+        <View style={{ borderRadius: 999, backgroundColor: theme.bgInput, paddingHorizontal: 8, paddingVertical: 4 }}>
+          <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>
+            {completed}/{steps.length}
+          </Text>
+        </View>
+      </View>
+      <View style={{ paddingHorizontal: 12, paddingVertical: 10, gap: 9 }}>
+        {steps.map((step, index) => {
+          const isDone = step.status === "completed";
+          const isActive = step.status === "in_progress";
+          const color = isDone ? theme.success : isActive ? theme.accent : theme.textTertiary;
+          return (
+            <View key={step.id} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+              <View style={{ alignItems: "center", width: 16 }}>
+                <AppSymbol
+                  name={isDone ? "checkmark.circle.fill" : isActive ? "clock" : "circle"}
+                  size={14}
+                  color={color}
+                />
+                {index < steps.length - 1 ? (
+                  <View style={{ width: StyleSheet.hairlineWidth, flex: 1, minHeight: 10, marginTop: 3, backgroundColor: theme.separator }} />
+                ) : null}
+              </View>
+              <Text selectable style={{ flex: 1, color: isActive ? theme.text : theme.textSecondary, fontSize: 13, lineHeight: 18, fontWeight: isActive ? "700" : "500" }}>
+                {step.text}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function ErrorCard({ text, theme }: { text: string; theme: Theme }) {
+  return (
+    <View
+      style={{
+        borderRadius: 8,
+        borderCurve: "continuous",
+        backgroundColor: theme.errorLight,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.error,
+        padding: 12,
+        flexDirection: "row",
+        gap: 9,
+        alignItems: "flex-start",
+      }}
+    >
+      <AppSymbol name="exclamationmark.triangle.fill" size={16} color={theme.error} />
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <Text style={{ color: theme.error, fontSize: 13, fontWeight: "900" }}>
+          Agent 出错了
+        </Text>
+        <Text selectable style={{ color: theme.error, fontSize: 13, lineHeight: 18 }}>
+          {text}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function AgentConversationSkeleton({ theme }: { theme: Theme }) {
+  const rows = [0, 1, 2, 3];
+  return (
+    <View style={{ paddingVertical: 18, gap: 14 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "center", paddingVertical: 6 }}>
+        <ActivityIndicator size="small" color={theme.accent} />
+        <Text style={{ color: theme.textTertiary, fontSize: 13, fontWeight: "800" }}>正在获取消息…</Text>
+      </View>
+      {rows.map((row) => {
+        const isUser = row === 1;
+        return (
+          <View
+            key={row}
+            style={{
+              alignSelf: isUser ? "flex-end" : "stretch",
+              width: isUser ? "62%" : "100%",
+              borderRadius: 10,
+              borderCurve: "continuous",
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: theme.mode === "light" ? "rgba(60,60,67,0.08)" : "rgba(255,255,255,0.07)",
+              backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.68)" : "rgba(255,255,255,0.045)",
+              paddingHorizontal: 12,
+              paddingVertical: 12,
+              gap: 8,
+            }}
+          >
+            <View style={{ width: isUser ? "74%" : "92%", height: 10, borderRadius: 5, backgroundColor: theme.bgInput }} />
+            <View style={{ width: isUser ? "48%" : "78%", height: 10, borderRadius: 5, backgroundColor: theme.bgInput }} />
+            {!isUser ? (
+              <View style={{ width: "56%", height: 10, borderRadius: 5, backgroundColor: theme.bgInput }} />
+            ) : null}
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -2018,7 +2550,7 @@ function TimelineItemView({
 }) {
   if (item.kind === "subagent_action" && item.subagent) {
     return (
-      <AgentTimelineBlock>
+      <AgentTimelineBlock theme={theme} tone={item.isStreaming ? "running" : "default"}>
         <SubagentCard action={item.subagent} theme={theme} running={item.isStreaming} />
       </AgentTimelineBlock>
     );
@@ -2026,7 +2558,7 @@ function TimelineItemView({
 
   if (item.kind === "user_input_prompt" && item.structuredInput) {
     return (
-      <AgentTimelineBlock>
+      <AgentTimelineBlock theme={theme} tone="warning">
         <StructuredInputCard
           input={item.structuredInput}
           theme={theme}
@@ -2042,13 +2574,15 @@ function TimelineItemView({
   if (item.kind === "thinking") {
     if (isEmptyActivityText(item.text)) return null;
     return (
-      <SystemActivityCard
-        icon="brain.head.profile"
-        title={item.isStreaming ? "正在思考" : "思考"}
-        text={item.text}
-        theme={theme}
-        running={item.isStreaming}
-      />
+      <AgentTimelineBlock theme={theme} tone={item.isStreaming ? "running" : "default"}>
+        <SystemActivityCard
+          icon="brain.head.profile"
+          title={item.isStreaming ? "正在思考" : "思考"}
+          text={item.text}
+          theme={theme}
+          running={item.isStreaming}
+        />
+      </AgentTimelineBlock>
     );
   }
 
@@ -2060,25 +2594,29 @@ function TimelineItemView({
           ? "上下文压缩"
           : "工具活动";
     return (
-      <SystemActivityCard
-        icon={item.kind === "review" ? "doc.text.magnifyingglass" : item.kind === "context_compaction" ? "square.stack.3d.up" : "terminal.fill"}
-        title={title}
-        text={item.text}
-        theme={theme}
-        running={item.isStreaming}
-      />
+      <AgentTimelineBlock theme={theme} tone={item.isStreaming ? "running" : "default"}>
+        <SystemActivityCard
+          icon={item.kind === "review" ? "doc.text.magnifyingglass" : item.kind === "context_compaction" ? "square.stack.3d.up" : "terminal.fill"}
+          title={title}
+          text={item.text}
+          theme={theme}
+          running={item.isStreaming}
+        />
+      </AgentTimelineBlock>
     );
   }
 
   if (item.type === "status") {
     return item.text ? (
-      <SystemActivityCard
-        icon={item.status === "error" ? "exclamationmark.triangle.fill" : "info.circle"}
-        title={item.status === "error" ? "状态异常" : "状态"}
-        text={item.text}
-        theme={theme}
-        running={item.isStreaming}
-      />
+      <AgentTimelineBlock theme={theme} tone={item.status === "error" ? "error" : item.isStreaming ? "running" : "default"}>
+        <SystemActivityCard
+          icon={item.status === "error" ? "exclamationmark.triangle.fill" : "info.circle"}
+          title={item.status === "error" ? "状态异常" : "状态"}
+          text={item.text}
+          theme={theme}
+          running={item.isStreaming}
+        />
+      </AgentTimelineBlock>
     ) : null;
   }
 
@@ -2087,51 +2625,46 @@ function TimelineItemView({
     const text = item.text || (item.content ?? []).map((block) => block.text ?? "").join("\n");
     if (item.role === "system") {
       return text ? (
-        <View style={{ paddingVertical: 2 }}>
-          <Text selectable style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 17 }}>
-            {text}
-          </Text>
-        </View>
+        <AgentTimelineBlock theme={theme}>
+          <SystemMessageCard text={text} theme={theme} />
+        </AgentTimelineBlock>
       ) : null;
     }
     if (!isUser) {
-      return <AssistantMessage item={item} text={text} theme={theme} />;
+      return (
+        <AssistantMessage
+          item={item}
+          text={text}
+          theme={theme}
+        />
+      );
     }
+    const deliveryLabel = userMessageDeliveryLabel(item);
     return (
-      <View
-        style={{
-          alignSelf: "flex-end",
-          maxWidth: "82%",
-          borderRadius: 14,
-          borderCurve: "continuous",
-          backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.075)",
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.mode === "light" ? "rgba(60,60,67,0.12)" : "rgba(255,255,255,0.10)",
-          paddingVertical: 8,
-          paddingHorizontal: 11,
-          gap: 6,
-        }}
-      >
-        {text || item.content?.length ? (
-          <UserMessageContent blocks={item.content} fallbackText={text} theme={theme} />
-        ) : item.isStreaming ? (
-          <StreamingPill theme={theme} />
-        ) : null}
-      </View>
+      <UserMessageCard item={item} text={text} theme={theme} deliveryLabel={deliveryLabel} />
     );
   }
 
   if (item.type === "tool_call" && item.toolCall && !item.commandExecution && !item.fileChange) {
+    const tone: AgentRailTone = item.toolCall.status === "running"
+      ? "running"
+      : item.toolCall.status === "failed"
+        ? "error"
+        : item.toolCall.status === "completed"
+          ? "success"
+          : "default";
     return (
-      <AgentTimelineBlock>
+      <AgentTimelineBlock theme={theme} tone={tone}>
         <ToolCard tool={item.toolCall} theme={theme} />
       </AgentTimelineBlock>
     );
   }
 
   if (item.commandExecution) {
+    const status = item.commandExecution.status ?? (item.isStreaming ? "running" : "completed");
+    const tone: AgentRailTone = status === "running" ? "running" : status === "failed" ? "error" : status === "completed" ? "success" : "default";
     return (
-      <AgentTimelineBlock>
+      <AgentTimelineBlock theme={theme} tone={tone}>
         <ToolCard
           tool={{
             id: item.itemId ?? item.id,
@@ -2142,7 +2675,7 @@ function TimelineItemView({
             ].filter(Boolean).join("\n\n"),
             output: item.commandExecution.output,
             createdAt: item.createdAt,
-            status: item.commandExecution.status ?? "running",
+            status,
           }}
           theme={theme}
         />
@@ -2151,11 +2684,13 @@ function TimelineItemView({
   }
 
   if (item.fileChange) {
+    const status = item.fileChange.status ?? (item.isStreaming ? "running" : "completed");
+    const tone: AgentRailTone = status === "running" ? "running" : status === "failed" ? "error" : status === "completed" ? "success" : "default";
     const summary = item.fileChange.entries
       .map((entry) => [entry.kind, entry.path].filter(Boolean).join(" ") || entry.path)
       .join("\n");
     return (
-      <AgentTimelineBlock>
+      <AgentTimelineBlock theme={theme} tone={tone}>
         <FileChangeCard
           tool={{
             id: item.itemId ?? item.id,
@@ -2163,7 +2698,7 @@ function TimelineItemView({
             input: summary,
             output: item.fileChange.diff ?? item.fileChange.summary,
             createdAt: item.createdAt,
-            status: item.fileChange.status ?? "running",
+            status,
           }}
           theme={theme}
         />
@@ -2172,30 +2707,23 @@ function TimelineItemView({
   }
 
   if (item.type === "plan" && item.plan?.length) {
+    const tone: AgentRailTone = item.plan.some((step) => step.status === "in_progress")
+      ? "running"
+      : item.plan.every((step) => step.status === "completed")
+        ? "success"
+        : "default";
     return (
-      <AgentTimelineBlock>
-        <View style={{ borderRadius: 10, borderCurve: "continuous", backgroundColor: timelineSurface(theme), borderWidth: StyleSheet.hairlineWidth, borderColor: theme.separator, padding: 12, gap: 9 }}>
-          <Text style={{ color: theme.text, fontSize: 14, fontWeight: "700" }}>执行计划</Text>
-          {item.plan.map((step) => (
-            <View key={step.id} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
-              <AppSymbol
-                name={step.status === "completed" ? "checkmark.circle.fill" : step.status === "in_progress" ? "clock" : "circle"}
-                size={14}
-                color={step.status === "completed" ? theme.success : step.status === "in_progress" ? theme.accent : theme.textTertiary}
-              />
-              <Text selectable style={{ flex: 1, color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
-                {step.text}
-              </Text>
-            </View>
-          ))}
-        </View>
+      <AgentTimelineBlock theme={theme} tone={tone}>
+        <PlanCard steps={item.plan} theme={theme} />
       </AgentTimelineBlock>
     );
   }
 
   if (item.type === "permission" && item.permission) {
+    const outcome = item.metadata?.permissionOutcome;
+    const tone: AgentRailTone = outcome === "allow" ? "success" : outcome === "deny" || outcome === "cancelled" ? "error" : "warning";
     return (
-      <AgentTimelineBlock>
+      <AgentTimelineBlock theme={theme} tone={tone}>
         <PermissionRequestCard item={item} theme={theme} onPermission={onPermission} />
       </AgentTimelineBlock>
     );
@@ -2203,12 +2731,8 @@ function TimelineItemView({
 
   if (item.type === "error") {
     return (
-      <AgentTimelineBlock>
-        <View style={{ borderRadius: 10, borderCurve: "continuous", backgroundColor: theme.errorLight, padding: 12 }}>
-          <Text selectable style={{ color: theme.error, fontSize: 13, lineHeight: 18 }}>
-            {item.error || item.text || "Agent 出错了"}
-          </Text>
-        </View>
+      <AgentTimelineBlock theme={theme} tone="error">
+        <ErrorCard text={item.error || item.text || "Agent 出错了"} theme={theme} />
       </AgentTimelineBlock>
     );
   }
@@ -2281,6 +2805,14 @@ function FilePreviewDrawer({
   const [previewLoading, setPreviewLoading] = useState(false);
   const requestSeqRef = useRef(0);
   const readSeqRef = useRef(0);
+  const previewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPreviewTimeout = useCallback(() => {
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+      previewTimeoutRef.current = null;
+    }
+  }, []);
 
   const loadDirectory = useCallback(async (path: string) => {
     const requestSeq = requestSeqRef.current + 1;
@@ -2291,6 +2823,7 @@ function FilePreviewDrawer({
     setSelectedPath(null);
     setPreview(null);
     readSeqRef.current += 1;
+    clearPreviewTimeout();
     setPreviewLoading(false);
     const result = await workspace.browseFiles(conversationId, path);
     if (requestSeqRef.current !== requestSeq) return;
@@ -2298,7 +2831,16 @@ function FilePreviewDrawer({
     setBrowseError(result.error);
     setCurrentPath(result.path || path);
     setBrowseLoading(false);
-  }, [conversationId, workspace]);
+  }, [clearPreviewTimeout, conversationId, workspace]);
+
+  useEffect(() => () => clearPreviewTimeout(), [clearPreviewTimeout]);
+
+  useEffect(() => {
+    if (visible) return;
+    readSeqRef.current += 1;
+    clearPreviewTimeout();
+    setPreviewLoading(false);
+  }, [clearPreviewTimeout, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -2321,13 +2863,29 @@ function FilePreviewDrawer({
     setPreview(null);
     const readSeq = readSeqRef.current + 1;
     readSeqRef.current = readSeq;
+    clearPreviewTimeout();
+    previewTimeoutRef.current = setTimeout(() => {
+      if (readSeqRef.current !== readSeq) return;
+      readSeqRef.current += 1;
+      previewTimeoutRef.current = null;
+      setPreview({
+        path: entry.path,
+        content: "",
+        encoding: "utf8",
+        truncated: false,
+        error: "文件读取无响应，请确认主机端仍在线并已更新到支持文件预览的版本。",
+      });
+      setPreviewLoading(false);
+    }, 16_000);
     workspace.readFile(conversationId, entry.path, FILE_PREVIEW_MAX_BYTES)
       .then((result) => {
         if (readSeqRef.current !== readSeq) return;
+        clearPreviewTimeout();
         setPreview(result);
       })
       .catch((error) => {
         if (readSeqRef.current !== readSeq) return;
+        clearPreviewTimeout();
         setPreview({
           path: entry.path,
           content: "",
@@ -2339,7 +2897,7 @@ function FilePreviewDrawer({
       .finally(() => {
         if (readSeqRef.current === readSeq) setPreviewLoading(false);
       });
-  }, [conversationId, loadDirectory, workspace]);
+  }, [clearPreviewTimeout, conversationId, loadDirectory, workspace]);
 
   const copyPreview = useCallback(() => {
     if (!preview?.content) return;
@@ -2590,17 +3148,30 @@ function FilePreviewDrawer({
 export function AgentConversationScreen({
   conversationId,
   workspace,
+  isRestoring = false,
   onBack,
 }: AgentConversationScreenProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const conversation = workspace.getConversation(conversationId);
   const timeline = workspace.getTimeline(conversationId);
-  const visibleTimeline = useMemo(() => dedupeTimelineItems(timeline), [timeline]);
+  const dedupedTimeline = useMemo(() => dedupeTimelineItems(timeline), [timeline]);
+  const queuedFollowUps = useMemo(
+    () => dedupedTimeline.filter((item) => isQueuedFollowUpItem(item, conversation?.status)),
+    [conversation?.status, dedupedTimeline],
+  );
+  const visibleTimeline = useMemo(
+    () => dedupedTimeline.filter((item) => !isQueuedFollowUpPlaceholder(item)),
+    [dedupedTimeline],
+  );
   const timelineRef = useRef<LegendListRef>(null);
+  const composerInputRef = useRef<TextInput>(null);
   const timelineNearBottomRef = useRef(true);
   const [isTimelineNearBottom, setIsTimelineNearBottom] = useState(true);
   const [hasNewOutput, setHasNewOutput] = useState(false);
+  const [bottomComposerHeight, setBottomComposerHeight] = useState(0);
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const [text, setText] = useState("");
   const [model, setModel] = useState<string | undefined>(conversation?.model);
   const [effort, setEffort] = useState<AgentReasoningEffort | undefined>(conversation?.reasoningEffort);
@@ -2616,9 +3187,11 @@ export function AgentConversationScreen({
     providerSupportsImageInput ||
     (capabilities?.enabled && (providerCapability?.supportsImages ?? capabilities.supportsImages)),
   );
-  const running = conversation?.status === "running" || conversation?.status === "waiting_permission";
+  const turnRunning = conversation?.status === "running";
+  const waitingPermission = conversation?.status === "waiting_permission";
+  const running = turnRunning || waitingPermission;
+  const canSteerRunningTurn = turnRunning && conversation?.provider === "codex";
   const meta = visibleConversationStatus(conversation?.status, theme);
-  const permission = permissionMeta(permissionMode, theme);
   const canSend = Boolean(text.trim() || attachments.length > 0);
   const modelOpts = useMemo(
     () => modelOptionsFor(conversation?.provider ?? "codex", capabilities),
@@ -2639,8 +3212,27 @@ export function AgentConversationScreen({
     ),
     [conversation?.provider, providerCapability?.commands],
   );
-  const commandPanelVisible = Boolean(commandToken && availableCommands.length > 0 && attachments.length === 0);
+  const commandPanelVisible = Boolean(commandToken && availableCommands.length > 0 && attachments.length === 0 && !running);
   const currentCollaborationMode = (conversation?.collaborationMode ?? providerCapability?.currentMode ?? "default") as AgentCollaborationMode;
+  const composerBottomOffset = Math.max(0, keyboardInset - insets.bottom);
+  const timelineBottomInset = Math.max(
+    bottomComposerHeight + composerBottomOffset,
+    Math.max(insets.bottom + 116, 132) + composerBottomOffset,
+  );
+  const timelineListData = useMemo<TimelineListItem[]>(
+    () =>
+      visibleTimeline.length === 0
+        ? []
+        : [
+            ...visibleTimeline,
+            {
+              id: "__timeline-bottom-spacer",
+              type: "bottom_spacer",
+              spacerHeight: timelineBottomInset + 18,
+            },
+          ],
+    [timelineBottomInset, visibleTimeline],
+  );
 
   useEffect(() => {
     if (commandPanelVisible) {
@@ -2649,10 +3241,53 @@ export function AgentConversationScreen({
   }, [commandPanelVisible]);
 
   useEffect(() => {
+    const applyKeyboardFrame = (event: KeyboardEvent) => {
+      if (typeof Keyboard.scheduleLayoutAnimation === "function") {
+        Keyboard.scheduleLayoutAnimation(event);
+      }
+      const nextInset = Platform.OS === "ios"
+        ? Math.max(0, windowHeight - event.endCoordinates.screenY)
+        : Math.max(0, windowHeight - event.endCoordinates.screenY, event.endCoordinates.height);
+      setKeyboardInset((current) => Math.abs(current - nextInset) > 4 ? nextInset : current);
+    };
+    const clearKeyboardFrame = (event?: KeyboardEvent) => {
+      if (event && typeof Keyboard.scheduleLayoutAnimation === "function") {
+        Keyboard.scheduleLayoutAnimation(event);
+      }
+      setKeyboardInset((current) => current === 0 ? current : 0);
+    };
+
+    if (Platform.OS === "ios") {
+      const showSub = Keyboard.addListener("keyboardWillShow", applyKeyboardFrame);
+      const hideSub = Keyboard.addListener("keyboardWillHide", clearKeyboardFrame);
+      return () => {
+        showSub.remove();
+        hideSub.remove();
+      };
+    }
+
+    const showSub = Keyboard.addListener("keyboardDidShow", applyKeyboardFrame);
+    const hideSub = Keyboard.addListener("keyboardDidHide", clearKeyboardFrame);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [insets.bottom, windowHeight]);
+
+  useEffect(() => {
     setModel(conversation?.model);
     setEffort(conversation?.reasoningEffort);
     setPermissionMode(conversation?.permissionMode);
   }, [conversation?.id, conversation?.model, conversation?.permissionMode, conversation?.reasoningEffort]);
+
+  useEffect(() => {
+    if (!conversation) return;
+    workspace.markRead(conversation.id);
+  }, [conversation?.id, conversation?.lastResponseAt, timeline.length, workspace.markRead]);
+
+  useEffect(() => () => {
+    if (conversationId) workspace.markRead(conversationId);
+  }, [conversationId, workspace.markRead]);
 
   useEffect(() => {
     if (effort && !effortOpts.some((option) => option.value === effort)) {
@@ -2747,13 +3382,11 @@ export function AgentConversationScreen({
     }
     return sections;
   }, [effortMenuActions, modelMenuActions, permissionMenuActions]);
-  const settingsChipLabel = useMemo(() => {
-    const parts: string[] = [];
-    if (modelMenuActions.length > 1) parts.push(formatModel(model, modelOpts));
-    if (effortMenuActions.length > 0) parts.push(`思考 ${formatEffort(effort)}`);
-    if (permissionMode && permissionMode !== undefined) parts.push(permission.label.replace("权限", ""));
-    return parts.join(" · ") || "设置";
-  }, [effort, effortMenuActions.length, model, modelMenuActions.length, modelOpts, permission.label, permissionMode]);
+  const compactSettingsLabel = useMemo(() => {
+    if (modelMenuActions.length > 1) return formatModel(model, modelOpts);
+    if (effortMenuActions.length > 0) return formatEffort(effort);
+    return "设置";
+  }, [effort, effortMenuActions.length, model, modelMenuActions.length, modelOpts]);
   const handleSettingsMenu = useCallback((eventId: string) => {
     if (eventId.startsWith("model:")) {
       commitModel(valueFromMenuId<string>(eventId.slice("model:".length)));
@@ -2820,11 +3453,34 @@ export function AgentConversationScreen({
   const forceTimelineToBottom = useCallback((animated = true) => {
     const ref = timelineRef.current;
     if (!ref) return;
-    const nativeScrollRef = ref.getNativeScrollRef() as { scrollToEnd?: (options?: { animated?: boolean }) => void } | null;
-    ref.scrollToEnd({ animated, viewOffset: 0 });
+    const listRef = ref as LegendListRef & {
+      scrollToIndex?: (options: { index: number; animated?: boolean; viewPosition?: number; viewOffset?: number }) => void;
+      scrollToOffset?: (options: { offset: number; animated?: boolean }) => void;
+    };
+    const nativeScrollRef = ref.getNativeScrollRef() as {
+      scrollToEnd?: (options?: { animated?: boolean }) => void;
+      scrollTo?: (options?: { y?: number; animated?: boolean }) => void;
+    } | null;
+    if (timelineListData.length > 0) {
+      try {
+        listRef.scrollToIndex?.({
+          index: timelineListData.length - 1,
+          animated,
+          viewPosition: 1,
+          viewOffset: 0,
+        });
+      } catch {
+        // LegendList can reject scrollToIndex before the last row is measured; fall back below.
+      }
+    }
+    listRef.scrollToEnd({ animated, viewOffset: 0 });
+    listRef.scrollToOffset?.({ offset: Number.MAX_SAFE_INTEGER, animated });
     nativeScrollRef?.scrollToEnd?.({ animated });
-    ref.scrollToOffset({ offset: Number.MAX_SAFE_INTEGER, animated });
-  }, []);
+    nativeScrollRef?.scrollTo?.({ y: Number.MAX_SAFE_INTEGER, animated });
+    timelineNearBottomRef.current = true;
+    setIsTimelineNearBottom(true);
+    setHasNewOutput(false);
+  }, [timelineListData.length]);
 
   const scrollTimelineToBottom = useCallback((animated = true, stick = true) => {
     if (stick) {
@@ -2838,7 +3494,10 @@ export function AgentConversationScreen({
     setTimeout(scroll, 220);
   }, [forceTimelineToBottom]);
 
-  const renderTimelineItem = useCallback(({ item, index }: LegendListRenderItemProps<AgentTimelineItem>) => {
+  const renderTimelineItem = useCallback(({ item, index }: LegendListRenderItemProps<TimelineListItem>) => {
+    if (isTimelineBottomSpacer(item)) {
+      return <View style={{ height: item.spacerHeight }} />;
+    }
     const previous = visibleTimeline[index - 1];
     const startsTurn = Boolean(item.turnId && previous?.turnId && item.turnId !== previous.turnId);
     return (
@@ -2864,26 +3523,29 @@ export function AgentConversationScreen({
     );
   }, [conversationId, theme, visibleTimeline, workspace]);
 
-  const timelineEmpty = useMemo(() => (
-    <View style={{ paddingVertical: 36, alignItems: "center", gap: 9 }}>
-      <View
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 22,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: theme.accentLight,
-        }}
-      >
-        <AppSymbol name="sparkles" size={22} color={theme.accent} />
+  const timelineEmpty = useMemo(() => {
+    if (isRestoring) return <AgentConversationSkeleton theme={theme} />;
+    return (
+      <View style={{ paddingVertical: 36, alignItems: "center", gap: 9 }}>
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: theme.accentLight,
+          }}
+        >
+          <AppSymbol name="sparkles" size={22} color={theme.accent} />
+        </View>
+        <Text style={{ color: theme.text, fontSize: 16, fontWeight: "800" }}>开始一个 Agent 对话</Text>
+        <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
+          发送 prompt 后，回复、代码、工具调用和权限请求都会在这里按时间线展示。
+        </Text>
       </View>
-      <Text style={{ color: theme.text, fontSize: 16, fontWeight: "800" }}>开始一个 Agent 对话</Text>
-      <Text style={{ color: theme.textTertiary, fontSize: 13, lineHeight: 18, textAlign: "center" }}>
-        发送 prompt 后，回复、代码、工具调用和权限请求都会在这里按时间线展示。
-      </Text>
-    </View>
-  ), [theme]);
+    );
+  }, [isRestoring, theme]);
 
   useEffect(() => {
     if (visibleTimeline.length === 0) return;
@@ -2898,7 +3560,9 @@ export function AgentConversationScreen({
   const send = useCallback(() => {
     const value = text.trim();
     if (!canSend || !conversation) return;
-    const commandMatch = attachments.length === 0 ? commandFromMessage(value, availableCommands) : null;
+    const commandMatch = attachments.length === 0 && !running
+      ? commandFromMessage(value, availableCommands)
+      : null;
     if (commandMatch) {
       const run = () => {
         workspace.executeCommand(conversation.id, commandMatch.command, value, commandMatch.args);
@@ -2934,7 +3598,20 @@ export function AgentConversationScreen({
     setText("");
     setAttachments([]);
     scrollTimelineToBottom(true);
-  }, [attachments, availableCommands, canSend, conversation, currentCollaborationMode, effort, effortOpts, model, permissionMode, permissionOpts, scrollTimelineToBottom, text, workspace]);
+  }, [attachments, availableCommands, canSend, conversation, currentCollaborationMode, effort, effortOpts, model, permissionMode, permissionOpts, running, scrollTimelineToBottom, text, workspace]);
+
+  const steerQueuedFollowUp = useCallback((item: AgentTimelineItem) => {
+    if (!conversation) return;
+    workspace.sendQueuedFollowUp(conversation.id, item.id, "steer");
+    Haptics.selectionAsync().catch(() => {});
+    scrollTimelineToBottom(true);
+  }, [conversation, scrollTimelineToBottom, workspace]);
+
+  const discardQueuedFollowUp = useCallback((item: AgentTimelineItem) => {
+    if (!conversation) return;
+    workspace.discardQueuedFollowUp(conversation.id, item.id);
+    Haptics.selectionAsync().catch(() => {});
+  }, [conversation, workspace]);
 
   const executeSlashCommand = useCallback((command: AgentCommandDescriptor, args = "") => {
     if (!conversation) return;
@@ -3086,6 +3763,14 @@ export function AgentConversationScreen({
     ]);
   }, [pickImages, supportsImages]);
 
+  if (!conversation && !workspace.isHydrated) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg, paddingHorizontal: 16, paddingTop: insets.top + 64 }}>
+        <AgentConversationSkeleton theme={theme} />
+      </View>
+    );
+  }
+
   if (!conversation) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: "center", justifyContent: "center", padding: 24 }}>
@@ -3098,11 +3783,7 @@ export function AgentConversationScreen({
   }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={0}
-      style={{ flex: 1, backgroundColor: theme.bg }}
-    >
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <View
         style={{
           position: "absolute",
@@ -3227,16 +3908,21 @@ export function AgentConversationScreen({
       <View style={{ flex: 1 }}>
         <LegendList
           ref={timelineRef}
-          data={visibleTimeline}
+          data={timelineListData}
           style={{ flex: 1 }}
           keyExtractor={(item) => item.id}
           renderItem={renderTimelineItem}
           ListEmptyComponent={timelineEmpty}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16, paddingTop: insets.top + 60, paddingBottom: 18 }}
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingHorizontal: 16,
+            paddingTop: insets.top + 60,
+            paddingBottom: visibleTimeline.length === 0 ? timelineBottomInset + 18 : 0,
+          }}
           contentInsetAdjustmentBehavior="never"
           automaticallyAdjustContentInsets={false}
-          scrollIndicatorInsets={{ top: insets.top + 60, bottom: 18 }}
+          scrollIndicatorInsets={{ top: insets.top + 60, bottom: 18 + timelineBottomInset }}
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
           onScroll={handleTimelineScroll}
@@ -3254,6 +3940,40 @@ export function AgentConversationScreen({
           maintainScrollAtEndThreshold={0.2}
           maintainVisibleContentPosition={false}
         />
+        {isRestoring && visibleTimeline.length > 0 ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              top: insets.top + 58,
+              left: 0,
+              right: 0,
+              alignItems: "center",
+              zIndex: 12,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 7,
+                borderRadius: 999,
+                backgroundColor: theme.mode === "light" ? "rgba(255,255,255,0.82)" : "rgba(42,42,43,0.82)",
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.separator,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                shadowColor: "#000",
+                shadowOpacity: theme.mode === "dark" ? 0.20 : 0.08,
+                shadowRadius: 10,
+                shadowOffset: { width: 0, height: 4 },
+              }}
+            >
+              <ActivityIndicator size="small" color={theme.accent} />
+              <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "800" }}>正在同步最新消息…</Text>
+            </View>
+          </View>
+        ) : null}
         {!isTimelineNearBottom || hasNewOutput ? (
           <View
             pointerEvents="box-none"
@@ -3261,8 +3981,10 @@ export function AgentConversationScreen({
               position: "absolute",
               left: 0,
               right: 0,
-              bottom: 12,
+              bottom: timelineBottomInset + 12,
               alignItems: "center",
+              zIndex: 20,
+              elevation: 20,
             }}
           >
             <Pressable
@@ -3292,36 +4014,61 @@ export function AgentConversationScreen({
       </View>
 
       <View
+        pointerEvents="box-none"
         style={{
-          paddingHorizontal: 12,
-          paddingTop: 8,
-          paddingBottom: Math.max(insets.bottom + 2, 12),
-          backgroundColor: theme.bg,
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: composerBottomOffset,
         }}
       >
-        <NoticeStrip
-          notices={visibleNotices}
-          theme={theme}
-          onDismiss={(id) => workspace.dismissNotice(id)}
-        />
         <View
+          onLayout={(event) => {
+            const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+            setBottomComposerHeight((current) =>
+              Math.abs(current - nextHeight) > 1 ? nextHeight : current
+            );
+          }}
           style={{
-            borderRadius: 24,
-            borderCurve: "continuous",
-            borderWidth: StyleSheet.hairlineWidth,
-            borderColor: theme.separator,
-            backgroundColor: theme.bgCard,
-            paddingHorizontal: 12,
-            paddingTop: 10,
-            paddingBottom: 10,
-            gap: 7,
-            shadowColor: "#000",
-            shadowOpacity: theme.mode === "dark" ? 0.28 : 0.08,
-            shadowRadius: 24,
-            shadowOffset: { width: 0, height: 10 },
-            elevation: 8,
+            paddingHorizontal: 10,
+            paddingTop: 6,
+            paddingBottom: Math.max(insets.bottom + 6, 12),
+            backgroundColor: "transparent",
+            gap: 6,
           }}
         >
+          <NoticeStrip
+            notices={visibleNotices}
+            theme={theme}
+            onDismiss={(id) => workspace.dismissNotice(id)}
+          />
+          <View
+            style={{
+              borderRadius: 22,
+              borderCurve: "continuous",
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: theme.mode === "light" ? "rgba(60,60,67,0.18)" : "rgba(255,255,255,0.14)",
+              backgroundColor: theme.bgCard,
+              paddingHorizontal: 0,
+              paddingTop: 0,
+              paddingBottom: 0,
+              gap: 0,
+              overflow: "hidden",
+              shadowColor: "#000",
+              shadowOpacity: theme.mode === "dark" ? 0.26 : 0.10,
+              shadowRadius: 18,
+              shadowOffset: { width: 0, height: 8 },
+              elevation: 8,
+            }}
+          >
+          {queuedFollowUps.length > 0 ? (
+            <QueuedFollowUpList
+              items={queuedFollowUps}
+              theme={theme}
+              onSteer={steerQueuedFollowUp}
+              onDiscard={discardQueuedFollowUp}
+            />
+          ) : null}
           {attachments.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <View style={{ flexDirection: "row", gap: 8 }}>
@@ -3372,9 +4119,10 @@ export function AgentConversationScreen({
             />
           ) : null}
           <TextInput
+            ref={composerInputRef}
             value={text}
             onChangeText={setText}
-            placeholder={running ? "Agent 运行中，可先编辑草稿" : "给 Agent 发送消息"}
+            placeholder={canSteerRunningTurn ? "要求后续变更" : running ? "Agent 运行中，可先编辑草稿" : "给 Agent 发送消息"}
             placeholderTextColor={theme.textTertiary}
             multiline
             keyboardType="default"
@@ -3385,35 +4133,40 @@ export function AgentConversationScreen({
             returnKeyType="default"
             blurOnSubmit={false}
             style={{
-              minHeight: 44,
+              minHeight: 50,
               maxHeight: 132,
               color: theme.text,
               fontSize: 14,
               lineHeight: 20,
-              paddingHorizontal: 4,
-              paddingVertical: 4,
+              paddingHorizontal: 14,
+              paddingTop: 12,
+              paddingBottom: 6,
             }}
           />
           {running ? (
-            <Text style={{ color: theme.textTertiary, fontSize: 11, lineHeight: 15 }}>
-              当前任务运行中，停止后再发送这条消息。
+            <Text style={{ color: theme.textTertiary, fontSize: 11, lineHeight: 15, paddingHorizontal: 14, paddingBottom: 2 }}>
+              {canSteerRunningTurn
+                ? "Codex 正在工作，发送会加入队列；点队列里的引导可立即打断当前回复。"
+                : waitingPermission
+                  ? "当前任务正在等待授权，请先处理授权请求或停止任务。"
+                  : "当前任务运行中，停止后再发送这条消息。"}
             </Text>
           ) : null}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 }}>
-            <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 10 }}>
+            <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 7 }}>
               {supportsImages ? (
                 <Pressable
                   onPress={showAttachSheet}
                   style={({ pressed }) => ({
-                    width: 34,
-                    height: 34,
-                    borderRadius: 17,
+                    width: 30,
+                    height: 30,
+                    borderRadius: 15,
                     alignItems: "center",
                     justifyContent: "center",
-                    backgroundColor: pressed ? theme.accentLight : theme.bgInput,
+                    backgroundColor: pressed ? theme.bgInput : "transparent",
                   })}
                 >
-                  <AppSymbol name="photo" size={17} color={theme.textSecondary} />
+                  <AppSymbol name="plus" size={18} color={theme.textSecondary} />
                 </Pressable>
               ) : null}
               {nativePlanCommand ? (
@@ -3428,20 +4181,20 @@ export function AgentConversationScreen({
                     executeSlashCommand(command);
                   }}
                   style={({ pressed }) => ({
-                    height: 34,
+                    height: 30,
                     borderRadius: 999,
                     alignItems: "center",
                     justifyContent: "center",
                     flexDirection: "row",
                     gap: 5,
-                    paddingHorizontal: 10,
+                    paddingHorizontal: 11,
                     backgroundColor: currentCollaborationMode === "plan"
-                      ? (pressed ? theme.accentSecondary : theme.accent)
-                      : (pressed ? theme.accentLight : theme.bgInput),
+                      ? (pressed ? theme.accentLight : "rgba(173,198,255,0.28)")
+                      : (pressed ? theme.bgInput : theme.mode === "light" ? "rgba(60,60,67,0.06)" : "rgba(255,255,255,0.08)"),
                   })}
                 >
-                  <AppSymbol name="checklist" size={13} color={currentCollaborationMode === "plan" ? theme.textInverse : theme.textSecondary} />
-                  <Text style={{ color: currentCollaborationMode === "plan" ? theme.textInverse : theme.textSecondary, fontSize: 11, fontWeight: "800" }}>
+                  <AppSymbol name="checklist" size={13} color={currentCollaborationMode === "plan" ? theme.accent : theme.textSecondary} />
+                  <Text style={{ color: currentCollaborationMode === "plan" ? theme.accent : theme.textSecondary, fontSize: 11, fontWeight: "800" }}>
                     Plan
                   </Text>
                 </Pressable>
@@ -3452,40 +4205,51 @@ export function AgentConversationScreen({
               >
                 <View
                   style={{
-                    flex: 1,
-                    minHeight: 34,
+                    minHeight: 30,
                     borderRadius: 999,
-                    paddingHorizontal: 12,
-                    paddingVertical: 7,
+                    paddingHorizontal: 9,
+                    paddingVertical: 6,
                     flexDirection: "row",
                     alignItems: "center",
-                    gap: 6,
-                    backgroundColor: permissionMode === "full_access" ? theme.warning : theme.bgInput,
+                    gap: 5,
+                    backgroundColor: permissionMode === "full_access"
+                      ? "rgba(255,214,10,0.20)"
+                      : "transparent",
                   }}
                 >
                   <AppSymbol
-                    name={permission.icon}
-                    size={13}
-                    color={permissionMode === "full_access" ? theme.textInverse : theme.textSecondary}
+                    name="bolt"
+                    size={12}
+                    color={permissionMode === "full_access" ? theme.warning : theme.textSecondary}
                   />
                   <Text
                     style={{
-                      flex: 1,
-                      color: permissionMode === "full_access" ? theme.textInverse : theme.textSecondary,
+                      color: theme.textSecondary,
                       fontSize: 12,
-                      fontWeight: "700",
+                      fontWeight: "800",
                     }}
                     numberOfLines={1}
                   >
-                    {settingsChipLabel}
+                    {compactSettingsLabel}
                   </Text>
                   <AppSymbol
                     name="chevron.down"
                     size={9}
-                    color={permissionMode === "full_access" ? theme.textInverse : theme.textTertiary}
+                    color={theme.textTertiary}
                   />
                 </View>
               </MenuView>
+            </View>
+            <View
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 15,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <AppSymbol name="mic" size={15} color={theme.textTertiary} />
             </View>
             {running ? (
               <Pressable
@@ -3496,12 +4260,13 @@ export function AgentConversationScreen({
                   borderRadius: 19,
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: pressed ? theme.errorLight : theme.bgInput,
+                  backgroundColor: pressed ? theme.bgElevated : theme.mode === "light" ? "#111111" : "#f6f6f7",
                 })}
               >
-                <AppSymbol name="stop.circle.fill" size={20} color={theme.error} />
+                <AppSymbol name="stop.fill" size={14} color={theme.mode === "light" ? "#ffffff" : "#111111"} />
               </Pressable>
-            ) : (
+            ) : null}
+            {(!running || canSteerRunningTurn) ? (
               <Pressable
                 onPress={send}
                 disabled={!canSend}
@@ -3517,7 +4282,8 @@ export function AgentConversationScreen({
               >
                 <AppSymbol name="arrow.up" size={18} color="#fff" />
               </Pressable>
-            )}
+            ) : null}
+          </View>
           </View>
         </View>
       </View>
@@ -3531,6 +4297,6 @@ export function AgentConversationScreen({
         bottomInset={insets.bottom}
         onClose={() => setFileDrawerOpen(false)}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }

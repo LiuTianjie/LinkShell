@@ -517,6 +517,159 @@ describe("WebSocket session", () => {
     host.close();
     client.close();
   });
+
+  it("relays agent v2 workspace messages after pairing claim", async () => {
+    const { body: pairing } = await postJson("/pairings", {});
+    const sessionId = pairing.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-agent-pairing");
+    await waitForMessage(host);
+
+    host.send(serializeEnvelope(createEnvelope({
+      type: "session.connect",
+      sessionId,
+      payload: {
+        role: "host",
+        clientName: "local-codex",
+        provider: "codex",
+        machineId: "machine-agent-pairing",
+        hostname: "workstation",
+        cwd: "/repo",
+        projectName: "repo",
+      },
+    })));
+
+    const claim = await postJson("/pairings/claim", {
+      pairingCode: pairing.pairingCode,
+    });
+    expect(claim.status).toBe(200);
+    expect(claim.body.sessionId).toBe(sessionId);
+
+    const client = await connectWs(sessionId, "client", "client-agent-pairing");
+    await waitForMessage(client);
+
+    const { body: sessionsBody } = await getJson("/sessions");
+    const sessions = sessionsBody.sessions as Array<Record<string, unknown>>;
+    const listed = sessions.find((session) => session.id === sessionId);
+    expect(listed).toMatchObject({
+      hasHost: true,
+      provider: "codex",
+      machineId: "machine-agent-pairing",
+      hostname: "workstation",
+      cwd: "/repo",
+      projectName: "repo",
+    });
+
+    client.send(serializeEnvelope(createEnvelope({
+      type: "agent.v2.capabilities.request",
+      sessionId,
+      payload: {},
+    })));
+    const capabilitiesRequest = await waitForMessage(host);
+    expect(capabilitiesRequest.type).toBe("agent.v2.capabilities.request");
+
+    host.send(serializeEnvelope(createEnvelope({
+      type: "agent.v2.capabilities",
+      sessionId,
+      payload: {
+        enabled: true,
+        provider: "codex",
+        providers: [{
+          id: "codex",
+          label: "Codex",
+          enabled: true,
+          defaultModel: "gpt-5.5",
+          supportsImages: true,
+          supportsPermission: true,
+          supportsPlan: true,
+          supportsCancel: true,
+        }],
+        supportsSessionList: true,
+        supportsSessionLoad: true,
+        supportsImages: true,
+        supportsAudio: false,
+        supportsPermission: true,
+        supportsPlan: true,
+        supportsCancel: true,
+      },
+    })));
+    const capabilities = await waitForMessage(client);
+    expect(capabilities.type).toBe("agent.v2.capabilities");
+    expect((capabilities.payload as Record<string, unknown>).provider).toBe("codex");
+
+    client.send(serializeEnvelope(createEnvelope({
+      type: "agent.v2.conversation.open",
+      sessionId,
+      payload: {
+        conversationId: "agent-temp-client",
+        provider: "codex",
+        cwd: "/repo",
+      },
+    })));
+    const openRequest = await waitForMessage(host);
+    expect(openRequest.type).toBe("agent.v2.conversation.open");
+    expect((openRequest.payload as Record<string, unknown>).conversationId).toBe("agent-temp-client");
+
+    host.send(serializeEnvelope(createEnvelope({
+      type: "agent.v2.conversation.opened",
+      sessionId,
+      payload: {
+        requestedConversationId: "agent-temp-client",
+        conversation: {
+          id: "agent-remote-codex-thread-1",
+          agentSessionId: "thread-1",
+          provider: "codex",
+          cwd: "/repo",
+          title: "repo",
+          status: "idle",
+          createdAt: Date.now(),
+          lastActivityAt: Date.now(),
+        },
+        snapshot: [],
+      },
+    })));
+    const opened = await waitForMessage(client);
+    expect(opened.type).toBe("agent.v2.conversation.opened");
+    expect((opened.payload as Record<string, unknown>).requestedConversationId).toBe("agent-temp-client");
+    expect(((opened.payload as Record<string, unknown>).conversation as Record<string, unknown>).id)
+      .toBe("agent-remote-codex-thread-1");
+
+    client.send(serializeEnvelope(createEnvelope({
+      type: "agent.v2.prompt",
+      sessionId,
+      payload: {
+        conversationId: "agent-remote-codex-thread-1",
+        clientMessageId: "msg-1",
+        contentBlocks: [{ type: "text", text: "run tests" }],
+        delivery: "auto",
+      },
+    })));
+    const prompt = await waitForMessage(host);
+    expect(prompt.type).toBe("agent.v2.prompt");
+    expect((prompt.payload as Record<string, unknown>).clientMessageId).toBe("msg-1");
+
+    host.send(serializeEnvelope(createEnvelope({
+      type: "agent.v2.event",
+      sessionId,
+      payload: {
+        conversationId: "agent-remote-codex-thread-1",
+        item: {
+          id: "assistant-1",
+          conversationId: "agent-remote-codex-thread-1",
+          type: "message",
+          role: "assistant",
+          text: "Tests are running.",
+          createdAt: Date.now(),
+        },
+      },
+    })));
+    const event = await waitForMessage(client);
+    expect(event.type).toBe("agent.v2.event");
+    expect((event.payload as Record<string, unknown>).conversationId).toBe("agent-remote-codex-thread-1");
+
+    host.close();
+    client.close();
+  });
 });
 
 describe("Control ownership", () => {
@@ -646,6 +799,63 @@ describe("Control ownership", () => {
     const received = await waitForMessage(host);
     expect(received.type).toBe("agent.v2.structured_input.respond");
     expect((received.payload as Record<string, unknown>).requestId).toBe("input-1");
+
+    host.close();
+    client1.close();
+    client2.close();
+  });
+
+  it("routes agent permission responses and cancel only from the controller", async () => {
+    const { body } = await postJson("/pairings", {});
+    const sessionId = body.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-agent-permission-cancel");
+    await waitForMessage(host);
+
+    const client1 = await connectWs(sessionId, "client", "client-agent-permission-cancel-a");
+    await waitForMessage(client1);
+
+    const client2 = await connectWs(sessionId, "client", "client-agent-permission-cancel-b");
+    await waitForMessage(client2);
+
+    const permissionResponse = createEnvelope({
+      type: "agent.v2.permission.respond",
+      sessionId,
+      payload: {
+        conversationId: "conversation-1",
+        requestId: "permission-1",
+        outcome: "allow",
+        optionId: "allow_once",
+      },
+    });
+
+    client2.send(serializeEnvelope(permissionResponse));
+    const permissionError = await waitForMessage(client2);
+    expect(permissionError.type).toBe("session.error");
+    expect((permissionError.payload as Record<string, unknown>).code).toBe("control_conflict");
+
+    client1.send(serializeEnvelope(permissionResponse));
+    const receivedPermission = await waitForMessage(host);
+    expect(receivedPermission.type).toBe("agent.v2.permission.respond");
+    expect((receivedPermission.payload as Record<string, unknown>).requestId).toBe("permission-1");
+
+    const cancel = createEnvelope({
+      type: "agent.v2.cancel",
+      sessionId,
+      payload: {
+        conversationId: "conversation-1",
+      },
+    });
+
+    client2.send(serializeEnvelope(cancel));
+    const cancelError = await waitForMessage(client2);
+    expect(cancelError.type).toBe("session.error");
+    expect((cancelError.payload as Record<string, unknown>).code).toBe("control_conflict");
+
+    client1.send(serializeEnvelope(cancel));
+    const receivedCancel = await waitForMessage(host);
+    expect(receivedCancel.type).toBe("agent.v2.cancel");
+    expect((receivedCancel.payload as Record<string, unknown>).conversationId).toBe("conversation-1");
 
     host.close();
     client1.close();

@@ -9,6 +9,20 @@ export { SUPABASE_URL, SUPABASE_ANON_KEY };
 
 const AUTH_STORAGE_KEY = "@linkshell/auth";
 
+function normalizeGatewayUrl(rawUrl: string): string {
+  const value = rawUrl.trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    url.search = "";
+    url.pathname = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return value.replace(/\/+$/, "");
+  }
+}
+
 export interface AuthUser {
   id: string;
   email?: string;
@@ -253,7 +267,13 @@ export async function fetchOfficialGateways(): Promise<OfficialGateway[]> {
       5_000,
     );
     if (res.ok) {
-      return (await res.json()) as OfficialGateway[];
+      const rows = (await res.json()) as OfficialGateway[];
+      return rows
+        .map((gateway) => ({
+          ...gateway,
+          url: normalizeGatewayUrl(gateway.url),
+        }))
+        .filter((gateway) => gateway.url.length > 0);
     }
   } catch {}
   return [];
@@ -282,12 +302,19 @@ export async function fetchMySessions(
   const session = await getValidSession();
   if (!session) throw new Error("Not signed in");
 
-  const res = await fetchWithTimeout(`${gatewayUrl}/sessions/mine`, {
+  const normalizedGatewayUrl = normalizeGatewayUrl(gatewayUrl);
+  const res = await fetchWithTimeout(`${normalizedGatewayUrl}/sessions/mine`, {
     headers: {
       Authorization: `Bearer ${session.accessToken}`,
     },
   }, 5_000);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as {
+      error?: string;
+      message?: string;
+    } | null;
+    throw new Error(body?.message || body?.error || `HTTP ${res.status}`);
+  }
   const body = (await res.json()) as { sessions: any[] };
   return body.sessions ?? [];
 }

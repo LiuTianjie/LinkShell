@@ -8,6 +8,7 @@ export default function SessionsTab() {
     <SessionListScreen
       gatewayBaseUrl={ctx.gatewayBaseUrl}
       onSelectSession={ctx.handleConnectSession}
+      onSessionRemoved={ctx.handleRemoveSession}
       refreshKey={ctx.sessionRefreshKey}
       deviceToken={ctx.manager.deviceToken}
     />

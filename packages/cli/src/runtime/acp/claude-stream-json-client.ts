@@ -1,9 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
-import { readdirSync, existsSync } from "node:fs";
+import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
+import { parseClaudeJsonlSession } from "./claude-sdk-client.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
 
@@ -45,6 +46,43 @@ function projectHash(cwd: string): string {
       .replace(/\/$/, "")
       .replace(/\//g, "-")
   );
+}
+
+function claudeProjectsRoot(): string {
+  return join(homedir(), ".claude", "projects");
+}
+
+function claudeProjectDir(cwd: string): string {
+  return join(claudeProjectsRoot(), projectHash(cwd));
+}
+
+function claudeProjectDirs(preferredCwd: string): string[] {
+  const root = claudeProjectsRoot();
+  const preferred = claudeProjectDir(preferredCwd);
+  const dirs: string[] = [];
+  if (existsSync(preferred)) dirs.push(preferred);
+  if (!existsSync(root)) return dirs;
+  try {
+    for (const entry of readdirSync(root)) {
+      const fullPath = join(root, entry);
+      if (fullPath !== preferred && statSync(fullPath).isDirectory()) {
+        dirs.push(fullPath);
+      }
+    }
+  } catch {
+    // Ignore unreadable Claude storage.
+  }
+  return dirs;
+}
+
+function stringField(value: unknown, keys: string[]): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  return undefined;
 }
 
 function id(prefix: string): string {
@@ -474,27 +512,39 @@ export class ClaudeStreamJsonClient {
   }
 
   async listSessions(): Promise<unknown> {
-    const home = homedir();
-    const projectDir = join(home, ".claude", "projects", projectHash(this.input.cwd));
-
-    if (!existsSync(projectDir)) {
-      return { sessions: [] };
-    }
-
-    const sessions: Array<{ id: string; cwd: string; lastModified: number }> = [];
-    try {
-      for (const entry of readdirSync(projectDir)) {
-        if (entry.endsWith(".jsonl")) {
+    const sessions: Array<Record<string, unknown>> = [];
+    const seen = new Set<string>();
+    for (const projectDir of claudeProjectDirs(this.input.cwd)) {
+      try {
+        for (const entry of readdirSync(projectDir)) {
+          if (!entry.endsWith(".jsonl")) continue;
           const sessionId = entry.replace(".jsonl", "");
+          if (seen.has(sessionId)) continue;
+          seen.add(sessionId);
+          const filePath = join(projectDir, entry);
+          const stat = statSync(filePath);
+          const parsed = parseClaudeJsonlSession({
+            text: readFileSync(filePath, "utf8"),
+            cwd: this.input.cwd,
+            sessionId,
+            fallbackUpdatedAt: stat.mtimeMs,
+          });
+          const thread = parsed.thread && typeof parsed.thread === "object"
+            ? parsed.thread as Record<string, unknown>
+            : {};
           sessions.push({
             id: sessionId,
-            cwd: this.input.cwd,
-            lastModified: 0, // would need fs.statSync for accurate time
+            cwd: stringField(thread, ["cwd", "workingDirectory", "workspacePath"]) ?? this.input.cwd,
+            title: stringField(thread, ["title", "preview"]),
+            model: stringField(thread, ["model"]),
+            createdAt: thread.createdAt,
+            lastActivityAt: thread.updatedAt ?? stat.mtimeMs,
+            lastModified: stat.mtimeMs,
           });
         }
+      } catch {
+        // directory read failed
       }
-    } catch {
-      // directory read failed
     }
 
     return { sessions };

@@ -22,6 +22,7 @@ export interface AppContextValue {
   handleClaim: (code: string, gateway?: string) => void;
   handleConnectSession: (sessionId: string, serverUrl?: string) => void;
   handleDisconnectSession: (sessionId: string) => void;
+  handleRemoveSession: (sessionId: string, serverUrl?: string) => Promise<void>;
   handlePairingScanned: (payload: { code: string; gateway?: string }) => void;
   navigateTo: (s: "tabs" | "scanner" | "terminal") => void;
   // UI state

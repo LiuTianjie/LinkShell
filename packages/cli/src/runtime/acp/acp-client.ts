@@ -108,6 +108,35 @@ export class AcpClient {
     });
   }
 
+  readSession(input: { sessionId: string; includeTurns?: boolean }): Promise<unknown> {
+    if (this.protocol === "codex-app-server") {
+      return this.transport.request("thread/read", {
+        threadId: input.sessionId,
+        includeTurns: input.includeTurns ?? true,
+      });
+    }
+    return Promise.reject(new Error("Provider does not support readSession."));
+  }
+
+  listTurns(input: {
+    sessionId: string;
+    limit?: number;
+    cursor?: string;
+    sortDirection?: "asc" | "desc";
+    itemsView?: "summary" | "full";
+  }): Promise<unknown> {
+    if (this.protocol === "codex-app-server") {
+      return this.transport.request("thread/turns/list", {
+        threadId: input.sessionId,
+        limit: input.limit ?? 50,
+        cursor: input.cursor,
+        sortDirection: input.sortDirection ?? "desc",
+        itemsView: input.itemsView ?? "full",
+      });
+    }
+    return Promise.reject(new Error("Provider does not support listTurns."));
+  }
+
   listSessions(): Promise<unknown> {
     if (this.protocol === "codex-app-server") {
       return this.transport.request("thread/list", { limit: 20 });
@@ -133,8 +162,9 @@ export class AcpClient {
     cwd: string;
   }): Promise<unknown> {
     if (this.protocol === "codex-app-server") {
+      const model = input.model?.trim() || "default";
       const collaborationSettings = {
-        ...(input.model ? { model: input.model } : {}),
+        model,
         ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
       };
       const collaborationMode = input.collaborationMode && input.collaborationMode !== "default"
@@ -145,7 +175,7 @@ export class AcpClient {
         : undefined;
       return this.transport.request("turn/start", {
         threadId: input.sessionId,
-        model: input.model,
+        model,
         effort: input.reasoningEffort,
         permissions: permissionsForMode(input.permissionMode, input.cwd),
         collaborationMode,
@@ -168,6 +198,27 @@ export class AcpClient {
         permissionMode: input.permissionMode,
       },
     }, 60_000);
+  }
+
+  steer(input: {
+    sessionId: string;
+    turnId: string;
+    content: unknown[];
+  }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Active-turn steering is only supported by Codex app-server."));
+    }
+    return this.transport.request("turn/steer", {
+      threadId: input.sessionId,
+      expectedTurnId: input.turnId,
+      input: input.content.map((block) => {
+        const raw = block as { type?: string; text?: string; data?: string };
+        if (raw.type === "image" && raw.data) {
+          return { type: "image", url: raw.data };
+        }
+        return { type: "text", text: raw.text ?? "" };
+      }),
+    }, null);
   }
 
   cancel(input: { sessionId?: string; turnId?: string }): void {

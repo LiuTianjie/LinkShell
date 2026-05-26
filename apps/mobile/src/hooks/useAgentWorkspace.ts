@@ -8,6 +8,8 @@ import {
   loadAgentConversations,
   loadAgentTimeline,
   makeAgentConversationId,
+  mergeAgentConversationId,
+  removeAgentConversationsByServerUrl,
   renameAgentConversation,
   saveAgentTimeline,
   upsertAgentConversation,
@@ -46,6 +48,10 @@ export interface OpenConversationResult {
   error?: string;
 }
 
+export interface AgentWorkspaceRefreshOptions {
+  mergeCurrent?: boolean;
+}
+
 export interface AgentFileEntry {
   name: string;
   path: string;
@@ -70,6 +76,7 @@ export interface AgentFileReadResult {
 }
 
 export interface AgentWorkspaceHandle {
+  isHydrated: boolean;
   conversations: AgentConversationRecord[];
   archivedConversations: AgentConversationRecord[];
   activeConversationId: string | null;
@@ -77,7 +84,7 @@ export interface AgentWorkspaceHandle {
   connectedSessions: SessionInfo[];
   notices: AgentNotice[];
   dismissNotice: (id: string) => void;
-  refresh: () => Promise<void>;
+  refresh: (options?: AgentWorkspaceRefreshOptions) => Promise<void>;
   requestCapabilities: (sessionId?: string) => void;
   openConversation: (input: OpenConversationInput) => Promise<OpenConversationResult>;
   openProject: (record: ProjectRecord) => Promise<string | null>;
@@ -94,8 +101,15 @@ export interface AgentWorkspaceHandle {
       permissionMode?: AgentPermissionMode;
       collaborationMode?: AgentCollaborationMode;
       attachments?: AgentContentBlock[];
+      delivery?: "auto" | "new_turn" | "steer" | "queued";
     },
   ) => void;
+  sendQueuedFollowUp: (
+    conversationId: string,
+    itemId: string,
+    delivery: "steer" | "new_turn",
+  ) => void;
+  discardQueuedFollowUp: (conversationId: string, itemId: string) => void;
   executeCommand: (
     conversationId: string,
     command: AgentCommandDescriptor,
@@ -133,10 +147,111 @@ export interface AgentWorkspaceHandle {
   readFile: (conversationId: string, path: string, maxBytes?: number) => Promise<AgentFileReadResult>;
   archive: (conversationId: string, archived: boolean) => Promise<void>;
   rename: (conversationId: string, title: string) => Promise<void>;
+  markRead: (conversationId: string) => void;
+  removeByServerUrl: (serverUrl: string) => Promise<void>;
 }
 
 function normalizeServerUrl(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+function isAgentSessionUsable(session: SessionInfo | undefined): boolean {
+  return Boolean(session) &&
+    (
+      session!.status === "connected" ||
+      session!.status === "reconnecting" ||
+      session!.status === "connecting" ||
+      session!.status === "host_disconnected"
+    );
+}
+
+function mergeConversationRecords(
+  current: AgentConversationRecord[],
+  records: AgentConversationRecord[],
+  options?: { preserveLocalArchived?: boolean },
+): AgentConversationRecord[] {
+  const preserveLocalArchived = options?.preserveLocalArchived ?? true;
+  const next = [...current];
+  for (const record of records) {
+    const index = next.findIndex((item) => item.id === record.id);
+    const merged = index >= 0
+      ? {
+          ...next[index],
+          ...record,
+          archived: preserveLocalArchived && next[index]!.archived && !record.archived
+            ? true
+            : record.archived,
+          lastMessagePreview: record.lastMessagePreview ?? next[index]!.lastMessagePreview,
+          lastUserActivityAt: record.lastUserActivityAt ?? next[index]!.lastUserActivityAt,
+          lastResponseAt: record.lastResponseAt ?? next[index]!.lastResponseAt,
+          lastReadAt: record.lastReadAt ?? next[index]!.lastReadAt,
+        }
+      : record;
+    if (index >= 0) next[index] = merged;
+    else next.unshift(merged);
+  }
+  return next.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+}
+
+function isUserVisibleResponseItem(item: AgentTimelineItem): boolean {
+  if (item.role === "user") return false;
+  if (item.type === "error" || item.error) return true;
+  if (item.type === "permission" || item.permission) return true;
+  if (item.kind === "user_input_prompt") return true;
+  if (item.role === "assistant") return true;
+  return Boolean(previewFromItem(item));
+}
+
+function statusForIncomingItem(
+  item: AgentTimelineItem,
+  fallback: AgentConversationRecord["status"],
+): AgentConversationRecord["status"] {
+  if (item.type === "error" || item.error) return "error";
+  if (item.type === "permission" || item.permission || item.kind === "user_input_prompt") {
+    return "waiting_permission";
+  }
+  return item.status ?? fallback;
+}
+
+function reconcileConversationId(
+  current: AgentConversationRecord[],
+  requestedConversationId: string,
+  record: AgentConversationRecord,
+): AgentConversationRecord[] {
+  if (!requestedConversationId || requestedConversationId === record.id) {
+    return mergeConversationRecords(current, [record]);
+  }
+
+  const oldRecord = current.find((item) => item.id === requestedConversationId);
+  const existingRecord = current.find((item) => item.id === record.id);
+  const createdAt = Math.min(
+    record.createdAt,
+    oldRecord?.createdAt ?? record.createdAt,
+    existingRecord?.createdAt ?? record.createdAt,
+  );
+  const lastActivityAt = Math.max(
+    record.lastActivityAt,
+    oldRecord?.lastActivityAt ?? record.lastActivityAt,
+    existingRecord?.lastActivityAt ?? record.lastActivityAt,
+  );
+  const merged: AgentConversationRecord = {
+    ...oldRecord,
+    ...existingRecord,
+    ...record,
+    id: record.id,
+    archived: Boolean(record.archived || oldRecord?.archived || existingRecord?.archived),
+    createdAt,
+    lastActivityAt,
+    lastMessagePreview: record.lastMessagePreview ?? oldRecord?.lastMessagePreview ?? existingRecord?.lastMessagePreview,
+    lastUserActivityAt: record.lastUserActivityAt ?? oldRecord?.lastUserActivityAt ?? existingRecord?.lastUserActivityAt,
+    lastResponseAt: record.lastResponseAt ?? oldRecord?.lastResponseAt ?? existingRecord?.lastResponseAt,
+    lastReadAt: record.lastReadAt ?? oldRecord?.lastReadAt ?? existingRecord?.lastReadAt,
+  };
+  return mergeConversationRecords(
+    current.filter((item) => item.id !== requestedConversationId && item.id !== record.id),
+    [merged],
+    { preserveLocalArchived: false },
+  );
 }
 
 function textFromBlocks(blocks: AgentContentBlock[] | undefined): string {
@@ -169,6 +284,14 @@ function mergeTimeline(
 ): AgentTimelineItem[] {
   const map = new Map(current.map((item) => [item.id, item]));
   for (const item of incoming) {
+    const existing = map.get(item.id);
+    if (
+      existing?.metadata?.queuedDiscarded === true &&
+      existing.metadata?.delivery === "queued" &&
+      item.metadata?.queuedDiscarded !== true
+    ) {
+      continue;
+    }
     map.set(item.id, item);
   }
   return [...map.values()]
@@ -178,7 +301,11 @@ function mergeTimeline(
 
 function normalizeSnapshotItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
   return items.map((item) => {
-    if (item.type === "permission" && !item.metadata?.permissionOutcome) {
+    if (
+      item.type === "permission" &&
+      !item.metadata?.permissionOutcome &&
+      item.metadata?.permissionLive !== true
+    ) {
       return {
         ...item,
         metadata: {
@@ -213,12 +340,15 @@ export function useAgentWorkspace(
   const [capabilitiesBySessionId, setCapabilitiesBySessionId] = useState<Map<string, AgentCapabilities>>(new Map());
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [notices, setNotices] = useState<AgentNotice[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
   const managerRef = useRef(manager);
   const conversationsRef = useRef(conversations);
   const timelineRef = useRef(timelineById);
+  const autoSendingQueuedRef = useRef(new Set<string>());
   const pendingOpenRef = useRef(new Map<string, {
     resolve: (result: OpenConversationResult) => void;
     timer: ReturnType<typeof setTimeout>;
+    allowErrorOpen: boolean;
   }>());
   const pendingBrowseRef = useRef(new Map<string, {
     resolve: (result: AgentFileBrowseResult) => void;
@@ -227,6 +357,7 @@ export function useAgentWorkspace(
   const pendingReadRef = useRef(new Map<string, {
     resolve: (result: AgentFileReadResult) => void;
     timer: ReturnType<typeof setTimeout>;
+    path: string;
   }>());
 
   useEffect(() => {
@@ -251,17 +382,47 @@ export function useAgentWorkspace(
       ),
     [manager.sessions],
   );
+  const connectedSessionSignature = useMemo(
+    () =>
+      connectedSessions
+        .map((session) => `${session.gatewayUrl}:${session.sessionId}:${session.status}:${session.machineId ?? ""}`)
+        .sort()
+        .join("|"),
+    [connectedSessions],
+  );
 
-  const refresh = useCallback(async () => {
-    const stored = await loadAgentConversations();
-    setConversations(stored);
-    const pairs = await Promise.all(
-      stored.slice(0, 20).map(async (conversation) => [
-        conversation.id,
-        await loadAgentTimeline(conversation.id),
-      ] as const),
-    );
-    setTimelineById(new Map(pairs));
+  const refresh = useCallback(async (options?: AgentWorkspaceRefreshOptions) => {
+    try {
+      const mergeCurrent = options?.mergeCurrent ?? true;
+      const stored = await loadAgentConversations();
+      setConversations((prev) => mergeCurrent ? mergeConversationRecords(stored, prev) : stored);
+      const storedConversationIds = new Set(stored.map((conversation) => conversation.id));
+      const pairs = await Promise.all(
+        stored.slice(0, 20).map(async (conversation) => [
+          conversation.id,
+          await loadAgentTimeline(conversation.id),
+        ] as const),
+      );
+      setTimelineById((prev) => {
+        if (!mergeCurrent) return new Map(pairs);
+        const next = new Map(prev);
+        for (const [conversationId, storedItems] of pairs) {
+          const currentItems = next.get(conversationId);
+          next.set(
+            conversationId,
+            currentItems ? mergeTimeline(storedItems, currentItems) : storedItems,
+          );
+        }
+        return next;
+      });
+      if (!mergeCurrent) {
+        setActiveConversationId((current) =>
+          current && storedConversationIds.has(current) ? current : null
+        );
+      }
+    } finally {
+      setIsHydrated(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -272,12 +433,22 @@ export function useAgentWorkspace(
     record: AgentConversationRecord,
     options?: { preserveLocalArchived?: boolean },
   ) => {
+    setConversations((prev) => mergeConversationRecords(prev, [record], options));
     const saved = await upsertAgentConversation(record, options);
-    setConversations((prev) => {
-      const next = prev.filter((item) => item.id !== saved.id);
-      next.unshift(saved);
-      return next.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-    });
+    setConversations((prev) => mergeConversationRecords(prev, [saved], options));
+  }, []);
+
+  const persistConversations = useCallback((
+    records: AgentConversationRecord[],
+    options?: { preserveLocalArchived?: boolean },
+  ) => {
+    if (records.length === 0) return;
+    setConversations((prev) => mergeConversationRecords(prev, records, options));
+    (async () => {
+      for (const record of records) {
+        await upsertAgentConversation(record, options);
+      }
+    })().catch(() => {});
   }, []);
 
   const persistTimelineItem = useCallback(async (item: AgentTimelineItem) => {
@@ -288,6 +459,33 @@ export function useAgentWorkspace(
     });
     await upsertAgentTimelineItem(item);
   }, []);
+
+  const appendLocalError = useCallback((conversationId: string, error: string, idPrefix = "error") => {
+    const item: AgentTimelineItem = {
+      id: `${idPrefix}:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      conversationId,
+      type: "error",
+      error,
+      createdAt: Date.now(),
+    };
+    setTimelineById((prev) => {
+      const next = new Map(prev);
+      next.set(conversationId, mergeTimeline(next.get(conversationId) ?? [], [item]));
+      return next;
+    });
+    upsertAgentTimelineItem(item).catch(() => {});
+    const conversation = conversationsRef.current.find((entry) => entry.id === conversationId);
+    if (conversation) {
+      const now = Date.now();
+      persistConversation({
+        ...conversation,
+        status: "error",
+        lastMessagePreview: error,
+        lastActivityAt: now,
+        lastResponseAt: now,
+      }).catch(() => {});
+    }
+  }, [persistConversation]);
 
   const sessionForConversation = useCallback(
     (conversationId: string) => {
@@ -302,63 +500,22 @@ export function useAgentWorkspace(
     (conversationId: string, preferredSessionId?: string) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
       if (!conversation) {
-        console.warn("[LiveActivityAction] workspace ensureSession missing conversation", { conversationId, preferredSessionId });
         return false;
       }
-      const isUsable = (session: SessionInfo | undefined) =>
-        Boolean(session) &&
-        (
-          session!.status === "connected" ||
-          session!.status === "reconnecting" ||
-          session!.status === "connecting" ||
-          session!.status === "host_disconnected"
-        );
 
       const preferred = preferredSessionId ? manager.sessions.get(preferredSessionId) : undefined;
-      if (isUsable(preferred)) {
-        console.log("[LiveActivityAction] workspace ensureSession preferred usable", {
-          conversationId,
-          preferredSessionId,
-          status: preferred?.status,
-          controllerId: preferred?.controllerId,
-        });
+      if (isAgentSessionUsable(preferred)) {
         return true;
       }
 
       const resolved = findSessionForConversation(conversation, manager.sessions);
-      if (isUsable(resolved)) {
-        console.log("[LiveActivityAction] workspace ensureSession resolved usable", {
-          conversationId,
-          preferredSessionId,
-          resolvedSessionId: resolved?.sessionId,
-          status: resolved?.status,
-          controllerId: resolved?.controllerId,
-        });
+      if (isAgentSessionUsable(resolved)) {
         return true;
       }
 
       const sessionId = preferredSessionId || conversation.sessionId;
       if (sessionId && conversation.serverUrl) {
-        console.warn("[LiveActivityAction] workspace ensureSession reconnect", {
-          conversationId,
-          preferredSessionId,
-          sessionId,
-          serverUrl: conversation.serverUrl,
-          knownSessions: [...manager.sessions.values()].map((session) => ({
-            sessionId: session.sessionId,
-            status: session.status,
-            gatewayUrl: session.gatewayUrl,
-            controllerId: session.controllerId,
-          })),
-        });
         manager.connectToSession(sessionId, conversation.serverUrl);
-      } else {
-        console.warn("[LiveActivityAction] workspace ensureSession cannot reconnect", {
-          conversationId,
-          preferredSessionId,
-          sessionId,
-          serverUrl: conversation.serverUrl,
-        });
       }
       return false;
     },
@@ -413,7 +570,7 @@ export function useAgentWorkspace(
   useEffect(() => {
     if (connectedSessions.length === 0) return;
     requestCapabilities();
-  }, [connectedSessions.length, requestCapabilities]);
+  }, [connectedSessionSignature, connectedSessions.length, requestCapabilities]);
 
   const handleEnvelope = useCallback(
     (envelope: Envelope) => {
@@ -436,6 +593,9 @@ export function useAgentWorkspace(
         archived: Boolean(conversation.archived),
         lastMessagePreview: conversation.lastMessagePreview,
         lastActivityAt: conversation.lastActivityAt ?? Date.now(),
+        lastUserActivityAt: conversation.lastUserActivityAt,
+        lastResponseAt: conversation.lastResponseAt,
+        lastReadAt: conversation.lastReadAt,
         createdAt: conversation.createdAt ?? Date.now(),
         schemaVersion: 1,
       });
@@ -492,14 +652,44 @@ export function useAgentWorkspace(
       }
 
       if (envelope.type === "terminal.file.read.result") {
-        const payload = parseTypedPayload("terminal.file.read.result", envelope.payload) as AgentFileReadResult & {
-          requestId?: string;
-        };
-        if (!payload.requestId) return;
-        const pending = pendingReadRef.current.get(payload.requestId);
+        let payload: AgentFileReadResult & { requestId?: string };
+        try {
+          payload = parseTypedPayload("terminal.file.read.result", envelope.payload) as AgentFileReadResult & {
+            requestId?: string;
+          };
+        } catch {
+          const raw = envelope.payload && typeof envelope.payload === "object"
+            ? envelope.payload as Partial<AgentFileReadResult & { requestId?: string }>
+            : {};
+          payload = {
+            path: typeof raw.path === "string" ? raw.path : "",
+            content: typeof raw.content === "string" ? raw.content : "",
+            encoding: "utf8",
+            size: typeof raw.size === "number" ? raw.size : undefined,
+            truncated: Boolean(raw.truncated),
+            error: typeof raw.error === "string" ? raw.error : "文件读取响应格式无效。",
+            requestId: typeof raw.requestId === "string" ? raw.requestId : undefined,
+          };
+        }
+        let pendingKey = payload.requestId;
+        let pending = pendingKey ? pendingReadRef.current.get(pendingKey) : undefined;
+        if (!pending) {
+          const matches = [...pendingReadRef.current.entries()].filter(([, item]) =>
+            item.path === payload.path
+          );
+          if (matches.length === 1) {
+            pendingKey = matches[0]![0];
+            pending = matches[0]![1];
+          }
+        }
+        if (!pending && pendingReadRef.current.size === 1) {
+          const only = [...pendingReadRef.current.entries()][0];
+          pendingKey = only?.[0];
+          pending = only?.[1];
+        }
         if (!pending) return;
         clearTimeout(pending.timer);
-        pendingReadRef.current.delete(payload.requestId);
+        pendingReadRef.current.delete(pendingKey!);
         pending.resolve({
           path: payload.path,
           content: payload.content,
@@ -516,12 +706,33 @@ export function useAgentWorkspace(
         const record = toRecord(payload.conversation);
         persistConversation(record).catch(() => {});
         setActiveConversationId(record.id);
-        const pending = pendingOpenRef.current.get(record.id);
+        const requestedConversationId = typeof payload.requestedConversationId === "string"
+          ? payload.requestedConversationId
+          : undefined;
+        if (requestedConversationId && requestedConversationId !== record.id) {
+          setConversations((prev) => reconcileConversationId(prev, requestedConversationId, record));
+          mergeAgentConversationId(requestedConversationId, record.id).catch(() => {});
+          setTimelineById((prev) => {
+            const oldItems = prev.get(requestedConversationId);
+            if (!oldItems?.length) return prev;
+            const next = new Map(prev);
+            next.delete(requestedConversationId);
+            next.set(record.id, mergeTimeline(
+              next.get(record.id) ?? [],
+              oldItems.map((item) => ({ ...item, conversationId: record.id })),
+            ));
+            return next;
+          });
+        }
+        const pending = pendingOpenRef.current.get(record.id) ??
+          (requestedConversationId ? pendingOpenRef.current.get(requestedConversationId) : undefined);
         if (pending) {
           clearTimeout(pending.timer);
           pendingOpenRef.current.delete(record.id);
+          if (requestedConversationId) pendingOpenRef.current.delete(requestedConversationId);
+          const canOpenErrorConversation = pending.allowErrorOpen && record.status === "error";
           pending.resolve({
-            conversationId: record.status === "error" ? null : record.id,
+            conversationId: record.status === "error" && !canOpenErrorConversation ? null : record.id,
             status: record.status,
             error: record.status === "error"
               ? record.lastMessagePreview || "Agent 对话创建失败。"
@@ -530,10 +741,11 @@ export function useAgentWorkspace(
         }
         const items = normalizeSnapshotItems((payload.snapshot ?? []) as AgentTimelineItem[]);
         if (items.length > 0) {
-          saveAgentTimeline(record.id, items).catch(() => {});
           setTimelineById((prev) => {
             const next = new Map(prev);
-            next.set(record.id, mergeTimeline(next.get(record.id) ?? [], items));
+            const merged = mergeTimeline(next.get(record.id) ?? [], items);
+            next.set(record.id, merged);
+            saveAgentTimeline(record.id, merged).catch(() => {});
             return next;
           });
         }
@@ -542,18 +754,14 @@ export function useAgentWorkspace(
 
       if (envelope.type === "agent.v2.conversation.list.result") {
         const payload = parseTypedPayload("agent.v2.conversation.list.result", envelope.payload) as any;
-        for (const conversation of payload.conversations ?? []) {
-          persistConversation(toRecord(conversation)).catch(() => {});
-        }
+        persistConversations((payload.conversations ?? []).map(toRecord));
         return;
       }
 
       if (envelope.type === "agent.v2.snapshot") {
         const payload = parseTypedPayload("agent.v2.snapshot", envelope.payload) as any;
         if (payload.activeConversationId) setActiveConversationId(payload.activeConversationId);
-        for (const conversation of payload.conversations ?? []) {
-          persistConversation(toRecord(conversation)).catch(() => {});
-        }
+        persistConversations((payload.conversations ?? []).map(toRecord));
         const grouped = new Map<string, AgentTimelineItem[]>();
         for (const item of normalizeSnapshotItems((payload.items ?? []) as AgentTimelineItem[])) {
           grouped.set(item.conversationId, [...(grouped.get(item.conversationId) ?? []), item]);
@@ -576,16 +784,27 @@ export function useAgentWorkspace(
           persistConversation(toRecord(payload.conversation)).catch(() => {});
         }
         if (payload.item) {
-          persistTimelineItem(payload.item as AgentTimelineItem).catch(() => {});
-          const preview = previewFromItem(payload.item as AgentTimelineItem);
+          const item = payload.item as AgentTimelineItem;
+          const itemWithSourceSession: AgentTimelineItem = {
+            ...item,
+            metadata: {
+              ...(item.metadata ?? {}),
+              sessionId: item.metadata?.sessionId ?? envelope.sessionId,
+            },
+          };
+          persistTimelineItem(itemWithSourceSession).catch(() => {});
+          const preview = previewFromItem(itemWithSourceSession);
           if (preview) {
             const existing = conversationsRef.current.find((item) => item.id === payload.conversationId);
             if (existing) {
+              const now = Date.now();
+              const isResponse = isUserVisibleResponseItem(itemWithSourceSession);
               persistConversation({
                 ...existing,
                 lastMessagePreview: preview,
-                lastActivityAt: Date.now(),
-                status: payload.item.status ?? existing.status,
+                lastActivityAt: now,
+                lastResponseAt: isResponse ? now : existing.lastResponseAt,
+                status: statusForIncomingItem(itemWithSourceSession, existing.status),
               }).catch(() => {});
             }
           }
@@ -653,11 +872,14 @@ export function useAgentWorkspace(
             const existing = conversationsRef.current.find((item) => item.id === payload.conversationId);
             const preview = previewFromItem(patchedItem);
             if (existing && preview) {
+              const now = Date.now();
+              const isResponse = isUserVisibleResponseItem(patchedItem);
               persistConversation({
                 ...existing,
                 lastMessagePreview: preview,
-                lastActivityAt: Date.now(),
-                status: patchedItem.status ?? existing.status,
+                lastActivityAt: now,
+                lastResponseAt: isResponse ? now : existing.lastResponseAt,
+                status: statusForIncomingItem(patchedItem, existing.status),
               }).catch(() => {});
             }
             const next = new Map(prev);
@@ -744,17 +966,24 @@ export function useAgentWorkspace(
         persistTimelineItem(permissionItem).catch(() => {});
         const existing = conversationsRef.current.find((item) => item.id === payload.conversationId);
         if (existing) {
+          const now = Date.now();
           persistConversation({
             ...existing,
             status: "waiting_permission",
             lastMessagePreview: previewFromItem(permissionItem) ?? "需要授权",
-            lastActivityAt: Date.now(),
+            lastActivityAt: now,
+            lastResponseAt: now,
           }).catch(() => {});
         }
       }
 
       if (envelope.type === "agent.permission.request") {
         const payload = parseTypedPayload("agent.permission.request" as any, envelope.payload) as any;
+        const isTerminalPermission =
+          typeof envelope.terminalId === "string" &&
+          envelope.terminalId.length > 0 &&
+          typeof payload.agentSessionId !== "string";
+        if (isTerminalPermission) return;
         const conversation =
           conversationsRef.current.find((item) =>
             item.sessionId === envelope.sessionId &&
@@ -764,10 +993,6 @@ export function useAgentWorkspace(
           conversationsRef.current.find((item) => item.id === activeConversationId && item.sessionId === envelope.sessionId) ??
           conversationsRef.current.find((item) => item.sessionId === envelope.sessionId && !item.archived);
         if (!conversation) return;
-        const isTerminalPermission =
-          typeof envelope.terminalId === "string" &&
-          envelope.terminalId.length > 0 &&
-          typeof payload.agentSessionId !== "string";
         const permissionItem: AgentTimelineItem = {
           id: `permission:${payload.requestId}`,
           conversationId: conversation.id,
@@ -780,9 +1005,8 @@ export function useAgentWorkspace(
             options: payload.options ?? [],
           },
           metadata: {
-            protocol: isTerminalPermission ? "terminal" : "legacy",
+            protocol: "legacy",
             sessionId: envelope.sessionId,
-            terminalId: envelope.terminalId,
             agentSessionId: payload.agentSessionId,
             permissionLive: true,
             permissionExpired: false,
@@ -792,177 +1016,21 @@ export function useAgentWorkspace(
           updatedAt: Date.now(),
         };
         persistTimelineItem(permissionItem).catch(() => {});
+        const now = Date.now();
         persistConversation({
           ...conversation,
           status: "waiting_permission",
           lastMessagePreview: previewFromItem(permissionItem) ?? "需要授权",
-          lastActivityAt: Date.now(),
+          lastActivityAt: now,
+          lastResponseAt: now,
         }).catch(() => {});
       }
 
       if (envelope.type === "terminal.status") {
-        const payload = envelope.payload as {
-          phase?: string;
-          summary?: string;
-          pendingPermissionCount?: number;
-          permissionResolution?: {
-            requestId?: string;
-            outcome?: "allow" | "deny" | "cancelled";
-            source?: string;
-            delivered?: boolean;
-          };
-          topPermission?: {
-            requestId?: string;
-            toolName?: string;
-            toolInput?: string;
-            permissionRequest?: string;
-            timestamp?: number;
-          };
-        };
-        const topPermission = payload.topPermission;
-        const permissionResolution = payload.permissionResolution;
-        const terminalId = typeof (envelope as any).terminalId === "string"
-          ? (envelope as any).terminalId
-          : "default";
-        const resolvedConversation = permissionResolution?.requestId
-          ? conversationsRef.current.find((item) =>
-              timelineRef.current.get(item.id)?.some((timelineItem) =>
-                timelineItem.type === "permission" &&
-                timelineItem.permission?.requestId === permissionResolution.requestId &&
-                timelineItem.metadata?.sessionId === envelope.sessionId,
-              ),
-            )
-          : undefined;
-        const conversation =
-          resolvedConversation ??
-          conversationsRef.current.find((item) => item.id === activeConversationId && item.sessionId === envelope.sessionId) ??
-          conversationsRef.current.find((item) =>
-            item.sessionId === envelope.sessionId &&
-            !item.archived &&
-            (item.status === "running" || item.status === "waiting_permission"),
-          ) ??
-          conversationsRef.current.find((item) => item.sessionId === envelope.sessionId && !item.archived);
-        if (!conversation) return;
-        if (permissionResolution?.requestId) {
-          const delivered = permissionResolution.delivered === true;
-          const outcome = permissionResolution.outcome;
-          setTimelineById((prev) => {
-            const items = prev.get(conversation.id);
-            if (!items) return prev;
-            let changed = false;
-            const nextItems = items.map((item) => {
-              if (item.type === "permission" && item.permission?.requestId === permissionResolution.requestId) {
-                changed = true;
-                return {
-                  ...item,
-                  metadata: {
-                    ...(item.metadata ?? {}),
-                    permissionLive: false,
-                    permissionPending: false,
-                    permissionExpired: false,
-                    permissionDelivered: delivered,
-                    permissionResolutionSource: permissionResolution.source,
-                    ...(outcome ? { permissionOutcome: outcome } : {}),
-                    permissionError: delivered
-                      ? undefined
-                      : "授权没有送达 Agent：这条请求可能已经过期或被其它入口处理。",
-                  },
-                  updatedAt: Date.now(),
-                };
-              }
-              return item;
-            });
-            if (!changed) return prev;
-            saveAgentTimeline(conversation.id, nextItems).catch(() => {});
-            const next = new Map(prev);
-            next.set(conversation.id, nextItems);
-            return next;
-          });
-          if (!topPermission?.requestId) return;
-        }
-        if (!topPermission?.requestId) {
-          const pendingCount = payload.pendingPermissionCount ?? 0;
-          const shouldClearPermissions =
-            pendingCount === 0 &&
-            (payload.phase !== "waiting" || payload.summary === "permission allowed" || payload.summary === "permission denied");
-          if (!shouldClearPermissions) return;
-          const outcome = payload.summary === "permission denied"
-            ? "deny"
-            : payload.summary === "permission allowed"
-              ? "allow"
-              : undefined;
-          setTimelineById((prev) => {
-            const items = prev.get(conversation.id);
-            if (!items) return prev;
-            let changed = false;
-            const nextItems = items.map((item) => {
-              if (
-                item.type === "permission" &&
-                item.metadata?.protocol === "terminal" &&
-                item.metadata?.sessionId === envelope.sessionId &&
-                (item.metadata?.terminalId ?? "default") === terminalId &&
-                item.metadata?.permissionLive === true &&
-                !item.metadata?.permissionOutcome
-              ) {
-                changed = true;
-                return {
-                  ...item,
-                  metadata: {
-                    ...(item.metadata ?? {}),
-                    permissionLive: false,
-                    permissionPending: false,
-                    permissionExpired: false,
-                    ...(outcome ? { permissionOutcome: outcome } : {}),
-                    permissionError: undefined,
-                  },
-                  updatedAt: Date.now(),
-                };
-              }
-              return item;
-            });
-            if (!changed) return prev;
-            saveAgentTimeline(conversation.id, nextItems).catch(() => {});
-            const next = new Map(prev);
-            next.set(conversation.id, nextItems);
-            return next;
-          });
-          return;
-        }
-        const permissionItem: AgentTimelineItem = {
-          id: `permission:${topPermission.requestId}`,
-          conversationId: conversation.id,
-          type: "permission",
-          permission: {
-            requestId: topPermission.requestId,
-            toolName: topPermission.toolName,
-            toolInput: topPermission.toolInput || topPermission.permissionRequest,
-            context: topPermission.permissionRequest,
-            options: [
-              { id: "deny", label: "拒绝", kind: "deny" },
-              { id: "allow_once", label: "允许一次", kind: "allow" },
-            ],
-          },
-          metadata: {
-            protocol: "terminal",
-            sessionId: envelope.sessionId,
-            terminalId,
-            permissionLive: true,
-            permissionExpired: false,
-            permissionPending: false,
-          },
-          createdAt: topPermission.timestamp ?? Date.now(),
-          updatedAt: Date.now(),
-        };
-        persistTimelineItem(permissionItem).catch(() => {});
-        persistConversation({
-          ...conversation,
-          status: "waiting_permission",
-          lastMessagePreview: previewFromItem(permissionItem) ?? "需要授权",
-          lastActivityAt: Date.now(),
-        }).catch(() => {});
+        return;
       }
     },
-    [activeConversationId, persistConversation, persistTimelineItem],
+    [activeConversationId, persistConversation, persistConversations, persistTimelineItem],
   );
 
   useEffect(() => {
@@ -973,7 +1041,7 @@ export function useAgentWorkspace(
   const openConversation = useCallback(
     async (input: OpenConversationInput) => {
       let session = manager.sessions.get(input.sessionId);
-      if (!session && input.serverUrl) {
+      if ((!session || !isAgentSessionUsable(session)) && input.serverUrl) {
         manager.connectToSession(input.sessionId, input.serverUrl);
         session = manager.sessions.get(input.sessionId);
       }
@@ -995,13 +1063,25 @@ export function useAgentWorkspace(
       return await new Promise<OpenConversationResult>((resolve) => {
         const timer = setTimeout(() => {
           pendingOpenRef.current.delete(conversationId);
+          if (input.conversationId) {
+            resolve({
+              conversationId,
+              status: conversationsRef.current.find((item) => item.id === conversationId)?.status,
+              error: "CLI 暂未确认对话，已打开本地历史。新消息需等待主机端 Agent 恢复。",
+            });
+            return;
+          }
           resolve({
             conversationId: null,
             error: "CLI 没有在 12 秒内确认对话，请确认主机端 linkshell 仍在线。",
           });
         }, 12_000);
-        pendingOpenRef.current.set(conversationId, { resolve, timer });
-        manager.sendAgentWorkspaceEnvelope(
+        pendingOpenRef.current.set(conversationId, {
+          resolve,
+          timer,
+          allowErrorOpen: Boolean(input.conversationId),
+        });
+        const accepted = manager.sendAgentWorkspaceEnvelope(
           session?.sessionId ?? input.sessionId,
           "agent.v2.conversation.open",
           {
@@ -1015,8 +1095,16 @@ export function useAgentWorkspace(
             collaborationMode: input.collaborationMode,
             title: input.title || input.cwd.split("/").filter(Boolean).pop() || "Agent",
           },
-          { queue: true, dedupeKey: `agent-v2-open:${conversationId}` },
+          { queue: true, dedupeKey: `agent-v2-open:${conversationId}`, claimControl: true },
         );
+        if (!accepted) {
+          clearTimeout(timer);
+          pendingOpenRef.current.delete(conversationId);
+          resolve({
+            conversationId: null,
+            error: "Agent 对话请求未发送：连接未就绪，请稍后重试。",
+          });
+        }
       });
     },
     [manager],
@@ -1056,24 +1144,28 @@ export function useAgentWorkspace(
     async (conversationId: string) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
       if (!conversation) return null;
-      const session = findSessionForConversation(conversation, manager.sessions);
-      if (!session) {
-        return null;
+      let session = findSessionForConversation(conversation, manager.sessions);
+      if (!isAgentSessionUsable(session)) {
+        if (!conversation.sessionId || !conversation.serverUrl) return null;
+        manager.connectToSession(conversation.sessionId, conversation.serverUrl);
       }
-      manager.setActiveSessionId(session.sessionId);
+      const sessionId = session?.sessionId ?? conversation.sessionId;
+      const serverUrl = session?.gatewayUrl ?? conversation.serverUrl;
+      const machineId = session?.machineId ?? conversation.machineId;
+      manager.setActiveSessionId(sessionId);
       await persistConversation({
         ...conversation,
-        sessionId: session.sessionId,
-        machineId: session.machineId ?? conversation.machineId,
+        sessionId,
+        machineId,
         archived: false,
         lastActivityAt: Date.now(),
       }, { preserveLocalArchived: false });
       const result = await openConversation({
         conversationId: conversation.id,
         agentSessionId: conversation.agentSessionId,
-        sessionId: session.sessionId,
-        machineId: session.machineId ?? conversation.machineId,
-        serverUrl: session.gatewayUrl,
+        sessionId,
+        machineId,
+        serverUrl,
         cwd: conversation.cwd,
         provider: conversation.provider,
         model: conversation.model,
@@ -1097,6 +1189,7 @@ export function useAgentWorkspace(
         permissionMode?: AgentPermissionMode;
         collaborationMode?: AgentCollaborationMode;
         attachments?: AgentContentBlock[];
+        delivery?: "auto" | "new_turn" | "steer" | "queued";
       },
     ) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
@@ -1109,9 +1202,13 @@ export function useAgentWorkspace(
         ...attachments,
       ];
       const session = findSessionForConversation(conversation, manager.sessions);
-      if (!session) return;
+      if (!session) {
+        appendLocalError(conversationId, "消息未发送：设备连接已失效，请重新打开会话。", "send-error");
+        return;
+      }
 
       const now = Date.now();
+      const delivery = options?.delivery ?? (conversation.status === "running" ? "queued" : "auto");
       const optimisticItem: AgentTimelineItem = {
         id: clientMessageId,
         conversationId,
@@ -1120,7 +1217,7 @@ export function useAgentWorkspace(
         role: "user",
         content: contentBlocks,
         text: textFromBlocks(contentBlocks),
-        metadata: { optimistic: true },
+        metadata: { optimistic: true, delivery },
         createdAt: now,
       };
       setTimelineById((prev) => {
@@ -1139,6 +1236,8 @@ export function useAgentWorkspace(
         status: "running",
         lastMessagePreview: previewFromItem(optimisticItem) ?? conversation.lastMessagePreview,
         lastActivityAt: now,
+        lastUserActivityAt: now,
+        lastReadAt: now,
       };
       setConversations((prev) => {
         const next = prev.filter((item) => item.id !== conversationId);
@@ -1147,6 +1246,10 @@ export function useAgentWorkspace(
       });
       upsertAgentConversation(nextConversation).catch(() => {});
 
+      if (delivery === "queued") {
+        return;
+      }
+
       const accepted = manager.sendAgentWorkspaceEnvelope(
         session.sessionId,
         "agent.v2.prompt",
@@ -1154,12 +1257,13 @@ export function useAgentWorkspace(
           conversationId,
           clientMessageId,
           contentBlocks,
+          delivery,
           model: options?.model,
           reasoningEffort: options?.reasoningEffort,
           permissionMode: options?.permissionMode,
           collaborationMode: options?.collaborationMode,
         },
-        { queue: true },
+        { queue: true, dedupeKey: `agent-v2-prompt:${clientMessageId}`, claimControl: true },
       );
       if (!accepted) {
         const failedItem: AgentTimelineItem = {
@@ -1177,8 +1281,109 @@ export function useAgentWorkspace(
         upsertAgentTimelineItem(failedItem).catch(() => {});
       }
     },
-    [manager],
+    [appendLocalError, manager],
   );
+
+  const markQueuedFollowUpSent = useCallback((conversationId: string, itemId: string) => {
+    setTimelineById((prev) => {
+      const items = prev.get(conversationId);
+      if (!items) return prev;
+      const nextItems = items.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              metadata: { ...(item.metadata ?? {}), queuedSent: true },
+              updatedAt: Date.now(),
+            }
+          : item,
+      );
+      saveAgentTimeline(conversationId, nextItems).catch(() => {});
+      const next = new Map(prev);
+      next.set(conversationId, nextItems);
+      return next;
+    });
+  }, []);
+
+  const discardQueuedFollowUp = useCallback((conversationId: string, itemId: string) => {
+    const applyDiscard = (items: AgentTimelineItem[] | undefined) =>
+      (items ?? []).map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              metadata: {
+                ...(item.metadata ?? {}),
+                queuedDiscarded: true,
+                queuedSent: true,
+              },
+              updatedAt: Date.now(),
+            }
+          : item,
+      );
+
+    const currentItems = timelineRef.current.get(conversationId);
+    if (currentItems) {
+      const nextCurrentItems = applyDiscard(currentItems);
+      timelineRef.current = new Map(timelineRef.current);
+      timelineRef.current.set(conversationId, nextCurrentItems);
+    }
+
+    setTimelineById((prev) => {
+      const nextItems = applyDiscard(prev.get(conversationId));
+      saveAgentTimeline(conversationId, nextItems).catch(() => {});
+      const next = new Map(prev);
+      next.set(conversationId, nextItems);
+      return next;
+    });
+  }, []);
+
+  const sendQueuedFollowUp = useCallback(
+    (conversationId: string, itemId: string, delivery: "steer" | "new_turn") => {
+      const item = timelineRef.current.get(conversationId)?.find((entry) => entry.id === itemId);
+      const conversation = conversationsRef.current.find((entry) => entry.id === conversationId);
+      if (!item || !conversation) return;
+      if (item.metadata?.queuedDiscarded === true || item.metadata?.queuedSent === true) return;
+      const blocks = item.content?.length
+        ? item.content
+        : item.text
+          ? [{ type: "text" as const, text: item.text }]
+          : [];
+      const text = blocks
+        .filter((block) => block.type === "text")
+        .map((block) => block.text ?? "")
+        .join("\n")
+        .trim();
+      const attachments = blocks.filter((block) => block.type === "image");
+      if (!text && attachments.length === 0) return;
+      markQueuedFollowUpSent(conversationId, itemId);
+      sendPrompt(conversationId, text, {
+        model: conversation.model,
+        reasoningEffort: conversation.reasoningEffort,
+        permissionMode: conversation.permissionMode,
+        collaborationMode: conversation.collaborationMode,
+        attachments,
+        delivery,
+      });
+    },
+    [markQueuedFollowUpSent, sendPrompt],
+  );
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    for (const conversation of conversations) {
+      if (conversation.status === "running" || conversation.status === "waiting_permission") continue;
+      const queued = (timelineById.get(conversation.id) ?? []).find((item) =>
+        item.type === "message" &&
+        item.role === "user" &&
+        item.metadata?.delivery === "queued" &&
+        item.metadata?.queuedSent !== true &&
+        item.metadata?.queuedDiscarded !== true
+      );
+      if (!queued || autoSendingQueuedRef.current.has(queued.id)) continue;
+      autoSendingQueuedRef.current.add(queued.id);
+      sendQueuedFollowUp(conversation.id, queued.id, "new_turn");
+      setTimeout(() => autoSendingQueuedRef.current.delete(queued.id), 1500);
+    }
+  }, [conversations, isHydrated, sendQueuedFollowUp, timelineById]);
 
   const executeCommand = useCallback(
     (
@@ -1190,7 +1395,10 @@ export function useAgentWorkspace(
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
       if (!conversation) return;
       const session = findSessionForConversation(conversation, manager.sessions);
-      if (!session) return;
+      if (!session) {
+        appendLocalError(conversationId, "命令未发送：设备连接已失效，请重新打开会话。", "command-error");
+        return;
+      }
       const clientMessageId = `cmd-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const accepted = manager.sendAgentWorkspaceEnvelope(
         session.sessionId,
@@ -1202,7 +1410,7 @@ export function useAgentWorkspace(
           args,
           clientMessageId,
         },
-        { queue: true },
+        { queue: true, dedupeKey: `agent-v2-command:${clientMessageId}`, claimControl: true },
       );
       if (accepted) {
         const now = Date.now();
@@ -1232,6 +1440,8 @@ export function useAgentWorkspace(
           status: command.executionKind === "prompt" ? "running" : conversation.status,
           lastMessagePreview: previewFromItem(optimisticItem) ?? conversation.lastMessagePreview,
           lastActivityAt: now,
+          lastUserActivityAt: now,
+          lastReadAt: now,
         };
         setConversations((prev) => {
           const next = prev.filter((item) => item.id !== conversationId);
@@ -1257,7 +1467,7 @@ export function useAgentWorkspace(
         upsertAgentTimelineItem(failedItem).catch(() => {});
       }
     },
-    [manager],
+    [appendLocalError, manager],
   );
 
   const updateConversationSettings = useCallback(
@@ -1298,7 +1508,7 @@ export function useAgentWorkspace(
         session.sessionId,
         "agent.v2.cancel",
         { conversationId },
-        { queue: true, dedupeKey: `agent-v2-cancel:${conversationId}` },
+        { queue: true, dedupeKey: `agent-v2-cancel:${conversationId}`, claimControl: true },
       );
     },
     [manager],
@@ -1311,6 +1521,31 @@ export function useAgentWorkspace(
     ): string | null => {
       const metadataSessionId = typeof permissionItem?.metadata?.sessionId === "string"
         ? permissionItem.metadata.sessionId
+        : undefined;
+      if (metadataSessionId && manager.sessions.has(metadataSessionId)) return metadataSessionId;
+      const resolved = findSessionForConversation(conversation, manager.sessions);
+      if (resolved) return resolved.sessionId;
+
+      const serverUrl = normalizeServerUrl(conversation.serverUrl);
+      const candidates = [...manager.sessions.values()].filter((session) =>
+        normalizeServerUrl(session.gatewayUrl) === serverUrl
+      );
+      const cwdMatch = candidates.find((session) =>
+        session.cwd === conversation.cwd ||
+        [...session.terminals.values()].some((terminal) => terminal.cwd === conversation.cwd)
+      );
+      return cwdMatch?.sessionId ?? candidates[0]?.sessionId ?? null;
+    },
+    [manager.sessions],
+  );
+
+  const resolveStructuredInputSessionId = useCallback(
+    (
+      conversation: AgentConversationRecord,
+      inputItem: AgentTimelineItem | undefined,
+    ): string | null => {
+      const metadataSessionId = typeof inputItem?.metadata?.sessionId === "string"
+        ? inputItem.metadata.sessionId
         : undefined;
       if (metadataSessionId && manager.sessions.has(metadataSessionId)) return metadataSessionId;
       const resolved = findSessionForConversation(conversation, manager.sessions);
@@ -1392,7 +1627,6 @@ export function useAgentWorkspace(
     ) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
       if (!conversation) {
-        console.warn("[LiveActivityAction] workspace respond missing conversation", { conversationId, requestId, outcome, optionId });
         return false;
       }
       const permissionItem = timelineRef.current
@@ -1400,14 +1634,6 @@ export function useAgentWorkspace(
         ?.find((item) => item.type === "permission" && item.permission?.requestId === requestId);
       const sourceSessionId = resolvePermissionSessionId(conversation, permissionItem);
       if (!sourceSessionId) {
-        console.warn("[LiveActivityAction] workspace respond no source session", {
-          conversationId,
-          requestId,
-          outcome,
-          optionId,
-          protocol: permissionItem?.metadata?.protocol,
-          conversationSessionId: conversation.sessionId,
-        });
         updatePermissionMetadata(conversationId, requestId, {
           permissionLive: false,
           permissionExpired: true,
@@ -1418,14 +1644,6 @@ export function useAgentWorkspace(
       }
       let accepted = false;
       const protocol = permissionItem?.metadata?.protocol ?? "v2";
-      console.log("[LiveActivityAction] workspace respond route", {
-        conversationId,
-        requestId,
-        outcome,
-        optionId,
-        sourceSessionId,
-        protocol,
-      });
       if (permissionItem?.metadata?.protocol === "terminal") {
         const terminalId = typeof permissionItem.metadata.terminalId === "string"
           ? permissionItem.metadata.terminalId
@@ -1459,28 +1677,12 @@ export function useAgentWorkspace(
         );
       }
       if (!accepted) {
-        console.warn("[LiveActivityAction] workspace respond not accepted", {
-          conversationId,
-          requestId,
-          outcome,
-          optionId,
-          sourceSessionId,
-          protocol,
-        });
         updatePermissionMetadata(conversationId, requestId, {
           permissionPending: false,
           permissionError: "授权未发送：连接未就绪，请稍后重试。",
         });
         return false;
       }
-      console.log("[LiveActivityAction] workspace respond accepted", {
-        conversationId,
-        requestId,
-        outcome,
-        optionId,
-        sourceSessionId,
-        protocol,
-      });
       updatePermissionMetadata(conversationId, requestId, {
         permissionPending: true,
         permissionLive: true,
@@ -1489,10 +1691,13 @@ export function useAgentWorkspace(
         optionId,
         permissionError: undefined,
       });
+      const now = Date.now();
       persistConversation({
         ...conversation,
         status: "running",
-        lastActivityAt: Date.now(),
+        lastActivityAt: now,
+        lastUserActivityAt: now,
+        lastReadAt: now,
       }).catch(() => {});
       return true;
     },
@@ -1526,17 +1731,41 @@ export function useAgentWorkspace(
     ) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId);
       if (!conversation) return;
+      const inputItem = timelineRef.current
+        .get(conversationId)
+        ?.find((item) =>
+          item.kind === "user_input_prompt" &&
+          item.structuredInput?.requestId === requestId,
+        );
+      const sourceSessionId = resolveStructuredInputSessionId(conversation, inputItem);
+      if (!sourceSessionId) {
+        updateTimelineItemMetadata(conversationId, `input:${requestId}`, {
+          inputSubmitting: false,
+          inputError: "回答未发送：设备连接已失效，请重新打开会话。",
+        });
+        return;
+      }
       const accepted = manager.sendAgentWorkspaceEnvelope(
-        conversation.sessionId,
+        sourceSessionId,
         "agent.v2.structured_input.respond" as any,
         { conversationId, requestId, answers },
-        { queue: true, dedupeKey: `agent-v2-input:${requestId}` },
+        { queue: true, dedupeKey: `agent-v2-input:${requestId}`, claimControl: true },
       );
       updateTimelineItemMetadata(conversationId, `input:${requestId}`, accepted
-        ? { inputSubmitting: true, inputError: undefined, answers }
+        ? { inputSubmitting: true, inputError: undefined, answers, sessionId: sourceSessionId }
         : { inputSubmitting: false, inputError: "回答未发送：连接未就绪，请稍后重试。" });
+      if (accepted) {
+        const now = Date.now();
+        persistConversation({
+          ...conversation,
+          status: "running",
+          lastActivityAt: now,
+          lastUserActivityAt: now,
+          lastReadAt: now,
+        }).catch(() => {});
+      }
     },
-    [manager, updateTimelineItemMetadata],
+    [manager, persistConversation, resolveStructuredInputSessionId, updateTimelineItemMetadata],
   );
 
   const browseFiles = useCallback(
@@ -1598,7 +1827,7 @@ export function useAgentWorkspace(
             error: "读取文件超时，请确认主机端仍在线。",
           });
         }, 12_000);
-        pendingReadRef.current.set(requestId, { resolve, timer });
+        pendingReadRef.current.set(requestId, { resolve, timer, path });
         const accepted = manager.sendAgentWorkspaceEnvelope(
           session.sessionId,
           "terminal.file.read",
@@ -1635,11 +1864,44 @@ export function useAgentWorkspace(
     );
   }, []);
 
+  const markRead = useCallback((conversationId: string) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    if (!conversation) return;
+    const now = Math.max(Date.now(), conversation.lastResponseAt ?? 0, conversation.lastActivityAt ?? 0);
+    const nextConversation: AgentConversationRecord = {
+      ...conversation,
+      lastReadAt: now,
+    };
+    setConversations((prev) =>
+      mergeConversationRecords(prev, [nextConversation]),
+    );
+    upsertAgentConversation(nextConversation).catch(() => {});
+  }, []);
+
+  const removeByServerUrl = useCallback(async (serverUrl: string) => {
+    const normalized = normalizeServerUrl(serverUrl);
+    const removedIds = conversationsRef.current
+      .filter((item) => normalizeServerUrl(item.serverUrl) === normalized)
+      .map((item) => item.id);
+    setConversations((prev) =>
+      prev.filter((item) => normalizeServerUrl(item.serverUrl) !== normalized),
+    );
+    if (removedIds.length > 0) {
+      setTimelineById((prev) => {
+        const next = new Map(prev);
+        for (const id of removedIds) next.delete(id);
+        return next;
+      });
+    }
+    await removeAgentConversationsByServerUrl(serverUrl);
+  }, []);
+
   const dismissNotice = useCallback((id: string) => {
     setNotices((prev) => prev.filter((notice) => notice.id !== id));
   }, []);
 
   return {
+    isHydrated,
     conversations: conversations.filter((item) => !item.archived),
     archivedConversations: conversations.filter((item) => item.archived),
     activeConversationId,
@@ -1657,6 +1919,8 @@ export function useAgentWorkspace(
       conversationsRef.current.find((item) => item.id === conversationId),
     getTimeline: (conversationId) => timelineRef.current.get(conversationId) ?? [],
     sendPrompt,
+    sendQueuedFollowUp,
+    discardQueuedFollowUp,
     executeCommand,
     updateConversationSettings,
     cancel,
@@ -1667,5 +1931,7 @@ export function useAgentWorkspace(
     readFile,
     archive,
     rename,
+    markRead,
+    removeByServerUrl,
   };
 }

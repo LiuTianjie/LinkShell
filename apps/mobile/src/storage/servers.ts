@@ -50,8 +50,9 @@ export async function addServer(
 
 export async function removeServer(url: string): Promise<SavedServer[]> {
   let servers = await loadServers();
-  const wasDefault = servers.find((s) => s.url === url)?.isDefault;
-  servers = servers.filter((s) => s.url !== url);
+  const normalized = url.replace(/\/+$/, "");
+  const wasDefault = servers.find((s) => s.url.replace(/\/+$/, "") === normalized)?.isDefault;
+  servers = servers.filter((s) => s.url.replace(/\/+$/, "") !== normalized);
   if (wasDefault && servers.length > 0) {
     servers[0]!.isDefault = true;
   }
@@ -63,10 +64,8 @@ export async function removeServer(url: string): Promise<SavedServer[]> {
 export async function removeServerWithHistory(
   url: string,
 ): Promise<SavedServer[]> {
-  const { removeByServerUrl } = await import("./history");
-  const { removeProjectsByServerUrl } = await import("./projects");
-  await removeByServerUrl(url);
-  await removeProjectsByServerUrl(url);
+  const { removeLocalWorkspaceDataByServerUrl } = await import("./workspace-cleanup");
+  await removeLocalWorkspaceDataByServerUrl(url);
   return removeServer(url);
 }
 

@@ -511,7 +511,7 @@ program
     process.stderr.write(`    Provider: custom (shell)\n`);
     process.stderr.write(`    Keep awake: ${keepAwake ? "enabled" : "disabled"}\n`);
     process.stderr.write(`    Desktop: enabled\n`);
-    process.stderr.write(`    Agent GUI: enabled (Codex app-server)\n`);
+    process.stderr.write(`    Agent GUI: enabled (Codex / Claude auto-detect)\n`);
     process.stderr.write(`    Open the LinkShell app on your phone to connect.\n\n`);
     process.stderr.write(`    Stop:   linkshell stop\n`);
     process.stderr.write(`    Status: linkshell status\n`);

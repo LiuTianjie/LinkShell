@@ -1,9 +1,11 @@
 import { homedir } from "node:os";
-import { readdirSync, existsSync, readFileSync } from "node:fs";
+import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
+type AgentCollaborationMode = "default" | "plan";
+type ClaudePermissionMode = "default" | "dontAsk" | "acceptEdits" | "bypassPermissions" | "plan";
 
 interface ClaudeContentBlock {
   type?: string;
@@ -50,6 +52,44 @@ function projectHash(cwd: string): string {
       .replace(/\/$/, "")
       .replace(/\//g, "-")
   );
+}
+
+function claudeProjectDir(cwd: string): string {
+  return join(homedir(), ".claude", "projects", projectHash(cwd));
+}
+
+function claudeProjectsRoot(): string {
+  return join(homedir(), ".claude", "projects");
+}
+
+function claudeProjectDirs(preferredCwd: string): string[] {
+  const root = claudeProjectsRoot();
+  const preferred = claudeProjectDir(preferredCwd);
+  const dirs: string[] = [];
+  if (existsSync(preferred)) dirs.push(preferred);
+  if (!existsSync(root)) return dirs;
+  try {
+    for (const entry of readdirSync(root)) {
+      const fullPath = join(root, entry);
+      if (fullPath !== preferred && statSync(fullPath).isDirectory()) {
+        dirs.push(fullPath);
+      }
+    }
+  } catch {
+    // Ignore unreadable Claude storage.
+  }
+  return dirs;
+}
+
+function parseTimestamp(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 10_000_000_000 ? value : value * 1000;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
 }
 
 function extractToolResultText(content: unknown): string {
@@ -133,6 +173,234 @@ function stringField(value: unknown, keys: string[]): string | undefined {
   return undefined;
 }
 
+function previewText(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+function contentText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((entry) => {
+      if (typeof entry === "string") return entry;
+      const raw = asRecord(entry);
+      if (!raw) return "";
+      if (typeof raw.text === "string") return raw.text;
+      if (raw.type === "image") return `[${stringField(raw.source, ["media_type", "mimeType"]) ?? "image"} attachment]`;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function claudeToolItemType(toolName: string | undefined): "commandExecution" | "fileChange" | "toolCall" {
+  if (toolName === "Bash") return "commandExecution";
+  if (toolName === "Write" || toolName === "Edit" || toolName === "MultiEdit") return "fileChange";
+  return "toolCall";
+}
+
+function claudeToolHistoryItem(
+  toolId: string,
+  toolName: string | undefined,
+  toolInput: Record<string, unknown> | undefined,
+  cwd: string,
+): Record<string, unknown> {
+  const filePath = stringField(toolInput, ["file_path", "path", "notebook_path"]);
+  return {
+    id: toolId,
+    type: claudeToolItemType(toolName),
+    toolName: toolName ?? "tool",
+    tool: toolName ?? "tool",
+    input: toolInput,
+    toolInput,
+    command: stringField(toolInput, ["command"]),
+    cwd: stringField(toolInput, ["cwd"]) ?? cwd,
+    path: filePath,
+    status: "running",
+  };
+}
+
+export function parseClaudeJsonlSession(input: {
+  text: string;
+  cwd: string;
+  sessionId?: string;
+  fallbackUpdatedAt?: number;
+}): Record<string, unknown> {
+  const turns: Array<Record<string, unknown>> = [];
+  const toolItems = new Map<string, Record<string, unknown>>();
+  let sessionId = input.sessionId;
+  let model: string | undefined;
+  let title: string | undefined;
+  let preview: string | undefined;
+  let createdAt: number | undefined;
+  let updatedAt = input.fallbackUpdatedAt;
+  let cwd = input.cwd;
+  let index = 0;
+
+  for (const line of input.text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    index += 1;
+    let raw: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(line);
+      const record = asRecord(parsed);
+      if (!record) continue;
+      raw = record;
+    } catch {
+      continue;
+    }
+
+    const timestamp = parseTimestamp(raw.timestamp ?? raw.createdAt ?? raw.created_at);
+    cwd = stringField(raw, ["cwd", "workingDirectory", "workspacePath"]) ?? cwd;
+    if (timestamp !== undefined) {
+      createdAt = createdAt === undefined ? timestamp : Math.min(createdAt, timestamp);
+      updatedAt = updatedAt === undefined ? timestamp : Math.max(updatedAt, timestamp);
+    }
+
+    sessionId = sessionId ?? stringField(raw, ["sessionId", "session_id"]);
+    model = model ?? stringField(raw, ["model"]);
+    const message = asRecord(raw.message);
+    model = model ?? stringField(message, ["model"]);
+    const type = stringField(raw, ["type"]);
+    const role = stringField(message, ["role"]) ?? type;
+    const content = message && "content" in message ? message.content : raw.content;
+    const turnId = stringField(raw, ["uuid", "id"]) ?? `claude-history-${index}`;
+    const items: Record<string, unknown>[] = [];
+
+    if (type === "summary" || typeof raw.summary === "string") {
+      const summary = typeof raw.summary === "string" ? raw.summary : undefined;
+      if (summary) {
+        items.push({
+          id: turnId,
+          type: "contextCompaction",
+          summary,
+          status: "completed",
+        });
+        preview = previewText(summary) || preview;
+      }
+    } else if (role === "user") {
+      const contentBlocks = Array.isArray(content) ? content : [];
+      const toolResults = contentBlocks
+        .map(asRecord)
+        .filter((block): block is Record<string, unknown> => Boolean(block && block.type === "tool_result"));
+      const ordinaryText = Array.isArray(content)
+        ? contentText(contentBlocks.filter((block) => asRecord(block)?.type !== "tool_result"))
+        : contentText(content);
+      if (ordinaryText.trim()) {
+        items.push({
+          id: stringField(message, ["id"]) ?? turnId,
+          type: "userMessage",
+          content: [{ type: "text", text: ordinaryText }],
+        });
+        title = title ?? previewText(ordinaryText);
+        preview = previewText(ordinaryText) || preview;
+      }
+      for (const block of toolResults) {
+        const toolId = stringField(block, ["tool_use_id"]) ?? `tool-result-${index}`;
+        const previous = toolItems.get(toolId);
+        const output = extractToolResultText(block.content);
+        items.push({
+          ...previous,
+          id: toolId,
+          type: stringField(previous, ["type"]) ?? "toolCall",
+          toolName: stringField(previous, ["toolName", "tool", "name"]),
+          tool: stringField(previous, ["toolName", "tool", "name"]),
+          status: block.is_error === true ? "failed" : "completed",
+          output,
+          aggregatedOutput: output,
+          isError: block.is_error === true,
+        });
+      }
+    } else if (role === "assistant") {
+      const assistantMessageId = stringField(message, ["id"]) ?? turnId;
+      if (typeof content === "string") {
+        if (content.trim()) {
+          items.push({
+            id: assistantMessageId,
+            type: "agentMessage",
+            content: [{ type: "text", text: content }],
+            status: "completed",
+          });
+          preview = previewText(content) || preview;
+        }
+      } else {
+        const blocks = Array.isArray(content) ? content.map(asRecord).filter((block): block is Record<string, unknown> => Boolean(block)) : [];
+        const text = contentText(blocks.filter((block) => block.type === "text"));
+        if (text.trim()) {
+          items.push({
+            id: assistantMessageId,
+            type: "agentMessage",
+            content: [{ type: "text", text }],
+            status: "completed",
+          });
+          preview = previewText(text) || preview;
+        }
+        blocks.forEach((block, blockIndex) => {
+          if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking.trim()) {
+            items.push({
+              id: `${turnId}:thinking:${blockIndex}`,
+              type: "thinking",
+              text: block.thinking,
+              status: "completed",
+            });
+          } else if (block.type === "tool_use") {
+            const toolId = stringField(block, ["id"]) ?? `${turnId}:tool:${blockIndex}`;
+            const toolName = stringField(block, ["name"]);
+            const toolInput = asRecord(block.input);
+            const item = claudeToolHistoryItem(toolId, toolName, toolInput, cwd);
+            toolItems.set(toolId, item);
+            items.push(item);
+          }
+        });
+      }
+    } else if (type === "system") {
+      model = model ?? stringField(raw, ["model"]);
+    }
+
+    if (items.length > 0) {
+      turns.push({
+        id: turnId,
+        createdAt: timestamp,
+        items,
+      });
+    }
+  }
+
+  return {
+    thread: {
+      id: sessionId ?? input.sessionId,
+      sessionId: sessionId ?? input.sessionId,
+      cwd,
+      model,
+      title,
+      preview,
+      createdAt,
+      updatedAt,
+      turns,
+    },
+  };
+}
+
+function claudeSessionMetadataFromFile(filePath: string, cwd: string, sessionId: string): Record<string, unknown> {
+  const stat = statSync(filePath);
+  const parsed = parseClaudeJsonlSession({
+    text: readFileSync(filePath, "utf8"),
+    cwd,
+    sessionId,
+    fallbackUpdatedAt: stat.mtimeMs,
+  });
+  const thread = asRecord(parsed.thread) ?? {};
+  return {
+    id: sessionId,
+    cwd: stringField(thread, ["cwd", "workingDirectory", "workspacePath"]) ?? cwd,
+    title: stringField(thread, ["title", "preview"]),
+    model: stringField(thread, ["model"]),
+    createdAt: parseTimestamp(thread.createdAt),
+    lastActivityAt: parseTimestamp(thread.updatedAt) ?? stat.mtimeMs,
+    lastModified: stat.mtimeMs,
+  };
+}
+
 function isInsideCwd(cwd: string, candidate: string): boolean {
   const root = resolve(cwd);
   const target = resolve(root, candidate);
@@ -154,6 +422,16 @@ function outcomeFromPermissionResponse(value: unknown): "allow" | "deny" {
     return optionId.toLowerCase().includes("allow") ? "allow" : "deny";
   }
   return outcome === "allow" ? "allow" : "deny";
+}
+
+export function claudePermissionModeFor(input: {
+  permissionMode?: AgentPermissionMode;
+  collaborationMode?: AgentCollaborationMode;
+}): ClaudePermissionMode {
+  if (input.collaborationMode === "plan" || input.permissionMode === "read_only") return "plan";
+  if (input.permissionMode === "workspace_write") return "acceptEdits";
+  if (input.permissionMode === "full_access") return "bypassPermissions";
+  return "default";
 }
 
 export class ClaudeSdkClient {
@@ -201,6 +479,33 @@ export class ClaudeSdkClient {
     return { sessionId: input.sessionId, status: "loaded", cwd: input.cwd };
   }
 
+  async readSession(input: { sessionId: string; includeTurns?: boolean }): Promise<unknown> {
+    let filePath = join(claudeProjectDir(this.input.cwd), `${input.sessionId}.jsonl`);
+    if (!existsSync(filePath)) {
+      const match = claudeProjectDirs(this.input.cwd)
+        .map((dir) => join(dir, `${input.sessionId}.jsonl`))
+        .find((candidate) => existsSync(candidate));
+      if (match) filePath = match;
+    }
+    if (!existsSync(filePath)) {
+      return {
+        thread: {
+          id: input.sessionId,
+          sessionId: input.sessionId,
+          cwd: this.input.cwd,
+          turns: [],
+        },
+      };
+    }
+    const stat = statSync(filePath);
+    return parseClaudeJsonlSession({
+      text: readFileSync(filePath, "utf8"),
+      cwd: this.input.cwd,
+      sessionId: input.sessionId,
+      fallbackUpdatedAt: stat.mtimeMs,
+    });
+  }
+
   async prompt(input: {
     sessionId?: string;
     content: unknown[];
@@ -208,7 +513,7 @@ export class ClaudeSdkClient {
     model?: string;
     reasoningEffort?: string;
     permissionMode?: AgentPermissionMode;
-    collaborationMode?: "default" | "plan";
+    collaborationMode?: AgentCollaborationMode;
     cwd: string;
   }): Promise<unknown> {
     if (!this.query) await this.initialize();
@@ -231,10 +536,25 @@ export class ClaudeSdkClient {
     const sdkOptions: Record<string, unknown> = {
       cwd: input.cwd ?? this.input.cwd,
       abortController,
+      permissionMode: claudePermissionModeFor({
+        permissionMode: input.permissionMode,
+        collaborationMode: input.collaborationMode,
+      }),
+      toolConfig: {
+        askUserQuestion: { previewFormat: "markdown" },
+      },
       canUseTool: async (toolName: string, toolInput: unknown) => {
-        if (input.permissionMode === "full_access") return { behavior: "allow" };
+        if (toolName === "AskUserQuestion") {
+          const response = await this.input.onRequest("claude/askUserQuestion", {
+            ...(asRecord(toolInput) ?? {}),
+            requestId: id("claude-input"),
+            sessionId: this.claudeSessionId,
+          });
+          return response;
+        }
+        if (input.permissionMode === "full_access") return { behavior: "allow", updatedInput: toolInput };
         if (["Read", "Glob", "Grep", "LS", "NotebookRead", "TodoRead"].includes(toolName)) {
-          return { behavior: "allow" };
+          return { behavior: "allow", updatedInput: toolInput };
         }
         if (input.permissionMode === "read_only" && ["Write", "Edit", "MultiEdit", "Bash"].includes(toolName)) {
           return { behavior: "deny", message: "Read-only mode is active." };
@@ -242,7 +562,7 @@ export class ClaudeSdkClient {
         if (input.permissionMode === "workspace_write" && ["Write", "Edit", "MultiEdit"].includes(toolName)) {
           const filePath = stringField(toolInput, ["file_path", "path", "notebook_path"]);
           if (filePath && isInsideCwd(input.cwd ?? this.input.cwd, filePath)) {
-            return { behavior: "allow" };
+            return { behavior: "allow", updatedInput: toolInput };
           }
         }
         const requestId = id("claude-perm");
@@ -259,7 +579,9 @@ export class ClaudeSdkClient {
             { id: "allow_once", label: "允许一次", kind: "allow" },
           ],
         });
-        return { behavior: outcomeFromPermissionResponse(response) === "allow" ? "allow" : "deny" };
+        return outcomeFromPermissionResponse(response) === "allow"
+          ? { behavior: "allow", updatedInput: toolInput }
+          : { behavior: "deny", message: "User denied this action from LinkShell." };
       },
     };
     if (input.model) sdkOptions.model = input.model;
@@ -289,18 +611,18 @@ export class ClaudeSdkClient {
         this.handleSdkMessage(message, {
           cwd: input.cwd ?? this.input.cwd,
           toolNames,
-      currentToolId: (value?: string | null) => {
-        if (value !== undefined) currentToolId = value ?? undefined;
-        return currentToolId;
-      },
-      currentToolName: (value?: string | null) => {
-        if (value !== undefined) currentToolName = value ?? undefined;
-        return currentToolName;
-      },
-      currentMessageId: (value?: string | null) => {
-        if (value !== undefined) currentMessageId = value ?? undefined;
-        return currentMessageId;
-      },
+          currentToolId: (value?: string | null) => {
+            if (value !== undefined) currentToolId = value ?? undefined;
+            return currentToolId;
+          },
+          currentToolName: (value?: string | null) => {
+            if (value !== undefined) currentToolName = value ?? undefined;
+            return currentToolName;
+          },
+          currentMessageId: (value?: string | null) => {
+            if (value !== undefined) currentMessageId = value ?? undefined;
+            return currentMessageId;
+          },
         });
       }
       return { sessionId: this.claudeSessionId, status: abortController.signal.aborted ? "cancelled" : "completed" };
@@ -333,21 +655,20 @@ export class ClaudeSdkClient {
   }
 
   async listSessions(): Promise<unknown> {
-    const projectDir = join(homedir(), ".claude", "projects", projectHash(this.input.cwd));
-    if (!existsSync(projectDir)) return { sessions: [] };
-    const sessions: Array<{ id: string; cwd: string; lastModified: number }> = [];
-    try {
-      for (const entry of readdirSync(projectDir)) {
-        if (entry.endsWith(".jsonl")) {
-          sessions.push({
-            id: entry.replace(".jsonl", ""),
-            cwd: this.input.cwd,
-            lastModified: 0,
-          });
+    const sessions: Array<Record<string, unknown>> = [];
+    const seen = new Set<string>();
+    for (const projectDir of claudeProjectDirs(this.input.cwd)) {
+      try {
+        for (const entry of readdirSync(projectDir)) {
+          if (!entry.endsWith(".jsonl")) continue;
+          const sessionId = entry.replace(".jsonl", "");
+          if (seen.has(sessionId)) continue;
+          seen.add(sessionId);
+          sessions.push(claudeSessionMetadataFromFile(join(projectDir, entry), this.input.cwd, sessionId));
         }
+      } catch {
+        // Ignore unreadable Claude project storage.
       }
-    } catch {
-      // Ignore unreadable Claude project storage.
     }
     return { sessions };
   }

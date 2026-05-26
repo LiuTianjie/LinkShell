@@ -8,6 +8,12 @@ import {
 import type { Envelope } from "@linkshell/protocol";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 import { getDeviceToken, setDeviceToken } from "../storage/device-token";
+import {
+  connectionDetailForClose,
+  reconnectDelayForAttempt,
+  sessionErrorConnectionImpact,
+  shouldReconnectAfterClose,
+} from "./session-connection-policy";
 
 export type ConnectionStatus =
   | "idle"
@@ -21,9 +27,6 @@ export type ConnectionStatus =
   | `error:${string}`;
 
 const HEARTBEAT_INTERVAL = 15_000;
-const RECONNECT_BASE_DELAY = 1_000;
-const RECONNECT_MAX_DELAY = 15_000;
-const RECONNECT_MAX_ATTEMPTS = 15;
 const HEALTH_PROBE_INTERVAL = 30_000;
 
 export interface UseSessionOptions {
@@ -413,12 +416,16 @@ export function useSession({
               break;
             }
 
-            if (p.code === "session_terminated") {
+            const impact = sessionErrorConnectionImpact(p.code);
+            if (impact === "session_exited") {
               setStatus("session_exited");
               break;
             }
+            if (impact === "subscription_expired") {
+              setStatus(`error:${p.code}` as ConnectionStatus);
+              break;
+            }
 
-            setStatus(`error:${p.code}` as ConnectionStatus);
             break;
           }
           case "terminal.exit":
@@ -527,16 +534,18 @@ export function useSession({
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         stopHeartbeat();
         if (socketRef.current === ws) {
           socketRef.current = null;
         }
-        if (
-          !manualDisconnectRef.current &&
-          statusRef.current !== "session_exited"
-        ) {
-          setConnectionDetail("Gateway connection lost. Reconnecting...");
+        const code = (event as any)?.code as number | undefined;
+        if (shouldReconnectAfterClose({
+          code,
+          manualDisconnect: manualDisconnectRef.current,
+          status: statusRef.current,
+        })) {
+          setConnectionDetail(connectionDetailForClose(code));
           scheduleReconnect(sid);
         }
       };
@@ -575,19 +584,8 @@ export function useSession({
 
   const scheduleReconnect = useCallback(
     (sid: string) => {
-      if (reconnectAttempts.current >= RECONNECT_MAX_ATTEMPTS) {
-        setConnectionDetail(
-          "Gateway is unreachable. Will auto-retry when the server is back.",
-        );
-        setStatus("disconnected");
-        startHealthProbe(sid);
-        return;
-      }
       setStatus("reconnecting");
-      const delay = Math.min(
-        RECONNECT_BASE_DELAY * 2 ** reconnectAttempts.current,
-        RECONNECT_MAX_DELAY,
-      );
+      const delay = reconnectDelayForAttempt(reconnectAttempts.current);
       reconnectAttempts.current++;
       reconnectRef.current = setTimeout(() => {
         connectSocket(sid, true, activeGatewayBaseUrlRef.current);
@@ -603,14 +601,18 @@ export function useSession({
 
       try {
         const currentToken = deviceTokenRef.current ?? (await getDeviceToken());
-        const res = await fetch(claimUrl, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            pairingCode,
-            deviceToken: currentToken ?? undefined,
-          }),
-        });
+        const res = await fetchWithTimeout(
+          claimUrl,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              pairingCode,
+              deviceToken: currentToken ?? undefined,
+            }),
+          },
+          10_000,
+        );
         const body = (await res.json()) as {
           sessionId?: string;
           deviceToken?: string;

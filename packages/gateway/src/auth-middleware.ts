@@ -20,6 +20,21 @@ export interface SubscriptionCheckResult {
   reason?: string;
 }
 
+export function canReadSessionDetail(input: {
+  authRequired: boolean;
+  authenticatedUserId?: string;
+  sessionUserId?: string;
+  tokenOwns: boolean;
+}): boolean {
+  if (input.tokenOwns) return true;
+  return Boolean(
+    input.authRequired &&
+    input.authenticatedUserId &&
+    input.sessionUserId &&
+    input.authenticatedUserId === input.sessionUserId,
+  );
+}
+
 /**
  * Validate a Supabase JWT and check subscription via iTool's profiles table.
  */
@@ -120,15 +135,15 @@ export async function checkSubscriptionByUserId(
   }
 }
 
-function extractToken(req: IncomingMessage): string | null {
+export function extractAuthToken(req: IncomingMessage): string | null {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const token = url.searchParams.get("auth_token");
+  if (token) return token;
   const auth = req.headers.authorization;
   if (auth) {
     const match = auth.match(/^Bearer\s+(.+)$/i);
     if (match?.[1]) return match[1];
   }
-  const url = new URL(req.url ?? "/", "http://localhost");
-  const token = url.searchParams.get("auth_token");
-  if (token) return token;
   return null;
 }
 
@@ -138,7 +153,7 @@ function extractToken(req: IncomingMessage): string | null {
 export async function validateRequest(
   req: IncomingMessage,
 ): Promise<AuthResult | null> {
-  const token = extractToken(req);
+  const token = extractAuthToken(req);
   if (!token) return null;
   const result = await validateToken(token);
   return result.authenticated ? result : null;
@@ -156,7 +171,7 @@ export async function requireAuth(
     return { authenticated: true };
   }
 
-  const token = extractToken(req);
+  const token = extractAuthToken(req);
   if (!token) {
     res.writeHead(401, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "auth_required", message: "Authentication required" }));
@@ -195,7 +210,7 @@ export async function checkWsAuth(
     return { authenticated: true };
   }
 
-  const token = extractToken(req);
+  const token = extractAuthToken(req);
   if (!token) return null;
 
   const result = await validateToken(token);

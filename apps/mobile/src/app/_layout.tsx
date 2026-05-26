@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Linking } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Stack } from "expo-router/stack";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -13,16 +12,23 @@ import { useAgentWorkspace } from "../hooks/useAgentWorkspace";
 import { useSessionManager } from "../hooks/useSessionManager";
 import type { SessionInfo } from "../hooks/useSessionManager";
 import { addToHistory, enrichHistory } from "../storage/history";
+import {
+  clearLastSession,
+  loadLastSession,
+  saveLastSession,
+} from "../storage/last-session";
+import {
+  removeLocalWorkspaceDataBySessionId,
+  normalizeServerUrl,
+} from "../storage/workspace-cleanup";
 import { upsertProject } from "../storage/projects";
-import { addServer } from "../storage/servers";
+import { addServer, getDefaultServer, removeServerWithHistory } from "../storage/servers";
 import { ThemeProvider, useTheme } from "../theme";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 import { parsePairingLink } from "../utils/pairing-link";
 import { useAgentLiveActivity } from "../hooks/useAgentLiveActivity";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
-const LAST_SESSION_KEY = "@linkshell/last_session";
-
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -233,11 +239,17 @@ function AppInner() {
 
   // App state
   const handleForeground = useCallback(async () => {
+    if (manager.sessions.size > 0) {
+      for (const session of manager.sessions.values()) {
+        if (session.status === "session_exited") continue;
+        manager.connectToSession(session.sessionId, session.gatewayUrl);
+      }
+      return;
+    }
     if (manager.sessions.size === 0) {
       try {
-        const raw = await AsyncStorage.getItem(LAST_SESSION_KEY);
-        if (raw) {
-          const last = JSON.parse(raw) as { gateway: string; sessionId: string };
+        const last = await loadLastSession();
+        if (last) {
           setGatewayBaseUrl(last.gateway);
           manager.connectToSession(last.sessionId, last.gateway);
           router.push("/session");
@@ -250,7 +262,7 @@ function AppInner() {
     if (manager.activeSessionId) {
       const info = manager.sessions.get(manager.activeSessionId);
       if (info) {
-        await AsyncStorage.setItem(LAST_SESSION_KEY, JSON.stringify({ gateway: info.gatewayUrl, sessionId: manager.activeSessionId }));
+        await saveLastSession({ gateway: info.gatewayUrl, sessionId: manager.activeSessionId });
       }
     }
   }, [manager]);
@@ -273,10 +285,37 @@ function AppInner() {
   const handleDisconnectSession = useCallback((sessionId: string) => {
     manager.disconnectSession(sessionId);
     if (manager.sessions.size <= 1) {
-      AsyncStorage.removeItem(LAST_SESSION_KEY);
+      clearLastSession();
       router.back();
     }
   }, [manager, router]);
+
+  const handleRemoveSession = useCallback(async (sessionId: string, serverUrl?: string) => {
+    if (serverUrl) {
+      const normalized = normalizeServerUrl(serverUrl);
+      const sessionsToDisconnect = [...manager.sessions.values()]
+        .filter((session) => normalizeServerUrl(session.gatewayUrl) === normalized)
+        .sort((a, b) => {
+          if (a.sessionId === manager.activeSessionId) return 1;
+          if (b.sessionId === manager.activeSessionId) return -1;
+          return 0;
+        });
+      for (const session of sessionsToDisconnect) {
+        manager.disconnectSession(session.sessionId);
+      }
+      await agentWorkspace.removeByServerUrl(serverUrl);
+      await removeServerWithHistory(serverUrl);
+      if (normalizeServerUrl(gatewayBaseUrl) === normalized) {
+        const nextDefault = await getDefaultServer();
+        setGatewayBaseUrl(nextDefault?.url ?? DEFAULT_GATEWAY);
+      }
+    } else {
+      manager.disconnectSession(sessionId);
+      await removeLocalWorkspaceDataBySessionId(sessionId);
+    }
+    await agentWorkspace.refresh({ mergeCurrent: false }).catch(() => {});
+    setSessionRefreshKey((key) => key + 1);
+  }, [agentWorkspace, gatewayBaseUrl, manager]);
 
   // Session/terminal tabs
   const sessionTabs = Array.from(manager.sessions.entries()).map(([sid, info]) => ({
@@ -306,6 +345,7 @@ function AppInner() {
     handleClaim,
     handleConnectSession,
     handleDisconnectSession,
+    handleRemoveSession,
     handlePairingScanned,
     navigateTo,
     setConnectionSheetVisible,

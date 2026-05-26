@@ -5,9 +5,12 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { useTheme } from "../theme";
-import { clearHistory, loadHistory } from "../storage/history";
-import { clearProjects, removeProjectsByServerUrl } from "../storage/projects";
+import { loadHistory } from "../storage/history";
 import { getDefaultServer, loadServers } from "../storage/servers";
+import {
+  clearLocalWorkspaceData,
+  removeLocalWorkspaceDataByServerUrls,
+} from "../storage/workspace-cleanup";
 import {
   loadSession,
   refreshSession,
@@ -17,13 +20,12 @@ import {
   fetchOfficialGateways,
   type AuthSession,
 } from "../lib/supabase";
-import { removeByServerUrl } from "../storage/history";
 
 interface SettingsScreenProps {
   gatewayBaseUrl: string;
   onGatewayChange: (url: string) => void;
   onOpenGatewayList: () => void;
-  onAuthChanged?: () => void;
+  onAuthChanged?: (removedGatewayUrls?: string[]) => void;
 }
 
 export function SettingsScreen({
@@ -95,14 +97,15 @@ export function SettingsScreen({
           text: "清除",
           style: "destructive",
           onPress: async () => {
-            await Promise.all([clearHistory(), clearProjects()]);
+            await clearLocalWorkspaceData();
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             setHistoryCount(0);
+            onAuthChanged?.();
           },
         },
       ],
     );
-  }, [historyCount]);
+  }, [historyCount, onAuthChanged]);
 
   const cardStyle = {
     marginHorizontal: 20,
@@ -181,15 +184,9 @@ export function SettingsScreen({
                           officialUrls = gws.map((g) => g.url);
                         } catch {}
                         await signOut();
-                        // Clean up history for official gateways
-                        for (const url of officialUrls) {
-                          await Promise.all([
-                            removeByServerUrl(url),
-                            removeProjectsByServerUrl(url),
-                          ]);
-                        }
+                        await removeLocalWorkspaceDataByServerUrls(officialUrls);
                         setAuthSession(null);
-                        onAuthChanged?.();
+                        onAuthChanged?.(officialUrls);
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                       },
                     },

@@ -24,7 +24,8 @@ import {
   handleTunnelRequest,
   cleanupSessionTunnels,
 } from "./tunnel.js";
-import { AUTH_REQUIRED, requireAuth, checkWsAuth, validateRequest, checkSubscriptionByUserId } from "./auth-middleware.js";
+import { AUTH_REQUIRED, requireAuth, checkWsAuth, validateRequest, checkSubscriptionByUserId, canReadSessionDetail } from "./auth-middleware.js";
+import { setCors } from "./cors.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const logLevel = (process.env.LOG_LEVEL ?? "info") as
@@ -116,15 +117,6 @@ function extractBearerToken(req: IncomingMessage): string | null {
   return match?.[1] ?? null;
 }
 
-// ── CORS ────────────────────────────────────────────────────────────
-
-function setCors(res: ServerResponse): void {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.setHeader("Access-Control-Max-Age", "86400");
-}
-
 // ── HTTP API ────────────────────────────────────────────────────────
 
 const createPairingBody = z.object({ sessionId: z.string().optional() });
@@ -174,6 +166,7 @@ async function handleRequest(
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const method = req.method ?? "GET";
   const ip = getClientIp(req);
+  let authenticatedUserId: string | undefined;
 
   // Health check
   if (method === "GET" && url.pathname === "/healthz") {
@@ -186,6 +179,13 @@ async function handleRequest(
     const authResult = await validateRequest(req);
     if (!authResult || !authResult.userId) {
       json(res, 401, { error: "auth_required", message: "Authentication required" });
+      return;
+    }
+    if (AUTH_REQUIRED && !authResult.subscribed) {
+      json(res, 403, {
+        error: "subscription_required",
+        message: "Pro subscription required. Subscribe at https://itool.tech",
+      });
       return;
     }
     const sessions = sessionManager
@@ -207,6 +207,13 @@ async function handleRequest(
     const authResult = await validateRequest(req);
     if (!authResult || !authResult.userId) {
       json(res, 401, { error: "auth_required", message: "Authentication required" });
+      return;
+    }
+    if (AUTH_REQUIRED && !authResult.subscribed) {
+      json(res, 403, {
+        error: "subscription_required",
+        message: "Pro subscription required. Subscribe at https://itool.tech",
+      });
       return;
     }
     const session = sessionManager.get(sessionId);
@@ -273,6 +280,7 @@ async function handleRequest(
   if (AUTH_REQUIRED) {
     const authResult = await requireAuth(req, res);
     if (!authResult) return; // response already sent
+    authenticatedUserId = authResult.userId;
   }
 
   // Create pairing
@@ -342,7 +350,14 @@ async function handleRequest(
   if (method === "GET" && sessionMatch) {
     const token = extractBearerToken(req);
     const targetId = sessionMatch[1]!;
-    if (!token || !tokenManager.owns(token, targetId)) {
+    const session = sessionManager.get(targetId);
+    const tokenOwns = Boolean(token && tokenManager.owns(token, targetId));
+    if (!canReadSessionDetail({
+      authRequired: AUTH_REQUIRED,
+      authenticatedUserId,
+      sessionUserId: session?.userId,
+      tokenOwns,
+    })) {
       json(res, 401, {
         error: "unauthorized",
         message: "Valid device token required",

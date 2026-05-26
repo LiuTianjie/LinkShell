@@ -94,7 +94,7 @@ class LiveActivityModule: NSObject {
                             content,
                             alertConfiguration: AlertConfiguration(
                                 title: "Agent 需要操作",
-                                body: "有新的权限请求等待处理",
+                                body: "有新的请求等待处理",
                                 sound: .default
                             )
                         )

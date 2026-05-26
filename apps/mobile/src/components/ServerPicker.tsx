@@ -16,7 +16,7 @@ import type { SavedServer } from "../storage/servers";
 import {
   addServer,
   loadServers,
-  removeServer,
+  removeServerWithHistory,
   setDefaultServer,
 } from "../storage/servers";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
@@ -61,7 +61,7 @@ export function ServerPicker({ selectedUrl, onSelect, visible, onDismiss }: Serv
 
   const handleRemove = useCallback(
     async (url: string) => {
-      const updated = await removeServer(url);
+      const updated = await removeServerWithHistory(url);
       setServers(updated);
       if (url === selectedUrl && updated.length > 0) {
         onSelect(updated[0]!.url);

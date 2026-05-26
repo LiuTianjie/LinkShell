@@ -61,6 +61,7 @@ const PRO_SESSION_REFRESH_INTERVAL_MS = 5_000;
 interface SessionListScreenProps {
   gatewayBaseUrl: string;
   onSelectSession: (sessionId: string, serverUrl?: string) => void;
+  onSessionRemoved?: (sessionId: string, serverUrl: string) => void | Promise<void>;
   refreshKey?: number;
   deviceToken?: string | null;
 }
@@ -498,6 +499,7 @@ function GatewaySection({
 export function SessionListScreen({
   gatewayBaseUrl,
   onSelectSession,
+  onSessionRemoved,
   refreshKey,
   deviceToken,
 }: SessionListScreenProps) {
@@ -631,29 +633,44 @@ export function SessionListScreen({
   }, [fetchAllGateways]);
 
   const handleDeleteSession = useCallback(
-    (sessionId: string, serverUrl: string, hasHost: boolean) => {
+    (sessionId: string, serverUrl: string, hasHost: boolean, isOfficial = false) => {
       const doDelete = async () => {
+        let remoteDeleted = false;
         try {
           const session = await getValidSession();
-          if (session?.accessToken) {
-            await fetchWithTimeout(`${serverUrl}/sessions/${sessionId}`, {
+          if (isOfficial) {
+            if (!session?.accessToken) {
+              throw new Error("登录状态已过期，请重新登录后再删除。");
+            }
+            const response = await fetchWithTimeout(`${serverUrl}/sessions/${sessionId}`, {
               method: "DELETE",
               headers: { Authorization: `Bearer ${session.accessToken}` },
             }, 5_000);
+            if (!response.ok) {
+              const body = await response.json().catch(() => null) as { message?: string; error?: string } | null;
+              throw new Error(body?.message || body?.error || `HTTP ${response.status}`);
+            }
+            remoteDeleted = true;
           }
-        } catch {}
+        } catch (error) {
+          if (isOfficial) {
+            Alert.alert("删除失败", error instanceof Error ? error.message : "官方网关拒绝删除这个会话。");
+            return;
+          }
+        }
+        if (!isOfficial) remoteDeleted = true;
+        if (!remoteDeleted) return;
+        await onSessionRemoved?.(sessionId, serverUrl);
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        const normalized = serverUrl.replace(/\/+$/, "");
         setGroups((prev) =>
-          prev.map((g) => ({
-            ...g,
-            sessions: g.sessions.filter((s) => s.id !== sessionId),
-          })),
+          prev.filter((g) => g.server.url.replace(/\/+$/, "") !== normalized),
         );
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       };
 
       if (hasHost) {
-        Alert.alert("删除会话", "该会话主机仍在线，确定要强制删除吗？", [
+        Alert.alert("删除网关", "该网关的主机仍在线，确定要从本机删除这个网关和相关记录吗？", [
           { text: "取消", style: "cancel" },
           { text: "删除", style: "destructive", onPress: doDelete },
         ]);
@@ -661,7 +678,7 @@ export function SessionListScreen({
         doDelete();
       }
     },
-    [],
+    [onSessionRemoved],
   );
 
   const totalSessions = groups.reduce((sum, g) => sum + g.sessions.length, 0);
@@ -720,7 +737,9 @@ export function SessionListScreen({
             group={group}
             theme={theme}
             onSelect={onSelectSession}
-            onDelete={handleDeleteSession}
+            onDelete={(sessionId, serverUrl, hasHost) =>
+              handleDeleteSession(sessionId, serverUrl, hasHost, group.server.isOfficial === true)
+            }
             index={index}
           />
         ))}

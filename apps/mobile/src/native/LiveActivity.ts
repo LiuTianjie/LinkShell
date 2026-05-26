@@ -106,9 +106,6 @@ export async function endLiveActivity(): Promise<void> {
 export async function confirmAction(requestId: string): Promise<void> {
   if (!isIOS || !LiveActivityModule) return;
   try {
-    const ok = await LiveActivityModule.confirmAction(requestId);
-    console.log("[LiveActivityAction] JS confirmAction result", { requestId, ok });
-  } catch (error) {
-    console.warn("[LiveActivityAction] JS confirmAction failed", { requestId, error });
-  }
+    await LiveActivityModule.confirmAction(requestId);
+  } catch {}
 }

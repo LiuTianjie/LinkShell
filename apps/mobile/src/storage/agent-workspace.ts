@@ -173,6 +173,9 @@ export interface AgentConversationRecord {
   archived: boolean;
   lastMessagePreview?: string;
   lastActivityAt: number;
+  lastUserActivityAt?: number;
+  lastResponseAt?: number;
+  lastReadAt?: number;
   createdAt: number;
   schemaVersion: 1;
 }
@@ -380,9 +383,7 @@ function providerScopedConversationId(record: AgentConversationRecord): string |
   if (!record.agentSessionId) return null;
   const suffix = normalizeAgentIdSegment(record.agentSessionId);
   const scoped = `agent-remote-${record.provider}-${suffix}`;
-  const legacy = `agent-remote-${suffix}`;
-  if (record.id !== legacy) return null;
-  return scoped;
+  return record.id === scoped ? null : scoped;
 }
 
 interface ProviderScopedMigration {
@@ -488,12 +489,43 @@ export async function upsertAgentConversation(
         archived: preserveLocalArchived && conversations[index].archived && !normalized.archived
           ? true
           : normalized.archived,
+        lastMessagePreview: normalized.lastMessagePreview ?? conversations[index].lastMessagePreview,
+        lastUserActivityAt: normalized.lastUserActivityAt ?? conversations[index].lastUserActivityAt,
+        lastResponseAt: normalized.lastResponseAt ?? conversations[index].lastResponseAt,
+        lastReadAt: normalized.lastReadAt ?? conversations[index].lastReadAt,
       }
     : normalized;
   if (index >= 0) conversations[index] = nextRecord;
   else conversations.unshift(nextRecord);
   await saveConversations(conversations);
   return nextRecord;
+}
+
+export async function mergeAgentConversationId(oldId: string, newId: string): Promise<void> {
+  if (!oldId || !newId || oldId === newId) return;
+  const conversations = await loadAgentConversations();
+  const oldRecord = conversations.find((item) => item.id === oldId);
+  if (!oldRecord) return;
+  const next = conversations.filter((item) => item.id !== oldId);
+  const existingIndex = next.findIndex((item) => item.id === newId);
+  if (existingIndex >= 0) {
+    const existing = next[existingIndex]!;
+    next[existingIndex] = {
+      ...oldRecord,
+      ...existing,
+      id: newId,
+      archived: existing.archived || oldRecord.archived,
+      createdAt: Math.min(existing.createdAt, oldRecord.createdAt),
+      lastActivityAt: Math.max(existing.lastActivityAt, oldRecord.lastActivityAt),
+      lastUserActivityAt: Math.max(existing.lastUserActivityAt ?? 0, oldRecord.lastUserActivityAt ?? 0) || undefined,
+      lastResponseAt: Math.max(existing.lastResponseAt ?? 0, oldRecord.lastResponseAt ?? 0) || undefined,
+      lastReadAt: Math.max(existing.lastReadAt ?? 0, oldRecord.lastReadAt ?? 0) || undefined,
+    };
+  } else {
+    next.unshift({ ...oldRecord, id: newId });
+  }
+  await saveConversations(next);
+  await migrateAgentTimelineKey({ oldId, newId });
 }
 
 export async function archiveAgentConversation(id: string, archived: boolean): Promise<void> {
@@ -508,6 +540,60 @@ export async function renameAgentConversation(id: string, title: string): Promis
   await saveConversations(
     conversations.map((item) => item.id === id ? { ...item, title } : item),
   );
+}
+
+async function removeAgentTimelines(conversationIds: string[]): Promise<void> {
+  if (conversationIds.length === 0) return;
+  await AsyncStorage.multiRemove(conversationIds.map((id) => `${TIMELINE_PREFIX}${id}`));
+  if (!IMAGE_CACHE_DIR) return;
+  await Promise.all(
+    conversationIds.map((id) =>
+      FileSystem.deleteAsync(`${IMAGE_CACHE_DIR}/${sanitizePathSegment(id)}`, { idempotent: true })
+        .catch(() => {}),
+    ),
+  );
+}
+
+async function removeAgentConversationsWhere(
+  predicate: (item: AgentConversationRecord) => boolean,
+): Promise<void> {
+  const conversations = await loadAgentConversations();
+  const removed = conversations.filter(predicate);
+  if (removed.length === 0) return;
+  await saveConversations(conversations.filter((item) => !predicate(item)));
+  await removeAgentTimelines(removed.map((item) => item.id));
+}
+
+export async function removeAgentConversationsBySessionId(
+  sessionId: string,
+): Promise<void> {
+  await removeAgentConversationsWhere((item) => item.sessionId === sessionId);
+}
+
+export async function removeAgentConversationsBySessionIdAndServerUrl(
+  sessionId: string,
+  serverUrl: string,
+): Promise<void> {
+  const normalized = normalizeServerUrl(serverUrl);
+  await removeAgentConversationsWhere((item) =>
+    item.sessionId === sessionId &&
+    normalizeServerUrl(item.serverUrl) === normalized
+  );
+}
+
+export async function removeAgentConversationsByServerUrl(
+  serverUrl: string,
+): Promise<void> {
+  const normalized = normalizeServerUrl(serverUrl);
+  await removeAgentConversationsWhere(
+    (item) => normalizeServerUrl(item.serverUrl) === normalized,
+  );
+}
+
+export async function clearAgentWorkspace(): Promise<void> {
+  const conversations = await loadAgentConversations();
+  await saveConversations([]);
+  await removeAgentTimelines(conversations.map((item) => item.id));
 }
 
 export async function loadAgentTimeline(conversationId: string): Promise<AgentTimelineItem[]> {
@@ -542,6 +628,30 @@ export async function saveAgentTimeline(
   conversationId: string,
   items: AgentTimelineItem[],
 ): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(`${TIMELINE_PREFIX}${conversationId}`);
+    const existing = raw ? JSON.parse(raw) as AgentTimelineItem[] : [];
+    if (Array.isArray(existing)) {
+      const discardedQueuedItems = existing.filter((item) =>
+        item.id &&
+        item.conversationId === conversationId &&
+        item.metadata?.delivery === "queued" &&
+        item.metadata?.queuedDiscarded === true
+      );
+      if (discardedQueuedItems.length > 0) {
+        const map = new Map(items.map((item) => [item.id, item]));
+        for (const discarded of discardedQueuedItems) {
+          const current = map.get(discarded.id);
+          if (!current || current.metadata?.queuedDiscarded !== true) {
+            map.set(discarded.id, discarded);
+          }
+        }
+        items = [...map.values()];
+      }
+    }
+  } catch {
+    // Best effort: a malformed old timeline should not block saving the current one.
+  }
   let next = [...items]
     .sort((a, b) => a.createdAt - b.createdAt)
     .slice(-MAX_TIMELINE_ITEMS);
@@ -572,6 +682,14 @@ export async function saveAgentTimeline(
 export async function upsertAgentTimelineItem(item: AgentTimelineItem): Promise<void> {
   const timeline = await loadAgentTimeline(item.conversationId);
   const index = timeline.findIndex((entry) => entry.id === item.id);
+  if (
+    index >= 0 &&
+    timeline[index]?.metadata?.queuedDiscarded === true &&
+    timeline[index]?.metadata?.delivery === "queued" &&
+    item.metadata?.queuedDiscarded !== true
+  ) {
+    return;
+  }
   if (index >= 0) timeline[index] = item;
   else timeline.push(item);
   await saveAgentTimeline(item.conversationId, timeline);

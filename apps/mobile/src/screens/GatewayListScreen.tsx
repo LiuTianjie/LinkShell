@@ -35,12 +35,14 @@ interface GatewayListScreenProps {
   onBack: () => void;
   onAddGateway: () => void;
   onGatewayChange: (url: string) => void;
+  onServerRemoved?: (url: string) => void;
 }
 
 export function GatewayListScreen({
   onBack,
   onAddGateway,
   onGatewayChange,
+  onServerRemoved,
 }: GatewayListScreenProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -84,6 +86,7 @@ export function GatewayListScreen({
             onPress: async () => {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               const updated = await removeServerWithHistory(server.url);
+              onServerRemoved?.(server.url);
               LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
               setServers(updated);
               swipeableRefs.current.delete(server.url);
@@ -97,7 +100,7 @@ export function GatewayListScreen({
         ],
       );
     },
-    [onGatewayChange],
+    [onGatewayChange, onServerRemoved],
   );
 
   const handleSetDefault = useCallback(

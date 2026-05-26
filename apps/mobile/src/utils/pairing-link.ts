@@ -10,7 +10,10 @@ function normalizeGateway(rawGateway: string | null): string | undefined {
   }
 
   try {
-    const url = new URL(value);
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return undefined;
+    }
     const hostname = url.hostname.trim().toLowerCase();
     if (
       hostname === "localhost" ||
@@ -21,9 +24,12 @@ function normalizeGateway(rawGateway: string | null): string | undefined {
       return undefined;
     }
 
+    url.hash = "";
+    url.search = "";
+    url.pathname = "";
     return url.toString().replace(/\/+$/, "");
   } catch {
-    return value.replace(/\/+$/, "") || undefined;
+    return undefined;
   }
 }
 
@@ -33,13 +39,20 @@ export function parsePairingLink(raw: string): PairingLinkPayload | null {
     return null;
   }
 
+  if (/^\d{6}$/.test(value)) {
+    return { code: value };
+  }
+
   try {
     const url = new URL(value);
     if (url.protocol !== "linkshell:" || url.hostname !== "pair") {
       return null;
     }
 
-    const code = url.searchParams.get("code")?.trim() ?? "";
+    const code = (
+      url.searchParams.get("code")?.trim() ||
+      decodeURIComponent(url.pathname.replace(/^\/+/, "")).trim()
+    );
     const gateway = normalizeGateway(url.searchParams.get("gateway"));
 
     if (!/^\d{6}$/.test(code)) {

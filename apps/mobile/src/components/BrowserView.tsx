@@ -61,10 +61,6 @@ export function BrowserView({
       })()
     : null;
 
-  if (__DEV__ && tunnelUrl) {
-    console.log("[BrowserView] tunnelUrl:", tunnelUrl.substring(0, 120), "deviceToken:", !!deviceToken, "authToken:", !!authToken);
-  }
-
   const handleGo = useCallback(() => {
     const p = port.trim();
     if (!p || isNaN(Number(p)) || Number(p) < 1 || Number(p) > 65535) return;

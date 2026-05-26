@@ -3,10 +3,13 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
 import {
+  agentV2ClientReadMessageTypes,
+  agentV2ClientWriteMessageTypes,
   createEnvelope,
   parseEnvelope,
   serializeEnvelope,
   type Envelope,
+  type ProtocolMessageType,
 } from "@linkshell/protocol";
 import { SessionManager } from "../src/sessions.js";
 import { handleSocketMessage } from "../src/relay.js";
@@ -61,6 +64,58 @@ function connectWs(sessionId: string, role: "host" | "client", deviceId: string)
     ws.on("open", () => resolve(ws));
     ws.on("error", reject);
   });
+}
+
+function agentReadPayload(type: ProtocolMessageType): Record<string, unknown> {
+  switch (type) {
+    case "agent.v2.conversation.list":
+      return { includeArchived: true };
+    case "agent.v2.snapshot.request":
+      return { conversationId: "conversation-1" };
+    default:
+      return {};
+  }
+}
+
+function agentWritePayload(type: ProtocolMessageType, suffix: string): Record<string, unknown> {
+  switch (type) {
+    case "agent.v2.conversation.open":
+      return {
+        conversationId: `conversation-open-${suffix}`,
+        provider: "codex",
+        cwd: "/repo",
+      };
+    case "agent.v2.prompt":
+      return {
+        conversationId: "conversation-1",
+        clientMessageId: `msg-${suffix}`,
+        contentBlocks: [{ type: "text", text: "hello" }],
+      };
+    case "agent.v2.command.execute":
+      return {
+        conversationId: "conversation-1",
+        commandId: "codex:linkshell:plan",
+        rawText: "/plan",
+        clientMessageId: `cmd-${suffix}`,
+      };
+    case "agent.v2.cancel":
+      return { conversationId: "conversation-1" };
+    case "agent.v2.permission.respond":
+      return {
+        conversationId: "conversation-1",
+        requestId: `permission-${suffix}`,
+        outcome: "allow",
+        optionId: "allow_once",
+      };
+    case "agent.v2.structured_input.respond":
+      return {
+        conversationId: "conversation-1",
+        requestId: `input-${suffix}`,
+        answers: { question: ["answer"] },
+      };
+    default:
+      return {};
+  }
 }
 
 let server: Server;
@@ -168,5 +223,97 @@ describe("relay controller gating", () => {
     host.close();
     observer.close();
     controller.close();
+  });
+
+  it("uses shared agent.v2 route policy for read and write messages", async () => {
+    const sessionId = `agent-route-${Date.now()}`;
+    const host = await connectWs(sessionId, "host", "host-1");
+    const observer = await connectWs(sessionId, "client", "observer");
+    const controller = await connectWs(sessionId, "client", "controller");
+
+    controller.send(serializeEnvelope(createEnvelope({
+      type: "control.claim",
+      sessionId,
+      deviceId: "controller",
+      payload: { deviceId: "controller" },
+    })));
+    await nextEnvelope(host, (e) => e.type === "control.grant");
+
+    for (const type of agentV2ClientReadMessageTypes) {
+      observer.send(serializeEnvelope(createEnvelope({
+        type,
+        sessionId,
+        deviceId: "observer",
+        payload: agentReadPayload(type),
+      })));
+      const read = await nextEnvelope(host, (e) => e.type === type);
+      expect(read.deviceId).toBe("observer");
+    }
+
+    host.send(serializeEnvelope({
+      id: "agent-event-1",
+      type: "agent.v2.event",
+      sessionId,
+      timestamp: new Date().toISOString(),
+      payload: {
+        conversationId: "conversation-1",
+        item: {
+          id: "item-1",
+          conversationId: "conversation-1",
+          type: "message",
+          kind: "chat",
+          role: "assistant",
+          text: "hello",
+          createdAt: Date.now(),
+        },
+      },
+    } as Envelope));
+    const relayedEvent = await nextEnvelope(observer, (e) => e.type === "agent.v2.event");
+    expect((relayedEvent.payload as { conversationId?: string }).conversationId).toBe("conversation-1");
+
+    for (const [index, type] of agentV2ClientWriteMessageTypes.entries()) {
+      observer.send(serializeEnvelope(createEnvelope({
+        type,
+        sessionId,
+        deviceId: "observer",
+        payload: agentWritePayload(type, `observer-${index}`),
+      })));
+      const error = await nextEnvelope(observer, (e) => e.type === "session.error");
+      expect((error.payload as { code: string }).code).toBe("control_conflict");
+
+      controller.send(serializeEnvelope(createEnvelope({
+        type,
+        sessionId,
+        deviceId: "controller",
+        payload: agentWritePayload(type, `controller-${index}`),
+      })));
+      const write = await nextEnvelope(host, (e) => e.type === type);
+      expect(write.deviceId).toBe("controller");
+    }
+
+    host.close();
+    observer.close();
+    controller.close();
+  });
+
+  it("keeps agent.v2 payloads transparent and leaves shape validation to endpoints", async () => {
+    const sessionId = `agent-transparent-${Date.now()}`;
+    const host = await connectWs(sessionId, "host", "host-1");
+    const observer = await connectWs(sessionId, "client", "observer");
+
+    host.send(serializeEnvelope({
+      id: "agent-event-invalid",
+      type: "agent.v2.event",
+      sessionId,
+      timestamp: new Date().toISOString(),
+      payload: { opaque: true },
+    } as Envelope));
+
+    const relayed = await nextEnvelope(observer, (e) => e.type === "agent.v2.event");
+    expect(relayed.payload).toEqual({ opaque: true });
+    expect((queues.get(host) ?? []).find((e) => e.type === "session.error")).toBeUndefined();
+
+    host.close();
+    observer.close();
   });
 });

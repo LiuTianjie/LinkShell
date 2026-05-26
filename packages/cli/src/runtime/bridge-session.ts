@@ -6,6 +6,7 @@ import { writeFileSync, readFileSync, readdirSync, statSync, unlinkSync, mkdirSy
 import { tmpdir } from "node:os";
 import { join, basename, resolve } from "node:path";
 import {
+  agentV2MessageRoute,
   createEnvelope,
   parseEnvelope,
   parseTypedPayload,
@@ -211,9 +212,23 @@ function hookPermissionOptions(suggestions: unknown[]): Array<{
   ];
 }
 
+function stripGatewayBase(url: URL): string {
+  url.hash = "";
+  url.search = "";
+  url.pathname = "";
+  return url.toString().replace(/\/+$/, "");
+}
+
+function isHttpGatewayUrl(url: URL): boolean {
+  return url.protocol === "http:" || url.protocol === "https:";
+}
+
 function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
   try {
     const url = new URL(gatewayHttpUrl);
+    if (!isHttpGatewayUrl(url)) {
+      return undefined;
+    }
     const hostname = url.hostname.trim().toLowerCase();
     if (
       hostname === "localhost" ||
@@ -227,15 +242,15 @@ function getPairingGatewayParam(gatewayHttpUrl: string): string | undefined {
         return undefined; // No LAN interface found, can't help
       }
       url.hostname = lanIp;
-      return url.toString().replace(/\/+$/, "");
+      return stripGatewayBase(url);
     }
-    return url.toString().replace(/\/+$/, "");
+    return stripGatewayBase(url);
   } catch {
     return gatewayHttpUrl.replace(/\/+$/, "") || undefined;
   }
 }
 
-function resolvePairingGateway(
+export function resolvePairingGateway(
   gatewayHttpUrl: string,
   pairingGateway?: string,
 ): string | undefined {
@@ -246,23 +261,35 @@ function resolvePairingGateway(
 
   try {
     const absoluteUrl = new URL(override);
-    return absoluteUrl.toString().replace(/\/+$/, "");
+    if (isHttpGatewayUrl(absoluteUrl)) {
+      return stripGatewayBase(absoluteUrl);
+    }
+  } catch {
+    // Fall through and treat the override as a host[:port] value.
+  }
+
+  try {
+    const baseUrl = new URL(gatewayHttpUrl);
+    if (!isHttpGatewayUrl(baseUrl)) {
+      return override.replace(/\/+$/, "") || undefined;
+    }
+    const normalizedHost = override
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/.*$/, "")
+      .trim();
+
+    if (!normalizedHost) {
+      return getPairingGatewayParam(gatewayHttpUrl);
+    }
+
+    baseUrl.host = normalizedHost;
+    return stripGatewayBase(baseUrl);
   } catch {
     try {
-      const baseUrl = new URL(gatewayHttpUrl);
-      const normalizedHost = override
-        .replace(/^https?:\/\//i, "")
-        .replace(/\/.*$/, "")
-        .trim();
-
-      if (!normalizedHost) {
-        return getPairingGatewayParam(gatewayHttpUrl);
-      }
-
-      baseUrl.hostname = normalizedHost;
-      return baseUrl.toString().replace(/\/+$/, "");
+      const prefixed = new URL(`http://${override.replace(/^\/+/, "")}`);
+      return stripGatewayBase(prefixed);
     } catch {
-      return override.replace(/\/+$/, "") || undefined;
+      return undefined;
     }
   }
 }
@@ -272,6 +299,28 @@ function normalizeAgentProvider(provider: unknown): AgentProvider {
     return provider;
   }
   return "codex";
+}
+
+export function resolveAgentWorkspaceProviders(options: {
+  agentProvider?: AgentProvider;
+  agentCommand?: string;
+}): AgentProvider[] {
+  if (options.agentCommand?.trim()) {
+    return [normalizeAgentProvider(options.agentProvider ?? "custom")];
+  }
+  const defaultProviders: AgentProvider[] = ["codex", "claude"];
+  const detected = detectAvailableProviders();
+  const requested = options.agentProvider ? normalizeAgentProvider(options.agentProvider) : undefined;
+  const ordered = [
+    ...(requested ? [requested] : []),
+    ...detected,
+    ...defaultProviders,
+  ];
+  const unique: AgentProvider[] = [];
+  for (const provider of ordered) {
+    if (!unique.includes(provider)) unique.push(provider);
+  }
+  return unique;
 }
 
 export class BridgeSession {
@@ -334,9 +383,7 @@ export class BridgeSession {
     }
     if (this.options.agentUi) {
       process.env.LINKSHELL_ID = this.terminalHookMarker(DEFAULT_TERMINAL_ID);
-      const availableProviders = this.options.agentProvider
-        ? [normalizeAgentProvider(this.options.agentProvider)]
-        : detectAvailableProviders();
+      const availableProviders = resolveAgentWorkspaceProviders(this.options);
       const agentOptions = {
         sessionId: this.sessionId,
         cwd: process.cwd(),
@@ -516,6 +563,52 @@ export class BridgeSession {
 
   private async handleMessage(envelope: Envelope): Promise<void> {
     const tid = envelope.terminalId ?? DEFAULT_TERMINAL_ID;
+    const agentV2Route = agentV2MessageRoute(envelope.type);
+    if (agentV2Route === "client_write" || agentV2Route === "client_read") {
+      if (!this.agentWorkspace) {
+        this.send(
+          createEnvelope({
+            type: "agent.v2.capabilities",
+            sessionId: this.sessionId,
+            payload: {
+              enabled: false,
+              provider: normalizeAgentProvider(
+                this.options.agentProvider ?? "codex",
+              ),
+              machineId: this.machineIdentity?.machineId,
+              workspaceProtocolVersion: 2,
+              error: "Agent Workspace is not enabled. Start CLI with --agent-ui.",
+              supportsSessionList: false,
+              supportsSessionLoad: false,
+              supportsImages: false,
+              supportsAudio: false,
+              supportsPermission: false,
+              supportsPlan: false,
+              supportsCancel: false,
+            },
+          }),
+        );
+        return;
+      }
+      if (envelope.type === "agent.v2.prompt" || envelope.type === "agent.v2.command.execute") {
+        this.refreshAgentPermissionHooks();
+      }
+      try {
+        await this.agentWorkspace.handleEnvelope(envelope);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.log(`agent.v2 invalid message: ${message}`);
+        this.send(createEnvelope({
+          type: "session.error",
+          sessionId: this.sessionId,
+          payload: {
+            code: "invalid_message",
+            message: `Invalid Agent Workspace message: ${message}`,
+          },
+        }));
+      }
+      return;
+    }
     switch (envelope.type) {
       case "terminal.input": {
         const p = parseTypedPayload("terminal.input", envelope.payload);
@@ -840,44 +933,6 @@ export class BridgeSession {
           break;
         }
         await this.agentSession.handleEnvelope(envelope);
-        break;
-      }
-      case "agent.v2.capabilities.request":
-      case "agent.v2.conversation.open":
-      case "agent.v2.conversation.list":
-      case "agent.v2.prompt":
-      case "agent.v2.command.execute":
-      case "agent.v2.cancel":
-      case "agent.v2.permission.respond":
-      case "agent.v2.structured_input.respond":
-      case "agent.v2.snapshot.request": {
-        if (!this.agentWorkspace) {
-          this.send(
-            createEnvelope({
-              type: "agent.v2.capabilities",
-              sessionId: this.sessionId,
-              payload: {
-                enabled: false,
-                provider: normalizeAgentProvider(
-                  this.options.agentProvider ?? "codex",
-                ),
-                machineId: this.machineIdentity?.machineId,
-                workspaceProtocolVersion: 2,
-                error: "Agent Workspace is not enabled. Start CLI with --agent-ui.",
-                supportsSessionList: false,
-                supportsSessionLoad: false,
-                supportsImages: false,
-                supportsAudio: false,
-                supportsPermission: false,
-                supportsPlan: false,
-                supportsCancel: false,
-              },
-            }),
-          );
-          break;
-        }
-        if (envelope.type === "agent.v2.prompt" || envelope.type === "agent.v2.command.execute") this.refreshAgentPermissionHooks();
-        await this.agentWorkspace.handleEnvelope(envelope);
         break;
       }
       case "file.upload": {
@@ -1397,9 +1452,7 @@ export class BridgeSession {
     if (!term?.hookPort) return;
     const marker = term.hookMarker;
     const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${term.hookPort}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
-    const providers = this.options.agentProvider
-      ? [normalizeAgentProvider(this.options.agentProvider)]
-      : detectAvailableProviders();
+    const providers = resolveAgentWorkspaceProviders(this.options);
     try {
       for (const provider of providers) {
         if (provider === "codex") {

@@ -75,7 +75,7 @@ const output = parseTypedPayload("terminal.output", parsed.payload);
 | `agent.v2.capabilities` / `agent.v2.conversation.*` / `agent.v2.prompt` / `agent.v2.event` | Agent Workspace v2 |
 | `agent.v2.permission.*` / `agent.v2.structured_input.respond` | Agent 权限与结构化输入 |
 
-所有 payload 使用 Zod schema 做运行时校验。
+协议包为所有 payload 提供 Zod schema。Gateway 会对非 Agent Workspace v2 的已知协议消息做 schema 校验；Agent Workspace v2 envelope 由 Gateway 复用共享路由策略区分 host 推送、client 读请求和需要控制权的 client 写请求，但 payload 保持透明转发，由 CLI/App 端按业务版本解析。
 
 Agent Workspace v2 的 timeline 支持 `chat`、`thinking`、`tool_activity`、`command_execution`、`file_change`、`subagent_action`、`plan`、`user_input_prompt`、`review` 和 `context_compaction`。Provider capability 会携带可用模型、默认模型、reasoning effort、permission mode 和 provider feature flags，供移动端动态渲染控制项。
 

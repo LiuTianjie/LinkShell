@@ -76,6 +76,7 @@ const PROVIDER_META: Record<AgentProvider, { label: string; subtitle: string; ic
   claude: { label: "Claude", subtitle: "Anthropic Agent", icon: "brain.head.profile" },
   custom: { label: "Custom", subtitle: "自定义 Agent 命令", icon: "gearshape.fill" },
 };
+const DEFAULT_AGENT_PROVIDER_CHOICES: AgentProvider[] = ["codex", "claude"];
 
 const HIDDEN_AGENT_PROJECT_KEYS = "@linkshell/agent-hidden-projects:v1";
 
@@ -96,10 +97,6 @@ function normalizeServerUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
-function agentHostKey(serverUrl: string, sessionId: string): string {
-  return `${normalizeServerUrl(serverUrl)}\u0000${sessionId}`;
-}
-
 function shortPath(path: string): string {
   const parts = path.split("/").filter(Boolean);
   if (parts.length <= 3) return path;
@@ -118,6 +115,15 @@ function normalizeProvider(provider: string | null | undefined): AgentProvider |
 
 function isGatewayHostOnline(session: GatewayHostSession): boolean {
   return session.hasHost === true && (!session.state || session.state === "active");
+}
+
+function isSessionUsable(session: SessionInfo): boolean {
+  return (
+    session.status === "connected" ||
+    session.status === "connecting" ||
+    session.status === "reconnecting" ||
+    session.status === "host_disconnected"
+  );
 }
 
 function SectionTitle({ children, theme }: { children: React.ReactNode; theme: Theme }) {
@@ -146,15 +152,17 @@ function providerCapability(
 function providerOptions(
   capabilities: AgentCapabilities | undefined,
 ): AgentProviderCapability[] {
+  const byProvider = new Map<AgentProvider, AgentProviderCapability>();
   if (capabilities?.providers?.length) {
-    return capabilities.providers.map((item) => ({
-      ...item,
-      label: item.label || PROVIDER_META[item.id].label,
-    }));
-  }
-  if (capabilities?.provider) {
+    for (const item of capabilities.providers) {
+      byProvider.set(item.id, {
+        ...item,
+        label: item.label || PROVIDER_META[item.id].label,
+      });
+    }
+  } else if (capabilities?.provider) {
     const provider = capabilities.provider;
-    return [{
+    byProvider.set(provider, {
       id: provider,
       label: PROVIDER_META[provider].label,
       enabled: capabilities.enabled,
@@ -163,9 +171,30 @@ function providerOptions(
       supportsPermission: capabilities.supportsPermission,
       supportsPlan: capabilities.supportsPlan,
       supportsCancel: capabilities.supportsCancel,
-    }];
+    });
   }
-  return [];
+
+  const choices = DEFAULT_AGENT_PROVIDER_CHOICES.map((provider) => {
+    const existing = byProvider.get(provider);
+    if (existing) return existing;
+    return {
+      id: provider,
+      label: PROVIDER_META[provider].label,
+      enabled: false,
+      reason: providerReason(capabilities, provider),
+    };
+  });
+
+  for (const item of byProvider.values()) {
+    if (!choices.some((choice) => choice.id === item.id)) {
+      choices.push({
+      ...item,
+      label: item.label || PROVIDER_META[item.id].label,
+      });
+    }
+  }
+
+  return choices;
 }
 
 function providerReason(
@@ -181,7 +210,7 @@ function providerReason(
       : "需要先连接主机并确认 Agent 能力。";
   }
   if (provider === "custom") return "Custom Agent 需要在 CLI 侧配置 --agent-command 后才能使用。";
-  return capabilities?.error;
+  return capabilities?.error ?? `${PROVIDER_META[provider].label} 未安装或启动失败。`;
 }
 
 function projectKey(serverUrl: string, machineIdOrSessionId: string, cwd: string): string {
@@ -263,6 +292,10 @@ function conversationSummary(
   return latestPreview || conversation.title || "暂无对话摘要";
 }
 
+function conversationListSortAt(conversation: AgentConversationRecord): number {
+  return conversation.lastUserActivityAt ?? conversation.createdAt ?? conversation.lastActivityAt;
+}
+
 function providerGroups(conversations: AgentConversationRecord[]) {
   const order: AgentProvider[] = ["codex", "claude", "custom"];
   return order
@@ -270,14 +303,18 @@ function providerGroups(conversations: AgentConversationRecord[]) {
       provider,
       conversations: conversations
         .filter((conversation) => conversation.provider === provider)
-        .sort((a, b) => b.lastActivityAt - a.lastActivityAt),
+        .sort((a, b) => {
+          const byUserActivity = conversationListSortAt(b) - conversationListSortAt(a);
+          if (byUserActivity !== 0) return byUserActivity;
+          return b.lastActivityAt - a.lastActivityAt;
+        }),
     }))
     .filter((group) => group.conversations.length > 0);
 }
 
 function latestConversation(conversations: AgentConversationRecord[]): AgentConversationRecord | undefined {
   return conversations.reduce<AgentConversationRecord | undefined>((latest, conversation) =>
-    !latest || conversation.lastActivityAt > latest.lastActivityAt ? conversation : latest,
+    !latest || conversationListSortAt(conversation) > conversationListSortAt(latest) ? conversation : latest,
   undefined);
 }
 
@@ -421,8 +458,17 @@ function ConversationStateIndicator({
   conversation: AgentConversationRecord;
   theme: Theme;
 }) {
-  if (conversation.status === "running") {
-    return <SpinningRing color={theme.accent} />;
+  if (conversation.status === "error") {
+    return (
+      <View
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: theme.error,
+        }}
+      />
+    );
   }
   if (conversation.status === "waiting_permission") {
     return (
@@ -436,14 +482,17 @@ function ConversationStateIndicator({
       />
     );
   }
-  if (conversation.status === "error") {
+  if (conversation.status === "running") {
+    return <SpinningRing color={theme.accent} />;
+  }
+  if ((conversation.lastResponseAt ?? 0) > (conversation.lastReadAt ?? 0)) {
     return (
       <View
         style={{
           width: 8,
           height: 8,
           borderRadius: 4,
-          backgroundColor: theme.error,
+          backgroundColor: theme.accent,
         }}
       />
     );
@@ -531,7 +580,6 @@ export function AgentWorkspaceScreen({
   const [archivedExpanded, setArchivedExpanded] = useState(false);
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(() => new Set());
   const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
-  const autoConnectedHostKeysRef = useRef<Set<string>>(new Set());
   const didInitializeCollapsedProjectsRef = useRef(false);
   const knownProjectKeysRef = useRef<Set<string>>(new Set());
 
@@ -684,27 +732,6 @@ export function AgentWorkspaceScreen({
   }, [gatewayHosts, onlineSessions, projects]);
 
   useEffect(() => {
-    if (!onConnectSession) return;
-    const existingKeys = new Set(
-      allSessions.map((session) => agentHostKey(session.gatewayUrl, session.sessionId)),
-    );
-    const onlineHostKeys = new Set<string>();
-    for (const host of gatewayHosts) {
-      if (!host.id || !host.serverUrl) continue;
-      const key = agentHostKey(host.serverUrl, host.id);
-      onlineHostKeys.add(key);
-      if (existingKeys.has(key) || autoConnectedHostKeysRef.current.has(key)) continue;
-      autoConnectedHostKeysRef.current.add(key);
-      onConnectSession(host.id, host.serverUrl);
-    }
-    for (const key of autoConnectedHostKeysRef.current) {
-      if (!onlineHostKeys.has(key) && !existingKeys.has(key)) {
-        autoConnectedHostKeysRef.current.delete(key);
-      }
-    }
-  }, [allSessions, gatewayHosts, onConnectSession]);
-
-  useEffect(() => {
     for (const target of targets) {
       workspace.requestCapabilities(target.sessionId);
     }
@@ -759,7 +786,7 @@ export function AgentWorkspaceScreen({
       const existing = groups.get(id);
       if (existing) {
         existing.conversations.push(conversation);
-        existing.lastActivityAt = Math.max(existing.lastActivityAt, conversation.lastActivityAt);
+        existing.lastActivityAt = Math.max(existing.lastActivityAt, conversationListSortAt(conversation));
         if (target) existing.target = target;
         if (project) existing.project = project;
         existing.hostname = existing.hostname ?? target?.hostname ?? project?.hostname;
@@ -775,7 +802,7 @@ export function AgentWorkspaceScreen({
         target,
         project,
         conversations: [conversation],
-        lastActivityAt: conversation.lastActivityAt,
+        lastActivityAt: conversationListSortAt(conversation),
       });
     }
 
@@ -878,10 +905,8 @@ export function AgentWorkspaceScreen({
       return [{
         id: provider,
         label: PROVIDER_META[provider].label,
-        enabled: Boolean(selectedTarget),
-        reason: selectedTarget
-          ? undefined
-          : providerReason(selectedCapabilities, provider),
+        enabled: false,
+        reason: providerReason(selectedCapabilities, provider, selectedTarget?.status),
       }];
     },
     [selectedCapabilities, selectedProvider, selectedTarget],
@@ -891,6 +916,16 @@ export function AgentWorkspaceScreen({
   const selectedProviderReason =
     selectedProviderChoice?.reason ??
     providerReason(selectedCapabilities, selectedProvider, selectedTarget?.status);
+
+  const ensureTargetConnected = useCallback((target: AgentTarget | undefined) => {
+    if (!target || !onConnectSession) return;
+    const alreadyConnected = allSessions.some((session) =>
+      session.sessionId === target.sessionId &&
+      normalizeServerUrl(session.gatewayUrl) === normalizeServerUrl(target.serverUrl) &&
+      isSessionUsable(session)
+    );
+    if (!alreadyConnected) onConnectSession(target.sessionId, target.serverUrl);
+  }, [allSessions, onConnectSession]);
 
   const didAutoSelectRef = useRef(false);
 
@@ -939,6 +974,7 @@ export function AgentWorkspaceScreen({
       return;
     }
     const target = targetOverride ?? selectedTarget ?? targets[0];
+    ensureTargetConnected(target);
     setSelectedSessionId(target?.sessionId ?? null);
     const projectForTarget =
       projectOverride?.project ?? projects.find((item) => item.sessionId === target?.sessionId);
@@ -947,7 +983,7 @@ export function AgentWorkspaceScreen({
     setSelectedProvider(target?.provider ?? "codex");
     setCreateVisible(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-  }, [knownGatewayCount, loadingGatewayHosts, onOpenConnectionSheet, projects, selectedTarget, targets]);
+  }, [ensureTargetConnected, knownGatewayCount, loadingGatewayHosts, onOpenConnectionSheet, projects, selectedTarget, targets]);
 
   const createConversation = useCallback(async () => {
     if (!selectedTarget) {
@@ -962,6 +998,7 @@ export function AgentWorkspaceScreen({
       Alert.alert("请选择工作目录", "可以使用当前目录，也可以手动输入一个目录。");
       return;
     }
+    ensureTargetConnected(selectedTarget);
     setCreating(true);
     try {
       const result = await workspace.openConversation({
@@ -1013,6 +1050,7 @@ export function AgentWorkspaceScreen({
     }
   }, [
     effectiveCwd,
+    ensureTargetConnected,
     onOpenConnectionSheet,
     onOpenConversation,
     selectedCapabilities,
@@ -1025,38 +1063,24 @@ export function AgentWorkspaceScreen({
   ]);
 
   const openProject = useCallback(
-    async (project: AgentProjectGroup, conversation?: AgentConversationRecord) => {
+    (project: AgentProjectGroup, conversation?: AgentConversationRecord) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      if (!project.target) {
-        Alert.alert("主机不在线", "请先在这个项目所在的主机上启动 linkshell，再继续使用 Agent。");
-        return;
-      }
       const latest = conversation ?? project.conversations[0];
       if (!latest) {
+        if (!project.target) {
+          Alert.alert("主机不在线", "请先在这个项目所在的主机上启动 linkshell，再继续使用 Agent。");
+          return;
+        }
         openCreate(project.target, project);
         return;
       }
 
-      const result = await workspace.openConversation({
-        conversationId: latest.id,
-        agentSessionId: latest.agentSessionId,
-        sessionId: project.target.sessionId,
-        machineId: project.target.machineId,
-        serverUrl: project.target.serverUrl,
-        cwd: project.cwd,
-        provider: latest.provider ?? project.target.provider ?? "codex",
-        model: latest.model,
-        reasoningEffort: latest.reasoningEffort,
-        permissionMode: latest.permissionMode,
-        title: latest.title || project.title,
-      });
-      if (result.conversationId) {
-        onOpenConversation(result.conversationId);
-        return;
+      if (project.target) {
+        ensureTargetConnected(project.target);
       }
-      Alert.alert("无法恢复 Agent 对话", result.error ?? "请确认主机端会话在线，并且 Agent GUI 已启用。");
+      onOpenConversation(latest.id);
     },
-    [onOpenConversation, openCreate, workspace],
+    [ensureTargetConnected, onOpenConversation, openCreate],
   );
 
   const archiveConversation = useCallback((conversation: AgentConversationRecord) => {
@@ -1117,7 +1141,7 @@ export function AgentWorkspaceScreen({
     );
   }, [workspace]);
 
-  const restoreArchivedConversation = useCallback(async (conversation: AgentConversationRecord) => {
+  const restoreArchivedConversation = useCallback((conversation: AgentConversationRecord) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setHiddenProjectKeys((prev) => {
       const next = new Set(prev);
@@ -1125,12 +1149,8 @@ export function AgentWorkspaceScreen({
       saveHiddenAgentProjectKeys(next).catch(() => {});
       return next;
     });
-    const result = await workspace.resumeConversation(conversation.id);
-    if (result) {
-      onOpenConversation(result);
-      return;
-    }
-    Alert.alert("设备离线", "这条历史会话所在的设备当前不在线。请先在该设备上启动 linkshell。");
+    workspace.archive(conversation.id, false).catch(() => {});
+    onOpenConversation(conversation.id);
   }, [onOpenConversation, workspace]);
 
   const refreshWorkspace = useCallback(async () => {
@@ -1475,9 +1495,7 @@ export function AgentWorkspaceScreen({
                   return (
                     <Pressable
                       key={conversation.id}
-                      onPress={() => restoreArchivedConversation(conversation).catch(() => {
-                        Alert.alert("无法恢复会话", "请确认主机端 linkshell 仍在线。");
-                      })}
+                      onPress={() => restoreArchivedConversation(conversation)}
                       style={({ pressed }) => ({
                         minHeight: 32,
                         borderRadius: 8,
@@ -1559,6 +1577,7 @@ export function AgentWorkspaceScreen({
                   <Pressable
                     key={`${target.serverUrl}:${target.sessionId}`}
                     onPress={() => {
+                      ensureTargetConnected(target);
                       setSelectedSessionId(target.sessionId);
                       const project = projects.find((item) => item.sessionId === target.sessionId);
                       setSelectedProjectId(project?.id ?? null);
@@ -1686,7 +1705,7 @@ export function AgentWorkspaceScreen({
               ) : null}
               <Pressable
                 onPress={() => {
-                  if (!selectedSession && selectedSessionId && onConnectSession) {
+                  if (selectedSessionId && onConnectSession && (!selectedSession || !isSessionUsable(selectedSession))) {
                     const target = targets.find(t => t.sessionId === selectedSessionId);
                     if (target) onConnectSession(selectedSessionId, target.serverUrl);
                   }

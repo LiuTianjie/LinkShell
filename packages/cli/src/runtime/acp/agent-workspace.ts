@@ -201,6 +201,7 @@ interface PendingStructuredInputWaiter {
   resolve: (value: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
   source?: string;
+  input: AgentStructuredInput;
 }
 
 const PERMISSION_TIMEOUT_MS = 5 * 60_000;
@@ -208,6 +209,17 @@ const MAX_TIMELINE_ITEMS = 200;
 
 function id(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeAgentSessionIdSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-");
+}
+
+export function makeAgentV2RemoteConversationId(
+  provider: AgentProvider,
+  agentSessionId: string,
+): string {
+  return `agent-remote-${provider}-${normalizeAgentSessionIdSegment(agentSessionId)}`;
 }
 
 function stringify(value: unknown): string {
@@ -264,6 +276,12 @@ function extractItem(value: unknown): Record<string, unknown> | undefined {
   return asRecord(raw.item) ?? raw;
 }
 
+function extractTurn(value: unknown): Record<string, unknown> | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  return asRecord(raw.turn) ?? raw;
+}
+
 function stringifyDefined(value: unknown): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   return stringify(value);
@@ -300,6 +318,29 @@ function normalizePlanStatus(value: unknown): AgentPlanStep["status"] {
   if (value === "completed" || value === "done") return "completed";
   if (value === "inProgress" || value === "running" || value === "active") return "in_progress";
   return "pending";
+}
+
+function agentStatusFromThreadStatus(value: unknown): AgentStatus | undefined {
+  const raw = asRecord(value);
+  const status = typeof value === "string"
+    ? value
+    : firstString(raw, ["status", "state", "phase", "type"]) ??
+      firstString(asRecord(raw?.status), ["status", "state", "phase", "type"]);
+  const normalized = normalizedIdentifier(status);
+  if (!normalized) return undefined;
+  if (["active", "running", "inprogress", "busy", "working", "streaming"].includes(normalized)) {
+    return "running";
+  }
+  if (["idle", "ready", "completed", "complete", "done", "finished"].includes(normalized)) {
+    return "idle";
+  }
+  if (["waitingpermission", "waitingforpermission", "requirespermission", "needspermission"].includes(normalized)) {
+    return "waiting_permission";
+  }
+  if (["error", "failed", "systemerror", "fatal"].includes(normalized)) {
+    return "error";
+  }
+  return undefined;
 }
 
 function nameFromToolMethod(method: string): string {
@@ -670,7 +711,9 @@ function parseStructuredInputQuestion(value: unknown, index: number): AgentStruc
     question,
     isOther: raw.isOther === true,
     isSecret: raw.isSecret === true || raw.secret === true,
-    selectionLimit: firstNumber(raw, ["selectionLimit", "maxSelections"]),
+    selectionLimit: raw.multiSelect === true
+      ? options.length || undefined
+      : firstNumber(raw, ["selectionLimit", "maxSelections"]),
     options: options.length > 0 ? options : undefined,
   };
 }
@@ -1237,6 +1280,7 @@ function parseRemoteSessions(value: unknown): Array<{
   const raw = asRecord(value);
   const sessionsValue =
     Array.isArray(value) ? value :
+    Array.isArray(raw?.data) ? raw.data :
     Array.isArray(raw?.threads) ? raw.threads :
     Array.isArray(raw?.sessions) ? raw.sessions :
     Array.isArray(raw?.items) ? raw.items :
@@ -1262,7 +1306,7 @@ function parseRemoteSessions(value: unknown): Array<{
     result.push({
       id,
       cwd: firstString(source, ["cwd", "workingDirectory", "workspacePath"]),
-      title: firstString(source, ["title", "name", "summary"]),
+      title: firstString(source, ["title", "name", "summary", "preview"]),
       model: firstString(source, ["model", "modelId"]),
       createdAt: parseTimestamp(source.createdAt ?? source.created_at),
       lastActivityAt: parseTimestamp(source.lastActivityAt ?? source.updatedAt ?? source.modifiedAt ?? source.lastModified ?? source.updated_at),
@@ -1271,10 +1315,279 @@ function parseRemoteSessions(value: unknown): Array<{
   return result;
 }
 
+function threadFromProviderResult(value: unknown): Record<string, unknown> | undefined {
+  const raw = asRecord(value);
+  return asRecord(raw?.thread) ?? raw;
+}
+
+function threadFromTurnsListResult(sessionId: string, value: unknown): Record<string, unknown> | undefined {
+  const raw = asRecord(value);
+  const order = firstString(raw, ["sortDirection", "order", "sortOrder", "sort"]);
+  const turns =
+    Array.isArray(raw?.turns) ? raw.turns :
+    Array.isArray(raw?.data) ? raw.data :
+    Array.isArray(raw?.items) ? raw.items :
+    Array.isArray(value) ? value :
+    undefined;
+  if (!turns) return undefined;
+  const extracted = turns
+    .map(extractTurn)
+    .filter((turn): turn is Record<string, unknown> => Boolean(turn));
+  const chronological = order && /asc/i.test(order)
+    ? extracted
+    : [...extracted].reverse();
+  return { id: sessionId, turns: chronological };
+}
+
+function turnItemsFromThread(thread: Record<string, unknown> | undefined): Record<string, unknown>[] {
+  if (!thread) return [];
+  const turnsValue = Array.isArray(thread.turns)
+    ? thread.turns
+    : Array.isArray(thread.items)
+      ? [{ id: firstString(thread, ["turnId", "id"]), items: thread.items }]
+      : [];
+  const result: Record<string, unknown>[] = [];
+  for (const turnEntry of turnsValue) {
+    const turn = extractTurn(turnEntry);
+    if (!turn) continue;
+    const turnId = firstString(turn, ["id", "turnId"]);
+    const createdAt = parseTimestamp(
+      turn.createdAt ??
+      turn.created_at ??
+      turn.startedAt ??
+      turn.started_at ??
+      turn.completedAt ??
+      turn.completed_at ??
+      turn.updatedAt ??
+      turn.updated_at,
+    );
+    const itemsRecord = asRecord(turn.items);
+    const items = Array.isArray(turn.items)
+      ? turn.items
+      : Array.isArray(itemsRecord?.data)
+        ? itemsRecord.data
+        : Array.isArray(itemsRecord?.items)
+          ? itemsRecord.items
+          : Array.isArray(turn.item)
+            ? turn.item
+            : Array.isArray(turn.events)
+              ? turn.events
+              : [];
+    for (const itemEntry of items) {
+      const item = extractItem(itemEntry);
+      if (!item) continue;
+      result.push({
+        ...item,
+        ...(turnId && !firstString(item, ["turnId"]) ? { turnId } : {}),
+        __turnCreatedAt: createdAt,
+      });
+    }
+  }
+  return result;
+}
+
+function activeTurnIdFromThread(thread: Record<string, unknown> | undefined): string | undefined {
+  if (!thread) return undefined;
+  const turnsValue = Array.isArray(thread.turns)
+    ? thread.turns
+    : Array.isArray(thread.items)
+      ? [{ id: firstString(thread, ["turnId", "id"]), items: thread.items, status: thread.status }]
+      : [];
+  let activeTurnId: string | undefined;
+  for (const turnEntry of turnsValue) {
+    const turn = extractTurn(turnEntry);
+    if (!turn) continue;
+    const turnId = firstString(turn, ["id", "turnId"]);
+    if (!turnId) continue;
+    const status =
+      firstString(turn, ["status", "state", "phase"]) ??
+      firstString(asRecord(turn.status), ["status", "state", "phase", "type"]);
+    const normalized = normalizedIdentifier(status);
+    if ([
+      "active",
+      "running",
+      "inprogress",
+      "busy",
+      "working",
+      "streaming",
+      "waitingpermission",
+      "waitingforpermission",
+      "requirespermission",
+      "needspermission",
+    ].includes(normalized)) {
+      activeTurnId = turnId;
+    }
+  }
+  return activeTurnId;
+}
+
+function timelineItemFromProviderItem(
+  item: Record<string, unknown>,
+  conversationId: string,
+  index: number,
+): AgentTimelineItem | undefined {
+  const itemType = firstString(item, ["type"]);
+  const normalized = normalizedIdentifier(itemType);
+  const itemId = firstString(item, ["id", "itemId", "messageId", "toolCallId"]) ?? `history-${index + 1}`;
+  const createdAt =
+    parseTimestamp(item.createdAt ?? item.created_at ?? item.timestamp ?? item.__turnCreatedAt) ??
+    Date.now() + index;
+  const base = {
+    id: itemId,
+    conversationId,
+    turnId: firstString(item, ["turnId"]),
+    itemId,
+    createdAt,
+    updatedAt: parseTimestamp(item.updatedAt ?? item.updated_at) ?? createdAt,
+    isStreaming: false,
+  };
+
+  if (
+    normalized === "usermessage" ||
+    normalized === "userinput" ||
+    (normalized === "message" && item.role === "user")
+  ) {
+    const content = contentBlocksFromItem(item);
+    const text = textFromBlocks(content);
+    if (!content.length && !text) return undefined;
+    return {
+      ...base,
+      type: "message",
+      kind: "chat",
+      role: "user",
+      content,
+      text,
+    };
+  }
+
+  if (
+    normalized === "agentmessage" ||
+    normalized === "assistantmessage" ||
+    (normalized === "message" && item.role !== "user")
+  ) {
+    const content = contentBlocksFromItem(item);
+    const text = textFromBlocks(content);
+    if (!content.length && !text) return undefined;
+    return {
+      ...base,
+      type: "message",
+      kind: "chat",
+      role: item.role === "system" ? "system" : "assistant",
+      content,
+      text,
+    };
+  }
+
+  if (normalized === "reasoning" || normalized === "thinking") {
+    const text = firstString(item, ["text", "content", "summary", "message"]) ??
+      stringifyDefined(item.contentItems ?? item.summary);
+    if (!text) return undefined;
+    return {
+      ...base,
+      type: "status",
+      kind: "thinking",
+      role: "system",
+      text,
+    };
+  }
+
+  if (normalized === "enteredreviewmode" || normalized === "exitedreviewmode") {
+    const text = firstString(item, ["review", "text", "content", "summary", "message"]);
+    return {
+      ...base,
+      type: "status",
+      kind: "review",
+      role: "system",
+      text: text ?? (normalized === "enteredreviewmode" ? "正在审查" : "审查已完成"),
+    };
+  }
+
+  if (normalized === "contextcompaction") {
+    return {
+      ...base,
+      type: "status",
+      kind: "context_compaction",
+      role: "system",
+      text: firstString(item, ["text", "summary", "message"]) ?? "上下文已压缩",
+    };
+  }
+
+  if (isSubagentItemType(itemType)) {
+    const subagent = decodeSubagentAction(item, normalizeToolStatus(item.status, true));
+    if (!subagent) return undefined;
+    return {
+      ...base,
+      type: "status",
+      kind: "subagent_action",
+      role: "system",
+      text: summarizeSubagentAction(subagent),
+      subagent,
+    };
+  }
+
+  if (isToolItemType(itemType) || toolNameFromItem(item)) {
+    const toolId = firstString(item, ["id", "itemId", "toolCallId"]) ?? itemId;
+    const toolCall: AgentToolCall = {
+      id: toolId,
+      name: toolNameFromItem(item) ?? "工具",
+      input: toolInputFromItem(item),
+      output:
+        normalized === "filechange" || normalized === "diff"
+          ? extractDiffText(item) ?? firstString(item, ["output", "summary"])
+          : firstString(item, ["aggregatedOutput", "output", "stdout", "stderr"]) ??
+            stringifyDefined(item.result ?? item.error ?? item.contentItems),
+      createdAt,
+      status: normalizeToolStatus(item.status, true),
+    };
+    const kind: AgentTimelineKind = toolCall.name.includes("文件") || normalized === "filechange" || normalized === "diff"
+      ? "file_change"
+      : toolCall.name.includes("命令") || normalized === "commandexecution"
+        ? "command_execution"
+        : "tool_activity";
+    return {
+      ...base,
+      id: `tool:${toolId}`,
+      type: "tool_call",
+      kind,
+      itemId: toolId,
+      toolCall,
+      commandExecution: kind === "command_execution" ? commandExecutionFromTool(toolCall) : undefined,
+      fileChange: kind === "file_change" ? fileChangeFromTool(toolCall) : undefined,
+    };
+  }
+
+  return undefined;
+}
+
+function timelineItemsFromProviderThread(
+  value: unknown,
+  conversationId: string,
+): AgentTimelineItem[] {
+  const items = turnItemsFromThread(threadFromProviderResult(value))
+    .map((item, index) => timelineItemFromProviderItem(item, conversationId, index))
+    .filter((item): item is AgentTimelineItem => Boolean(item));
+  const byId = new Map<string, AgentTimelineItem>();
+  for (const item of items) {
+    byId.set(item.id, item);
+  }
+  return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-MAX_TIMELINE_ITEMS);
+}
+
+function previewFromTimelineItem(item: AgentTimelineItem): string | undefined {
+  if (item.error) return item.error;
+  if (item.text) return item.text;
+  if (item.content?.length) return textFromBlocks(item.content);
+  if (item.toolCall) return `${item.toolCall.name} · ${item.toolCall.status}`;
+  if (item.permission) return `需要授权 ${item.permission.toolName ?? ""}`.trim();
+  if (item.subagent) return summarizeSubagentAction(item.subagent);
+  return undefined;
+}
+
 export class AgentWorkspaceProxy {
   private clients = new Map<AgentProvider, AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient>();
   private agentProtocols = new Map<AgentProvider, AgentProtocol>();
   private providerCapabilities = new Map<AgentProvider, ProviderRuntimeCapabilities>();
+  private providerErrors = new Map<AgentProvider, string>();
   private initialized = false;
   private status: AgentStatus = "unavailable";
   private error: string | undefined;
@@ -1347,11 +1660,21 @@ export class AgentWorkspaceProxy {
       case "agent.v2.cancel": {
         const payload = parseTypedPayload("agent.v2.cancel", envelope.payload);
         const conversation = this.conversations.get(payload.conversationId);
+        if (!conversation) break;
+        const turnId = this.currentTurnIds.get(payload.conversationId);
+        if (this.protocolForProvider(conversation.provider) === "codex-app-server" && !turnId) {
+          this.rejectAgentAction(
+            conversation,
+            "无法停止 Codex：当前运行 turn 尚未同步，请重新打开对话后再试。",
+            conversation.status,
+          );
+          break;
+        }
         this.cancelPendingPermissions(payload.conversationId);
-        const cancelClient = conversation ? this.clientForProvider(conversation.provider) : undefined;
+        const cancelClient = this.clientForProvider(conversation.provider);
         cancelClient?.cancel({
-          sessionId: conversation?.agentSessionId,
-          turnId: this.currentTurnIds.get(payload.conversationId),
+          sessionId: conversation.agentSessionId,
+          turnId,
         });
         this.forgetCurrentTurn(payload.conversationId);
         this.updateConversationStatus(payload.conversationId, "idle");
@@ -1384,6 +1707,13 @@ export class AgentWorkspaceProxy {
 
   private protocolForProvider(provider: AgentProvider): AgentProtocol | undefined {
     return this.agentProtocols.get(provider);
+  }
+
+  private defaultModelForProvider(provider: AgentProvider): string | undefined {
+    const capabilities = this.providerCapabilities.get(provider);
+    const defaultModel = capabilities?.defaultModel?.trim();
+    if (defaultModel) return defaultModel;
+    return capabilities?.models?.find((model) => model.id && model.id !== "default")?.id;
   }
 
   private async initialize(): Promise<void> {
@@ -1452,6 +1782,7 @@ export class AgentWorkspaceProxy {
     try {
       const client = await tryCreateClient(resolved);
       this.clients.set(provider, client);
+      this.providerErrors.delete(provider);
       await this.refreshProviderCapabilities(provider, client, resolved.protocol);
       this.status = "idle";
       this.error = undefined;
@@ -1471,6 +1802,7 @@ export class AgentWorkspaceProxy {
           };
           const client = await tryCreateClient(fallback);
           this.clients.set(provider, client);
+          this.providerErrors.delete(provider);
           await this.refreshProviderCapabilities(provider, client, fallback.protocol);
           this.status = "idle";
           this.error = undefined;
@@ -1485,6 +1817,8 @@ export class AgentWorkspaceProxy {
       if (this.input.verbose) {
         process.stderr.write(`[agent:v2] failed to start ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
       }
+      this.providerErrors.set(provider, error instanceof Error ? error.message : String(error));
+      this.sendCapabilities();
       return undefined;
     }
   }
@@ -1537,7 +1871,7 @@ export class AgentWorkspaceProxy {
           const agentSessionId = remote.id;
           const existingId = this.conversationByAgentSessionId.get(agentSessionId);
           const now = Date.now();
-          const conversationId = existingId ?? `agent:${agentSessionId}`;
+          const conversationId = existingId ?? makeAgentV2RemoteConversationId(provider, agentSessionId);
           const existing = this.conversations.get(conversationId);
           const cwd = remote.cwd ?? existing?.cwd ?? this.input.cwd;
           const conversation: AgentConversation = {
@@ -1568,6 +1902,83 @@ export class AgentWorkspaceProxy {
     }
   }
 
+  private async hydrateConversationFromProvider(
+    conversation: AgentConversation,
+    seedResult?: unknown,
+  ): Promise<void> {
+    const client = this.clientForProvider(conversation.provider);
+    if (!client || !conversation.agentSessionId) return;
+    let source = seedResult;
+    const hasSeedTurns = turnItemsFromThread(threadFromProviderResult(seedResult)).length > 0;
+    if (!hasSeedTurns) {
+      const readSession = (client as { readSession?: (input: { sessionId: string; includeTurns?: boolean }) => Promise<unknown> }).readSession;
+      if (typeof readSession === "function") {
+        try {
+          source = await readSession.call(client, {
+            sessionId: conversation.agentSessionId,
+            includeTurns: true,
+          });
+        } catch (error) {
+          if (this.input.verbose) {
+            process.stderr.write(`[agent:v2] thread/read hydration failed for ${conversation.provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+          }
+        }
+      }
+      if (turnItemsFromThread(threadFromProviderResult(source)).length === 0) {
+        const listTurns = (client as { listTurns?: (input: {
+          sessionId: string;
+          limit?: number;
+          cursor?: string;
+          sortDirection?: "asc" | "desc";
+          itemsView?: "summary" | "full";
+        }) => Promise<unknown> }).listTurns;
+        if (typeof listTurns === "function") {
+          try {
+            const turnsResult = await listTurns.call(client, {
+              sessionId: conversation.agentSessionId,
+              limit: MAX_TIMELINE_ITEMS,
+              sortDirection: "desc",
+              itemsView: "full",
+            });
+            const turnsThread = threadFromTurnsListResult(conversation.agentSessionId, turnsResult);
+            if (turnsThread) source = { thread: turnsThread };
+          } catch (error) {
+            if (this.input.verbose) {
+              process.stderr.write(`[agent:v2] thread/turns/list hydration failed for ${conversation.provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+            }
+          }
+        }
+      }
+    }
+
+    const thread = threadFromProviderResult(source);
+    const activeTurnId = activeTurnIdFromThread(thread);
+    if (activeTurnId) this.rememberTurnConversationId(conversation.id, activeTurnId);
+    const model = firstString(thread, ["model", "modelId", "currentModel"]);
+    if (model && !conversation.model) conversation.model = model;
+
+    const hydratedItems = timelineItemsFromProviderThread(source, conversation.id);
+    if (hydratedItems.length === 0) return;
+    const existing = this.timelines.get(conversation.id) ?? [];
+    const merged = new Map<string, AgentTimelineItem>();
+    for (const item of [...existing, ...hydratedItems]) {
+      merged.set(item.id, item);
+    }
+    const nextItems = [...merged.values()]
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(-MAX_TIMELINE_ITEMS);
+    this.timelines.set(conversation.id, nextItems);
+    for (const item of nextItems) {
+      this.rememberItemConversationId(conversation.id, item);
+    }
+    const lastPreview = [...nextItems].reverse()
+      .map((item) => previewText(previewFromTimelineItem(item) ?? ""))
+      .find(Boolean);
+    if (lastPreview && !conversation.lastMessagePreview) {
+      conversation.lastMessagePreview = lastPreview;
+    }
+  }
+
   private sendCapabilities(): void {
     const providers = this.input.availableProviders.map((provider) => {
       const client = this.clients.get(provider);
@@ -1587,7 +1998,7 @@ export class AgentWorkspaceProxy {
         id: provider,
         label: providerLabel(provider),
         enabled,
-        reason: enabled ? undefined : `${providerLabel(provider)} 未安装或启动失败`,
+        reason: enabled ? undefined : this.providerErrors.get(provider) ?? `${providerLabel(provider)} 未安装或启动失败`,
         supportsImages,
         supportsPermission,
         supportsPlan: enabled,
@@ -1659,23 +2070,62 @@ export class AgentWorkspaceProxy {
       );
     }
 
-    const client = await this.ensureProviderClient(provider);
-    if (!client) {
-      return this.openFailure(
-        payload,
-        `${providerLabel(provider)} 启动失败。请确认 CLI 已安装并可用。`,
-      );
-    }
-
-    const cwd = payload.cwd ?? this.input.cwd;
+    let cwd = payload.cwd ?? this.input.cwd;
     let agentSessionId = payload.agentSessionId;
     let existingConversation =
       (payload.conversationId ? this.conversations.get(payload.conversationId) : undefined) ??
       (agentSessionId ? this.conversations.get(this.conversationByAgentSessionId.get(agentSessionId) ?? "") : undefined);
+    if (!payload.cwd && existingConversation?.cwd) cwd = existingConversation.cwd;
+
+    const client = await this.ensureProviderClient(provider);
+    if (!client) {
+      const message = this.providerErrors.get(provider) ?? `${providerLabel(provider)} 启动失败。请确认 CLI 已安装并可用。`;
+      if (existingConversation) {
+        this.activeConversationId = existingConversation.id;
+        this.input.send(createEnvelope({
+          type: "agent.v2.conversation.opened",
+          sessionId: this.input.sessionId,
+          payload: {
+            conversation: existingConversation,
+            snapshot: this.timelines.get(existingConversation.id) ?? [],
+            requestedConversationId: payload.conversationId,
+            providerError: message,
+          },
+        }));
+        this.sendCapabilities();
+        return existingConversation;
+      }
+      if (payload.conversationId) {
+        return this.openOfflineHistory(payload, message, cwd);
+      }
+      return this.openFailure(payload, message, cwd);
+    }
 
     if (existingConversation && existingConversation.status !== "error" && existingConversation.agentSessionId) {
-      if (payload.conversationId && existingConversation.id !== payload.conversationId) {
+      const requestedCanonicalId = makeAgentV2RemoteConversationId(provider, existingConversation.agentSessionId);
+      if (
+        payload.conversationId &&
+        payload.conversationId === requestedCanonicalId &&
+        existingConversation.id !== payload.conversationId
+      ) {
         existingConversation = this.adoptConversationId(existingConversation.id, payload.conversationId);
+      }
+      if ((this.timelines.get(existingConversation.id) ?? []).length === 0 && existingConversation.status !== "running") {
+        try {
+          const existingAgentSessionId = existingConversation.agentSessionId!;
+          const result = await client.loadSession({ sessionId: existingAgentSessionId, cwd });
+          const nextAgentSessionId = this.extractSessionId(result);
+          if (nextAgentSessionId && nextAgentSessionId !== existingAgentSessionId) {
+            this.conversationByAgentSessionId.delete(existingAgentSessionId);
+            existingConversation.agentSessionId = nextAgentSessionId;
+            this.conversationByAgentSessionId.set(nextAgentSessionId, existingConversation.id);
+          }
+          await this.hydrateConversationFromProvider(existingConversation, result);
+        } catch (error) {
+          if (this.input.verbose) {
+            process.stderr.write(`[agent:v2] resume failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+          }
+        }
       }
       this.activeConversationId = existingConversation.id;
       this.input.send(createEnvelope({
@@ -1684,6 +2134,7 @@ export class AgentWorkspaceProxy {
         payload: {
           conversation: existingConversation,
           snapshot: this.timelines.get(existingConversation.id) ?? [],
+          requestedConversationId: payload.conversationId,
         },
       }));
       return existingConversation;
@@ -1695,7 +2146,7 @@ export class AgentWorkspaceProxy {
         : await client.newSession({ cwd });
       agentSessionId = this.extractSessionId(result) ?? agentSessionId ?? id("agent-session");
       const now = Date.now();
-      const conversationId = payload.conversationId ?? `agent:${agentSessionId}`;
+      const conversationId = makeAgentV2RemoteConversationId(provider, agentSessionId);
       const conversation: AgentConversation = {
         ...existingConversation,
         id: conversationId,
@@ -1717,10 +2168,15 @@ export class AgentWorkspaceProxy {
       this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
       this.activeConversationId = conversation.id;
       this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
+      await this.hydrateConversationFromProvider(conversation, result);
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.opened",
         sessionId: this.input.sessionId,
-        payload: { conversation, snapshot: this.timelines.get(conversation.id) ?? [] },
+        payload: {
+          conversation,
+          snapshot: this.timelines.get(conversation.id) ?? [],
+          requestedConversationId: payload.conversationId,
+        },
       }));
       return conversation;
     } catch (error) {
@@ -1772,8 +2228,62 @@ export class AgentWorkspaceProxy {
     this.input.send(createEnvelope({
       type: "agent.v2.conversation.opened",
       sessionId: this.input.sessionId,
-      payload: { conversation, snapshot: this.timelines.get(conversation.id) ?? [] },
+      payload: {
+        conversation,
+        snapshot: this.timelines.get(conversation.id) ?? [],
+        requestedConversationId: payload.conversationId,
+      },
     }));
+    return conversation;
+  }
+
+  private openOfflineHistory(
+    payload: {
+      conversationId?: string;
+      agentSessionId?: string;
+      cwd?: string;
+      provider?: AgentProvider;
+      model?: string;
+      reasoningEffort?: string;
+      permissionMode?: AgentPermissionMode;
+      collaborationMode?: AgentCollaborationMode;
+      title?: string;
+    },
+    message: string,
+    cwd = payload.cwd ?? this.input.cwd,
+  ): AgentConversation {
+    const now = Date.now();
+    const conversation: AgentConversation = {
+      id: payload.conversationId!,
+      agentSessionId: payload.agentSessionId,
+      provider: payload.provider ?? this.input.availableProviders[0] ?? "codex",
+      cwd,
+      title: payload.title ?? titleFromCwd(cwd),
+      model: payload.model,
+      reasoningEffort: payload.reasoningEffort,
+      permissionMode: payload.permissionMode,
+      collaborationMode: payload.collaborationMode,
+      status: "idle",
+      archived: false,
+      lastActivityAt: now,
+      createdAt: now,
+    };
+    this.conversations.set(conversation.id, conversation);
+    if (conversation.agentSessionId) {
+      this.conversationByAgentSessionId.set(conversation.agentSessionId, conversation.id);
+    }
+    this.activeConversationId = conversation.id;
+    this.input.send(createEnvelope({
+      type: "agent.v2.conversation.opened",
+      sessionId: this.input.sessionId,
+      payload: {
+        conversation,
+        snapshot: this.timelines.get(conversation.id) ?? [],
+        requestedConversationId: payload.conversationId,
+        providerError: message,
+      },
+    }));
+    this.sendCapabilities();
     return conversation;
   }
 
@@ -1781,6 +2291,8 @@ export class AgentWorkspaceProxy {
     conversationId: string;
     clientMessageId: string;
     contentBlocks: AgentContentBlock[];
+    delivery?: "auto" | "new_turn" | "steer";
+    targetTurnId?: string;
     model?: string;
     reasoningEffort?: string;
     permissionMode?: AgentPermissionMode;
@@ -1791,39 +2303,28 @@ export class AgentWorkspaceProxy {
       await this.openConversation({ conversationId: payload.conversationId });
     if (!conversation) return;
     if (!conversation.agentSessionId) {
-      this.addItem(payload.conversationId, {
-        id: id("error"),
-        conversationId: payload.conversationId,
-        type: "error",
-        error: "Agent session 尚未就绪，消息没有发送。请重新打开对话后再试。",
-        createdAt: Date.now(),
-      });
+      this.rejectAgentAction(
+        conversation,
+        "Agent session 尚未就绪，消息没有发送。请重新打开对话后再试。",
+      );
       return;
     }
-    const client = this.clientForProvider(conversation.provider);
+    const client = this.clientForProvider(conversation.provider) ?? await this.ensureProviderClient(conversation.provider);
     if (!client) {
-      this.addItem(conversation.id, {
-        id: id("error"),
-        conversationId: conversation.id,
-        type: "error",
-        error: `${providerLabel(conversation.provider)} 未连接，消息没有发送。`,
-        createdAt: Date.now(),
-      });
+      this.rejectAgentAction(
+        conversation,
+        this.providerErrors.get(conversation.provider) ?? `${providerLabel(conversation.provider)} 未连接，消息没有发送。`,
+        "error",
+      );
       return;
     }
 
     const protocol = this.protocolForProvider(conversation.provider);
     if (payload.contentBlocks.some((block) => block.type === "image") && !protocolSupportsImages(protocol)) {
-      conversation.status = "idle";
-      conversation.lastActivityAt = Date.now();
-      this.emitConversation(conversation);
-      this.addItem(conversation.id, {
-        id: id("error"),
-        conversationId: conversation.id,
-        type: "error",
-        error: "当前 Agent provider 暂不支持图片输入，请升级 CLI 或切换到 Codex。",
-        createdAt: Date.now(),
-      });
+      this.rejectAgentAction(
+        conversation,
+        "当前 Agent provider 暂不支持图片输入，请升级 CLI 或切换到 Codex。",
+      );
       return;
     }
 
@@ -1832,7 +2333,35 @@ export class AgentWorkspaceProxy {
       reasoningEffort: conversation.reasoningEffort,
       permissionMode: conversation.permissionMode,
     };
-    conversation.model = payload.model ?? conversation.model;
+    const effectiveModel = payload.model ??
+      conversation.model ??
+      (protocol === "codex-app-server" ? this.defaultModelForProvider(conversation.provider) : undefined);
+    const wasRunning = conversation.status === "running";
+    const activeTurnId = payload.targetTurnId ?? this.currentTurnIds.get(conversation.id);
+    const shouldSteer = Boolean(
+      payload.delivery !== "new_turn" &&
+      wasRunning &&
+      protocol === "codex-app-server" &&
+      activeTurnId,
+    );
+    if (wasRunning && payload.delivery !== "new_turn" && protocol !== "codex-app-server") {
+      this.addItem(conversation.id, {
+        id: id("error"),
+        conversationId: conversation.id,
+        type: "error",
+        error: `${providerLabel(conversation.provider)} 当前不支持运行中追加输入。请等待本轮结束，或先停止后再发送。`,
+        createdAt: Date.now(),
+      });
+      return;
+    }
+    if (payload.delivery === "steer" && protocol === "codex-app-server" && !activeTurnId) {
+      this.rejectAgentAction(
+        conversation,
+        "当前没有可追加输入的 Codex turn。请等待本轮开始后重试，或作为新消息发送。",
+      );
+      return;
+    }
+    conversation.model = effectiveModel ?? conversation.model;
     conversation.reasoningEffort = payload.reasoningEffort ?? conversation.reasoningEffort;
     conversation.permissionMode = payload.permissionMode ?? conversation.permissionMode;
     conversation.collaborationMode = payload.collaborationMode ?? conversation.collaborationMode;
@@ -1840,14 +2369,14 @@ export class AgentWorkspaceProxy {
     conversation.lastActivityAt = Date.now();
     this.activeConversationId = conversation.id;
 
-    if (payload.model && payload.model !== priorSettings.model) {
+    if (effectiveModel && effectiveModel !== priorSettings.model) {
       const runtimeCapabilities = this.providerCapabilities.get(conversation.provider);
-      const label = runtimeCapabilities?.models?.find((m) => m.id === payload.model)?.label ?? payload.model;
+      const label = runtimeCapabilities?.models?.find((m) => m.id === effectiveModel)?.label ?? effectiveModel;
       this.emitNotice({
         conversationId: conversation.id,
         kind: "model_changed",
         title: `已切换模型 · ${label}`,
-        detail: `${providerLabel(conversation.provider)} 下次回复将使用 ${payload.model}`,
+        detail: `${providerLabel(conversation.provider)} 下次回复将使用 ${effectiveModel}`,
       });
     }
     if (payload.reasoningEffort && payload.reasoningEffort !== priorSettings.reasoningEffort) {
@@ -1873,21 +2402,62 @@ export class AgentWorkspaceProxy {
       role: "user",
       content: payload.contentBlocks,
       text: userText,
+      metadata: shouldSteer ? { delivery: "steer", targetTurnId: activeTurnId } : undefined,
       createdAt: Date.now(),
     });
     this.emitConversation(conversation);
 
-    try {
-      const result = await client.prompt({
-        sessionId: conversation.agentSessionId,
+    const promptAsNewTurn = () =>
+      client.prompt({
+        sessionId: conversation.agentSessionId!,
         content: payload.contentBlocks,
         clientMessageId: payload.clientMessageId,
-        model: payload.model,
+        model: effectiveModel,
         reasoningEffort: payload.reasoningEffort,
         permissionMode: payload.permissionMode,
         collaborationMode: payload.collaborationMode ?? conversation.collaborationMode,
         cwd: conversation.cwd,
       });
+
+    try {
+      const steer = (client as { steer?: (input: { sessionId: string; turnId: string; content: AgentContentBlock[] }) => Promise<unknown> }).steer;
+      let result: unknown;
+      if (shouldSteer && typeof steer === "function") {
+        try {
+          result = await steer.call(client, {
+            sessionId: conversation.agentSessionId,
+            turnId: activeTurnId!,
+            content: payload.contentBlocks,
+          });
+        } catch (steerError) {
+          this.forgetCurrentTurn(conversation.id, activeTurnId);
+          const userItem = this.findItem(conversation.id, payload.clientMessageId);
+          if (userItem) {
+            this.upsertItem(conversation.id, {
+              ...userItem,
+              metadata: {
+                ...(userItem.metadata ?? {}),
+                delivery: "new_turn",
+                fallbackFrom: "steer",
+                failedTargetTurnId: activeTurnId,
+              },
+              updatedAt: Date.now(),
+            });
+          }
+          this.addItem(conversation.id, {
+            id: id("status"),
+            conversationId: conversation.id,
+            type: "status",
+            role: "system",
+            text: "Codex 未接收运行中追加输入，已改为发送新消息。",
+            status: "running",
+            createdAt: Date.now(),
+          });
+          result = await promptAsNewTurn();
+        }
+      } else {
+        result = await promptAsNewTurn();
+      }
       const nextAgentSessionId = this.extractSessionId(result);
       if (nextAgentSessionId && nextAgentSessionId !== conversation.agentSessionId) {
         if (conversation.agentSessionId) this.conversationByAgentSessionId.delete(conversation.agentSessionId);
@@ -2120,6 +2690,9 @@ export class AgentWorkspaceProxy {
   }
 
   private handleRequest(method: string, params: unknown): Promise<unknown> | unknown {
+    if (method === "claude/askUserQuestion") {
+      return this.handleStructuredInput({ ...(asRecord(params) ?? {}), source: method }, true);
+    }
     if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") {
       return this.handleStructuredInput(params, true);
     }
@@ -2167,7 +2740,6 @@ export class AgentWorkspaceProxy {
     if (
       method.startsWith("account/") ||
       method.startsWith("mcpServer/startupStatus/") ||
-      method === "thread/status/changed" ||
       method === "thread/tokenUsage/updated" ||
       method === "serverRequest/resolved" ||
       method === "mcpServer/oauthLogin/completed"
@@ -2176,6 +2748,25 @@ export class AgentWorkspaceProxy {
     }
 
     const conversationId = this.conversationIdFromParams(params) ?? this.fallbackConversationId();
+    if (method === "thread/status/changed") {
+      const status = agentStatusFromThreadStatus(params);
+      if (conversationId && status) {
+        const raw = asRecord(params);
+        const turnId = this.extractTurnId(raw);
+        if (turnId && (status === "running" || status === "waiting_permission")) {
+          this.rememberTurnConversationId(conversationId, turnId);
+        }
+        if (status === "idle" || status === "error") {
+          this.forgetCurrentTurn(conversationId, turnId);
+        }
+        const message =
+          status === "error"
+            ? firstString(raw, ["message", "error", "reason"])
+            : undefined;
+        this.updateConversationStatus(conversationId, status, message);
+      }
+      return;
+    }
     if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") {
       this.handleStructuredInput(params);
       return;
@@ -2685,9 +3276,8 @@ export class AgentWorkspaceProxy {
     const raw = asRecord(params) ?? {};
     const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
     const source = firstString(raw, ["method", "source", "requestMethod"]);
-    const formatResponse = source === "mcpServer/elicitation/request"
-      ? formatMcpElicitationResponse
-      : formatStructuredInputResponse;
+    const formatResponse = (answers: Record<string, string[]>, input?: AgentStructuredInput) =>
+      formatStructuredInputResponseForSource(source, answers, input);
     if (!conversationId) return waitForResponse ? Promise.resolve(formatResponse({})) : undefined;
     const structuredInput = decodeStructuredInput(raw);
     if (!structuredInput) return waitForResponse ? Promise.resolve(formatResponse({})) : undefined;
@@ -2711,13 +3301,13 @@ export class AgentWorkspaceProxy {
       const timer = setTimeout(() => {
         this.pendingStructuredInputs.delete(structuredInput.requestId);
         this.structuredInputWaiters.delete(structuredInput.requestId);
-        resolve(formatResponse({}));
+        resolve(formatResponse({}, structuredInput));
         this.markStructuredInput(conversationId, structuredInput.requestId, {
           inputPending: false,
           inputError: "等待用户输入超时",
         });
       }, PERMISSION_TIMEOUT_MS);
-      this.structuredInputWaiters.set(structuredInput.requestId, { resolve, timer, source });
+      this.structuredInputWaiters.set(structuredInput.requestId, { resolve, timer, source, input: structuredInput });
     });
   }
 
@@ -2773,6 +3363,12 @@ export class AgentWorkspaceProxy {
       conversationId,
       type: "permission",
       permission,
+      metadata: {
+        protocol: "v2",
+        permissionLive: true,
+        permissionExpired: false,
+        permissionPending: false,
+      },
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -2803,10 +3399,13 @@ export class AgentWorkspaceProxy {
     optionId?: string;
   }): void {
     const permission = this.pendingPermissions.get(payload.requestId);
+    const waiter = this.permissionWaiters.get(payload.requestId);
+    const existingItem = this.findItem(payload.conversationId, `permission:${payload.requestId}`);
+    const alreadyResolved = Boolean(existingItem?.metadata?.permissionOutcome);
+    if (!permission && !waiter && alreadyResolved) return;
     this.pendingPermissions.delete(payload.requestId);
     const selectedOptionId =
       payload.optionId ?? selectPermissionOption(permission, payload.outcome);
-    const waiter = this.permissionWaiters.get(payload.requestId);
     if (waiter) {
       clearTimeout(waiter.timer);
       this.permissionWaiters.delete(payload.requestId);
@@ -2832,7 +3431,9 @@ export class AgentWorkspaceProxy {
       permissionError: undefined,
       permissionPending: false,
     });
-    this.updateConversationStatus(payload.conversationId, "running");
+    if (permission || waiter || existingItem) {
+      this.updateConversationStatus(payload.conversationId, "running");
+    }
   }
 
   private respondStructuredInput(payload: {
@@ -2841,15 +3442,15 @@ export class AgentWorkspaceProxy {
     answers: Record<string, string[]>;
   }): void {
     const pending = this.pendingStructuredInputs.get(payload.requestId);
-    this.pendingStructuredInputs.delete(payload.requestId);
     const waiter = this.structuredInputWaiters.get(payload.requestId);
+    const existingItem = this.findItem(payload.conversationId, `input:${payload.requestId}`);
+    const alreadySubmitted = existingItem?.metadata?.inputSubmitted === true;
+    if (!pending && !waiter && alreadySubmitted) return;
+    this.pendingStructuredInputs.delete(payload.requestId);
     if (waiter) {
       clearTimeout(waiter.timer);
       this.structuredInputWaiters.delete(payload.requestId);
-      const formatResponse = waiter.source === "mcpServer/elicitation/request"
-        ? formatMcpElicitationResponse
-        : formatStructuredInputResponse;
-      waiter.resolve(formatResponse(payload.answers));
+      waiter.resolve(formatStructuredInputResponseForSource(waiter.source, payload.answers, waiter.input));
     }
     this.markStructuredInput(payload.conversationId, payload.requestId, {
       inputPending: false,
@@ -2858,7 +3459,9 @@ export class AgentWorkspaceProxy {
       inputError: undefined,
       answers: payload.answers,
     });
-    this.updateConversationStatus(pending?.conversationId ?? payload.conversationId, "running");
+    if (pending || waiter || existingItem) {
+      this.updateConversationStatus(pending?.conversationId ?? payload.conversationId, "running");
+    }
   }
 
   private markPermission(
@@ -3058,7 +3661,7 @@ export class AgentWorkspaceProxy {
     this.input.send(createEnvelope({
       type: "agent.v2.event",
       sessionId: this.input.sessionId,
-      payload: { conversationId, conversation, item },
+      payload: { conversationId, conversation: conversation ? { ...conversation } : undefined, item },
     }));
   }
 
@@ -3066,7 +3669,7 @@ export class AgentWorkspaceProxy {
     this.input.send(createEnvelope({
       type: "agent.v2.event",
       sessionId: this.input.sessionId,
-      payload: { conversationId: conversation.id, conversation },
+      payload: { conversationId: conversation.id, conversation: { ...conversation } },
     }));
   }
 
@@ -3099,6 +3702,21 @@ export class AgentWorkspaceProxy {
       sessionId: this.input.sessionId,
       payload: input,
     }));
+  }
+
+  private rejectAgentAction(
+    conversation: AgentConversation,
+    message: string,
+    status: AgentStatus = "idle",
+  ): void {
+    this.updateConversationStatus(conversation.id, status, message);
+    this.addItem(conversation.id, {
+      id: id("error"),
+      conversationId: conversation.id,
+      type: "error",
+      error: message,
+      createdAt: Date.now(),
+    });
   }
 
   private updateConversationPreview(
@@ -3228,12 +3846,22 @@ export class AgentWorkspaceProxy {
   private handleProviderExit(provider: AgentProvider, message: string): void {
     this.clients.delete(provider);
     this.agentProtocols.delete(provider);
-    this.cancelPendingPermissions();
+    this.providerErrors.set(provider, message);
+    for (const conversation of this.conversations.values()) {
+      if (conversation.provider === provider && conversation.status === "waiting_permission") {
+        this.cancelPendingPermissions(conversation.id, false);
+      }
+    }
     for (const conversation of this.conversations.values()) {
       if (conversation.provider !== provider) continue;
+      if (conversation.status !== "running" && conversation.status !== "waiting_permission") {
+        this.emitConversation(conversation);
+        continue;
+      }
       conversation.status = "error";
       conversation.lastMessagePreview = message;
       conversation.lastActivityAt = Date.now();
+      this.forgetCurrentTurn(conversation.id);
       this.emitConversation(conversation);
       this.addItem(conversation.id, {
         id: id("error"),
@@ -3246,8 +3874,9 @@ export class AgentWorkspaceProxy {
     this.sendCapabilities();
   }
 
-  private cancelPendingPermissions(conversationId?: string): void {
+  private cancelPendingPermissions(conversationId?: string, updateStatus = true): void {
     for (const [requestId, waiter] of this.permissionWaiters) {
+      if (conversationId && this.itemConversationIds.get(requestId) !== conversationId) continue;
       clearTimeout(waiter.timer);
       waiter.resolve(formatPermissionResponse(
         this.permissionSources.get(requestId),
@@ -3257,11 +3886,12 @@ export class AgentWorkspaceProxy {
       this.pendingPermissions.delete(requestId);
       this.permissionSources.delete(requestId);
     }
-    this.permissionWaiters.clear();
+    if (!conversationId) this.permissionWaiters.clear();
     for (const [requestId, waiter] of this.structuredInputWaiters) {
-      clearTimeout(waiter.timer);
-      waiter.resolve(formatStructuredInputResponse({}));
       const pending = this.pendingStructuredInputs.get(requestId);
+      if (conversationId && pending?.conversationId !== conversationId) continue;
+      clearTimeout(waiter.timer);
+      waiter.resolve(formatStructuredInputResponseForSource(waiter.source, {}, waiter.input));
       if (pending) {
         this.markStructuredInput(pending.conversationId, requestId, {
           inputPending: false,
@@ -3269,9 +3899,10 @@ export class AgentWorkspaceProxy {
         });
       }
       this.pendingStructuredInputs.delete(requestId);
+      this.structuredInputWaiters.delete(requestId);
     }
-    this.structuredInputWaiters.clear();
-    if (conversationId) this.updateConversationStatus(conversationId, "idle");
+    if (!conversationId) this.structuredInputWaiters.clear();
+    if (conversationId && updateStatus) this.updateConversationStatus(conversationId, "idle");
   }
 
   private extractSessionId(value: unknown): string | undefined {
@@ -3359,6 +3990,37 @@ function formatStructuredInputResponse(answers: Record<string, string[]>): unkno
   };
 }
 
+function formatClaudeAskUserQuestionResponse(
+  answers: Record<string, string[]>,
+  input?: AgentStructuredInput,
+): unknown {
+  const questions = input?.questions ?? [];
+  const byQuestionText: Record<string, string | string[]> = {};
+  for (const question of questions) {
+    const values = answers[question.id] ?? answers[question.question] ?? [];
+    const cleaned = values.map((value) => value.trim()).filter(Boolean);
+    if (cleaned.length === 0) continue;
+    byQuestionText[question.question] = question.selectionLimit && question.selectionLimit > 1
+      ? cleaned
+      : cleaned[0] ?? "";
+  }
+  return {
+    behavior: "allow",
+    updatedInput: {
+      questions: questions.map((question) => ({
+        question: question.question,
+        header: question.header,
+        options: question.options?.map((option) => ({
+          label: option.label,
+          description: option.description,
+        })) ?? [],
+        multiSelect: Boolean(question.selectionLimit && question.selectionLimit > 1),
+      })),
+      answers: byQuestionText,
+    },
+  };
+}
+
 function formatMcpElicitationResponse(answers: Record<string, string[]>): unknown {
   const content = Object.fromEntries(
     Object.entries(answers).map(([questionId, values]) => [
@@ -3371,6 +4033,20 @@ function formatMcpElicitationResponse(answers: Record<string, string[]>): unknow
     content,
     _meta: { source: "linkshell" },
   };
+}
+
+function formatStructuredInputResponseForSource(
+  source: string | undefined,
+  answers: Record<string, string[]>,
+  input?: AgentStructuredInput,
+): unknown {
+  if (source === "mcpServer/elicitation/request") {
+    return formatMcpElicitationResponse(answers);
+  }
+  if (source === "claude/askUserQuestion") {
+    return formatClaudeAskUserQuestionResponse(answers, input);
+  }
+  return formatStructuredInputResponse(answers);
 }
 
 function formatPermissionResponse(

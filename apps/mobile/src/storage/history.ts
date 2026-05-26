@@ -74,6 +74,19 @@ export async function removeBySessionId(sessionId: string): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
 }
 
+export async function removeBySessionIdAndServerUrl(
+  sessionId: string,
+  serverUrl: string,
+): Promise<void> {
+  const normalized = serverUrl.replace(/\/+$/, "");
+  const history = await loadHistory();
+  const filtered = history.filter((item) =>
+    item.sessionId !== sessionId ||
+    item.serverUrl.replace(/\/+$/, "") !== normalized
+  );
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+}
+
 export async function removeByServerUrl(serverUrl: string): Promise<void> {
   const normalized = serverUrl.replace(/\/+$/, "");
   const history = await loadHistory();

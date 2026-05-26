@@ -35,6 +35,7 @@ export class JsonRpcStdioTransport {
     }
   >();
   private buffer = "";
+  private closed = false;
 
   constructor(
     private readonly command: string,
@@ -46,6 +47,7 @@ export class JsonRpcStdioTransport {
 
   start(cwd: string): void {
     if (this.child) return;
+    this.closed = false;
     this.child = spawn(this.command, {
       cwd,
       shell: true,
@@ -169,6 +171,9 @@ export class JsonRpcStdioTransport {
   }
 
   private failAll(message: string): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.child = undefined;
     this.onExit(message);
     for (const [, pending] of this.pending) {
       if (pending.timer) clearTimeout(pending.timer);

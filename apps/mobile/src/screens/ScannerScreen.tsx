@@ -36,17 +36,14 @@ export function ScannerScreen({ onClose, onScan }: ScannerScreenProps) {
     if (scannedRef.current) return;
     scannedRef.current = true;
 
-    console.log('[LinkShell] Scanned raw:', result.data);
     const parsed = parsePairingLink(result.data);
     if (!parsed) {
-      console.warn('[LinkShell] QR parse failed for:', result.data);
       setScanned(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError("当前二维码不是 LinkShell 配对二维码。请在 CLI 中重新生成。");
       return;
     }
 
-    console.log('[LinkShell] Parsed QR:', JSON.stringify(parsed));
     setScanned(true);
     setError(null);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

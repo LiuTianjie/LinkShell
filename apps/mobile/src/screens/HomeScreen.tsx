@@ -25,9 +25,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { useTheme, type Theme } from "../theme";
 import type { ConnectionRecord } from "../storage/history";
-import { loadHistory, removeBySessionId } from "../storage/history";
-import { removeProjectsBySessionId } from "../storage/projects";
+import { loadHistory } from "../storage/history";
 import { getDefaultServer, type SavedServer } from "../storage/servers";
+
+function normalizeServerUrl(url: string): string {
+  return url.replace(/\/+$/, "");
+}
 
 interface HomeScreenProps {
   gatewayBaseUrl: string;
@@ -35,6 +38,7 @@ interface HomeScreenProps {
   connectionDetail?: string | null;
   onOpenConnectionSheet: () => void;
   onConnectSession: (sessionId: string, serverUrl?: string) => void;
+  onSessionRemoved?: (sessionId: string, serverUrl: string) => void | Promise<void>;
   refreshKey?: number;
 }
 
@@ -44,6 +48,7 @@ export function HomeScreen({
   connectionDetail,
   onOpenConnectionSheet,
   onConnectSession,
+  onSessionRemoved,
   refreshKey,
 }: HomeScreenProps) {
   const { theme } = useTheme();
@@ -88,15 +93,13 @@ export function HomeScreen({
     [onConnectSession],
   );
 
-  const handleDeleteSession = useCallback(async (sessionId: string) => {
+  const handleDeleteSession = useCallback(async (sessionId: string, serverUrl: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await Promise.all([
-      removeBySessionId(sessionId),
-      removeProjectsBySessionId(sessionId),
-    ]);
-    setHistory((prev) => prev.filter((r) => r.sessionId !== sessionId));
+    await onSessionRemoved?.(sessionId, serverUrl);
+    const normalized = normalizeServerUrl(serverUrl);
+    setHistory((prev) => prev.filter((r) => normalizeServerUrl(r.serverUrl) !== normalized));
     swipeableRefs.current.delete(sessionId);
-  }, []);
+  }, [onSessionRemoved]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -431,7 +434,7 @@ export function HomeScreen({
                 onPress={() =>
                   handleResumeSession(item.sessionId, item.serverUrl)
                 }
-                onDelete={() => handleDeleteSession(item.sessionId)}
+                onDelete={() => handleDeleteSession(item.sessionId, item.serverUrl)}
               />
             ))}
           </View>

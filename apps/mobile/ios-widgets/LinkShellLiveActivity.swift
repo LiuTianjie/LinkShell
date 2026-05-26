@@ -243,7 +243,7 @@ struct StatusBadge: View {
             Circle()
                 .fill(statusColor(status))
                 .frame(width: 7, height: 7)
-            Text(permissionCount > 1 ? "\(permissionCount) 个授权" : statusLabel(status))
+            Text(statusText)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
@@ -253,6 +253,12 @@ struct StatusBadge: View {
         .background(
             Capsule().fill(statusColor(status).opacity(0.22))
         )
+    }
+
+    private var statusText: String {
+        if permissionCount > 1 { return "\(permissionCount) 个授权" }
+        if status == "waiting_permission" && permissionCount == 0 { return "待回答" }
+        return statusLabel(status)
     }
 }
 

@@ -702,6 +702,7 @@ export const agentV2ConversationOpenPayloadSchema = z.object({
 export const agentV2ConversationOpenedPayloadSchema = z.object({
   conversation: agentV2ConversationSchema,
   snapshot: z.array(agentV2TimelineItemSchema).default([]),
+  requestedConversationId: z.string().min(1).optional(),
 });
 
 export const agentV2ConversationListPayloadSchema = z.object({
@@ -716,6 +717,8 @@ export const agentV2PromptPayloadSchema = z.object({
   conversationId: z.string().min(1),
   clientMessageId: z.string().min(1),
   contentBlocks: z.array(agentContentBlockSchema).min(1),
+  delivery: z.enum(["auto", "new_turn", "steer"]).optional().default("auto"),
+  targetTurnId: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   reasoningEffort: agentReasoningEffortSchema.optional(),
   permissionMode: agentPermissionModeSchema.optional(),
@@ -887,6 +890,59 @@ export const protocolMessageSchemas = {
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;
+
+export const agentV2HostToClientMessageTypes = [
+  "agent.v2.capabilities",
+  "agent.v2.conversation.opened",
+  "agent.v2.conversation.list.result",
+  "agent.v2.event",
+  "agent.v2.snapshot",
+  "agent.v2.permission.request",
+  "agent.v2.notice",
+] as const satisfies readonly ProtocolMessageType[];
+
+export const agentV2ClientWriteMessageTypes = [
+  "agent.v2.conversation.open",
+  "agent.v2.prompt",
+  "agent.v2.command.execute",
+  "agent.v2.cancel",
+  "agent.v2.permission.respond",
+  "agent.v2.structured_input.respond",
+] as const satisfies readonly ProtocolMessageType[];
+
+export const agentV2ClientReadMessageTypes = [
+  "agent.v2.capabilities.request",
+  "agent.v2.conversation.list",
+  "agent.v2.snapshot.request",
+] as const satisfies readonly ProtocolMessageType[];
+
+export type AgentV2MessageRoute =
+  | "host_to_client"
+  | "client_write"
+  | "client_read";
+
+const agentV2HostToClientSet = new Set<string>(agentV2HostToClientMessageTypes);
+const agentV2ClientWriteSet = new Set<string>(agentV2ClientWriteMessageTypes);
+const agentV2ClientReadSet = new Set<string>(agentV2ClientReadMessageTypes);
+
+export function agentV2MessageRoute(type: string): AgentV2MessageRoute | null {
+  if (agentV2HostToClientSet.has(type)) return "host_to_client";
+  if (agentV2ClientWriteSet.has(type)) return "client_write";
+  if (agentV2ClientReadSet.has(type)) return "client_read";
+  return null;
+}
+
+export function isAgentV2HostToClientMessage(type: string): boolean {
+  return agentV2MessageRoute(type) === "host_to_client";
+}
+
+export function isAgentV2ClientWriteMessage(type: string): boolean {
+  return agentV2MessageRoute(type) === "client_write";
+}
+
+export function isAgentV2ClientReadMessage(type: string): boolean {
+  return agentV2MessageRoute(type) === "client_read";
+}
 
 // ── UUID helper (works in Node, Web, and Expo) ─────────────────────
 

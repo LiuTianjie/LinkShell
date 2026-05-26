@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createEnvelope,
+  isAgentV2HostToClientMessage,
   parseEnvelope,
   parseTypedPayload,
   serializeEnvelope,
@@ -12,7 +13,14 @@ import type {
   TerminalStreamEvent,
   TerminalStreamSnapshot,
 } from "./useSession";
+import {
+  connectionDetailForClose,
+  reconnectDelayForAttempt,
+  sessionErrorConnectionImpact,
+  shouldReconnectAfterClose,
+} from "./session-connection-policy";
 import { ensureDeviceToken, setDeviceToken } from "../storage/device-token";
+import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -251,10 +259,11 @@ export interface SessionManagerHandle {
 // ── Constants ──────────────────────────────────────────────────────
 
 const HEARTBEAT_INTERVAL = 15_000;
-const RECONNECT_BASE_DELAY = 1_000;
-const RECONNECT_MAX_DELAY = 15_000;
-const RECONNECT_MAX_ATTEMPTS = 15;
 const TERMINAL_REPLAY_LIMIT = 100;
+
+function normalizeGatewayUrl(url: string): string {
+  return url.replace(/\/+$/, "");
+}
 
 function mergeAgentMessages(
   current: AgentMessage[],
@@ -431,7 +440,7 @@ function createInternalSession(
   const listeners = new Set<(event: TerminalStreamEvent) => void>();
   return {
     sessionId,
-    gatewayUrl,
+    gatewayUrl: normalizeGatewayUrl(gatewayUrl),
     deviceId,
     status: "connecting",
     controllerId: null,
@@ -634,28 +643,13 @@ export function useSessionManager(): SessionManagerHandle {
 
   const flushControlOutbound = (s: InternalSession) => {
     if (!s.socket || s.socket.readyState !== WebSocket.OPEN) {
-      console.warn("[SessionControl] flush skipped socket not open", {
-        sessionId: s.sessionId,
-        pendingControlCount: s.pendingControlOutbound.length,
-      });
       return;
     }
     if (s.controllerId !== s.deviceId) {
-      console.warn("[SessionControl] flush skipped not controller", {
-        sessionId: s.sessionId,
-        deviceId: s.deviceId,
-        controllerId: s.controllerId,
-        pendingControlCount: s.pendingControlOutbound.length,
-      });
       return;
     }
     const queued = s.pendingControlOutbound.splice(0);
     s.pendingControlDedupeKeys.clear();
-    if (queued.length > 0) console.log("[SessionControl] flush sending", {
-      sessionId: s.sessionId,
-      count: queued.length,
-      types: queued.map((item) => item.envelope.type),
-    });
     for (const item of queued) {
       s.socket.send(serializeEnvelope(item.envelope));
     }
@@ -724,17 +718,9 @@ export function useSessionManager(): SessionManagerHandle {
     options?: { queue?: boolean; dedupeKey?: string },
   ): boolean => {
     const requestId = (envelope.payload as { requestId?: unknown } | undefined)?.requestId;
-    console.log("[LiveActivityAction] session sendWithControl start", {
-      sessionId: s.sessionId,
-      deviceId: s.deviceId,
-      controllerId: s.controllerId,
-      type: envelope.type,
-      requestId,
-      queue: options?.queue,
-      dedupeKey: options?.dedupeKey,
-      socketOpen: s.socket?.readyState === WebSocket.OPEN,
-      pendingControlCount: s.pendingControlOutbound.length,
-    });
+    if (typeof requestId === "string" && s.pendingPermissionResponseIds.has(requestId)) {
+      return true;
+    }
     const claimAccepted = sendRaw(
       s,
       createEnvelope({
@@ -750,21 +736,9 @@ export function useSessionManager(): SessionManagerHandle {
     let accepted = true;
     if (s.controllerId === s.deviceId) {
       accepted = sendRaw(s, envelope, options);
-      console.log("[LiveActivityAction] session sendWithControl sent immediately", {
-        sessionId: s.sessionId,
-        type: envelope.type,
-        requestId,
-        accepted,
-      });
     } else if (options?.queue) {
       if (options.dedupeKey && s.pendingControlDedupeKeys.has(options.dedupeKey)) {
         accepted = true;
-        console.log("[LiveActivityAction] session sendWithControl already pending", {
-          sessionId: s.sessionId,
-          type: envelope.type,
-          requestId,
-          dedupeKey: options.dedupeKey,
-        });
       } else {
         if (s.pendingControlOutbound.length >= OUTBOUND_QUEUE_LIMIT) {
           const dropped = s.pendingControlOutbound.shift();
@@ -772,21 +746,9 @@ export function useSessionManager(): SessionManagerHandle {
         }
         s.pendingControlOutbound.push({ envelope, dedupeKey: options.dedupeKey });
         if (options.dedupeKey) s.pendingControlDedupeKeys.add(options.dedupeKey);
-        console.log("[LiveActivityAction] session sendWithControl queued until grant", {
-          sessionId: s.sessionId,
-          type: envelope.type,
-          requestId,
-          dedupeKey: options.dedupeKey,
-          pendingControlCount: s.pendingControlOutbound.length,
-        });
       }
     } else {
       accepted = false;
-      console.warn("[LiveActivityAction] session sendWithControl rejected no queue", {
-        sessionId: s.sessionId,
-        type: envelope.type,
-        requestId,
-      });
     }
     if (accepted && typeof requestId === "string") {
       s.pendingPermissionResponseIds.add(requestId);
@@ -795,15 +757,6 @@ export function useSessionManager(): SessionManagerHandle {
       }, 5_000);
     }
     const result = claimAccepted && accepted;
-    console.log("[LiveActivityAction] session sendWithControl result", {
-      sessionId: s.sessionId,
-      type: envelope.type,
-      requestId,
-      claimAccepted,
-      accepted,
-      result,
-      pendingControlCount: s.pendingControlOutbound.length,
-    });
     return result;
   };
 
@@ -838,11 +791,19 @@ export function useSessionManager(): SessionManagerHandle {
     const base = s.gatewayUrl
       .replace(/^https:/, "wss:")
       .replace(/^http:/, "ws:");
+    if (!deviceTokenRef.current) {
+      try {
+        deviceTokenRef.current = await ensureDeviceToken();
+        tick();
+      } catch {}
+    }
     const tokenParam = deviceTokenRef.current
       ? `&token=${encodeURIComponent(deviceTokenRef.current)}`
       : "";
 
-    // Add Supabase auth token for official gateways
+    // Add Supabase auth token for official gateways. Token refresh failures are
+    // treated as transient: the socket may be rejected, but the reconnect loop
+    // below keeps the session alive until auth/network recovers.
     let authParam = "";
     try {
       const { getValidSession } = await import("../lib/supabase");
@@ -850,7 +811,9 @@ export function useSessionManager(): SessionManagerHandle {
       if (session?.accessToken) {
         authParam = `&auth_token=${encodeURIComponent(session.accessToken)}`;
       }
-    } catch {}
+    } catch {
+      s.connectionDetail = "认证刷新暂时失败，保持连接并重试。";
+    }
 
     const url = `${base}/ws?sessionId=${encodeURIComponent(s.sessionId)}&role=client&deviceId=${s.deviceId}${tokenParam}${authParam}`;
     const ws = new WebSocket(url);
@@ -879,9 +842,18 @@ export function useSessionManager(): SessionManagerHandle {
           const headers: Record<string, string> = {};
           if (deviceTokenRef.current)
             headers["Authorization"] = `Bearer ${deviceTokenRef.current}`;
-          const res = await fetch(
-            `${s.gatewayUrl}/sessions/${encodeURIComponent(s.sessionId)}`,
+          let authQuery = "";
+          try {
+            const { getValidSession } = await import("../lib/supabase");
+            const session = await getValidSession();
+            if (session?.accessToken) {
+              authQuery = `?auth_token=${encodeURIComponent(session.accessToken)}`;
+            }
+          } catch {}
+          const res = await fetchWithTimeout(
+            `${s.gatewayUrl}/sessions/${encodeURIComponent(s.sessionId)}${authQuery}`,
             { headers },
+            5_000,
           );
           if (!res.ok) {
             if (s.status === "connecting" || s.status === "reconnecting") {
@@ -1229,15 +1201,6 @@ export function useSessionManager(): SessionManagerHandle {
         }
         case "session.error": {
           const p = parseTypedPayload("session.error", envelope.payload);
-          console.warn("[LiveActivityAction] session error", {
-            sessionId: s.sessionId,
-            code: p.code,
-            message: p.message,
-            pendingPermissionResponseIds: [...s.pendingPermissionResponseIds],
-            pendingControlCount: s.pendingControlOutbound.length,
-            controllerId: s.controllerId,
-            deviceId: s.deviceId,
-          });
           if (p.code === "control_conflict") {
             if (s.pendingPermissionResponseIds.size > 0) {
               s.pendingPermissionResponseIds.clear();
@@ -1249,26 +1212,27 @@ export function useSessionManager(): SessionManagerHandle {
             agentWorkspaceCbRef.current?.(envelope);
             break;
           }
+          const impact = sessionErrorConnectionImpact(p.code);
           s.connectionDetail = p.message;
-          if (p.code === "session_terminated") {
+          if (impact === "session_exited") {
             s.status = "session_exited";
             tick();
             break;
           }
-          s.status = `error:${p.code}` as ConnectionStatus;
+          if (impact === "subscription_expired") {
+            s.status = `error:${p.code}` as ConnectionStatus;
+            tick();
+            break;
+          }
+          // Protocol/agent/session errors are surfaced to the UI, but they
+          // should not poison the websocket lifecycle. The connection remains
+          // usable unless the gateway actually closes the socket.
           tick();
           break;
         }
         case "control.grant": {
           const p = parseTypedPayload("control.grant", envelope.payload);
           s.controllerId = p.deviceId;
-          if (p.deviceId === s.deviceId && s.pendingControlOutbound.length > 0) console.log("[SessionControl] control grant", {
-            sessionId: s.sessionId,
-            deviceId: s.deviceId,
-            controllerId: p.deviceId,
-            isMine: p.deviceId === s.deviceId,
-            pendingControlCount: s.pendingControlOutbound.length,
-          });
           if (p.deviceId === s.deviceId) {
             flushControlOutbound(s);
             agentWorkspaceCbRef.current?.(envelope);
@@ -1431,6 +1395,9 @@ export function useSessionManager(): SessionManagerHandle {
           break;
         }
         default:
+          if (isAgentV2HostToClientMessage(envelope.type)) {
+            agentWorkspaceCbRef.current?.(envelope);
+          }
           break;
       }
     };
@@ -1438,17 +1405,11 @@ export function useSessionManager(): SessionManagerHandle {
     ws.onclose = (event) => {
       stopHeartbeat(s);
       if (s.socket === ws) s.socket = null;
-      // 4001 = unauthorized (token doesn't own this session) — don't reconnect
       const code = (event as any)?.code as number | undefined;
-      if (code === 4001) {
-        s.status = "disconnected";
-        s.connectionDetail = "Unauthorized: device token does not own this session.";
-        tick();
-        return;
-      }
-      if (!s.manualDisconnect && s.status !== "session_exited") {
-        s.connectionDetail = "Gateway connection lost. Reconnecting...";
+      if (shouldReconnectAfterClose({ code, manualDisconnect: s.manualDisconnect, status: s.status })) {
+        s.connectionDetail = connectionDetailForClose(code);
         scheduleReconnect(s);
+        return;
       }
     };
 
@@ -1456,19 +1417,9 @@ export function useSessionManager(): SessionManagerHandle {
   };
 
   const scheduleReconnect = (s: InternalSession) => {
-    if (s.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
-      s.connectionDetail =
-        "Gateway is unreachable. Retry when the server is back.";
-      s.status = "disconnected";
-      tick();
-      return;
-    }
     s.status = "reconnecting";
     tick();
-    const delay = Math.min(
-      RECONNECT_BASE_DELAY * 2 ** s.reconnectAttempts,
-      RECONNECT_MAX_DELAY,
-    );
+    const delay = reconnectDelayForAttempt(s.reconnectAttempts);
     s.reconnectAttempts++;
     s.reconnectTimer = setTimeout(() => connectSocket(s, true), delay);
   };
@@ -1483,13 +1434,18 @@ export function useSessionManager(): SessionManagerHandle {
   const claim = useCallback(
     async (pairingCode: string, gatewayUrl: string): Promise<string | null> => {
       try {
+        const normalizedGatewayUrl = normalizeGatewayUrl(gatewayUrl);
         const currentToken =
           deviceTokenRef.current ?? (await ensureDeviceToken());
-        const res = await fetch(`${gatewayUrl}/pairings/claim`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ pairingCode, deviceToken: currentToken }),
-        });
+        const res = await fetchWithTimeout(
+          `${normalizedGatewayUrl}/pairings/claim`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ pairingCode, deviceToken: currentToken }),
+          },
+          10_000,
+        );
         const body = (await res.json()) as {
           sessionId?: string;
           deviceToken?: string;
@@ -1502,7 +1458,7 @@ export function useSessionManager(): SessionManagerHandle {
         }
 
         const sid = body.sessionId;
-        const s = createInternalSession(sid, gatewayUrl, deviceIdRef.current);
+        const s = createInternalSession(sid, normalizedGatewayUrl, deviceIdRef.current);
         sessionsRef.current.set(sid, s);
         setActiveSessionId(sid);
         connectSocket(s);
@@ -1517,16 +1473,23 @@ export function useSessionManager(): SessionManagerHandle {
 
   const connectToSession = useCallback(
     (sessionId: string, gatewayUrl: string) => {
-      // If already connected, just switch to it
+      const normalizedGatewayUrl = normalizeGatewayUrl(gatewayUrl);
       const existing = sessionsRef.current.get(sessionId);
       if (existing) {
+        existing.gatewayUrl = normalizedGatewayUrl || existing.gatewayUrl;
         setActiveSessionId(sessionId);
+        const socketOpen = existing.socket?.readyState === WebSocket.OPEN;
+        const socketConnecting = existing.socket?.readyState === WebSocket.CONNECTING;
+        if (!socketOpen && !socketConnecting && existing.status !== "session_exited") {
+          connectSocket(existing, true);
+          tick();
+        }
         return;
       }
 
       const s = createInternalSession(
         sessionId,
-        gatewayUrl,
+        normalizedGatewayUrl,
         deviceIdRef.current,
       );
       sessionsRef.current.set(sessionId, s);

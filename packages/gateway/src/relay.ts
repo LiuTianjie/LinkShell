@@ -1,5 +1,6 @@
 import type WebSocket from "ws";
 import {
+  agentV2MessageRoute,
   parseEnvelope,
   parseTypedPayload,
   protocolMessageSchemas,
@@ -49,7 +50,7 @@ export function handleSocketMessage(
   }
 
   try {
-    if (isProtocolMessageType(envelope.type)) {
+    if (shouldValidatePayloadAtGateway(envelope.type)) {
       envelope = {
         ...envelope,
         payload: parseTypedPayload(envelope.type, envelope.payload),
@@ -79,6 +80,11 @@ function isProtocolMessageType(type: string): type is ProtocolMessageType {
   return Object.prototype.hasOwnProperty.call(protocolMessageSchemas, type);
 }
 
+function shouldValidatePayloadAtGateway(type: string): type is ProtocolMessageType {
+  if (agentV2MessageRoute(type) !== null) return false;
+  return isProtocolMessageType(type);
+}
+
 function sendSessionError(
   socket: WebSocket,
   sessionId: string,
@@ -102,6 +108,11 @@ function handleHostMessage(
   session: ReturnType<SessionManager["get"]> & {},
   sessions: SessionManager,
 ): void {
+  if (agentV2MessageRoute(envelope.type) === "host_to_client") {
+    broadcastToClients(session, envelope);
+    return;
+  }
+
   switch (envelope.type) {
     case "session.connect": {
       // Extract metadata from host's connect message
@@ -177,13 +188,6 @@ function handleHostMessage(
     case "agent.update":
     case "agent.permission.request":
     case "agent.snapshot":
-    case "agent.v2.capabilities":
-    case "agent.v2.conversation.opened":
-    case "agent.v2.conversation.list.result":
-    case "agent.v2.event":
-    case "agent.v2.snapshot":
-    case "agent.v2.permission.request":
-    case "agent.v2.notice":
     // Multi-terminal: host → clients
     case "terminal.spawned":
     case "terminal.list":
@@ -225,6 +229,17 @@ function handleClientMessage(
     );
     return false;
   };
+
+  const agentRoute = agentV2MessageRoute(envelope.type);
+  if (agentRoute === "client_write") {
+    if (!requireController()) return;
+    sendToHost(session, envelope);
+    return;
+  }
+  if (agentRoute === "client_read") {
+    sendToHost(session, envelope);
+    return;
+  }
 
   switch (envelope.type) {
     case "terminal.input": {
@@ -316,12 +331,6 @@ function handleClientMessage(
     case "agent.prompt":
     case "agent.cancel":
     case "agent.permission.response":
-    case "agent.v2.conversation.open":
-    case "agent.v2.prompt":
-    case "agent.v2.command.execute":
-    case "agent.v2.cancel":
-    case "agent.v2.permission.respond":
-    case "agent.v2.structured_input.respond":
     // Multi-terminal write ops: client → host (require controller)
     case "terminal.spawn":
     case "terminal.kill":
@@ -338,9 +347,6 @@ function handleClientMessage(
     case "terminal.history.request":
     case "agent.initialize":
     case "agent.session.list":
-    case "agent.v2.capabilities.request":
-    case "agent.v2.conversation.list":
-    case "agent.v2.snapshot.request":
       sendToHost(session, envelope);
       break;
     default:
