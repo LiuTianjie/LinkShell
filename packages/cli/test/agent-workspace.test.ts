@@ -485,6 +485,44 @@ describe("AgentWorkspaceProxy event routing", () => {
     ]);
   });
 
+  it("restarts Codex app-server once when thread/list hits a wedged transport", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.clear();
+    proxy.conversationByAgentSessionId.clear();
+    proxy.initialized = true;
+    let stopCalls = 0;
+    let restartCalls = 0;
+    proxy.clients.set("codex", {
+      stop: () => { stopCalls += 1; },
+      listSessions: async () => {
+        throw new Error("Transport channel closed, when Auth(TokenRefreshFailed(\"Failed to parse server response\"))");
+      },
+    });
+    proxy.ensureProviderClient = async () => {
+      restartCalls += 1;
+      const recovered = {
+        listSessions: async () => ({
+          sessions: [{ id: "thread-after-restart", cwd: "/repo", title: "Recovered" }],
+        }),
+      };
+      proxy.clients.set("codex", recovered);
+      return recovered;
+    };
+
+    await proxy.handleEnvelope({
+      id: "env-recover-list",
+      type: "agent.v2.snapshot.request",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {},
+    });
+
+    expect(stopCalls).toBe(1);
+    expect(restartCalls).toBe(1);
+    const snapshot = sent.find((envelope) => envelope.type === "agent.v2.snapshot");
+    expect(snapshot?.payload.conversations[0].agentSessionId).toBe("thread-after-restart");
+  });
+
   it("parses Codex thread/list data[] results", async () => {
     const { proxy, sent } = makeProxy();
     proxy.conversations.clear();
@@ -653,6 +691,52 @@ describe("AgentWorkspaceProxy event routing", () => {
       "assistant-read-1",
     ]);
     expect(opened?.payload.conversation.lastMessagePreview).toBe("history restored");
+  });
+
+  it("restarts Codex app-server once when opening a thread hits a wedged transport", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.get("conversation-a").status = "idle";
+    proxy.timelines.set("conversation-a", []);
+    proxy.initialized = true;
+    let restartCalls = 0;
+    proxy.clients.set("codex", {
+      stop: () => {},
+      loadSession: async () => {
+        throw new Error("ACP request timed out: thread/resume");
+      },
+    });
+    proxy.ensureProviderClient = async () => {
+      restartCalls += 1;
+      const recovered = {
+        loadSession: async () => ({
+          thread: {
+            id: "thread-a",
+            turns: [
+              {
+                id: "turn-recovered",
+                items: [
+                  { id: "assistant-recovered", type: "agentMessage", text: "recovered history" },
+                ],
+              },
+            ],
+          },
+        }),
+      };
+      proxy.clients.set("codex", recovered);
+      return recovered;
+    };
+
+    await proxy.handleEnvelope({
+      id: "env-open-recover",
+      type: "agent.v2.conversation.open",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: { conversationId: "conversation-a", agentSessionId: "thread-a", cwd: "/tmp", provider: "codex" },
+    });
+
+    expect(restartCalls).toBe(1);
+    const opened = sent.find((envelope) => envelope.type === "agent.v2.conversation.opened");
+    expect(opened?.payload.snapshot.map((item: any) => item.id)).toEqual(["assistant-recovered"]);
   });
 
   it("falls back to Codex thread/turns/list when thread/read cannot hydrate history", async () => {

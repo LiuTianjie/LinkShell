@@ -1705,6 +1705,28 @@ export class AgentWorkspaceProxy {
     return this.clients.get(provider);
   }
 
+  private shouldRecycleProviderClient(provider: AgentProvider, error: unknown): boolean {
+    if (provider !== "codex") return false;
+    const message = error instanceof Error ? error.message : String(error);
+    return /ACP agent is not running|ACP request timed out|Transport channel closed|TokenRefreshFailed|Failed to parse server response|channel closed|EPIPE|ECONNRESET/i.test(message);
+  }
+
+  private async recycleProviderClient(
+    provider: AgentProvider,
+    error: unknown,
+  ): Promise<AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined> {
+    if (!this.shouldRecycleProviderClient(provider, error)) return undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    const existing = this.clients.get(provider);
+    if (existing) {
+      try { existing.stop(); } catch {}
+    }
+    this.clients.delete(provider);
+    this.agentProtocols.delete(provider);
+    this.providerErrors.set(provider, message);
+    return this.ensureProviderClient(provider);
+  }
+
   private protocolForProvider(provider: AgentProvider): AgentProtocol | undefined {
     return this.agentProtocols.get(provider);
   }
@@ -1866,7 +1888,16 @@ export class AgentWorkspaceProxy {
     await this.initialize();
     for (const [provider, client] of this.clients) {
       try {
-        const result = await client.listSessions();
+        let activeClient = client;
+        let result: unknown;
+        try {
+          result = await activeClient.listSessions();
+        } catch (error) {
+          const recovered = await this.recycleProviderClient(provider, error);
+          if (!recovered) throw error;
+          activeClient = recovered;
+          result = await activeClient.listSessions();
+        }
         for (const remote of parseRemoteSessions(result)) {
           const agentSessionId = remote.id;
           const existingId = this.conversationByAgentSessionId.get(agentSessionId);
@@ -1906,7 +1937,7 @@ export class AgentWorkspaceProxy {
     conversation: AgentConversation,
     seedResult?: unknown,
   ): Promise<void> {
-    const client = this.clientForProvider(conversation.provider);
+    let client = this.clientForProvider(conversation.provider);
     if (!client || !conversation.agentSessionId) return;
     let source = seedResult;
     const hasSeedTurns = turnItemsFromThread(threadFromProviderResult(seedResult)).length > 0;
@@ -1919,6 +1950,8 @@ export class AgentWorkspaceProxy {
             includeTurns: true,
           });
         } catch (error) {
+          const recovered = await this.recycleProviderClient(conversation.provider, error);
+          if (recovered) client = recovered;
           if (this.input.verbose) {
             process.stderr.write(`[agent:v2] thread/read hydration failed for ${conversation.provider}: ${error instanceof Error ? error.message : String(error)}\n`);
           }
@@ -1934,12 +1967,27 @@ export class AgentWorkspaceProxy {
         }) => Promise<unknown> }).listTurns;
         if (typeof listTurns === "function") {
           try {
-            const turnsResult = await listTurns.call(client, {
-              sessionId: conversation.agentSessionId,
-              limit: MAX_TIMELINE_ITEMS,
-              sortDirection: "desc",
-              itemsView: "full",
-            });
+            let turnsResult: unknown;
+            try {
+              turnsResult = await listTurns.call(client, {
+                sessionId: conversation.agentSessionId,
+                limit: MAX_TIMELINE_ITEMS,
+                sortDirection: "desc",
+                itemsView: "full",
+              });
+            } catch (error) {
+              const recovered = await this.recycleProviderClient(conversation.provider, error);
+              if (!recovered) throw error;
+              client = recovered;
+              const recoveredListTurns = (client as { listTurns?: typeof listTurns }).listTurns;
+              if (typeof recoveredListTurns !== "function") throw error;
+              turnsResult = await recoveredListTurns.call(client, {
+                sessionId: conversation.agentSessionId,
+                limit: MAX_TIMELINE_ITEMS,
+                sortDirection: "desc",
+                itemsView: "full",
+              });
+            }
             const turnsThread = threadFromTurnsListResult(conversation.agentSessionId, turnsResult);
             if (turnsThread) source = { thread: turnsThread };
           } catch (error) {
@@ -2077,7 +2125,7 @@ export class AgentWorkspaceProxy {
       (agentSessionId ? this.conversations.get(this.conversationByAgentSessionId.get(agentSessionId) ?? "") : undefined);
     if (!payload.cwd && existingConversation?.cwd) cwd = existingConversation.cwd;
 
-    const client = await this.ensureProviderClient(provider);
+    let client = await this.ensureProviderClient(provider);
     if (!client) {
       const message = this.providerErrors.get(provider) ?? `${providerLabel(provider)} 启动失败。请确认 CLI 已安装并可用。`;
       if (existingConversation) {
@@ -2113,7 +2161,15 @@ export class AgentWorkspaceProxy {
       if ((this.timelines.get(existingConversation.id) ?? []).length === 0 && existingConversation.status !== "running") {
         try {
           const existingAgentSessionId = existingConversation.agentSessionId!;
-          const result = await client.loadSession({ sessionId: existingAgentSessionId, cwd });
+          let result: unknown;
+          try {
+            result = await client.loadSession({ sessionId: existingAgentSessionId, cwd });
+          } catch (error) {
+            const recovered = await this.recycleProviderClient(provider, error);
+            if (!recovered) throw error;
+            client = recovered;
+            result = await client.loadSession({ sessionId: existingAgentSessionId, cwd });
+          }
           const nextAgentSessionId = this.extractSessionId(result);
           if (nextAgentSessionId && nextAgentSessionId !== existingAgentSessionId) {
             this.conversationByAgentSessionId.delete(existingAgentSessionId);
@@ -2141,9 +2197,19 @@ export class AgentWorkspaceProxy {
     }
 
     try {
-      const result = agentSessionId
-        ? await client.loadSession({ sessionId: agentSessionId, cwd })
-        : await client.newSession({ cwd });
+      let result: unknown;
+      try {
+        result = agentSessionId
+          ? await client.loadSession({ sessionId: agentSessionId, cwd })
+          : await client.newSession({ cwd });
+      } catch (error) {
+        const recovered = await this.recycleProviderClient(provider, error);
+        if (!recovered) throw error;
+        client = recovered;
+        result = agentSessionId
+          ? await client.loadSession({ sessionId: agentSessionId, cwd })
+          : await client.newSession({ cwd });
+      }
       agentSessionId = this.extractSessionId(result) ?? agentSessionId ?? id("agent-session");
       const now = Date.now();
       const conversationId = makeAgentV2RemoteConversationId(provider, agentSessionId);
