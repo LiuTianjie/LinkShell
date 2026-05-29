@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { enqueueWrite } from "./write-queue";
 
 export interface SavedServer {
   url: string;
@@ -10,54 +11,72 @@ export interface SavedServer {
 }
 
 const STORAGE_KEY = "@linkshell/servers";
+const SERVERS_VERSION = 1;
+
+interface ServersEnvelope {
+  version: number;
+  servers: SavedServer[];
+}
 
 export async function loadServers(): Promise<SavedServer[]> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as SavedServer[];
+    const parsed = JSON.parse(raw) as ServersEnvelope | SavedServer[];
+    if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
+      if ((parsed as ServersEnvelope).version !== SERVERS_VERSION) return [];
+      const servers = (parsed as ServersEnvelope).servers;
+      return Array.isArray(servers) ? servers : [];
+    }
+    // Unversioned legacy shape: discard.
+    return [];
   } catch {
     return [];
   }
 }
 
 export async function saveServers(servers: SavedServer[]): Promise<void> {
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(servers));
+  const envelope: ServersEnvelope = { version: SERVERS_VERSION, servers };
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
 }
 
 export async function addServer(
   url: string,
   name?: string,
 ): Promise<SavedServer[]> {
-  const servers = await loadServers();
-  const normalized = url.replace(/\/+$/, "");
-  const existing = servers.find((s) => s.url === normalized);
-  if (existing) {
-    existing.lastUsedAt = Date.now();
-    existing.name = name ?? existing.name;
-  } else {
-    servers.push({
-      url: normalized,
-      name: name ?? new URL(normalized).host,
-      isDefault: servers.length === 0,
-      addedAt: Date.now(),
-      lastUsedAt: Date.now(),
-    });
-  }
-  await saveServers(servers);
-  return servers;
+  return enqueueWrite(STORAGE_KEY, async () => {
+    const servers = await loadServers();
+    const normalized = url.replace(/\/+$/, "");
+    const existing = servers.find((s) => s.url === normalized);
+    if (existing) {
+      existing.lastUsedAt = Date.now();
+      existing.name = name ?? existing.name;
+    } else {
+      servers.push({
+        url: normalized,
+        name: name ?? new URL(normalized).host,
+        isDefault: servers.length === 0,
+        addedAt: Date.now(),
+        lastUsedAt: Date.now(),
+      });
+    }
+    await saveServers(servers);
+    return servers;
+  });
 }
 
 export async function removeServer(url: string): Promise<SavedServer[]> {
-  let servers = await loadServers();
-  const normalized = url.replace(/\/+$/, "");
-  const wasDefault = servers.find((s) => s.url.replace(/\/+$/, "") === normalized)?.isDefault;
-  servers = servers.filter((s) => s.url.replace(/\/+$/, "") !== normalized);
-  if (wasDefault && servers.length > 0) {
-    servers[0]!.isDefault = true;
-  }
-  await saveServers(servers);
-  return servers;
+  return enqueueWrite(STORAGE_KEY, async () => {
+    let servers = await loadServers();
+    const normalized = url.replace(/\/+$/, "");
+    const wasDefault = servers.find((s) => s.url.replace(/\/+$/, "") === normalized)?.isDefault;
+    servers = servers.filter((s) => s.url.replace(/\/+$/, "") !== normalized);
+    if (wasDefault && servers.length > 0) {
+      servers[0]!.isDefault = true;
+    }
+    await saveServers(servers);
+    return servers;
+  });
 }
 
 /** Remove a server AND all history records associated with it. */
@@ -70,21 +89,25 @@ export async function removeServerWithHistory(
 }
 
 export async function setDefaultServer(url: string): Promise<SavedServer[]> {
-  const servers = await loadServers();
-  for (const s of servers) {
-    s.isDefault = s.url === url;
-  }
-  await saveServers(servers);
-  return servers;
+  return enqueueWrite(STORAGE_KEY, async () => {
+    const servers = await loadServers();
+    for (const s of servers) {
+      s.isDefault = s.url === url;
+    }
+    await saveServers(servers);
+    return servers;
+  });
 }
 
 export async function touchServer(url: string): Promise<void> {
-  const servers = await loadServers();
-  const server = servers.find((s) => s.url === url);
-  if (server) {
-    server.lastUsedAt = Date.now();
-    await saveServers(servers);
-  }
+  await enqueueWrite(STORAGE_KEY, async () => {
+    const servers = await loadServers();
+    const server = servers.find((s) => s.url === url);
+    if (server) {
+      server.lastUsedAt = Date.now();
+      await saveServers(servers);
+    }
+  });
 }
 
 export async function getDefaultServer(): Promise<SavedServer | undefined> {

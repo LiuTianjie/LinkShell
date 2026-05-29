@@ -3,6 +3,37 @@ import { z } from "zod";
 // ── Protocol version ────────────────────────────────────────────────
 
 export const PROTOCOL_VERSION = 1;
+// Oldest peer protocol version this build still interoperates with. The CLI and
+// app ship and update independently, so version negotiation must DEGRADE, never
+// hard-reject: a peer that omits its version is a legacy pre-versioning client
+// and is always treated as compatible.
+export const PROTOCOL_MIN_COMPATIBLE_VERSION = 1;
+
+/**
+ * Decide whether a peer's advertised protocol version can interoperate with
+ * this build. Returns true when the version is absent (legacy client) or within
+ * the supported range. Callers should warn — not disconnect — on `false`, so an
+ * out-of-date CLI/app keeps working in degraded mode rather than breaking.
+ */
+export function isProtocolVersionCompatible(remoteVersion?: number): boolean {
+  if (remoteVersion === undefined || remoteVersion === null) return true;
+  if (!Number.isFinite(remoteVersion)) return false;
+  return remoteVersion >= PROTOCOL_MIN_COMPATIBLE_VERSION;
+}
+
+// ── Payload size caps ───────────────────────────────────────────────
+// Bound unbounded base64/data strings so a malicious or buggy peer can't
+// OOM the relay. These are runtime-only constraints; the static type of
+// each field stays `string`.
+
+const MAX_TERMINAL_DATA = 1_048_576; // 1 MB — terminal stdin/stdout chunk
+const MAX_SCREEN_FRAME_DATA = 4_194_304; // 4 MB — base64 JPEG frame
+const MAX_FILE_UPLOAD_DATA = 8_388_608; // 8 MB — uploaded file payload
+const MAX_TUNNEL_BODY = 8_388_608; // 8 MB — tunnel HTTP body chunk
+const MAX_TUNNEL_WS_DATA = 1_048_576; // 1 MB — tunnel websocket frame
+const MAX_AGENT_BLOCK_DATA = 8_388_608; // 8 MB — agent content block data
+const MAX_TUNNEL_URL = 8192; // tunnel request URL length
+const MAX_HTTP_METHOD = 16; // HTTP verb length
 
 // ── Device & Session enums ──────────────────────────────────────────
 
@@ -61,14 +92,14 @@ export type Envelope = z.infer<typeof envelopeSchema>;
 
 export const terminalOutputPayloadSchema = z.object({
   stream: z.enum(["stdout", "stderr"]),
-  data: z.string(),
+  data: z.string().max(MAX_TERMINAL_DATA),
   encoding: z.literal("utf8").default("utf8"),
   isReplay: z.boolean().default(false),
   isFinal: z.boolean().default(false),
 });
 
 export const terminalInputPayloadSchema = z.object({
-  data: z.string(),
+  data: z.string().max(MAX_TERMINAL_DATA),
 });
 
 export const terminalResizePayloadSchema = z.object({
@@ -110,13 +141,13 @@ export const sessionHeartbeatPayloadSchema = z.object({
 });
 
 export const pairingCreatedPayloadSchema = z.object({
-  pairingCode: z.string().length(6),
+  pairingCode: z.string().regex(/^\d{6}$/),
   sessionId: z.string().min(1),
   expiresAt: z.string().datetime(),
 });
 
 export const sessionClaimPayloadSchema = z.object({
-  pairingCode: z.string().length(6),
+  pairingCode: z.string().regex(/^\d{6}$/),
 });
 
 export const sessionClaimedPayloadSchema = z.object({
@@ -157,7 +188,7 @@ export const screenStartPayloadSchema = z.object({
 export const screenStopPayloadSchema = z.object({});
 
 export const screenFramePayloadSchema = z.object({
-  data: z.string(), // base64 JPEG
+  data: z.string().max(MAX_SCREEN_FRAME_DATA), // base64 JPEG
   width: z.number().int(),
   height: z.number().int(),
   frameId: z.number().int(),
@@ -298,8 +329,11 @@ export const terminalStatusPayloadSchema = z.object({
 // ── File upload payloads ────────────────────────────────────────────
 
 export const fileUploadPayloadSchema = z.object({
-  data: z.string(), // base64 encoded
-  filename: z.string().min(1),
+  data: z.string().max(MAX_FILE_UPLOAD_DATA), // base64 encoded
+  filename: z
+    .string()
+    .min(1)
+    .refine((s) => !s.includes("..") && !s.startsWith("/"), "invalid filename"),
 });
 
 export const permissionDecisionPayloadSchema = z.object({
@@ -325,10 +359,10 @@ export const errorPayloadSchema = z.object({
 
 export const tunnelRequestPayloadSchema = z.object({
   requestId: z.string().min(1),
-  method: z.string().min(1),
-  url: z.string(),
+  method: z.string().min(1).max(MAX_HTTP_METHOD),
+  url: z.string().max(MAX_TUNNEL_URL),
   headers: z.record(z.string()),
-  body: z.string().nullable(), // base64 encoded
+  body: z.string().max(MAX_TUNNEL_BODY).nullable(), // base64 encoded
   port: z.number().int().min(1).max(65535),
 });
 
@@ -336,13 +370,13 @@ export const tunnelResponsePayloadSchema = z.object({
   requestId: z.string().min(1),
   statusCode: z.number().int(),
   headers: z.record(z.string()),
-  body: z.string(), // base64 encoded chunk
+  body: z.string().max(MAX_TUNNEL_BODY), // base64 encoded chunk
   isFinal: z.boolean(),
 });
 
 export const tunnelWsDataPayloadSchema = z.object({
   requestId: z.string().min(1),
-  data: z.string(), // base64 encoded
+  data: z.string().max(MAX_TUNNEL_WS_DATA), // base64 encoded
   isBinary: z.boolean(),
 });
 
@@ -385,7 +419,7 @@ export const agentCollaborationModeSchema = z.enum(["default", "plan"]);
 export const agentContentBlockSchema = z.object({
   type: z.enum(["text", "image"]),
   text: z.string().optional(),
-  data: z.string().optional(),
+  data: z.string().max(MAX_AGENT_BLOCK_DATA).optional(),
   mimeType: z.string().optional(),
 });
 
@@ -996,5 +1030,16 @@ export function parseTypedPayload<TType extends ProtocolMessageType>(
   type: TType,
   payload: unknown,
 ): z.infer<(typeof protocolMessageSchemas)[TType]> {
+  // Guard against unregistered or inherited keys (e.g. "toString") so the
+  // lookup can never resolve to a non-schema and crash with a raw TypeError.
+  if (!Object.prototype.hasOwnProperty.call(protocolMessageSchemas, type)) {
+    throw new z.ZodError([
+      {
+        code: z.ZodIssueCode.custom,
+        path: ["type"],
+        message: `Unknown protocol message type: ${String(type)}`,
+      },
+    ]);
+  }
   return protocolMessageSchemas[type].parse(payload);
 }

@@ -4,7 +4,7 @@ import WebSocket from "ws";
 import { hostname, platform, homedir } from "node:os";
 import { writeFileSync, readFileSync, readdirSync, statSync, unlinkSync, mkdirSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, basename, resolve } from "node:path";
+import { join, basename, resolve, relative, isAbsolute } from "node:path";
 import {
   agentV2MessageRoute,
   createEnvelope,
@@ -43,6 +43,17 @@ export interface BridgeSessionOptions {
   agentUi?: boolean;
   agentProvider?: AgentProvider;
   agentCommand?: string;
+  /**
+   * Confinement root for client-driven filesystem operations
+   * (terminal.browse / terminal.file.read / terminal.mkdir).
+   * Defaults to the bridge's cwd. Paths resolving outside this root are rejected.
+   */
+  fileRoot?: string;
+  /**
+   * Ports the tunnel proxy is allowed to connect to on 127.0.0.1.
+   * Defaults to DEFAULT_TUNNEL_PORTS when omitted.
+   */
+  allowedTunnelPorts?: number[];
 }
 
 const HEARTBEAT_INTERVAL = 15_000;
@@ -51,6 +62,13 @@ const RECONNECT_MAX_DELAY = 30_000;
 const RECONNECT_MAX_ATTEMPTS = 20;
 const DEFAULT_TERMINAL_ID = "default";
 const HOOK_BODY_LIMIT = 256 * 1024;
+const SCROLLBACK_LINES = 500;
+// How long to keep an exited terminal (with its scrollback) in memory so the
+// client can replay its final output before it is reaped.
+const EXITED_TERMINAL_GRACE_MS = 30_000;
+// Default ports the bridge will proxy tunnel requests to when no explicit
+// allowlist is configured. Covers the common dev servers the app tunnels to.
+const DEFAULT_TUNNEL_PORTS = [3000, 3001, 4321, 5173, 5174, 8080, 8000, 8081];
 const PERMISSION_REQUEST_TIMEOUT_MS = Number(
   process.env.LINKSHELL_PERMISSION_TIMEOUT_MS ?? 5 * 60_000,
 );
@@ -332,6 +350,7 @@ export class BridgeSession {
   private reconnectAttempts = 0;
   private reconnecting = false;
   private sessionId = "";
+  private hostToken: string | undefined;
   private exited = false;
   private stopped = false;
   private permissionStacks = new Map<string, Array<{
@@ -351,10 +370,48 @@ export class BridgeSession {
   private agentSession: AgentSessionProxy | undefined;
   private agentWorkspace: AgentWorkspaceProxy | undefined;
   private machineIdentity: MachineIdentity | undefined;
+  // Confinement root for client-driven filesystem ops; resolved once at construction.
+  private readonly fileRoot: string;
+  // Ports the tunnel proxy may connect to on 127.0.0.1.
+  private readonly allowedTunnelPorts: Set<number>;
+  // Pending deletions of exited terminals (terminalId → timer) so we can clear on stop().
+  private exitedTerminalTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Invoked when all terminals have exited naturally — closes embedded gateway,
+  // removes daemon PID file, etc. Set by the CLI entry point.
+  private onAllTerminalsExited: (() => void | Promise<void>) | undefined;
 
   constructor(options: BridgeSessionOptions) {
     this.options = options;
     this.sessionId = options.sessionId ?? "";
+    this.fileRoot = resolve(options.fileRoot ?? process.cwd());
+    this.allowedTunnelPorts = new Set(
+      options.allowedTunnelPorts && options.allowedTunnelPorts.length > 0
+        ? options.allowedTunnelPorts
+        : DEFAULT_TUNNEL_PORTS,
+    );
+  }
+
+  /** Register a callback invoked once all terminals exit naturally (process self-cleanup). */
+  setOnAllTerminalsExited(handler: () => void | Promise<void>): void {
+    this.onAllTerminalsExited = handler;
+  }
+
+  /**
+   * Resolve a client-supplied path inside the confinement root.
+   * Returns the absolute resolved path, or null if it escapes the root.
+   */
+  private resolveConfinedPath(clientPath: string): string | null {
+    const expanded = clientPath.startsWith("~")
+      ? clientPath.replace(/^~/, homedir())
+      : clientPath;
+    // Resolve relative paths against the confinement root, not process.cwd().
+    const target = isAbsolute(expanded)
+      ? resolve(expanded)
+      : resolve(this.fileRoot, expanded);
+    const rel = relative(this.fileRoot, target);
+    if (rel === "") return target; // the root itself
+    if (rel.startsWith("..") || isAbsolute(rel)) return null;
+    return target;
   }
 
   private log(msg: string): void {
@@ -373,6 +430,9 @@ export class BridgeSession {
       `starting session (gateway=${this.options.gatewayUrl}, provider=${this.options.providerConfig.provider})`,
     );
     this.machineIdentity = loadOrCreateMachineIdentity();
+    // Sweep stale LinkShell hook entries (dead curl ports) left by a prior crash
+    // before we write fresh ones for this session.
+    this.sweepStaleHookConfigs();
     if (!this.sessionId) {
       await this.createPairing();
     }
@@ -421,9 +481,14 @@ export class BridgeSession {
     const body = (await res.json()) as {
       sessionId: string;
       pairingCode: string;
+      hostToken?: string;
       expiresAt: string;
     };
     this.sessionId = body.sessionId;
+    // Secret token proving we are the legitimate host for this session; sent on
+    // every host WS connect so a third party who learns the sessionId can't
+    // hijack the host role.
+    this.hostToken = body.hostToken;
 
     const pairingGateway = resolvePairingGateway(
       this.options.gatewayHttpUrl,
@@ -494,11 +559,24 @@ export class BridgeSession {
     url.searchParams.set("sessionId", this.sessionId);
     url.searchParams.set("role", "host");
     const authToken = await this.resolveAuthToken();
+    const wsOptions: WebSocket.ClientOptions = {};
+    const headers: Record<string, string> = {};
     if (authToken) {
+      // Prefer the Authorization header so the token doesn't leak into URLs/logs.
+      headers["Authorization"] = `Bearer ${authToken}`;
+      // TODO: remove the query param once all gateways read the Authorization
+      // header. Kept for backward compatibility with older gateways that only
+      // read the `auth_token` query parameter.
       url.searchParams.set("auth_token", authToken);
     }
+    if (this.hostToken) {
+      headers["x-linkshell-host-token"] = this.hostToken;
+    }
+    if (Object.keys(headers).length > 0) {
+      wsOptions.headers = headers;
+    }
 
-    this.socket = new WebSocket(url);
+    this.socket = new WebSocket(url, wsOptions);
 
     this.socket.on("open", () => {
       process.stderr.write(
@@ -669,9 +747,15 @@ export class BridgeSession {
       }
       case "terminal.browse": {
         const p = parseTypedPayload("terminal.browse", envelope.payload);
-        // Expand ~ to home directory
-        const rawPath = p.path.startsWith("~") ? p.path.replace(/^~/, homedir()) : p.path;
-        const browsePath = resolve(rawPath);
+        const browsePath = this.resolveConfinedPath(p.path);
+        if (browsePath === null) {
+          this.send(createEnvelope({
+            type: "terminal.browse.result",
+            sessionId: this.sessionId,
+            payload: { path: p.path, entries: [], error: "Path is outside the allowed root", requestId: p.requestId },
+          }));
+          break;
+        }
         try {
           const entries = readdirSync(browsePath, { withFileTypes: true })
             .filter((d) => !d.name.startsWith(".") && (d.isDirectory() || (p.includeFiles && d.isFile())))
@@ -706,8 +790,22 @@ export class BridgeSession {
       }
       case "terminal.file.read": {
         const p = parseTypedPayload("terminal.file.read", envelope.payload);
-        const rawPath = p.path.startsWith("~") ? p.path.replace(/^~/, homedir()) : p.path;
-        const filePath = resolve(rawPath);
+        const filePath = this.resolveConfinedPath(p.path);
+        if (filePath === null) {
+          this.send(createEnvelope({
+            type: "terminal.file.read.result",
+            sessionId: this.sessionId,
+            payload: {
+              path: p.path,
+              content: "",
+              encoding: "utf8",
+              truncated: false,
+              error: "Path is outside the allowed root",
+              requestId: p.requestId,
+            },
+          }));
+          break;
+        }
         try {
           const stats = statSync(filePath);
           if (!stats.isFile()) {
@@ -755,8 +853,15 @@ export class BridgeSession {
       }
       case "terminal.mkdir": {
         const p = parseTypedPayload("terminal.mkdir", envelope.payload);
-        const rawPath = p.path.startsWith("~") ? p.path.replace(/^~/, homedir()) : p.path;
-        const dirPath = resolve(rawPath);
+        const dirPath = this.resolveConfinedPath(p.path);
+        if (dirPath === null) {
+          this.send(createEnvelope({
+            type: "terminal.browse.result",
+            sessionId: this.sessionId,
+            payload: { path: p.path, entries: [], error: "Path is outside the allowed root" },
+          }));
+          break;
+        }
         try {
           mkdirSync(dirPath, { recursive: true });
           // Browse the parent to refresh the listing
@@ -1016,6 +1121,21 @@ export class BridgeSession {
     port: number;
   }): void {
     const { requestId, method, url: reqUrl, headers, body, port } = payload;
+
+    // SSRF guard: only proxy to ports in the allowlist (pinned to 127.0.0.1).
+    if (!this.allowedTunnelPorts.has(port)) {
+      this.log(`rejecting tunnel request to disallowed port ${port}`);
+      if (headers.upgrade === "websocket") {
+        this.send(createEnvelope({
+          type: "tunnel.ws.close",
+          sessionId: this.sessionId,
+          payload: { requestId, code: 1008, reason: `Port ${port} is not allowed` },
+        }));
+      } else {
+        this.sendTunnelError(requestId, 403, `Port ${port} is not allowed`);
+      }
+      return;
+    }
 
     // WebSocket upgrade request
     if (headers.upgrade === "websocket") {
@@ -1278,7 +1398,7 @@ export class BridgeSession {
       cwd,
       projectName: basename(cwd),
       provider,
-      scrollback: new ScrollbackBuffer(1000),
+      scrollback: new ScrollbackBuffer(SCROLLBACK_LINES),
       outputSeq: 0,
       statusSeq: 0,
       status: "running",
@@ -1318,6 +1438,20 @@ export class BridgeSession {
       }));
       this.sendTerminalList();
 
+      // Reap the exited terminal (and its scrollback) after a grace period so
+      // clients can replay final output, then free the memory. Tracked so the
+      // timer can be cleared on stop().
+      const reapTimer = setTimeout(() => {
+        this.exitedTerminalTimers.delete(terminalId);
+        const t = this.terminals.get(terminalId);
+        if (t && t.status === "exited") {
+          this.terminals.delete(terminalId);
+          this.log(`reaped exited terminal ${terminalId}`);
+        }
+      }, EXITED_TERMINAL_GRACE_MS);
+      if (typeof reapTimer.unref === "function") reapTimer.unref();
+      this.exitedTerminalTimers.set(terminalId, reapTimer);
+
       // If all terminals exited, close the session
       const allExited = [...this.terminals.values()].every((t) => t.status === "exited");
       if (allExited) {
@@ -1325,6 +1459,9 @@ export class BridgeSession {
         setTimeout(() => {
           this.stopHeartbeat();
           this.socket?.close();
+          // Self-clean process-level resources (embedded gateway + PID file)
+          // since the PTYs exited naturally rather than via a signal handler.
+          void this.onAllTerminalsExited?.();
         }, 500);
         process.exitCode = exitCode ?? 0;
       }
@@ -2046,6 +2183,59 @@ export class BridgeSession {
     } catch { /* ignore parse errors */ }
   }
 
+  /**
+   * Remove ALL LinkShell hook entries (any marker) from a JSON config file.
+   * Used on startup to sweep stale entries left behind by a crashed instance,
+   * whose curl ports are now dead. Matches via isLinkShellHookEntry rather than
+   * a single marker so entries from previous runs are also cleaned.
+   */
+  private sweepLinkShellHookEntries(configPath: string): void {
+    if (!existsSync(configPath)) return;
+    try {
+      // Re-read immediately before write to minimize the window for a
+      // concurrent writer to clobber our changes.
+      const raw = JSON.parse(readFileSync(configPath, "utf8"));
+      const hooks = raw.hooks as Record<string, unknown[]> | undefined;
+      if (!hooks) return;
+
+      let changed = false;
+      for (const [eventName, entries] of Object.entries(hooks)) {
+        if (!Array.isArray(entries)) continue;
+        const filtered = entries.filter((entry) => !isLinkShellHookEntry(entry));
+        if (filtered.length !== entries.length) {
+          changed = true;
+          if (filtered.length === 0) {
+            delete hooks[eventName];
+          } else {
+            hooks[eventName] = filtered;
+          }
+        }
+      }
+
+      if (changed) {
+        if (Object.keys(hooks).length === 0) {
+          delete raw.hooks;
+        }
+        writeFileSync(configPath, JSON.stringify(raw, null, 2));
+        this.log(`swept stale LinkShell hook entries from ${configPath}`);
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
+  /** Sweep stale LinkShell hook entries from known shared config files on startup. */
+  private sweepStaleHookConfigs(): void {
+    const home = homedir();
+    const candidates = [
+      join(home, ".claude", "settings.json"),
+      join(home, ".codex", "hooks.json"),
+      join(home, ".gemini", "settings.json"),
+      join(process.cwd(), "hooks.json"), // copilot (per-cwd)
+    ];
+    for (const path of candidates) {
+      this.sweepLinkShellHookEntries(path);
+    }
+  }
+
   private send(message: Envelope): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       return;
@@ -2207,6 +2397,11 @@ export class BridgeSession {
       ws.close(1001, "Session stopped");
     }
     this.tunnelSockets.clear();
+    // Clear pending exited-terminal reap timers.
+    for (const timer of this.exitedTerminalTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.exitedTerminalTimers.clear();
     for (const term of this.terminals.values()) {
       this.cleanupHookServer(term);
       if (term.status === "running") term.pty.kill();

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import {
   agentV2ClientReadMessageTypes,
   agentV2ClientWriteMessageTypes,
@@ -8,8 +9,11 @@ import {
   isAgentV2ClientReadMessage,
   isAgentV2ClientWriteMessage,
   isAgentV2HostToClientMessage,
+  isProtocolVersionCompatible,
   parseEnvelope,
   parseTypedPayload,
+  PROTOCOL_MIN_COMPATIBLE_VERSION,
+  PROTOCOL_VERSION,
   protocolMessageSchemas,
   serializeEnvelope,
 } from "../src/index.js";
@@ -173,3 +177,145 @@ describe("protocol message registry", () => {
     }
   });
 });
+
+describe("parseEnvelope validation", () => {
+  const validBase = {
+    id: "msg-1",
+    type: "session.heartbeat",
+    sessionId: "session-1",
+    timestamp: "2026-05-29T00:00:00.000Z",
+    payload: { ts: 1 },
+  };
+
+  it("accepts a well-formed envelope", () => {
+    const parsed = parseEnvelope(JSON.stringify(validBase));
+    expect(parsed.sessionId).toBe("session-1");
+  });
+
+  const malformed: Array<[string, Record<string, unknown>]> = [
+    ["missing sessionId", { ...validBase, sessionId: undefined }],
+    ["empty sessionId", { ...validBase, sessionId: "" }],
+    ["missing id", { ...validBase, id: undefined }],
+    ["empty type", { ...validBase, type: "" }],
+    ["non-datetime timestamp", { ...validBase, timestamp: "not-a-date" }],
+    ["numeric timestamp", { ...validBase, timestamp: 1717171717000 }],
+    ["negative seq", { ...validBase, seq: -1 }],
+  ];
+
+  it.each(malformed)("rejects envelope with %s", (_label, input) => {
+    expect(() => parseEnvelope(JSON.stringify(input))).toThrow(ZodError);
+  });
+});
+
+describe("parseTypedPayload unknown type handling", () => {
+  it("throws a ZodError (not a raw TypeError) for an unregistered type", () => {
+    // Cast through unknown so the test can exercise the runtime guard.
+    const call = () =>
+      parseTypedPayload("not.a.real.type" as never, { foo: "bar" });
+    expect(call).toThrow(ZodError);
+    let caught: unknown;
+    try {
+      call();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ZodError);
+    expect(caught).not.toBeInstanceOf(TypeError);
+  });
+
+  it("throws a ZodError for inherited object keys like toString", () => {
+    expect(() =>
+      parseTypedPayload("toString" as never, {}),
+    ).toThrow(ZodError);
+  });
+});
+
+describe("payload size caps", () => {
+  it("rejects oversized terminal.output data", () => {
+    const tooBig = "a".repeat(1_048_576 + 1);
+    expect(() =>
+      parseTypedPayload("terminal.output", { stream: "stdout", data: tooBig }),
+    ).toThrow(ZodError);
+  });
+
+  it("accepts terminal.output data at the cap boundary", () => {
+    const atCap = "a".repeat(1_048_576);
+    const payload = parseTypedPayload("terminal.output", {
+      stream: "stdout",
+      data: atCap,
+    });
+    expect(payload.data.length).toBe(1_048_576);
+  });
+
+  it("rejects oversized file.upload data", () => {
+    const tooBig = "a".repeat(8_388_608 + 1);
+    expect(() =>
+      parseTypedPayload("file.upload", { data: tooBig, filename: "x.txt" }),
+    ).toThrow(ZodError);
+  });
+});
+
+describe("file.upload filename traversal guard", () => {
+  it("rejects path traversal segments", () => {
+    expect(() =>
+      parseTypedPayload("file.upload", { data: "", filename: "../etc/passwd" }),
+    ).toThrow(ZodError);
+  });
+
+  it("rejects absolute paths", () => {
+    expect(() =>
+      parseTypedPayload("file.upload", { data: "", filename: "/etc/passwd" }),
+    ).toThrow(ZodError);
+  });
+
+  it("accepts a plain filename", () => {
+    const payload = parseTypedPayload("file.upload", {
+      data: "",
+      filename: "report.txt",
+    });
+    expect(payload.filename).toBe("report.txt");
+  });
+});
+
+describe("pairingCode digit constraint", () => {
+  it("accepts a six-digit code", () => {
+    const payload = parseTypedPayload("pairing.claim", { pairingCode: "123456" });
+    expect(payload.pairingCode).toBe("123456");
+  });
+
+  it("rejects a non-digit six-char code", () => {
+    expect(() =>
+      parseTypedPayload("pairing.claim", { pairingCode: "abcdef" }),
+    ).toThrow(ZodError);
+  });
+
+  it("rejects a code of the wrong length", () => {
+    expect(() =>
+      parseTypedPayload("pairing.claim", { pairingCode: "12345" }),
+    ).toThrow(ZodError);
+  });
+});
+
+describe("protocol version negotiation", () => {
+  it("treats a missing version as a compatible legacy client", () => {
+    expect(isProtocolVersionCompatible(undefined)).toBe(true);
+  });
+
+  it("accepts the current and minimum compatible versions", () => {
+    expect(isProtocolVersionCompatible(PROTOCOL_VERSION)).toBe(true);
+    expect(isProtocolVersionCompatible(PROTOCOL_MIN_COMPATIBLE_VERSION)).toBe(true);
+  });
+
+  it("accepts a newer version (forward compatible)", () => {
+    expect(isProtocolVersionCompatible(PROTOCOL_VERSION + 5)).toBe(true);
+  });
+
+  it("rejects a version older than the minimum compatible", () => {
+    expect(isProtocolVersionCompatible(PROTOCOL_MIN_COMPATIBLE_VERSION - 1)).toBe(false);
+  });
+
+  it("rejects a non-finite version", () => {
+    expect(isProtocolVersionCompatible(Number.NaN)).toBe(false);
+  });
+});
+

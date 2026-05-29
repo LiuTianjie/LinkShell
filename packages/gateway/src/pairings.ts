@@ -6,10 +6,15 @@ export interface PairingRecord {
   pairingCode: string;
   expiresAt: number; // unix ms
   claimed: boolean;
+  failedAttempts: number; // failed claim attempts against this code
 }
 
 const PAIRING_TTL = Number(process.env.PAIRING_TTL_MS ?? 10 * 60_000); // 10 minutes
 const CLEANUP_INTERVAL = 60_000;
+// Invalidate a code after this many failed claim attempts to cap brute-forcing.
+const MAX_FAILED_CLAIM_ATTEMPTS = Number(
+  process.env.PAIRING_MAX_FAILED_ATTEMPTS ?? 5,
+);
 
 export class PairingManager {
   private pairings = new Map<string, PairingRecord>();
@@ -29,7 +34,8 @@ export class PairingManager {
           void this.store.deletePairing(record.pairingCode).catch(() => {});
           continue;
         }
-        this.pairings.set(record.pairingCode, record);
+        // Stored records predate the failedAttempts field; default it.
+        this.pairings.set(record.pairingCode, { ...record, failedAttempts: 0 });
       }
     } catch (err) {
       process.stderr.write(`[gateway] pairing store hydrate failed, using memory only: ${err}\n`);
@@ -44,6 +50,7 @@ export class PairingManager {
       pairingCode: code,
       expiresAt: Date.now() + PAIRING_TTL,
       claimed: false,
+      failedAttempts: 0,
     };
     this.pairings.set(code, record);
     this.persist(record);
@@ -61,6 +68,15 @@ export class PairingManager {
       return { error: "pairing_expired", status: 410 };
     }
     if (record.claimed) {
+      // Count repeated claim attempts on an existing code; once the cap is
+      // exceeded, invalidate it so it can no longer be targeted.
+      record.failedAttempts += 1;
+      if (record.failedAttempts >= MAX_FAILED_CLAIM_ATTEMPTS) {
+        this.pairings.delete(pairingCode);
+        void this.store?.deletePairing(pairingCode).catch(() => {});
+      } else {
+        this.persist(record);
+      }
       return { error: "pairing_already_claimed", status: 409 };
     }
     record.claimed = true;

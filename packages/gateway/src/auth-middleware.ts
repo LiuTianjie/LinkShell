@@ -36,12 +36,49 @@ export function canReadSessionDetail(input: {
 }
 
 /**
+ * Short-TTL in-memory cache of successful token validations, so repeated
+ * requests/WS upgrades with the same token don't hit Supabase on every call
+ * (and an attacker can't amplify load with many pending 5s fetches as easily).
+ */
+interface CachedAuth {
+  result: AuthResult;
+  expiresAt: number;
+}
+const tokenAuthCache = new Map<string, CachedAuth>();
+const TOKEN_CACHE_TTL = 45_000; // 45s
+
+function getCachedAuth(token: string): AuthResult | null {
+  const entry = tokenAuthCache.get(token);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    tokenAuthCache.delete(token);
+    return null;
+  }
+  return entry.result;
+}
+
+function setCachedAuth(token: string, result: AuthResult): void {
+  // Only cache successful authentications — never pin a failure.
+  if (!result.authenticated) return;
+  tokenAuthCache.set(token, { result, expiresAt: Date.now() + TOKEN_CACHE_TTL });
+  if (tokenAuthCache.size > 1000) {
+    const now = Date.now();
+    for (const [k, v] of tokenAuthCache) {
+      if (now > v.expiresAt) tokenAuthCache.delete(k);
+    }
+  }
+}
+
+/**
  * Validate a Supabase JWT and check subscription via iTool's profiles table.
  */
 async function validateToken(token: string): Promise<AuthResult> {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     return { authenticated: false };
   }
+
+  const cached = getCachedAuth(token);
+  if (cached) return cached;
 
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
@@ -86,7 +123,15 @@ async function validateToken(token: string): Promise<AuthResult> {
       }
     } catch {}
 
-    return { authenticated: true, userId: user.id, email: user.email, plan, subscribed };
+    const authResult: AuthResult = {
+      authenticated: true,
+      userId: user.id,
+      email: user.email,
+      plan,
+      subscribed,
+    };
+    setCachedAuth(token, authResult);
+    return authResult;
   } catch {
     return { authenticated: false };
   }

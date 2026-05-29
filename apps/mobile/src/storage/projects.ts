@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { loadHistory } from "./history";
+import { enqueueWrite } from "./write-queue";
 
 export interface ProjectRecord {
   id: string;
@@ -120,48 +121,50 @@ export async function upsertProject(
   const cwd = normalizeCwd(input.cwd);
   if (!cwd) return null;
 
-  const now = Date.now();
-  const serverUrl = normalizeServerUrl(input.serverUrl);
-  const id = makeProjectId(serverUrl, input.machineId ?? input.sessionId, cwd);
-  const projects = await loadProjects();
-  const existingIndex = projects.findIndex((item) =>
-    item.id === id ||
-    (
-      input.machineId &&
-      !item.machineId &&
-      normalizeServerUrl(item.serverUrl) === serverUrl &&
-      item.cwd === cwd &&
+  return enqueueWrite(STORAGE_KEY, async () => {
+    const now = Date.now();
+    const serverUrl = normalizeServerUrl(input.serverUrl);
+    const id = makeProjectId(serverUrl, input.machineId ?? input.sessionId, cwd);
+    const projects = await loadProjects();
+    const existingIndex = projects.findIndex((item) =>
+      item.id === id ||
       (
-        item.sessionId === input.sessionId ||
-        (Boolean(input.hostname) && item.hostname === input.hostname)
+        input.machineId &&
+        !item.machineId &&
+        normalizeServerUrl(item.serverUrl) === serverUrl &&
+        item.cwd === cwd &&
+        (
+          item.sessionId === input.sessionId ||
+          (Boolean(input.hostname) && item.hostname === input.hostname)
+        )
       )
-    )
-  );
-  const existing = existingIndex >= 0 ? projects[existingIndex] : undefined;
+    );
+    const existing = existingIndex >= 0 ? projects[existingIndex] : undefined;
 
-  const next: ProjectRecord = {
-    id,
-    serverUrl,
-    sessionId: input.sessionId,
-    machineId: input.machineId ?? existing?.machineId,
-    cwd,
-    projectName: input.projectName ?? existing?.projectName,
-    hostname: input.hostname ?? existing?.hostname,
-    platform: input.platform ?? existing?.platform,
-    provider: input.provider ?? existing?.provider,
-    lastTerminalId: input.lastTerminalId ?? existing?.lastTerminalId,
-    lastOpenedAt: input.lastOpenedAt ?? existing?.lastOpenedAt ?? now,
-    createdAt: existing?.createdAt ?? input.createdAt ?? now,
-    schemaVersion: 1,
-  };
+    const next: ProjectRecord = {
+      id,
+      serverUrl,
+      sessionId: input.sessionId,
+      machineId: input.machineId ?? existing?.machineId,
+      cwd,
+      projectName: input.projectName ?? existing?.projectName,
+      hostname: input.hostname ?? existing?.hostname,
+      platform: input.platform ?? existing?.platform,
+      provider: input.provider ?? existing?.provider,
+      lastTerminalId: input.lastTerminalId ?? existing?.lastTerminalId,
+      lastOpenedAt: input.lastOpenedAt ?? existing?.lastOpenedAt ?? now,
+      createdAt: existing?.createdAt ?? input.createdAt ?? now,
+      schemaVersion: 1,
+    };
 
-  if (existingIndex >= 0) {
-    projects[existingIndex] = next;
-  } else {
-    projects.unshift(next);
-  }
-  await saveProjects(projects);
-  return next;
+    if (existingIndex >= 0) {
+      projects[existingIndex] = next;
+    } else {
+      projects.unshift(next);
+    }
+    await saveProjects(projects);
+    return next;
+  });
 }
 
 export async function touchProject(input: {
@@ -184,35 +187,43 @@ export async function touchProject(input: {
 export async function removeProjectsBySessionId(
   sessionId: string,
 ): Promise<void> {
-  const projects = await loadProjects();
-  await saveProjects(projects.filter((item) => item.sessionId !== sessionId));
+  await enqueueWrite(STORAGE_KEY, async () => {
+    const projects = await loadProjects();
+    await saveProjects(projects.filter((item) => item.sessionId !== sessionId));
+  });
 }
 
 export async function removeProjectsBySessionIdAndServerUrl(
   sessionId: string,
   serverUrl: string,
 ): Promise<void> {
-  const normalized = normalizeServerUrl(serverUrl);
-  const projects = await loadProjects();
-  await saveProjects(projects.filter((item) =>
-    item.sessionId !== sessionId ||
-    normalizeServerUrl(item.serverUrl) !== normalized
-  ));
+  await enqueueWrite(STORAGE_KEY, async () => {
+    const normalized = normalizeServerUrl(serverUrl);
+    const projects = await loadProjects();
+    await saveProjects(projects.filter((item) =>
+      item.sessionId !== sessionId ||
+      normalizeServerUrl(item.serverUrl) !== normalized
+    ));
+  });
 }
 
 export async function removeProject(id: string): Promise<void> {
-  const projects = await loadProjects();
-  await saveProjects(projects.filter((item) => item.id !== id));
+  await enqueueWrite(STORAGE_KEY, async () => {
+    const projects = await loadProjects();
+    await saveProjects(projects.filter((item) => item.id !== id));
+  });
 }
 
 export async function removeProjectsByServerUrl(
   serverUrl: string,
 ): Promise<void> {
-  const normalized = normalizeServerUrl(serverUrl);
-  const projects = await loadProjects();
-  await saveProjects(
-    projects.filter((item) => normalizeServerUrl(item.serverUrl) !== normalized),
-  );
+  await enqueueWrite(STORAGE_KEY, async () => {
+    const normalized = normalizeServerUrl(serverUrl);
+    const projects = await loadProjects();
+    await saveProjects(
+      projects.filter((item) => normalizeServerUrl(item.serverUrl) !== normalized),
+    );
+  });
 }
 
 export async function clearProjects(): Promise<void> {

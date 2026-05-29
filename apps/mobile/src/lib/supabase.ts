@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 
 const SUPABASE_URL = "https://mkbeusztkzffnzjdwmqk.supabase.co";
@@ -7,7 +8,16 @@ const SUPABASE_ANON_KEY =
 
 export { SUPABASE_URL, SUPABASE_ANON_KEY };
 
-const AUTH_STORAGE_KEY = "@linkshell/auth";
+// Legacy plaintext AsyncStorage key (migrated out of on first read).
+const LEGACY_AUTH_STORAGE_KEY = "@linkshell/auth";
+// SecureStore key (Keychain/Keystore) — keys may only contain [A-Za-z0-9._-].
+const AUTH_SECURE_KEY = "linkshell_auth_session";
+const AUTH_SCHEMA_VERSION = 1;
+
+interface AuthEnvelope {
+  version: number;
+  session: AuthSession;
+}
 
 function normalizeGatewayUrl(rawUrl: string): string {
   const value = rawUrl.trim();
@@ -37,24 +47,48 @@ export interface AuthSession {
 }
 
 async function saveSession(session: AuthSession): Promise<void> {
-  await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  const envelope: AuthEnvelope = { version: AUTH_SCHEMA_VERSION, session };
+  // Tokens are sensitive — store in the Keychain/Keystore, not plaintext.
+  await SecureStore.setItemAsync(AUTH_SECURE_KEY, JSON.stringify(envelope));
 }
 
 export async function loadSession(): Promise<AuthSession | null> {
   try {
-    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as AuthSession;
+    const secure = await SecureStore.getItemAsync(AUTH_SECURE_KEY);
+    if (secure) {
+      const parsed = JSON.parse(secure) as Partial<AuthEnvelope>;
+      if (parsed && parsed.version === AUTH_SCHEMA_VERSION && parsed.session) {
+        return parsed.session;
+      }
+      // Unknown/old version — discard rather than trust a stale schema.
+      return null;
+    }
+    // One-time migration from legacy plaintext AsyncStorage.
+    const legacy = await AsyncStorage.getItem(LEGACY_AUTH_STORAGE_KEY);
+    if (legacy) {
+      const session = JSON.parse(legacy) as AuthSession;
+      await saveSession(session);
+      await AsyncStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+      return session;
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
 export async function clearSession(): Promise<void> {
-  await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+  try {
+    await SecureStore.deleteItemAsync(AUTH_SECURE_KEY);
+  } catch {}
+  await AsyncStorage.removeItem(LEGACY_AUTH_STORAGE_KEY).catch(() => {});
 }
 
-async function fetchUserPlan(accessToken: string, userId: string): Promise<string> {
+async function fetchUserPlan(
+  accessToken: string,
+  userId: string,
+  fallbackPlan = "free",
+): Promise<string> {
   try {
     const res = await fetchWithTimeout(
       `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=plan,plan_expires_at&limit=1`,
@@ -74,9 +108,15 @@ async function fetchUserPlan(accessToken: string, userId: string): Promise<strin
           return "pro";
         }
       }
+      // Definitive answer from the server: this user is not on an active plan.
+      return "free";
     }
-  } catch {}
-  return "free";
+    // Transient HTTP failure — keep the previously known plan rather than
+    // silently downgrading a paying user to free on a flaky network.
+    return fallbackPlan;
+  } catch {
+    return fallbackPlan;
+  }
 }
 
 export async function signUp(
@@ -164,36 +204,50 @@ export async function signOut(): Promise<void> {
   await clearSession();
 }
 
-export async function refreshSession(): Promise<AuthSession | null> {
-  const session = await loadSession();
-  if (!session?.refreshToken) return null;
+let inFlightRefresh: Promise<AuthSession | null> | null = null;
 
-  try {
-    const res = await fetchWithTimeout(
-      `${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: SUPABASE_ANON_KEY,
+export async function refreshSession(): Promise<AuthSession | null> {
+  // Single-flight: Supabase rotates the refresh token, so two concurrent
+  // refreshes race — one consumes the token and the other 400s, dropping the
+  // session and logging the user out. Collapse concurrent callers onto one.
+  if (inFlightRefresh) return inFlightRefresh;
+  inFlightRefresh = (async () => {
+    const session = await loadSession();
+    if (!session?.refreshToken) return null;
+
+    try {
+      const res = await fetchWithTimeout(
+        `${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ refresh_token: session.refreshToken }),
         },
-        body: JSON.stringify({ refresh_token: session.refreshToken }),
-      },
-      10_000,
-    );
-    if (!res.ok) return null;
-    const body = await res.json() as any;
-    const plan = await fetchUserPlan(body.access_token, body.user.id);
-    const updated: AuthSession = {
-      accessToken: body.access_token,
-      refreshToken: body.refresh_token,
-      expiresAt: Date.now() + (body.expires_in ?? 3600) * 1000,
-      user: { id: body.user.id, email: body.user.email, plan },
-    };
-    await saveSession(updated);
-    return updated;
-  } catch {
-    return null;
+        10_000,
+      );
+      if (!res.ok) return null;
+      const body = await res.json() as any;
+      // Preserve the prior plan if the profile lookup transiently fails.
+      const plan = await fetchUserPlan(body.access_token, body.user.id, session.user.plan);
+      const updated: AuthSession = {
+        accessToken: body.access_token,
+        refreshToken: body.refresh_token,
+        expiresAt: Date.now() + (body.expires_in ?? 3600) * 1000,
+        user: { id: body.user.id, email: body.user.email, plan },
+      };
+      await saveSession(updated);
+      return updated;
+    } catch {
+      return null;
+    }
+  })();
+  try {
+    return await inFlightRefresh;
+  } finally {
+    inFlightRefresh = null;
   }
 }
 

@@ -1,10 +1,16 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const STORAGE_KEY = "@linkshell/last_session";
+const LAST_SESSION_VERSION = 1;
 
 export interface LastSessionRecord {
   gateway: string;
   sessionId: string;
+}
+
+interface LastSessionEnvelope {
+  version: number;
+  record: LastSessionRecord;
 }
 
 function normalizeServerUrl(url: string): string {
@@ -15,16 +21,31 @@ export async function loadLastSession(): Promise<LastSessionRecord | null> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<LastSessionRecord>;
-    if (!parsed.gateway || !parsed.sessionId) return null;
-    return { gateway: parsed.gateway, sessionId: parsed.sessionId };
+    const parsed = JSON.parse(raw) as
+      | LastSessionEnvelope
+      | Partial<LastSessionRecord>;
+    // Versioned shape.
+    if (parsed && typeof parsed === "object" && "version" in parsed) {
+      if ((parsed as LastSessionEnvelope).version !== LAST_SESSION_VERSION) {
+        return null;
+      }
+      const record = (parsed as LastSessionEnvelope).record;
+      if (!record?.gateway || !record?.sessionId) return null;
+      return { gateway: record.gateway, sessionId: record.sessionId };
+    }
+    // Unversioned legacy shape: discard.
+    return null;
   } catch {
     return null;
   }
 }
 
 export async function saveLastSession(record: LastSessionRecord): Promise<void> {
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(record));
+  const envelope: LastSessionEnvelope = {
+    version: LAST_SESSION_VERSION,
+    record,
+  };
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
 }
 
 export async function clearLastSession(): Promise<void> {

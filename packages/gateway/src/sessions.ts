@@ -19,6 +19,7 @@ export interface Session {
   lastActivity: number;
   createdAt: number;
   outputBuffers: Map<string, Envelope[]>; // keyed by terminalId
+  outputBufferBytes: Map<string, number>; // approx byte size per terminalId buffer
   lastStatusByTerminal: Map<string, Envelope>; // last terminal.status per terminal
   hostDisconnectedAt: number | undefined;
   // Metadata from host's session.connect
@@ -33,8 +34,20 @@ export interface Session {
 }
 
 const OUTPUT_BUFFER_CAPACITY = 200;
+const OUTPUT_BUFFER_MAX_BYTES = 8 * 1024 * 1024; // 8MB per terminal buffer
 const HOST_RECONNECT_WINDOW = 60_000; // 60s
 const CLEANUP_INTERVAL = 30_000;
+
+/** Approximate the wire byte size of an envelope for buffer accounting. */
+function approxEnvelopeBytes(envelope: Envelope): number {
+  const data = (envelope.payload as { data?: unknown } | undefined)?.data;
+  if (typeof data === "string") return data.length;
+  try {
+    return JSON.stringify(envelope).length;
+  } catch {
+    return 0;
+  }
+}
 
 export class SessionManager {
   private sessions = new Map<string, Session>();
@@ -56,6 +69,7 @@ export class SessionManager {
         lastActivity: Date.now(),
         createdAt: Date.now(),
         outputBuffers: new Map(),
+        outputBufferBytes: new Map(),
         lastStatusByTerminal: new Map(),
         hostDisconnectedAt: undefined,
         provider: undefined,
@@ -137,11 +151,20 @@ export class SessionManager {
     if (!buf) {
       buf = [];
       session.outputBuffers.set(tid, buf);
+      session.outputBufferBytes.set(tid, 0);
     }
     buf.push(envelope);
-    if (buf.length > OUTPUT_BUFFER_CAPACITY) {
-      buf.shift();
+    let bytes = (session.outputBufferBytes.get(tid) ?? 0) + approxEnvelopeBytes(envelope);
+    // Evict oldest until under BOTH the count cap and the byte cap, so a
+    // malicious/abnormal host can't pin unbounded memory via large frames.
+    while (
+      buf.length > OUTPUT_BUFFER_CAPACITY ||
+      (bytes > OUTPUT_BUFFER_MAX_BYTES && buf.length > 1)
+    ) {
+      const removed = buf.shift();
+      if (removed) bytes -= approxEnvelopeBytes(removed);
     }
+    session.outputBufferBytes.set(tid, Math.max(0, bytes));
     session.lastActivity = Date.now();
   }
 

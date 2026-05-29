@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Appearance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -140,8 +140,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     Appearance.setColorScheme(mode);
   }, [mode]);
 
+  // Memoize so consumers don't re-render whenever the provider re-renders for
+  // an unrelated reason — only when theme/callbacks actually change.
+  const value = useMemo(
+    () => ({ theme, toggleTheme, setThemeMode }),
+    [theme, toggleTheme, setThemeMode],
+  );
+
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setThemeMode }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

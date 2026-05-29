@@ -1,15 +1,30 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 
-const STORAGE_KEY = "@linkshell/device_token";
+// Legacy plaintext AsyncStorage key (migrated out on first read).
+const LEGACY_STORAGE_KEY = "@linkshell/device_token";
+// SecureStore key (Keychain/Keystore) — only [A-Za-z0-9._-] allowed.
+const SECURE_KEY = "linkshell_device_token";
 
 let cached: string | null = null;
 
 export async function getDeviceToken(): Promise<string | null> {
   if (cached) return cached;
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw) cached = raw;
-    return raw;
+    const secure = await SecureStore.getItemAsync(SECURE_KEY);
+    if (secure) {
+      cached = secure;
+      return secure;
+    }
+    // One-time migration from legacy plaintext AsyncStorage.
+    const legacy = await AsyncStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy) {
+      cached = legacy;
+      await SecureStore.setItemAsync(SECURE_KEY, legacy);
+      await AsyncStorage.removeItem(LEGACY_STORAGE_KEY);
+      return legacy;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -17,7 +32,7 @@ export async function getDeviceToken(): Promise<string | null> {
 
 export async function setDeviceToken(token: string): Promise<void> {
   cached = token;
-  await AsyncStorage.setItem(STORAGE_KEY, token);
+  await SecureStore.setItemAsync(SECURE_KEY, token);
 }
 
 export async function ensureDeviceToken(): Promise<string> {

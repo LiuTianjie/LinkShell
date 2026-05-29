@@ -154,7 +154,7 @@ export async function handleTunnelRequest(
   const cookieToken = tokenOwns ? token : authJwt;
   if (cookieToken) {
     const cookieVal = encodeURIComponent(`${sessionId}:${port}:${cookieToken}`);
-    res.setHeader("Set-Cookie", `lsh_tunnel=${cookieVal}; Path=/; HttpOnly; SameSite=Lax`);
+    res.setHeader("Set-Cookie", `lsh_tunnel=${cookieVal}; Path=/; HttpOnly; Secure; SameSite=Lax`);
   }
 
   // Validate session & host

@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
+import { enqueueWrite } from "./write-queue";
 
 export type AgentProvider = "codex" | "claude" | "custom";
 export type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
@@ -250,7 +251,10 @@ const CONVERSATIONS_KEY = "@linkshell/agent-conversations:v1";
 const TIMELINE_PREFIX = "@linkshell/agent-timeline:v1:";
 const MAX_CONVERSATIONS = 100;
 const MAX_TIMELINE_ITEMS = 200;
-const MAX_TIMELINE_BYTES = 100 * 1024 * 1024;
+// Android AsyncStorage is backed by SQLite, whose cursor window caps a single
+// row near ~2MB. A larger budget makes writes silently fail and data vanish, so
+// keep the serialized timeline comfortably under that limit.
+const MAX_TIMELINE_BYTES = 1.5 * 1024 * 1024;
 const IMAGE_CACHE_DIR = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ""}agent-images`;
 
 function normalizeServerUrl(serverUrl: string): string {
@@ -444,6 +448,8 @@ async function migrateAgentTimelineKey(migration: ProviderScopedMigration): Prom
   }
 }
 
+// Raw write of the conversations row. Callers that read-modify-write must run
+// inside enqueueWrite(CONVERSATIONS_KEY, ...) so concurrent mutations serialize.
 async function saveConversations(items: AgentConversationRecord[]): Promise<void> {
   await AsyncStorage.setItem(
     CONVERSATIONS_KEY,
@@ -474,72 +480,80 @@ export async function upsertAgentConversation(
   input: Omit<AgentConversationRecord, "schemaVersion"> & { schemaVersion?: 1 },
   options: { preserveLocalArchived?: boolean } = {},
 ): Promise<AgentConversationRecord> {
-  const conversations = await loadAgentConversations();
-  const normalized: AgentConversationRecord = {
-    ...input,
-    serverUrl: normalizeServerUrl(input.serverUrl),
-    schemaVersion: 1,
-  };
-  const index = conversations.findIndex((item) => item.id === normalized.id);
-  const preserveLocalArchived = options.preserveLocalArchived ?? true;
-  const nextRecord = index >= 0
-    ? {
-        ...conversations[index],
-        ...normalized,
-        archived: preserveLocalArchived && conversations[index].archived && !normalized.archived
-          ? true
-          : normalized.archived,
-        lastMessagePreview: normalized.lastMessagePreview ?? conversations[index].lastMessagePreview,
-        lastUserActivityAt: normalized.lastUserActivityAt ?? conversations[index].lastUserActivityAt,
-        lastResponseAt: normalized.lastResponseAt ?? conversations[index].lastResponseAt,
-        lastReadAt: normalized.lastReadAt ?? conversations[index].lastReadAt,
-      }
-    : normalized;
-  if (index >= 0) conversations[index] = nextRecord;
-  else conversations.unshift(nextRecord);
-  await saveConversations(conversations);
-  return nextRecord;
+  return enqueueWrite(CONVERSATIONS_KEY, async () => {
+    const conversations = await loadAgentConversations();
+    const normalized: AgentConversationRecord = {
+      ...input,
+      serverUrl: normalizeServerUrl(input.serverUrl),
+      schemaVersion: 1,
+    };
+    const index = conversations.findIndex((item) => item.id === normalized.id);
+    const preserveLocalArchived = options.preserveLocalArchived ?? true;
+    const nextRecord = index >= 0
+      ? {
+          ...conversations[index],
+          ...normalized,
+          archived: preserveLocalArchived && conversations[index].archived && !normalized.archived
+            ? true
+            : normalized.archived,
+          lastMessagePreview: normalized.lastMessagePreview ?? conversations[index].lastMessagePreview,
+          lastUserActivityAt: normalized.lastUserActivityAt ?? conversations[index].lastUserActivityAt,
+          lastResponseAt: normalized.lastResponseAt ?? conversations[index].lastResponseAt,
+          lastReadAt: normalized.lastReadAt ?? conversations[index].lastReadAt,
+        }
+      : normalized;
+    if (index >= 0) conversations[index] = nextRecord;
+    else conversations.unshift(nextRecord);
+    await saveConversations(conversations);
+    return nextRecord;
+  });
 }
 
 export async function mergeAgentConversationId(oldId: string, newId: string): Promise<void> {
   if (!oldId || !newId || oldId === newId) return;
-  const conversations = await loadAgentConversations();
-  const oldRecord = conversations.find((item) => item.id === oldId);
-  if (!oldRecord) return;
-  const next = conversations.filter((item) => item.id !== oldId);
-  const existingIndex = next.findIndex((item) => item.id === newId);
-  if (existingIndex >= 0) {
-    const existing = next[existingIndex]!;
-    next[existingIndex] = {
-      ...oldRecord,
-      ...existing,
-      id: newId,
-      archived: existing.archived || oldRecord.archived,
-      createdAt: Math.min(existing.createdAt, oldRecord.createdAt),
-      lastActivityAt: Math.max(existing.lastActivityAt, oldRecord.lastActivityAt),
-      lastUserActivityAt: Math.max(existing.lastUserActivityAt ?? 0, oldRecord.lastUserActivityAt ?? 0) || undefined,
-      lastResponseAt: Math.max(existing.lastResponseAt ?? 0, oldRecord.lastResponseAt ?? 0) || undefined,
-      lastReadAt: Math.max(existing.lastReadAt ?? 0, oldRecord.lastReadAt ?? 0) || undefined,
-    };
-  } else {
-    next.unshift({ ...oldRecord, id: newId });
-  }
-  await saveConversations(next);
+  await enqueueWrite(CONVERSATIONS_KEY, async () => {
+    const conversations = await loadAgentConversations();
+    const oldRecord = conversations.find((item) => item.id === oldId);
+    if (!oldRecord) return;
+    const next = conversations.filter((item) => item.id !== oldId);
+    const existingIndex = next.findIndex((item) => item.id === newId);
+    if (existingIndex >= 0) {
+      const existing = next[existingIndex]!;
+      next[existingIndex] = {
+        ...oldRecord,
+        ...existing,
+        id: newId,
+        archived: existing.archived || oldRecord.archived,
+        createdAt: Math.min(existing.createdAt, oldRecord.createdAt),
+        lastActivityAt: Math.max(existing.lastActivityAt, oldRecord.lastActivityAt),
+        lastUserActivityAt: Math.max(existing.lastUserActivityAt ?? 0, oldRecord.lastUserActivityAt ?? 0) || undefined,
+        lastResponseAt: Math.max(existing.lastResponseAt ?? 0, oldRecord.lastResponseAt ?? 0) || undefined,
+        lastReadAt: Math.max(existing.lastReadAt ?? 0, oldRecord.lastReadAt ?? 0) || undefined,
+      };
+    } else {
+      next.unshift({ ...oldRecord, id: newId });
+    }
+    await saveConversations(next);
+  });
   await migrateAgentTimelineKey({ oldId, newId });
 }
 
 export async function archiveAgentConversation(id: string, archived: boolean): Promise<void> {
-  const conversations = await loadAgentConversations();
-  await saveConversations(
-    conversations.map((item) => item.id === id ? { ...item, archived } : item),
-  );
+  await enqueueWrite(CONVERSATIONS_KEY, async () => {
+    const conversations = await loadAgentConversations();
+    await saveConversations(
+      conversations.map((item) => item.id === id ? { ...item, archived } : item),
+    );
+  });
 }
 
 export async function renameAgentConversation(id: string, title: string): Promise<void> {
-  const conversations = await loadAgentConversations();
-  await saveConversations(
-    conversations.map((item) => item.id === id ? { ...item, title } : item),
-  );
+  await enqueueWrite(CONVERSATIONS_KEY, async () => {
+    const conversations = await loadAgentConversations();
+    await saveConversations(
+      conversations.map((item) => item.id === id ? { ...item, title } : item),
+    );
+  });
 }
 
 async function removeAgentTimelines(conversationIds: string[]): Promise<void> {
@@ -557,10 +571,13 @@ async function removeAgentTimelines(conversationIds: string[]): Promise<void> {
 async function removeAgentConversationsWhere(
   predicate: (item: AgentConversationRecord) => boolean,
 ): Promise<void> {
-  const conversations = await loadAgentConversations();
-  const removed = conversations.filter(predicate);
-  if (removed.length === 0) return;
-  await saveConversations(conversations.filter((item) => !predicate(item)));
+  const removed = await enqueueWrite(CONVERSATIONS_KEY, async () => {
+    const conversations = await loadAgentConversations();
+    const toRemove = conversations.filter(predicate);
+    if (toRemove.length === 0) return [];
+    await saveConversations(conversations.filter((item) => !predicate(item)));
+    return toRemove;
+  });
   await removeAgentTimelines(removed.map((item) => item.id));
 }
 

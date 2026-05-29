@@ -49,6 +49,7 @@
     "expo-linear-gradient": "^55.0.13",
     "expo-linking": "~7.0.1",
     "expo-router": "~6.0.23",
+    "expo-secure-store": "~15.0.8",
     "expo-speech-recognition": "^3.1.2",
     "expo-status-bar": "~3.0.9",
     "expo-symbols": "^55.0.5",

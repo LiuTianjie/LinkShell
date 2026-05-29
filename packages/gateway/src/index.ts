@@ -12,6 +12,7 @@ import { z, ZodError } from "zod";
 import { SessionManager } from "./sessions.js";
 import { PairingManager } from "./pairings.js";
 import { TokenManager } from "./tokens.js";
+import { HostAuthManager } from "./host-auth.js";
 import { createSupabaseStateStore } from "./state-store.js";
 import { handleSocketMessage } from "./relay.js";
 import {
@@ -45,6 +46,7 @@ const stateStore = createSupabaseStateStore();
 const sessionManager = new SessionManager();
 const pairingManager = new PairingManager(stateStore);
 const tokenManager = new TokenManager(stateStore);
+const hostAuthManager = new HostAuthManager();
 await Promise.all([pairingManager.hydrate(), tokenManager.hydrate()]);
 
 const PING_INTERVAL = 20_000;
@@ -65,10 +67,18 @@ const WS_CONNECT_RATE_LIMIT_WINDOW_MS = Number(
 
 class RateLimiter {
   private hits = new Map<string, { count: number; resetAt: number }>();
+  private pruneTimer: ReturnType<typeof setInterval>;
   constructor(
     private maxHits: number,
     private windowMs: number,
-  ) {}
+  ) {
+    // Periodically evict expired windows so the map does not grow unbounded.
+    this.pruneTimer = setInterval(
+      () => this.prune(),
+      Math.max(windowMs, 60_000),
+    );
+    this.pruneTimer.unref?.();
+  }
 
   allow(key: string): boolean {
     const now = Date.now();
@@ -80,6 +90,17 @@ class RateLimiter {
     entry.count++;
     return entry.count <= this.maxHits;
   }
+
+  private prune(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.hits) {
+      if (now >= entry.resetAt) this.hits.delete(key);
+    }
+  }
+
+  destroy(): void {
+    clearInterval(this.pruneTimer);
+  }
 }
 
 const pairingLimiter = new RateLimiter(
@@ -89,6 +110,18 @@ const pairingLimiter = new RateLimiter(
 const wsConnectLimiter = new RateLimiter(
   WS_CONNECT_RATE_LIMIT_MAX,
   WS_CONNECT_RATE_LIMIT_WINDOW_MS,
+);
+// Gateway-wide cap on failed pairing claims per window, independent of the
+// per-IP creation limiter — mitigates distributed pairing-code guessing.
+const CLAIM_FAILURE_RATE_LIMIT_MAX = Number(
+  process.env.CLAIM_FAILURE_RATE_LIMIT_MAX ?? 100,
+);
+const CLAIM_FAILURE_RATE_LIMIT_WINDOW_MS = Number(
+  process.env.CLAIM_FAILURE_RATE_LIMIT_WINDOW_MS ?? 60_000,
+);
+const claimFailureLimiter = new RateLimiter(
+  CLAIM_FAILURE_RATE_LIMIT_MAX,
+  CLAIM_FAILURE_RATE_LIMIT_WINDOW_MS,
 );
 
 function isLoopbackIp(ip: string): boolean {
@@ -104,10 +137,43 @@ function isRateLimitBypassed(ip: string): boolean {
   return isLoopbackIp(ip);
 }
 
+/**
+ * Trusted reverse proxies, parsed from TRUSTED_PROXIES (comma-separated IPs).
+ * X-Forwarded-For is only honored when the immediate peer
+ * (req.socket.remoteAddress) is one of these. Default empty = trust nobody,
+ * so the socket address is always used and the header cannot be spoofed.
+ * IPv6-mapped IPv4 (::ffff:1.2.3.4) is normalized to the bare IPv4 form.
+ */
+function normalizeIp(ip: string): string {
+  const t = ip.trim().toLowerCase();
+  if (t.startsWith("::ffff:")) return t.slice(7);
+  return t;
+}
+
+function parseTrustedProxies(): Set<string> {
+  const raw = process.env.TRUSTED_PROXIES ?? "";
+  const set = new Set<string>();
+  for (const part of raw.split(",")) {
+    const ip = normalizeIp(part);
+    if (ip) set.add(ip);
+  }
+  return set;
+}
+
+const TRUSTED_PROXIES = parseTrustedProxies();
+
 function getClientIp(req: IncomingMessage): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string") return forwarded.split(",")[0]!.trim();
-  return req.socket.remoteAddress ?? "unknown";
+  const peer = req.socket.remoteAddress ?? "unknown";
+  // Only honor X-Forwarded-For when the direct peer is a configured proxy;
+  // otherwise the header is attacker-controlled and would defeat rate limits.
+  if (TRUSTED_PROXIES.has(normalizeIp(peer))) {
+    const forwarded = req.headers["x-forwarded-for"];
+    if (typeof forwarded === "string") {
+      const first = forwarded.split(",")[0]?.trim();
+      if (first) return first;
+    }
+  }
+  return peer;
 }
 
 function extractBearerToken(req: IncomingMessage): string | null {
@@ -291,9 +357,13 @@ async function handleRequest(
     }
     const body = createPairingBody.parse(await readJson(req));
     const record = pairingManager.create(body.sessionId);
+    // Issue a secret host token bound to this session. Only the CLI that
+    // created the pairing can later connect as role=host (see WS handler).
+    const hostToken = hostAuthManager.issue(record.sessionId);
     json(res, 201, {
       sessionId: record.sessionId,
       pairingCode: record.pairingCode,
+      hostToken,
       expiresAt: new Date(record.expiresAt).toISOString(),
     });
     return;
@@ -303,6 +373,12 @@ async function handleRequest(
   if (method === "POST" && url.pathname === "/pairings/claim") {
     if (!isRateLimitBypassed(ip) && !pairingLimiter.allow(ip)) {
       json(res, 429, { error: "rate_limited", message: "Too many requests" });
+      return;
+    }
+    // Gateway-wide cap on failed claims, independent of per-IP limiter, to
+    // blunt distributed brute-forcing across many source IPs.
+    if (!isRateLimitBypassed(ip) && !claimFailureLimiter.allow("global")) {
+      json(res, 429, { error: "rate_limited", message: "Too many failed claims" });
       return;
     }
     const body = claimPairingBody.parse(await readJson(req));
@@ -518,6 +594,24 @@ wss.on(
     };
 
     if (role === "host") {
+      // Verify the host token issued when this session's pairing was created.
+      // Without this, anyone who learns a sessionId could connect as host and
+      // capture controller keystrokes or inject terminal output.
+      const hdr = _request.headers["x-linkshell-host-token"];
+      const providedHostToken = Array.isArray(hdr) ? hdr[0] : hdr;
+      if (hostAuthManager.has(sessionId)) {
+        if (!hostAuthManager.verify(sessionId, providedHostToken)) {
+          log("warn", `rejected host connect with bad host token for ${sessionId}`);
+          socket.close(4003, "host authentication failed");
+          return;
+        }
+      } else if (providedHostToken) {
+        // No binding yet (e.g. gateway restarted and lost in-memory state) —
+        // trust the first host token presented for this session.
+        hostAuthManager.adopt(sessionId, providedHostToken);
+      }
+      // else: legacy host without a token — allowed for backward compatibility.
+
       // Check if this is a reconnect (session already exists with clients)
       const existingSession = sessionManager.get(sessionId);
       const isReconnect =
@@ -590,11 +684,21 @@ wss.on(
       }
     }
 
-    // Ping/pong for liveness
+    // Ping/pong for liveness — terminate connections that stop responding
+    // to pings (dead/half-open sockets) instead of leaking them.
+    const liveSocket = socket as WebSocket & { isAlive?: boolean };
+    liveSocket.isAlive = true;
+    socket.on("pong", () => {
+      liveSocket.isAlive = true;
+    });
     const pingTimer = setInterval(() => {
-      if (socket.readyState === socket.OPEN) {
-        socket.ping();
+      if (socket.readyState !== socket.OPEN) return;
+      if (liveSocket.isAlive === false) {
+        socket.terminate();
+        return;
       }
+      liveSocket.isAlive = false;
+      socket.ping();
     }, PING_INTERVAL);
 
     socket.on("message", (data: WebSocket.RawData) => {
@@ -664,6 +768,7 @@ function shutdown() {
   sessionManager.destroy();
   pairingManager.destroy();
   tokenManager.destroy();
+  hostAuthManager.destroy();
   server.close(() => {
     process.stdout.write("[gateway] stopped\n");
     process.exit(0);

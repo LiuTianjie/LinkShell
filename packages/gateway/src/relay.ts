@@ -1,6 +1,7 @@
 import type WebSocket from "ws";
 import {
   agentV2MessageRoute,
+  isProtocolVersionCompatible,
   parseEnvelope,
   parseTypedPayload,
   protocolMessageSchemas,
@@ -117,6 +118,16 @@ function handleHostMessage(
     case "session.connect": {
       // Extract metadata from host's connect message
       const p = parseTypedPayload("session.connect", envelope.payload);
+      // Non-breaking version negotiation: warn (never disconnect) when a host
+      // advertises an incompatible protocol version. CLI and app update
+      // independently, so an out-of-date peer must keep working in degraded
+      // mode rather than being rejected.
+      if (!isProtocolVersionCompatible(p.protocolVersion)) {
+        process.stderr.write(
+          `[gateway] host on session ${session.id} advertises protocol v${p.protocolVersion}, ` +
+          `which is older than the minimum compatible version — continuing in degraded mode\n`,
+        );
+      }
       if (p.provider || p.machineId || p.hostname || p.platform || p.cwd || p.projectName) {
         sessions.setMetadata(
           session.id,
@@ -355,15 +366,19 @@ function handleClientMessage(
   }
 }
 
+/** Skip clients whose send buffer exceeds this, so one slow/stalled client
+ *  can't grow gateway memory without bound (backpressure). */
+const MAX_CLIENT_BUFFER_BYTES = 8 * 1024 * 1024; // 8MB
+
 function broadcastToClients(
   session: ReturnType<SessionManager["get"]> & {},
   envelope: Envelope,
 ): void {
   const data = serializeEnvelope(envelope);
   for (const [, client] of session.clients) {
-    if (client.socket.readyState === client.socket.OPEN) {
-      client.socket.send(data);
-    }
+    if (client.socket.readyState !== client.socket.OPEN) continue;
+    if (client.socket.bufferedAmount > MAX_CLIENT_BUFFER_BYTES) continue;
+    client.socket.send(data);
   }
 }
 

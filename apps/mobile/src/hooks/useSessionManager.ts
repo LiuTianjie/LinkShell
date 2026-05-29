@@ -349,6 +349,10 @@ interface InternalSession {
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   healthProbeTimer: ReturnType<typeof setTimeout> | null;
   reconnectAttempts: number;
+  // Incremented every time a new socket is opened. onclose/onerror closures
+  // capture the epoch at open time; a stale closure (epoch mismatch) must not
+  // schedule a reconnect, preventing concurrent sockets after a manual reconnect.
+  socketEpoch: number;
   lastAckedSeq: number;
   lastAckedSeqByTerminal: Map<string, number>;
   pendingOutbound: Array<{ envelope: Envelope; dedupeKey?: string }>;
@@ -455,6 +459,7 @@ function createInternalSession(
     reconnectTimer: null,
     healthProbeTimer: null,
     reconnectAttempts: 0,
+    socketEpoch: 0,
     lastAckedSeq: -1,
     lastAckedSeqByTerminal: new Map(),
     pendingOutbound: [],
@@ -551,9 +556,32 @@ function toSessionInfo(s: InternalSession): SessionInfo {
 export function useSessionManager(): SessionManagerHandle {
   const sessionsRef = useRef(new Map<string, InternalSession>());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  // Bump to force re-render when internal state changes
+  // Bump to force re-render when internal state changes.
   const [, setTick] = useState(0);
-  const tick = useCallback(() => setTick((t) => t + 1), []);
+  // Per-session version + global generation for memoizing toSessionInfo so a
+  // change in one session doesn't deep-copy every other session's agent state.
+  const genRef = useRef(0);
+  const versionsRef = useRef(new Map<string, number>());
+  const infoCacheRef = useRef(
+    new Map<string, { v: number; g: number; info: SessionInfo }>(),
+  );
+  const sessionsMapRef = useRef(new Map<string, SessionInfo>());
+  // Global invalidate: rebuilds every session's SessionInfo (conservative,
+  // == legacy behavior). Used for low-frequency / cross-session changes.
+  const tick = useCallback(() => {
+    genRef.current += 1;
+    setTick((t) => t + 1);
+  }, []);
+  // Targeted invalidate: only the named session's SessionInfo is rebuilt.
+  // Safe to use anywhere `tick()` was used; falling back to tick() is always
+  // correct, just less efficient.
+  const bump = useCallback((sessionId: string) => {
+    versionsRef.current.set(
+      sessionId,
+      (versionsRef.current.get(sessionId) ?? 0) + 1,
+    );
+    setTick((t) => t + 1);
+  }, []);
 
   const deviceIdRef = useRef(generateId());
   const deviceTokenRef = useRef<string | null>(null);
@@ -784,6 +812,11 @@ export function useSessionManager(): SessionManagerHandle {
       clearTimeout(s.reconnectTimer);
       s.reconnectTimer = null;
     }
+    // Bump the epoch synchronously, before any await. connectSocket awaits token
+    // refresh before creating the socket, so a superseded socket's onclose may
+    // fire during those awaits; bumping here guarantees its captured epoch is
+    // already stale and it won't schedule a competing reconnect.
+    const epoch = ++s.socketEpoch;
     s.manualDisconnect = false;
     s.status = isReconnect ? "reconnecting" : "connecting";
     tick();
@@ -931,9 +964,14 @@ export function useSessionManager(): SessionManagerHandle {
 
       switch (envelope.type as string) {
         case "terminal.output": {
+          // Raw output flows to the WebView via the terminal stream (appendChunk
+          // → listeners) and does NOT require a React render. Only flag a render
+          // when something React-visible changes (status, new terminal entry).
+          let outputVisibleChange = false;
           if (s.status === "connecting" || s.status === "reconnecting") {
             s.status = "connected";
             s.connectionDetail = null;
+            outputVisibleChange = true;
           }
           const p = parseTypedPayload("terminal.output", envelope.payload);
           const tid = (envelope as any).terminalId ?? "default";
@@ -947,6 +985,7 @@ export function useSessionManager(): SessionManagerHandle {
             );
             s.terminals.set(tid, t);
             if (!s.activeTerminalId) s.activeTerminalId = tid;
+            outputVisibleChange = true;
           }
           appendChunk(s, tid, p.data);
           if (envelope.seq !== undefined) {
@@ -969,7 +1008,7 @@ export function useSessionManager(): SessionManagerHandle {
               );
             }
           }
-          tick();
+          if (outputVisibleChange) bump(s.sessionId);
           break;
         }
         case "terminal.spawned": {
@@ -1405,6 +1444,10 @@ export function useSessionManager(): SessionManagerHandle {
     ws.onclose = (event) => {
       stopHeartbeat(s);
       if (s.socket === ws) s.socket = null;
+      // A newer socket was opened after this one — this is a stale close from a
+      // superseded socket. Do not schedule a reconnect or we'd create a second
+      // concurrent socket racing the current one.
+      if (epoch !== s.socketEpoch) return;
       const code = (event as any)?.code as number | undefined;
       if (shouldReconnectAfterClose({ code, manualDisconnect: s.manualDisconnect, status: s.status })) {
         s.connectionDetail = connectionDetailForClose(code);
@@ -1917,11 +1960,38 @@ export function useSessionManager(): SessionManagerHandle {
     [getActive, tick],
   );
 
-  // Build sessions map for consumers
-  const sessions = new Map<string, SessionInfo>();
-  for (const [id, s] of sessionsRef.current) {
-    sessions.set(id, toSessionInfo(s));
+  // Build sessions map for consumers. Memoized per-session: a session's
+  // SessionInfo is only rebuilt when its version (bump) or the global
+  // generation (tick) changes, so an output chunk in one session no longer
+  // deep-copies every other session's agent timeline. Per-session identity is
+  // kept stable across renders so React.memo'd children can skip work.
+  {
+    const prevMap = sessionsMapRef.current;
+    const nextMap = new Map<string, SessionInfo>();
+    let changed = prevMap.size !== sessionsRef.current.size;
+    for (const [id, s] of sessionsRef.current) {
+      const version = versionsRef.current.get(id) ?? 0;
+      const cached = infoCacheRef.current.get(id);
+      let info: SessionInfo;
+      if (cached && cached.v === version && cached.g === genRef.current) {
+        info = cached.info;
+      } else {
+        info = toSessionInfo(s);
+        infoCacheRef.current.set(id, { v: version, g: genRef.current, info });
+      }
+      if (prevMap.get(id) !== info) changed = true;
+      nextMap.set(id, info);
+    }
+    for (const id of [...infoCacheRef.current.keys()]) {
+      if (!sessionsRef.current.has(id)) {
+        infoCacheRef.current.delete(id);
+        versionsRef.current.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) sessionsMapRef.current = nextMap;
   }
+  const sessions = sessionsMapRef.current;
 
   // Cleanup on unmount
   useEffect(() => {

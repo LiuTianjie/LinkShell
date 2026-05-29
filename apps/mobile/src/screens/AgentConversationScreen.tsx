@@ -977,7 +977,9 @@ function UserMessageContent({
   );
 }
 
-function MarkdownContent({
+const TimelineSeparator = () => <View style={{ height: 12 }} />;
+
+const MarkdownContent = memo(function MarkdownContent({
   text,
   theme,
   inverse = false,
@@ -1149,7 +1151,7 @@ function MarkdownContent({
       </Markdown>
     </View>
   );
-}
+});
 
 const FileChangeCard = memo(function FileChangeCard({ tool, theme }: { tool: AgentToolCall; theme: Theme }) {
   const [expanded, setExpanded] = useState(false);
@@ -2537,7 +2539,7 @@ function AgentConversationSkeleton({ theme }: { theme: Theme }) {
   );
 }
 
-function TimelineItemView({
+const TimelineItemView = memo(function TimelineItemView({
   item,
   theme,
   onPermission,
@@ -2738,7 +2740,7 @@ function TimelineItemView({
   }
 
   return null;
-}
+});
 
 function HighlightedCodeLine({
   line,
@@ -3165,6 +3167,11 @@ export function AgentConversationScreen({
     () => dedupedTimeline.filter((item) => !isQueuedFollowUpPlaceholder(item)),
     [dedupedTimeline],
   );
+  // Mirror into a ref so renderTimelineItem can read neighbor items without
+  // depending on `visibleTimeline` — otherwise the renderer's identity changes
+  // on every streamed token and defeats LegendList row recycling.
+  const visibleTimelineRef = useRef(visibleTimeline);
+  visibleTimelineRef.current = visibleTimeline;
   const timelineRef = useRef<LegendListRef>(null);
   const composerInputRef = useRef<TextInput>(null);
   const timelineNearBottomRef = useRef(true);
@@ -3498,7 +3505,7 @@ export function AgentConversationScreen({
     if (isTimelineBottomSpacer(item)) {
       return <View style={{ height: item.spacerHeight }} />;
     }
-    const previous = visibleTimeline[index - 1];
+    const previous = visibleTimelineRef.current[index - 1];
     const startsTurn = Boolean(item.turnId && previous?.turnId && item.turnId !== previous.turnId);
     return (
       <View style={{ gap: 12 }}>
@@ -3521,7 +3528,7 @@ export function AgentConversationScreen({
         />
       </View>
     );
-  }, [conversationId, theme, visibleTimeline, workspace]);
+  }, [conversationId, theme, workspace]);
 
   const timelineEmpty = useMemo(() => {
     if (isRestoring) return <AgentConversationSkeleton theme={theme} />;
@@ -3913,7 +3920,7 @@ export function AgentConversationScreen({
           keyExtractor={(item) => item.id}
           renderItem={renderTimelineItem}
           ListEmptyComponent={timelineEmpty}
-          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          ItemSeparatorComponent={TimelineSeparator}
           contentContainerStyle={{
             flexGrow: 1,
             paddingHorizontal: 16,
@@ -3933,7 +3940,7 @@ export function AgentConversationScreen({
             if (timelineNearBottomRef.current) forceTimelineToBottom(false);
           }}
           scrollEventThrottle={16}
-          estimatedItemSize={96}
+          estimatedItemSize={160}
           drawDistance={420}
           alignItemsAtEnd
           maintainScrollAtEnd={{ onDataChange: true, onItemLayout: true, onLayout: true }}

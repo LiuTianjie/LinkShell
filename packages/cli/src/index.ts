@@ -221,11 +221,39 @@ program
       daemon.removePid("bridge");
       if (embeddedGatewayHandle) await embeddedGatewayHandle.close();
     };
+
+    // When all PTYs exit naturally (not via a signal), the session closes its
+    // own socket but the embedded gateway loop and stale PID file would linger.
+    // Run the same process-level cleanup and then exit.
+    session.setOnAllTerminalsExited(async () => {
+      daemon.removePid("bridge");
+      if (embeddedGatewayHandle) await embeddedGatewayHandle.close();
+      process.exit(process.exitCode ?? 0);
+    });
+
     process.on("SIGINT", () => {
       cleanup().then(() => process.exit(0));
     });
     process.on("SIGTERM", () => {
       cleanup().then(() => process.exit(0));
+    });
+
+    // Global crash handlers: never die silently. In daemon mode keep the bridge
+    // alive (it has its own gateway reconnect logic); stderr is redirected to the
+    // daemon log file so the trace is recoverable.
+    const isDaemonChild = Boolean(options._foregroundBridge);
+    process.on("uncaughtException", (err) => {
+      process.stderr.write(
+        `[bridge] uncaught exception: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`,
+      );
+      if (!isDaemonChild) {
+        cleanup().then(() => process.exit(1));
+      }
+    });
+    process.on("unhandledRejection", (reason) => {
+      process.stderr.write(
+        `[bridge] unhandled rejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}\n`,
+      );
     });
 
     await session.start();

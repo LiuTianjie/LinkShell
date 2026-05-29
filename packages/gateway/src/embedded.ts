@@ -389,8 +389,20 @@ export function startEmbeddedGateway(
         ),
       );
 
+      // Ping/pong for liveness — terminate sockets that stop answering pings.
+      const liveSocket = socket as WebSocket & { isAlive?: boolean };
+      liveSocket.isAlive = true;
+      socket.on("pong", () => {
+        liveSocket.isAlive = true;
+      });
       const pingTimer = setInterval(() => {
-        if (socket.readyState === socket.OPEN) socket.ping();
+        if (socket.readyState !== socket.OPEN) return;
+        if (liveSocket.isAlive === false) {
+          socket.terminate();
+          return;
+        }
+        liveSocket.isAlive = false;
+        socket.ping();
       }, PING_INTERVAL);
 
       socket.on("message", (data: WebSocket.RawData) => {

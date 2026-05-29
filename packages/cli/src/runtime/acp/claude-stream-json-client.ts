@@ -120,6 +120,7 @@ function splitImageDataUrl(value: string, fallbackMimeType = "image/png"): { dat
 }
 
 export class ClaudeStreamJsonClient {
+  private static warnedBypass = false;
   private child: ChildProcessWithoutNullStreams | undefined;
   private claudeSessionId: string | undefined;
   private pendingCancel = false;
@@ -176,6 +177,28 @@ export class ClaudeStreamJsonClient {
     }
 
     this.pendingCancel = false;
+
+    // SECURITY: the headless stream-json fallback can only run with
+    // --permission-mode bypassPermissions (there is no TTY to prompt on), so
+    // remotely-submitted prompts execute tools — including shell — without
+    // confirmation. The SDK path (preferred when @anthropic-ai/claude-agent-sdk
+    // is installed) routes tool approvals to the mobile UI instead.
+    if (/^(1|true|yes)$/i.test(process.env.LINKSHELL_REQUIRE_AGENT_PERMISSIONS ?? "")) {
+      throw new Error(
+        "Agent permission enforcement is required (LINKSHELL_REQUIRE_AGENT_PERMISSIONS) " +
+        "but the Claude stream-json fallback can only run with bypassPermissions. " +
+        "Install @anthropic-ai/claude-agent-sdk to enable permission-gated tool approvals.",
+      );
+    }
+    if (!ClaudeStreamJsonClient.warnedBypass) {
+      ClaudeStreamJsonClient.warnedBypass = true;
+      process.stderr.write(
+        "[bridge] WARNING: Claude stream-json fallback runs with bypassPermissions — " +
+        "remotely submitted prompts can execute tools (including shell) without confirmation. " +
+        "Install @anthropic-ai/claude-agent-sdk for permission-gated control, or set " +
+        "LINKSHELL_REQUIRE_AGENT_PERMISSIONS=true to refuse the unsafe fallback.\n",
+      );
+    }
 
     // Build Claude args
     const args: string[] = [
