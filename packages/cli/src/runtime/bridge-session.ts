@@ -63,6 +63,9 @@ const RECONNECT_MAX_ATTEMPTS = 20;
 const DEFAULT_TERMINAL_ID = "default";
 const HOOK_BODY_LIMIT = 256 * 1024;
 const SCROLLBACK_LINES = 500;
+// Upper bound on concurrent live terminals — forceNew removed the cwd-dedup
+// ceiling, so bound growth to avoid PTY/fd exhaustion from a runaway client.
+const MAX_TERMINALS = 12;
 // How long to keep an exited terminal (with its scrollback) in memory so the
 // client can replay its final output before it is reaped.
 const EXITED_TERMINAL_GRACE_MS = 30_000;
@@ -383,7 +386,10 @@ export class BridgeSession {
   constructor(options: BridgeSessionOptions) {
     this.options = options;
     this.sessionId = options.sessionId ?? "";
-    this.fileRoot = resolve(options.fileRoot ?? process.cwd());
+    // Confine client-driven file ops to the user's home by default (single-user
+    // self-hosted model: the owner browses their own projects under ~). This
+    // still blocks /etc, /usr, other users' dirs. Override via --file-root.
+    this.fileRoot = resolve(options.fileRoot ?? homedir());
     this.allowedTunnelPorts = new Set(
       options.allowedTunnelPorts && options.allowedTunnelPorts.length > 0
         ? options.allowedTunnelPorts
@@ -703,10 +709,24 @@ export class BridgeSession {
       case "terminal.spawn": {
         const p = parseTypedPayload("terminal.spawn", envelope.payload);
         const normalizedCwd = resolve(p.cwd);
-        // Dedup: if a running terminal already exists for this cwd, return it
-        const existing = [...this.terminals.values()].find(
-          (t) => t.status === "running" && resolve(t.cwd) === normalizedCwd,
-        );
+        // Cap concurrent terminals — forceNew removed the cwd-dedup ceiling, so
+        // bound growth explicitly to avoid PTY/fd exhaustion from a runaway client.
+        const liveCount = [...this.terminals.values()].filter((t) => t.status === "running").length;
+        if (liveCount >= MAX_TERMINALS) {
+          this.send(createEnvelope({
+            type: "session.error",
+            sessionId: this.sessionId,
+            payload: { code: "too_many_terminals", message: `最多同时打开 ${MAX_TERMINALS} 个终端` },
+          }));
+          break;
+        }
+        // Dedup by cwd UNLESS the client explicitly asks for a fresh terminal
+        // (forceNew lets web open multiple tabs in the same directory).
+        const existing = p.forceNew
+          ? undefined
+          : [...this.terminals.values()].find(
+              (t) => t.status === "running" && resolve(t.cwd) === normalizedCwd,
+            );
         if (existing) {
           this.send(createEnvelope({
             type: "terminal.spawned",

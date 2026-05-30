@@ -84,6 +84,16 @@ export class PairingManager {
     return record;
   }
 
+  /** Look up a code's session without consuming an attempt or mutating state.
+   *  Lets the claim endpoint stay idempotent for a device that already owns the
+   *  mapped session (it re-issues instead of erroring with already_claimed). */
+  peek(pairingCode: string): { sessionId: string; claimed: boolean } | null {
+    const record = this.pairings.get(pairingCode);
+    if (!record) return null;
+    if (record.expiresAt < Date.now()) return null;
+    return { sessionId: record.sessionId, claimed: record.claimed };
+  }
+
   getStatus(pairingCode: string): { status: string; expiresAt: number; sessionId: string } | { error: string; httpStatus: number } {
     const record = this.pairings.get(pairingCode);
     if (!record) {

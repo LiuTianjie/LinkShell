@@ -221,6 +221,10 @@ export const screenIcePayloadSchema = z.object({
 export const terminalSpawnPayloadSchema = z.object({
   cwd: z.string().min(1),
   provider: terminalProviderSchema.optional(),
+  // When true, always spawn a fresh PTY even if one already exists for this cwd
+  // (lets a client open multiple terminal tabs in the same directory). Omitted/
+  // false preserves the legacy one-terminal-per-cwd dedup (mobile relies on it).
+  forceNew: z.boolean().optional(),
 });
 
 export const terminalInfoSchema = z.object({
@@ -847,6 +851,24 @@ export const agentV2NoticePayloadSchema = z.object({
   durationMs: z.number().int().positive().optional(),
 });
 
+// History pagination: client requests OLDER timeline items for a conversation
+// (scrolling up). cursor is opaque (passed back from a prior result); omit for
+// the first older page. The host pages the provider transcript via its cursor.
+export const agentV2HistoryRequestPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().max(200).optional().default(50),
+});
+
+export const agentV2HistoryResultPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  // Older items, chronologically ascending; the client prepends them.
+  items: z.array(agentV2TimelineItemSchema).default([]),
+  // Opaque cursor for the NEXT (even older) page; absent when no more history.
+  nextCursor: z.string().optional(),
+  hasMore: z.boolean().default(false),
+});
+
 // ── Protocol message type registry ──────────────────────────────────
 
 export const protocolMessageSchemas = {
@@ -921,6 +943,8 @@ export const protocolMessageSchemas = {
   "agent.v2.snapshot": agentV2SnapshotPayloadSchema,
   "agent.v2.event": agentV2EventPayloadSchema,
   "agent.v2.notice": agentV2NoticePayloadSchema,
+  "agent.v2.history.request": agentV2HistoryRequestPayloadSchema,
+  "agent.v2.history.result": agentV2HistoryResultPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;
@@ -933,6 +957,7 @@ export const agentV2HostToClientMessageTypes = [
   "agent.v2.snapshot",
   "agent.v2.permission.request",
   "agent.v2.notice",
+  "agent.v2.history.result",
 ] as const satisfies readonly ProtocolMessageType[];
 
 export const agentV2ClientWriteMessageTypes = [
@@ -948,6 +973,7 @@ export const agentV2ClientReadMessageTypes = [
   "agent.v2.capabilities.request",
   "agent.v2.conversation.list",
   "agent.v2.snapshot.request",
+  "agent.v2.history.request",
 ] as const satisfies readonly ProtocolMessageType[];
 
 export type AgentV2MessageRoute =

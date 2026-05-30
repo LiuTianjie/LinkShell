@@ -15,26 +15,44 @@ function normalizeMcpServers(value: unknown): unknown[] {
   });
 }
 
-function permissionsForMode(
+// Codex app-server turn/start sandbox + approval, per the authoritative schema
+// (codex 0.133.0 generate-json-schema). `sandboxPolicy` is a tagged object
+// (camelCase type) that actually restricts the sandbox; `approvalPolicy`
+// controls when Codex asks for approval (→ a permission card on the client).
+// NOTE: the separate `permissions` field is a NAMED-PROFILE reference and
+// "cannot be combined with sandboxPolicy" — so we never send it.
+function sandboxPolicyForMode(
   mode: AgentPermissionMode | undefined,
   cwd: string,
 ): unknown | undefined {
   if (!mode) return undefined;
-  if (mode === "full_access") return { type: "disabled" };
+  switch (mode) {
+    case "read_only":
+      return { type: "readOnly", networkAccess: false };
+    case "workspace_write":
+      return { type: "workspaceWrite", writableRoots: [cwd], networkAccess: false };
+    case "full_access":
+      return { type: "dangerFullAccess" };
+    default:
+      return undefined;
+  }
+}
 
-  return {
-    type: "managed",
-    network: { enabled: false },
-    fileSystem: {
-      type: "restricted",
-      entries: [
-        {
-          path: { type: "path", path: cwd },
-          access: mode === "workspace_write" ? "write" : "read",
-        },
-      ],
-    },
-  };
+function approvalPolicyForMode(
+  mode: AgentPermissionMode | undefined,
+): string | undefined {
+  if (!mode) return undefined;
+  switch (mode) {
+    case "read_only":
+    case "workspace_write":
+      // Ask before escaping the sandbox → triggers a permission request the
+      // host forwards to the client as agent.v2.permission.request.
+      return "on-request";
+    case "full_access":
+      return "never";
+    default:
+      return undefined;
+  }
 }
 
 export class AcpClient {
@@ -173,11 +191,16 @@ export class AcpClient {
             settings: collaborationSettings,
           }
         : undefined;
-      return this.transport.request("turn/start", {
+      const sandboxPolicy = sandboxPolicyForMode(input.permissionMode, input.cwd);
+      const approvalPolicy = approvalPolicyForMode(input.permissionMode);
+      const turnStartParams = {
         threadId: input.sessionId,
         model,
         effort: input.reasoningEffort,
-        permissions: permissionsForMode(input.permissionMode, input.cwd),
+        // Inline sandbox + approval per the codex app-server schema. Omitted
+        // when no mode is set so Codex falls back to its config.toml default.
+        ...(sandboxPolicy ? { sandboxPolicy } : {}),
+        ...(approvalPolicy ? { approvalPolicy } : {}),
         collaborationMode,
         input: input.content.map((block) => {
           const raw = block as { type?: string; text?: string; data?: string };
@@ -186,7 +209,8 @@ export class AcpClient {
           }
           return { type: "text", text: raw.text ?? "" };
         }),
-      }, null);
+      };
+      return this.transport.request("turn/start", turnStartParams, null);
     }
     return this.transport.request("session/prompt", {
       sessionId: input.sessionId,

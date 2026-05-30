@@ -138,15 +138,16 @@ describe("AcpClient codex app-server protocol", () => {
           reasoning_effort: "high",
         },
       },
-      permissions: {
-        type: "managed",
-        fileSystem: {
-          type: "restricted",
-          entries: [{ access: "write" }],
-        },
+      // workspace_write → codex's tagged sandbox + on-request approval
+      // (the old object-shaped `permissions` was rejected by codex serde).
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        networkAccess: false,
       },
+      approvalPolicy: "on-request",
     });
     expect(entries[5].params).toEqual({ threadId: "thread-1" });
+    expect(entries[4].params).not.toHaveProperty("permissions");
     expect(entries[4].params).not.toHaveProperty("permissionProfile");
   });
 

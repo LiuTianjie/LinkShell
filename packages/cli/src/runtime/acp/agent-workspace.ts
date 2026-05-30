@@ -1597,6 +1597,9 @@ export class AgentWorkspaceProxy {
   private conversations = new Map<string, AgentConversation>();
   private conversationByAgentSessionId = new Map<string, string>();
   private timelines = new Map<string, AgentTimelineItem[]>();
+  // Opaque codex turns cursor per conversation, pointing at OLDER history to
+  // page through (captured at hydration, advanced on each history.request).
+  private historyCursors = new Map<string, string | undefined>();
   private toolOutputBuffers = new Map<string, string>();
   private pendingPermissions = new Map<string, AgentPermission>();
   private permissionWaiters = new Map<string, PendingPermissionWaiter>();
@@ -1645,6 +1648,11 @@ export class AgentWorkspaceProxy {
         const payload = parseTypedPayload("agent.v2.snapshot.request", envelope.payload);
         await this.syncProviderSessions();
         this.sendSnapshot(payload.conversationId);
+        break;
+      }
+      case "agent.v2.history.request": {
+        const payload = parseTypedPayload("agent.v2.history.request", envelope.payload);
+        await this.loadOlderHistory(payload);
         break;
       }
       case "agent.v2.prompt": {
@@ -1990,6 +1998,10 @@ export class AgentWorkspaceProxy {
             }
             const turnsThread = threadFromTurnsListResult(conversation.agentSessionId, turnsResult);
             if (turnsThread) source = { thread: turnsThread };
+            // Capture the opaque cursor pointing at OLDER turns so the client
+            // can page further back via agent.v2.history.request.
+            const olderCursor = firstString(asRecord(turnsResult), ["nextCursor", "next_cursor", "cursor"]);
+            this.historyCursors.set(conversation.id, olderCursor);
           } catch (error) {
             if (this.input.verbose) {
               process.stderr.write(`[agent:v2] thread/turns/list hydration failed for ${conversation.provider}: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -3414,11 +3426,20 @@ export class AgentWorkspaceProxy {
     if (!conversationId) return waitForResponse ? Promise.resolve({ outcome: { outcome: "cancelled" } }) : undefined;
     const requestId = firstString(raw, ["requestId", "id", "permissionId"]) ?? id("perm");
     const rawToolCall = asRecord(raw.toolCall) ?? raw;
+    // Codex app-server command/file approvals carry `command`/`reason`/`cwd`
+    // (not toolCall/context). Surface them so the card actually shows what's
+    // being approved; fall back to the Claude/MCP shape otherwise.
+    const codexCommand = firstString(raw, ["command"]);
+    const codexCwd = firstString(raw, ["cwd"]);
     const permission: AgentPermission = {
       requestId,
-      toolName: firstString(rawToolCall, ["toolName", "tool", "name", "title", "kind"]),
-      toolInput: stringify(rawToolCall.input ?? rawToolCall.toolInput ?? rawToolCall),
-      context: firstString(raw, ["context", "description", "message", "title"]),
+      toolName:
+        firstString(rawToolCall, ["toolName", "tool", "name", "title", "kind"]) ??
+        (codexCommand ? "shell" : undefined),
+      toolInput: codexCommand
+        ? (codexCwd ? `$ ${codexCommand}\n# cwd: ${codexCwd}` : `$ ${codexCommand}`)
+        : stringify(rawToolCall.input ?? rawToolCall.toolInput ?? rawToolCall),
+      context: firstString(raw, ["context", "description", "message", "title", "reason"]),
       options: parsePermissionOptions(raw.options),
     };
     this.pendingPermissions.set(requestId, permission);
@@ -3825,6 +3846,76 @@ export class AgentWorkspaceProxy {
         items,
       },
     }));
+  }
+
+  /** Page OLDER transcript history for a conversation (client scrolling up).
+   *  Only Codex's app-server exposes paginated reads; other providers report
+   *  no more history. Pure pass-through — does not touch the bounded live
+   *  timeline. The client prepends the returned (ascending) items. */
+  private async loadOlderHistory(payload: {
+    conversationId: string;
+    cursor?: string;
+    limit: number;
+  }): Promise<void> {
+    const sendResult = (
+      items: AgentTimelineItem[],
+      nextCursor?: string,
+    ): void => {
+      this.input.send(createEnvelope({
+        type: "agent.v2.history.result",
+        sessionId: this.input.sessionId,
+        payload: {
+          conversationId: payload.conversationId,
+          items,
+          nextCursor,
+          hasMore: Boolean(nextCursor),
+        },
+      }));
+    };
+
+    const conversation = this.conversations.get(payload.conversationId);
+    if (!conversation?.agentSessionId) return sendResult([], undefined);
+
+    const client = this.clientForProvider(conversation.provider);
+    const listTurns = (client as {
+      listTurns?: (input: {
+        sessionId: string;
+        limit?: number;
+        cursor?: string;
+        sortDirection?: "asc" | "desc";
+        itemsView?: "summary" | "full";
+      }) => Promise<unknown>;
+    } | undefined)?.listTurns;
+    if (typeof listTurns !== "function") return sendResult([], undefined);
+
+    // Client-supplied cursor wins; else the one captured at hydration. Absent
+    // cursor means we're already at the start of history.
+    const cursor = payload.cursor ?? this.historyCursors.get(payload.conversationId);
+    if (!cursor) return sendResult([], undefined);
+
+    try {
+      const turnsResult = await listTurns.call(client, {
+        sessionId: conversation.agentSessionId,
+        limit: payload.limit,
+        cursor,
+        sortDirection: "desc",
+        itemsView: "full",
+      });
+      const turnsThread = threadFromTurnsListResult(conversation.agentSessionId, turnsResult);
+      const items = turnsThread
+        ? timelineItemsFromProviderThread({ thread: turnsThread }, payload.conversationId)
+        : [];
+      const nextCursor = firstString(asRecord(turnsResult), ["nextCursor", "next_cursor", "cursor"]);
+      this.historyCursors.set(payload.conversationId, nextCursor);
+      sendResult(items, nextCursor);
+    } catch (error) {
+      if (this.input.verbose) {
+        process.stderr.write(
+          `[agent:v2] history page failed for ${conversation.provider}: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
+      sendResult([], undefined);
+    }
   }
 
   private conversationIdFromParams(params: unknown): string | undefined {

@@ -1,3 +1,190 @@
+@import "@xterm/xterm/css/xterm.css";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  /* Theme variables as space-separated RGB triplets (channel format). Dark is
+     the default on :root so there's no flash before the theme script runs. */
+  :root,
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --c-canvas: 11 13 15;
+    --c-surface: 22 24 28;
+    --c-surface-raised: 28 31 36;
+    --c-surface-overlay: 35 38 44;
+    --c-border: 42 46 53;
+    --c-border-strong: 56 62 70;
+    --c-content-primary: 233 235 238;
+    --c-content-secondary: 158 165 173;
+    --c-content-muted: 112 118 126;
+    --c-content-faint: 78 83 90;
+    --c-brand: 59 107 97;
+    --c-brand-light: 78 138 126;
+    --c-brand-dark: 42 79 71;
+    --c-accent: 45 212 191;
+    --c-accent-dim: 31 148 136;
+    --c-diff-add: 31 61 43;
+    --c-diff-add-text: 95 211 138;
+    --c-diff-remove: 61 31 36;
+    --c-diff-remove-text: 240 112 127;
+    --c-success: 16 185 129;
+    --c-warning: 245 158 11;
+    --c-danger: 239 68 68;
+    --glass-bg: 18 20 23;
+    --body-wash-1: rgba(45, 212, 191, 0.05);
+    --body-wash-2: rgba(59, 107, 97, 0.04);
+  }
+
+  [data-theme="light"] {
+    color-scheme: light;
+    /* Codex-style: warm neutral grays, near-white canvas, minimal chroma. */
+    --c-canvas: 255 255 255;
+    --c-surface: 255 255 255;
+    --c-surface-raised: 248 248 247;
+    --c-surface-overlay: 241 241 239;
+    --c-border: 229 229 226;
+    --c-border-strong: 212 212 208;
+    --c-content-primary: 33 33 33;
+    --c-content-secondary: 90 90 88;
+    --c-content-muted: 130 130 126;
+    --c-content-faint: 168 168 163;
+    /* Accent stays teal for brand identity but darker so it reads on white. */
+    --c-brand: 47 92 83;
+    --c-brand-light: 62 120 109;
+    --c-brand-dark: 36 70 63;
+    --c-accent: 17 122 110;
+    --c-accent-dim: 15 105 95;
+    --c-diff-add: 230 246 235;
+    --c-diff-add-text: 30 120 78;
+    --c-diff-remove: 252 230 232;
+    --c-diff-remove-text: 188 50 64;
+    --c-success: 22 128 84;
+    --c-warning: 176 110 20;
+    --c-danger: 196 48 48;
+    --glass-bg: 255 255 255;
+    /* No colored wash in light mode — Codex keeps the canvas a flat clean white. */
+    --body-wash-1: transparent;
+    --body-wash-2: transparent;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-content-primary font-sans antialiased;
+    /* Subtle vignette + top accent wash so the canvas isn't a flat void. */
+    background-image:
+      radial-gradient(120% 80% at 50% -10%, var(--body-wash-1), transparent 60%),
+      radial-gradient(100% 60% at 100% 100%, var(--body-wash-2), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgb(var(--c-accent) / 0.25);
+  }
+
+  /* Thin, terminal-adjacent scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--c-border-strong)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(var(--c-border-strong));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--c-content-faint));
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* Card: layered surface with a hairline top-highlight for depth (Codex feel). */
+  .codex-card {
+    @apply rounded-xl border border-border bg-surface;
+    box-shadow:
+      0 1px 0 0 rgb(var(--c-content-primary) / 0.03) inset,
+      0 1px 2px 0 rgb(0 0 0 / 0.18);
+  }
+  .codex-card-raised {
+    @apply rounded-xl border border-border bg-surface-raised;
+    box-shadow:
+      0 1px 0 0 rgb(var(--c-content-primary) / 0.04) inset,
+      0 8px 28px -8px rgb(0 0 0 / 0.28);
+  }
+
+  /* Frosted glass — translucent surface + backdrop blur for overlays/bars. */
+  .glass {
+    background: rgb(var(--glass-bg) / 0.7);
+    backdrop-filter: saturate(140%) blur(16px);
+    -webkit-backdrop-filter: saturate(140%) blur(16px);
+    border: 1px solid rgb(var(--c-border) / 0.7);
+  }
+  .glass-bar {
+    background: rgb(var(--glass-bg) / 0.6);
+    backdrop-filter: saturate(140%) blur(12px);
+    -webkit-backdrop-filter: saturate(140%) blur(12px);
+  }
+
+  .codex-input {
+    @apply w-full rounded-xl border border-border bg-surface-raised px-3.5 py-2.5 text-sm
+      text-content-primary placeholder-content-muted outline-none transition-colors duration-150
+      focus:border-accent-dim focus:ring-2 focus:ring-accent/20;
+  }
+
+  .codex-btn {
+    @apply inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3.5
+      text-sm font-medium transition-colors duration-150
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40
+      disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .codex-btn-primary {
+    @apply codex-btn bg-accent-dim text-white hover:bg-accent;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.12);
+  }
+  .codex-btn-ghost {
+    @apply codex-btn text-content-secondary hover:bg-surface-overlay hover:text-content-primary;
+  }
+  .codex-btn-outline {
+    @apply codex-btn border border-border bg-surface text-content-secondary
+      hover:border-border-strong hover:bg-surface-overlay hover:text-content-primary;
+  }
+
+  /* Sidebar tree row — roomier, ChatGPT-like padding. */
+  .tree-row {
+    @apply flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left
+      transition-colors duration-150 hover:bg-surface-overlay;
+  }
+  .tree-row-active {
+    @apply bg-surface-overlay text-content-primary;
+  }
+
+  /* Pill chip (provider tags, status badges) */
+  .codex-chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-border bg-surface-raised
+      px-2 py-0.5 font-mono text-2xs text-content-secondary;
+  }
+
+  /* Xterm fills its pane */
+  .xterm-host,
+  .xterm-host .xterm,
+  .xterm-host .xterm-viewport {
+    height: 100%;
+    width: 100%;
+  }
+}

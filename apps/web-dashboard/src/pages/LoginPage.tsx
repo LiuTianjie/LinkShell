@@ -1,8 +1,9 @@
-import { useState, FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { signIn, signUp } from "../lib/supabase";
+import { BrandLogo } from "../components/icons";
 import type { Session } from "../lib/supabase";
 
-export function LoginPage({ onLogin }: { onLogin: (s: Session) => void }) {
+export function LoginPage({ onLogin, onCancel }: { onLogin: (s: Session) => void; onCancel?: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -27,52 +28,61 @@ export function LoginPage({ onLogin }: { onLogin: (s: Session) => void }) {
     setLoading(false);
     if (result.error) setError(result.error);
     else if (result.session) onLogin(result.session);
-    else setMessage("Check your email to confirm your account.");
+    else setMessage("请查收邮件以确认账户。");
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
-          <h1 className="text-2xl font-bold">LinkShell</h1>
-          <p className="text-gray-400 mt-1">Sign in to your account</p>
+          <div className="mx-auto mb-3 flex items-center justify-center">
+            <BrandLogo size={56} />
+          </div>
+          <h1 className="font-mono text-xl font-bold text-content-primary">LinkShell</h1>
+          <p className="mt-1 text-sm text-content-muted">登录以连接你的 agent 会话</p>
         </div>
-        <form onSubmit={handleSignIn} className="space-y-4">
+        <form onSubmit={handleSignIn} className="space-y-3">
           <input
             type="email"
-            placeholder="Email"
+            placeholder="邮箱"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="w-full px-4 py-2.5 rounded-lg bg-gray-900 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            className="codex-input"
+            autoComplete="email"
           />
           <input
             type="password"
-            placeholder="Password"
+            placeholder="密码"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={6}
-            className="w-full px-4 py-2.5 rounded-lg bg-gray-900 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            className="codex-input"
+            autoComplete="current-password"
           />
-          {error && <p className="text-red-400 text-sm">{error}</p>}
-          {message && <p className="text-green-400 text-sm">{message}</p>}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium disabled:opacity-50 transition"
-          >
-            {loading ? "..." : "Sign In"}
+          {error && <p className="text-sm text-danger">{error}</p>}
+          {message && <p className="text-sm text-success">{message}</p>}
+          <button type="submit" disabled={loading} className="codex-btn-primary w-full">
+            {loading ? "…" : "登录"}
           </button>
           <button
             type="button"
             onClick={handleSignUp}
             disabled={loading || !email || !password}
-            className="w-full py-2.5 rounded-lg border border-gray-600 hover:border-gray-500 text-gray-300 font-medium disabled:opacity-50 transition"
+            className="codex-btn-outline w-full"
           >
-            Create Account
+            创建账户
           </button>
+          {onCancel && (
+            <button type="button" onClick={onCancel} className="codex-btn-ghost w-full">
+              暂不登录，用配对码连接
+            </button>
+          )}
         </form>
+        <p className="text-center text-2xs text-content-faint">
+          登录可选 · Pro 账户登录后免扫码直接看到自己的会话
+        </p>
       </div>
     </div>
   );

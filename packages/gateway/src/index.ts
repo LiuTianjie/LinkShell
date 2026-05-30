@@ -27,6 +27,7 @@ import {
 } from "./tunnel.js";
 import { AUTH_REQUIRED, requireAuth, checkWsAuth, validateRequest, checkSubscriptionByUserId, canReadSessionDetail } from "./auth-middleware.js";
 import { setCors } from "./cors.js";
+import { serveWeb, webEnabled, webDistPath } from "./static-web.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const logLevel = (process.env.LOG_LEVEL ?? "info") as
@@ -382,6 +383,17 @@ async function handleRequest(
       return;
     }
     const body = claimPairingBody.parse(await readJson(req));
+    // Idempotent re-claim: if the requester's device token already owns the
+    // session this code maps to, re-issue success instead of erroring with
+    // already_claimed. Only a token that has PROVEN ownership takes this path,
+    // so it can't be used to bypass brute-force protection. This lets a browser
+    // that refreshes or re-enters its code reconnect smoothly.
+    const peeked = pairingManager.peek(body.pairingCode);
+    if (peeked && body.deviceToken && tokenManager.owns(body.deviceToken, peeked.sessionId)) {
+      tokenManager.bind(body.deviceToken, peeked.sessionId); // refresh lastUsedAt
+      json(res, 200, { sessionId: peeked.sessionId, deviceToken: body.deviceToken });
+      return;
+    }
     const result = pairingManager.claim(body.pairingCode);
     if ("error" in result) {
       json(res, result.status, { error: result.error });
@@ -460,6 +472,10 @@ async function handleRequest(
     json(res, 200, result);
     return;
   }
+
+  // Web UI: serve the built SPA for any unmatched GET (after all API routes, so
+  // it never shadows them). No-op when WEB_DIST isn't present (API-only mode).
+  if (await serveWeb(req, res)) return;
 
   json(res, 404, { error: "not_found" });
 }
@@ -841,6 +857,11 @@ server.listen(port, () => {
   log("info", `LinkShell Gateway v0.1.0`);
   log("info", `listening on http://0.0.0.0:${port}`);
   log("info", `log level: ${logLevel}`);
+  if (webEnabled()) {
+    log("info", `web UI served from ${webDistPath()} (open http://0.0.0.0:${port}/)`);
+  } else {
+    log("info", `web UI not bundled (API-only); set WEB_DIST to enable`);
+  }
 });
 
 // ── Helpers ─────────────────────────────────────────────────────────
