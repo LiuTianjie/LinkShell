@@ -637,9 +637,12 @@ wss.on(
     };
 
     if (role === "host") {
-      // Verify the host token issued when this session's pairing was created.
-      // Without this, anyone who learns a sessionId could connect as host and
-      // capture controller keystrokes or inject terminal output.
+      // Host-token check (trust-on-first-use). The first host to connect with a
+      // token binds the session; after that, only that token is accepted — so a
+      // third party who later learns the sessionId can't hijack the host role
+      // and capture controller keystrokes or inject terminal output. A host that
+      // presents NO token never creates a binding and is allowed as a legacy
+      // host, keeping older CLIs (which don't send a token) working.
       const hdr = _request.headers["x-linkshell-host-token"];
       const providedHostToken = Array.isArray(hdr) ? hdr[0] : hdr;
       if (hostAuthManager.has(sessionId)) {
@@ -649,8 +652,8 @@ wss.on(
           return;
         }
       } else if (providedHostToken) {
-        // No binding yet (e.g. gateway restarted and lost in-memory state) —
-        // trust the first host token presented for this session.
+        // First host connect with a token (or after a gateway restart lost the
+        // in-memory binding) — trust it and bind the session to it.
         hostAuthManager.adopt(sessionId, providedHostToken);
       }
       // else: legacy host without a token — allowed for backward compatibility.

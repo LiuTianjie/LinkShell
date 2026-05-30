@@ -2,9 +2,14 @@ import { describe, it, expect } from "vitest";
 import { HostAuthManager } from "../src/host-auth.js";
 
 describe("HostAuthManager", () => {
-  it("verifies the token it issued for a session", () => {
+  it("issue() mints a token WITHOUT eagerly binding (TOFU) so legacy hosts aren't locked out", () => {
     const m = new HostAuthManager();
     const token = m.issue("session-a");
+    // No binding until a host actually connects with the token — this is what
+    // lets a token-less legacy CLI connect (has() stays false → allowed).
+    expect(m.has("session-a")).toBe(false);
+    // Once the host connects with the issued token, it binds and verifies.
+    m.adopt("session-a", token);
     expect(m.has("session-a")).toBe(true);
     expect(m.verify("session-a", token)).toBe(true);
     m.destroy();
@@ -12,7 +17,8 @@ describe("HostAuthManager", () => {
 
   it("rejects a wrong token for a bound session (hijack attempt)", () => {
     const m = new HostAuthManager();
-    m.issue("session-a");
+    const token = m.issue("session-a");
+    m.adopt("session-a", token); // first legitimate host connect binds it
     expect(m.verify("session-a", "not-the-token")).toBe(false);
     expect(m.verify("session-a", undefined)).toBe(false);
     m.destroy();

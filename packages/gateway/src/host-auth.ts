@@ -35,11 +35,17 @@ export class HostAuthManager {
     this.cleanupTimer.unref?.();
   }
 
-  /** Issue a fresh host token for a session (called at pairing creation). */
-  issue(sessionId: string): string {
-    const hostToken = randomUUID();
-    this.bindings.set(sessionId, { sessionId, hostToken, lastUsedAt: Date.now() });
-    return hostToken;
+  /** Mint a fresh host token to hand to the CLI at pairing creation.
+   *
+   *  Deliberately does NOT create a binding yet: the binding is established
+   *  trust-on-first-use when the host first connects WITH this token (see
+   *  `adopt`). This keeps the gateway backward-compatible with older CLIs that
+   *  don't send a host token at all — they simply never create a binding and
+   *  are allowed as legacy hosts, instead of being locked out by an eager
+   *  binding they can't satisfy. The legitimate host connects milliseconds
+   *  after pairing, so the trust-on-first-use window is negligible. */
+  issue(_sessionId: string): string {
+    return randomUUID();
   }
 
   /** Trust-on-first-use: register a host-provided token when no binding exists
