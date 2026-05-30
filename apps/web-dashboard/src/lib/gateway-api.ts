@@ -24,11 +24,22 @@ interface AuthHeaders {
 
 function authHeaders(auth: AuthHeaders): Record<string, string> {
   const headers: Record<string, string> = {};
-  // The gateway accepts the device token via Bearer for HTTP, and (separately)
-  // a Supabase JWT. Device token wins for /sessions ownership; JWT for cloud.
+  // On a premium gateway the JWT must be the bearer (it satisfies the
+  // AUTH_REQUIRED gate). The device token — which proves session ownership —
+  // can't share the header, so it rides in the `?token=` query param instead
+  // (see withDeviceToken). For a logged-out user the device token is the bearer.
   const bearer = auth.jwt ?? auth.deviceToken;
   if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
   return headers;
+}
+
+/** Append the device token as `?token=` so the gateway can resolve session
+ *  ownership even when the Authorization header carries the Supabase JWT. */
+function withDeviceToken(rawUrl: string, auth: AuthHeaders): string {
+  if (!auth.deviceToken) return rawUrl;
+  const url = new URL(rawUrl);
+  url.searchParams.set("token", auth.deviceToken);
+  return url.toString();
 }
 
 /** Claim a 6-digit pairing code → returns a device token bound to the session. */
@@ -58,7 +69,7 @@ export async function listSessions(
   config: GatewayConfig,
   auth: AuthHeaders,
 ): Promise<SessionSummary[]> {
-  const res = await fetch(`${httpBase(config)}/sessions`, {
+  const res = await fetch(withDeviceToken(`${httpBase(config)}/sessions`, auth), {
     headers: authHeaders(auth),
   });
   if (!res.ok) return [];
@@ -72,7 +83,7 @@ export async function getSession(
   sessionId: string,
   auth: AuthHeaders,
 ): Promise<SessionSummary | null> {
-  const res = await fetch(`${httpBase(config)}/sessions/${sessionId}`, {
+  const res = await fetch(withDeviceToken(`${httpBase(config)}/sessions/${sessionId}`, auth), {
     headers: authHeaders(auth),
   });
   if (!res.ok) return null;

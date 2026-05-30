@@ -184,6 +184,17 @@ function extractBearerToken(req: IncomingMessage): string | null {
   return match?.[1] ?? null;
 }
 
+// The device token proves session ownership. On a premium (AUTH_REQUIRED)
+// gateway the Authorization header is taken by the Supabase JWT, so the device
+// token rides in the `?token=` query param instead (same as the client WS URL).
+// Prefer the query param, fall back to the bearer for non-auth gateways.
+function extractDeviceToken(req: IncomingMessage): string | null {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const q = url.searchParams.get("token");
+  if (q) return q;
+  return extractBearerToken(req);
+}
+
 // ── HTTP API ────────────────────────────────────────────────────────
 
 const createPairingBody = z.object({ sessionId: z.string().optional() });
@@ -431,7 +442,7 @@ async function handleRequest(
 
   // Session list
   if (method === "GET" && url.pathname === "/sessions") {
-    const token = extractBearerToken(req);
+    const token = extractDeviceToken(req);
     const allowedIds = token && tokenManager.validate(token)
       ? tokenManager.getSessionIds(token)
       : new Set<string>();
@@ -460,7 +471,7 @@ async function handleRequest(
   // Session detail
   const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
   if (method === "GET" && sessionMatch) {
-    const token = extractBearerToken(req);
+    const token = extractDeviceToken(req);
     const targetId = sessionMatch[1]!;
     const session = sessionManager.get(targetId);
     const tokenOwns = Boolean(token && tokenManager.owns(token, targetId));
