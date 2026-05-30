@@ -8,8 +8,9 @@ tmp/
 temp/
 *.tsbuildinfo
 
-# Mobile app (not needed for gateway)
-apps/
+# Mobile app (not needed for gateway). web-dashboard IS needed — the gateway
+# image bundles its built UI (see Dockerfile: COPY apps/web-dashboard).
+apps/mobile/
 
 # Expo / RN
 .expo/
