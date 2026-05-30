@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { signOut, isPro } from "../lib/supabase";
 import type { Session } from "../lib/supabase";
 import { loadGatewayConfig, saveGatewayUrl } from "../lib/gateway-config";
-import { claimPairing, listSessions } from "../lib/gateway-api";
+import { claimPairing, listSessions, listMySessions } from "../lib/gateway-api";
 import { getDeviceToken } from "../lib/device-token";
 import { loadKnownSessions, rememberSessions, forgetSession, markAllOffline } from "../lib/storage";
 import { BrandLogo, IconClose, IconChevronRight, IconPlus, IconRefresh, ProviderIcon } from "../components/icons";
@@ -32,10 +32,19 @@ export function SessionListPage({
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const list = await listSessions(config, {
-      deviceToken: getDeviceToken(),
-      jwt: session?.accessToken ?? null,
-    });
+    // Two ownership models, merged: (1) /sessions/mine — sessions the logged-in
+    // user owns automatically after `linkshell login` (pro users never pair);
+    // (2) /sessions — sessions claimed via a pairing code on this device.
+    const [mine, owned] = await Promise.all([
+      listMySessions(config, session?.accessToken ?? null),
+      listSessions(config, {
+        deviceToken: getDeviceToken(),
+        jwt: session?.accessToken ?? null,
+      }),
+    ]);
+    const byId = new Map<string, SessionSummary>();
+    for (const s of [...mine, ...owned]) byId.set(s.id, s);
+    const list = [...byId.values()];
     // Reconcile cache against live truth: live results drive hasHost; cached
     // sessions absent from live are marked offline. If live is empty, every
     // remembered session is offline (host gone) — never show a dead "在线".

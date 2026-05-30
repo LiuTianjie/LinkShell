@@ -77,6 +77,22 @@ export async function listSessions(
   return body.sessions ?? [];
 }
 
+/** List sessions owned by the logged-in user (no pairing needed). The CLI host
+ *  stamps session.userId when it connects authenticated (`linkshell login`), so
+ *  a pro user sees their sessions automatically. Returns [] when not logged in. */
+export async function listMySessions(
+  config: GatewayConfig,
+  jwt: string | null | undefined,
+): Promise<SessionSummary[]> {
+  if (!jwt) return [];
+  const res = await fetch(`${httpBase(config)}/sessions/mine`, {
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  if (!res.ok) return [];
+  const body = (await res.json()) as { sessions?: SessionSummary[] };
+  return body.sessions ?? [];
+}
+
 /** Detail for one session (host status, cwd, provider). */
 export async function getSession(
   config: GatewayConfig,
