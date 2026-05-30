@@ -226,6 +226,22 @@ const server = createServer(async (req, res) => {
   }
 });
 
+// API path prefixes that must NEVER be served the SPA / handled as a web route.
+// Everything else (incl. "/", client-side views) may fall through to the web UI,
+// which must be reachable BEFORE the AUTH_REQUIRED guard so users can load the
+// login page and authenticate in the first place.
+function isApiPath(pathname: string): boolean {
+  return (
+    pathname === "/healthz" ||
+    pathname === "/sessions" ||
+    pathname.startsWith("/sessions/") ||
+    pathname === "/pairings" ||
+    pathname.startsWith("/pairings/") ||
+    pathname.startsWith("/agent/") ||
+    pathname.startsWith("/tunnel/")
+  );
+}
+
 async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -341,6 +357,14 @@ async function handleRequest(
     log(result.status === 200 ? "info" : "warn", `agent permission respond protocol=${body.protocol} session=${body.sessionId} request=${body.requestId} status=${result.status} forwarded=${forwarded}${ack}`);
     json(res, result.status, result.body);
     return;
+  }
+
+  // Web UI (public): serve the built SPA + its static assets BEFORE the
+  // AUTH_REQUIRED guard, so the login page itself is reachable on a premium
+  // gateway. Only non-API GET/HEAD requests are eligible; API routes above and
+  // below are matched explicitly and never reach here as web routes.
+  if ((method === "GET" || method === "HEAD") && !isApiPath(url.pathname)) {
+    if (await serveWeb(req, res)) return;
   }
 
   // Auth check for premium gateway (skip healthz, /sessions/mine, tunnel)
@@ -473,9 +497,12 @@ async function handleRequest(
     return;
   }
 
-  // Web UI: serve the built SPA for any unmatched GET (after all API routes, so
-  // it never shadows them). No-op when WEB_DIST isn't present (API-only mode).
-  if (await serveWeb(req, res)) return;
+  // Web UI fallback: any remaining non-API GET (these are authenticated on a
+  // premium gateway) falls back to the SPA. API-shaped paths that matched no
+  // route 404 properly instead of being masked by the SPA shell.
+  if ((method === "GET" || method === "HEAD") && !isApiPath(url.pathname)) {
+    if (await serveWeb(req, res)) return;
+  }
 
   json(res, 404, { error: "not_found" });
 }
