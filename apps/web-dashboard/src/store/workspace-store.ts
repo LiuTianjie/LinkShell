@@ -104,6 +104,8 @@ export class WorkspaceStore {
   private capabilities: AgentCapabilitiesPayload | null = null;
   private activeConversationId: string | null = null;
   private lastError: { code: string; message: string } | null = null;
+  // Timer that auto-clears a transient error banner after a few seconds.
+  private errorClearTimer: ReturnType<typeof setTimeout> | undefined;
   private history = new Map<string, HistoryState>();
   private notices: Notice[] = [];
   // Enabled-provider signature; re-request snapshot when it changes (providers
@@ -175,6 +177,7 @@ export class WorkspaceStore {
 
   destroy(): void {
     this.flushPersist();
+    if (this.errorClearTimer) clearTimeout(this.errorClearTimer);
     this.unsub();
     this.bridge.disconnect();
     this.listeners.clear();
@@ -190,6 +193,10 @@ export class WorkspaceStore {
       case "status":
         this.status = e.status;
         if (e.status === "connected") {
+          // A successful (re)connect clears any stale error banner — otherwise a
+          // transient close code (e.g. 1006) lingers red in the header long
+          // after the connection has recovered.
+          this.lastError = null;
           this.requestCapabilities();
           this.requestSnapshot();
         }
@@ -202,6 +209,16 @@ export class WorkspaceStore {
       case "session.error":
         this.lastError = { code: e.code, message: e.message };
         this.notify();
+        // Auto-dismiss the error banner: most session.error events are
+        // transient (a momentary close code, a recoverable hiccup). Leaving a
+        // red code pinned to the header forever looks broken. A genuine
+        // persistent failure will re-emit and re-show it.
+        if (this.errorClearTimer) clearTimeout(this.errorClearTimer);
+        this.errorClearTimer = setTimeout(() => {
+          this.lastError = null;
+          this.errorClearTimer = undefined;
+          this.notify();
+        }, 6000);
         break;
       case "agent":
         this.handleAgentEnvelope(e.envelope);
@@ -411,6 +428,18 @@ export class WorkspaceStore {
     const next = this.notices.filter((n) => n.id !== id);
     if (next.length !== this.notices.length) {
       this.notices = next;
+      this.notify();
+    }
+  }
+
+  /** Manually clear the header error banner (user tapped it). */
+  dismissError(): void {
+    if (this.errorClearTimer) {
+      clearTimeout(this.errorClearTimer);
+      this.errorClearTimer = undefined;
+    }
+    if (this.lastError) {
+      this.lastError = null;
       this.notify();
     }
   }

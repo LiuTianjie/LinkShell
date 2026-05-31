@@ -172,9 +172,12 @@ export function AgentConsolePage({
 
   return (
     <div className="flex h-screen h-[100dvh] flex-col">
-      {/* Top bar */}
-      <header className="flex items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex items-center gap-3">
+      {/* Top bar. pt safe-area inset so it clears the notch / status bar. */}
+      <header
+        className="flex items-center justify-between border-b border-border px-4 py-2"
+        style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
+      >
+        <div className="flex min-w-0 items-center gap-3">
           {isMobile && (
             <button
               onClick={() => setMobileNavOpen(true)}
@@ -184,20 +187,24 @@ export function AgentConsolePage({
               <IconMenu size={17} />
             </button>
           )}
-          <button onClick={onBack} className="codex-btn-ghost text-2xs" aria-label="返回会话列表">
+          <button onClick={onBack} className="codex-btn-ghost shrink-0 text-2xs" aria-label="返回会话列表">
             ← 会话
           </button>
-          <span className={`flex items-center gap-1 text-2xs ${st.color}`}>
+          <span className={`flex shrink-0 items-center gap-1 text-2xs ${st.color}`}>
             <span className="h-1.5 w-1.5 rounded-full bg-current" />
             {st.text}
           </span>
           {snapshot.lastError && (
-            <span className="text-2xs text-danger" title={snapshot.lastError.message}>
+            <button
+              onClick={() => store.dismissError()}
+              className="min-w-0 truncate rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-2xs text-danger"
+              title={`${snapshot.lastError.message}（点击关闭）`}
+            >
               {snapshot.lastError.code}
-            </span>
+            </button>
           )}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           <ThemeToggle />
           <button
             onClick={() => setRightPanel((v) => (v === "files" ? "none" : "files"))}

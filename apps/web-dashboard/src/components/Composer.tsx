@@ -216,7 +216,9 @@ export function Composer({
             autoGrow();
           }}
           onKeyDown={onKeyDown}
-          className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-content-primary placeholder-content-muted outline-none"
+          // text-base (16px) on mobile prevents iOS Safari from auto-zooming
+          // the page when the field focuses; md+ keeps the tighter 15px.
+          className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-base leading-6 text-content-primary placeholder-content-muted outline-none md:text-[15px]"
         />
         {running && onCancel ? (
           <button
