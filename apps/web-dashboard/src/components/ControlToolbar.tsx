@@ -1,14 +1,17 @@
+import { useRef, useState, useEffect, type ReactNode } from "react";
 import type {
   AgentConversation,
   AgentProviderCapability,
   AgentReasoningEffort,
   AgentPermissionMode,
 } from "../lib/types";
-import { IconCheck } from "./icons";
+import { IconCheck, IconChevronDown } from "./icons";
 
-// Compact control bar above the composer: model / reasoning effort / permission
-// mode / plan toggle, all driven by the active provider's capabilities. Changes
-// update the conversation's local settings and ride the next prompt.
+// Codex-style compact controls that live INSIDE the composer's bottom bar:
+// unlabeled pills (model / reasoning effort / permission) + a plan toggle.
+// Everything is capability-driven so it adapts per provider — Claude (no real
+// model list, its own effort/permission sets) and Codex both render correctly;
+// a control with no options simply doesn't appear.
 
 const EFFORT_LABEL: Record<string, string> = {
   none: "无",
@@ -38,36 +41,69 @@ export interface ControlToolbarProps {
   onChange: (patch: SettingsPatch) => void;
 }
 
-function Select<T extends string>({
-  label,
+// A rounded pill backed by a popover list — matches Codex's settings menus far
+// better than a native <select> (which can't be styled to the same polish) and
+// behaves consistently across desktop/mobile.
+function PillSelect<T extends string>({
+  icon,
   value,
   options,
   render,
   onChange,
+  title,
 }: {
-  label: string;
+  icon?: ReactNode;
   value: T | undefined;
   options: T[];
   render: (v: T) => string;
   onChange: (v: T) => void;
+  title?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
   if (options.length === 0) return null;
+  const current = value ?? options[0];
   return (
-    <label className="flex items-center gap-1.5 text-xs text-content-muted">
-      <span>{label}</span>
-      <select
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value as T)}
-        className="cursor-pointer rounded-full bg-surface-overlay px-2.5 py-1 text-xs text-content-primary outline-none transition-colors hover:bg-surface-raised focus:ring-2 focus:ring-accent/20"
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title={title}
+        className="flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-2xs font-medium text-content-secondary transition-colors hover:bg-surface-overlay hover:text-content-primary"
       >
-        {value === undefined && <option value="">默认</option>}
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {render(o)}
-          </option>
-        ))}
-      </select>
-    </label>
+        {icon}
+        <span className="max-w-[7rem] truncate">{render(current)}</span>
+        <IconChevronDown size={11} className="text-content-faint" />
+      </button>
+      {open && (
+        <div className="codex-card-raised absolute bottom-full left-0 z-20 mb-1.5 min-w-[8rem] overflow-hidden p-1 animate-fade-in">
+          {options.map((o) => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => {
+                onChange(o);
+                setOpen(false);
+              }}
+              className={`flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-surface-overlay ${
+                o === current ? "text-content-primary" : "text-content-secondary"
+              }`}
+            >
+              <span className="truncate">{render(o)}</span>
+              {o === current && <IconCheck size={13} className="shrink-0 text-accent" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -78,64 +114,53 @@ export function ControlToolbar({
 }: ControlToolbarProps) {
   const models = capability?.models ?? [];
   // Host sends a placeholder [{id:"default", label:"默认模型"}] for providers
-  // that don't expose a real model list (e.g. Claude CLI). A single placeholder
-  // isn't selectable, so hide the picker instead of showing a useless dropdown.
+  // that don't expose a real model list (e.g. Claude CLI). Hide the picker then.
   const realModels = models.filter((m) => m.id !== "default");
-  const showModelPicker = realModels.length > 0;
   const efforts = capability?.reasoningEfforts ?? [];
   const permissions = capability?.permissionModes ?? [];
   const supportsPlan = capability?.supportsPlan ?? false;
   const planOn = conversation.collaborationMode === "plan";
 
   return (
-    <div className="flex flex-wrap items-center gap-3 px-1 pb-2 pt-1">
-      {showModelPicker && (
-        <label className="flex items-center gap-1.5 text-xs text-content-muted">
-          <span>模型</span>
-          <select
-            value={conversation.model ?? capability?.defaultModel ?? realModels[0]?.id ?? ""}
-            onChange={(e) => onChange({ model: e.target.value })}
-            className="cursor-pointer rounded-full bg-surface-overlay px-2.5 py-1 text-xs text-content-primary outline-none transition-colors hover:bg-surface-raised focus:ring-2 focus:ring-accent/20"
-          >
-            {realModels.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </label>
+    <>
+      {realModels.length > 0 && (
+        <PillSelect
+          title="模型"
+          value={conversation.model ?? capability?.defaultModel ?? realModels[0]?.id}
+          options={realModels.map((m) => m.id)}
+          render={(id) => realModels.find((m) => m.id === id)?.label ?? id}
+          onChange={(model) => onChange({ model })}
+        />
       )}
-
-      <Select
-        label="强度"
+      <PillSelect
+        title="推理强度"
         value={conversation.reasoningEffort}
         options={efforts}
         render={(e) => EFFORT_LABEL[e] ?? e}
         onChange={(reasoningEffort) => onChange({ reasoningEffort })}
       />
-
-      <Select
-        label="权限"
+      <PillSelect
+        title="权限"
         value={conversation.permissionMode}
         options={permissions}
         render={(p) => PERMISSION_LABEL[p] ?? p}
         onChange={(permissionMode) => onChange({ permissionMode })}
       />
-
       {supportsPlan && (
         <button
+          type="button"
           onClick={() => onChange({ collaborationMode: planOn ? "default" : "plan" })}
-          className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+          className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-2xs font-medium transition-colors ${
             planOn
               ? "bg-accent-dim text-white"
-              : "bg-surface-overlay text-content-secondary hover:text-content-primary"
+              : "text-content-secondary hover:bg-surface-overlay hover:text-content-primary"
           }`}
           title="计划模式"
         >
-          {planOn && <IconCheck size={12} />}
-          计划模式
+          {planOn && <IconCheck size={11} />}
+          计划
         </button>
       )}
-    </div>
+    </>
   );
 }

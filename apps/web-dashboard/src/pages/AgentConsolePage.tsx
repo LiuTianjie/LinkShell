@@ -412,16 +412,18 @@ export function AgentConsolePage({
                   onSteer={(itemId) => store.sendQueuedFollowUp(activeId, itemId, "steer")}
                   onDiscard={(itemId) => store.discardQueuedFollowUp(activeId, itemId)}
                 />
-                <ControlToolbar
-                  conversation={activeConversation}
-                  capability={activeCapability}
-                  onChange={(patch) => store.updateConversationSettings(activeId, patch)}
-                />
                 <Composer
                   disabled={snapshot.status !== "connected"}
                   running={running}
                   supportsImages={activeCapability?.supportsImages}
                   commands={activeCapability?.commands}
+                  controls={
+                    <ControlToolbar
+                      conversation={activeConversation}
+                      capability={activeCapability}
+                      onChange={(patch) => store.updateConversationSettings(activeId, patch)}
+                    />
+                  }
                   onSend={handleSend}
                   onCancel={() => store.cancel(activeId)}
                   onExecuteCommand={(commandId, args) => store.executeCommand(activeId, commandId, args)}

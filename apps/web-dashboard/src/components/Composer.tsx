@@ -1,6 +1,6 @@
-import { useState, useRef, useMemo, type KeyboardEvent, type ChangeEvent } from "react";
+import { useState, useRef, useMemo, type KeyboardEvent, type ChangeEvent, type ReactNode } from "react";
 import type { AgentCommandDescriptor } from "../lib/types";
-import { IconPaperclip, IconSend, IconStop, IconClose } from "./icons";
+import { IconPlus, IconArrowUp, IconStop, IconClose } from "./icons";
 import { useIsMobile } from "../hooks/useMediaQuery";
 
 export interface PendingImage {
@@ -14,6 +14,9 @@ export interface ComposerProps {
   running?: boolean;
   supportsImages?: boolean;
   commands?: AgentCommandDescriptor[];
+  /** Capability-driven control pills (model / effort / permission / plan),
+   *  rendered inside the composer's bottom toolbar — Codex style. */
+  controls?: ReactNode;
   onSend: (text: string, images: PendingImage[]) => void;
   onCancel?: () => void;
   onExecuteCommand?: (commandId: string, args?: string) => void;
@@ -24,6 +27,7 @@ export function Composer({
   running,
   supportsImages,
   commands = [],
+  controls,
   onSend,
   onCancel,
   onExecuteCommand,
@@ -181,20 +185,11 @@ export function Composer({
         </div>
       )}
 
-      <div className="codex-card-raised flex items-end gap-2 p-2 transition-colors focus-within:border-accent-dim focus-within:ring-2 focus-within:ring-accent/20">
+      {/* One rounded card: textarea on top, a single bottom toolbar (Codex style)
+          holding the +/attach control, capability pills, and the send button. */}
+      <div className="codex-card-raised flex flex-col gap-1 px-3 pt-2.5 pb-2 transition-colors focus-within:border-accent-dim focus-within:ring-2 focus-within:ring-accent/20">
         {supportsImages && (
-          <>
-            <input ref={fileRef} type="file" accept="image/*" multiple onChange={onFiles} className="hidden" />
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={disabled}
-              className="mb-0.5 shrink-0 cursor-pointer rounded-full p-2 text-content-muted transition-colors hover:bg-surface-overlay hover:text-accent"
-              title="附加图片"
-              aria-label="附加图片"
-            >
-              <IconPaperclip size={16} />
-            </button>
-          </>
+          <input ref={fileRef} type="file" accept="image/*" multiple onChange={onFiles} className="hidden" />
         )}
         <textarea
           ref={taRef}
@@ -218,28 +213,46 @@ export function Composer({
           onKeyDown={onKeyDown}
           // text-base (16px) on mobile prevents iOS Safari from auto-zooming
           // the page when the field focuses; md+ keeps the tighter 15px.
-          className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-base leading-6 text-content-primary placeholder-content-muted outline-none md:text-[15px]"
+          className="min-w-0 resize-none bg-transparent px-0 py-1 text-base leading-6 text-content-primary placeholder-content-muted outline-none md:text-[15px]"
         />
-        {running && onCancel ? (
-          <button
-            onClick={onCancel}
-            className="mb-0.5 flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-surface-overlay text-content-secondary transition-colors hover:bg-surface-raised hover:text-content-primary"
-            aria-label="停止"
-            title="停止"
-          >
-            <IconStop size={15} />
-          </button>
-        ) : (
-          <button
-            onClick={submit}
-            disabled={disabled || (!text.trim() && images.length === 0)}
-            className="mb-0.5 flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-accent-dim text-white transition-colors hover:bg-accent disabled:cursor-default disabled:opacity-40"
-            aria-label="发送"
-            title="发送"
-          >
-            <IconSend size={15} />
-          </button>
-        )}
+
+        {/* Bottom toolbar: left cluster (attach + capability pills), right send. */}
+        <div className="flex items-center gap-1">
+          {supportsImages && (
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={disabled}
+              className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-content-muted transition-colors hover:bg-surface-overlay hover:text-content-primary disabled:opacity-40"
+              title="附加图片"
+              aria-label="附加图片"
+            >
+              <IconPlus size={17} />
+            </button>
+          )}
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
+            {controls}
+          </div>
+          {running && onCancel ? (
+            <button
+              onClick={onCancel}
+              className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-surface-overlay text-content-secondary transition-colors hover:bg-surface-raised hover:text-content-primary"
+              aria-label="停止"
+              title="停止"
+            >
+              <IconStop size={14} />
+            </button>
+          ) : (
+            <button
+              onClick={submit}
+              disabled={disabled || (!text.trim() && images.length === 0)}
+              className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-accent-dim text-white transition-colors hover:bg-accent disabled:cursor-default disabled:bg-surface-overlay disabled:text-content-faint"
+              aria-label="发送"
+              title="发送"
+            >
+              <IconArrowUp size={16} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
