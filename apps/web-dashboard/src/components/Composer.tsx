@@ -1,6 +1,7 @@
 import { useState, useRef, useMemo, type KeyboardEvent, type ChangeEvent } from "react";
 import type { AgentCommandDescriptor } from "../lib/types";
 import { IconPaperclip, IconSend, IconStop, IconClose } from "./icons";
+import { useIsMobile } from "../hooks/useMediaQuery";
 
 export interface PendingImage {
   data: string; // data URL
@@ -32,6 +33,7 @@ export function Composer({
   const [highlight, setHighlight] = useState(0);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const isMobile = useIsMobile();
 
   // Slash-command palette: active when the input is a single "/token" with no
   // space yet. Filters commands by name prefix.
@@ -199,14 +201,22 @@ export function Composer({
           value={text}
           rows={1}
           disabled={disabled}
-          placeholder={commands.length > 0 ? "发送指令，或输入 / 调用命令…  (⌘/Ctrl+Enter 发送)" : "向 agent 发送指令…  (⌘/Ctrl+Enter 发送，Enter 换行)"}
+          placeholder={
+            isMobile
+              ? commands.length > 0
+                ? "发送指令，或输入 / 调用命令…"
+                : "向 agent 发送指令…"
+              : commands.length > 0
+                ? "发送指令，或输入 / 调用命令…  (⌘/Ctrl+Enter 发送)"
+                : "向 agent 发送指令…  (⌘/Ctrl+Enter 发送，Enter 换行)"
+          }
           onChange={(e) => {
             setText(e.target.value);
             setHighlight(0);
             autoGrow();
           }}
           onKeyDown={onKeyDown}
-          className="flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-content-primary placeholder-content-muted outline-none"
+          className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-content-primary placeholder-content-muted outline-none"
         />
         {running && onCancel ? (
           <button

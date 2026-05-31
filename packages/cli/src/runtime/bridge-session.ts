@@ -21,7 +21,7 @@ import { ScreenShare } from "./screen-share.js";
 import { getLanIp } from "../utils/lan-ip.js";
 import { startKeepAwake, type KeepAwakeHandle } from "../utils/keep-awake.js";
 import { loadOrCreateMachineIdentity, type MachineIdentity } from "../machine-id.js";
-import { getValidToken } from "../auth.js";
+import { getValidToken, refreshAccessToken } from "../auth.js";
 import { AgentSessionProxy } from "./acp/agent-session.js";
 import { AgentWorkspaceProxy } from "./acp/agent-workspace.js";
 import { detectAvailableProviders, type AgentProvider } from "./acp/provider-resolver.js";
@@ -57,9 +57,17 @@ export interface BridgeSessionOptions {
 }
 
 const HEARTBEAT_INTERVAL = 15_000;
+// Transport-layer WS keepalive: ping the gateway periodically; if a pong
+// doesn't arrive before the next ping, the socket is half-open (network
+// silently dropped, no FIN) — terminate it so the reconnect loop kicks in.
+const WS_PING_INTERVAL = 20_000;
 const RECONNECT_BASE_DELAY = 1_000;
 const RECONNECT_MAX_DELAY = 30_000;
-const RECONNECT_MAX_ATTEMPTS = 20;
+// Cap the exponent so the backoff levels off at RECONNECT_MAX_DELAY instead of
+// overflowing. There is NO attempt ceiling — a connected host never gives up
+// (only `stop()`/all-PTYs-exited ends it), so it survives gateway restarts and
+// arbitrarily long network outages, reconnecting whenever connectivity returns.
+const RECONNECT_MAX_EXPONENT = 5;
 const DEFAULT_TERMINAL_ID = "default";
 const HOOK_BODY_LIMIT = 256 * 1024;
 const SCROLLBACK_LINES = 500;
@@ -349,6 +357,10 @@ export class BridgeSession {
   private socket: WebSocket | undefined;
   private terminals = new Map<string, TerminalInstance>();
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  private wsPingTimer: ReturnType<typeof setInterval> | undefined;
+  // True between sending a WS ping and receiving its pong. If still true at the
+  // next ping tick, the socket is half-open and gets terminated.
+  private awaitingPong = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempts = 0;
   private reconnecting = false;
@@ -545,14 +557,37 @@ export class BridgeSession {
         this.options.authToken = token;
         return token;
       }
+      // Refresh failed (e.g. offline / transient Supabase error). Do NOT clear
+      // the token — keep using the last one we had. It may be expired and the
+      // gateway may reject it, but the close handler force-refreshes on the next
+      // attempt, and clearing it would permanently downgrade us to no-auth and
+      // lock a pro host out of its own sessions once connectivity returns.
       process.stderr.write(
-        "[bridge] login token expired and refresh failed; run `linkshell login` if the gateway rejects the connection\n",
+        "[bridge] token refresh failed; reusing last token (will retry refresh on reconnect)\n",
       );
-      this.options.authToken = undefined;
-      return undefined;
+      return this.options.authToken;
     } catch (error) {
       this.log(`failed to refresh login token: ${error instanceof Error ? error.message : String(error)}`);
       return this.options.authToken;
+    }
+  }
+
+  // After an auth-class WS close, force a token refresh before reconnecting so
+  // we don't spin on 401/4001/4003. A gateway restart surfaces as 1006 right
+  // after a fresh connect, so we refresh on that too (cheap, debounced by the
+  // reconnect backoff). No-op for clean/normal closes.
+  private async maybeRefreshTokenForClose(code: number): Promise<void> {
+    if (!this.options.authToken) return;
+    const authClass = code === 4001 || code === 4003 || code === 1006 || code === 401;
+    if (!authClass) return;
+    try {
+      const refreshed = await refreshAccessToken();
+      if (refreshed?.accessToken) {
+        this.options.authToken = refreshed.accessToken;
+        this.log("refreshed auth token after auth-class close");
+      }
+    } catch {
+      // Offline — keep the old token; the reconnect loop will retry later.
     }
   }
 
@@ -610,6 +645,12 @@ export class BridgeSession {
         }),
       );
       this.startHeartbeat();
+      this.startWsPing();
+    });
+
+    // Gateway answered our WS ping — connection is alive.
+    this.socket.on("pong", () => {
+      this.awaitingPong = false;
     });
 
     this.socket.on("message", (data) => {
@@ -630,18 +671,32 @@ export class BridgeSession {
 
     this.socket.on("close", (code, reasonBuffer) => {
       this.stopHeartbeat();
+      this.stopWsPing();
       this.socket = undefined;
       const reason = reasonBuffer.toString();
-      process.stderr.write(
-        `[bridge] gateway connection closed (code=${code}${reason ? `, reason=${reason}` : ""})\n`,
-      );
+      // Quiet during an ongoing outage: log the first close (we were connected,
+      // attempts==0) and every 10th, so multi-hour outages don't flood the log.
+      if (this.reconnectAttempts === 0 || this.reconnectAttempts % 10 === 0) {
+        process.stderr.write(
+          `[bridge] gateway connection closed (code=${code}${reason ? `, reason=${reason}` : ""})\n`,
+        );
+      }
       if (!this.exited) {
-        this.scheduleReconnect();
+        // Auth-class closes (token expired / gateway restarted) get a forced
+        // token refresh before the next attempt, so we don't loop on 401/4xxx.
+        this.maybeRefreshTokenForClose(code).finally(() => {
+          this.scheduleReconnect();
+        });
       }
     });
 
     this.socket.on("error", (error) => {
-      process.stderr.write(`[bridge] gateway error: ${error.message}\n`);
+      // During an outage every retry emits a connection error; the `close`
+      // handler already logs (quietly) and drives reconnect. Only surface the
+      // first error of an outage to avoid flooding the daemon log.
+      if (this.reconnectAttempts <= 1) {
+        process.stderr.write(`[bridge] gateway error: ${error.message || "connection failed"}\n`);
+      }
     });
   }
 
@@ -2299,6 +2354,45 @@ export class BridgeSession {
     }
   }
 
+  // Transport-layer keepalive. WS ping/pong detects a half-open socket (network
+  // dropped without a TCP FIN, e.g. laptop sleep / Wi-Fi loss) that would
+  // otherwise hang silently. If the previous ping's pong never arrived, the
+  // socket is dead → terminate it, which fires `close` → scheduleReconnect.
+  private startWsPing(): void {
+    this.stopWsPing();
+    this.awaitingPong = false;
+    this.wsPingTimer = setInterval(() => {
+      const sock = this.socket;
+      if (!sock || sock.readyState !== WebSocket.OPEN) return;
+      if (this.awaitingPong) {
+        // No pong since the last ping → half-open. Forcibly close so we reconnect.
+        process.stderr.write("[bridge] no pong from gateway; terminating dead connection\n");
+        this.awaitingPong = false;
+        try {
+          sock.terminate();
+        } catch {
+          // terminate may throw if already closing; close handler still runs.
+        }
+        return;
+      }
+      this.awaitingPong = true;
+      try {
+        sock.ping();
+      } catch {
+        // ping failed → let the next tick terminate, or close already fired.
+      }
+    }, WS_PING_INTERVAL);
+    if (typeof this.wsPingTimer.unref === "function") this.wsPingTimer.unref();
+  }
+
+  private stopWsPing(): void {
+    if (this.wsPingTimer) {
+      clearInterval(this.wsPingTimer);
+      this.wsPingTimer = undefined;
+    }
+    this.awaitingPong = false;
+  }
+
   private startScreenCapture(fps: number, quality: number, scale: number): void {
     if (!this.options.screen) {
       this.log("screen sharing not enabled (use --screen)");
@@ -2362,25 +2456,24 @@ export class BridgeSession {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnecting) return;
-
-    // In daemon mode, never give up — reset attempts after hitting max
-    if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
-      process.stderr.write(
-        "[bridge] max reconnect attempts reached, resetting counter and continuing...\n",
-      );
-      this.reconnectAttempts = 0;
-    }
+    if (this.reconnecting || this.stopped || this.exited) return;
 
     this.reconnecting = true;
-    const delay = Math.min(
-      RECONNECT_BASE_DELAY * 2 ** this.reconnectAttempts,
-      RECONNECT_MAX_DELAY,
-    );
+    // Exponential backoff capped at RECONNECT_MAX_DELAY, with full jitter so a
+    // fleet of hosts doesn't stampede a restarting gateway. The attempt counter
+    // only ever grows toward the cap — it is NEVER reset to "give up"; the host
+    // keeps trying forever until stop()/exit.
+    const exponent = Math.min(this.reconnectAttempts, RECONNECT_MAX_EXPONENT);
+    const base = Math.min(RECONNECT_BASE_DELAY * 2 ** exponent, RECONNECT_MAX_DELAY);
+    const delay = Math.round(base * (0.5 + Math.random() * 0.5));
     this.reconnectAttempts++;
-    process.stderr.write(
-      `[bridge] reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})\n`,
-    );
+    // Quiet logging: only the first retry of an outage and every 10th attempt,
+    // so a multi-hour offline window doesn't flood the daemon log.
+    if (this.reconnectAttempts === 1 || this.reconnectAttempts % 10 === 0) {
+      process.stderr.write(
+        `[bridge] reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})\n`,
+      );
+    }
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       if (this.stopped || this.exited) {
@@ -2399,6 +2492,7 @@ export class BridgeSession {
     this.stopped = true;
     this.exited = true;
     this.stopHeartbeat();
+    this.stopWsPing();
     this.stopScreenCapture();
     this.agentSession?.stop();
     this.agentSession = undefined;

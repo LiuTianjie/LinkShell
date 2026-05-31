@@ -238,18 +238,11 @@ export function AgentConsolePage({
         {isMobile ? (
           mobileNavOpen && (
             <div className="absolute inset-0 z-30 flex animate-fade-in">
-              <aside className="flex w-[82%] max-w-xs flex-col border-r border-border bg-surface shadow-2xl animate-slide-in">
-                <div className="flex items-center justify-between border-b border-border px-3 py-2">
+              <aside className="flex w-[82%] max-w-xs flex-col border-r border-border bg-surface shadow-2xl animate-drawer-in">
+                <div className="flex items-center border-b border-border px-3 py-2">
                   <span className="text-2xs font-semibold uppercase tracking-wide text-content-muted">
                     会话
                   </span>
-                  <button
-                    onClick={() => setMobileNavOpen(false)}
-                    className="codex-btn-ghost px-2 py-1.5"
-                    aria-label="关闭会话列表"
-                  >
-                    <IconClose size={16} />
-                  </button>
                 </div>
                 <div className="min-h-0 flex-1">
                   <ConversationTree
@@ -332,9 +325,9 @@ export function AgentConsolePage({
               <div
                 ref={scrollRef}
                 onScroll={handleTimelineScroll}
-                className="min-h-0 flex-1 overflow-y-auto px-4 py-8"
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-8"
               >
-                <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+                <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6">
                 {historyState?.loading && (
                   <p className="text-center text-2xs text-content-muted">加载更早的消息…</p>
                 )}
@@ -370,7 +363,7 @@ export function AgentConsolePage({
                   });
                   return units.map((u, i) =>
                     u.k === "item" ? (
-                      <div key={u.item.id} className="animate-fade-in">
+                      <div key={u.item.id} className="min-w-0 animate-fade-in">
                         <TimelineItemView
                           item={u.item}
                           canSteer={activeConversation.provider === "codex" && running}
@@ -388,7 +381,7 @@ export function AgentConsolePage({
                         />
                       </div>
                     ) : (
-                      <div key={u.key} className="animate-fade-in">
+                      <div key={u.key} className="min-w-0 animate-fade-in">
                         <TurnActivityGroup
                           items={u.items}
                           live={running && i === lastGroup}
@@ -404,7 +397,7 @@ export function AgentConsolePage({
                 )}
                 </div>
               </div>
-              <div className="mx-auto w-full max-w-3xl px-4 pb-4">
+              <div className="mx-auto w-full min-w-0 max-w-3xl px-4 pb-4">
                 <QueuedMessages
                   items={timeline.filter(isQueuedItem)}
                   canSteer={activeConversation.provider === "codex" && running}

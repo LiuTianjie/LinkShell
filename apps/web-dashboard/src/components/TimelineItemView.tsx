@@ -9,7 +9,7 @@ import { parseDiff, diffStats } from "../lib/diff";
 
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
-    <div className="prose-codex text-[15px] leading-7 text-content-primary">
+    <div className="prose-codex break-words text-[15px] leading-7 text-content-primary">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -17,7 +17,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
             const isBlock = /language-/.test(className ?? "");
             if (isBlock) {
               return (
-                <pre className="my-3 overflow-x-auto rounded-lg border border-border bg-surface-raised p-3 font-mono text-[13px] leading-relaxed">
+                <pre className="my-3 max-w-full overflow-x-auto rounded-lg border border-border bg-surface-raised p-3 font-mono text-[13px] leading-relaxed">
                   <code className={className} {...props}>
                     {children}
                   </code>
@@ -25,7 +25,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
               );
             }
             return (
-              <code className="rounded bg-surface-overlay px-1.5 py-0.5 font-mono text-[13px] text-accent" {...props}>
+              <code className="break-all rounded bg-surface-overlay px-1.5 py-0.5 font-mono text-[13px] text-accent" {...props}>
                 {children}
               </code>
             );
@@ -436,7 +436,7 @@ function ThinkingBlock({ item }: { item: AgentTimelineItem }) {
         {item.isStreaming && <StreamingPill />}
       </button>
       {expanded && item.text && (
-        <p className="mt-2 whitespace-pre-wrap pl-4 text-sm italic leading-relaxed text-content-muted">
+        <p className="mt-2 whitespace-pre-wrap break-words pl-4 text-sm italic leading-relaxed text-content-muted">
           {item.text}
         </p>
       )}
@@ -853,16 +853,16 @@ export const TimelineItemView = memo(
     const discarded = item.metadata?.queuedDiscarded === true;
 
     return (
-      <div className={isUser ? "flex flex-col items-end" : ""}>
+      <div className={isUser ? "flex flex-col items-end" : "min-w-0"}>
         <div
           className={
             isUser
-              ? `max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-7 ${
+              ? `max-w-[85%] break-words rounded-2xl px-4 py-2.5 text-[15px] leading-7 ${
                   discarded
                     ? "bg-surface-raised text-content-secondary line-through opacity-50"
                     : "bg-surface-raised text-content-primary"
                 }`
-              : "w-full"
+              : "w-full min-w-0"
           }
         >
           {/* Image blocks from content (text-only path missed these before). */}

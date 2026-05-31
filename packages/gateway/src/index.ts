@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
 } from "@linkshell/protocol";
 import { z, ZodError } from "zod";
+import { createRequire } from "node:module";
 import { SessionManager } from "./sessions.js";
 import { PairingManager } from "./pairings.js";
 import { TokenManager } from "./tokens.js";
@@ -49,6 +50,23 @@ const pairingManager = new PairingManager(stateStore);
 const tokenManager = new TokenManager(stateStore);
 const hostAuthManager = new HostAuthManager();
 await Promise.all([pairingManager.hydrate(), tokenManager.hydrate()]);
+
+// Resolve our own package version so /healthz and the startup log report the
+// real deployed build (no more guessing which image Sealos is running).
+const GATEWAY_VERSION: string = (() => {
+  const req = createRequire(import.meta.url);
+  // The build emits to dist/gateway/src/index.js, so package.json is several
+  // levels up — try a few candidates rather than assuming the layout.
+  for (const rel of ["../package.json", "../../package.json", "../../../package.json"]) {
+    try {
+      const v = req(rel)?.version;
+      if (typeof v === "string") return v;
+    } catch {
+      // try next candidate
+    }
+  }
+  return "unknown";
+})();
 
 const PING_INTERVAL = 20_000;
 const MAX_BODY_SIZE = 4096;
@@ -264,7 +282,7 @@ async function handleRequest(
 
   // Health check
   if (method === "GET" && url.pathname === "/healthz") {
-    json(res, 200, { ok: true });
+    json(res, 200, { ok: true, version: GATEWAY_VERSION });
     return;
   }
 
@@ -677,13 +695,19 @@ wss.on(
         existingSession.state === "host_disconnected";
       sessionManager.setHost(sessionId, device);
 
-      // Associate userId from auth (for AUTH_REQUIRED gateways)
+      // Associate userId from auth (for AUTH_REQUIRED gateways). Without this,
+      // the session won't appear in GET /sessions/mine for the logged-in user.
       const authResult = (_request as any).__authResult as
         | { userId?: string }
         | undefined;
       if (authResult?.userId) {
         const session = sessionManager.get(sessionId);
         if (session) session.userId = authResult.userId;
+        log("info", `host connected for ${sessionId} as user ${authResult.userId}`);
+      } else if (AUTH_REQUIRED) {
+        // Host connected WITHOUT a resolvable user (CLI not `linkshell login`'d,
+        // or a different account). It won't show up in /sessions/mine.
+        log("warn", `host connected for ${sessionId} with NO authenticated user — will be invisible to /sessions/mine (is the CLI logged in?)`);
       }
       if (isReconnect) {
         const notification = serializeEnvelope(
@@ -895,7 +919,7 @@ if (AUTH_REQUIRED) {
 // ── Start ───────────────────────────────────────────────────────────
 
 server.listen(port, () => {
-  log("info", `LinkShell Gateway v0.1.0`);
+  log("info", `LinkShell Gateway v${GATEWAY_VERSION}`);
   log("info", `listening on http://0.0.0.0:${port}`);
   log("info", `log level: ${logLevel}`);
   if (webEnabled()) {

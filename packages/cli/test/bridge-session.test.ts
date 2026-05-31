@@ -113,6 +113,75 @@ describe("BridgeSession agent v2 routing", () => {
   });
 });
 
+describe("BridgeSession reconnect resilience", () => {
+  it("never stops scheduling reconnects (no attempt ceiling) until stop()", () => {
+    const bridge = makeBridge();
+    vi.useFakeTimers();
+    try {
+      // Simulate a long outage: many consecutive failures should always arm a
+      // new reconnect timer — the host must never give up on its own.
+      for (let i = 0; i < 100; i++) {
+        bridge.reconnecting = false;
+        bridge.scheduleReconnect();
+        expect(bridge.reconnectTimer).toBeDefined();
+        // Fire the timer; connectGateway is stubbed to avoid real sockets.
+        bridge.connectGateway = vi.fn(async () => {});
+        vi.runOnlyPendingTimers();
+      }
+      expect(bridge.reconnectAttempts).toBeGreaterThan(50);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops reconnecting after stop()", () => {
+    const bridge = makeBridge();
+    bridge.stop(0);
+    bridge.scheduleReconnect();
+    expect(bridge.reconnectTimer).toBeUndefined();
+  });
+
+  it("keeps the last auth token when refresh fails (does not downgrade to no-auth)", async () => {
+    const bridge = makeBridge({ authToken: "old-token" });
+    // getValidToken returning null simulates an offline/transient refresh fail.
+    const auth = await import("../src/auth.js");
+    const spy = vi.spyOn(auth, "getValidToken").mockResolvedValue(null);
+    const resolved = await bridge.resolveAuthToken();
+    expect(resolved).toBe("old-token");
+    expect(bridge.options.authToken).toBe("old-token");
+    spy.mockRestore();
+  });
+
+  it("returns undefined auth token only when the user never logged in", async () => {
+    const bridge = makeBridge({ authToken: undefined });
+    expect(await bridge.resolveAuthToken()).toBeUndefined();
+  });
+
+  it("force-refreshes the token on auth-class close codes", async () => {
+    const bridge = makeBridge({ authToken: "old-token" });
+    const auth = await import("../src/auth.js");
+    const spy = vi.spyOn(auth, "refreshAccessToken").mockResolvedValue({
+      accessToken: "fresh-token",
+      refreshToken: "r",
+      expiresAt: Date.now() + 3_600_000,
+      userId: "u",
+    } as any);
+    await bridge.maybeRefreshTokenForClose(4001);
+    expect(spy).toHaveBeenCalledOnce();
+    expect(bridge.options.authToken).toBe("fresh-token");
+    spy.mockRestore();
+  });
+
+  it("does NOT refresh the token on a clean close", async () => {
+    const bridge = makeBridge({ authToken: "old-token" });
+    const auth = await import("../src/auth.js");
+    const spy = vi.spyOn(auth, "refreshAccessToken").mockResolvedValue(null);
+    await bridge.maybeRefreshTokenForClose(1000); // normal closure
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
 describe("resolvePairingGateway", () => {
   it("normalizes host:port overrides using the gateway protocol", () => {
     expect(resolvePairingGateway("http://localhost:8787", "192.168.1.20:8787")).toBe(
