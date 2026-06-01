@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getValidSession } from "../lib/supabase";
-import { getDeviceToken } from "../lib/device-token";
+import { ensureDeviceToken } from "../lib/device-token";
 import { IconRefresh, IconExternal, IconGlobe, IconClose, IconMonitor, IconPhone, IconComment } from "./icons";
 
 // Port-forward preview: load a service running on the host's localhost:{port}
@@ -141,7 +141,7 @@ export function PortPreview({
   const [propEdits, setPropEdits] = useState<Record<string, string>>({});
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const deviceToken = getDeviceToken();
+  const deviceToken = useMemo(() => ensureDeviceToken(), []);
 
   // Resolve a fresh JWT for tunnel auth (pro users authorize via auth_token;
   // device-token owners via token). Either alone is sufficient on the gateway.

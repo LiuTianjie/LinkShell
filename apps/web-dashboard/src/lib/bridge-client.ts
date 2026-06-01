@@ -15,7 +15,7 @@ import {
 import type { Envelope, ProtocolMessageType } from "@linkshell/protocol";
 import type { ConnectionStatus, GatewayConfig } from "./types";
 import { clientWsUrl } from "./gateway-api";
-import { getDeviceId, getDeviceToken } from "./device-token";
+import { ensureDeviceToken, getDeviceId } from "./device-token";
 
 const HEARTBEAT_INTERVAL = 15_000;
 const RECONNECT_BASE_DELAY = 1_000;
@@ -105,7 +105,7 @@ export class BridgeClient {
     const url = clientWsUrl(this.options.config, {
       sessionId: this.options.sessionId,
       deviceId: this.deviceId,
-      deviceToken: getDeviceToken(),
+      deviceToken: ensureDeviceToken(),
       jwt,
     });
 

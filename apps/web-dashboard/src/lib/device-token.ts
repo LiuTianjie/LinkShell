@@ -24,6 +24,14 @@ export function getDeviceToken(): string | null {
   return cached;
 }
 
+export function ensureDeviceToken(): string {
+  const existing = getDeviceToken();
+  if (existing) return existing;
+  const token = uuid();
+  setDeviceToken(token);
+  return token;
+}
+
 export function setDeviceToken(token: string): void {
   cached = token;
   try {

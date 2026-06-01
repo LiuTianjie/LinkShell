@@ -96,6 +96,10 @@ function errorResponse(res: ServerResponse, status: number, message: string): vo
   if (res.headersSent) return;
   res.writeHead(status, {
     "content-type": "text/plain",
+    "cache-control": "no-store, private",
+    "cdn-cache-control": "no-store",
+    "surrogate-control": "no-store",
+    "vary": "authorization, cookie",
     "access-control-allow-origin": "*",
   });
   res.end(message);
@@ -326,6 +330,10 @@ export function handleTunnelResponse(payload: {
     if (!pending.headersSent) {
       const responseHeaders: Record<string, string | string[]> = {
         ...payload.headers,
+        "cache-control": "no-store, private",
+        "cdn-cache-control": "no-store",
+        "surrogate-control": "no-store",
+        "vary": "authorization, cookie",
         "access-control-allow-origin": "*",
       };
       pending.res.writeHead(payload.statusCode, mergeTunnelSetCookie(responseHeaders, pending.tunnelCookie));
