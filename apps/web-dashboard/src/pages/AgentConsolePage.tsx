@@ -10,12 +10,13 @@ import { ConversationTree } from "../components/ConversationTree";
 import { ControlToolbar } from "../components/ControlToolbar";
 import { FileBrowser } from "../components/FileBrowser";
 import { FolderPicker } from "../components/FolderPicker";
+import { PortPreview } from "../components/PortPreview";
 import { IconChevronRight, IconChevronLeft, IconClose, IconPlug, IconMenu, BrandLogo } from "../components/icons";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import type { ConnectionStatus, AgentTimelineItem } from "../lib/types";
-import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, ProviderIcon } from "../components/icons";
+import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, IconGlobe, ProviderIcon } from "../components/icons";
 
 function statusLabel(status: ConnectionStatus): { text: string; color: string } {
   if (status === "connected") return { text: "已连接", color: "text-success" };
@@ -45,7 +46,7 @@ function itemMatchesQuery(item: AgentTimelineItem, q: string): boolean {
   return haystacks.some((h) => typeof h === "string" && h.toLowerCase().includes(needle));
 }
 
-type RightPanel = "none" | "terminal" | "files";
+type RightPanel = "none" | "terminal" | "files" | "preview";
 
 export function AgentConsolePage({
   sessionId,
@@ -381,6 +382,14 @@ export function AgentConsolePage({
         icon: <IconFolder size={15} />,
         run: () => setRightPanel((v) => (v === "files" ? "none" : "files")),
       },
+      {
+        id: "panel-preview",
+        label: "打开端口预览",
+        group: "操作",
+        keywords: "preview port browser localhost tunnel",
+        icon: <IconGlobe size={15} />,
+        run: () => setRightPanel((v) => (v === "preview" ? "none" : "preview")),
+      },
     );
     return actions;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -435,6 +444,12 @@ export function AgentConsolePage({
             <IconSearch size={16} />
           </button>
           <ThemeToggle />
+          <button
+            onClick={() => setRightPanel((v) => (v === "preview" ? "none" : "preview"))}
+            className={rightPanel === "preview" ? "codex-btn-primary text-2xs" : "codex-btn-outline text-2xs"}
+          >
+            预览
+          </button>
           <button
             onClick={() => setRightPanel((v) => (v === "files" ? "none" : "files"))}
             className={rightPanel === "files" ? "codex-btn-primary text-2xs" : "codex-btn-outline text-2xs"}
@@ -804,6 +819,15 @@ export function AgentConsolePage({
               <FileBrowser
                 store={store}
                 initialPath={activeConversation?.cwd || "."}
+                onClose={() => setRightPanel("none")}
+              />
+            );
+          } else if (rightPanel === "preview") {
+            content = (
+              <PortPreview
+                gatewayUrl={config.httpUrl}
+                sessionId={sessionId}
+                isMobile={isMobile}
                 onClose={() => setRightPanel("none")}
               />
             );
