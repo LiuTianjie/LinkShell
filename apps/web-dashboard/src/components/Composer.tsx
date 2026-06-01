@@ -271,6 +271,14 @@ export function Composer({
         pick();
         return;
       }
+      // In the @-mention palette, plain Enter picks: a folder drills in
+      // (palette stays open on the new dir), a file becomes a chip. The slash
+      // palette deliberately keeps Enter as newline (Cmd/Ctrl+Enter to pick).
+      if (e.key === "Enter" && !e.metaKey && !e.ctrlKey && !e.shiftKey && palette.kind === "mention") {
+        e.preventDefault();
+        pick();
+        return;
+      }
       // Cmd/Ctrl+Enter picks the highlighted entry (Enter alone = newline).
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
