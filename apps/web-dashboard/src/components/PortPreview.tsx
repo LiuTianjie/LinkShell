@@ -98,6 +98,7 @@ function cssSelector(el: Element): string {
 export function PortPreview({
   gatewayUrl,
   sessionId,
+  initialAuthToken,
   defaultPort,
   isMobile,
   onClose,
@@ -105,6 +106,7 @@ export function PortPreview({
 }: {
   gatewayUrl: string;
   sessionId: string;
+  initialAuthToken?: string | null;
   defaultPort?: string;
   isMobile?: boolean;
   onClose: () => void;
@@ -118,8 +120,8 @@ export function PortPreview({
   // The committed navigation target driving the iframe src. Updated ONLY on an
   // explicit go/Enter — never from the load-follow handler, which would loop.
   const [nav, setNav] = useState<Nav | null>(null);
-  const [authToken, setAuthToken] = useState<string | null>(null);
-  const [authResolved, setAuthResolved] = useState(false);
+  const [authToken, setAuthToken] = useState<string | null>(initialAuthToken ?? null);
+  const [authResolved, setAuthResolved] = useState(Boolean(initialAuthToken));
   const [viewport, setViewport] = useState<Viewport>("desktop");
   const [reloadKey, setReloadKey] = useState(0);
   // Annotate mode: overlay captures the mouse, highlights the hovered element,
@@ -145,7 +147,12 @@ export function PortPreview({
   // device-token owners via token). Either alone is sufficient on the gateway.
   useEffect(() => {
     let cancelled = false;
-    setAuthResolved(false);
+    if (initialAuthToken) {
+      setAuthToken(initialAuthToken);
+      setAuthResolved(true);
+    } else {
+      setAuthResolved(false);
+    }
     getValidSession()
       .then((s) => {
         if (!cancelled) setAuthToken(s?.accessToken ?? null);
@@ -156,7 +163,7 @@ export function PortPreview({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialAuthToken]);
 
   const tunnelUrl = useMemo(() => {
     if (!nav) return null;

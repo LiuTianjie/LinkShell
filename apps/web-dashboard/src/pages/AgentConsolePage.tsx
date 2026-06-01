@@ -793,35 +793,6 @@ export function AgentConsolePage({
                   ))}
                 </div>
               </div>
-              {/* Terminal bottom panel — slides up/down VS Code-style via
-                   animate-panel-in-up / animate-panel-out-down. During the exit
-                   animation the panel keeps its full height so translateY(100%)
-                   is visible; after animationend it unmounts. */}
-              {(terminalOpen || terminalClosing) && (
-                <div
-                  className={`relative shrink-0 overflow-hidden border-t border-border bg-surface ${
-                    terminalClosing ? "animate-panel-out-down" : "animate-panel-in-up"
-                  }`}
-                  style={{ height: terminalHeight }}
-                  onAnimationEnd={() => {
-                    if (terminalClosing) {
-                      setTerminalClosing(false);
-                      setTerminalOpen(false);
-                    }
-                  }}
-                >
-                  {/* Drag handle on top edge */}
-                  <div
-                    onPointerDown={startTerminalResize}
-                    className="absolute left-0 right-0 top-0 z-10 h-1 cursor-row-resize bg-transparent transition-colors hover:bg-accent-dim/50"
-                    title="拖动调整终端高度"
-                  />
-                  <TerminalPanel
-                    bridge={store.client}
-                    onNewTerminal={handleNewTerminal}
-                  />
-                </div>
-              )}
               <div className="mx-auto w-full min-w-0 max-w-3xl px-4 pb-4">
                 {planReady && (
                   <div className="mb-2 flex items-center gap-3 rounded-xl border border-accent-dim/40 bg-surface px-3.5 py-2.5 animate-slide-in">
@@ -862,6 +833,35 @@ export function AgentConsolePage({
                   onExecuteCommand={(commandId, args) => store.executeCommand(activeId, commandId, args)}
                 />
               </div>
+              {/* Terminal bottom panel — the whole chat surface (timeline +
+                   composer) sits above this panel, so opening it pushes the
+                   input upward instead of leaving the composer in front of the
+                   terminal. */}
+              {(terminalOpen || terminalClosing) && (
+                <div
+                  className={`relative shrink-0 overflow-hidden border-t border-border bg-surface ${
+                    terminalClosing ? "animate-panel-out-down" : "animate-panel-in-up"
+                  }`}
+                  style={{ height: terminalHeight }}
+                  onAnimationEnd={() => {
+                    if (terminalClosing) {
+                      setTerminalClosing(false);
+                      setTerminalOpen(false);
+                    }
+                  }}
+                >
+                  {/* Drag handle on top edge */}
+                  <div
+                    onPointerDown={startTerminalResize}
+                    className="absolute left-0 right-0 top-0 z-10 h-1 cursor-row-resize bg-transparent transition-colors hover:bg-accent-dim/50"
+                    title="拖动调整终端高度"
+                  />
+                  <TerminalPanel
+                    bridge={store.client}
+                    onNewTerminal={handleNewTerminal}
+                  />
+                </div>
+              )}
             </>
           )}
         </main>
@@ -918,6 +918,7 @@ export function AgentConsolePage({
               <PortPreview
                 gatewayUrl={config.httpUrl}
                 sessionId={sessionId}
+                initialAuthToken={session?.accessToken ?? null}
                 isMobile={isMobile}
                 onClose={() => setRightPanel("none")}
                 onAnnotate={(text) => {

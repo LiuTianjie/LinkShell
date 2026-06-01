@@ -58,7 +58,7 @@ function pickActiveTerminal(livingIds: string[], remembered: string | null): str
 // buffer — inactive tabs therefore don't lose content.
 function TerminalView({ bridge, terminalId }: { bridge: BridgeClient | null; terminalId: string }) {
   const { containerRef } = useTerminal(bridge, terminalId);
-  return <div ref={containerRef} className="xterm-host min-h-0 flex-1 p-2" />;
+  return <div ref={containerRef} className="xterm-host min-h-0 flex-1 bg-canvas p-2" />;
 }
 
 export function TerminalPanel({
@@ -171,7 +171,7 @@ export function TerminalPanel({
   return (
     <div className="flex h-full flex-col bg-canvas">
       {/* Tab bar */}
-      <div className="flex items-center gap-0.5 border-b border-border bg-surface px-1.5 py-1">
+      <div className="flex items-center gap-0.5 border-b border-border bg-surface-raised px-1.5 py-1">
         <IconTerminal size={13} className="mx-1 shrink-0 text-content-faint" />
         <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
           {tabs.map((t) => (

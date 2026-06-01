@@ -89,6 +89,15 @@ function errorResponse(res: ServerResponse, status: number, message: string): vo
   res.end(message);
 }
 
+function isSecureRequest(req: IncomingMessage): boolean {
+  if ((req.socket as { encrypted?: boolean }).encrypted) return true;
+  const proto = req.headers["x-forwarded-proto"];
+  if (typeof proto === "string") {
+    return proto.split(",")[0]?.trim().toLowerCase() === "https";
+  }
+  return false;
+}
+
 export function parseTunnelPath(pathname: string): { sessionId: string; port: number; path: string } | null {
   const match = pathname.match(/^\/tunnel\/([^/]+)\/(\d+)(\/.*)?$/);
   if (!match) return null;
@@ -182,7 +191,8 @@ export async function handleTunnelRequest(
   const cookieToken = tokenOwns ? token : authJwt;
   if (cookieToken) {
     const cookieVal = encodeURIComponent(`${sessionId}:${port}:${cookieToken}`);
-    res.setHeader("Set-Cookie", `lsh_tunnel=${cookieVal}; Path=/; HttpOnly; Secure; SameSite=Lax`);
+    const secure = isSecureRequest(req) ? "; Secure" : "";
+    res.setHeader("Set-Cookie", `lsh_tunnel=${cookieVal}; Path=/; HttpOnly${secure}; SameSite=Lax`);
   }
 
   // Validate session & host

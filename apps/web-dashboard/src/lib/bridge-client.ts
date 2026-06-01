@@ -338,7 +338,7 @@ export class BridgeClient {
   }
 
   requestTerminalList(): void {
-    this.send("terminal.list", {});
+    this.send("terminal.list", { terminals: [] });
   }
 
   /** Buffered output for a terminal, so a reopened pane can replay it. */

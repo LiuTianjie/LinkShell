@@ -8,6 +8,29 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { BridgeClient, BridgeEvent } from "../lib/bridge-client";
 
+function cssRgb(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value ? `rgb(${value})` : fallback;
+}
+
+function cssRgba(name: string, alpha: number, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value ? `rgb(${value} / ${alpha})` : fallback;
+}
+
+function readTerminalTheme(): NonNullable<ConstructorParameters<typeof Terminal>[0]>["theme"] {
+  return {
+    background: cssRgb("--c-canvas", "#0b0d0f"),
+    foreground: cssRgb("--c-content-primary", "#e6e8eb"),
+    cursor: cssRgb("--c-accent", "#2dd4bf"),
+    selectionBackground: cssRgba("--c-accent", 0.22, "rgba(45,212,191,0.25)"),
+    black: cssRgb("--c-content-faint", "#4e535a"),
+    brightBlack: cssRgb("--c-content-muted", "#70767e"),
+    white: cssRgb("--c-content-secondary", "#9ea5ad"),
+    brightWhite: cssRgb("--c-content-primary", "#e9ebee"),
+  };
+}
+
 export function useTerminal(
   bridge: BridgeClient | null,
   terminalId: string,
@@ -23,12 +46,7 @@ export function useTerminal(
       fontFamily: "JetBrains Mono, ui-monospace, monospace",
       fontSize: 13,
       cursorBlink: true,
-      theme: {
-        background: "#0b0d0f",
-        foreground: "#e6e8eb",
-        cursor: "#2dd4bf",
-        selectionBackground: "rgba(45,212,191,0.25)",
-      },
+      theme: readTerminalTheme(),
       scrollback: 5000,
     });
     const fit = new FitAddon();
@@ -67,6 +85,14 @@ export function useTerminal(
     });
     ro.observe(containerRef.current);
 
+    const themeObserver = new MutationObserver(() => {
+      term.options.theme = readTerminalTheme();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
     // Announce initial size.
     bridge.sendResize(terminalId, term.cols, term.rows);
 
@@ -75,6 +101,7 @@ export function useTerminal(
       resizeSub.dispose();
       off();
       ro.disconnect();
+      themeObserver.disconnect();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
