@@ -45,11 +45,11 @@ describe("tunnel cookie fallback", () => {
     }), "/zh", reserved)).toBe(true);
   });
 
-  it("does not use stale tunnel cookies for root-domain subresources without tunnel referrer", () => {
+  it("allows subresources without tunnel referrer because referrer policy may strip it", () => {
     const reserved = () => false;
 
-    expect(shouldUseTunnelCookieFallback(req({ "sec-fetch-dest": "script" }), "/_next/static/chunk.js", reserved)).toBe(false);
-    expect(shouldUseTunnelCookieFallback(req({ "sec-fetch-dest": "style" }), "/assets/app.css", reserved)).toBe(false);
+    expect(shouldUseTunnelCookieFallback(req({ "sec-fetch-dest": "script" }), "/_next/static/chunk.js", reserved)).toBe(true);
+    expect(shouldUseTunnelCookieFallback(req({ "sec-fetch-dest": "style" }), "/assets/app.css", reserved)).toBe(true);
   });
 
   it("preserves upstream cookies when adding the tunnel cookie", () => {

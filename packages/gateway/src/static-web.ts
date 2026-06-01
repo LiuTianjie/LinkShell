@@ -76,6 +76,12 @@ async function serveWebFile(req: IncomingMessage, res: ServerResponse, filePath:
     // index.html must never be cached so deploys take effect immediately.
     if (filePath.endsWith("index.html")) {
       res.setHeader("Cache-Control", "no-cache");
+      // lsh_tunnel is an HttpOnly helper cookie for preview subresources. Older
+      // builds used Path=/, so stale values are still sent to the LinkShell app
+      // shell and even /ws handshakes. Clear it whenever the real app document
+      // is served; /tunnel/... responses will set a fresh value when preview is
+      // actually opened.
+      res.setHeader("Set-Cookie", "lsh_tunnel=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
     } else {
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     }

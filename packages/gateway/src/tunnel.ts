@@ -129,14 +129,16 @@ export function shouldUseTunnelCookieFallback(
 ): boolean {
   if (pathname === "/" || isReservedPath(pathname)) return false;
 
-  // A stale Path=/ tunnel cookie must not hijack normal top-level visits to
-  // the LinkShell web app. Cookie fallback is only for requests that are clearly
-  // continuing from an explicit /tunnel/... iframe navigation. Missing Fetch
-  // Metadata headers are allowed for older/non-browser clients.
+  // A stale Path=/ tunnel cookie must not hijack normal top-level document
+  // visits to the LinkShell web app. Subresources are allowed through the
+  // cookie fallback even when Referrer-Policy strips the /tunnel/... path; the
+  // real LinkShell shell clears this HttpOnly cookie on index.html responses,
+  // and concrete LinkShell assets are served before fallback.
   const dest = req.headers["sec-fetch-dest"];
   if (hasTunnelReferer(req)) return true;
   if (!dest) return true;
   if (dest === "iframe") return true;
+  if (dest !== "document") return true;
 
   return false;
 }
