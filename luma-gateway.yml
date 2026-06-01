@@ -1,0 +1,13 @@
+name: linkshell-gateway
+image: nickname4th/linkshell-gateway:latest
+region: cn
+exposure: cn-edge
+domain: gateway.itool.tech
+port: 8787
+replicas: 2
+env:
+  PORT: "8787"
+  AUTH_REQUIRED: "true"
+  SUPABASE_URL: ${SUPABASE_URL}
+  SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
