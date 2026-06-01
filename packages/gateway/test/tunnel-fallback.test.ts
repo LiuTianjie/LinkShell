@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { IncomingMessage } from "node:http";
 import {
+  mergeTunnelSetCookie,
   parseTunnelCookie,
   shouldUseTunnelCookieFallback,
 } from "../src/tunnel.js";
@@ -34,10 +35,30 @@ describe("tunnel cookie fallback", () => {
     const reserved = () => false;
 
     expect(shouldUseTunnelCookieFallback(req({ "sec-fetch-dest": "iframe" }), "/zh", reserved)).toBe(true);
-    expect(shouldUseTunnelCookieFallback(req({ "sec-fetch-dest": "style" }), "/assets/app.css", reserved)).toBe(true);
+    expect(shouldUseTunnelCookieFallback(req({
+      "sec-fetch-dest": "style",
+      referer: "https://gateway.example/tunnel/session-1/3000/zh",
+    }), "/assets/app.css", reserved)).toBe(true);
     expect(shouldUseTunnelCookieFallback(req({
       "sec-fetch-dest": "document",
       referer: "https://gateway.example/tunnel/session-1/3000/",
     }), "/zh", reserved)).toBe(true);
+  });
+
+  it("does not use stale tunnel cookies for root-domain subresources without tunnel referrer", () => {
+    const reserved = () => false;
+
+    expect(shouldUseTunnelCookieFallback(req({ "sec-fetch-dest": "script" }), "/_next/static/chunk.js", reserved)).toBe(false);
+    expect(shouldUseTunnelCookieFallback(req({ "sec-fetch-dest": "style" }), "/assets/app.css", reserved)).toBe(false);
+  });
+
+  it("preserves upstream cookies when adding the tunnel cookie", () => {
+    expect(mergeTunnelSetCookie({
+      "content-type": "text/html",
+      "set-cookie": "sb=refresh; Path=/",
+    }, "lsh_tunnel=session; Path=/")).toEqual({
+      "content-type": "text/html",
+      "set-cookie": ["sb=refresh; Path=/", "lsh_tunnel=session; Path=/"],
+    });
   });
 });

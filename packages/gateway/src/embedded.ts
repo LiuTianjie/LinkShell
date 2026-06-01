@@ -20,6 +20,7 @@ import {
 import {
   parseTunnelPath,
   parseTunnelCookie,
+  shouldUseTunnelCookieFallback,
   handleTunnelRequest,
   handleTunnelWsUpgrade,
   cleanupSessionTunnels,
@@ -253,7 +254,15 @@ export function startEmbeddedGateway(
 
       // Tunnel fallback: cookie-based routing for sub-resources (e.g. /_next/static/...)
       const tunnelCookie = parseTunnelCookie(req);
-      if (tunnelCookie) {
+      if (tunnelCookie && shouldUseTunnelCookieFallback(req, url.pathname, (pathname) =>
+        pathname === "/healthz" ||
+        pathname === "/sessions" ||
+        pathname.startsWith("/sessions/") ||
+        pathname === "/pairings" ||
+        pathname.startsWith("/pairings/") ||
+        pathname.startsWith("/agent/") ||
+        pathname.startsWith("/tunnel/")
+      )) {
         const fallbackParsed = {
           sessionId: tunnelCookie.sessionId,
           port: tunnelCookie.port,
@@ -306,7 +315,7 @@ export function startEmbeddedGateway(
 
     // Tunnel WS fallback via cookie (for HMR paths like /_next/webpack-hmr)
     const tunnelCookie = parseTunnelCookie(request);
-    if (tunnelCookie && url.pathname !== "/ws") {
+    if (tunnelCookie && shouldUseTunnelCookieFallback(request, url.pathname, (pathname) => pathname === "/ws")) {
       const fallbackParsed = {
         sessionId: tunnelCookie.sessionId,
         port: tunnelCookie.port,

@@ -16,6 +16,7 @@ export interface PendingTunnelRequest {
   res: ServerResponse;
   headersSent: boolean;
   timeout: ReturnType<typeof setTimeout>;
+  tunnelCookie?: string;
 }
 
 export interface PendingTunnelWs {
@@ -129,13 +130,32 @@ export function shouldUseTunnelCookieFallback(
   if (pathname === "/" || isReservedPath(pathname)) return false;
 
   // A stale Path=/ tunnel cookie must not hijack normal top-level visits to
-  // the LinkShell web app. Browser iframe navigations use "iframe"; redirects
-  // from an explicit /tunnel/... URL have that URL as the referrer. Missing
-  // Fetch Metadata headers are allowed for older/non-browser clients.
+  // the LinkShell web app. Cookie fallback is only for requests that are clearly
+  // continuing from an explicit /tunnel/... iframe navigation. Missing Fetch
+  // Metadata headers are allowed for older/non-browser clients.
   const dest = req.headers["sec-fetch-dest"];
-  if (dest === "document" && !hasTunnelReferer(req)) return false;
+  if (hasTunnelReferer(req)) return true;
+  if (!dest) return true;
+  if (dest === "iframe") return true;
 
-  return true;
+  return false;
+}
+
+export function mergeTunnelSetCookie(
+  headers: Record<string, string | string[]>,
+  tunnelCookie?: string,
+): Record<string, string | string[]> {
+  if (!tunnelCookie) return headers;
+  const merged = { ...headers };
+  const setCookieKey = Object.keys(merged).find((key) => key.toLowerCase() === "set-cookie");
+  const upstreamSetCookie = setCookieKey ? merged[setCookieKey] : undefined;
+  if (setCookieKey) delete merged[setCookieKey];
+  merged["set-cookie"] = upstreamSetCookie
+    ? Array.isArray(upstreamSetCookie)
+      ? [...upstreamSetCookie, tunnelCookie]
+      : [upstreamSetCookie, tunnelCookie]
+    : tunnelCookie;
+  return merged;
 }
 
 export async function handleTunnelRequest(
@@ -188,11 +208,12 @@ export async function handleTunnelRequest(
   }
 
   // Set auth cookie for subsequent sub-resource requests
+  let tunnelCookie: string | undefined;
   const cookieToken = tokenOwns ? token : authJwt;
   if (cookieToken) {
     const cookieVal = encodeURIComponent(`${sessionId}:${port}:${cookieToken}`);
     const secure = isSecureRequest(req) ? "; Secure" : "";
-    res.setHeader("Set-Cookie", `lsh_tunnel=${cookieVal}; Path=/; HttpOnly${secure}; SameSite=Lax`);
+    tunnelCookie = `lsh_tunnel=${cookieVal}; Path=/; Max-Age=600; HttpOnly${secure}; SameSite=Lax`;
   }
 
   // Validate session & host
@@ -233,7 +254,9 @@ export async function handleTunnelRequest(
     }
   }
 
-  // Reconstruct URL with query string
+  // Reconstruct URL with query string. The gateway authenticates fallback
+  // subresources with lsh_tunnel; it must not mutate host-facing URLs with
+  // auth query params because that leaks credentials and poisons cache keys.
   const fullUrl = path + (url.search || "");
 
   // Register pending request
@@ -245,6 +268,7 @@ export async function handleTunnelRequest(
       untrackRequest(sessionId, requestId);
       errorResponse(res, 504, "Tunnel request timed out");
     }, TUNNEL_TIMEOUT),
+    tunnelCookie,
   };
   pendingRequests.set(requestId, pending);
   trackRequest(sessionId, requestId);
@@ -287,11 +311,11 @@ export function handleTunnelResponse(payload: {
     if (!pending) return;
 
     if (!pending.headersSent) {
-      const responseHeaders: Record<string, string> = {
+      const responseHeaders: Record<string, string | string[]> = {
         ...payload.headers,
         "access-control-allow-origin": "*",
       };
-      pending.res.writeHead(payload.statusCode, responseHeaders);
+      pending.res.writeHead(payload.statusCode, mergeTunnelSetCookie(responseHeaders, pending.tunnelCookie));
       pending.headersSent = true;
     }
 

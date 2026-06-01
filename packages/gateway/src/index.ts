@@ -572,7 +572,7 @@ server.on("upgrade", (request, socket, head) => {
 
   // Tunnel WS fallback via cookie (for HMR paths like /_next/webpack-hmr)
   const tunnelCookie = parseTunnelCookie(request);
-  if (tunnelCookie && url.pathname !== "/ws") {
+  if (tunnelCookie && shouldUseTunnelCookieFallback(request, url.pathname, isApiPath)) {
     const fallbackParsed = {
       sessionId: tunnelCookie.sessionId,
       port: tunnelCookie.port,
