@@ -32,24 +32,41 @@ export function SessionListPage({
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    // Two ownership models, merged: (1) /sessions/mine — sessions the logged-in
-    // user owns automatically after `linkshell login` (pro users never pair);
-    // (2) /sessions — sessions claimed via a pairing code on this device.
-    const [mine, owned] = await Promise.all([
-      listMySessions(config, session?.accessToken ?? null),
-      listSessions(config, {
-        deviceToken: getDeviceToken(),
-        jwt: session?.accessToken ?? null,
-      }),
-    ]);
-    const byId = new Map<string, SessionSummary>();
-    for (const s of [...mine, ...owned]) byId.set(s.id, s);
-    const list = [...byId.values()];
-    // Reconcile cache against live truth: live results drive hasHost; cached
-    // sessions absent from live are marked offline. If live is empty, every
-    // remembered session is offline (host gone) — never show a dead "在线".
-    setSessions(list.length > 0 ? rememberSessions(list) : markAllOffline());
-    setLoading(false);
+    try {
+      // Two ownership models, merged: (1) /sessions/mine — sessions the logged-in
+      // user owns automatically after `linkshell login` (pro users never pair);
+      // (2) /sessions — sessions claimed via a pairing code on this device.
+      // allSettled (not all): one endpoint failing (network blip / 401 / timeout)
+      // must NOT blank the whole list — we still show whatever the other returns,
+      // falling back to remembered sessions so the page never gets stuck loading.
+      const [mineRes, ownedRes] = await Promise.allSettled([
+        listMySessions(config, session?.accessToken ?? null),
+        listSessions(config, {
+          deviceToken: getDeviceToken(),
+          jwt: session?.accessToken ?? null,
+        }),
+      ]);
+      const mine = mineRes.status === "fulfilled" ? mineRes.value : [];
+      const owned = ownedRes.status === "fulfilled" ? ownedRes.value : [];
+      const bothFailed = mineRes.status === "rejected" && ownedRes.status === "rejected";
+      const byId = new Map<string, SessionSummary>();
+      for (const s of [...mine, ...owned]) byId.set(s.id, s);
+      const list = [...byId.values()];
+      // Reconcile cache against live truth: live results drive hasHost; cached
+      // sessions absent from live are marked offline. If BOTH calls failed, keep
+      // the remembered list as-is (a transient error shouldn't wipe the view);
+      // if live is genuinely empty, mark everything offline (host gone).
+      if (bothFailed) {
+        setSessions(loadKnownSessions());
+      } else {
+        setSessions(list.length > 0 ? rememberSessions(list) : markAllOffline());
+      }
+    } catch {
+      // Defensive: never leave the page stuck on "加载中…".
+      setSessions(loadKnownSessions());
+    } finally {
+      setLoading(false);
+    }
   }, [config, session?.accessToken]);
 
   useEffect(() => {
@@ -107,26 +124,26 @@ export function SessionListPage({
 
   return (
     <div className="min-h-screen bg-canvas">
-      <header className="glass-bar sticky top-0 z-10 flex h-14 items-center justify-between border-b border-border px-6">
-        <div className="flex items-center gap-2.5">
+      <header className="glass-bar sticky top-0 z-10 flex h-14 items-center justify-between gap-3 border-b border-border px-4 sm:px-6">
+        <div className="flex shrink-0 items-center gap-2.5">
           <BrandLogo size={26} />
           <h1 className="font-mono text-[15px] font-semibold text-content-primary">LinkShell</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           {isPro(session) && (
-            <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-0.5 text-2xs font-semibold tracking-wide text-accent">
+            <span className="shrink-0 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-0.5 text-2xs font-semibold tracking-wide text-accent">
               PRO
             </span>
           )}
           {session ? (
             <>
-              <span className="text-[13px] text-content-muted">{session.user.email}</span>
-              <button onClick={async () => { await signOut(); onLogout(); }} className="codex-btn-ghost text-2xs">
+              <span className="min-w-0 truncate text-[13px] text-content-muted">{session.user.email}</span>
+              <button onClick={async () => { await signOut(); onLogout(); }} className="codex-btn-ghost shrink-0 whitespace-nowrap text-2xs">
                 退出
               </button>
             </>
           ) : (
-            <button onClick={onLogin} className="codex-btn-outline text-2xs">
+            <button onClick={onLogin} className="codex-btn-outline shrink-0 whitespace-nowrap text-2xs">
               登录
             </button>
           )}

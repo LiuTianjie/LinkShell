@@ -89,7 +89,14 @@ export function AgentConsolePage({
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
     () => localStorage.getItem("linkshell_sidebar_collapsed") === "1",
   );
+  // Right panel (terminal/diff/files/subagent) width, persisted. Resizes from
+  // its LEFT edge, so it grows as the handle is dragged toward the canvas.
+  const [rightPanelWidth, setRightPanelWidth] = useState<number>(() => {
+    const v = Number(localStorage.getItem("linkshell_rightpanel_w"));
+    return v >= 320 && v <= 1100 ? v : 560;
+  });
   const draggingRef = useRef(false);
+  const rightDraggingRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const toggleSidebar = () => {
@@ -121,6 +128,28 @@ export function AgentConsolePage({
   const sidebarWidthRef = useRef(sidebarWidth);
   sidebarWidthRef.current = sidebarWidth;
 
+  // Drag-to-resize the right panel from its LEFT edge. Width grows as the
+  // handle moves toward the canvas, so width = viewport - pointerX.
+  const rightPanelWidthRef = useRef(rightPanelWidth);
+  rightPanelWidthRef.current = rightPanelWidth;
+  const startRightResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    rightDraggingRef.current = true;
+    const onMove = (ev: PointerEvent) => {
+      if (!rightDraggingRef.current) return;
+      const w = Math.min(1100, Math.max(320, window.innerWidth - ev.clientX));
+      setRightPanelWidth(w);
+    };
+    const onUp = () => {
+      rightDraggingRef.current = false;
+      localStorage.setItem("linkshell_rightpanel_w", String(rightPanelWidthRef.current));
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   const activeId = snapshot.activeConversationId;
   const timeline = activeId ? snapshot.timelines.get(activeId) ?? [] : [];
   const activeConversation = snapshot.conversations.find((c) => c.id === activeId);
@@ -145,15 +174,44 @@ export function AgentConsolePage({
     setSeed((s) => ({ text, nonce: s.nonce + 1 }));
   };
 
-  // Global shortcuts: Cmd/Ctrl+K opens the command palette; Cmd/Ctrl+F opens
+  // Plan mode: once the agent finishes a planning turn (we're in plan mode,
+  // idle, and the latest item is the agent's, not the user's), surface a
+  // one-click "execute" affordance. Executing reuses the existing mode-switch
+  // path: send an instruction with collaborationMode "default", which exits
+  // plan mode and tells the agent to proceed. The user can instead just keep
+  // typing in the composer to refine the plan.
+  const planReady = useMemo(() => {
+    if (activeConversation?.collaborationMode !== "plan") return false;
+    if (running || activeConversation?.status === "waiting_permission") return false;
+    const last = [...timeline].reverse().find((i) => !isQueuedItem(i));
+    return last != null && last.role !== "user";
+  }, [activeConversation?.collaborationMode, activeConversation?.status, running, timeline]);
+
+  const handleExecutePlan = () => {
+    if (!activeId) return;
+    store.sendPrompt({
+      conversationId: activeId,
+      text: "请按上面的计划开始执行。",
+      collaborationMode: "default",
+      model: activeConversation?.model,
+      reasoningEffort: activeConversation?.reasoningEffort,
+      permissionMode: activeConversation?.permissionMode,
+    });
+  };
+
+  // Global shortcuts: Cmd/Ctrl+Shift+P (or Cmd/Ctrl+K) opens the command
+  // palette to search conversations + run actions; Cmd/Ctrl+F opens
   // in-conversation search (preventDefault stops the browser's own find bar).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "k") {
+      if (mod && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
-      } else if (mod && e.key.toLowerCase() === "f") {
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         setSearchOpen(true);
         requestAnimationFrame(() => searchInputRef.current?.focus());
@@ -170,6 +228,19 @@ export function AgentConsolePage({
     setSearchOpen(false);
     setSearchQuery("");
   }, [activeId]);
+
+  // When the terminal panel is first opened for a conversation, spawn a fresh
+  // shell in that conversation's cwd — instead of leaving the user attached to
+  // the host's shared "default" PTY (the agent's own REPL). Guarded per
+  // conversation id so toggling the panel closed/open doesn't leak terminals;
+  // switching to a different conversation spawns one for its cwd.
+  const terminalSpawnedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (rightPanel !== "terminal" || !activeId || !activeConversation) return;
+    if (terminalSpawnedRef.current.has(activeId)) return;
+    terminalSpawnedRef.current.add(activeId);
+    store.client.spawnTerminal(activeConversation.cwd || ".");
+  }, [rightPanel, activeId, activeConversation, store]);
 
   // Refs for scroll anchoring. prevScrollHeightRef preserves the viewport when
   // older history is prepended; atBottomRef tracks whether to stick to bottom.
@@ -316,7 +387,7 @@ export function AgentConsolePage({
   }, [enabledProviders, snapshot.conversations, activeId, running]);
 
   return (
-    <div className="flex h-screen h-[100dvh] flex-col">
+    <div className="flex h-[100dvh] flex-col overflow-hidden">
       {/* Top bar. pt safe-area inset so it clears the notch / status bar. */}
       <header
         className="flex items-center justify-between border-b border-border px-4 py-2"
@@ -351,10 +422,15 @@ export function AgentConsolePage({
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <button
-            onClick={() => setPaletteOpen(true)}
-            className="codex-btn-ghost px-2 py-1.5"
-            title="命令面板 (⌘/Ctrl+K)"
-            aria-label="命令面板"
+            onClick={() => {
+              if (!activeId) return;
+              setSearchOpen(true);
+              requestAnimationFrame(() => searchInputRef.current?.focus());
+            }}
+            disabled={!activeId}
+            className="codex-btn-ghost px-2 py-1.5 disabled:opacity-40"
+            title="在对话中搜索 (⌘/Ctrl+F)"
+            aria-label="在对话中搜索"
           >
             <IconSearch size={16} />
           </button>
@@ -539,6 +615,7 @@ export function AgentConsolePage({
                               onOpenDiff={(d) => { setDiffItem(d); setRightPanel("none"); }}
                               onOpenAgent={(detail) => { setAgentDetail(detail); setDiffItem(null); setRightPanel("none"); }}
                               onEditMessage={handleEditMessage}
+                              highlightQuery={q}
                             />
                           </div>
                         ))}
@@ -607,12 +684,30 @@ export function AgentConsolePage({
                     ),
                   );
                 })()}
-                {timeline.length === 0 && (
-                  <p className="py-12 text-center text-sm text-content-muted">发送第一条指令…</p>
-                )}
+                {timeline.length === 0 &&
+                  (activeConversation?.lastMessagePreview ? (
+                    // Existing conversation whose transcript is still loading
+                    // (we switched to it instantly; history streams in after).
+                    <div className="flex flex-col items-center gap-2 py-16 text-content-muted">
+                      <span className="h-5 w-5 animate-spin rounded-full border-2 border-content-faint border-t-accent" />
+                      <p className="text-sm">加载对话记录…</p>
+                    </div>
+                  ) : (
+                    <p className="py-12 text-center text-sm text-content-muted">发送第一条指令…</p>
+                  ))}
                 </div>
               </div>
               <div className="mx-auto w-full min-w-0 max-w-3xl px-4 pb-4">
+                {planReady && (
+                  <div className="mb-2 flex items-center gap-3 rounded-xl border border-accent-dim/40 bg-surface px-3.5 py-2.5 animate-slide-in">
+                    <span className="min-w-0 flex-1 text-sm text-content-secondary">
+                      计划已就绪。执行它，或在下方继续补充。
+                    </span>
+                    <button onClick={handleExecutePlan} className="codex-btn-primary shrink-0 text-xs">
+                      执行计划
+                    </button>
+                  </div>
+                )}
                 <QueuedMessages
                   items={timeline.filter(isQueuedItem)}
                   canSteer={activeConversation.provider === "codex" && running}
@@ -647,59 +742,47 @@ export function AgentConsolePage({
         </main>
 
         {/* Right panel: subagent / diff drawer takes priority, then terminal/files.
-            Desktop = split pane (border + percentage width); mobile = full-screen
-            overlay above the turn-log (split panes are unusable on a phone). */}
+            Desktop = drag-resizable split pane (border + persisted px width);
+            mobile = full-screen overlay above the turn-log. */}
         {(() => {
-          // Shared wrapper classes: overlay on mobile, bordered split pane on desktop.
-          const drawer = (desktopWidth: string) =>
-            isMobile
-              ? "absolute inset-0 z-30 flex flex-col bg-canvas animate-fade-in"
-              : `flex ${desktopWidth} flex-col border-l border-border`;
+          // Compute the panel's content first; wrap once below so the resize
+          // handle + sizing logic isn't duplicated across every branch.
+          let content: React.ReactNode = null;
           if (agentDetail) {
-            return (
-              <aside className={drawer("w-[42%]")}>
+            content = (
+              <>
                 <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
                   <span className="text-2xs font-semibold uppercase tracking-wide text-content-muted">
                     子 Agent
                   </span>
-                  <button
-                    onClick={() => setAgentDetail(null)}
-                    className="codex-btn-ghost px-2 py-1.5"
-                    aria-label="关闭"
-                  >
+                  <button onClick={() => setAgentDetail(null)} className="codex-btn-ghost px-2 py-1.5" aria-label="关闭">
                     <IconClose size={15} />
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
                   <SubagentDetailView detail={agentDetail} />
                 </div>
-              </aside>
+              </>
             );
-          }
-          if (diffItem) {
-            return (
-              <aside className={drawer("w-[46%]")}>
+          } else if (diffItem) {
+            content = (
+              <>
                 <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
                   <span className="text-2xs font-semibold uppercase tracking-wide text-content-muted">
                     文件差异
                   </span>
-                  <button
-                    onClick={() => setDiffItem(null)}
-                    className="codex-btn-ghost px-2 py-1.5"
-                    aria-label="关闭差异"
-                  >
+                  <button onClick={() => setDiffItem(null)} className="codex-btn-ghost px-2 py-1.5" aria-label="关闭差异">
                     <IconClose size={15} />
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
                   <DiffViewer item={diffItem} />
                 </div>
-              </aside>
+              </>
             );
-          }
-          if (rightPanel === "terminal") {
-            return (
-              <aside className={drawer("w-[44%]")}>
+          } else if (rightPanel === "terminal") {
+            content = (
+              <>
                 {isMobile && (
                   <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
                     <span className="text-2xs font-semibold uppercase tracking-wide text-content-muted">终端</span>
@@ -714,21 +797,39 @@ export function AgentConsolePage({
                     onNewTerminal={() => store.client.spawnTerminal(activeConversation?.cwd || ".")}
                   />
                 </div>
-              </aside>
+              </>
+            );
+          } else if (rightPanel === "files") {
+            content = (
+              <FileBrowser
+                store={store}
+                initialPath={activeConversation?.cwd || "."}
+                onClose={() => setRightPanel("none")}
+              />
             );
           }
-          if (rightPanel === "files") {
+          if (!content) return null;
+
+          // Mobile: full-screen overlay (split panes are unusable on a phone).
+          if (isMobile) {
             return (
-              <aside className={drawer("w-[40%]")}>
-                <FileBrowser
-                  store={store}
-                  initialPath={activeConversation?.cwd || "."}
-                  onClose={() => setRightPanel("none")}
-                />
-              </aside>
+              <aside className="absolute inset-0 z-30 flex flex-col bg-canvas animate-fade-in">{content}</aside>
             );
           }
-          return null;
+          // Desktop: bordered split pane with a left-edge drag handle.
+          return (
+            <aside
+              className="relative flex shrink-0 flex-col border-l border-border"
+              style={{ width: rightPanelWidth }}
+            >
+              <div
+                onPointerDown={startRightResize}
+                className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent transition-colors hover:bg-accent-dim/50"
+                title="拖动调整宽度"
+              />
+              {content}
+            </aside>
+          );
         })()}
       </div>
 

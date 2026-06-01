@@ -55,17 +55,69 @@ export function CopyButton({
   );
 }
 
+// ── Search-term highlighting (rehype plugin) ────────────────────────
+// Walks the hast tree and wraps case-insensitive matches of `query` in <mark>,
+// skipping code/pre subtrees so it never corrupts syntax highlighting. Built as
+// a unified attacher factory so it slots into ReactMarkdown's rehypePlugins.
+function rehypeMark(query: string) {
+  const q = query.toLowerCase();
+  const walk = (node: any): void => {
+    if (!node || !Array.isArray(node.children)) return;
+    if (node.type === "element" && (node.tagName === "code" || node.tagName === "pre")) return;
+    const out: any[] = [];
+    for (const child of node.children) {
+      if (child.type === "text" && typeof child.value === "string") {
+        const value: string = child.value;
+        const lower = value.toLowerCase();
+        let idx = lower.indexOf(q);
+        if (idx === -1) {
+          out.push(child);
+          continue;
+        }
+        let last = 0;
+        while (idx !== -1) {
+          if (idx > last) out.push({ type: "text", value: value.slice(last, idx) });
+          out.push({
+            type: "element",
+            tagName: "mark",
+            properties: {},
+            children: [{ type: "text", value: value.slice(idx, idx + q.length) }],
+          });
+          last = idx + q.length;
+          idx = lower.indexOf(q, last);
+        }
+        if (last < value.length) out.push({ type: "text", value: value.slice(last) });
+      } else {
+        walk(child);
+        out.push(child);
+      }
+    }
+    node.children = out;
+  };
+  return () => (tree: any) => {
+    if (q) walk(tree);
+  };
+}
+
 // ── Markdown (memoized so streaming siblings don't re-parse it) ──────
 
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+export const Markdown = memo(function Markdown({ text, highlight }: { text: string; highlight?: string }) {
   return (
     <div className="prose-codex break-words text-[15px] leading-7 text-content-primary">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         // detect: true highlights fenced blocks even without a language hint;
         // ignoreMissing keeps unknown languages from throwing mid-render.
-        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+        // When a search query is active, append the <mark> highlighter.
+        rehypePlugins={
+          highlight
+            ? [[rehypeHighlight, { detect: true, ignoreMissing: true }], rehypeMark(highlight)]
+            : [[rehypeHighlight, { detect: true, ignoreMissing: true }]]
+        }
         components={{
+          mark({ children }) {
+            return <mark className="rounded bg-warning/30 px-0.5 text-content-primary">{children}</mark>;
+          },
           // Replace the default <pre> with a pass-through so our custom code
           // renderer owns the block markup (avoids a nested <pre><pre>).
           pre({ children }) {
@@ -370,15 +422,16 @@ function PlanCard({ item }: { item: AgentTimelineItem }) {
                 <span className="block h-2.5 w-2.5 rounded-full border border-content-faint" />
               )}
             </span>
-            <span
-              className={
-                step.status === "completed"
-                  ? "text-content-muted line-through"
-                  : "text-content-secondary"
-              }
+            {/* Plan text can be Markdown (esp. Codex plan-mode, which sends a
+                full ## / `code` document), so render it instead of dumping the
+                raw source with visible #/backticks. */}
+            <div
+              className={`min-w-0 flex-1 ${
+                step.status === "completed" ? "text-content-muted line-through" : "text-content-secondary"
+              }`}
             >
-              {step.text}
-            </span>
+              <Markdown text={step.text} />
+            </div>
           </li>
         ))}
       </ul>
@@ -871,6 +924,8 @@ export interface TimelineItemProps {
   onOpenAgent?: (detail: SubagentDetail) => void;
   /** Edit & resend a prior user message (loads its text into the composer). */
   onEditMessage?: (text: string) => void;
+  /** Active search query — message text highlights matches when set. */
+  highlightQuery?: string;
 }
 
 export const TimelineItemView = memo(
@@ -885,6 +940,7 @@ export const TimelineItemView = memo(
     onOpenDiff,
     onOpenAgent,
     onEditMessage,
+    highlightQuery,
   }: TimelineItemProps) {
     // structured input (e.g. AskUserQuestion)
     if (item.kind === "user_input_prompt" || item.structuredInput) {
@@ -957,7 +1013,7 @@ export const TimelineItemView = memo(
                   ))}
               </div>
             )}
-          {hasText && <Markdown text={item.text!} />}
+          {hasText && <Markdown text={item.text!} highlight={highlightQuery} />}
           {item.isStreaming && <StreamingPill />}
         </div>
         {discarded && <span className="mt-1 text-2xs text-content-faint">已丢弃</span>}
@@ -995,5 +1051,6 @@ export const TimelineItemView = memo(
     prev.onDiscardQueued === next.onDiscardQueued &&
     prev.onOpenDiff === next.onOpenDiff &&
     prev.onOpenAgent === next.onOpenAgent &&
-    prev.onEditMessage === next.onEditMessage,
+    prev.onEditMessage === next.onEditMessage &&
+    prev.highlightQuery === next.highlightQuery,
 );

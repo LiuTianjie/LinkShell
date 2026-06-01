@@ -61,6 +61,10 @@ export function Composer({
   const [images, setImages] = useState<PendingImage[]>([]);
   const [highlight, setHighlight] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  // Picked @-file references, shown as removable chips above the input and
+  // re-expanded to `@path` tokens on send (directories are NOT chipped — they
+  // stay inline so the palette can drill into them).
+  const [mentions, setMentions] = useState<string[]>([]);
   // @-mention state: entries fetched for the directory under the cursor token,
   // refetched only when that directory changes (not on every keystroke).
   const [mentionEntries, setMentionEntries] = useState<MentionEntry[]>([]);
@@ -74,6 +78,7 @@ export function Composer({
     if (!conversationId) return;
     const draft = loadDraft(conversationId);
     setText(draft);
+    setMentions([]); // file chips are per-message, never carry across switches
     // Defer the height sync until the textarea reflects the new value.
     requestAnimationFrame(() => autoGrow());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -155,7 +160,9 @@ export function Composer({
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
         return a.name.localeCompare(b.name);
       })
-      .slice(0, 8);
+      // Cap generously and let the panel scroll. A tight cap (was 8) hid every
+      // file when a directory had ≥8 subfolders, since folders sort first.
+      .slice(0, 50);
     return matches.length > 0 ? matches : null;
   }, [atMatch, mentionEntries, mentionFetchedDir, mentionTargetDir]);
 
@@ -193,8 +200,9 @@ export function Composer({
     }
   };
 
-  // Insert the picked file/dir, replacing the trailing @token. Directories keep
-  // the palette open (trailing slash) so the user can drill in; files close it.
+  // Insert the picked file/dir, replacing the trailing @token. Directories stay
+  // inline (trailing slash) so the user can drill in; files become a removable
+  // chip above the input and the @token is stripped from the text.
   const pickMention = (entry: MentionEntry) => {
     if (!atMatch) return;
     const base = (cwd || ".").replace(/\/+$/, "");
@@ -202,8 +210,12 @@ export function Composer({
       ? entry.path.slice(base.length).replace(/^\/+/, "")
       : entry.name;
     const head = text.slice(0, text.length - atMatch.token.length);
-    const insertion = entry.isDirectory ? `@${rel}/` : `@${rel} `;
-    updateText(head + insertion);
+    if (entry.isDirectory) {
+      updateText(`${head}@${rel}/`);
+    } else {
+      updateText(head);
+      setMentions((prev) => (prev.includes(rel) ? prev : [...prev, rel]));
+    }
     taRef.current?.focus();
   };
 
@@ -218,15 +230,21 @@ export function Composer({
       if (cmd) {
         onExecuteCommand(cmd.id, cmdMatch[2] || undefined);
         updateText("");
+        setMentions([]);
         resetHeight();
         return;
       }
     }
 
-    if (!trimmed && images.length === 0) return;
-    onSend(trimmed, images);
+    // Expand picked file chips back into leading @path tokens so the agent
+    // receives them the same way it would from inline typing.
+    const mentionPrefix = mentions.map((m) => `@${m}`).join(" ");
+    const body = [mentionPrefix, trimmed].filter(Boolean).join(" ");
+    if (!body && images.length === 0) return;
+    onSend(body, images);
     updateText("");
     setImages([]);
+    setMentions([]);
     resetHeight();
   };
 
@@ -390,14 +408,36 @@ export function Composer({
         </div>
       )}
 
+      {/* Picked @-file reference chips (removable; expanded to @path on send) */}
+      {mentions.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {mentions.map((m) => (
+            <span
+              key={m}
+              className="flex items-center gap-1 rounded-lg border border-border bg-surface-overlay py-1 pl-2 pr-1 font-mono text-xs text-content-secondary"
+            >
+              <IconFile size={12} className="shrink-0 text-content-faint" />
+              <span className="max-w-[200px] truncate" title={m}>{m}</span>
+              <button
+                onClick={() => setMentions((prev) => prev.filter((x) => x !== m))}
+                className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-content-faint transition-colors hover:text-danger"
+                aria-label={`移除 ${m}`}
+              >
+                <IconClose size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* One rounded card: textarea on top, a single bottom toolbar (Codex style)
           holding the +/attach control, capability pills, and the send button. */}
       <div
         onDrop={onDrop}
         onDragOver={onDragOver}
         onDragLeave={() => setDragOver(false)}
-        className={`codex-card-raised flex flex-col gap-1 px-3 pt-2.5 pb-2 transition-colors focus-within:border-accent-dim focus-within:ring-2 focus-within:ring-accent/20 ${
-          dragOver ? "border-accent-dim ring-2 ring-accent/30" : ""
+        className={`codex-card-raised flex flex-col gap-1 px-3 pt-2.5 pb-2 transition-colors focus-within:border-border-strong ${
+          dragOver ? "border-border-strong" : ""
         }`}
       >
         {supportsImages && (
@@ -453,7 +493,7 @@ export function Composer({
           ) : (
             <button
               onClick={submit}
-              disabled={disabled || (!text.trim() && images.length === 0)}
+              disabled={disabled || (!text.trim() && images.length === 0 && mentions.length === 0)}
               className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-accent-dim text-white transition-colors hover:bg-accent disabled:cursor-default disabled:bg-surface-overlay disabled:text-content-faint"
               aria-label="发送"
               title="发送"
