@@ -434,8 +434,19 @@ export function claudePermissionModeFor(input: {
   return "default";
 }
 
+const FALLBACK_MODEL_LABELS: Record<string, string> = {
+  default: "默认模型",
+  sonnet: "Sonnet",
+  opus: "Opus",
+  opusplan: "Opus Plan",
+  haiku: "Haiku",
+  "sonnet[1m]": "Sonnet 1M",
+  "opus[1m]": "Opus 1M",
+};
+
 export class ClaudeSdkClient {
   private query: ClaudeQuery | undefined;
+  private startup: ((params?: { options?: Record<string, unknown>; initializeTimeoutMs?: number }) => Promise<{ query(prompt: string): AsyncGenerator<unknown> & { supportedModels(): Promise<{ value: string; displayName: string }[]>; interrupt(): Promise<void> }; close(): void }>) | undefined;
   private claudeSessionId: string | undefined;
   private abortController: AbortController | undefined;
   private permissionWaiters = new Map<string, (outcome: "allow" | "deny") => void>();
@@ -461,6 +472,12 @@ export class ClaudeSdkClient {
         throw new Error("Claude Agent SDK does not export query()");
       }
       this.query = query as ClaudeQuery;
+      // startup() pre-warms the CLI subprocess so we can discover available models
+      // without starting a full conversation (via supportedModels() on the Query).
+      const startup = (mod as { startup?: unknown }).startup;
+      if (typeof startup === "function") {
+        this.startup = startup as typeof this.startup;
+      }
       return { status: "ok", protocol: "claude-agent-sdk" };
     } catch (error) {
       throw new Error(
@@ -675,27 +692,63 @@ export class ClaudeSdkClient {
 
   async listModels(): Promise<unknown> {
     let defaultModel: string = "default";
+    // Read the user's configured default model from settings.json. This is always
+    // consulted (both for live discovery and for the fallback path).
+    let availableModels: string[] | undefined;
     try {
       const settingsPath = join(homedir(), ".claude", "settings.json");
       if (existsSync(settingsPath)) {
-        const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as { model?: unknown };
+        const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as { model?: unknown; availableModels?: unknown };
         if (typeof raw.model === "string" && raw.model.trim().length > 0) {
           defaultModel = raw.model.trim();
+        }
+        if (Array.isArray(raw.availableModels)) {
+          availableModels = raw.availableModels.filter((m): m is string => typeof m === "string");
         }
       }
     } catch {
       // Fallback to "default" if settings file is unreadable.
     }
+
+    // Dynamic model discovery: use the Claude Agent SDK's startup() to get the
+    // REAL model list for THIS API key (different keys/tiers see different models).
+    // Falls back to settings.json availableModels → hardcoded list on any failure.
+    if (this.startup) {
+      let warm: Awaited<ReturnType<NonNullable<typeof this.startup>>> | undefined;
+      try {
+        warm = await this.startup({ initializeTimeoutMs: 10_000 });
+        const q = warm.query("");
+        try {
+          const sdkModels: { value: string; displayName: string }[] = await (q as unknown as { supportedModels(): Promise<{ value: string; displayName: string }[]> }).supportedModels();
+          if (sdkModels.length > 0) {
+            // Filter to admin-configured allowlist if present, then map to our format.
+            const allow = availableModels;
+            const filtered = allow
+              ? sdkModels.filter((m) => allow.includes(m.value) || m.value === "default")
+              : sdkModels;
+            return {
+              defaultModel,
+              models: filtered.map((m) => ({ id: m.value, label: m.displayName || m.value })),
+            };
+          }
+        } catch {
+          // supportedModels() failed — the subprocess may be in a bad state. Close it.
+        } finally {
+          try { warm.close(); } catch { /* ignore */ }
+        }
+      } catch {
+        // startup() failed — clean up if it partially succeeded.
+        try { warm?.close(); } catch { /* ignore */ }
+      }
+    }
+
+    // Fallback: admin-configured allowlist, or the full Claude Code alias set.
+    const fallbackModels = availableModels ?? [
+      "default", "sonnet", "opus", "opusplan", "haiku", "sonnet[1m]", "opus[1m]",
+    ];
     return {
       defaultModel,
-      models: [
-        { id: "default", label: "默认模型" },
-        { id: "sonnet", label: "Sonnet" },
-        { id: "opus", label: "Opus" },
-        { id: "haiku", label: "Haiku" },
-        { id: "sonnet[1m]", label: "Sonnet 1M" },
-        { id: "opusplan", label: "Opus Plan" },
-      ],
+      models: fallbackModels.map((id) => ({ id, label: FALLBACK_MODEL_LABELS[id] ?? id })),
     };
   }
 

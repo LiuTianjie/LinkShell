@@ -16,11 +16,36 @@ interface Nav {
   path: string; // always starts with "/"
 }
 
-// A selected element's identity, captured for the agent.
+// A selected element's identity, captured for the agent. `el` is the live DOM
+// node inside the iframe (same-origin), used for live style write-back.
 interface Picked {
+  el: HTMLElement;
   selector: string;
   text: string;
   rect: { top: number; left: number; width: number; height: number };
+}
+
+// The curated set of CSS properties the visual editor exposes. Kept small and
+// high-value (mirrors Codex's element panel): edits write back to the iframe
+// DOM live for preview, and changed ones are serialized into the agent message
+// so the agent can apply them to the real source.
+const EDITABLE_PROPS: { cssProp: string; label: string }[] = [
+  { cssProp: "color", label: "文本颜色" },
+  { cssProp: "background-color", label: "背景" },
+  { cssProp: "font-size", label: "字号" },
+  { cssProp: "font-weight", label: "字重" },
+  { cssProp: "padding", label: "内边距" },
+  { cssProp: "border-radius", label: "圆角" },
+];
+
+// Read the editable properties off an element's computed style.
+function readProps(el: HTMLElement): Record<string, string> {
+  const cs = el.ownerDocument.defaultView?.getComputedStyle(el);
+  const out: Record<string, string> = {};
+  for (const { cssProp } of EDITABLE_PROPS) {
+    out[cssProp] = cs?.getPropertyValue(cssProp).trim() ?? "";
+  }
+  return out;
 }
 
 // "3000" or "3000/tools/color?x=1" → { port, path }. Returns null if no port.
@@ -103,6 +128,11 @@ export function PortPreview({
   const [hoverRect, setHoverRect] = useState<Picked["rect"] | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [comment, setComment] = useState("");
+  // Visual editor: original computed styles of the picked element (for diffing)
+  // and the user's working edits. Editing a prop writes back to the iframe DOM
+  // live and records the new value here; only changed props go to the agent.
+  const [baseProps, setBaseProps] = useState<Record<string, string>>({});
+  const [propEdits, setPropEdits] = useState<Record<string, string>>({});
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const deviceToken = getDeviceToken();
 
@@ -188,12 +218,19 @@ export function PortPreview({
     e.preventDefault();
     try {
       const el = elementAt(e.clientX, e.clientY);
-      if (!el) return;
+      // Duck-type rather than `instanceof HTMLElement`: nodes inside the iframe
+      // are instances of the IFRAME's HTMLElement, not the parent window's, so
+      // a cross-realm instanceof check would wrongly fail.
+      if (!el || !("style" in el)) return;
+      const htmlEl = el as HTMLElement;
       setPicked({
-        selector: cssSelector(el),
-        text: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120),
-        rect: rectOf(el),
+        el: htmlEl,
+        selector: cssSelector(htmlEl),
+        text: (htmlEl.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120),
+        rect: rectOf(htmlEl),
       });
+      setBaseProps(readProps(htmlEl));
+      setPropEdits({});
       setComment("");
     } catch {
       setAnnotateError("此页面跨域，无法读取元素（生产环境同源可用）");
@@ -201,25 +238,58 @@ export function PortPreview({
     }
   };
 
+  // Edit a property: write to the iframe DOM live (instant preview) and record
+  // the new value. Stored as inline style on the live node — purely a preview;
+  // the real change is what we send to the agent.
+  const editProp = (cssProp: string, value: string) => {
+    if (!picked) return;
+    try {
+      picked.el.style.setProperty(cssProp, value);
+    } catch {
+      // ignore write failures (e.g. invalid value mid-typing)
+    }
+    setPropEdits((prev) => ({ ...prev, [cssProp]: value }));
+  };
+
+  // Props the user actually changed from their computed baseline.
+  const changedProps = (): { cssProp: string; from: string; to: string }[] =>
+    Object.entries(propEdits)
+      .filter(([k, v]) => v !== (baseProps[k] ?? ""))
+      .map(([k, v]) => ({ cssProp: k, from: baseProps[k] ?? "", to: v }));
+
   const submitAnnotation = () => {
     if (!picked) return;
+    const changes = changedProps();
     const lines = [
       "关于预览页面中的这个元素：",
       `- 选择器: \`${picked.selector}\``,
       picked.text ? `- 文本: "${picked.text}"` : "",
       `- 路径: localhost:${address}`,
       comment.trim() ? `- 批注: ${comment.trim()}` : "",
-    ].filter(Boolean);
-    onAnnotate?.(lines.join("\n"));
+    ];
+    if (changes.length > 0) {
+      lines.push("- 请把以下样式改动应用到源码：");
+      for (const c of changes) lines.push(`    - ${c.cssProp}: ${c.from || "(默认)"} → ${c.to}`);
+    }
+    onAnnotate?.(lines.filter(Boolean).join("\n"));
     setPicked(null);
     setComment("");
+    setBaseProps({});
+    setPropEdits({});
     setHoverRect(null);
     setAnnotate(false);
   };
 
+  const cancelPick = () => {
+    setPicked(null);
+    setComment("");
+    setBaseProps({});
+    setPropEdits({});
+  };
+
   const toggleAnnotate = () => {
     setAnnotateError(null);
-    setPicked(null);
+    cancelPick();
     setHoverRect(null);
     setAnnotate((v) => !v);
   };
@@ -369,11 +439,32 @@ export function PortPreview({
 
       {/* Comment box for the picked element */}
       {picked && (
-        <div className="border-t border-border bg-surface px-3 py-2.5">
+        <div className="max-h-[45%] overflow-y-auto border-t border-border bg-surface px-3 py-2.5">
           <p className="mb-1 truncate font-mono text-2xs text-content-faint" title={picked.selector}>
             {picked.selector}
           </p>
           {picked.text && <p className="mb-2 truncate text-2xs text-content-muted">“{picked.text}”</p>}
+
+          {/* Visual property editor — edits write back to the iframe DOM live
+              (instant preview) and the changed props are sent to the agent. */}
+          <div className="mb-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5">
+            {EDITABLE_PROPS.map(({ cssProp, label }) => {
+              const value = propEdits[cssProp] ?? baseProps[cssProp] ?? "";
+              const changed = cssProp in propEdits && propEdits[cssProp] !== (baseProps[cssProp] ?? "");
+              return (
+                <label key={cssProp} className="flex flex-col gap-0.5">
+                  <span className={`text-2xs ${changed ? "text-accent" : "text-content-faint"}`}>{label}</span>
+                  <input
+                    value={value}
+                    onChange={(e) => editProp(cssProp, e.target.value)}
+                    spellCheck={false}
+                    className="w-full rounded-md border border-border bg-surface-raised px-2 py-1 font-mono text-2xs text-content-primary outline-none focus:border-accent-dim"
+                  />
+                </label>
+              );
+            })}
+          </div>
+
           <div className="flex items-center gap-2">
             <input
               value={comment}
@@ -386,7 +477,7 @@ export function PortPreview({
             <button onClick={submitAnnotation} className="codex-btn-primary shrink-0 text-xs">
               发送给 Agent
             </button>
-            <button onClick={() => setPicked(null)} className="codex-btn-ghost shrink-0 text-xs">
+            <button onClick={cancelPick} className="codex-btn-ghost shrink-0 text-xs">
               取消
             </button>
           </div>

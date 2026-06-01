@@ -52,6 +52,30 @@ export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY);
 }
 
+// Auth-expiry pub-sub. When a refresh token is definitively rejected we clear
+// the dead session and notify the app so it can drop logged-in UI and bounce
+// back to the home page instead of silently sending a stale credential that
+// the gateway rejects with 401.
+type AuthExpiredListener = () => void;
+const authExpiredListeners = new Set<AuthExpiredListener>();
+
+export function onAuthExpired(fn: AuthExpiredListener): () => void {
+  authExpiredListeners.add(fn);
+  return () => {
+    authExpiredListeners.delete(fn);
+  };
+}
+
+function notifyAuthExpired(): void {
+  for (const fn of authExpiredListeners) {
+    try {
+      fn();
+    } catch {
+      // a misbehaving listener must not break the others
+    }
+  }
+}
+
 export function isPro(session: Session | null): boolean {
   return session?.plan === "pro";
 }
@@ -182,7 +206,18 @@ export async function refreshSession(): Promise<Session | null> {
         headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
         body: JSON.stringify({ refresh_token: current.refreshToken }),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        // A 4xx means the refresh token is dead (expired / already rotated /
+        // revoked) — the session can never recover, so clear it and tell the
+        // app to drop logged-in UI. Leaving it in storage is exactly what
+        // caused stale-credential 401s. A 5xx is transient: keep the session
+        // and let the next attempt retry.
+        if (res.status >= 400 && res.status < 500) {
+          clearSession();
+          notifyAuthExpired();
+        }
+        return null;
+      }
       const body = await res.json();
       const plan = await fetchUserPlan(body.access_token, body.user.id, current.plan);
       const updated: Session = {

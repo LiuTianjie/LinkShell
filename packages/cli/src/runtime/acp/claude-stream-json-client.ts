@@ -574,16 +574,30 @@ export class ClaudeStreamJsonClient {
   }
 
   async listModels(): Promise<unknown> {
+    let defaultModel: string = "default";
+    let availableModels: string[] | undefined;
+    try {
+      const settingsPath = join(homedir(), ".claude", "settings.json");
+      if (existsSync(settingsPath)) {
+        const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as { model?: unknown; availableModels?: unknown };
+        if (typeof raw.model === "string" && raw.model.trim().length > 0) {
+          defaultModel = raw.model.trim();
+        }
+        if (Array.isArray(raw.availableModels)) {
+          availableModels = raw.availableModels.filter((m): m is string => typeof m === "string");
+        }
+      }
+    } catch {
+      // Fallback to defaults if settings file is unreadable.
+    }
+    const ids = availableModels ?? ["default", "sonnet", "opus", "opusplan", "haiku", "sonnet[1m]", "opus[1m]"];
+    const LABELS: Record<string, string> = {
+      default: "默认模型", sonnet: "Sonnet", opus: "Opus", opusplan: "Opus Plan",
+      haiku: "Haiku", "sonnet[1m]": "Sonnet 1M", "opus[1m]": "Opus 1M",
+    };
     return {
-      defaultModel: "default",
-      models: [
-        { id: "default", label: "默认模型" },
-        { id: "sonnet", label: "Sonnet" },
-        { id: "opus", label: "Opus" },
-        { id: "haiku", label: "Haiku" },
-        { id: "sonnet[1m]", label: "Sonnet 1M" },
-        { id: "opusplan", label: "Opus Plan" },
-      ],
+      defaultModel,
+      models: ids.map((id) => ({ id, label: LABELS[id] ?? id })),
     };
   }
 
