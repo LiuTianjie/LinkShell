@@ -727,7 +727,13 @@ export class AgentSessionProxy {
     const itemId = firstString(raw, ["itemId", "id"]) ?? id("plan");
     const delta = firstString(raw, ["delta", "text"]);
     if (!delta) return;
-    const text = `${this.planDeltaBuffers.get(itemId) ?? ""}${delta}`;
+    const prev = this.planDeltaBuffers.get(itemId) ?? "";
+    // Codex sometimes re-sends each "delta" as the FULL plan-so-far (a
+    // cumulative snapshot) instead of a true increment. Naive concatenation
+    // then doubled the text inside a single plan step (the reported bug). If
+    // the incoming chunk already contains the buffer as a prefix, treat it as a
+    // snapshot and replace; otherwise append as a genuine increment.
+    const text = delta.startsWith(prev) ? delta : `${prev}${delta}`;
     this.planDeltaBuffers.set(itemId, text);
     const existing = this.plan.findIndex((step) => step.id === itemId);
     const step: AgentPlanStep = { id: itemId, text, status: "in_progress" };
