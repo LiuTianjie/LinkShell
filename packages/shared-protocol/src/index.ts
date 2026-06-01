@@ -869,6 +869,28 @@ export const agentV2HistoryResultPayloadSchema = z.object({
   hasMore: z.boolean().default(false),
 });
 
+// Mutate a conversation's user-facing metadata (rename / archive toggle).
+// Fields are optional: send only what changes. The host applies the patch to
+// its tracked conversation and echoes the updated record back via agent.v2.event.
+export const agentV2ConversationUpdatePayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  title: z.string().optional(),
+  archived: z.boolean().optional(),
+});
+
+// "Delete" a conversation. Semantics: FORGET it from the workspace's tracked
+// set — it does NOT delete the agent's on-disk transcript/session file (that's
+// destructive and irreversible). The host drops it from its in-memory map and
+// tombstones the id so syncProviderSessions can't resurrect it on the next list.
+export const agentV2ConversationDeletePayloadSchema = z.object({
+  conversationId: z.string().min(1),
+});
+
+// Host → clients: a conversation was forgotten; clients remove it from their list.
+export const agentV2ConversationDeletedPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+});
+
 // ── Protocol message type registry ──────────────────────────────────
 
 export const protocolMessageSchemas = {
@@ -933,6 +955,9 @@ export const protocolMessageSchemas = {
   "agent.v2.conversation.opened": agentV2ConversationOpenedPayloadSchema,
   "agent.v2.conversation.list": agentV2ConversationListPayloadSchema,
   "agent.v2.conversation.list.result": agentV2ConversationListResultPayloadSchema,
+  "agent.v2.conversation.update": agentV2ConversationUpdatePayloadSchema,
+  "agent.v2.conversation.delete": agentV2ConversationDeletePayloadSchema,
+  "agent.v2.conversation.deleted": agentV2ConversationDeletedPayloadSchema,
   "agent.v2.prompt": agentV2PromptPayloadSchema,
   "agent.v2.command.execute": agentV2CommandExecutePayloadSchema,
   "agent.v2.cancel": agentV2CancelPayloadSchema,
@@ -958,10 +983,13 @@ export const agentV2HostToClientMessageTypes = [
   "agent.v2.permission.request",
   "agent.v2.notice",
   "agent.v2.history.result",
+  "agent.v2.conversation.deleted",
 ] as const satisfies readonly ProtocolMessageType[];
 
 export const agentV2ClientWriteMessageTypes = [
   "agent.v2.conversation.open",
+  "agent.v2.conversation.update",
+  "agent.v2.conversation.delete",
   "agent.v2.prompt",
   "agent.v2.command.execute",
   "agent.v2.cancel",

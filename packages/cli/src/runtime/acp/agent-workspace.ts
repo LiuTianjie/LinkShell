@@ -1597,6 +1597,11 @@ export class AgentWorkspaceProxy {
   private conversations = new Map<string, AgentConversation>();
   private conversationByAgentSessionId = new Map<string, string>();
   private timelines = new Map<string, AgentTimelineItem[]>();
+  // Conversations the user "deleted" (forgot). We never touch the agent's
+  // on-disk transcript, so syncProviderSessions would otherwise re-list and
+  // resurrect them. Tombstone by agentSessionId (the stable provider key) so a
+  // forgotten conversation stays gone for the life of this workspace process.
+  private deletedAgentSessionIds = new Set<string>();
   // Opaque codex turns cursor per conversation, pointing at OLDER history to
   // page through (captured at hydration, advanced on each history.request).
   private historyCursors = new Map<string, string | undefined>();
@@ -1629,6 +1634,41 @@ export class AgentWorkspaceProxy {
       case "agent.v2.conversation.open": {
         const payload = parseTypedPayload("agent.v2.conversation.open", envelope.payload);
         await this.openConversation(payload);
+        break;
+      }
+      case "agent.v2.conversation.update": {
+        const payload = parseTypedPayload("agent.v2.conversation.update", envelope.payload);
+        const conversation = this.conversations.get(payload.conversationId);
+        if (!conversation) break;
+        if (payload.title !== undefined) {
+          const trimmed = payload.title.trim();
+          conversation.title = trimmed === "" ? undefined : trimmed;
+        }
+        if (payload.archived !== undefined) conversation.archived = payload.archived;
+        conversation.lastActivityAt = Date.now();
+        // Echo the updated record so every client refreshes (the web store
+        // force-replaces by id on any event carrying `conversation`).
+        this.emitConversation(conversation);
+        break;
+      }
+      case "agent.v2.conversation.delete": {
+        const payload = parseTypedPayload("agent.v2.conversation.delete", envelope.payload);
+        const conversation = this.conversations.get(payload.conversationId);
+        // Forget the conversation from the workspace's tracked set. We do NOT
+        // delete the provider's on-disk transcript — only stop tracking it and
+        // tombstone its session id so syncProviderSessions won't re-add it.
+        if (conversation?.agentSessionId) {
+          this.deletedAgentSessionIds.add(conversation.agentSessionId);
+          this.conversationByAgentSessionId.delete(conversation.agentSessionId);
+        }
+        this.conversations.delete(payload.conversationId);
+        this.timelines.delete(payload.conversationId);
+        this.historyCursors.delete(payload.conversationId);
+        this.input.send(createEnvelope({
+          type: "agent.v2.conversation.deleted",
+          sessionId: this.input.sessionId,
+          payload: { conversationId: payload.conversationId },
+        }));
         break;
       }
       case "agent.v2.conversation.list": {
@@ -1908,6 +1948,8 @@ export class AgentWorkspaceProxy {
         }
         for (const remote of parseRemoteSessions(result)) {
           const agentSessionId = remote.id;
+          // Skip conversations the user explicitly forgot — don't resurrect them.
+          if (this.deletedAgentSessionIds.has(agentSessionId)) continue;
           const existingId = this.conversationByAgentSessionId.get(agentSessionId);
           const now = Date.now();
           const conversationId = existingId ?? makeAgentV2RemoteConversationId(provider, agentSessionId);
