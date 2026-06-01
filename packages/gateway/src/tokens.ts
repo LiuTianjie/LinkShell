@@ -89,6 +89,34 @@ export class TokenManager {
     return record.sessionIds.has(sessionId);
   }
 
+  async ownsFresh(token: string, sessionId: string): Promise<boolean> {
+    if (this.owns(token, sessionId)) return true;
+    if (!this.store) return false;
+    try {
+      const records = await this.store.loadTokens();
+      const now = Date.now();
+      for (const record of records) {
+        if (now - record.lastUsedAt > SESSION_TTL) continue;
+        if (record.token !== token) continue;
+        const next = {
+          token: record.token,
+          sessionIds: new Set(record.sessionIds),
+          createdAt: record.createdAt,
+          lastUsedAt: Date.now(),
+        };
+        this.tokens.set(record.token, next);
+        for (const sid of record.sessionIds) {
+          this.sessionToToken.set(sid, record.token);
+        }
+        this.persist(next);
+        return next.sessionIds.has(sessionId);
+      }
+    } catch (err) {
+      process.stderr.write(`[gateway] token store refresh failed: ${err}\n`);
+    }
+    return false;
+  }
+
   getSessionIds(token: string): Set<string> {
     const record = this.tokens.get(token);
     if (!record) return new Set();

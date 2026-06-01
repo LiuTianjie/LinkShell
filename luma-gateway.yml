@@ -4,7 +4,7 @@ region: cn
 exposure: cn-edge
 domain: gateway.itool.tech
 port: 8787
-replicas: 2
+replicas: 1
 env:
   PORT: "8787"
   AUTH_REQUIRED: "true"

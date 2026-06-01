@@ -171,7 +171,7 @@ export function parseTunnelCookie(req: IncomingMessage): { sessionId: string; po
   return { sessionId, port, token };
 }
 
-function errorResponse(res: ServerResponse, status: number, message: string): void {
+function errorResponse(res: ServerResponse, status: number, message: string, diagnostic?: string): void {
   if (res.headersSent) return;
   res.writeHead(status, {
     "content-type": "text/plain",
@@ -180,6 +180,7 @@ function errorResponse(res: ServerResponse, status: number, message: string): vo
     "surrogate-control": "no-store",
     "vary": "authorization, cookie",
     "access-control-allow-origin": "*",
+    ...(diagnostic ? { "x-linkshell-tunnel-error": diagnostic } : {}),
   });
   res.end(message);
 }
@@ -267,9 +268,10 @@ export async function handleTunnelRequest(
 
   // Auth: device token OR Supabase JWT (userId owns session)
   let token = preAuthToken || extractToken(req, url) || tokenFromTunnelCookie(req, sessionId, port);
-  let tokenOwns = Boolean(token && tokens.owns(token, sessionId));
+  let tokenOwns = Boolean(token && await tokens.ownsFresh(token, sessionId));
   let authOwns = false;
   let authJwt: string | null = null;
+  let authDiagnostic = token ? "token_not_bound" : "missing_token";
   if (!tokenOwns && AUTH_REQUIRED) {
     // Try preAuthToken as JWT first (from cookie fallback), then from request headers/params
     const jwtCandidate = preAuthToken || url.searchParams.get("auth_token") || (() => {
@@ -292,10 +294,20 @@ export async function handleTunnelRequest(
             if (user.id && session?.userId && user.id === session.userId) {
               authOwns = true;
               authJwt = jwtCandidate;
+            } else if (!session) {
+              authDiagnostic = "session_not_local";
+            } else if (!session.userId) {
+              authDiagnostic = "session_user_missing";
+            } else {
+              authDiagnostic = "session_user_mismatch";
             }
+          } else {
+            authDiagnostic = "invalid_jwt";
           }
         }
-      } catch {}
+      } catch {
+        authDiagnostic = "jwt_check_failed";
+      }
     }
   }
   if (!tokenOwns && authOwns) {
@@ -306,7 +318,7 @@ export async function handleTunnelRequest(
     }
   }
   if (!tokenOwns && !authOwns) {
-    errorResponse(res, 401, "Unauthorized");
+    errorResponse(res, 401, "Unauthorized", authDiagnostic);
     return;
   }
 
@@ -322,7 +334,7 @@ export async function handleTunnelRequest(
   // Validate session & host
   const session = sessions.get(sessionId);
   if (!session || !session.host || session.host.socket.readyState !== session.host.socket.OPEN) {
-    errorResponse(res, 502, "Host not connected");
+    errorResponse(res, 502, "Host not connected", !session ? "session_not_local" : "host_not_connected");
     return;
   }
 
@@ -514,8 +526,9 @@ export async function handleTunnelWsUpgrade(
 
   // Auth: device token OR Supabase JWT (userId owns session)
   let token = preAuthToken || url.searchParams.get("token");
-  let tokenOwns = Boolean(token && tokens.owns(token, sessionId));
+  let tokenOwns = Boolean(token && await tokens.ownsFresh(token, sessionId));
   let authOwns = false;
+  let authDiagnostic = token ? "token_not_bound" : "missing_token";
   if (!tokenOwns && AUTH_REQUIRED) {
     // Try auth_token param first, then fall back to token param (cookie fallback stores JWT there)
     const authToken = url.searchParams.get("auth_token") || token;
@@ -533,10 +546,20 @@ export async function handleTunnelWsUpgrade(
             const session = sessions.get(sessionId);
             if (user.id && session?.userId && user.id === session.userId) {
               authOwns = true;
+            } else if (!session) {
+              authDiagnostic = "session_not_local";
+            } else if (!session.userId) {
+              authDiagnostic = "session_user_missing";
+            } else {
+              authDiagnostic = "session_user_mismatch";
             }
+          } else {
+            authDiagnostic = "invalid_jwt";
           }
         }
-      } catch {}
+      } catch {
+        authDiagnostic = "jwt_check_failed";
+      }
     }
   }
   if (!tokenOwns && authOwns) {
@@ -547,7 +570,7 @@ export async function handleTunnelWsUpgrade(
     }
   }
   if (!tokenOwns && !authOwns) {
-    ws.close(4001, "Unauthorized");
+    ws.close(4001, `Unauthorized:${authDiagnostic}`);
     return;
   }
 
