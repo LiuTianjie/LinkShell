@@ -122,18 +122,22 @@ export function PortPreview({
   const [viewport, setViewport] = useState<Viewport>("desktop");
   const [reloadKey, setReloadKey] = useState(0);
   // Annotate mode: overlay captures the mouse, highlights the hovered element,
-  // and on click captures it + opens a comment box.
+  // and on click captures it + opens a floating comment card near the element.
   const [annotate, setAnnotate] = useState(false);
   const [annotateError, setAnnotateError] = useState<string | null>(null);
   const [hoverRect, setHoverRect] = useState<Picked["rect"] | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [comment, setComment] = useState("");
+  // Visual editor collapsed by default (Codex-style): the user sees a simple
+  // comment box; tapping the expand button reveals the CSS property grid.
+  const [cssExpanded, setCssExpanded] = useState(false);
   // Visual editor: original computed styles of the picked element (for diffing)
   // and the user's working edits. Editing a prop writes back to the iframe DOM
   // live and records the new value here; only changed props go to the agent.
   const [baseProps, setBaseProps] = useState<Record<string, string>>({});
   const [propEdits, setPropEdits] = useState<Record<string, string>>({});
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const deviceToken = getDeviceToken();
 
   // Resolve a fresh JWT for tunnel auth (pro users authorize via auth_token;
@@ -276,6 +280,7 @@ export function PortPreview({
     setComment("");
     setBaseProps({});
     setPropEdits({});
+    setCssExpanded(false);
     setHoverRect(null);
     setAnnotate(false);
   };
@@ -285,6 +290,7 @@ export function PortPreview({
     setComment("");
     setBaseProps({});
     setPropEdits({});
+    setCssExpanded(false);
   };
 
   const toggleAnnotate = () => {
@@ -408,7 +414,7 @@ export function PortPreview({
                   onMouseLeave={() => setHoverRect(null)}
                   onClick={onOverlayClick}
                 >
-                  {hoverRect && (
+                  {hoverRect && !picked && (
                     <div
                       className="pointer-events-none absolute border-2 border-accent bg-accent/10"
                       style={{
@@ -419,70 +425,100 @@ export function PortPreview({
                       }}
                     />
                   )}
-                  {picked && (
-                    <div
-                      className="pointer-events-none absolute border-2 border-accent-dim"
-                      style={{
-                        top: picked.rect.top,
-                        left: picked.rect.left,
-                        width: picked.rect.width,
-                        height: picked.rect.height,
-                      }}
-                    />
-                  )}
                 </div>
               )}
+
+              {/* Floating annotation card — Codex-style: appears near the picked
+                  element. Comment input is always visible; the CSS property editor
+                  is collapsed behind an expand toggle. Both comment text and any
+                  CSS changes are sent to the agent together. */}
+              {picked && (() => {
+                // Position the card near the element. Prefer below the element;
+                // flip above when there isn't enough room (e.g. element near the
+                // bottom of the viewport). Clamp horizontally so it stays on-screen.
+                const cardW = 280;
+                const gap = 8;
+                const bodyH = bodyRef.current?.clientHeight ?? 600;
+                const below = picked.rect.top + picked.rect.height + gap;
+                const above = picked.rect.top - gap; // card bottom edge
+                const estCardH = cssExpanded ? 340 : 140;
+                const flip = below + estCardH > bodyH && above - estCardH > 0;
+                const top = flip ? Math.max(4, above - estCardH) : below;
+                const left = Math.max(4, Math.min(picked.rect.left, (bodyRef.current?.clientWidth ?? 800) - cardW - 4));
+
+                return (
+                  <div
+                    className="absolute z-20 flex flex-col gap-2 rounded-xl border border-accent-dim/40 bg-surface-raised px-3 py-2.5 shadow-2xl animate-fade-in"
+                    style={{ top, left, width: cardW, maxHeight: bodyH - top - 8 }}
+                  >
+                    {/* Element identity */}
+                    <p className="truncate font-mono text-2xs text-content-faint" title={picked.selector}>
+                      {picked.selector}
+                    </p>
+                    {picked.text && (
+                      <p className="-mt-1 truncate text-2xs text-content-muted">"{picked.text}"</p>
+                    )}
+
+                    {/* Comment input — always visible */}
+                    <input
+                      value={comment}
+                      onChange={(e) => setComment(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && submitAnnotation()}
+                      autoFocus
+                      placeholder="添加批注…"
+                      className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-content-primary placeholder-content-muted outline-none focus:border-accent-dim"
+                    />
+
+                    {/* Expand/Collapse CSS editor toggle */}
+                    <button
+                      onClick={() => setCssExpanded((v) => !v)}
+                      className={`flex cursor-pointer items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-2xs transition-colors ${
+                        cssExpanded ? "text-accent" : "text-content-muted hover:text-content-secondary"
+                      }`}
+                    >
+                      <svg width={10} height={10} viewBox="0 0 10 10" className={`shrink-0 transition-transform ${cssExpanded ? "rotate-180" : ""}`}>
+                        <path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      调整样式
+                    </button>
+
+                    {/* CSS property editor — collapsed by default */}
+                    {cssExpanded && (
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 animate-fade-in">
+                        {EDITABLE_PROPS.map(({ cssProp, label }) => {
+                          const value = propEdits[cssProp] ?? baseProps[cssProp] ?? "";
+                          const changed = cssProp in propEdits && propEdits[cssProp] !== (baseProps[cssProp] ?? "");
+                          return (
+                            <label key={cssProp} className="flex flex-col gap-0.5">
+                              <span className={`text-2xs ${changed ? "text-accent" : "text-content-faint"}`}>{label}</span>
+                              <input
+                                value={value}
+                                onChange={(e) => editProp(cssProp, e.target.value)}
+                                spellCheck={false}
+                                className="w-full rounded-md border border-border bg-surface px-2 py-1 font-mono text-2xs text-content-primary outline-none focus:border-accent-dim"
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2">
+                      <button onClick={cancelPick} className="codex-btn-ghost flex-1 text-2xs">
+                        取消
+                      </button>
+                      <button onClick={submitAnnotation} className="codex-btn-primary flex-1 text-2xs">
+                        发送给 Agent
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
       </div>
-
-      {/* Comment box for the picked element */}
-      {picked && (
-        <div className="max-h-[45%] overflow-y-auto border-t border-border bg-surface px-3 py-2.5">
-          <p className="mb-1 truncate font-mono text-2xs text-content-faint" title={picked.selector}>
-            {picked.selector}
-          </p>
-          {picked.text && <p className="mb-2 truncate text-2xs text-content-muted">“{picked.text}”</p>}
-
-          {/* Visual property editor — edits write back to the iframe DOM live
-              (instant preview) and the changed props are sent to the agent. */}
-          <div className="mb-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5">
-            {EDITABLE_PROPS.map(({ cssProp, label }) => {
-              const value = propEdits[cssProp] ?? baseProps[cssProp] ?? "";
-              const changed = cssProp in propEdits && propEdits[cssProp] !== (baseProps[cssProp] ?? "");
-              return (
-                <label key={cssProp} className="flex flex-col gap-0.5">
-                  <span className={`text-2xs ${changed ? "text-accent" : "text-content-faint"}`}>{label}</span>
-                  <input
-                    value={value}
-                    onChange={(e) => editProp(cssProp, e.target.value)}
-                    spellCheck={false}
-                    className="w-full rounded-md border border-border bg-surface-raised px-2 py-1 font-mono text-2xs text-content-primary outline-none focus:border-accent-dim"
-                  />
-                </label>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submitAnnotation()}
-              autoFocus
-              placeholder="对这个元素的批注（可留空）…"
-              className="codex-input flex-1 text-sm"
-            />
-            <button onClick={submitAnnotation} className="codex-btn-primary shrink-0 text-xs">
-              发送给 Agent
-            </button>
-            <button onClick={cancelPick} className="codex-btn-ghost shrink-0 text-xs">
-              取消
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

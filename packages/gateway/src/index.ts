@@ -349,6 +349,23 @@ async function handleRequest(
     return;
   }
 
+  // Tunnel fallback: cookie-based routing for sub-resources (e.g. /_next/static/...).
+  // Placed BEFORE serveWeb so tunnel sub-resources are routed correctly even for
+  // extensionless paths (SPA routes inside the tunneled app). But we MUST guard
+  // against hijacking the LinkShell root ("/" → web UI) and LinkShell's own
+  // static assets ("/assets/*"). Everything else with an active tunnel cookie
+  // goes to the tunnel.
+  const tunnelCookie = parseTunnelCookie(req);
+  if (tunnelCookie && url.pathname !== "/" && !url.pathname.startsWith("/assets/")) {
+    const fallbackParsed = {
+      sessionId: tunnelCookie.sessionId,
+      port: tunnelCookie.port,
+      path: url.pathname,
+    };
+    await handleTunnelRequest(req, res, sessionManager, tokenManager, fallbackParsed, url, tunnelCookie.token);
+    return;
+  }
+
   // Live Activity permission response: device-token auth, no controller required.
   if (method === "POST" && url.pathname === "/agent/permission/respond") {
     const token = extractBearerToken(req);
@@ -382,21 +399,6 @@ async function handleRequest(
   // below are matched explicitly and never reach here as web routes.
   if ((method === "GET" || method === "HEAD") && !isApiPath(url.pathname)) {
     if (await serveWeb(req, res)) return;
-  }
-
-  // Tunnel fallback: cookie-based routing for sub-resources (e.g. /_next/static/...).
-  // Placed AFTER serveWeb so the cookie never hijacks the root domain or any SPA
-  // route — serveWeb handles those first. Only sub-resource paths that don't
-  // exist in WEB_DIST (like tunneled-app-specific hashed assets) reach the tunnel.
-  const tunnelCookie = parseTunnelCookie(req);
-  if (tunnelCookie) {
-    const fallbackParsed = {
-      sessionId: tunnelCookie.sessionId,
-      port: tunnelCookie.port,
-      path: url.pathname,
-    };
-    await handleTunnelRequest(req, res, sessionManager, tokenManager, fallbackParsed, url, tunnelCookie.token);
-    return;
   }
 
   // Auth check for premium gateway (skip healthz, /sessions/mine, tunnel)

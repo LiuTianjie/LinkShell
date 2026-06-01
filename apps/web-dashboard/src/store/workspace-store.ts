@@ -469,6 +469,10 @@ export class WorkspaceStore {
     const conv = this.conversations.find((c) => c.id === conversationId);
     if (!conv) return;
     this.openInFlight.add(conversationId);
+    // Signal the UI that we're loading history for this conversation so it
+    // shows a spinner instead of the bare "发送第一条指令…" placeholder.
+    this.history.set(conversationId, { loading: true, hasMore: true });
+    this.notify();
     // Sweep the guard if the host never replies, so re-selecting can retry
     // instead of being permanently blocked (blank history forever).
     setTimeout(() => this.openInFlight.delete(conversationId), 12_000);

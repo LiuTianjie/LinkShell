@@ -702,7 +702,7 @@ export function AgentConsolePage({
                   );
                 })()}
                 {timeline.length === 0 &&
-                  (activeConversation?.lastMessagePreview ? (
+                  (activeConversation?.lastMessagePreview || historyState?.loading ? (
                     // Existing conversation whose transcript is still loading
                     // (we switched to it instantly; history streams in after).
                     <div className="flex flex-col items-center gap-2 py-16 text-content-muted">
