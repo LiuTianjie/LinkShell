@@ -104,7 +104,27 @@ export function saveConversations(sessionId: string, conversations: AgentConvers
   write(CONV_PREFIX + sessionId, conversations);
 }
 
-// ── Timelines (per session, keyed by conversationId) ────────────────
+// ── Composer drafts (per conversation) ──────────────────────────────
+// Unsent input survives refresh and conversation switches. Keyed by the
+// conversationId so each thread keeps its own in-progress message.
+
+const DRAFT_PREFIX = "linkshell_draft_";
+
+export function loadDraft(conversationId: string): string {
+  try {
+    return localStorage.getItem(DRAFT_PREFIX + conversationId) ?? "";
+  } catch {
+    return "";
+  }
+}
+export function saveDraft(conversationId: string, text: string): void {
+  try {
+    if (text) localStorage.setItem(DRAFT_PREFIX + conversationId, text);
+    else localStorage.removeItem(DRAFT_PREFIX + conversationId);
+  } catch {
+    // Quota / unavailable — non-fatal.
+  }
+}
 
 export function loadTimelines(sessionId: string): Record<string, AgentTimelineItem[]> {
   return read<Record<string, AgentTimelineItem[]>>(TIMELINE_PREFIX + sessionId) ?? {};

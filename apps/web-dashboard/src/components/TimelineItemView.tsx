@@ -1,9 +1,59 @@
 import { memo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { IconWrench, IconCheck, IconChevronRight, IconChevronDown, IconFile, IconClose, IconUsers } from "./icons";
+import rehypeHighlight from "rehype-highlight";
+import { IconWrench, IconCheck, IconChevronRight, IconChevronDown, IconFile, IconClose, IconUsers, IconCopy, IconPencil } from "./icons";
 import type { AgentTimelineItem } from "../lib/types";
 import { parseDiff, diffStats } from "../lib/diff";
+
+// ── Copy-to-clipboard button (hover-revealed) ───────────────────────
+
+/** Recursively flatten React children to plain text — works for both raw code
+ *  strings and the span tree that rehype-highlight produces. */
+function nodeText(node: ReactNode): string {
+  if (node == null || node === false || node === true) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (typeof node === "object" && "props" in (node as { props?: { children?: ReactNode } })) {
+    return nodeText((node as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return "";
+}
+
+export function CopyButton({
+  text,
+  className,
+  label = "复制",
+}: {
+  text: string;
+  className?: string;
+  label?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard unavailable (insecure context / denied) — fail silently.
+    }
+  };
+  return (
+    <button
+      onClick={copy}
+      title={copied ? "已复制" : label}
+      aria-label={label}
+      className={
+        className ??
+        "flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-border bg-surface text-content-muted transition-colors hover:text-content-primary"
+      }
+    >
+      {copied ? <IconCheck size={13} className="text-success" /> : <IconCopy size={13} />}
+    </button>
+  );
+}
 
 // ── Markdown (memoized so streaming siblings don't re-parse it) ──────
 
@@ -12,16 +62,31 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
     <div className="prose-codex break-words text-[15px] leading-7 text-content-primary">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        // detect: true highlights fenced blocks even without a language hint;
+        // ignoreMissing keeps unknown languages from throwing mid-render.
+        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
         components={{
+          // Replace the default <pre> with a pass-through so our custom code
+          // renderer owns the block markup (avoids a nested <pre><pre>).
+          pre({ children }) {
+            return <>{children}</>;
+          },
           code({ className, children, ...props }) {
-            const isBlock = /language-/.test(className ?? "");
+            const isBlock = /language-|hljs/.test(className ?? "");
             if (isBlock) {
+              const raw = nodeText(children);
               return (
-                <pre className="my-3 max-w-full overflow-x-auto rounded-lg border border-border bg-surface-raised p-3 font-mono text-[13px] leading-relaxed">
-                  <code className={className} {...props}>
-                    {children}
-                  </code>
-                </pre>
+                <div className="group/code relative my-3">
+                  <pre className="max-w-full overflow-x-auto rounded-lg border border-border bg-surface-raised p-3 font-mono text-[13px] leading-relaxed">
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
+                  </pre>
+                  <CopyButton
+                    text={raw}
+                    className="absolute right-2 top-2 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-border bg-surface text-content-muted opacity-0 transition-opacity hover:text-content-primary group-hover/code:opacity-100"
+                  />
+                </div>
               );
             }
             return (
@@ -105,6 +170,7 @@ export function DiffViewer({ item }: { item: AgentTimelineItem }) {
           {stats.added > 0 && <span className="text-diff-addText">+{stats.added}</span>}
           {stats.removed > 0 && <span className="text-diff-removeText">−{stats.removed}</span>}
         </span>
+        {fc?.diff && <CopyButton text={fc.diff} label="复制差异" />}
       </div>
       <div className="min-h-0 flex-1 overflow-auto font-mono text-[13px] leading-[1.6]">
         {lines.length === 0 ? (
@@ -202,9 +268,15 @@ function ToolCard({ item }: { item: AgentTimelineItem }) {
       {expanded && hasBody && (
         <div className={cmd ? "" : "px-3.5 pb-3 pt-2"}>
           {cmd?.output && (
-            <pre className="max-h-72 overflow-auto px-3.5 py-2.5 font-mono text-[13px] leading-relaxed text-content-secondary">
-              {cmd.output}
-            </pre>
+            <div className="group/out relative">
+              <pre className="max-h-72 overflow-auto px-3.5 py-2.5 font-mono text-[13px] leading-relaxed text-content-secondary">
+                {cmd.output}
+              </pre>
+              <CopyButton
+                text={cmd.output}
+                className="absolute right-2 top-2 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-border bg-surface text-content-muted opacity-0 transition-opacity hover:text-content-primary group-hover/out:opacity-100"
+              />
+            </div>
           )}
           {tool?.input && (
             <pre className="max-h-40 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-faint">
@@ -797,6 +869,8 @@ export interface TimelineItemProps {
   onDiscardQueued?: (itemId: string) => void;
   onOpenDiff?: (item: AgentTimelineItem) => void;
   onOpenAgent?: (detail: SubagentDetail) => void;
+  /** Edit & resend a prior user message (loads its text into the composer). */
+  onEditMessage?: (text: string) => void;
 }
 
 export const TimelineItemView = memo(
@@ -810,6 +884,7 @@ export const TimelineItemView = memo(
     onDiscardQueued,
     onOpenDiff,
     onOpenAgent,
+    onEditMessage,
   }: TimelineItemProps) {
     // structured input (e.g. AskUserQuestion)
     if (item.kind === "user_input_prompt" || item.structuredInput) {
@@ -851,9 +926,10 @@ export const TimelineItemView = memo(
     // message (user / assistant / system)
     const isUser = item.role === "user";
     const discarded = item.metadata?.queuedDiscarded === true;
+    const hasText = item.text != null && item.text !== "";
 
     return (
-      <div className={isUser ? "flex flex-col items-end" : "min-w-0"}>
+      <div className={isUser ? "group flex flex-col items-end" : "group min-w-0"}>
         <div
           className={
             isUser
@@ -881,10 +957,31 @@ export const TimelineItemView = memo(
                   ))}
               </div>
             )}
-          {item.text != null && item.text !== "" && <Markdown text={item.text} />}
+          {hasText && <Markdown text={item.text!} />}
           {item.isStreaming && <StreamingPill />}
         </div>
         {discarded && <span className="mt-1 text-2xs text-content-faint">已丢弃</span>}
+        {/* Hover actions: copy (both roles), edit & resend (user only). Hidden
+            while streaming or for discarded items. */}
+        {hasText && !item.isStreaming && !discarded && (
+          <div
+            className={`mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 ${
+              isUser ? "justify-end" : ""
+            }`}
+          >
+            {isUser && onEditMessage && (
+              <button
+                onClick={() => onEditMessage(item.text!)}
+                title="编辑并重新发送"
+                aria-label="编辑并重新发送"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-border bg-surface text-content-muted transition-colors hover:text-content-primary"
+              >
+                <IconPencil size={13} />
+              </button>
+            )}
+            <CopyButton text={item.text!} />
+          </div>
+        )}
       </div>
     );
   },
@@ -897,5 +994,6 @@ export const TimelineItemView = memo(
     prev.onSteerQueued === next.onSteerQueued &&
     prev.onDiscardQueued === next.onDiscardQueued &&
     prev.onOpenDiff === next.onOpenDiff &&
-    prev.onOpenAgent === next.onOpenAgent,
+    prev.onOpenAgent === next.onOpenAgent &&
+    prev.onEditMessage === next.onEditMessage,
 );

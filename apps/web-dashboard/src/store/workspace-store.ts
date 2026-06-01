@@ -347,6 +347,12 @@ export class WorkspaceStore {
         this.notify();
         return;
       }
+      if (type === "agent.v2.conversation.deleted") {
+        const p = parseTypedPayload("agent.v2.conversation.deleted", envelope.payload);
+        this.removeConversationLocal(p.conversationId);
+        this.notify();
+        return;
+      }
       if (type === "agent.v2.event") {
         const p = parseTypedPayload("agent.v2.event", envelope.payload);
         if (p.conversation) {
@@ -748,6 +754,57 @@ export class WorkspaceStore {
       c.id === conversationId ? { ...c, ...patch } : c,
     );
     this.notify();
+  }
+
+  /** Rename a conversation. Optimistically updates the local title, then asks
+   *  the host to persist it; the host echoes back the canonical record. An
+   *  empty title clears the custom name (falls back to preview/id in the UI). */
+  renameConversation(conversationId: string, title: string): void {
+    const trimmed = title.trim();
+    const next = trimmed === "" ? undefined : trimmed;
+    this.conversations = this.conversations.map((c) =>
+      c.id === conversationId ? { ...c, title: next } : c,
+    );
+    this.notify();
+    this.bridge.sendAgent("agent.v2.conversation.update", {
+      conversationId,
+      title: trimmed,
+    });
+  }
+
+  /** Archive or unarchive a conversation. Optimistic + host round-trip. */
+  setConversationArchived(conversationId: string, archived: boolean): void {
+    this.conversations = this.conversations.map((c) =>
+      c.id === conversationId ? { ...c, archived } : c,
+    );
+    this.notify();
+    this.bridge.sendAgent("agent.v2.conversation.update", {
+      conversationId,
+      archived,
+    });
+  }
+
+  /** Forget a conversation from the workspace. This does NOT delete the agent's
+   *  on-disk transcript — it removes the conversation from the tracked list on
+   *  both web and host. Optimistically removes it locally, then tells the host. */
+  deleteConversation(conversationId: string): void {
+    this.removeConversationLocal(conversationId);
+    this.notify();
+    this.bridge.sendAgent("agent.v2.conversation.delete", { conversationId });
+  }
+
+  // Drop a conversation and its timeline/history from local state. Shared by the
+  // optimistic delete and the host's `conversation.deleted` broadcast.
+  private removeConversationLocal(conversationId: string): void {
+    this.conversations = this.conversations.filter((c) => c.id !== conversationId);
+    if (this.timelines.has(conversationId)) {
+      const nextTimelines = new Map(this.timelines);
+      nextTimelines.delete(conversationId);
+      this.timelines = nextTimelines;
+    }
+    this.history.delete(conversationId);
+    this.openInFlight.delete(conversationId);
+    if (this.activeConversationId === conversationId) this.activeConversationId = null;
   }
 
   private nextRequestId(prefix: string): string {

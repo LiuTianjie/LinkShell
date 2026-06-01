@@ -12,8 +12,10 @@ import { FileBrowser } from "../components/FileBrowser";
 import { FolderPicker } from "../components/FolderPicker";
 import { IconChevronRight, IconChevronLeft, IconClose, IconPlug, IconMenu, BrandLogo } from "../components/icons";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import type { ConnectionStatus, AgentTimelineItem } from "../lib/types";
+import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, ProviderIcon } from "../components/icons";
 
 function statusLabel(status: ConnectionStatus): { text: string; color: string } {
   if (status === "connected") return { text: "已连接", color: "text-success" };
@@ -22,6 +24,25 @@ function statusLabel(status: ConnectionStatus): { text: string; color: string } 
   if (status === "host_disconnected") return { text: "主机离线", color: "text-warning" };
   if (status.startsWith("error")) return { text: "错误", color: "text-danger" };
   return { text: "未连接", color: "text-content-muted" };
+}
+
+// Does a timeline item match a free-text search query? Looks across message
+// text, command, tool name/io, and changed file paths so search is useful for
+// both conversation and activity items.
+function itemMatchesQuery(item: AgentTimelineItem, q: string): boolean {
+  const needle = q.toLowerCase();
+  const haystacks = [
+    item.text,
+    item.commandExecution?.command,
+    item.commandExecution?.output,
+    item.toolCall?.name,
+    item.toolCall?.input,
+    item.toolCall?.output,
+    item.fileChange?.summary,
+    ...(item.fileChange?.entries?.map((e) => e.path) ?? []),
+    item.error,
+  ];
+  return haystacks.some((h) => typeof h === "string" && h.toLowerCase().includes(needle));
 }
 
 type RightPanel = "none" | "terminal" | "files";
@@ -52,6 +73,14 @@ export function AgentConsolePage({
   // When set, the folder picker is open for this provider (awaiting a cwd choice
   // before the conversation is actually created).
   const [pendingProvider, setPendingProvider] = useState<string | null>(null);
+  // Edit-and-resend: bumping the nonce injects text into the composer.
+  const [seed, setSeed] = useState<{ text: string; nonce: number }>({ text: "", nonce: 0 });
+  // In-conversation search (Cmd/Ctrl+F): a flat filtered view of the timeline.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  // Command palette (Cmd/Ctrl+K).
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   // Sidebar width + collapsed state, persisted across sessions.
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const v = Number(localStorage.getItem("linkshell_sidebar_w"));
@@ -101,6 +130,46 @@ export function AgentConsolePage({
     : undefined;
   const running = activeConversation?.status === "running";
   const historyState = activeId ? snapshot.history.get(activeId) : undefined;
+
+  // Last user message in this conversation — recalled by ↑ in an empty composer.
+  const lastUserText = useMemo(() => {
+    for (let i = timeline.length - 1; i >= 0; i--) {
+      const it = timeline[i];
+      if (it.role === "user" && it.text) return it.text;
+    }
+    return undefined;
+  }, [timeline]);
+
+  // Edit-and-resend: load a prior message back into the composer for editing.
+  const handleEditMessage = (text: string) => {
+    setSeed((s) => ({ text, nonce: s.nonce + 1 }));
+  };
+
+  // Global shortcuts: Cmd/Ctrl+K opens the command palette; Cmd/Ctrl+F opens
+  // in-conversation search (preventDefault stops the browser's own find bar).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      } else if (mod && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSearchOpen(true);
+        requestAnimationFrame(() => searchInputRef.current?.focus());
+      } else if (e.key === "Escape") {
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Reset search when switching conversations.
+  useEffect(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, [activeId]);
 
   // Refs for scroll anchoring. prevScrollHeightRef preserves the viewport when
   // older history is prepended; atBottomRef tracks whether to stick to bottom.
@@ -170,6 +239,82 @@ export function AgentConsolePage({
   const st = statusLabel(snapshot.status);
   const deviceLabel = `CLI 设备 · ${sessionId.slice(0, 8)}`;
 
+  // Command-palette actions: new conversation per enabled provider, jump to any
+  // existing conversation, and the common turn/panel actions.
+  const enabledProviders = providers.filter((p) => p.enabled);
+  const paletteActions = useMemo<PaletteAction[]>(() => {
+    const actions: PaletteAction[] = [];
+    for (const p of enabledProviders) {
+      actions.push({
+        id: `new-${p.id}`,
+        label: `新建 ${p.label} 对话`,
+        group: "新建",
+        keywords: `new conversation ${p.id}`,
+        icon: <IconPlus size={15} />,
+        run: () => handleNewConversation(p.id),
+      });
+    }
+    for (const c of snapshot.conversations.filter((c) => !c.archived)) {
+      const name =
+        (c.title && c.title.trim()) ||
+        (c.lastMessagePreview && c.lastMessagePreview.trim().slice(0, 40)) ||
+        `对话 ${c.id.slice(-6)}`;
+      actions.push({
+        id: `conv-${c.id}`,
+        label: name,
+        group: "对话",
+        hint: c.cwd ? c.cwd.split("/").slice(-1)[0] : undefined,
+        keywords: `${c.provider} ${c.cwd ?? ""}`,
+        icon: <ProviderIcon provider={c.provider} size={15} />,
+        run: () => store.setActiveConversation(c.id),
+      });
+    }
+    if (activeId && running) {
+      actions.push({
+        id: "cancel",
+        label: "停止当前回合",
+        group: "操作",
+        keywords: "cancel stop interrupt",
+        icon: <IconStop size={15} />,
+        run: () => store.cancel(activeId),
+      });
+    }
+    if (activeId) {
+      actions.push({
+        id: "search",
+        label: "在对话中搜索",
+        group: "操作",
+        hint: "⌘F",
+        keywords: "search find filter",
+        icon: <IconSearch size={15} />,
+        run: () => {
+          setSearchOpen(true);
+          requestAnimationFrame(() => searchInputRef.current?.focus());
+        },
+      });
+    }
+    actions.push(
+      {
+        id: "panel-terminal",
+        label: "打开终端",
+        group: "操作",
+        keywords: "terminal shell",
+        icon: <IconTerminal size={15} />,
+        run: () => setRightPanel((v) => (v === "terminal" ? "none" : "terminal")),
+      },
+      {
+        id: "panel-files",
+        label: "打开文件浏览器",
+        group: "操作",
+        keywords: "files browse",
+        icon: <IconFolder size={15} />,
+        run: () => setRightPanel((v) => (v === "files" ? "none" : "files")),
+      },
+    );
+    return actions;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledProviders, snapshot.conversations, activeId, running]);
+
   return (
     <div className="flex h-screen h-[100dvh] flex-col">
       {/* Top bar. pt safe-area inset so it clears the notch / status bar. */}
@@ -205,6 +350,14 @@ export function AgentConsolePage({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="codex-btn-ghost px-2 py-1.5"
+            title="命令面板 (⌘/Ctrl+K)"
+            aria-label="命令面板"
+          >
+            <IconSearch size={16} />
+          </button>
           <ThemeToggle />
           <button
             onClick={() => setRightPanel((v) => (v === "files" ? "none" : "files"))}
@@ -257,6 +410,7 @@ export function AgentConsolePage({
                     conversations={snapshot.conversations}
                     capabilities={snapshot.capabilities}
                     activeConversationId={activeId}
+                    store={store}
                     onSelect={(id) => { store.setActiveConversation(id); setMobileNavOpen(false); }}
                     onNewConversation={(p, cwd) => { setMobileNavOpen(false); handleNewConversation(p, cwd); }}
                   />
@@ -305,6 +459,7 @@ export function AgentConsolePage({
                 conversations={snapshot.conversations}
                 capabilities={snapshot.capabilities}
                 activeConversationId={activeId}
+                store={store}
                 onSelect={(id) => store.setActiveConversation(id)}
                 onNewConversation={handleNewConversation}
               />
@@ -329,6 +484,27 @@ export function AgentConsolePage({
             </div>
           ) : (
             <>
+              {/* In-conversation search bar (Cmd/Ctrl+F). */}
+              {searchOpen && (
+                <div className="flex items-center gap-2 border-b border-border bg-surface px-4 py-2">
+                  <IconSearch size={15} className="shrink-0 text-content-faint" />
+                  <input
+                    ref={searchInputRef}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Escape" && (setSearchOpen(false), setSearchQuery(""))}
+                    placeholder="在此对话中搜索…"
+                    className="min-w-0 flex-1 bg-transparent text-sm text-content-primary placeholder-content-muted outline-none"
+                  />
+                  <button
+                    onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+                    className="codex-btn-ghost px-2 py-1"
+                    aria-label="关闭搜索"
+                  >
+                    <IconClose size={14} />
+                  </button>
+                </div>
+              )}
               <div
                 ref={scrollRef}
                 onScroll={handleTimelineScroll}
@@ -338,7 +514,38 @@ export function AgentConsolePage({
                 {historyState?.loading && (
                   <p className="text-center text-2xs text-content-muted">加载更早的消息…</p>
                 )}
-                {(() => {
+                {searchOpen && searchQuery.trim() ? (
+                  // Search results: flat, chronological, every matching item.
+                  (() => {
+                    const q = searchQuery.trim();
+                    const matches = timeline.filter((it) => !isQueuedItem(it) && itemMatchesQuery(it, q));
+                    if (matches.length === 0) {
+                      return <p className="py-12 text-center text-sm text-content-muted">没有匹配「{q}」的消息</p>;
+                    }
+                    return (
+                      <>
+                        <p className="text-center text-2xs text-content-faint">{matches.length} 条匹配</p>
+                        {matches.map((it) => (
+                          <div key={it.id} className="min-w-0 animate-fade-in">
+                            <TimelineItemView
+                              item={it}
+                              canSteer={false}
+                              onPermission={(requestId, outcome, optionId) =>
+                                store.respondPermission(activeId, requestId, outcome, optionId)
+                              }
+                              onStructuredInput={(requestId, answers) =>
+                                store.respondStructuredInput(activeId, requestId, answers)
+                              }
+                              onOpenDiff={(d) => { setDiffItem(d); setRightPanel("none"); }}
+                              onOpenAgent={(detail) => { setAgentDetail(detail); setDiffItem(null); setRightPanel("none"); }}
+                              onEditMessage={handleEditMessage}
+                            />
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()
+                ) : (() => {
                   // Group consecutive activity items (tools/commands/files/
                   // thinking) per the Codex rollup model. Non-activity items
                   // (messages/permissions/plans/errors) render standalone. Only
@@ -385,6 +592,7 @@ export function AgentConsolePage({
                           onDiscardQueued={(itemId) => store.discardQueuedFollowUp(activeId, itemId)}
                           onOpenDiff={(it) => { setDiffItem(it); setRightPanel("none"); }}
                           onOpenAgent={(detail) => { setAgentDetail(detail); setDiffItem(null); setRightPanel("none"); }}
+                          onEditMessage={handleEditMessage}
                         />
                       </div>
                     ) : (
@@ -417,6 +625,11 @@ export function AgentConsolePage({
                   running={running}
                   supportsImages={activeCapability?.supportsImages}
                   commands={activeCapability?.commands}
+                  conversationId={activeId}
+                  lastUserText={lastUserText}
+                  cwd={activeConversation.cwd}
+                  onBrowse={(path) => store.browse(path, true)}
+                  seedText={seed}
                   controls={
                     <ControlToolbar
                       conversation={activeConversation}
@@ -555,6 +768,9 @@ export function AgentConsolePage({
           ))}
         </div>
       )}
+
+      {/* Command palette (⌘/Ctrl+K): fuzzy-search conversations + actions. */}
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={paletteActions} />
     </div>
   );
 }
