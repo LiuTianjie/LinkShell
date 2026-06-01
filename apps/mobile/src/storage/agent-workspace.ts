@@ -707,7 +707,28 @@ export async function upsertAgentTimelineItem(item: AgentTimelineItem): Promise<
   ) {
     return;
   }
-  if (index >= 0) timeline[index] = item;
-  else timeline.push(item);
+  if (index >= 0) {
+    const existing = timeline[index]!;
+    // Preserve client-only queue flags when the host echo lacks them.
+    if (
+      existing.metadata &&
+      (existing.metadata.queuedSent || existing.metadata.queuedDiscarded || existing.metadata.delivery)
+    ) {
+      const inMeta = item.metadata ?? {};
+      timeline[index] = {
+        ...item,
+        metadata: {
+          ...inMeta,
+          queuedSent: inMeta.queuedSent ?? existing.metadata.queuedSent,
+          queuedDiscarded: inMeta.queuedDiscarded ?? existing.metadata.queuedDiscarded,
+          delivery: inMeta.delivery ?? existing.metadata.delivery,
+        },
+      };
+    } else {
+      timeline[index] = item;
+    }
+  } else {
+    timeline.push(item);
+  }
   await saveAgentTimeline(item.conversationId, timeline);
 }

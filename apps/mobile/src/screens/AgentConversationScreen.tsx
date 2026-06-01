@@ -3424,7 +3424,7 @@ export function AgentConversationScreen({
   useEffect(() => {
     if (visibleNotices.length === 0) return;
     const timers = visibleNotices.map((notice) =>
-      setTimeout(() => workspace.dismissNotice(notice.id), notice.durationMs ?? 1800),
+      setTimeout(() => workspace.dismissNotice(notice.id), notice.durationMs && notice.durationMs > 0 ? notice.durationMs : 4000),
     );
     return () => {
       timers.forEach((timer) => clearTimeout(timer));

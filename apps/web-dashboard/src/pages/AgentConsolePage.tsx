@@ -27,6 +27,33 @@ function statusLabel(status: ConnectionStatus): { text: string; color: string } 
   return { text: "未连接", color: "text-content-muted" };
 }
 
+// Lightweight AnimatedPresence: mounts children with an enter animation, then
+// when `show` becomes false applies an exit animation and waits for
+// animationend before unmounting. Keeps panel transitions smooth.
+function useAnimatedPresence(show: boolean, animIn: string, animOut: string) {
+  const [state, setState] = useState<{ render: boolean; className: string }>(
+    () => ({ render: show, className: show ? animIn : "" }),
+  );
+  const prevShow = useRef(show);
+
+  useEffect(() => {
+    if (show && !prevShow.current) {
+      setState({ render: true, className: animIn });
+    } else if (!show && prevShow.current) {
+      setState({ render: true, className: animOut });
+    }
+    prevShow.current = show;
+  }, [show, animIn, animOut]);
+
+  const onAnimationEnd = useCallback(() => {
+    if (!prevShow.current) {
+      setState({ render: false, className: "" });
+    }
+  }, []);
+
+  return { render: state.render, className: state.className, onAnimationEnd };
+}
+
 // Does a timeline item match a free-text search query? Looks across message
 // text, command, tool name/io, and changed file paths so search is useful for
 // both conversation and activity items.
@@ -46,7 +73,7 @@ function itemMatchesQuery(item: AgentTimelineItem, q: string): boolean {
   return haystacks.some((h) => typeof h === "string" && h.toLowerCase().includes(needle));
 }
 
-type RightPanel = "none" | "terminal" | "files" | "preview";
+type RightPanel = "none" | "files" | "preview";
 
 export function AgentConsolePage({
   sessionId,
@@ -64,6 +91,32 @@ export function AgentConsolePage({
   const { store, snapshot } = useWorkspace(config, sessionId);
   const isMobile = useIsMobile();
   const [rightPanel, setRightPanel] = useState<RightPanel>("none");
+  // Terminal as a bottom slide-out panel (VS Code-style), toggled by Cmd+J
+  // or the header button. Height is persisted in localStorage and resizable
+  // via a drag handle on the top edge.
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalClosing, setTerminalClosing] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState<number>(() => {
+    const v = Number(localStorage.getItem("linkshell_terminal_h"));
+    return v >= 120 && v <= 600 ? v : 320;
+  });
+  const terminalDraggingRef = useRef(false);
+  const terminalHeightRef = useRef(terminalHeight);
+  terminalHeightRef.current = terminalHeight;
+  // Keep terminalOpen in a ref so toggleTerminal is stable and safe in the
+  // keyboard handler's empty-deps useEffect.
+  const terminalOpenRef = useRef(terminalOpen);
+  terminalOpenRef.current = terminalOpen;
+
+  // Toggle the terminal bottom panel. Closing animates out (slide-down)
+  // before unmounting; opening mounts + slides up immediately.
+  const toggleTerminal = useCallback(() => {
+    if (terminalOpenRef.current) {
+      setTerminalClosing(true);
+    } else {
+      setTerminalOpen(true);
+    }
+  }, []);
   // Mobile-only: the conversation tree opens as a full-screen overlay drawer
   // (no split pane on phones). Desktop uses sidebarCollapsed/width instead.
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -151,6 +204,28 @@ export function AgentConsolePage({
     window.addEventListener("pointerup", onUp);
   };
 
+  // Drag-to-resize the bottom terminal panel from its TOP edge. Height
+  // grows as the handle is dragged upward (pointerY decreases).
+  const startTerminalResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    terminalDraggingRef.current = true;
+    const startY = e.clientY;
+    const startH = terminalHeightRef.current;
+    const onMove = (ev: PointerEvent) => {
+      if (!terminalDraggingRef.current) return;
+      const h = Math.min(600, Math.max(120, startH + (startY - ev.clientY)));
+      setTerminalHeight(h);
+    };
+    const onUp = () => {
+      terminalDraggingRef.current = false;
+      localStorage.setItem("linkshell_terminal_h", String(terminalHeightRef.current));
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   const activeId = snapshot.activeConversationId;
   const timeline = activeId ? snapshot.timelines.get(activeId) ?? [] : [];
   const activeConversation = snapshot.conversations.find((c) => c.id === activeId);
@@ -212,6 +287,9 @@ export function AgentConsolePage({
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        toggleTerminal();
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         setSearchOpen(true);
@@ -364,11 +442,12 @@ export function AgentConsolePage({
     actions.push(
       {
         id: "panel-terminal",
-        label: "打开终端",
+        label: "切换终端",
         group: "操作",
+        hint: "⌘J",
         keywords: "terminal shell",
         icon: <IconTerminal size={15} />,
-        run: () => setRightPanel((v) => (v === "terminal" ? "none" : "terminal")),
+        run: toggleTerminal,
       },
       {
         id: "panel-files",
@@ -457,9 +536,9 @@ export function AgentConsolePage({
             <IconFolder size={16} />
           </button>
           <button
-            onClick={() => setRightPanel((v) => (v === "terminal" ? "none" : "terminal"))}
-            className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "terminal" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
-            title="终端"
+            onClick={toggleTerminal}
+            className={`cursor-pointer rounded-md p-1.5 transition-colors ${terminalOpen ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+            title="终端 (⌘J)"
             aria-label="终端"
           >
             <IconTerminal size={16} />
@@ -714,6 +793,35 @@ export function AgentConsolePage({
                   ))}
                 </div>
               </div>
+              {/* Terminal bottom panel — slides up/down VS Code-style via
+                   animate-panel-in-up / animate-panel-out-down. During the exit
+                   animation the panel keeps its full height so translateY(100%)
+                   is visible; after animationend it unmounts. */}
+              {(terminalOpen || terminalClosing) && (
+                <div
+                  className={`relative shrink-0 overflow-hidden border-t border-border bg-surface ${
+                    terminalClosing ? "animate-panel-out-down" : "animate-panel-in-up"
+                  }`}
+                  style={{ height: terminalHeight }}
+                  onAnimationEnd={() => {
+                    if (terminalClosing) {
+                      setTerminalClosing(false);
+                      setTerminalOpen(false);
+                    }
+                  }}
+                >
+                  {/* Drag handle on top edge */}
+                  <div
+                    onPointerDown={startTerminalResize}
+                    className="absolute left-0 right-0 top-0 z-10 h-1 cursor-row-resize bg-transparent transition-colors hover:bg-accent-dim/50"
+                    title="拖动调整终端高度"
+                  />
+                  <TerminalPanel
+                    bridge={store.client}
+                    onNewTerminal={handleNewTerminal}
+                  />
+                </div>
+              )}
               <div className="mx-auto w-full min-w-0 max-w-3xl px-4 pb-4">
                 {planReady && (
                   <div className="mb-2 flex items-center gap-3 rounded-xl border border-accent-dim/40 bg-surface px-3.5 py-2.5 animate-slide-in">
@@ -758,9 +866,9 @@ export function AgentConsolePage({
           )}
         </main>
 
-        {/* Right panel: subagent / diff drawer takes priority, then terminal/files.
-            Desktop = drag-resizable split pane (border + persisted px width);
-            mobile = full-screen overlay above the turn-log. */}
+        {/* Right panel: subagent / diff drawer takes priority, then files / preview.
+            Desktop = drag-resizable split pane (border + persisted px width) with
+            a slide-in/out transition; mobile = full-screen overlay. */}
         {(() => {
           // Compute the panel's content first; wrap once below so the resize
           // handle + sizing logic isn't duplicated across every branch.
@@ -797,25 +905,6 @@ export function AgentConsolePage({
                 </div>
               </>
             );
-          } else if (rightPanel === "terminal") {
-            content = (
-              <>
-                {isMobile && (
-                  <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-                    <span className="text-2xs font-semibold uppercase tracking-wide text-content-muted">终端</span>
-                    <button onClick={() => setRightPanel("none")} className="codex-btn-ghost px-2 py-1.5" aria-label="关闭终端">
-                      <IconClose size={15} />
-                    </button>
-                  </div>
-                )}
-                <div className="min-h-0 flex-1">
-                  <TerminalPanel
-                    bridge={store.client}
-                    onNewTerminal={handleNewTerminal}
-                  />
-                </div>
-              </>
-            );
           } else if (rightPanel === "files") {
             content = (
               <FileBrowser
@@ -840,26 +929,42 @@ export function AgentConsolePage({
               />
             );
           }
-          if (!content) return null;
 
-          // Mobile: full-screen overlay (split panes are unusable on a phone).
+          // Persist the last visible content so we can play the exit animation
+          // on it before unmounting. Without this the panel vanishes instantly.
+          const lastContentRef = useRef<React.ReactNode>(null);
+          if (content !== null) lastContentRef.current = content;
+
+          const rightShow = content !== null;
+          const rightAnim = useAnimatedPresence(rightShow, "animate-panel-in-right", "animate-panel-out-right");
+          if (!rightAnim.render && !rightShow) return null;
+
+          const displayContent = rightShow ? content : lastContentRef.current;
+
+          // Mobile: full-screen overlay.
           if (isMobile) {
             return (
-              <aside className="absolute inset-0 z-30 flex flex-col bg-canvas animate-fade-in">{content}</aside>
+              <aside
+                className={`absolute inset-0 z-30 flex flex-col bg-canvas ${rightAnim.className || "animate-fade-in"}`}
+                onAnimationEnd={rightAnim.onAnimationEnd}
+              >
+                {displayContent}
+              </aside>
             );
           }
           // Desktop: bordered split pane with a left-edge drag handle.
           return (
             <aside
-              className="relative flex shrink-0 flex-col border-l border-border"
+              className={`relative flex shrink-0 flex-col border-l border-border ${rightAnim.className}`}
               style={{ width: rightPanelWidth }}
+              onAnimationEnd={rightAnim.onAnimationEnd}
             >
               <div
                 onPointerDown={startRightResize}
                 className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent transition-colors hover:bg-accent-dim/50"
                 title="拖动调整宽度"
               />
-              {content}
+              {displayContent}
             </aside>
           );
         })()}

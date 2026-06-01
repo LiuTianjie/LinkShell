@@ -285,11 +285,30 @@ function mergeTimeline(
   const map = new Map(current.map((item) => [item.id, item]));
   for (const item of incoming) {
     const existing = map.get(item.id);
+    // A locally-discarded queued item must never be resurrected by a late echo.
     if (
       existing?.metadata?.queuedDiscarded === true &&
       existing.metadata?.delivery === "queued" &&
       item.metadata?.queuedDiscarded !== true
     ) {
+      continue;
+    }
+    // Preserve client-only queue flags when the host echo lacks them, so a
+    // late echo can't clear queuedSent/discarded and cause a double-send.
+    if (
+      existing?.metadata &&
+      (existing.metadata.queuedSent || existing.metadata.queuedDiscarded || existing.metadata.delivery)
+    ) {
+      const inMeta = item.metadata ?? {};
+      map.set(item.id, {
+        ...item,
+        metadata: {
+          ...inMeta,
+          queuedSent: inMeta.queuedSent ?? existing.metadata.queuedSent,
+          queuedDiscarded: inMeta.queuedDiscarded ?? existing.metadata.queuedDiscarded,
+          delivery: inMeta.delivery ?? existing.metadata.delivery,
+        },
+      });
       continue;
     }
     map.set(item.id, item);
@@ -614,7 +633,7 @@ export function useAgentWorkspace(
           kind: payload.kind,
           title: payload.title,
           detail: payload.detail,
-          durationMs: payload.durationMs ?? 1800,
+          durationMs: payload.durationMs && payload.durationMs > 0 ? payload.durationMs : 4000,
           createdAt: Date.now(),
         };
         setNotices((prev) => [...prev.slice(-4), notice]);
