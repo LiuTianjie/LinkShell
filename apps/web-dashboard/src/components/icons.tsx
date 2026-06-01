@@ -129,6 +129,12 @@ export const IconExternal = (p: IconProps) => (
 export const IconGlobe = (p: IconProps) => (
   <Svg {...p}><circle cx="12" cy="12" r="10" /><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20" /></Svg>
 );
+export const IconPhone = (p: IconProps) => (
+  <Svg {...p}><rect width="14" height="20" x="5" y="2" rx="2" ry="2" /><path d="M12 18h.01" /></Svg>
+);
+export const IconComment = (p: IconProps) => (
+  <Svg {...p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></Svg>
+);
 
 /** Real LinkShell brand logo (shared with the mobile app icon). */
 export function BrandLogo({ size = 28, className }: { size?: number; className?: string }) {

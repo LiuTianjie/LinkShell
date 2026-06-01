@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "../lib/supabase";
 import { getValidSession } from "../lib/supabase";
 import { loadGatewayConfig } from "../lib/gateway-config";
@@ -230,19 +230,6 @@ export function AgentConsolePage({
     setSearchQuery("");
   }, [activeId]);
 
-  // When the terminal panel is first opened for a conversation, spawn a fresh
-  // shell in that conversation's cwd — instead of leaving the user attached to
-  // the host's shared "default" PTY (the agent's own REPL). Guarded per
-  // conversation id so toggling the panel closed/open doesn't leak terminals;
-  // switching to a different conversation spawns one for its cwd.
-  const terminalSpawnedRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (rightPanel !== "terminal" || !activeId || !activeConversation) return;
-    if (terminalSpawnedRef.current.has(activeId)) return;
-    terminalSpawnedRef.current.add(activeId);
-    store.client.spawnTerminal(activeConversation.cwd || ".");
-  }, [rightPanel, activeId, activeConversation, store]);
-
   // Refs for scroll anchoring. prevScrollHeightRef preserves the viewport when
   // older history is prepended; atBottomRef tracks whether to stick to bottom.
   const prevHeightRef = useRef(0);
@@ -310,6 +297,15 @@ export function AgentConsolePage({
 
   const st = statusLabel(snapshot.status);
   const deviceLabel = `CLI 设备 · ${sessionId.slice(0, 8)}`;
+
+  // Stable spawn-terminal callback. TerminalPanel keys an effect on this prop,
+  // so an inline closure (new identity every render) would make it re-subscribe
+  // and re-request the terminal list on every streaming re-render. Depend on the
+  // cwd STRING, not the conversation object (whose identity changes each notify).
+  const activeCwd = activeConversation?.cwd;
+  const handleNewTerminal = useCallback(() => {
+    store.client.spawnTerminal(activeCwd || ".");
+  }, [store, activeCwd]);
 
   // Command-palette actions: new conversation per enabled provider, jump to any
   // existing conversation, and the common turn/panel actions.
@@ -446,21 +442,27 @@ export function AgentConsolePage({
           <ThemeToggle />
           <button
             onClick={() => setRightPanel((v) => (v === "preview" ? "none" : "preview"))}
-            className={rightPanel === "preview" ? "codex-btn-primary text-2xs" : "codex-btn-outline text-2xs"}
+            className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "preview" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+            title="端口预览"
+            aria-label="端口预览"
           >
-            预览
+            <IconGlobe size={16} />
           </button>
           <button
             onClick={() => setRightPanel((v) => (v === "files" ? "none" : "files"))}
-            className={rightPanel === "files" ? "codex-btn-primary text-2xs" : "codex-btn-outline text-2xs"}
+            className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "files" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+            title="文件"
+            aria-label="文件"
           >
-            文件
+            <IconFolder size={16} />
           </button>
           <button
             onClick={() => setRightPanel((v) => (v === "terminal" ? "none" : "terminal"))}
-            className={rightPanel === "terminal" ? "codex-btn-primary text-2xs" : "codex-btn-outline text-2xs"}
+            className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "terminal" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+            title="终端"
+            aria-label="终端"
           >
-            终端
+            <IconTerminal size={16} />
           </button>
         </div>
       </header>
@@ -809,7 +811,7 @@ export function AgentConsolePage({
                 <div className="min-h-0 flex-1">
                   <TerminalPanel
                     bridge={store.client}
-                    onNewTerminal={() => store.client.spawnTerminal(activeConversation?.cwd || ".")}
+                    onNewTerminal={handleNewTerminal}
                   />
                 </div>
               </>
@@ -829,6 +831,12 @@ export function AgentConsolePage({
                 sessionId={sessionId}
                 isMobile={isMobile}
                 onClose={() => setRightPanel("none")}
+                onAnnotate={(text) => {
+                  // Load the element annotation into the composer (not auto-sent)
+                  // so the user can add intent before sending it to the agent.
+                  setSeed((s) => ({ text, nonce: s.nonce + 1 }));
+                  if (isMobile) setRightPanel("none");
+                }}
               />
             );
           }
