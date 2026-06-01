@@ -563,8 +563,12 @@ server.on("upgrade", (request, socket, head) => {
     }
     // Import dynamically to handle tunnel WS upgrade
     import("./tunnel.js").then(({ handleTunnelWsUpgrade }) => {
+      const tunnelCookie = parseTunnelCookie(request);
+      const cookieToken = tunnelCookie?.sessionId === tunnelParsed.sessionId && tunnelCookie.port === tunnelParsed.port
+        ? tunnelCookie.token
+        : undefined;
       wss.handleUpgrade(request, socket, head, async (ws) => {
-        await handleTunnelWsUpgrade(ws, tunnelParsed, url, sessionManager, tokenManager);
+        await handleTunnelWsUpgrade(ws, tunnelParsed, url, sessionManager, tokenManager, cookieToken);
       });
     });
     return;

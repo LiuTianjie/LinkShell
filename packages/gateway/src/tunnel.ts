@@ -66,6 +66,17 @@ function extractToken(req: IncomingMessage, url: URL): string | null {
   return null;
 }
 
+export function tokenFromTunnelCookie(
+  req: IncomingMessage,
+  sessionId: string,
+  port: number,
+): string | null {
+  const tunnelCookie = parseTunnelCookie(req);
+  if (!tunnelCookie) return null;
+  if (tunnelCookie.sessionId !== sessionId || tunnelCookie.port !== port) return null;
+  return tunnelCookie.token;
+}
+
 /** Parse lsh_tunnel cookie: "sessionId:port:token" */
 export function parseTunnelCookie(req: IncomingMessage): { sessionId: string; port: number; token: string } | null {
   const cookie = req.headers.cookie;
@@ -172,7 +183,7 @@ export async function handleTunnelRequest(
   const { sessionId, port, path } = parsed;
 
   // Auth: device token OR Supabase JWT (userId owns session)
-  const token = preAuthToken || extractToken(req, url);
+  const token = preAuthToken || extractToken(req, url) || tokenFromTunnelCookie(req, sessionId, port);
   const tokenOwns = token && tokens.owns(token, sessionId);
   let authOwns = false;
   let authJwt: string | null = null;
@@ -395,11 +406,12 @@ export async function handleTunnelWsUpgrade(
   url: URL,
   sessions: SessionManager,
   tokens: TokenManager,
+  preAuthToken?: string,
 ): Promise<void> {
   const { sessionId, port, path } = parsed;
 
   // Auth: device token OR Supabase JWT (userId owns session)
-  const token = url.searchParams.get("token");
+  const token = preAuthToken || url.searchParams.get("token");
   const tokenOwns = token && tokens.owns(token, sessionId);
   let authOwns = false;
   if (!tokenOwns && AUTH_REQUIRED) {

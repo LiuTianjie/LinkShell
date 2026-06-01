@@ -307,8 +307,12 @@ export function startEmbeddedGateway(
     // Tunnel WebSocket upgrade (for HMR etc.)
     const tunnelParsed = parseTunnelPath(url.pathname);
     if (tunnelParsed) {
+      const tunnelCookie = parseTunnelCookie(request);
+      const cookieToken = tunnelCookie?.sessionId === tunnelParsed.sessionId && tunnelCookie.port === tunnelParsed.port
+        ? tunnelCookie.token
+        : undefined;
       wss.handleUpgrade(request, socket, head, (ws) => {
-        handleTunnelWsUpgrade(ws, tunnelParsed, url, sessionManager, tokenManager);
+        handleTunnelWsUpgrade(ws, tunnelParsed, url, sessionManager, tokenManager, cookieToken);
       });
       return;
     }

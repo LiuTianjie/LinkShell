@@ -4,6 +4,7 @@ import {
   mergeTunnelSetCookie,
   parseTunnelCookie,
   shouldUseTunnelCookieFallback,
+  tokenFromTunnelCookie,
 } from "../src/tunnel.js";
 
 function req(headers: IncomingMessage["headers"]): IncomingMessage {
@@ -21,6 +22,16 @@ describe("tunnel cookie fallback", () => {
       port: 3000,
       token: "jwt:with:colons",
     });
+  });
+
+  it("uses lsh_tunnel for explicit tunnel subresources only when session and port match", () => {
+    const request = req({
+      cookie: "lsh_tunnel=session-1%3A3000%3Adevice-token",
+    });
+
+    expect(tokenFromTunnelCookie(request, "session-1", 3000)).toBe("device-token");
+    expect(tokenFromTunnelCookie(request, "session-2", 3000)).toBeNull();
+    expect(tokenFromTunnelCookie(request, "session-1", 3001)).toBeNull();
   });
 
   it("does not hijack root, reserved API paths, or normal top-level documents", () => {
