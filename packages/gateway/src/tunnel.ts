@@ -101,6 +101,34 @@ export function parseTunnelPath(pathname: string): { sessionId: string; port: nu
   };
 }
 
+export function hasTunnelReferer(req: IncomingMessage): boolean {
+  const referer = req.headers.referer;
+  if (typeof referer !== "string") return false;
+  try {
+    const ref = new URL(referer);
+    return ref.pathname.startsWith("/tunnel/");
+  } catch {
+    return false;
+  }
+}
+
+export function shouldUseTunnelCookieFallback(
+  req: IncomingMessage,
+  pathname: string,
+  isReservedPath: (pathname: string) => boolean = () => false,
+): boolean {
+  if (pathname === "/" || isReservedPath(pathname)) return false;
+
+  // A stale Path=/ tunnel cookie must not hijack normal top-level visits to
+  // the LinkShell web app. Browser iframe navigations use "iframe"; redirects
+  // from an explicit /tunnel/... URL have that URL as the referrer. Missing
+  // Fetch Metadata headers are allowed for older/non-browser clients.
+  const dest = req.headers["sec-fetch-dest"];
+  if (dest === "document" && !hasTunnelReferer(req)) return false;
+
+  return true;
+}
+
 export async function handleTunnelRequest(
   req: IncomingMessage,
   res: ServerResponse,

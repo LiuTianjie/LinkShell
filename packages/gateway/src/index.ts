@@ -23,12 +23,13 @@ import {
 import {
   parseTunnelPath,
   parseTunnelCookie,
+  shouldUseTunnelCookieFallback,
   handleTunnelRequest,
   cleanupSessionTunnels,
 } from "./tunnel.js";
 import { AUTH_REQUIRED, requireAuth, checkWsAuth, validateRequest, checkSubscriptionByUserId, canReadSessionDetail } from "./auth-middleware.js";
 import { setCors } from "./cors.js";
-import { serveWeb, webEnabled, webDistPath } from "./static-web.js";
+import { serveWeb, serveWebAsset, webEnabled, webDistPath } from "./static-web.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const logLevel = (process.env.LOG_LEVEL ?? "info") as
@@ -351,12 +352,12 @@ async function handleRequest(
 
   // Tunnel fallback: cookie-based routing for sub-resources (e.g. /_next/static/...).
   // Placed BEFORE serveWeb so tunnel sub-resources are routed correctly even for
-  // extensionless paths (SPA routes inside the tunneled app). But we MUST guard
-  // against hijacking the LinkShell root ("/" → web UI) and LinkShell's own
-  // static assets ("/assets/*"). Everything else with an active tunnel cookie
-  // goes to the tunnel.
+  // extensionless paths (SPA routes inside the tunneled app). Concrete
+  // LinkShell web assets win first; missing absolute assets belong to the
+  // previewed app and should still be proxied.
   const tunnelCookie = parseTunnelCookie(req);
-  if (tunnelCookie && url.pathname !== "/" && !url.pathname.startsWith("/assets/")) {
+  if (tunnelCookie && shouldUseTunnelCookieFallback(req, url.pathname, isApiPath)) {
+    if (await serveWebAsset(req, res)) return;
     const fallbackParsed = {
       sessionId: tunnelCookie.sessionId,
       port: tunnelCookie.port,

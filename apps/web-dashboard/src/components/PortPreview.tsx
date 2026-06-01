@@ -119,6 +119,7 @@ export function PortPreview({
   // explicit go/Enter — never from the load-follow handler, which would loop.
   const [nav, setNav] = useState<Nav | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authResolved, setAuthResolved] = useState(false);
   const [viewport, setViewport] = useState<Viewport>("desktop");
   const [reloadKey, setReloadKey] = useState(0);
   // Annotate mode: overlay captures the mouse, highlights the hovered element,
@@ -144,9 +145,14 @@ export function PortPreview({
   // device-token owners via token). Either alone is sufficient on the gateway.
   useEffect(() => {
     let cancelled = false;
-    getValidSession().then((s) => {
-      if (!cancelled) setAuthToken(s?.accessToken ?? null);
-    });
+    setAuthResolved(false);
+    getValidSession()
+      .then((s) => {
+        if (!cancelled) setAuthToken(s?.accessToken ?? null);
+      })
+      .finally(() => {
+        if (!cancelled) setAuthResolved(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -154,6 +160,7 @@ export function PortPreview({
 
   const tunnelUrl = useMemo(() => {
     if (!nav) return null;
+    if (!deviceToken && !authResolved) return null;
     const base = `${gatewayUrl.replace(/\/+$/, "")}/tunnel/${encodeURIComponent(sessionId)}/${nav.port}${nav.path}`;
     const params: string[] = [];
     if (deviceToken) params.push(`token=${encodeURIComponent(deviceToken)}`);
@@ -161,7 +168,7 @@ export function PortPreview({
     if (params.length === 0) return base;
     const sep = nav.path.includes("?") ? "&" : "?";
     return `${base}${sep}${params.join("&")}`;
-  }, [nav, gatewayUrl, sessionId, deviceToken, authToken]);
+  }, [nav, gatewayUrl, sessionId, deviceToken, authToken, authResolved]);
 
   const go = () => {
     const parsed = parseAddress(address);
@@ -391,7 +398,7 @@ export function PortPreview({
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <IconGlobe size={34} className="text-content-faint" />
             <p className="text-sm leading-6 text-content-muted">
-              输入主机上服务的端口号，预览远程本地服务
+              {nav && !authResolved ? "正在准备预览认证..." : "输入主机上服务的端口号，预览远程本地服务"}
             </p>
           </div>
         ) : (
@@ -522,4 +529,3 @@ export function PortPreview({
     </div>
   );
 }
-

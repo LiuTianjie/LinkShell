@@ -39,18 +39,7 @@ export function webDistPath(): string {
   return WEB_DIST;
 }
 
-/**
- * Try to serve a GET/HEAD request from the web dist. Returns true if handled.
- * Place AFTER all API routes so it never shadows them. Unmatched non-asset
- * paths fall back to index.html (SPA client-side routing).
- */
-export async function serveWeb(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  if (!hasWeb) return false;
-  if (req.method !== "GET" && req.method !== "HEAD") return false;
-
-  const url = new URL(req.url ?? "/", "http://localhost");
-  let pathname = decodeURIComponent(url.pathname);
-
+async function resolveWebFile(pathname: string, allowSpaFallback: boolean): Promise<string | null> {
   // Path-traversal guard: normalize, then confine to WEB_DIST.
   const candidate = resolve(WEB_DIST, "." + normalize(pathname));
   const inRoot = candidate === WEB_DIST || candidate.startsWith(WEB_DIST + "/");
@@ -68,13 +57,17 @@ export async function serveWeb(req: IncomingMessage, res: ServerResponse): Promi
   // SPA fallback: serve index.html for "/" and for any path without a file
   // extension (a client-side route). Missing assets (with an extension) 404.
   if (!filePath) {
-    if (pathname === "/" || extname(pathname) === "") {
+    if (allowSpaFallback && (pathname === "/" || extname(pathname) === "")) {
       filePath = join(WEB_DIST, "index.html");
     } else {
-      return false; // let the caller 404 the missing asset
+      return null; // let the caller 404/proxy the missing asset
     }
   }
 
+  return filePath;
+}
+
+async function serveWebFile(req: IncomingMessage, res: ServerResponse, filePath: string): Promise<boolean> {
   try {
     const ext = extname(filePath).toLowerCase();
     const type = CONTENT_TYPES[ext] ?? "application/octet-stream";
@@ -98,4 +91,37 @@ export async function serveWeb(req: IncomingMessage, res: ServerResponse): Promi
   } catch {
     return false;
   }
+}
+
+/**
+ * Try to serve a concrete web asset without the SPA fallback. This lets the
+ * gateway protect its own built assets before tunnel cookie fallback handles a
+ * previewed app's absolute assets such as "/assets/app.css".
+ */
+export async function serveWebAsset(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  if (!hasWeb) return false;
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const pathname = decodeURIComponent(url.pathname);
+  const filePath = await resolveWebFile(pathname, false);
+  if (!filePath) return false;
+  return serveWebFile(req, res, filePath);
+}
+
+/**
+ * Try to serve a GET/HEAD request from the web dist. Returns true if handled.
+ * Place AFTER all API routes so it never shadows them. Unmatched non-asset
+ * paths fall back to index.html (SPA client-side routing).
+ */
+export async function serveWeb(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  if (!hasWeb) return false;
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const pathname = decodeURIComponent(url.pathname);
+  const filePath = await resolveWebFile(pathname, true);
+  if (!filePath) return false;
+
+  return serveWebFile(req, res, filePath);
 }
