@@ -1,0 +1,4 @@
+
+> @linkshell/protocol@0.4.1 build /Users/turning4th/claude-remote/packages/shared-protocol
+> tsc -p tsconfig.json
+

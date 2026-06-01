@@ -1,0 +1,10 @@
+
+> @linkshell/gateway@0.4.1 dev /Users/turning4th/claude-remote/packages/gateway
+> tsx src/index.ts
+
+[gateway:info] LinkShell Gateway v0.1.0
+[gateway:info] listening on http://0.0.0.0:8787
+[gateway:info] log level: info
+/Users/turning4th/claude-remote/packages/gateway:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @linkshell/gateway@0.4.1 dev: `tsx src/index.ts`
+Exit status 137

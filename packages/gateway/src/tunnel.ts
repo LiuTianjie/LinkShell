@@ -66,6 +66,22 @@ function extractToken(req: IncomingMessage, url: URL): string | null {
   return null;
 }
 
+function bindExplicitDeviceToken(
+  tokens: TokenManager,
+  sessionId: string,
+  url: URL,
+  preAuthToken?: string,
+): string | null {
+  // Cookie fallback may pass a JWT as preAuthToken. Only bind the explicit
+  // browser/device token from the original tunnel URL after JWT ownership has
+  // been proven.
+  if (preAuthToken) return null;
+  const deviceToken = url.searchParams.get("token");
+  if (!deviceToken) return null;
+  const token = tokens.register(deviceToken);
+  return tokens.bind(token, sessionId) ? token : null;
+}
+
 export function tokenFromTunnelCookie(
   req: IncomingMessage,
   sessionId: string,
@@ -187,8 +203,8 @@ export async function handleTunnelRequest(
   const { sessionId, port, path } = parsed;
 
   // Auth: device token OR Supabase JWT (userId owns session)
-  const token = preAuthToken || extractToken(req, url) || tokenFromTunnelCookie(req, sessionId, port);
-  const tokenOwns = token && tokens.owns(token, sessionId);
+  let token = preAuthToken || extractToken(req, url) || tokenFromTunnelCookie(req, sessionId, port);
+  let tokenOwns = Boolean(token && tokens.owns(token, sessionId));
   let authOwns = false;
   let authJwt: string | null = null;
   if (!tokenOwns && AUTH_REQUIRED) {
@@ -217,6 +233,13 @@ export async function handleTunnelRequest(
           }
         }
       } catch {}
+    }
+  }
+  if (!tokenOwns && authOwns) {
+    const boundToken = bindExplicitDeviceToken(tokens, sessionId, url, preAuthToken);
+    if (boundToken) {
+      token = boundToken;
+      tokenOwns = true;
     }
   }
   if (!tokenOwns && !authOwns) {
@@ -419,8 +442,8 @@ export async function handleTunnelWsUpgrade(
   const { sessionId, port, path } = parsed;
 
   // Auth: device token OR Supabase JWT (userId owns session)
-  const token = preAuthToken || url.searchParams.get("token");
-  const tokenOwns = token && tokens.owns(token, sessionId);
+  let token = preAuthToken || url.searchParams.get("token");
+  let tokenOwns = Boolean(token && tokens.owns(token, sessionId));
   let authOwns = false;
   if (!tokenOwns && AUTH_REQUIRED) {
     // Try auth_token param first, then fall back to token param (cookie fallback stores JWT there)
@@ -443,6 +466,13 @@ export async function handleTunnelWsUpgrade(
           }
         }
       } catch {}
+    }
+  }
+  if (!tokenOwns && authOwns) {
+    const boundToken = bindExplicitDeviceToken(tokens, sessionId, url, preAuthToken);
+    if (boundToken) {
+      token = boundToken;
+      tokenOwns = true;
     }
   }
   if (!tokenOwns && !authOwns) {
