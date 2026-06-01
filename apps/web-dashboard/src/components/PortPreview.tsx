@@ -121,7 +121,7 @@ export function PortPreview({
   // explicit go/Enter — never from the load-follow handler, which would loop.
   const [nav, setNav] = useState<Nav | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(initialAuthToken ?? null);
-  const [authResolved, setAuthResolved] = useState(Boolean(initialAuthToken));
+  const [authResolved, setAuthResolved] = useState(false);
   const [viewport, setViewport] = useState<Viewport>("desktop");
   const [reloadKey, setReloadKey] = useState(0);
   // Annotate mode: overlay captures the mouse, highlights the hovered element,
@@ -147,12 +147,7 @@ export function PortPreview({
   // device-token owners via token). Either alone is sufficient on the gateway.
   useEffect(() => {
     let cancelled = false;
-    if (initialAuthToken) {
-      setAuthToken(initialAuthToken);
-      setAuthResolved(true);
-    } else {
-      setAuthResolved(false);
-    }
+    setAuthResolved(false);
     getValidSession()
       .then((s) => {
         if (!cancelled) setAuthToken(s?.accessToken ?? null);
@@ -167,7 +162,7 @@ export function PortPreview({
 
   const tunnelUrl = useMemo(() => {
     if (!nav) return null;
-    if (!deviceToken && !authResolved) return null;
+    if (initialAuthToken && !authResolved) return null;
     const base = `${gatewayUrl.replace(/\/+$/, "")}/tunnel/${encodeURIComponent(sessionId)}/${nav.port}${nav.path}`;
     const params: string[] = [];
     if (deviceToken) params.push(`token=${encodeURIComponent(deviceToken)}`);

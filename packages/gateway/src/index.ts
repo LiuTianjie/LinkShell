@@ -582,11 +582,9 @@ server.on("upgrade", (request, socket, head) => {
       port: tunnelCookie.port,
       path: url.pathname,
     };
-    // Inject token into URL so handleTunnelWsUpgrade can auth
-    url.searchParams.set("token", tunnelCookie.token);
     wss.handleUpgrade(request, socket, head, async (ws) => {
       const { handleTunnelWsUpgrade } = await import("./tunnel.js");
-      await handleTunnelWsUpgrade(ws, fallbackParsed, url, sessionManager, tokenManager);
+      await handleTunnelWsUpgrade(ws, fallbackParsed, url, sessionManager, tokenManager, tunnelCookie.token);
     });
     return;
   }

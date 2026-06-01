@@ -17,6 +17,9 @@ export interface PendingTunnelRequest {
   headersSent: boolean;
   timeout: ReturnType<typeof setTimeout>;
   tunnelCookie?: string;
+  sessionId: string;
+  port: number;
+  requestPath: string;
 }
 
 export interface PendingTunnelWs {
@@ -66,6 +69,17 @@ function extractToken(req: IncomingMessage, url: URL): string | null {
   return null;
 }
 
+function stripGatewayCookies(cookie: string): string | null {
+  const kept = cookie
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => {
+      const name = part.split("=", 1)[0]?.trim();
+      return name !== "lsh_tunnel" && name !== "lsh_token";
+    });
+  return kept.length > 0 ? kept.join("; ") : null;
+}
+
 function bindExplicitDeviceToken(
   tokens: TokenManager,
   sessionId: string,
@@ -80,6 +94,55 @@ function bindExplicitDeviceToken(
   if (!deviceToken) return null;
   const token = tokens.register(deviceToken);
   return tokens.bind(token, sessionId) ? token : null;
+}
+
+function forwardedUrl(path: string, url: URL): string {
+  const params = new URLSearchParams(url.searchParams);
+  params.delete("token");
+  params.delete("auth_token");
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+function stripGatewayAuthParams(pathname: string, searchParams: URLSearchParams, hash = ""): string {
+  const params = new URLSearchParams(searchParams);
+  params.delete("token");
+  params.delete("auth_token");
+  const query = params.toString();
+  return `${pathname}${query ? `?${query}` : ""}${hash}`;
+}
+
+function rewriteTunnelLocation(
+  location: string,
+  input: { sessionId: string; port: number; requestPath: string },
+): string {
+  try {
+    const parsed = new URL(location, `http://127.0.0.1:${input.port}${input.requestPath}`);
+    const isLocal =
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "::1";
+    if (!isLocal || parsed.port !== String(input.port)) return location;
+    const target = stripGatewayAuthParams(parsed.pathname, parsed.searchParams, parsed.hash);
+    return `/tunnel/${encodeURIComponent(input.sessionId)}/${input.port}${target}`;
+  } catch {
+    return location;
+  }
+}
+
+function rewriteTunnelResponseHeaders(
+  headers: Record<string, string | string[]>,
+  input: { sessionId: string; port: number; requestPath: string },
+): Record<string, string | string[]> {
+  const rewritten = { ...headers };
+  const locationKey = Object.keys(rewritten).find((key) => key.toLowerCase() === "location");
+  if (!locationKey) return rewritten;
+
+  const location = rewritten[locationKey];
+  if (typeof location === "string") {
+    rewritten[locationKey] = rewriteTunnelLocation(location, input);
+  }
+  return rewritten;
 }
 
 export function tokenFromTunnelCookie(
@@ -290,14 +353,19 @@ export async function handleTunnelRequest(
   const skipHeaders = new Set(["host", "connection", "upgrade", "transfer-encoding", "keep-alive"]);
   for (const [key, val] of Object.entries(req.headers)) {
     if (!skipHeaders.has(key) && typeof val === "string") {
-      headers[key] = val;
+      if (key === "cookie") {
+        const cookie = stripGatewayCookies(val);
+        if (cookie) headers[key] = cookie;
+      } else {
+        headers[key] = val;
+      }
     }
   }
 
   // Reconstruct URL with query string. The gateway authenticates fallback
   // subresources with lsh_tunnel; it must not mutate host-facing URLs with
   // auth query params because that leaks credentials and poisons cache keys.
-  const fullUrl = path + (url.search || "");
+  const fullUrl = forwardedUrl(path, url);
 
   // Register pending request
   const pending: PendingTunnelRequest = {
@@ -309,6 +377,9 @@ export async function handleTunnelRequest(
       errorResponse(res, 504, "Tunnel request timed out");
     }, TUNNEL_TIMEOUT),
     tunnelCookie,
+    sessionId,
+    port,
+    requestPath: path,
   };
   pendingRequests.set(requestId, pending);
   trackRequest(sessionId, requestId);
@@ -352,7 +423,7 @@ export function handleTunnelResponse(payload: {
 
     if (!pending.headersSent) {
       const responseHeaders: Record<string, string | string[]> = {
-        ...payload.headers,
+        ...rewriteTunnelResponseHeaders(payload.headers, pending),
         "cache-control": "no-store, private",
         "cdn-cache-control": "no-store",
         "surrogate-control": "no-store",
@@ -487,7 +558,7 @@ export async function handleTunnelWsUpgrade(
   }
 
   const requestId = randomUUID();
-  const fullUrl = path + (url.search || "");
+  const fullUrl = forwardedUrl(path, url);
 
   // Register this WS so host responses route here
   registerTunnelWs(requestId, ws);

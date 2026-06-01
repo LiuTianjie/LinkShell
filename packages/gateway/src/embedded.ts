@@ -325,9 +325,8 @@ export function startEmbeddedGateway(
         port: tunnelCookie.port,
         path: url.pathname,
       };
-      url.searchParams.set("token", tunnelCookie.token);
       wss.handleUpgrade(request, socket, head, (ws) => {
-        handleTunnelWsUpgrade(ws, fallbackParsed, url, sessionManager, tokenManager);
+        handleTunnelWsUpgrade(ws, fallbackParsed, url, sessionManager, tokenManager, tunnelCookie.token);
       });
       return;
     }
