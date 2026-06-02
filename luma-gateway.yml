@@ -11,3 +11,13 @@ env:
   SUPABASE_URL: ${SUPABASE_URL}
   SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
   SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+healthcheck:
+  test:
+    - CMD
+    - wget
+    - -qO-
+    - http://127.0.0.1:8787/healthz
+  interval: 10s
+  timeout: 3s
+  retries: 3
+  start_period: 10s
