@@ -225,3 +225,30 @@
   .hljs-emphasis { font-style: italic; }
   .hljs-strong { font-weight: 600; }
 }
+
+/* Accessibility: honor the OS "reduce motion" setting (mandated by DESIGN.md).
+   Neutralizes enter/slide/pulse animations and transitions for users who opt
+   out of motion, while leaving layout and color untouched. Kept outside the
+   layers with !important so it reliably wins over component-level animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Touch accessibility: hover-revealed row actions (copy / edit / delete / menu,
+   marked `opacity-0 group-hover:opacity-100`) are unreachable on touch screens,
+   which have no hover state. On coarse pointers, reveal them permanently so the
+   web client is usable in a mobile browser. Desktop behavior is unchanged. */
+@media (hover: none) and (pointer: coarse) {
+  [class*="group-hover:opacity-100"] {
+    opacity: 1 !important;
+  }
+}
+
+

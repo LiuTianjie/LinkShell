@@ -13,6 +13,7 @@ import { FolderPicker } from "../components/FolderPicker";
 import { PortPreview } from "../components/PortPreview";
 import { IconChevronRight, IconChevronLeft, IconClose, IconPlug, IconMenu, BrandLogo } from "../components/icons";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { isEmbedded } from "../lib/embed";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import type { ConnectionStatus, AgentTimelineItem } from "../lib/types";
@@ -85,6 +86,9 @@ export function AgentConsolePage({
   onBack: () => void;
 }) {
   const config = useMemo(() => loadGatewayConfig(), []);
+  // Embedded in the mobile app's WebView: the native shell owns the theme, so
+  // hide the web theme toggle (it would fight the app's setting).
+  const embedded = useMemo(() => isEmbedded(), []);
   // The store resolves a fresh JWT per (re)connect via getValidSession; nothing
   // to thread here. session prop is kept for the header (email / pro badge).
   void session;
@@ -518,7 +522,7 @@ export function AgentConsolePage({
           >
             <IconSearch size={16} />
           </button>
-          <ThemeToggle />
+          {!embedded && <ThemeToggle />}
           <button
             onClick={() => setRightPanel((v) => (v === "preview" ? "none" : "preview"))}
             className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "preview" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}

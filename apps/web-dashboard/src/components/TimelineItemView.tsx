@@ -391,7 +391,7 @@ function PermissionCard({
             className={
               opt.kind === "allow"
                 ? "codex-btn-primary text-xs"
-                : "codex-btn-outline text-xs"
+                : "codex-btn-outline text-xs border-danger/40 text-danger hover:border-danger hover:bg-danger/10 hover:text-danger"
             }
           >
             {opt.label}
@@ -562,6 +562,39 @@ function ThinkingBlock({ item }: { item: AgentTimelineItem }) {
       </button>
       {expanded && item.text && (
         <p className="mt-2 whitespace-pre-wrap break-words pl-4 text-sm italic leading-relaxed text-content-muted">
+          {item.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Context-compaction / review note ────────────────────────────────
+// Lightweight system notes the agent emits between turns: a context window
+// compaction, or a self-review pass. Rendered as a slim labelled divider so
+// they read as ambient status rather than chat content (mobile parity).
+
+function SystemNoteBlock({ item, label }: { item: AgentTimelineItem; label: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDetail = item.text != null && item.text.trim() !== "";
+  return (
+    <div className="flex items-center gap-2 py-0.5 text-2xs text-content-faint">
+      <span className="h-px flex-1 bg-border" />
+      <button
+        onClick={() => hasDetail && setExpanded((v) => !v)}
+        className={`flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-2.5 py-1 ${
+          hasDetail ? "cursor-pointer transition-colors hover:text-content-secondary" : "cursor-default"
+        }`}
+        title={hasDetail ? (expanded ? "收起" : "展开") : undefined}
+      >
+        <span className="font-medium">{label}</span>
+        {item.isStreaming && <StreamingPill />}
+        {hasDetail &&
+          (expanded ? <IconChevronDown size={10} /> : <IconChevronRight size={10} />)}
+      </button>
+      <span className="h-px flex-1 bg-border" />
+      {expanded && hasDetail && (
+        <p className="basis-full whitespace-pre-wrap break-words pt-1.5 text-xs italic leading-relaxed text-content-muted">
           {item.text}
         </p>
       )}
@@ -978,6 +1011,13 @@ export const TimelineItemView = memo(
     // thinking
     if (item.kind === "thinking") {
       return <ThinkingBlock item={item} />;
+    }
+    // context compaction / review — ambient system notes
+    if (item.kind === "context_compaction") {
+      return <SystemNoteBlock item={item} label="上下文压缩" />;
+    }
+    if (item.kind === "review") {
+      return <SystemNoteBlock item={item} label="审查" />;
     }
     // message (user / assistant / system)
     const isUser = item.role === "user";
