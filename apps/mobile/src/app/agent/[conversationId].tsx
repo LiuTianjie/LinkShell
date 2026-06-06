@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAppContext } from "../../contexts/AppContext";
-import { AgentConversationScreen } from "../../screens/AgentConversationScreen";
+// Agent console is now the real web-dashboard console embedded in a WebView
+// (true 1:1 parity). The old native screen (../../features/agent) is kept
+// orphaned for one-line rollback until this is device-verified.
+import { AgentWebScreen as AgentConversationScreen } from "../../features/agent-web/AgentWebScreen";
 
 export default function AgentConversationRoute() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();

@@ -91,7 +91,18 @@ export interface AgentWorkspaceHandle {
   resumeConversation: (conversationId: string) => Promise<string | null>;
   ensureConversationSession: (conversationId: string, preferredSessionId?: string) => boolean;
   getConversation: (conversationId: string) => AgentConversationRecord | undefined;
+  /**
+   * Committed timeline state, keyed by conversation id. Consumers that render
+   * the timeline MUST derive their list from this reactive Map (e.g. via
+   * `useMemo(() => timelineById.get(id) ?? [], [timelineById, id])`) so a
+   * streamed-token commit renders the freshly committed array on the same
+   * pass. `getTimeline` reads a post-commit ref and therefore trails the
+   * current state by one render — use it only for imperative reads.
+   */
+  timelineById: Map<string, AgentTimelineItem[]>;
   getTimeline: (conversationId: string) => AgentTimelineItem[];
+  getHistoryState: (conversationId: string) => AgentHistoryState | undefined;
+  loadOlderHistory: (conversationId: string) => void;
   sendPrompt: (
     conversationId: string,
     text: string,
@@ -153,6 +164,17 @@ export interface AgentWorkspaceHandle {
 
 function normalizeServerUrl(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+// In-memory timeline cap. Higher than the on-disk cap (200) so older pages
+// fetched via agent.v2.history.request stay visible for the session even
+// though storage only persists the most recent slice.
+const MAX_TIMELINE_ITEMS = 1000;
+
+export interface AgentHistoryState {
+  loading: boolean;
+  hasMore: boolean;
+  cursor?: string;
 }
 
 function isAgentSessionUsable(session: SessionInfo | undefined): boolean {
@@ -315,7 +337,7 @@ function mergeTimeline(
   }
   return [...map.values()]
     .sort((a, b) => a.createdAt - b.createdAt)
-    .slice(-200);
+    .slice(-MAX_TIMELINE_ITEMS);
 }
 
 function normalizeSnapshotItems(items: AgentTimelineItem[]): AgentTimelineItem[] {
@@ -359,10 +381,12 @@ export function useAgentWorkspace(
   const [capabilitiesBySessionId, setCapabilitiesBySessionId] = useState<Map<string, AgentCapabilities>>(new Map());
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [notices, setNotices] = useState<AgentNotice[]>([]);
+  const [historyById, setHistoryById] = useState<Map<string, AgentHistoryState>>(new Map());
   const [isHydrated, setIsHydrated] = useState(false);
   const managerRef = useRef(manager);
   const conversationsRef = useRef(conversations);
   const timelineRef = useRef(timelineById);
+  const historyRef = useRef(historyById);
   const autoSendingQueuedRef = useRef(new Set<string>());
   const pendingOpenRef = useRef(new Map<string, {
     resolve: (result: OpenConversationResult) => void;
@@ -378,6 +402,16 @@ export function useAgentWorkspace(
     timer: ReturnType<typeof setTimeout>;
     path: string;
   }>());
+  // History pagination in-flight timers, keyed by conversationId. Guards against
+  // a host that never replies to agent.v2.history.request (offline / old CLI):
+  // without this the loading flag sticks true forever and the user can never
+  // retry, because loadOlderHistory bails while loading. Cleared on result.
+  const pendingHistoryRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // Timers that re-enable a permission / structured-input prompt if the host
+  // never echoes the response (dropped message, host went offline after
+  // accept). Keyed by `${conversationId}:${requestId}`. Cleared when the echo
+  // arrives via updatePermissionMetadata / updateTimelineItemMetadata.
+  const pendingResponseRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
     managerRef.current = manager;
@@ -390,6 +424,10 @@ export function useAgentWorkspace(
   useEffect(() => {
     timelineRef.current = timelineById;
   }, [timelineById]);
+
+  useEffect(() => {
+    historyRef.current = historyById;
+  }, [historyById]);
 
   const connectedSessions = useMemo(
     () =>
@@ -648,6 +686,41 @@ export function useAgentWorkspace(
         setCapabilitiesBySessionId((prev) => {
           const next = new Map(prev);
           next.set(envelope.sessionId, payload);
+          return next;
+        });
+        return;
+      }
+
+      if (envelope.type === "agent.v2.history.result") {
+        const payload = parseTypedPayload("agent.v2.history.result", envelope.payload) as {
+          conversationId: string;
+          items?: AgentTimelineItem[];
+          nextCursor?: string;
+          hasMore?: boolean;
+        };
+        const pendingTimer = pendingHistoryRef.current.get(payload.conversationId);
+        if (pendingTimer) {
+          clearTimeout(pendingTimer);
+          pendingHistoryRef.current.delete(payload.conversationId);
+        }
+        const older = normalizeSnapshotItems((payload.items ?? []) as AgentTimelineItem[]);
+        if (older.length > 0) {
+          setTimelineById((prev) => {
+            const next = new Map(prev);
+            const merged = mergeTimeline(next.get(payload.conversationId) ?? [], older);
+            next.set(payload.conversationId, merged);
+            saveAgentTimeline(payload.conversationId, merged).catch(() => {});
+            return next;
+          });
+        }
+        setHistoryById((prev) => {
+          const next = new Map(prev);
+          next.set(payload.conversationId, {
+            loading: false,
+            hasMore: Boolean(payload.hasMore),
+            cursor: payload.nextCursor,
+          });
+          historyRef.current = next;
           return next;
         });
         return;
@@ -1589,6 +1662,16 @@ export function useAgentWorkspace(
       requestId: string,
       metadata: Record<string, unknown>,
     ) => {
+      // A resolving update (host echo or local error) re-enables the card, so
+      // clear any pending-response watchdog armed by respondPermission.
+      if (metadata.permissionPending === false || "permissionOutcome" in metadata || metadata.permissionExpired === true) {
+        const key = `${conversationId}:${requestId}`;
+        const timer = pendingResponseRef.current.get(key);
+        if (timer) {
+          clearTimeout(timer);
+          pendingResponseRef.current.delete(key);
+        }
+      }
       setTimelineById((prev) => {
         const items = prev.get(conversationId);
         if (!items) return prev;
@@ -1616,6 +1699,16 @@ export function useAgentWorkspace(
       itemId: string,
       metadata: Record<string, unknown>,
     ) => {
+      // A resolving update (host echo or local error) re-enables the card, so
+      // clear any pending-response watchdog armed by respondStructuredInput.
+      if (metadata.inputSubmitting === false || metadata.inputSubmitted === true) {
+        const key = `${conversationId}:${itemId}`;
+        const timer = pendingResponseRef.current.get(key);
+        if (timer) {
+          clearTimeout(timer);
+          pendingResponseRef.current.delete(key);
+        }
+      }
       setTimelineById((prev) => {
         const items = prev.get(conversationId);
         if (!items) return prev;
@@ -1710,6 +1803,27 @@ export function useAgentWorkspace(
         optionId,
         permissionError: undefined,
       });
+      // Watchdog: if the host never echoes the response (dropped message, host
+      // went offline after accept), re-enable the card so the user can retry —
+      // mirrors the history-request timeout. The host echo arrives via the
+      // timeline-patch path, so verify against current state on expiry.
+      const permissionKey = `${conversationId}:${requestId}`;
+      const existingPermissionTimer = pendingResponseRef.current.get(permissionKey);
+      if (existingPermissionTimer) clearTimeout(existingPermissionTimer);
+      pendingResponseRef.current.set(
+        permissionKey,
+        setTimeout(() => {
+          pendingResponseRef.current.delete(permissionKey);
+          const current = timelineRef.current
+            .get(conversationId)
+            ?.find((item) => item.type === "permission" && item.permission?.requestId === requestId);
+          if (current?.metadata?.permissionPending !== true || current?.metadata?.permissionOutcome) return;
+          updatePermissionMetadata(conversationId, requestId, {
+            permissionPending: false,
+            permissionError: "未收到主机确认，请重试。",
+          });
+        }, 12_000),
+      );
       const now = Date.now();
       persistConversation({
         ...conversation,
@@ -1774,6 +1888,26 @@ export function useAgentWorkspace(
         ? { inputSubmitting: true, inputError: undefined, answers, sessionId: sourceSessionId }
         : { inputSubmitting: false, inputError: "回答未发送：连接未就绪，请稍后重试。" });
       if (accepted) {
+        // Watchdog: re-enable the form if the host never echoes inputSubmitted
+        // (dropped message / host offline). Verify against current state on
+        // expiry since the echo arrives via the timeline-patch path.
+        const inputKey = `${conversationId}:input:${requestId}`;
+        const existingInputTimer = pendingResponseRef.current.get(inputKey);
+        if (existingInputTimer) clearTimeout(existingInputTimer);
+        pendingResponseRef.current.set(
+          inputKey,
+          setTimeout(() => {
+            pendingResponseRef.current.delete(inputKey);
+            const current = timelineRef.current
+              .get(conversationId)
+              ?.find((item) => item.id === `input:${requestId}`);
+            if (current?.metadata?.inputSubmitting !== true || current?.metadata?.inputSubmitted === true) return;
+            updateTimelineItemMetadata(conversationId, `input:${requestId}`, {
+              inputSubmitting: false,
+              inputError: "未收到主机确认，请重试。",
+            });
+          }, 12_000),
+        );
         const now = Date.now();
         persistConversation({
           ...conversation,
@@ -1915,6 +2049,49 @@ export function useAgentWorkspace(
     await removeAgentConversationsByServerUrl(serverUrl);
   }, []);
 
+  const loadOlderHistory = useCallback((conversationId: string) => {
+    const state = historyRef.current.get(conversationId);
+    if (state && (state.loading || !state.hasMore)) return;
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    if (!conversation) return;
+    const session = findSessionForConversation(conversation, managerRef.current.sessions);
+    if (!session) return;
+    const accepted = managerRef.current.sendAgentWorkspaceEnvelope(
+      session.sessionId,
+      "agent.v2.history.request",
+      { conversationId, cursor: state?.cursor, limit: 50 },
+      { queue: true, dedupeKey: `agent-v2-history:${conversationId}` },
+    );
+    if (!accepted) return;
+    // Arm a timeout so a silent host (offline / old CLI without history support)
+    // can't leave the loading flag stuck true forever — reset it so the spinner
+    // stops and the user can scroll up to retry. hasMore is preserved.
+    const existingTimer = pendingHistoryRef.current.get(conversationId);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(() => {
+      pendingHistoryRef.current.delete(conversationId);
+      setHistoryById((prev) => {
+        const current = prev.get(conversationId);
+        if (!current?.loading) return prev;
+        const next = new Map(prev);
+        next.set(conversationId, { ...current, loading: false });
+        historyRef.current = next;
+        return next;
+      });
+    }, 12_000);
+    pendingHistoryRef.current.set(conversationId, timer);
+    setHistoryById((prev) => {
+      const next = new Map(prev);
+      next.set(conversationId, {
+        loading: true,
+        hasMore: state?.hasMore ?? true,
+        cursor: state?.cursor,
+      });
+      historyRef.current = next;
+      return next;
+    });
+  }, []);
+
   const dismissNotice = useCallback((id: string) => {
     setNotices((prev) => prev.filter((notice) => notice.id !== id));
   }, []);
@@ -1936,7 +2113,10 @@ export function useAgentWorkspace(
     ensureConversationSession,
     getConversation: (conversationId) =>
       conversationsRef.current.find((item) => item.id === conversationId),
+    timelineById,
     getTimeline: (conversationId) => timelineRef.current.get(conversationId) ?? [],
+    getHistoryState: (conversationId) => historyRef.current.get(conversationId),
+    loadOlderHistory,
     sendPrompt,
     sendQueuedFollowUp,
     discardQueuedFollowUp,

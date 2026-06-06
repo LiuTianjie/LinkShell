@@ -6,6 +6,7 @@ import {
   Clipboard,
   Keyboard,
   KeyboardEvent,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -26,6 +27,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppSymbol } from "../components/AppSymbol";
 import { GlassBar } from "../components/GlassBar";
 import type { AgentFileEntry, AgentFileReadResult, AgentWorkspaceHandle } from "../hooks/useAgentWorkspace";
+import { useComposerDictation } from "../hooks/useComposerDictation";
 import type {
   AgentContentBlock,
   AgentCapabilities,
@@ -245,6 +247,21 @@ function trailingSlashCommandToken(text: string): { query: string; start: number
   const query = text.slice(slashIndex + 1);
   if (/\s/.test(query)) return null;
   return { query, start: slashIndex, end: text.length };
+}
+
+// The trailing "@token" before the cursor (end of text), used to drive the
+// @-file-mention palette. Split into a directory part and a filter so
+// "@src/co" browses src/ filtering "co" — mirrors the web composer.
+function trailingMentionToken(
+  text: string,
+): { query: string; dir: string; filter: string; start: number; end: number } | null {
+  const match = /(?:^|\s)@(\S*)$/.exec(text);
+  if (!match) return null;
+  const query = match[1];
+  const slash = query.lastIndexOf("/");
+  const dir = slash >= 0 ? query.slice(0, slash) : "";
+  const filter = slash >= 0 ? query.slice(slash + 1) : query;
+  return { query, dir, filter, start: text.length - query.length - 1, end: text.length };
 }
 
 function commandSearchBlob(command: AgentCommandDescriptor): string {
@@ -2047,6 +2064,99 @@ function SlashCommandPanel({
   );
 }
 
+function MentionPanel({
+  entries,
+  loading,
+  error,
+  currentDir,
+  canNavigateUp,
+  theme,
+  onSelect,
+  onNavigateUp,
+  onClose,
+}: {
+  entries: AgentFileEntry[];
+  loading: boolean;
+  error?: string;
+  currentDir: string;
+  canNavigateUp: boolean;
+  theme: Theme;
+  onSelect: (entry: AgentFileEntry) => void;
+  onNavigateUp: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <View style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: timelineSurface(theme), borderWidth: StyleSheet.hairlineWidth, borderColor: theme.separator, overflow: "hidden" }}>
+      <View style={{ paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.separator, flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <AppSymbol name="at" size={12} color={theme.textTertiary} />
+        <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 12, fontWeight: "800" }} numberOfLines={1}>
+          {currentDir || "引用文件"}
+        </Text>
+        {loading ? <ActivityIndicator size="small" color={theme.accent} /> : null}
+        <Pressable onPress={onClose} hitSlop={8}>
+          <AppSymbol name="xmark" size={12} color={theme.textTertiary} />
+        </Pressable>
+      </View>
+      {error ? (
+        <View style={{ padding: 12 }}>
+          <Text style={{ color: theme.error, fontSize: 12, lineHeight: 17 }}>{error}</Text>
+        </View>
+      ) : entries.length === 0 && !loading && !canNavigateUp ? (
+        <View style={{ padding: 12 }}>
+          <Text style={{ color: theme.textTertiary, fontSize: 13, fontWeight: "700" }}>没有匹配的文件</Text>
+        </View>
+      ) : (
+        <ScrollView style={{ maxHeight: 280 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={entries.length > 6}>
+          {canNavigateUp ? (
+            <Pressable
+              onPress={onNavigateUp}
+              style={({ pressed }) => ({
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: theme.separator,
+                backgroundColor: pressed ? theme.bgInput : "transparent",
+                flexDirection: "row",
+                gap: 9,
+                alignItems: "center",
+              })}
+            >
+              <AppSymbol name="arrow.up.left" size={15} color={theme.textTertiary} />
+              <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 13, fontWeight: "700", fontFamily: MONO_FONT }}>..</Text>
+            </Pressable>
+          ) : null}
+          {entries.map((entry, index) => (
+            <Pressable
+              key={entry.path}
+              onPress={() => onSelect(entry)}
+              style={({ pressed }) => ({
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderBottomWidth: index === entries.length - 1 ? 0 : StyleSheet.hairlineWidth,
+                borderBottomColor: theme.separator,
+                backgroundColor: pressed ? theme.bgInput : "transparent",
+                flexDirection: "row",
+                gap: 9,
+                alignItems: "center",
+              })}
+            >
+              <AppSymbol
+                name={entry.isDirectory ? "folder.fill" : "doc.text"}
+                size={15}
+                color={entry.isDirectory ? theme.accent : theme.textSecondary}
+              />
+              <Text style={{ flex: 1, color: theme.text, fontSize: 13, fontWeight: "600", fontFamily: MONO_FONT }} numberOfLines={1}>
+                {entry.name}{entry.isDirectory ? "/" : ""}
+              </Text>
+              {entry.isDirectory ? <AppSymbol name="chevron.right" size={12} color={theme.textTertiary} /> : null}
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
 function AssistantMessage({
   item,
   text,
@@ -2171,11 +2281,13 @@ function isTimelineBottomSpacer(item: TimelineListItem): item is TimelineBottomS
 function QueuedFollowUpList({
   items,
   theme,
+  canSteer,
   onSteer,
   onDiscard,
 }: {
   items: AgentTimelineItem[];
   theme: Theme;
+  canSteer: boolean;
   onSteer: (item: AgentTimelineItem) => void;
   onDiscard: (item: AgentTimelineItem) => void;
 }) {
@@ -2240,6 +2352,7 @@ function QueuedFollowUpList({
                   paddingHorizontal: 6,
                   paddingVertical: 3,
                   opacity: canInsert ? 1 : 0.45,
+                  display: canSteer ? "flex" : "none",
                 })}
               >
                 <AppSymbol name="arrow.turn.up.right" size={10} color={theme.accent} />
@@ -2349,18 +2462,21 @@ function UserMessageCard({
   text,
   theme,
   deliveryLabel,
+  onEdit,
 }: {
   item: AgentTimelineItem;
   text: string;
   theme: Theme;
   deliveryLabel: { text: string; pending: boolean } | null;
+  onEdit?: (text: string) => void;
 }) {
   const isSteer = item.metadata?.delivery === "steer";
+  const canEdit = Boolean(onEdit) && text.trim().length > 0 && !item.isStreaming;
   return (
+    <View style={{ alignSelf: "flex-end", maxWidth: "82%", gap: 4, alignItems: "flex-end" }}>
     <View
       style={{
-        alignSelf: "flex-end",
-        maxWidth: "78%",
+        maxWidth: "100%",
         minWidth: text.length < 10 ? 108 : undefined,
         borderRadius: 13,
         borderCurve: "continuous",
@@ -2397,6 +2513,28 @@ function UserMessageCard({
             {isSteer ? "已引导" : deliveryLabel.text}
           </Text>
         </View>
+      ) : null}
+    </View>
+      {canEdit ? (
+        <Pressable
+          onPress={() => onEdit!(text)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="编辑并重新发送"
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            borderRadius: 999,
+            paddingHorizontal: 8,
+            paddingVertical: 3,
+            backgroundColor: pressed ? theme.bgInput : "transparent",
+            opacity: pressed ? 0.72 : 1,
+          })}
+        >
+          <AppSymbol name="pencil" size={11} color={theme.textTertiary} />
+          <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "800" }}>编辑</Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -2544,11 +2682,13 @@ const TimelineItemView = memo(function TimelineItemView({
   theme,
   onPermission,
   onStructuredInput,
+  onEditMessage,
 }: {
   item: AgentTimelineItem;
   theme: Theme;
   onPermission: (requestId: string, outcome: "allow" | "deny" | "cancelled", optionId?: string) => void;
   onStructuredInput: (requestId: string, answers: Record<string, string[]>) => void;
+  onEditMessage?: (text: string) => void;
 }) {
   if (item.kind === "subagent_action" && item.subagent) {
     return (
@@ -2643,7 +2783,7 @@ const TimelineItemView = memo(function TimelineItemView({
     }
     const deliveryLabel = userMessageDeliveryLabel(item);
     return (
-      <UserMessageCard item={item} text={text} theme={theme} deliveryLabel={deliveryLabel} />
+      <UserMessageCard item={item} text={text} theme={theme} deliveryLabel={deliveryLabel} onEdit={onEditMessage} />
     );
   }
 
@@ -3180,6 +3320,9 @@ export function AgentConversationScreen({
   const [bottomComposerHeight, setBottomComposerHeight] = useState(0);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [text, setText] = useState("");
+  // Cursor position in the composer, so dictated text inserts where the caret
+  // is rather than always appending. Updated on every selection change.
+  const selectionRef = useRef(0);
   const [model, setModel] = useState<string | undefined>(conversation?.model);
   const [effort, setEffort] = useState<AgentReasoningEffort | undefined>(conversation?.reasoningEffort);
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode | undefined>(
@@ -3187,6 +3330,15 @@ export function AgentConversationScreen({
   );
   const [attachments, setAttachments] = useState<AgentContentBlock[]>([]);
   const [fileDrawerOpen, setFileDrawerOpen] = useState(false);
+  // Android rename modal (iOS uses the native Alert.prompt instead).
+  const [renameModalVisible, setRenameModalVisible] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  // @-file-mention palette state: entries fetched for the directory under the
+  // current @token, refetched only when that directory changes.
+  const [mentionEntries, setMentionEntries] = useState<AgentFileEntry[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionError, setMentionError] = useState<string | undefined>();
+  const [mentionFetchedDir, setMentionFetchedDir] = useState<string | null>(null);
   const capabilities = conversation ? workspace.capabilitiesBySessionId.get(conversation.sessionId) : undefined;
   const providerCapability = conversation ? providerCapabilityFor(conversation.provider, capabilities) : undefined;
   const providerSupportsImageInput = conversation?.provider === "claude" || conversation?.provider === "codex";
@@ -3220,6 +3372,15 @@ export function AgentConversationScreen({
     [conversation?.provider, providerCapability?.commands],
   );
   const commandPanelVisible = Boolean(commandToken && availableCommands.length > 0 && attachments.length === 0 && !running);
+  // @-file-mention: active when a trailing @token exists and the slash palette
+  // isn't (slash takes priority). Resolves the absolute dir to browse from cwd.
+  const mentionToken = useMemo(() => (commandToken ? null : trailingMentionToken(text)), [commandToken, text]);
+  const mentionTargetDir = useMemo(() => {
+    if (!mentionToken) return null;
+    const base = (conversation?.cwd || ".").replace(/\/+$/, "") || "/";
+    return mentionToken.dir ? `${base}/${mentionToken.dir}` : base;
+  }, [conversation?.cwd, mentionToken]);
+  const mentionPanelVisible = Boolean(mentionToken && !running);
   const currentCollaborationMode = (conversation?.collaborationMode ?? providerCapability?.currentMode ?? "default") as AgentCollaborationMode;
   const composerBottomOffset = Platform.OS === "ios" ? Math.max(0, keyboardInset - insets.bottom) : 0;
   const timelineBottomInset = Math.max(
@@ -3295,6 +3456,36 @@ export function AgentConversationScreen({
   useEffect(() => () => {
     if (conversationId) workspace.markRead(conversationId);
   }, [conversationId, workspace.markRead]);
+
+  // Fetch directory entries for the active @-mention token. Guarded against
+  // races (only the latest target's result is applied) and only refetches when
+  // the resolved directory changes, not on every keystroke within it.
+  useEffect(() => {
+    if (!mentionTargetDir || !conversation) {
+      setMentionLoading(false);
+      return;
+    }
+    if (mentionTargetDir === mentionFetchedDir) return;
+    let cancelled = false;
+    setMentionLoading(true);
+    setMentionError(undefined);
+    workspace.browseFiles(conversation.id, mentionTargetDir)
+      .then((result) => {
+        if (cancelled) return;
+        setMentionEntries(result.error ? [] : result.entries);
+        setMentionError(result.error);
+        setMentionFetchedDir(mentionTargetDir);
+      })
+      .catch(() => {
+        if (!cancelled) setMentionError("读取目录失败。");
+      })
+      .finally(() => {
+        if (!cancelled) setMentionLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation, mentionFetchedDir, mentionTargetDir, workspace]);
 
   useEffect(() => {
     if (effort && !effortOpts.some((option) => option.value === effort)) {
@@ -3455,7 +3646,11 @@ export function AgentConversationScreen({
     if (nearBottom) {
       setHasNewOutput(false);
     }
-  }, []);
+    // Scrolled near the top → page in older history (matches web's scroll-up).
+    if (contentOffset.y < 120 && contentSize.height > layoutMeasurement.height) {
+      workspace.loadOlderHistory(conversationId);
+    }
+  }, [conversationId, workspace]);
 
   const forceTimelineToBottom = useCallback((animated = true) => {
     const ref = timelineRef.current;
@@ -3525,6 +3720,12 @@ export function AgentConversationScreen({
           onStructuredInput={(requestId, answers) =>
             workspace.respondStructuredInput(conversationId, requestId, answers)
           }
+          onEditMessage={(value) => {
+            setText(value);
+            selectionRef.current = value.length;
+            requestAnimationFrame(() => composerInputRef.current?.focus());
+            Haptics.selectionAsync().catch(() => {});
+          }}
         />
       </View>
     );
@@ -3607,6 +3808,84 @@ export function AgentConversationScreen({
     scrollTimelineToBottom(true);
   }, [attachments, availableCommands, canSend, conversation, currentCollaborationMode, effort, effortOpts, model, permissionMode, permissionOpts, running, scrollTimelineToBottom, text, workspace]);
 
+  // Plan mode: once a planning turn finishes (plan mode on, idle, last item is
+  // the agent's), offer a one-tap "execute" that exits plan mode and proceeds.
+  const planReady = useMemo(() => {
+    if (currentCollaborationMode !== "plan") return false;
+    if (running) return false;
+    // Last visible item is the agent's (a finished planning turn), not a
+    // just-sent user message — mirrors the web console's execute-plan gate.
+    const last = visibleTimeline[visibleTimeline.length - 1];
+    return Boolean(last) && last.role !== "user";
+  }, [currentCollaborationMode, running, visibleTimeline]);
+
+  const handleExecutePlan = useCallback(() => {
+    if (!conversation) return;
+    workspace.sendPrompt(conversation.id, "请按上面的计划开始执行。", {
+      model,
+      reasoningEffort: effort,
+      permissionMode,
+      collaborationMode: "default",
+    });
+    scrollTimelineToBottom(true);
+  }, [conversation, effort, model, permissionMode, scrollTimelineToBottom, workspace]);
+
+  const renameConversation = useCallback(() => {
+    if (!conversation) return;
+    if (Platform.OS === "ios" && typeof Alert.prompt === "function") {
+      Alert.prompt(
+        "重命名对话",
+        undefined,
+        [
+          { text: "取消", style: "cancel" },
+          {
+            text: "保存",
+            onPress: (value?: string) => {
+              const title = (value ?? "").trim();
+              if (title) workspace.rename(conversation.id, title).catch(() => {});
+            },
+          },
+        ],
+        "plain-text",
+        conversation.title ?? "",
+      );
+      return;
+    }
+    // Android (and any platform without Alert.prompt): in-app modal.
+    setRenameDraft(conversation.title ?? "");
+    setRenameModalVisible(true);
+  }, [conversation, workspace]);
+
+  const submitRename = useCallback(() => {
+    const title = renameDraft.trim();
+    setRenameModalVisible(false);
+    if (title && conversation) {
+      workspace.rename(conversation.id, title).catch(() => {});
+    }
+  }, [conversation, renameDraft, workspace]);
+
+  const insertDictatedText = useCallback((dictated: string) => {
+    const insert = dictated.trim();
+    if (!insert) return;
+    setText((prev) => {
+      const pos = Math.min(Math.max(selectionRef.current, 0), prev.length);
+      const before = prev.slice(0, pos);
+      const after = prev.slice(pos);
+      const combined =
+        before +
+        (before && !before.endsWith(" ") ? " " : "") +
+        insert +
+        (after && !after.startsWith(" ") ? " " : "") +
+        after;
+      selectionRef.current = (
+        before + (before && !before.endsWith(" ") ? " " : "") + insert
+      ).length;
+      return combined;
+    });
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+  const dictation = useComposerDictation(insertDictatedText);
+
   const steerQueuedFollowUp = useCallback((item: AgentTimelineItem) => {
     if (!conversation) return;
     workspace.sendQueuedFollowUp(conversation.id, item.id, "steer");
@@ -3661,6 +3940,58 @@ export function AgentConversationScreen({
     if (!commandToken) return;
     setText((current) => `${current.slice(0, commandToken.start)}${current.slice(commandToken.end)}`.trimEnd());
   }, [commandToken]);
+
+  // Entries matching the current @token's filter, folders first. Only valid
+  // once the fetched directory matches the token's resolved target.
+  const mentionMatches = useMemo(() => {
+    if (!mentionToken || mentionFetchedDir !== mentionTargetDir) return [];
+    const filter = mentionToken.filter.toLowerCase();
+    return mentionEntries
+      .filter((entry) => entry.name.toLowerCase().includes(filter))
+      .sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, 50);
+  }, [mentionEntries, mentionFetchedDir, mentionTargetDir, mentionToken]);
+
+  // Insert the picked entry, replacing the trailing @token. Folders keep a
+  // trailing slash so the palette drills in; files terminate with a space.
+  const selectMention = useCallback((entry: AgentFileEntry) => {
+    if (!mentionToken) return;
+    const base = (conversation?.cwd || ".").replace(/\/+$/, "");
+    const rel = base && entry.path.startsWith(base)
+      ? entry.path.slice(base.length).replace(/^\/+/, "")
+      : entry.name;
+    setText((current) => {
+      const head = current.slice(0, mentionToken.start);
+      const next = `${head}@${rel}${entry.isDirectory ? "/" : " "}`;
+      selectionRef.current = next.length;
+      return next;
+    });
+    Haptics.selectionAsync().catch(() => {});
+  }, [conversation?.cwd, mentionToken]);
+
+  const closeMentionPanel = useCallback(() => {
+    if (!mentionToken) return;
+    setText((current) => `${current.slice(0, mentionToken.start)}${current.slice(mentionToken.end)}`);
+  }, [mentionToken]);
+
+  // Navigate the @-mention browser up one directory by dropping the last
+  // segment of the token's dir part. Bounded at the conversation cwd (empty
+  // dir → no-op), mirroring the web composer's cwd-relative mentions.
+  const navigateMentionUp = useCallback(() => {
+    if (!mentionToken || !mentionToken.dir) return;
+    const dir = mentionToken.dir;
+    const parent = dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "";
+    setText((current) => {
+      const head = current.slice(0, mentionToken.start);
+      const next = `${head}@${parent}${parent ? "/" : ""}`;
+      selectionRef.current = next.length;
+      return next;
+    });
+    Haptics.selectionAsync().catch(() => {});
+  }, [mentionToken]);
 
   const cancelRunningTurn = useCallback(() => {
     if (!conversation) return;
@@ -3887,11 +4218,15 @@ export function AgentConversationScreen({
           <MenuView
             actions={[
               { id: "refresh", title: "刷新快照", image: "arrow.clockwise" },
+              { id: "rename", title: "重命名", image: "pencil" },
               { id: "archive", title: conversation.archived ? "取消归档" : "归档", image: "archivebox" },
             ]}
             onPressAction={({ nativeEvent }) => {
               if (nativeEvent.event === "refresh") {
                 workspace.requestCapabilities(conversation.sessionId);
+              }
+              if (nativeEvent.event === "rename") {
+                renameConversation();
               }
               if (nativeEvent.event === "archive") {
                 workspace.archive(conversation.id, !conversation.archived).then(onBack).catch(() => {});
@@ -3920,6 +4255,14 @@ export function AgentConversationScreen({
           keyExtractor={(item) => item.id}
           renderItem={renderTimelineItem}
           ListEmptyComponent={timelineEmpty}
+          ListHeaderComponent={
+            visibleTimeline.length > 0 && workspace.getHistoryState(conversationId)?.loading ? (
+              <View style={{ paddingTop: 8, paddingBottom: 14, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 7 }}>
+                <ActivityIndicator size="small" color={theme.accent} />
+                <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "700" }}>加载更早的消息…</Text>
+              </View>
+            ) : null
+          }
           ItemSeparatorComponent={TimelineSeparator}
           contentContainerStyle={{
             flexGrow: 1,
@@ -4049,6 +4392,77 @@ export function AgentConversationScreen({
             theme={theme}
             onDismiss={(id) => workspace.dismissNotice(id)}
           />
+          {planReady ? (
+            <View
+              style={{
+                marginBottom: 6,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                borderRadius: 16,
+                borderCurve: "continuous",
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.accent,
+                backgroundColor: theme.accentLight,
+                paddingHorizontal: 14,
+                paddingVertical: 11,
+              }}
+            >
+              <AppSymbol name="checklist" size={15} color={theme.accent} />
+              <Text style={{ flex: 1, color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
+                计划已就绪。执行它，或在下方继续补充。
+              </Text>
+              <Pressable
+                onPress={handleExecutePlan}
+                hitSlop={6}
+                style={({ pressed }) => ({
+                  borderRadius: 999,
+                  paddingHorizontal: 14,
+                  paddingVertical: 7,
+                  backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+                })}
+              >
+                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>执行计划</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {dictation.pressing ? (
+            <View
+              style={{
+                marginBottom: 6,
+                borderRadius: 16,
+                borderCurve: "continuous",
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: dictation.inCancelZone ? theme.error : theme.separator,
+                backgroundColor: dictation.inCancelZone ? theme.errorLight : theme.bgCard,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                gap: 6,
+                shadowColor: "#000",
+                shadowOpacity: theme.mode === "dark" ? 0.26 : 0.10,
+                shadowRadius: 18,
+                shadowOffset: { width: 0, height: 8 },
+                elevation: 8,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.error }} />
+                <Text style={{ flex: 1, color: theme.text, fontSize: 15, lineHeight: 21 }} numberOfLines={3}>
+                  {dictation.liveText || "正在听…"}
+                </Text>
+              </View>
+              <Text
+                style={{
+                  textAlign: "center",
+                  fontSize: 12,
+                  fontWeight: dictation.inCancelZone ? "800" : "600",
+                  color: dictation.inCancelZone ? theme.error : theme.textTertiary,
+                }}
+              >
+                {dictation.inCancelZone ? "松开取消" : "↑ 上滑取消，松开插入"}
+              </Text>
+            </View>
+          ) : null}
           <View
             style={{
               borderRadius: 22,
@@ -4072,6 +4486,7 @@ export function AgentConversationScreen({
             <QueuedFollowUpList
               items={queuedFollowUps}
               theme={theme}
+              canSteer={canSteerRunningTurn}
               onSteer={steerQueuedFollowUp}
               onDiscard={discardQueuedFollowUp}
             />
@@ -4125,11 +4540,27 @@ export function AgentConversationScreen({
               onClose={closeSlashCommandPanel}
             />
           ) : null}
+          {mentionPanelVisible && mentionToken ? (
+            <MentionPanel
+              entries={mentionMatches}
+              loading={mentionLoading}
+              error={mentionError}
+              currentDir={mentionTargetDir ?? ""}
+              canNavigateUp={Boolean(mentionToken.dir)}
+              theme={theme}
+              onSelect={selectMention}
+              onNavigateUp={navigateMentionUp}
+              onClose={closeMentionPanel}
+            />
+          ) : null}
           <TextInput
             ref={composerInputRef}
             value={text}
             onChangeText={setText}
-            placeholder={canSteerRunningTurn ? "要求后续变更" : running ? "Agent 运行中，可先编辑草稿" : "给 Agent 发送消息"}
+            onSelectionChange={(event) => {
+              selectionRef.current = event.nativeEvent.selection.end;
+            }}
+            placeholder={canSteerRunningTurn ? "要求后续变更" : waitingPermission ? "Agent 运行中，可先编辑草稿" : turnRunning ? "发送将加入队列，结束后自动发送" : "给 Agent 发送消息"}
             placeholderTextColor={theme.textTertiary}
             multiline
             keyboardType="default"
@@ -4156,7 +4587,7 @@ export function AgentConversationScreen({
                 ? "Codex 正在工作，发送会加入队列；点队列里的引导可立即打断当前回复。"
                 : waitingPermission
                   ? "当前任务正在等待授权，请先处理授权请求或停止任务。"
-                  : "当前任务运行中，停止后再发送这条消息。"}
+                  : "Agent 正在工作，发送会加入队列，本回合结束后自动发送。"}
             </Text>
           ) : null}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 10 }}>
@@ -4247,20 +4678,41 @@ export function AgentConversationScreen({
                 </View>
               </MenuView>
             </View>
-            <View
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 15,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <AppSymbol name="mic" size={15} color={theme.textTertiary} />
-            </View>
+            {dictation.available ? (
+              <View
+                {...dictation.panHandlers}
+                style={{
+                  width: 34,
+                  height: 30,
+                  borderRadius: 15,
+                  borderCurve: "continuous",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: dictation.pressing
+                    ? dictation.inCancelZone
+                      ? theme.errorLight
+                      : theme.accent
+                    : "transparent",
+                }}
+              >
+                <AppSymbol
+                  name={dictation.pressing ? "mic.fill" : "mic"}
+                  size={15}
+                  color={
+                    dictation.pressing
+                      ? dictation.inCancelZone
+                        ? theme.error
+                        : "#fff"
+                      : theme.textTertiary
+                  }
+                />
+              </View>
+            ) : null}
             {running ? (
               <Pressable
                 onPress={cancelRunningTurn}
+                accessibilityRole="button"
+                accessibilityLabel="停止当前任务"
                 style={({ pressed }) => ({
                   width: 38,
                   height: 38,
@@ -4273,10 +4725,13 @@ export function AgentConversationScreen({
                 <AppSymbol name="stop.fill" size={14} color={theme.mode === "light" ? "#ffffff" : "#111111"} />
               </Pressable>
             ) : null}
-            {(!running || canSteerRunningTurn) ? (
+            {(!waitingPermission) ? (
               <Pressable
                 onPress={send}
                 disabled={!canSend}
+                accessibilityRole="button"
+                accessibilityLabel={turnRunning ? "加入队列发送" : "发送消息"}
+                accessibilityState={{ disabled: !canSend }}
                 style={({ pressed }) => ({
                   width: 38,
                   height: 38,
@@ -4304,6 +4759,78 @@ export function AgentConversationScreen({
         bottomInset={insets.bottom}
         onClose={() => setFileDrawerOpen(false)}
       />
+      <Modal
+        visible={renameModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenameModalVisible(false)}
+      >
+        <Pressable
+          onPress={() => setRenameModalVisible(false)}
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center", paddingHorizontal: 28 }}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{
+              width: "100%",
+              maxWidth: 360,
+              borderRadius: 18,
+              borderCurve: "continuous",
+              backgroundColor: theme.bgCard,
+              padding: 18,
+              gap: 14,
+            }}
+          >
+            <Text style={{ color: theme.text, fontSize: 16, fontWeight: "800" }}>重命名对话</Text>
+            <TextInput
+              value={renameDraft}
+              onChangeText={setRenameDraft}
+              autoFocus
+              placeholder="对话标题"
+              placeholderTextColor={theme.textTertiary}
+              returnKeyType="done"
+              onSubmitEditing={submitRename}
+              style={{
+                minHeight: 44,
+                borderRadius: 11,
+                borderCurve: "continuous",
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.separator,
+                backgroundColor: theme.bgInput,
+                paddingHorizontal: 12,
+                color: theme.text,
+                fontSize: 15,
+              }}
+            />
+            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
+              <Pressable
+                onPress={() => setRenameModalVisible(false)}
+                style={({ pressed }) => ({
+                  paddingHorizontal: 16,
+                  paddingVertical: 9,
+                  borderRadius: 10,
+                  backgroundColor: pressed ? theme.bgInput : "transparent",
+                })}
+              >
+                <Text style={{ color: theme.textSecondary, fontSize: 14, fontWeight: "700" }}>取消</Text>
+              </Pressable>
+              <Pressable
+                onPress={submitRename}
+                disabled={!renameDraft.trim()}
+                style={({ pressed }) => ({
+                  paddingHorizontal: 16,
+                  paddingVertical: 9,
+                  borderRadius: 10,
+                  backgroundColor: pressed ? theme.accentSecondary : theme.accent,
+                  opacity: renameDraft.trim() ? 1 : 0.45,
+                })}
+              >
+                <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>保存</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
