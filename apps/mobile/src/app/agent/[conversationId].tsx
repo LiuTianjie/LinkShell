@@ -1,15 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
+import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAppContext } from "../../contexts/AppContext";
 // Agent console is now the real web-dashboard console embedded in a WebView
 // (true 1:1 parity). The old native screen (../../features/agent) is kept
 // orphaned for one-line rollback until this is device-verified.
 import { AgentWebScreen as AgentConversationScreen } from "../../features/agent-web/AgentWebScreen";
+import { useTheme } from "../../theme";
 
 export default function AgentConversationRoute() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const router = useRouter();
   const ctx = useAppContext();
+  const { theme } = useTheme();
   const resumedConversationRef = useRef<string | null>(null);
   const restoreRunRef = useRef(0);
   const mountedRef = useRef(true);
@@ -68,12 +71,16 @@ export default function AgentConversationRoute() {
       });
   }, [conversationId, isHydrated]);
 
+  const bg = theme.mode === "dark" ? "#0b0d0f" : "#ffffff";
+
   return (
-    <AgentConversationScreen
-      conversationId={conversationId ?? ""}
-      workspace={ctx.agentWorkspace}
-      isRestoring={restoring}
-      onBack={() => router.back()}
-    />
+    <View style={{ flex: 1, backgroundColor: bg }}>
+      <AgentConversationScreen
+        conversationId={conversationId ?? ""}
+        workspace={ctx.agentWorkspace}
+        isRestoring={restoring}
+        onBack={() => router.back()}
+      />
+    </View>
   );
 }

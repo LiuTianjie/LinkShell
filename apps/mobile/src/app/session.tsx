@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { View } from "react-native";
 import { useAppContext } from "../contexts/AppContext";
 import { SessionScreen } from "../screens/SessionScreen";
 import { FolderPickerModal } from "../components/FolderPickerModal";
@@ -18,7 +19,7 @@ export default function SessionRoute() {
   if (!activeSession) return null;
 
   return (
-    <>
+    <View style={{ flex: 1, backgroundColor: theme.bgTerminal }}>
       <SessionScreen
         sessionId={activeSession.sessionId}
         status={activeSession.status}
@@ -75,6 +76,6 @@ export default function SessionRoute() {
         onClose={() => ctx.setFolderPickerVisible(false)}
         theme={theme}
       />
-    </>
+    </View>
   );
 }
