@@ -257,7 +257,13 @@ export function AgentWebScreen({
     return () => sub.remove();
   }, [onBack]);
 
-  const containerBg = pageThemeColor || theme.bg;
+  // The native frame (safe-area insets + pre-paint background) must match the
+  // embedded web app's canvas, NOT the mobile theme.bg (#131314), or the notch
+  // / home-indicator strips look grayer than the web content. These mirror the
+  // web's --c-canvas tokens (dark: 11 13 15, light: #fff). Once the page paints,
+  // pageThemeColor (from the in-page extractor) takes over.
+  const webCanvas = resolvedTheme === "dark" ? "#0b0d0f" : "#ffffff";
+  const containerBg = pageThemeColor || webCanvas;
 
   // No usable host session (not hydrated yet, removed, or none connected).
   if (tokenState.status === "missing-session") {
