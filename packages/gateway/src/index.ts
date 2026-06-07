@@ -774,7 +774,13 @@ wss.on(
     }
 
     // Ping/pong for liveness — terminate connections that stop responding
-    // to pings (dead/half-open sockets) instead of leaking them.
+    // (dead/half-open sockets) instead of leaking them. Liveness is proven by
+    // EITHER a WS pong OR any inbound message: React Native's WebSocket does
+    // not reliably auto-reply to server ping control frames, so a perfectly
+    // healthy native client (terminal) would otherwise be terminated every
+    // ~40s, silently dropping its keystrokes into the reconnect queue. Active
+    // clients send a heartbeat every 15s (< PING_INTERVAL), so they always
+    // refresh isAlive; only a genuinely silent socket gets reaped.
     const liveSocket = socket as WebSocket & { isAlive?: boolean };
     liveSocket.isAlive = true;
     socket.on("pong", () => {
@@ -791,6 +797,8 @@ wss.on(
     }, PING_INTERVAL);
 
     socket.on("message", (data: WebSocket.RawData) => {
+      // Any inbound traffic counts as proof of life (see ping/pong note above).
+      liveSocket.isAlive = true;
       try {
         handleSocketMessage(
           socket,
