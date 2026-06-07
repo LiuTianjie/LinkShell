@@ -17,8 +17,12 @@ import { loadSession, type AuthSession } from "../../lib/supabase";
 import type { AgentWorkspaceHandle } from "../../hooks/useAgentWorkspace";
 
 export interface AgentWebScreenProps {
-  conversationId: string;
-  workspace: AgentWorkspaceHandle;
+  /** Route / deep-link entry: resolve the host session from a conversation record. */
+  conversationId?: string;
+  workspace?: AgentWorkspaceHandle;
+  /** Tab entry: drive directly from a connected host session (no preselected conversation). */
+  hostGatewayUrl?: string;
+  hostSessionId?: string;
   isRestoring?: boolean;
   onBack: () => void;
 }
@@ -26,7 +30,7 @@ export interface AgentWebScreenProps {
 type TokenState =
   | { status: "loading" }
   | { status: "ready"; token: string | null; session: AuthSession | null }
-  | { status: "missing-conversation" };
+  | { status: "missing-session" };
 
 interface WebError {
   message: string;
@@ -46,6 +50,8 @@ interface WebError {
 export function AgentWebScreen({
   conversationId,
   workspace,
+  hostGatewayUrl,
+  hostSessionId,
   isRestoring,
   onBack,
 }: AgentWebScreenProps) {
@@ -60,20 +66,23 @@ export function AgentWebScreen({
   const [webViewKey, setWebViewKey] = useState(0);
   const canGoBackRef = useRef(false);
 
-  const conversation = workspace.getConversation(conversationId);
-  const serverUrl = conversation?.serverUrl ?? null;
-  const sessionId = conversation?.sessionId ?? null;
+  // Resolve the host session two ways: a directly-supplied host (tab entry) wins;
+  // otherwise fall back to the conversation record (deep-link / route entry).
+  const conversation = conversationId ? workspace?.getConversation(conversationId) : undefined;
+  const serverUrl = hostGatewayUrl ?? conversation?.serverUrl ?? null;
+  const sessionId = hostSessionId ?? conversation?.sessionId ?? null;
   const resolvedTheme = theme.mode; // "dark" | "light"
 
-  // Resolve credentials once (both SecureStore-backed, async). Re-runs only if
-  // the conversation identity changes. We hand the WebView BOTH a device token
-  // (TOFU / paired-host path) AND the Supabase session (so the embedded web app
-  // boots genuinely logged-in — required for Pro users whose sessions are owned
-  // by userId via /sessions/mine and who never paired a device token).
+  // Resolve credentials once (both SecureStore-backed, async). Re-runs only when
+  // the resolved host (serverUrl/sessionId STRINGS, not the conversation object,
+  // whose identity churns on every store notify) changes. We hand the WebView
+  // BOTH a device token (TOFU / paired-host path) AND the Supabase session (so
+  // the embedded web app boots genuinely logged-in — required for Pro users
+  // whose sessions are owned by userId via /sessions/mine and never paired).
   useEffect(() => {
     let cancelled = false;
-    if (!conversation || !serverUrl || !sessionId) {
-      setTokenState({ status: "missing-conversation" });
+    if (!serverUrl || !sessionId) {
+      setTokenState({ status: "missing-session" });
       return;
     }
     setTokenState({ status: "loading" });
@@ -90,7 +99,7 @@ export function AgentWebScreen({
     return () => {
       cancelled = true;
     };
-  }, [conversation, serverUrl, sessionId]);
+  }, [serverUrl, sessionId]);
 
   const token = tokenState.status === "ready" ? tokenState.token : null;
   const authSession = tokenState.status === "ready" ? tokenState.session : null;
@@ -250,8 +259,8 @@ export function AgentWebScreen({
 
   const containerBg = pageThemeColor || theme.bg;
 
-  // Conversation gone (not yet hydrated / removed) — render a minimal message.
-  if (tokenState.status === "missing-conversation") {
+  // No usable host session (not hydrated yet, removed, or none connected).
+  if (tokenState.status === "missing-session") {
     return (
       <View
         style={[
@@ -263,9 +272,9 @@ export function AgentWebScreen({
           <ActivityIndicator size="small" color={theme.accent} />
         ) : (
           <>
-            <Text style={[styles.errorTitle, { color: theme.text }]}>找不到会话</Text>
+            <Text style={[styles.errorTitle, { color: theme.text }]}>没有可用的会话</Text>
             <Text style={[styles.errorBody, { color: theme.textSecondary }]}>
-              这个对话可能已被移除，请返回重新打开。
+              请先连接一台主机，连接后即可在这里使用 Agent。
             </Text>
             <Pressable
               onPress={onBack}
