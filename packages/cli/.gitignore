@@ -1,0 +1,4 @@
+# Generated at build time by scripts/copy-web.mjs (copied from
+# apps/web-dashboard/dist). Shipped in the npm tarball via package.json "files",
+# but never committed to git.
+/web

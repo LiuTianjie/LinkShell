@@ -11,6 +11,7 @@
     "dist",
     "src",
     "scripts",
+    "web",
     "README.md",
     "LICENSE"
   ],
@@ -30,7 +31,7 @@
     "url": "git+https://github.com/LiuTianjie/LinkShell.git"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-web.mjs",
     "postinstall": "node scripts/postinstall.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/index.ts",

@@ -12,9 +12,38 @@ import { getLanIp } from "./utils/lan-ip.js";
 import { shouldKeepAwake } from "./utils/keep-awake.js";
 
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { existsSync, statSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../../package.json") as { version: string };
+
+// Locate the bundled web-dashboard SPA and point the (embedded) gateway's
+// static server at it via WEB_DIST — BEFORE any gateway module is imported,
+// because static-web.ts freezes WEB_DIST at module-load time. This is what lets
+// the in-app WebView render for LAN / self-hosted users whose CLI runs its own
+// embedded gateway (the cloud image bundles web separately). A user-set
+// WEB_DIST always wins. Probed across published-package, monorepo-compiled, and
+// dev (tsx) layouts; the first candidate containing index.html is used.
+if (!process.env.WEB_DIST) {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(here, "../../../web"), // published npm package root, and packages/cli/web (compiled)
+    resolve(here, "../../../apps/web-dashboard/dist"), // dev: tsx src/index.ts in the monorepo
+  ];
+  for (const dir of candidates) {
+    try {
+      if (existsSync(resolve(dir, "index.html")) && statSync(dir).isDirectory()) {
+        process.env.WEB_DIST = dir;
+        break;
+      }
+    } catch {
+      // ignore and try the next candidate
+    }
+  }
+}
+
 
 const config = loadConfig();
 const program = new Command();

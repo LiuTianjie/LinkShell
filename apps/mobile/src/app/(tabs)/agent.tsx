@@ -1,11 +1,7 @@
-import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import React, { useState } from "react";
 import { useAppContext } from "../../contexts/AppContext";
+import { SessionListScreen } from "../../screens/SessionListScreen";
 import { AgentWebScreen } from "../../features/agent-web/AgentWebScreen";
-import { AppSymbol } from "../../components/AppSymbol";
-import { useTheme } from "../../theme";
 
 function isUsableStatus(status: string): boolean {
   return (
@@ -17,105 +13,49 @@ function isUsableStatus(status: string): boolean {
 }
 
 /**
- * The Agent tab now opens the real web console directly inside a WebView (1:1
- * with the web app) — no native list page in between. Conversation switching /
- * creation happens inside the web console's own drawer. The web console's
- * "← back" affordance posts requestClose → we switch to the Home tab.
+ * The Agent tab opens the real web console (1:1 with the web app) inside a
+ * WebView. Because a user's hosts can live on DIFFERENT gateways at once (a LAN
+ * embedded gateway, a self-hosted gateway, the Pro official gateway) and a
+ * single WebView is same-origin to ONE gateway, we keep a thin host-selection
+ * layer in front: `SessionListScreen` already aggregates hosts across every
+ * gateway (per-server `/sessions` + Pro `/sessions/mine`). Picking a host opens
+ * the console pointed at that host's gateway; the web console's own drawer then
+ * handles conversation switching/creation.
  *
- * When no host session is connected there's nothing to show, so we render a
- * native prompt to connect instead of a blank/login WebView.
+ * If a host is already active we skip straight into its console (the common
+ * single-host case — honors "tap Agent → straight in"); otherwise we show the
+ * picker. The console's back affordance returns to the picker (which is exactly
+ * what its "← 会话" label means), so multi-gateway users can switch hosts.
  */
 export default function AgentTab() {
   const ctx = useAppContext();
-  const router = useRouter();
-  const { theme } = useTheme();
-  const insets = useSafeAreaInsets();
+  const active = ctx.activeSession;
+  const [host, setHost] = useState<{ gatewayUrl: string; sessionId: string } | null>(
+    () =>
+      active && isUsableStatus(active.status)
+        ? { gatewayUrl: active.gatewayUrl, sessionId: active.sessionId }
+        : null,
+  );
 
-  const sessions = [...ctx.manager.sessions.values()];
-  const host =
-    (ctx.activeSession && isUsableStatus(ctx.activeSession.status)
-      ? ctx.activeSession
-      : undefined) ??
-    sessions.find((s) => isUsableStatus(s.status)) ??
-    sessions[0];
-
-  const goHome = () => router.navigate("/");
-
-  if (!host) {
+  if (host) {
     return (
-      <View
-        style={[
-          styles.center,
-          { backgroundColor: theme.bg, paddingTop: insets.top, paddingBottom: insets.bottom },
-        ]}
-      >
-        <View
-          style={[styles.iconWrap, { backgroundColor: theme.accentLight }]}
-        >
-          <AppSymbol name="sparkles" size={26} color={theme.accent} />
-        </View>
-        <Text style={[styles.title, { color: theme.text }]}>还没有可用的主机</Text>
-        <Text style={[styles.body, { color: theme.textSecondary }]}>
-          连接一台运行 linkshell 的主机后，就能在这里直接使用 Agent。
-        </Text>
-        <Pressable
-          onPress={() => ctx.setConnectionSheetVisible(true)}
-          style={({ pressed }) => [
-            styles.btn,
-            { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1 },
-          ]}
-        >
-          <Text style={styles.btnText}>连接主机</Text>
-        </Pressable>
-      </View>
+      <AgentWebScreen
+        hostGatewayUrl={host.gatewayUrl}
+        hostSessionId={host.sessionId}
+        onBack={() => setHost(null)}
+      />
     );
   }
 
   return (
-    <AgentWebScreen
-      hostGatewayUrl={host.gatewayUrl}
-      hostSessionId={host.sessionId}
-      onBack={goHome}
+    <SessionListScreen
+      gatewayBaseUrl={ctx.gatewayBaseUrl}
+      onSelectSession={(sessionId, serverUrl) =>
+        setHost({ gatewayUrl: serverUrl ?? ctx.gatewayBaseUrl, sessionId })
+      }
+      onSessionRemoved={ctx.handleRemoveSession}
+      refreshKey={ctx.sessionRefreshKey}
+      deviceToken={ctx.manager.deviceToken}
     />
   );
 }
-
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    paddingHorizontal: 36,
-  },
-  iconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 2,
-  },
-  title: {
-    fontSize: 17,
-    fontWeight: "700",
-  },
-  body: {
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: "center",
-  },
-  btn: {
-    marginTop: 6,
-    paddingHorizontal: 22,
-    height: 40,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  btnText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-});

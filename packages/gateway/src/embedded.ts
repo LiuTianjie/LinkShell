@@ -25,6 +25,7 @@ import {
   handleTunnelWsUpgrade,
   cleanupSessionTunnels,
 } from "./tunnel.js";
+import { serveWeb, serveWebAsset, webEnabled, webDistPath } from "./static-web.js";
 
 export interface EmbeddedGatewayOptions {
   port?: number;
@@ -252,6 +253,11 @@ export function startEmbeddedGateway(
         return;
       }
 
+      // Serve the gateway's OWN built web assets (no SPA fallback) before the
+      // tunnel cookie fallback, so a real asset like /assets/index-xxx.js is
+      // served locally instead of being proxied via a stale tunnel cookie.
+      if (await serveWebAsset(req, res)) return;
+
       // Tunnel fallback: cookie-based routing for sub-resources (e.g. /_next/static/...)
       const tunnelCookie = parseTunnelCookie(req);
       if (tunnelCookie && shouldUseTunnelCookieFallback(req, url.pathname, (pathname) =>
@@ -271,6 +277,11 @@ export function startEmbeddedGateway(
         await handleTunnelRequest(req, res, sessionManager, tokenManager, fallbackParsed, url, tunnelCookie.token);
         return;
       }
+
+      // Web SPA: last GET fallback, after every API route, so it never shadows
+      // them. Serves index.html for "/" and client-side routes; a no-op (false)
+      // when no web dist is bundled (e.g. an API-only embedded gateway).
+      if (await serveWeb(req, res)) return;
 
       json(res, 404, { error: "not_found" });
     } catch (err) {
@@ -479,6 +490,14 @@ export function startEmbeddedGateway(
       const actualPort =
         typeof addr === "object" && addr ? addr.port : targetPort;
       log("info", `embedded gateway on port ${actualPort}`);
+      // Surface whether the bundled web SPA was found — the in-app WebView loads
+      // this gateway's "/", so a missing dist means a blank screen. Makes the
+      // LAN/self-hosted "WebView is blank" failure mode diagnosable from logs.
+      if (webEnabled()) {
+        log("info", `web UI served from ${webDistPath()}`);
+      } else {
+        log("warn", `web UI not bundled (WEB_DIST=${webDistPath()} has no index.html) — in-app agent console will be blank`);
+      }
       resolve({
         port: actualPort,
         httpUrl: `http://127.0.0.1:${actualPort}`,
