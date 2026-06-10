@@ -258,6 +258,23 @@ linkshell stop      # 停止所有后台进程
 
 App 断开后重新连接不影响后台进程，扫码或输入配对码即可恢复。
 
+### Web 控制台（浏览器访问）
+
+除了手机 App，**任何 Gateway 都会在自己的地址上同源提供一个网页版控制台**——和手机端是同一个 Agent + 终端界面。CLI 自带这个网页（内置网关也有），无需单独部署。
+
+直接用浏览器打开 Gateway 地址即可：
+
+- **局域网**：`linkshell start` 后打开 CLI 显示的局域网地址，如 `http://192.168.1.10:8787`
+- **自托管网关**：打开你部署的域名，如 `https://gateway.example.com`
+- **官方网关（Pro）**：打开官方网关地址
+
+打开后默认连接「提供这个页面的网关」（web 跟随 gateway）。你会看到该网关下的会话列表，点进任意会话即可进入 Agent 控制台或终端。
+
+登录是**可选**的，不是访问门槛：
+
+- 局域网 / 自托管：无需登录，凭设备信任（首次连接 TOFU）即可使用
+- Pro 用户：右上角登录后，无需扫码即可看到归属你账号的所有官方网关会话（`/sessions/mine`）
+
 ## 本地开发
 
 ```bash
@@ -285,7 +302,7 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 │       └── Dockerfile
 ├── apps/
 │   ├── mobile/                # Expo App（xterm.js WebView、Agent Workspace、桌面/浏览器标签）
-│   ├── web-dashboard/         # Web 管理面板（Vite + React + Tailwind、登录、订阅、设备管理）
+│   ├── web-dashboard/         # 浏览器控制台（Vite + React + Tailwind）：Agent + 终端、会话列表、登录、订阅——由每个网关同源提供
 │   └── web-debug/             # Web 调试端（Vite + xterm.js + 调试面板）
 ├── docs/
 │   ├── site/                  # 宣传 Landing Page + 安装脚本

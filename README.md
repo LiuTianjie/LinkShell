@@ -258,6 +258,23 @@ In the app:
 
 Reconnecting after disconnection does not affect background processes — just scan or enter the pairing code to resume.
 
+### Web Console (Browser)
+
+Besides the phone app, **every gateway serves a web console same-origin at its own address** — the same Agent + terminal interface as mobile. The CLI ships this web bundle (the built-in gateway has it too), so there's nothing extra to deploy.
+
+Just open the gateway URL in a browser:
+
+- **LAN**: open the LAN address printed by `linkshell start`, e.g. `http://192.168.1.10:8787`
+- **Self-hosted gateway**: open your deployed domain, e.g. `https://gateway.example.com`
+- **Official gateway (Pro)**: open the official gateway URL
+
+The page connects to whichever gateway served it ("web follows the gateway"). You'll see that gateway's session list; click any session to open the Agent console or terminal.
+
+Login is **optional**, not a gate:
+
+- LAN / self-hosted: no login needed — device trust (TOFU on first connect) is enough
+- Pro: sign in (top-right) to see every session owned by your account across official gateways (`/sessions/mine`) without scanning a code
+
 ## Local Development
 
 ```bash
@@ -285,7 +302,7 @@ pnpm --filter linkshell-cli dev start --provider custom --command bash
 │       └── Dockerfile
 ├── apps/
 │   ├── mobile/                # Expo App (xterm.js WebView, Agent Workspace, desktop/browser tabs)
-│   ├── web-dashboard/         # Web dashboard (Vite + React + Tailwind, login, subscription, devices)
+│   ├── web-dashboard/         # Browser console (Vite + React + Tailwind): Agent + terminal, session list, login, subscription — served same-origin by every gateway
 │   └── web-debug/             # Web debug client (Vite + xterm.js + debug panel)
 ├── docs/
 │   ├── site/                  # Landing page + install script

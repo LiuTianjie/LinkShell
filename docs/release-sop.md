@@ -46,6 +46,9 @@ pnpm build
 > 这个仓库 workspace 里的内部依赖写的是 `workspace:*`（见 `packages/cli/package.json`、`packages/gateway/package.json`）。
 > `pnpm publish` 在打 tarball 时会把 `workspace:*` 重写成具体版本号；`npm publish` 不会，发出去的包到了用户机器上 `npm install` 会直接报 `EUNSUPPORTEDPROTOCOL "workspace:"`，整个 `linkshell upgrade` 链路就坏了。这种情况发生过一次（v0.4.0），当场只能 deprecate + bump 0.4.1 抢救。
 
+> 📦 **CLI 会把 web 控制台打进 tarball（自动）**。`packages/cli` 的 `prepack` 钩子在 `pnpm pack`/`pnpm publish` 时会先构建 `@linkshell/web-dashboard`（及其依赖 protocol），再跑 CLI 自身 build（`tsc` + `copy-web.mjs` 把 `web-dashboard/dist` 拷进 `packages/cli/web`）。所以**发 CLI 前不需要手动构建 web**，发出去的包里 `web/` 一定是新鲜的。内置/局域网/自托管网关靠这份 `web/` 同源伺服 web 控制台（云端 gateway 的 Docker 镜像则在 Dockerfile 里单独构建 web，是另一条线）。
+> ⚠️ 别用 `npm publish`/`npm pack`——除了上面的 `workspace:` 问题，npm 不会触发 pnpm 的 `prepack` 工作区构建逻辑，`web/` 可能是旧的或空的。
+
 ```bash
 # 发布 protocol（如果有改动）
 cd packages/shared-protocol
@@ -72,6 +75,11 @@ cd /tmp && rm -rf ls-publish-check && mkdir ls-publish-check && cd ls-publish-ch
 npm pack linkshell-cli@$VERSION
 tar -xzf linkshell-cli-$VERSION.tgz
 grep -n "workspace:" package/package.json && echo "❌ workspace: leaked, DO NOT release; deprecate this version" || echo "✅ deps look clean"
+
+# CLI 还要确认 web 控制台真的进了包且不是空壳（prepack 应已构建好）
+test -f package/web/index.html && ls package/web/assets/*.js >/dev/null 2>&1 \
+  && echo "✅ web console bundled (web/index.html + assets present)" \
+  || echo "❌ web/ missing or has no built assets — embedded-gateway console will be blank; rebuild & republish"
 
 npm pack @linkshell/gateway@$VERSION
 tar -xzf linkshell-gateway-$VERSION.tgz
@@ -230,6 +238,7 @@ linkshell start --agent-ui --provider custom --command bash
 - [ ] `pnpm build` 成功
 - [ ] **使用 `pnpm publish`（不是 `npm publish`）发布 npm 包**
 - [ ] 抽检 tarball 里没有残留的 `workspace:` 字面量（见 §4.1）
+- [ ] 抽检 CLI tarball 里 `web/index.html` + `web/assets/*.js` 存在（web 控制台已打包，见 §4.1）
 - [ ] Docker tag 已推送（CI 自动构建）
 - [ ] Homebrew formula 已更新 sha256
 - [ ] GitHub Release 已创建

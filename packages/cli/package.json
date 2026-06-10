@@ -32,6 +32,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-web.mjs",
+    "prepack": "pnpm --filter \"...@linkshell/web-dashboard\" build && pnpm run build",
     "postinstall": "node scripts/postinstall.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/index.ts",

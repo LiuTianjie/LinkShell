@@ -1365,9 +1365,22 @@
         </div>
       </div>
 
+      <!-- Web Console -->
+      <div style="margin-bottom:64px">
+        <h3><span class="tm">07</span> <span data-i18n="docsWebTitle">Web 控制台</span></h3>
+        <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsWebDesc">除了手机 App，任何 Gateway 都会在自己的地址上同源提供网页版控制台——和手机端是同一个 Agent + 终端界面。CLI 自带（内置网关也有），无需单独部署。</p>
+        <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmDocsWeb"># 浏览器直接打开网关地址</span>
+<span class="to">http://192.168.1.10:8787</span>
+<span class="to">https://gateway.example.com</span>
+        </div>
+        <div class="li g" data-i18n="docsWeb1">Web 跟随 Gateway — 打开哪个网关的地址就连接哪个网关，自动同源</div>
+        <div class="li g" data-i18n="docsWeb2">登录可选 — 局域网/自托管凭设备信任直接用；Pro 登录后免扫码看到账号下所有官方网关会话</div>
+        <div class="li g" data-i18n="docsWeb3">与手机端一致 — 同一套 Agent 控制台与终端界面，会话列表点进即用</div>
+      </div>
+
       <!-- FAQ -->
       <div>
-        <h3><span class="tm">07</span> <span data-i18n="docsFaqTitle">常见问题</span></h3>
+        <h3><span class="tm">08</span> <span data-i18n="docsFaqTitle">常见问题</span></h3>
 
         <div style="margin-bottom:24px">
           <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq1Q">Q: 需要公网服务器吗？</p>
@@ -1685,6 +1698,12 @@
         heroFreeGateway: "🎉 限时免费网关开放中：",
         heroFreeGatewayCmd: "linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws",
         docsProtocolTitle: "协议与可靠性",
+        docsWebTitle: "Web 控制台",
+        docsWebDesc: "除了手机 App，任何 Gateway 都会在自己的地址上同源提供网页版控制台——和手机端是同一个 Agent + 终端界面。CLI 自带（内置网关也有），无需单独部署。",
+        tmDocsWeb: "# 浏览器直接打开网关地址",
+        docsWeb1: "Web 跟随 Gateway — 打开哪个网关的地址就连接哪个网关，自动同源",
+        docsWeb2: "登录可选 — 局域网/自托管凭设备信任直接用；Pro 登录后免扫码看到账号下所有官方网关会话",
+        docsWeb3: "与手机端一致 — 同一套 Agent 控制台与终端界面，会话列表点进即用",
         docsProtoMsgTypes: "消息类型 (Zod)",
         docsProtoAck: "双层缓冲确认",
         docsProtoScrollback: "回滚缓冲区",
@@ -1907,6 +1926,12 @@
         heroFreeGateway: "🎉 Free gateway available now:",
         heroFreeGatewayCmd: "linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws",
         docsProtocolTitle: "Protocol & Reliability",
+        docsWebTitle: "Web Console",
+        docsWebDesc: "Besides the phone app, every gateway serves a web console same-origin at its own address — the same Agent + terminal interface as mobile. The CLI ships it (the built-in gateway too), so there's nothing extra to deploy.",
+        tmDocsWeb: "# Just open the gateway URL in a browser",
+        docsWeb1: "Web follows the gateway — the page connects to whichever gateway served it, same-origin",
+        docsWeb2: "Login optional — LAN/self-hosted works on device trust; Pro sign-in shows all your official-gateway sessions without scanning a code",
+        docsWeb3: "Same as mobile — identical Agent console and terminal; click any session in the list to open it",
         docsProtoMsgTypes: "Message Types (Zod)",
         docsProtoAck: "Dual-layer ACK",
         docsProtoScrollback: "Scrollback Buffer",
