@@ -129,23 +129,37 @@ npm 发布后，运行脚本自动更新 tap：
 
 ## 7. 移动端发版
 
-### iOS
+### 推荐：一键发版脚本（走 CI）
 
 ```bash
-cd apps/mobile
-pnpm prod:ios
+# 自动建议下一个 patch 版本，确认后打 tag 并推送
+./scripts/release-mobile.sh
+
+# 或指定版本
+./scripts/release-mobile.sh 1.1.5
 ```
 
-脚本会自动 bump iOS build number、prebuild、archive，并上传到 App Store Connect。若 App Store Connect 提示当前 train 已关闭，需要先提高 `expo.version`，再重新构建上传。
+脚本只做：校验版本号、预检（分支/working tree/tag 冲突/typecheck）、打 annotated tag `vX.Y.Z`、推送、显示触发的 CI run。
 
-### Android
+推送 `vX.Y.Z` 会同时触发两个 self-hosted macOS workflow：
+- `.github/workflows/ios-build.yml` → archive 并上传 TestFlight
+- `.github/workflows/android-build.yml` → 构建 AAB + APK，并自动创建 GitHub Release `LinkShell X.Y.Z`
+
+**tag 是唯一真相源**：CI 在自己的 checkout 里从 tag 解析版本、改写 `app.json`（version + `ios.buildNumber` + `android.versionCode` = `MAJOR*10000+MINOR*100+PATCH`）、创建 Release。所以本地 `app.json` 的版本号、未提交的改动都不进构建（tag 指向最后一个 commit）。
+
+> **Web 不打进 app**：移动端 agent console 是薄壳 WebView，直接加载 gateway 同源伺服的 `apps/web-dashboard/dist`（见 `AgentWebScreen.tsx`、`packages/gateway/Dockerfile`）。web 跟随 gateway 的 Docker 镜像发布，app 构建不涉及 web。
+
+### 本地手动构建（不走 CI / 应急）
 
 ```bash
-cd apps/mobile
-pnpm prod:android:apk
+# iOS：bump build number → prebuild → archive → 上传 App Store Connect
+cd apps/mobile && pnpm prod:ios
+
+# Android：出 APK 用于 adb 直装
+cd apps/mobile && pnpm prod:android:apk
 ```
 
-将 APK 上传到 GitHub Releases。
+若 App Store Connect 提示当前 train 已关闭，需要先提高 `expo.version`，再重新构建上传。
 
 ## 8. 提交 & 打 Tag
 
