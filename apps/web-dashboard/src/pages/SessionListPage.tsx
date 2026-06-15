@@ -8,6 +8,36 @@ import { loadKnownSessions, rememberSessions, forgetSession, markAllOffline } fr
 import { BrandLogo, IconClose, IconChevronRight, IconPlus, IconRefresh, ProviderIcon } from "../components/icons";
 import type { SessionSummary } from "../lib/types";
 
+function agentStatusLabel(status: SessionSummary["agentStatus"]): string | null {
+  switch (status) {
+    case "running":
+      return "运行中";
+    case "waiting_permission":
+      return "等待授权";
+    case "error":
+      return "异常";
+    case "idle":
+      return "空闲";
+    default:
+      return null;
+  }
+}
+
+function agentStatusClass(status: SessionSummary["agentStatus"]): string {
+  switch (status) {
+    case "running":
+      return "border-success/30 bg-success/10 text-success";
+    case "waiting_permission":
+      return "border-warning/40 bg-warning/10 text-warning";
+    case "error":
+      return "border-danger/30 bg-danger/10 text-danger";
+    case "idle":
+      return "border-border bg-surface-overlay text-content-muted";
+    default:
+      return "border-border bg-surface-overlay text-content-muted";
+  }
+}
+
 export function SessionListPage({
   session,
   onLogin,
@@ -228,9 +258,16 @@ export function SessionListPage({
                             {s.provider}
                           </span>
                         )}
+                        {agentStatusLabel(s.agentStatus) && (
+                          <span className={`rounded-full border px-2 py-0.5 text-2xs font-medium ${agentStatusClass(s.agentStatus)}`}>
+                            {s.agentProvider && s.agentProvider !== s.provider ? `${s.agentProvider} · ` : ""}
+                            {agentStatusLabel(s.agentStatus)}
+                          </span>
+                        )}
                       </p>
                       <p className="mt-1 font-mono text-2xs text-content-muted">
                         {s.cwd ?? "—"} · {s.hasHost ? "在线" : "主机离线"}
+                        {s.agentTitle ? ` · ${s.agentTitle}` : ""}
                       </p>
                     </div>
                   </button>

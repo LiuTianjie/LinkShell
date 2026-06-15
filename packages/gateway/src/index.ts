@@ -487,6 +487,11 @@ async function handleRequest(
         platform: s.platform ?? null,
         cwd: s.cwd ?? null,
         projectName: s.projectName ?? null,
+        agentStatus: s.agentStatus ?? null,
+        agentProvider: s.agentProvider ?? null,
+        agentConversationId: s.agentConversationId ?? null,
+        agentTitle: s.agentTitle ?? null,
+        agentLastActivity: s.agentLastActivity ?? null,
       }));
     json(res, 200, { sessions });
     return;

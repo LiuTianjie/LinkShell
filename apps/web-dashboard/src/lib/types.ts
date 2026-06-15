@@ -82,6 +82,11 @@ export interface SessionSummary {
   projectName: string | null;
   cwd: string | null;
   lastActivity: number;
+  agentStatus?: AgentStatus | null;
+  agentProvider?: AgentProvider | null;
+  agentConversationId?: string | null;
+  agentTitle?: string | null;
+  agentLastActivity?: number | null;
 }
 
 export interface TerminalView {

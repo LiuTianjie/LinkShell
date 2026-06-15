@@ -31,6 +31,12 @@ export interface Session {
   projectName: string | undefined;
   // Auth: user who owns this session (set on AUTH_REQUIRED gateways)
   userId: string | undefined;
+  // Latest agent/conversation state reported by the host.
+  agentStatus: string | undefined;
+  agentProvider: string | undefined;
+  agentConversationId: string | undefined;
+  agentTitle: string | undefined;
+  agentLastActivity: number | undefined;
 }
 
 const OUTPUT_BUFFER_CAPACITY = 200;
@@ -79,6 +85,11 @@ export class SessionManager {
         cwd: undefined,
         projectName: undefined,
         userId: undefined,
+        agentStatus: undefined,
+        agentProvider: undefined,
+        agentConversationId: undefined,
+        agentTitle: undefined,
+        agentLastActivity: undefined,
       };
       this.sessions.set(sessionId, session);
     }
@@ -251,7 +262,32 @@ export class SessionManager {
       cwd: session.cwd ?? null,
       projectName: session.projectName ?? null,
       userId: session.userId ?? null,
+      agentStatus: session.agentStatus ?? null,
+      agentProvider: session.agentProvider ?? null,
+      agentConversationId: session.agentConversationId ?? null,
+      agentTitle: session.agentTitle ?? null,
+      agentLastActivity: session.agentLastActivity ?? null,
     };
+  }
+
+  cacheAgentSummary(
+    sessionId: string,
+    summary: {
+      status?: string;
+      provider?: string | null;
+      conversationId?: string | null;
+      title?: string | null;
+      lastActivity?: number | null;
+    },
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    if (summary.status) session.agentStatus = summary.status;
+    if (summary.provider !== undefined) session.agentProvider = summary.provider ?? undefined;
+    if (summary.conversationId !== undefined) session.agentConversationId = summary.conversationId ?? undefined;
+    if (summary.title !== undefined) session.agentTitle = summary.title ?? undefined;
+    if (summary.lastActivity !== undefined) session.agentLastActivity = summary.lastActivity ?? undefined;
+    session.lastActivity = Date.now();
   }
 
   setMetadata(

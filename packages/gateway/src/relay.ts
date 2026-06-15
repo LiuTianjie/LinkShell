@@ -104,12 +104,115 @@ function sendSessionError(
   );
 }
 
+type AgentConversationLike = {
+  id: string;
+  status?: string;
+  provider?: string;
+  title?: string;
+  lastActivityAt?: number;
+};
+
+function pickConversationSummary(
+  conversations: AgentConversationLike[],
+  activeConversationId?: string,
+): AgentConversationLike | undefined {
+  const active = conversations.find((c) => c.id === activeConversationId);
+  if (active) return active;
+  const waiting = conversations.find((c) => c.status === "waiting_permission");
+  if (waiting) return waiting;
+  const running = conversations.find((c) => c.status === "running");
+  if (running) return running;
+  return [...conversations].sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))[0];
+}
+
+function aggregateAgentStatus(conversations: AgentConversationLike[], fallback?: string): string | undefined {
+  if (conversations.some((c) => c.status === "waiting_permission")) return "waiting_permission";
+  if (conversations.some((c) => c.status === "running")) return "running";
+  return fallback;
+}
+
+function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void {
+  try {
+    if (envelope.type === "agent.v2.snapshot") {
+      const p = parseTypedPayload("agent.v2.snapshot", envelope.payload);
+      const picked = pickConversationSummary(p.conversations, p.activeConversationId);
+      sessions.cacheAgentSummary(envelope.sessionId, {
+        status: aggregateAgentStatus(p.conversations, picked?.status ?? "idle"),
+        provider: picked?.provider,
+        conversationId: picked?.id ?? p.activeConversationId,
+        title: picked?.title,
+        lastActivity: picked?.lastActivityAt ?? Date.now(),
+      });
+      return;
+    }
+    if (envelope.type === "agent.v2.event") {
+      const p = parseTypedPayload("agent.v2.event", envelope.payload);
+      if (p.conversation) {
+        sessions.cacheAgentSummary(envelope.sessionId, {
+          status: p.conversation.status,
+          provider: p.conversation.provider,
+          conversationId: p.conversation.id,
+          title: p.conversation.title,
+          lastActivity: p.conversation.lastActivityAt,
+        });
+      } else if (p.patch?.status) {
+        sessions.cacheAgentSummary(envelope.sessionId, {
+          status: p.patch.status,
+          conversationId: p.conversationId,
+          lastActivity: Date.now(),
+        });
+      }
+      return;
+    }
+    if (envelope.type === "agent.v2.permission.request") {
+      const p = parseTypedPayload("agent.v2.permission.request", envelope.payload);
+      sessions.cacheAgentSummary(envelope.sessionId, {
+        status: "waiting_permission",
+        conversationId: p.conversationId,
+        lastActivity: Date.now(),
+      });
+      return;
+    }
+    if (envelope.type === "agent.snapshot") {
+      const p = parseTypedPayload("agent.snapshot", envelope.payload);
+      sessions.cacheAgentSummary(envelope.sessionId, {
+        status: p.status,
+        conversationId: p.agentSessionId,
+        lastActivity: Date.now(),
+      });
+      return;
+    }
+    if (envelope.type === "agent.update") {
+      const p = parseTypedPayload("agent.update", envelope.payload);
+      if (p.status) {
+        sessions.cacheAgentSummary(envelope.sessionId, {
+          status: p.status,
+          conversationId: p.agentSessionId,
+          lastActivity: Date.now(),
+        });
+      }
+      return;
+    }
+    if (envelope.type === "agent.permission.request") {
+      const p = parseTypedPayload("agent.permission.request", envelope.payload);
+      sessions.cacheAgentSummary(envelope.sessionId, {
+        status: "waiting_permission",
+        conversationId: p.agentSessionId,
+        lastActivity: Date.now(),
+      });
+    }
+  } catch {
+    // Agent summaries are best-effort; never block relay on a status parse.
+  }
+}
+
 function handleHostMessage(
   envelope: Envelope,
   session: ReturnType<SessionManager["get"]> & {},
   sessions: SessionManager,
 ): void {
   if (agentV2MessageRoute(envelope.type) === "host_to_client") {
+    cacheAgentEnvelope(envelope, sessions);
     broadcastToClients(session, envelope);
     return;
   }
@@ -199,6 +302,9 @@ function handleHostMessage(
     case "agent.update":
     case "agent.permission.request":
     case "agent.snapshot":
+      cacheAgentEnvelope(envelope, sessions);
+      broadcastToClients(session, envelope);
+      break;
     // Multi-terminal: host → clients
     case "terminal.spawned":
     case "terminal.list":
