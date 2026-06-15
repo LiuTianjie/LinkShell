@@ -131,6 +131,34 @@ function aggregateAgentStatus(conversations: AgentConversationLike[], fallback?:
   return fallback;
 }
 
+function agentStatusFromTerminalPhase(phase: string): string | undefined {
+  switch (phase) {
+    case "thinking":
+    case "tool_use":
+    case "outputting":
+      return "running";
+    case "waiting":
+      return "waiting_permission";
+    case "idle":
+      return "idle";
+    case "error":
+      return "error";
+    default:
+      return undefined;
+  }
+}
+
+function terminalStatusTitle(payload: { phase: string; toolName?: string; summary?: string }): string {
+  if (payload.toolName) return `外部终端 · ${payload.toolName}`;
+  if (payload.summary) return `外部终端 · ${payload.summary}`;
+  return "外部终端";
+}
+
+function shouldPromoteTerminalStatus(status: string, current?: string): boolean {
+  if (status !== "idle") return true;
+  return current !== "running" && current !== "waiting_permission";
+}
+
 function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void {
   try {
     if (envelope.type === "agent.v2.snapshot") {
@@ -200,6 +228,21 @@ function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void 
         conversationId: p.agentSessionId,
         lastActivity: Date.now(),
       });
+      return;
+    }
+    if (envelope.type === "terminal.status") {
+      const p = parseTypedPayload("terminal.status", envelope.payload);
+      const status = agentStatusFromTerminalPhase(p.phase);
+      const currentStatus = sessions.get(envelope.sessionId)?.agentStatus;
+      if (status && shouldPromoteTerminalStatus(status, currentStatus)) {
+        sessions.cacheAgentSummary(envelope.sessionId, {
+          status,
+          provider: p.provider ?? null,
+          conversationId: null,
+          title: terminalStatusTitle(p),
+          lastActivity: Date.now(),
+        });
+      }
     }
   } catch {
     // Agent summaries are best-effort; never block relay on a status parse.
@@ -314,6 +357,7 @@ function handleHostMessage(
       break;
     // Structured status from hooks
     case "terminal.status":
+      cacheAgentEnvelope(envelope, sessions);
       sessions.cacheStatus(session.id, envelope);
       broadcastToClients(session, envelope);
       break;

@@ -103,6 +103,13 @@ export function SessionListPage({
     refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
   const handleClaim = async () => {
     const code = pairingCode.trim();
     if (!/^\d{6}$/.test(code)) {

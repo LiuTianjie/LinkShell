@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import type { AgentConversation, AgentCapabilitiesPayload } from "../lib/types";
+import type { AgentConversation, AgentCapabilitiesPayload, AgentStatus } from "../lib/types";
 import type { WorkspaceStore } from "../store/workspace-store";
 import {
   IconDevice,
@@ -24,10 +24,35 @@ interface FolderGroup {
   providers: Map<string, AgentConversation[]>; // provider → conversations
 }
 
+interface ProviderGroup {
+  provider: string;
+  conversations: AgentConversation[];
+}
+
 function folderLabel(cwd: string): string {
   if (!cwd || cwd === "—") return "(未知目录)";
   const parts = cwd.replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || cwd;
+}
+
+function conversationPriority(c: AgentConversation, activeConversationId: string | null): number {
+  if (c.status === "waiting_permission") return 0;
+  if (c.status === "running") return 1;
+  if (c.status === "error") return 2;
+  if (c.id === activeConversationId) return 3;
+  return 4;
+}
+
+function compareConversations(activeConversationId: string | null) {
+  return (a: AgentConversation, b: AgentConversation) => {
+    const priority = conversationPriority(a, activeConversationId) - conversationPriority(b, activeConversationId);
+    if (priority !== 0) return priority;
+    return b.lastActivityAt - a.lastActivityAt;
+  };
+}
+
+function isActiveConversation(c: AgentConversation): boolean {
+  return c.status === "waiting_permission" || c.status === "running" || c.status === "error";
 }
 
 function buildTree(conversations: AgentConversation[]): FolderGroup[] {
@@ -52,10 +77,32 @@ function buildTree(conversations: AgentConversation[]): FolderGroup[] {
   return [...byFolder.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
+function sortedProviders(folder: FolderGroup): ProviderGroup[] {
+  return [...folder.providers.entries()]
+    .map(([provider, conversations]) => ({ provider, conversations }))
+    .sort((a, b) => providerLabel(a.provider).localeCompare(providerLabel(b.provider)));
+}
+
 function providerLabel(id: string): string {
   if (id === "claude") return "Claude";
   if (id === "codex") return "Codex";
   return id;
+}
+
+function statusBadge(status: AgentStatus): { text: string; className: string; pulsing?: boolean } {
+  switch (status) {
+    case "running":
+      return { text: "运行中", className: "border-success/30 bg-success/10 text-success", pulsing: true };
+    case "waiting_permission":
+      return { text: "等待授权", className: "border-warning/40 bg-warning/10 text-warning", pulsing: true };
+    case "error":
+      return { text: "异常", className: "border-danger/30 bg-danger/10 text-danger" };
+    case "unavailable":
+      return { text: "不可用", className: "border-border bg-surface-overlay text-content-faint" };
+    case "idle":
+    default:
+      return { text: "空闲", className: "border-border bg-surface-overlay text-content-muted" };
+  }
 }
 
 export interface ConversationTreeProps {
@@ -63,9 +110,13 @@ export interface ConversationTreeProps {
   conversations: AgentConversation[];
   capabilities: AgentCapabilitiesPayload | null;
   activeConversationId: string | null;
+  externalAgentStatus?: AgentStatus | null;
+  externalAgentTitle?: string | null;
+  externalAgentProvider?: string | null;
   store: WorkspaceStore;
   onSelect: (conversationId: string) => void;
   onNewConversation: (provider: string, cwd?: string) => void;
+  onOpenExternalTerminal?: () => void;
 }
 
 export function ConversationTree({
@@ -73,9 +124,13 @@ export function ConversationTree({
   conversations,
   capabilities,
   activeConversationId,
+  externalAgentStatus,
+  externalAgentTitle,
+  externalAgentProvider,
   store,
   onSelect,
   onNewConversation,
+  onOpenExternalTerminal,
 }: ConversationTreeProps) {
   const providers = capabilities?.providers ?? [];
   const enabledProviders = providers.filter((p) => p.enabled);
@@ -90,6 +145,17 @@ export function ConversationTree({
     () => (showArchived ? conversations : conversations.filter((c) => !c.archived)),
     [conversations, showArchived],
   );
+  const activeConversations = useMemo(
+    () => visibleConversations
+      .filter(isActiveConversation)
+      .sort(compareConversations(activeConversationId)),
+    [visibleConversations, activeConversationId],
+  );
+  const hasExternalActive =
+    externalAgentStatus === "running" ||
+    externalAgentStatus === "waiting_permission" ||
+    externalAgentStatus === "error";
+  const hasActiveSection = hasExternalActive || activeConversations.length > 0;
   const tree = useMemo(() => buildTree(visibleConversations), [visibleConversations]);
 
   // All folders/providers expanded by default; collapse state tracked by key.
@@ -157,6 +223,82 @@ export function ConversationTree({
         )}
       </div>
 
+      {hasActiveSection && (
+        <div className="border-b border-border px-3 py-3">
+          <p className="mb-2 text-2xs font-semibold uppercase tracking-wider text-content-faint">
+            活跃会话
+          </p>
+          <div className="space-y-1">
+            {hasExternalActive && externalAgentStatus && (
+              <button
+                key="active:external-terminal"
+                onClick={onOpenExternalTerminal}
+                className="flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-2 text-left transition-colors duration-150 hover:bg-surface-overlay"
+                title="打开终端面板"
+              >
+                <ProviderIcon provider={externalAgentProvider ?? "custom"} size={14} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate text-[13px] font-medium text-content-primary">
+                      {externalAgentTitle ?? "外部终端"}
+                    </span>
+                    {(() => {
+                      const status = statusBadge(externalAgentStatus);
+                      return (
+                        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${status.className}`}>
+                          {status.pulsing && (
+                            <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
+                          )}
+                          {status.text}
+                        </span>
+                      );
+                    })()}
+                  </span>
+                  <span className="mt-0.5 block truncate font-mono text-2xs text-content-muted">
+                    {deviceLabel}
+                  </span>
+                </span>
+              </button>
+            )}
+            {activeConversations.map((c) => {
+              const name =
+                (c.title && c.title.trim()) ||
+                (c.lastMessagePreview && c.lastMessagePreview.trim().slice(0, 40)) ||
+                `对话 ${c.id.slice(-6)}`;
+              const status = statusBadge(c.status);
+              return (
+                <button
+                  key={`active:${c.id}`}
+                  onClick={() => onSelect(c.id)}
+                  className={`flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-2 text-left transition-colors duration-150 hover:bg-surface-overlay ${
+                    c.id === activeConversationId ? "tree-row-active" : ""
+                  }`}
+                  title={c.cwd}
+                >
+                  <ProviderIcon provider={c.provider} size={14} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="truncate text-[13px] font-medium text-content-primary">
+                        {name}
+                      </span>
+                      <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${status.className}`}>
+                        {status.pulsing && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
+                        )}
+                        {status.text}
+                      </span>
+                    </span>
+                    <span className="mt-0.5 block truncate font-mono text-2xs text-content-muted">
+                      {folderLabel(c.cwd)}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Tree */}
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {tree.length === 0 ? (
@@ -185,7 +327,7 @@ export function ConversationTree({
                   </span>
                 </button>
                 {!fCollapsed &&
-                  [...folder.providers.entries()].map(([prov, convs]) => {
+                  sortedProviders(folder).map(({ provider: prov, conversations: convs }) => {
                     const pKey = `prov:${folder.cwd}:${prov}`;
                     const pCollapsed = collapsed.has(pKey);
                     return (
@@ -225,6 +367,7 @@ export function ConversationTree({
                               `对话 ${c.id.slice(-6)}`;
                             const isRenaming = renamingId === c.id;
                             const isMenuOpen = menuOpenId === c.id;
+                            const status = statusBadge(c.status);
                             return (
                             <div key={c.id} className="group relative">
                               {isRenaming ? (
@@ -260,11 +403,14 @@ export function ConversationTree({
                                   }`}
                                 >
                                   <p className="flex items-center gap-2">
-                                    {c.status === "running" && (
-                                      <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-accent" />
-                                    )}
                                     <span className="truncate text-[13px] text-content-primary">
                                       {name}
+                                    </span>
+                                    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${status.className}`}>
+                                      {status.pulsing && (
+                                        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
+                                      )}
+                                      {status.text}
                                     </span>
                                     {c.archived && (
                                       <span className="shrink-0 rounded bg-surface-overlay px-1 text-2xs text-content-faint">

@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { createEnvelope, type Envelope } from "@linkshell/protocol";
 import {
   BridgeSession,
@@ -26,6 +28,13 @@ function makeBridge(options: Partial<BridgeSessionOptions> = {}) {
     ...options,
   }) as any;
 }
+
+describe("BridgeSession default workspace", () => {
+  it("uses the user's home directory instead of the CLI launch cwd", () => {
+    const bridge = makeBridge({ agentUi: false });
+    expect(bridge.defaultCwd).toBe(resolve(homedir()));
+  });
+});
 
 describe("BridgeSession agent v2 routing", () => {
   it("keeps explicit agent commands scoped to a single selected workspace provider", () => {

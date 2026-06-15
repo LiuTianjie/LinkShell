@@ -83,7 +83,7 @@ export interface SessionSummary {
   cwd: string | null;
   lastActivity: number;
   agentStatus?: AgentStatus | null;
-  agentProvider?: AgentProvider | null;
+  agentProvider?: string | null;
   agentConversationId?: string | null;
   agentTitle?: string | null;
   agentLastActivity?: number | null;

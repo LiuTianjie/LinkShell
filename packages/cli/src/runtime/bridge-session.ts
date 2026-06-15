@@ -46,7 +46,7 @@ export interface BridgeSessionOptions {
   /**
    * Confinement root for client-driven filesystem operations
    * (terminal.browse / terminal.file.read / terminal.mkdir).
-   * Defaults to the bridge's cwd. Paths resolving outside this root are rejected.
+   * Defaults to the user's home directory. Paths resolving outside this root are rejected.
    */
   fileRoot?: string;
   /**
@@ -385,6 +385,8 @@ export class BridgeSession {
   private agentSession: AgentSessionProxy | undefined;
   private agentWorkspace: AgentWorkspaceProxy | undefined;
   private machineIdentity: MachineIdentity | undefined;
+  // Default host workspace shown to clients and used by the initial PTY.
+  private readonly defaultCwd: string;
   // Confinement root for client-driven filesystem ops; resolved once at construction.
   private readonly fileRoot: string;
   // Ports the tunnel proxy may connect to on 127.0.0.1.
@@ -398,6 +400,7 @@ export class BridgeSession {
   constructor(options: BridgeSessionOptions) {
     this.options = options;
     this.sessionId = options.sessionId ?? "";
+    this.defaultCwd = resolve(homedir());
     // Confine client-driven file ops to the user's home by default (single-user
     // self-hosted model: the owner browses their own projects under ~). This
     // still blocks /etc, /usr, other users' dirs. Override via --file-root.
@@ -464,7 +467,7 @@ export class BridgeSession {
       const availableProviders = resolveAgentWorkspaceProviders(this.options);
       const agentOptions = {
         sessionId: this.sessionId,
-        cwd: process.cwd(),
+        cwd: this.defaultCwd,
         availableProviders,
         command: this.options.agentCommand,
         verbose: this.options.verbose,
@@ -478,7 +481,7 @@ export class BridgeSession {
       });
       process.stderr.write(`[bridge] agent workspace channel enabled (providers: ${availableProviders.join(", ") || "none"})\n`);
     }
-    await this.spawnTerminal(DEFAULT_TERMINAL_ID, process.cwd());
+    await this.spawnTerminal(DEFAULT_TERMINAL_ID, this.defaultCwd);
     await this.connectGateway();
   }
 
@@ -639,8 +642,8 @@ export class BridgeSession {
             machineId: this.machineIdentity?.machineId,
             hostname: this.options.hostname || hostname(),
             platform: platform(),
-            cwd: process.cwd(),
-            projectName: basename(process.cwd()),
+            cwd: this.defaultCwd,
+            projectName: basename(this.defaultCwd),
           },
         }),
       );
@@ -1819,7 +1822,7 @@ export class BridgeSession {
 
   private setupCopilotHooks(terminalId: string, curlCmd: string, marker: string): string {
     // Copilot loads hooks from CWD as hooks.json
-    const cwd = this.terminals.get(terminalId)?.cwd ?? process.cwd();
+    const cwd = this.terminals.get(terminalId)?.cwd ?? this.defaultCwd;
     const hooksPath = join(cwd, "hooks.json");
     const mkHook = () => ({
       type: "command",
@@ -1997,6 +2000,7 @@ export class BridgeSession {
       terminalId,
       payload: {
         phase,
+        provider,
         seq,
         ...(toolName && { toolName }),
         ...(toolInput && { toolInput }),
@@ -2187,6 +2191,7 @@ export class BridgeSession {
       terminalId,
       payload: {
         phase,
+        provider: term?.provider,
         seq,
         ...(summary && { summary }),
         ...(permissionResolution && { permissionResolution }),
@@ -2304,7 +2309,7 @@ export class BridgeSession {
       join(home, ".claude", "settings.json"),
       join(home, ".codex", "hooks.json"),
       join(home, ".gemini", "settings.json"),
-      join(process.cwd(), "hooks.json"), // copilot (per-cwd)
+      join(this.defaultCwd, "hooks.json"), // copilot (per-cwd)
     ];
     for (const path of candidates) {
       this.sweepLinkShellHookEntries(path);

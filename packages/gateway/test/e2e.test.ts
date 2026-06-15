@@ -68,6 +68,20 @@ function waitForMessage(ws: WebSocket): Promise<ReturnType<typeof parseEnvelope>
   });
 }
 
+async function waitForSessionSummary(
+  sessionId: string,
+  predicate: (summary: Record<string, unknown>) => boolean,
+): Promise<Record<string, unknown>> {
+  for (let i = 0; i < 20; i++) {
+    const { body } = await getJson("/sessions");
+    const sessions = body.sessions as Array<Record<string, unknown>>;
+    const found = sessions.find((s) => s.id === sessionId);
+    if (found && predicate(found)) return found;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for session summary ${sessionId}`);
+}
+
 // ── Test server setup ───────────────────────────────────────────────
 
 let server: Server;
@@ -116,17 +130,9 @@ beforeAll(async () => {
     }
 
     if (method === "GET" && url.pathname === "/sessions") {
-      const sessions = sessionManager.listActive().map((s) => ({
-        id: s.id,
-        state: s.state,
-        hasHost: !!s.host,
-        clientCount: s.clients.size,
-        provider: s.provider ?? null,
-        machineId: s.machineId ?? null,
-        hostname: s.hostname ?? null,
-        cwd: s.cwd ?? null,
-        projectName: s.projectName ?? null,
-      }));
+      const sessions = sessionManager
+        .listActive()
+        .map((s) => sessionManager.getSummary(s.id));
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ sessions }));
       return;
@@ -301,6 +307,12 @@ describe("Protocol schemas", () => {
         provider,
       });
       expect(spawn.provider).toBe(provider);
+
+      const status = parseLocalTypedPayload("terminal.status", {
+        phase: "tool_use",
+        provider,
+      });
+      expect(status.provider).toBe(provider);
     }
   });
 
@@ -965,5 +977,86 @@ describe("Session list", () => {
     expect(found!.cwd).toBe("/repo");
 
     host.close();
+  });
+
+  it("promotes terminal hook status into the session agent summary", async () => {
+    const { body: pairing } = await postJson("/pairings", {});
+    const sessionId = pairing.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-terminal-status");
+    await waitForMessage(host);
+
+    host.send(serializeEnvelope(createEnvelope({
+      type: "terminal.status",
+      sessionId,
+      terminalId: "default",
+      payload: {
+        phase: "tool_use",
+        provider: "codex",
+        toolName: "Bash",
+      },
+    })));
+
+    const found = await waitForSessionSummary(sessionId, (s) => s.agentStatus === "running");
+    expect(found!.agentStatus).toBe("running");
+    expect(found!.agentProvider).toBe("codex");
+    expect(found!.agentConversationId).toBeNull();
+    expect(found!.agentTitle).toBe("外部终端 · Bash");
+
+    host.close();
+  });
+
+  it("does not let terminal idle overwrite an active agent conversation", async () => {
+    const { body: pairing } = await postJson("/pairings", {});
+    const sessionId = pairing.sessionId as string;
+
+    const host = await connectWs(sessionId, "host", "host-agent-terminal-priority");
+    await waitForMessage(host);
+    const client = await connectWs(sessionId, "client", "client-agent-terminal-priority");
+    await waitForMessage(client);
+
+    const now = Date.now();
+    host.send(serializeEnvelope(createEnvelope({
+      type: "agent.v2.event",
+      sessionId,
+      payload: {
+        conversationId: "conversation-running",
+        conversation: {
+          id: "conversation-running",
+          provider: "claude",
+          cwd: "/repo",
+          title: "Running agent",
+          status: "running",
+          archived: false,
+          lastActivityAt: now,
+          createdAt: now,
+        },
+      },
+    })));
+
+    await waitForSessionSummary(sessionId, (s) => s.agentStatus === "running");
+
+    host.send(serializeEnvelope(createEnvelope({
+      type: "terminal.status",
+      sessionId,
+      terminalId: "default",
+      payload: {
+        phase: "idle",
+        provider: "codex",
+      },
+    })));
+
+    let relayed = await waitForMessage(client);
+    while (relayed.type !== "terminal.status") {
+      relayed = await waitForMessage(client);
+    }
+
+    const found = await waitForSessionSummary(sessionId, (s) => s.agentStatus === "running");
+    expect(found!.agentStatus).toBe("running");
+    expect(found!.agentProvider).toBe("claude");
+    expect(found!.agentConversationId).toBe("conversation-running");
+
+    host.close();
+    client.close();
   });
 });

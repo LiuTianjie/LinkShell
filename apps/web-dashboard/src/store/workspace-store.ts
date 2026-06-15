@@ -53,6 +53,9 @@ export interface Notice {
 export interface WorkspaceSnapshot {
   status: ConnectionStatus;
   isController: boolean;
+  externalAgentStatus: AgentStatus | null;
+  externalAgentTitle: string | null;
+  externalAgentProvider: string | null;
   conversations: AgentConversation[];
   timelines: Map<string, AgentTimelineItem[]>;
   capabilities: AgentCapabilitiesPayload | null;
@@ -67,6 +70,23 @@ export interface WorkspaceSnapshot {
 function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
   return `${prefix}-${Date.now().toString(36)}-${rand}`;
+}
+
+function agentStatusFromTerminalPhase(phase: string): AgentStatus | null {
+  switch (phase) {
+    case "thinking":
+    case "tool_use":
+    case "outputting":
+      return "running";
+    case "waiting":
+      return "waiting_permission";
+    case "idle":
+      return "idle";
+    case "error":
+      return "error";
+    default:
+      return null;
+  }
 }
 
 export interface SendPromptInput {
@@ -99,6 +119,9 @@ export class WorkspaceStore {
   // Mutable working state; snapshot is rebuilt from it on change.
   private status: ConnectionStatus = "idle";
   private isController = false;
+  private externalAgentStatus: AgentStatus | null = null;
+  private externalAgentTitle: string | null = null;
+  private externalAgentProvider: string | null = null;
   private conversations: AgentConversation[] = [];
   private timelines = new Map<string, AgentTimelineItem[]>();
   private capabilities: AgentCapabilitiesPayload | null = null;
@@ -135,6 +158,9 @@ export class WorkspaceStore {
     return {
       status: this.status,
       isController: this.isController,
+      externalAgentStatus: this.externalAgentStatus,
+      externalAgentTitle: this.externalAgentTitle,
+      externalAgentProvider: this.externalAgentProvider,
       conversations: this.conversations,
       timelines: this.timelines,
       capabilities: this.capabilities,
@@ -236,6 +262,20 @@ export class WorkspaceStore {
   // Resolve pending file-browse / file-read requests by requestId.
   private handleOtherEnvelope(envelope: Envelope): void {
     const type = envelope.type as string;
+    if (type === "terminal.status") {
+      try {
+        const p = parseTypedPayload("terminal.status", envelope.payload);
+        this.externalAgentStatus = agentStatusFromTerminalPhase(p.phase);
+        this.externalAgentProvider = p.provider ?? null;
+        this.externalAgentTitle = p.toolName
+          ? `外部终端 · ${p.toolName}`
+          : p.summary
+            ? `外部终端 · ${p.summary}`
+            : "外部终端";
+        this.notify();
+      } catch {}
+      return;
+    }
     if (type === "terminal.browse.result") {
       try {
         const p = parseTypedPayload("terminal.browse.result", envelope.payload);
@@ -369,6 +409,12 @@ export class WorkspaceStore {
               ? this.conversations.map((c) => (c.id === incoming.id ? incoming : c))
               : [incoming, ...this.conversations]
           ).sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+        } else if (p.patch?.status) {
+          this.updateConversationStatus(
+            p.conversationId,
+            p.patch.status,
+            p.patch.updatedAt ?? Date.now(),
+          );
         }
         const current = this.timelines.get(p.conversationId) ?? [];
         const updated = applyEvent(current, p);
@@ -386,6 +432,7 @@ export class WorkspaceStore {
       }
       if (type === "agent.v2.permission.request") {
         const p = parseTypedPayload("agent.v2.permission.request", envelope.payload);
+        this.updateConversationStatus(p.conversationId, "waiting_permission", Date.now());
         if (p.item) {
           const item: AgentTimelineItem = {
             ...p.item,
@@ -427,6 +474,24 @@ export class WorkspaceStore {
           }
         : c,
     );
+  }
+
+  private updateConversationStatus(
+    conversationId: string,
+    status: AgentStatus,
+    lastActivityAt: number,
+  ): void {
+    this.conversations = this.conversations
+      .map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              status,
+              lastActivityAt: Math.max(c.lastActivityAt, lastActivityAt),
+            }
+          : c,
+      )
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   }
 
   // ── Client actions ──────────────────────────────────────────────────

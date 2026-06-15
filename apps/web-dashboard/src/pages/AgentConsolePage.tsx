@@ -16,7 +16,7 @@ import { ThemeToggle } from "../components/ThemeToggle";
 import { isEmbedded } from "../lib/embed";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
 import { useIsMobile } from "../hooks/useMediaQuery";
-import type { ConnectionStatus, AgentTimelineItem } from "../lib/types";
+import type { ConnectionStatus, AgentStatus, AgentTimelineItem } from "../lib/types";
 import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, IconGlobe, ProviderIcon } from "../components/icons";
 
 function statusLabel(status: ConnectionStatus): { text: string; color: string } {
@@ -26,6 +26,23 @@ function statusLabel(status: ConnectionStatus): { text: string; color: string } 
   if (status === "host_disconnected") return { text: "主机离线", color: "text-warning" };
   if (status.startsWith("error")) return { text: "错误", color: "text-danger" };
   return { text: "未连接", color: "text-content-muted" };
+}
+
+function agentStatusLabel(status?: AgentStatus): { text: string; className: string; pulsing?: boolean } | null {
+  switch (status) {
+    case "running":
+      return { text: "运行中", className: "border-success/30 bg-success/10 text-success", pulsing: true };
+    case "waiting_permission":
+      return { text: "等待授权", className: "border-warning/40 bg-warning/10 text-warning", pulsing: true };
+    case "error":
+      return { text: "异常", className: "border-danger/30 bg-danger/10 text-danger" };
+    case "idle":
+      return { text: "空闲", className: "border-border bg-surface-overlay text-content-muted" };
+    case "unavailable":
+      return { text: "不可用", className: "border-border bg-surface-overlay text-content-faint" };
+    default:
+      return null;
+  }
 }
 
 // Lightweight AnimatedPresence: mounts children with an enter animation, then
@@ -120,6 +137,10 @@ export function AgentConsolePage({
     } else {
       setTerminalOpen(true);
     }
+  }, []);
+  const openTerminal = useCallback(() => {
+    setTerminalClosing(false);
+    setTerminalOpen(true);
   }, []);
   // Mobile-only: the conversation tree opens as a full-screen overlay drawer
   // (no split pane on phones). Desktop uses sidebarCollapsed/width instead.
@@ -378,6 +399,16 @@ export function AgentConsolePage({
   };
 
   const st = statusLabel(snapshot.status);
+  const externalActive =
+    snapshot.externalAgentStatus === "running" ||
+    snapshot.externalAgentStatus === "waiting_permission" ||
+    snapshot.externalAgentStatus === "error";
+  const shownAgentStatus = externalActive
+    ? agentStatusLabel(snapshot.externalAgentStatus ?? undefined)
+    : agentStatusLabel(activeConversation?.status);
+  const shownAgentStatusPrefix = externalActive
+    ? (snapshot.externalAgentTitle ?? "外部终端")
+    : activeConversation?.provider;
   const deviceLabel = `CLI 设备 · ${sessionId.slice(0, 8)}`;
 
   // Stable spawn-terminal callback. TerminalPanel keys an effect on this prop,
@@ -498,6 +529,18 @@ export function AgentConsolePage({
             <span className="h-1.5 w-1.5 rounded-full bg-current" />
             {st.text}
           </span>
+          {shownAgentStatus && (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium ${shownAgentStatus.className}`}
+              title={externalActive ? "外部终端状态" : "当前对话状态"}
+            >
+              {shownAgentStatus.pulsing && (
+                <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
+              )}
+              {shownAgentStatusPrefix ? `${shownAgentStatusPrefix} · ` : ""}
+              {shownAgentStatus.text}
+            </span>
+          )}
           {snapshot.lastError && (
             <button
               onClick={() => store.dismissError()}
@@ -586,9 +629,13 @@ export function AgentConsolePage({
                     conversations={snapshot.conversations}
                     capabilities={snapshot.capabilities}
                     activeConversationId={activeId}
+                    externalAgentStatus={snapshot.externalAgentStatus}
+                    externalAgentTitle={snapshot.externalAgentTitle}
+                    externalAgentProvider={snapshot.externalAgentProvider}
                     store={store}
                     onSelect={(id) => { store.setActiveConversation(id); setMobileNavOpen(false); }}
                     onNewConversation={(p, cwd) => { setMobileNavOpen(false); handleNewConversation(p, cwd); }}
+                    onOpenExternalTerminal={() => { setMobileNavOpen(false); openTerminal(); }}
                   />
                 </div>
               </aside>
@@ -635,9 +682,13 @@ export function AgentConsolePage({
                 conversations={snapshot.conversations}
                 capabilities={snapshot.capabilities}
                 activeConversationId={activeId}
+                externalAgentStatus={snapshot.externalAgentStatus}
+                externalAgentTitle={snapshot.externalAgentTitle}
+                externalAgentProvider={snapshot.externalAgentProvider}
                 store={store}
                 onSelect={(id) => store.setActiveConversation(id)}
                 onNewConversation={handleNewConversation}
+                onOpenExternalTerminal={openTerminal}
               />
             </div>
             {/* Drag handle */}

@@ -304,6 +304,7 @@ export const terminalStatusPayloadSchema = z.object({
     "idle",
     "error",
   ]),
+  provider: terminalProviderSchema.optional(),
   seq: z.number().optional(),
   toolName: z.string().optional(),
   toolInput: z.string().optional(),
