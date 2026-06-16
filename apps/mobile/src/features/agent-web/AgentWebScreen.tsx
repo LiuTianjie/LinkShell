@@ -132,6 +132,26 @@ export function AgentWebScreen({
         data: { name: "console", sessionId },
       }),
     );
+    const knownSessionsLit = JSON.stringify(
+      JSON.stringify({
+        version: 1,
+        data: [
+          {
+            id: sessionId,
+            state: "active",
+            hasHost: true,
+            clientCount: 1,
+            provider: null,
+            machineId: null,
+            hostname: null,
+            platform: null,
+            projectName: null,
+            cwd: null,
+            lastActivity: Date.now(),
+          },
+        ],
+      }),
+    );
     // Reshape mobile's AuthSession → web's StoredSession envelope. Web keeps
     // `plan` at the TOP level of `session` (mobile nests it under user.plan),
     // and reads localStorage key "linkshell_session" as { version:1, session }.
@@ -160,6 +180,7 @@ export function AgentWebScreen({
           localStorage.setItem('linkshell_device_token', ${tokenLit});
           localStorage.setItem('linkshell_theme', ${themeLit});
           localStorage.setItem('linkshell_view', ${viewLit});
+          localStorage.setItem('linkshell_known_sessions', ${knownSessionsLit});
           localStorage.setItem('linkshell_embed', '1');
           ${sessionStmt}
         } catch (e) {}

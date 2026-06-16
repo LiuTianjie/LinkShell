@@ -51,6 +51,12 @@ localStorage.setItem('linkshell_device_token', '<deviceToken>');             // 
 localStorage.setItem('linkshell_theme', '<dark|light>');                     // theme.ts KEY (only if theme provided)
 localStorage.setItem('linkshell_view',                                       // storage.ts VIEW_KEY, versioned envelope
   JSON.stringify({ version: 1, data: { name: 'console', sessionId: '<sessionId>' } }));
+localStorage.setItem('linkshell_known_sessions',                             // storage.ts KNOWN_SESSIONS_KEY
+  JSON.stringify({ version: 1, data: [{
+    id: '<sessionId>', state: 'active', hasHost: true, clientCount: 1,
+    provider: null, machineId: null, hostname: null, platform: null,
+    projectName: null, cwd: null, lastActivity: Date.now()
+  }] }));
 ```
 
 **Precedence rule (WEB side):** when `embed=1` is present in the query string,
@@ -94,7 +100,8 @@ export function applyEmbedBootstrap(b: EmbedBootstrap): AppView | null;
 1. `saveGatewayUrl(b.gateway)`        — from `lib/gateway-config.ts`
 2. `setDeviceToken(b.token)`          — from `lib/device-token.ts`
 3. `if (b.theme) setThemePref(b.theme)` — from `lib/theme.ts`
-4. return `{ name: "console", sessionId: b.sessionId }` (or `null` if `sessionId`/`token`/`gateway` missing — malformed embed degrades to normal app)
+4. `rememberSessions([{ id: b.sessionId, ... }])` — seed the web session list for Back/refresh
+5. return `{ name: "console", sessionId: b.sessionId }` (or `null` if `sessionId`/`token`/`gateway` missing — malformed embed degrades to normal app)
 
 ### Change: `src/main.tsx`
 
@@ -226,6 +233,22 @@ export interface AgentWebScreenProps {
     localStorage.setItem('linkshell_theme', '<dark|light>');
     localStorage.setItem('linkshell_view', JSON.stringify({
       version: 1, data: { name: 'console', sessionId: '<sessionId>' }
+    }));
+    localStorage.setItem('linkshell_known_sessions', JSON.stringify({
+      version: 1,
+      data: [{
+        id: '<sessionId>',
+        state: 'active',
+        hasHost: true,
+        clientCount: 1,
+        provider: null,
+        machineId: null,
+        hostname: null,
+        platform: null,
+        projectName: null,
+        cwd: null,
+        lastActivity: Date.now()
+      }]
     }));
   } catch (e) {}
 })();

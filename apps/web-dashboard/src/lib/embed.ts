@@ -11,7 +11,7 @@
 import { saveGatewayUrl } from "./gateway-config";
 import { setDeviceToken } from "./device-token";
 import { setThemePref } from "./theme";
-import type { AppView } from "./storage";
+import { rememberSessions, type AppView } from "./storage";
 
 export interface EmbedBootstrap {
   embed: boolean;
@@ -52,6 +52,24 @@ export function applyEmbedBootstrap(b: EmbedBootstrap): AppView | null {
   saveGatewayUrl(b.gateway);
   setDeviceToken(b.token);
   if (b.theme) setThemePref(b.theme);
+  // Embedded WebView boots straight into the console, bypassing SessionListPage.
+  // Seed the web app's own known-session cache so Back/refresh can still show
+  // this session in the "我的会话" list without waiting for /sessions.
+  rememberSessions([
+    {
+      id: b.sessionId,
+      state: "active",
+      hasHost: true,
+      clientCount: 1,
+      provider: null,
+      machineId: null,
+      hostname: null,
+      platform: null,
+      projectName: null,
+      cwd: null,
+      lastActivity: Date.now(),
+    },
+  ]);
 
   return { name: "console", sessionId: b.sessionId };
 }
