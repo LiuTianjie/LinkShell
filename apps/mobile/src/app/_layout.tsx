@@ -61,6 +61,14 @@ function AppInner() {
 
   const displayStatus = activeSession?.status ?? "idle";
 
+  const rememberSession = useCallback((sessionId: string, gatewayUrl: string) => {
+    const normalizedGateway = normalizeServerUrl(gatewayUrl);
+    addToHistory({ serverUrl: normalizedGateway, sessionId })
+      .then(() => setSessionRefreshKey((key) => key + 1))
+      .catch(() => {});
+    addServer(normalizedGateway).catch(() => {});
+  }, []);
+
   const navigateTo = useCallback((screen: "tabs" | "scanner" | "terminal") => {
     if (screen === "terminal") router.push("/session");
     else if (screen === "scanner") router.push("/scanner");
@@ -134,14 +142,18 @@ function AppInner() {
     let active = true;
     manager.claim(pairing.code, gateway).then((sid) => {
       if (!active) return;
-      if (sid) { setConnectionSheetVisible(false); router.push("/session"); }
+      if (sid) {
+        rememberSession(sid, gateway);
+        setConnectionSheetVisible(false);
+        router.push("/session");
+      }
       else { router.dismiss(); setConnectionSheetVisible(true); }
     }).catch(() => {
       if (!active) return;
       router.dismiss(); setConnectionSheetVisible(true);
     });
     return () => { active = false; };
-  }, [gatewayBaseUrl, pendingPairing, manager, router]);
+  }, [gatewayBaseUrl, pendingPairing, manager, rememberSession, router]);
 
   // Save to history
   useEffect(() => {
@@ -271,16 +283,21 @@ function AppInner() {
 
   const handleClaim = useCallback(async (code: string) => {
     const sid = await manager.claim(code, gatewayBaseUrl);
-    if (sid) { setConnectionSheetVisible(false); router.push("/session"); }
-  }, [manager, gatewayBaseUrl, router]);
+    if (sid) {
+      rememberSession(sid, gatewayBaseUrl);
+      setConnectionSheetVisible(false);
+      router.push("/session");
+    }
+  }, [manager, gatewayBaseUrl, rememberSession, router]);
 
   const handleConnectSession = useCallback((sessionId: string, serverUrl?: string) => {
     const target = serverUrl ?? gatewayBaseUrl;
     if (target !== gatewayBaseUrl) setGatewayBaseUrl(target);
+    rememberSession(sessionId, target);
     setConnectionSheetVisible(false);
     manager.connectToSession(sessionId, target);
     router.push("/session");
-  }, [gatewayBaseUrl, manager, router]);
+  }, [gatewayBaseUrl, manager, rememberSession, router]);
 
   const handleDisconnectSession = useCallback((sessionId: string) => {
     manager.disconnectSession(sessionId);
