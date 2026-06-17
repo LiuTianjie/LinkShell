@@ -21,6 +21,7 @@ import type {
   terminalBrowseResultPayloadSchema,
   terminalBrowseEntrySchema,
   terminalFileReadResultPayloadSchema,
+  agentV2UsageReportPayloadSchema,
 } from "@linkshell/protocol";
 
 // Domain types are derived directly from the protocol's Zod schemas so they can
@@ -45,6 +46,7 @@ export type AgentPermissionMode = z.infer<typeof agentPermissionModeSchema>;
 export type AgentCollaborationMode = z.infer<typeof agentCollaborationModeSchema>;
 export type AgentStatus = z.infer<typeof agentV2StatusSchema>;
 export type AgentCommandDescriptor = z.infer<typeof agentCommandDescriptorSchema>;
+export type AgentUsageReport = z.infer<typeof agentV2UsageReportPayloadSchema>;
 
 export type BrowseEntry = z.infer<typeof terminalBrowseEntrySchema>;
 export type BrowseResult = z.infer<typeof terminalBrowseResultPayloadSchema>;

@@ -888,6 +888,43 @@ export const agentV2HistoryResultPayloadSchema = z.object({
   hasMore: z.boolean().default(false),
 });
 
+// Usage dashboard. The host aggregates ALL on-disk agent transcripts
+// (~/.claude/projects + ~/.codex/sessions) — decoupled from any live LinkShell
+// turn, so history + externally-started sessions all count. Token figures are
+// per-call sums (ccusage convention); the client renders an activity heatmap +
+// summary cards (cumulative / peak / streaks / longest task) + breakdowns.
+export const agentV2UsageTotalsSchema = z.object({
+  inputTokens: z.number().default(0),
+  outputTokens: z.number().default(0),
+  cacheReadTokens: z.number().default(0),
+  cacheWriteTokens: z.number().default(0),
+  totalTokens: z.number().default(0),
+  calls: z.number().default(0),
+});
+
+export const agentV2UsageBucketSchema = agentV2UsageTotalsSchema.extend({
+  key: z.string(),
+});
+
+export const agentV2UsageRequestPayloadSchema = z.object({});
+
+export const agentV2UsageReportPayloadSchema = z.object({
+  totals: agentV2UsageTotalsSchema,
+  sessions: z.number().default(0),
+  peakDayTokens: z.number().default(0),
+  longestTaskMs: z.number().default(0),
+  currentStreakDays: z.number().default(0),
+  longestStreakDays: z.number().default(0),
+  byDay: z.array(agentV2UsageBucketSchema).default([]), // key=YYYY-MM-DD, ascending
+  byHourWeekday: z
+    .array(z.object({ weekday: z.number(), hour: z.number(), tokens: z.number() }))
+    .default([]),
+  byTool: z.array(agentV2UsageBucketSchema).default([]),
+  byModel: z.array(agentV2UsageBucketSchema).default([]),
+  byProject: z.array(agentV2UsageBucketSchema).default([]),
+  generatedAt: z.number(),
+});
+
 // Mutate a conversation's user-facing metadata (rename / archive toggle).
 // Fields are optional: send only what changes. The host applies the patch to
 // its tracked conversation and echoes the updated record back via agent.v2.event.
@@ -989,6 +1026,8 @@ export const protocolMessageSchemas = {
   "agent.v2.notice": agentV2NoticePayloadSchema,
   "agent.v2.history.request": agentV2HistoryRequestPayloadSchema,
   "agent.v2.history.result": agentV2HistoryResultPayloadSchema,
+  "agent.v2.usage.request": agentV2UsageRequestPayloadSchema,
+  "agent.v2.usage.report": agentV2UsageReportPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;
@@ -1003,6 +1042,7 @@ export const agentV2HostToClientMessageTypes = [
   "agent.v2.notice",
   "agent.v2.history.result",
   "agent.v2.conversation.deleted",
+  "agent.v2.usage.report",
 ] as const satisfies readonly ProtocolMessageType[];
 
 export const agentV2ClientWriteMessageTypes = [
@@ -1021,6 +1061,7 @@ export const agentV2ClientReadMessageTypes = [
   "agent.v2.conversation.list",
   "agent.v2.snapshot.request",
   "agent.v2.history.request",
+  "agent.v2.usage.request",
 ] as const satisfies readonly ProtocolMessageType[];
 
 export type AgentV2MessageRoute =

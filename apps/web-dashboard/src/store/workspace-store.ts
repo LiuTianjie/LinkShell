@@ -29,6 +29,7 @@ import type {
   GatewayConfig,
   BrowseResult,
   FileReadResult,
+  AgentUsageReport,
 } from "../lib/types";
 import {
   loadConversations,
@@ -65,6 +66,8 @@ export interface WorkspaceSnapshot {
   history: Map<string, HistoryState>;
   // Transient toast notices (model/effort/permission changes, info, warnings).
   notices: Notice[];
+  // Latest on-demand usage report (null until requested + received).
+  usage: AgentUsageReport | null;
 }
 
 function genId(prefix: string): string {
@@ -131,6 +134,7 @@ export class WorkspaceStore {
   private errorClearTimer: ReturnType<typeof setTimeout> | undefined;
   private history = new Map<string, HistoryState>();
   private notices: Notice[] = [];
+  private usage: AgentUsageReport | null = null;
   // Enabled-provider signature; re-request snapshot when it changes (providers
   // come online after connect, so the first snapshot was empty).
   private lastProviderSig = "";
@@ -168,6 +172,7 @@ export class WorkspaceStore {
       lastError: this.lastError,
       history: this.history,
       notices: this.notices,
+      usage: this.usage,
     };
   }
 
@@ -458,6 +463,11 @@ export class WorkspaceStore {
         setTimeout(() => this.dismissNotice(id), ttl);
         return;
       }
+      if (type === "agent.v2.usage.report") {
+        this.usage = parseTypedPayload("agent.v2.usage.report", envelope.payload);
+        this.notify();
+        return;
+      }
     } catch {
       // Defensive: host may send shapes we don't validate; drop quietly.
     }
@@ -562,6 +572,11 @@ export class WorkspaceStore {
   }
   requestConversationList(includeArchived = false): void {
     this.bridge.sendAgent("agent.v2.conversation.list", { includeArchived });
+  }
+
+  /** Ask the host to aggregate all on-disk transcripts into a usage report. */
+  requestUsage(): void {
+    this.bridge.sendAgent("agent.v2.usage.request", {});
   }
 
   /** Load an older page of history for a conversation (scroll-up). No-op while

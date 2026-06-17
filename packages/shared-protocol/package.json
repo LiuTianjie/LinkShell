@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/protocol",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

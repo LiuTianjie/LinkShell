@@ -9,6 +9,7 @@ import {
 import { AcpClient } from "./acp-client.js";
 import { ClaudeSdkClient } from "./claude-sdk-client.js";
 import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
+import { aggregateUsage } from "../usage-report.js";
 import type { AgentProtocol, AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
 
@@ -1771,6 +1772,25 @@ export class AgentWorkspaceProxy {
       case "agent.v2.history.request": {
         const payload = parseTypedPayload("agent.v2.history.request", envelope.payload);
         await this.loadOlderHistory(payload);
+        break;
+      }
+      case "agent.v2.usage.request": {
+        // Aggregate ALL on-disk transcripts (decoupled from live turns). The
+        // scan is synchronous (~3s over a large corpus); acceptable for an
+        // explicit, on-demand dashboard open. Errors must never break the
+        // session, so swallow + send an empty report.
+        try {
+          const report = aggregateUsage();
+          this.input.send(createEnvelope({
+            type: "agent.v2.usage.report",
+            sessionId: this.input.sessionId,
+            payload: report,
+          }));
+        } catch (error) {
+          if (this.input.verbose) {
+            process.stderr.write(`[agent:v2] usage aggregation failed: ${error instanceof Error ? error.message : String(error)}\n`);
+          }
+        }
         break;
       }
       case "agent.v2.prompt": {

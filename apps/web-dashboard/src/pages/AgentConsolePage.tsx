@@ -11,13 +11,14 @@ import { ControlToolbar } from "../components/ControlToolbar";
 import { FileBrowser } from "../components/FileBrowser";
 import { FolderPicker } from "../components/FolderPicker";
 import { PortPreview } from "../components/PortPreview";
+import { UsageDashboard } from "../components/UsageDashboard";
 import { IconChevronRight, IconChevronLeft, IconClose, IconPlug, IconMenu, BrandLogo } from "../components/icons";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { isEmbedded } from "../lib/embed";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import type { ConnectionStatus, AgentStatus, AgentTimelineItem, AgentConversation } from "../lib/types";
-import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, IconGlobe, ProviderIcon } from "../components/icons";
+import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, IconGlobe, IconCommand, ProviderIcon } from "../components/icons";
 
 function statusLabel(status: ConnectionStatus): { text: string; color: string } {
   if (status === "connected") return { text: "已连接", color: "text-success" };
@@ -229,6 +230,8 @@ export function AgentConsolePage({
   const [diffItem, setDiffItem] = useState<AgentTimelineItem | null>(null);
   // The sub-agent whose read-only detail is shown in the right drawer (null = closed).
   const [agentDetail, setAgentDetail] = useState<SubagentDetail | null>(null);
+  // Usage dashboard full-screen overlay open state.
+  const [usageOpen, setUsageOpen] = useState(false);
   // When set, the folder picker is open for this provider (awaiting a cwd choice
   // before the conversation is actually created).
   const [pendingProvider, setPendingProvider] = useState<string | null>(null);
@@ -694,6 +697,14 @@ export function AgentConsolePage({
             aria-label="终端"
           >
             <IconTerminal size={16} />
+          </button>
+          <button
+            onClick={() => { store.requestUsage(); setUsageOpen(true); }}
+            className={`cursor-pointer rounded-md p-1.5 transition-colors ${usageOpen ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+            title="用量统计"
+            aria-label="用量统计"
+          >
+            <IconCommand size={16} />
           </button>
         </div>
       </header>
@@ -1170,6 +1181,11 @@ export function AgentConsolePage({
 
       {/* Command palette (⌘/Ctrl+K): fuzzy-search conversations + actions. */}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={paletteActions} />
+
+      {/* Usage dashboard full-screen overlay (GitHub heatmap style, Image #5 spec). */}
+      {usageOpen && (
+        <UsageDashboard report={snapshot.usage} onClose={() => setUsageOpen(false)} />
+      )}
     </div>
   );
 }
