@@ -137,6 +137,88 @@ function BreakdownBars({ title, buckets }: { title: string; buckets: AgentUsageR
   );
 }
 
+export function UsageDashboardContent({ report }: { report: AgentUsageReport | null }) {
+  const [mode, setMode] = useState<HeatMode>("daily");
+  const heat = useMemo(() => (report ? buildHeatmap(report.byDay, mode) : null), [report, mode]);
+
+  if (!report) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-12 text-content-muted">
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-content-faint border-t-accent" />
+        <p className="text-sm">正在扫描本机会话记录…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 divide-x divide-border rounded-2xl border border-border bg-surface sm:grid-cols-5">
+        <StatCard value={formatTokens(report.totals.totalTokens)} label="累计 Token 数" />
+        <StatCard value={formatTokens(report.peakDayTokens)} label="峰值 Token 数" />
+        <StatCard value={formatDuration(report.longestTaskMs)} label="最长任务时长" />
+        <StatCard value={`${report.currentStreakDays} 天`} label="当前连续天数" />
+        <StatCard value={`${report.longestStreakDays} 天`} label="最长连续天数" />
+      </div>
+
+      {/* Token activity heatmap */}
+      <div className="rounded-2xl border border-border bg-surface p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-content-primary">Token 活动</h3>
+          <div className="flex items-center gap-1 text-2xs">
+            {([["daily", "每日"], ["weekly", "每周"], ["cumulative", "累计"]] as const).map(([m, label]) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`rounded-md px-2 py-1 transition-colors ${mode === m ? "bg-surface-overlay text-content-primary" : "text-content-muted hover:text-content-secondary"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {heat && (
+          <div className="overflow-x-auto">
+            <div className="inline-flex flex-col gap-1">
+              <div className="flex gap-[3px]">
+                {heat.weeks.map((week, ci) => (
+                  <div key={ci} className="flex flex-col gap-[3px]">
+                    {week.map((cell) => {
+                      const c = cellColor(cell.value, heat.max);
+                      return (
+                        <div
+                          key={cell.key}
+                          className={`h-2.5 w-2.5 rounded-[2px] ${c.className}`}
+                          style={c.style}
+                          title={`${cell.key} · ${formatTokens(cell.daily)} tokens`}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+              <div className="relative mt-1 h-4 text-2xs text-content-faint">
+                {heat.monthLabels.map((ml) => (
+                  <span key={ml.col} className="absolute" style={{ left: `${ml.col * 13}px` }}>
+                    {ml.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Breakdowns */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <BreakdownBars title="工具分布" buckets={report.byTool} />
+        <BreakdownBars title="模型分布" buckets={report.byModel} />
+        <BreakdownBars title="项目分布" buckets={report.byProject} />
+      </div>
+    </div>
+  );
+}
+
 export function UsageDashboard({
   report,
   onClose,
@@ -144,9 +226,6 @@ export function UsageDashboard({
   report: AgentUsageReport | null;
   onClose: () => void;
 }) {
-  const [mode, setMode] = useState<HeatMode>("daily");
-  const heat = useMemo(() => (report ? buildHeatmap(report.byDay, mode) : null), [report, mode]);
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas/95 backdrop-blur-sm">
       <div className="flex items-center justify-between border-b border-border px-5 py-3">
@@ -155,80 +234,9 @@ export function UsageDashboard({
           <IconClose size={16} />
         </button>
       </div>
-
-      {!report ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-content-muted">
-          <span className="h-6 w-6 animate-spin rounded-full border-2 border-content-faint border-t-accent" />
-          <p className="text-sm">正在扫描本机会话记录…</p>
-        </div>
-      ) : (
-        <div className="mx-auto w-full max-w-5xl flex-1 space-y-6 overflow-y-auto px-5 py-6">
-          {/* Summary cards */}
-          <div className="grid grid-cols-2 divide-x divide-border rounded-2xl border border-border bg-surface sm:grid-cols-5">
-            <StatCard value={formatTokens(report.totals.totalTokens)} label="累计 Token 数" />
-            <StatCard value={formatTokens(report.peakDayTokens)} label="峰值 Token 数" />
-            <StatCard value={formatDuration(report.longestTaskMs)} label="最长任务时长" />
-            <StatCard value={`${report.currentStreakDays} 天`} label="当前连续天数" />
-            <StatCard value={`${report.longestStreakDays} 天`} label="最长连续天数" />
-          </div>
-
-          {/* Token activity heatmap */}
-          <div className="rounded-2xl border border-border bg-surface p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-content-primary">Token 活动</h3>
-              <div className="flex items-center gap-1 text-2xs">
-                {([["daily", "每日"], ["weekly", "每周"], ["cumulative", "累计"]] as const).map(([m, label]) => (
-                  <button
-                    key={m}
-                    onClick={() => setMode(m)}
-                    className={`rounded-md px-2 py-1 transition-colors ${mode === m ? "bg-surface-overlay text-content-primary" : "text-content-muted hover:text-content-secondary"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {heat && (
-              <div className="overflow-x-auto">
-                <div className="inline-flex flex-col gap-1">
-                  <div className="flex gap-[3px]">
-                    {heat.weeks.map((week, ci) => (
-                      <div key={ci} className="flex flex-col gap-[3px]">
-                        {week.map((cell) => {
-                          const c = cellColor(cell.value, heat.max);
-                          return (
-                            <div
-                              key={cell.key}
-                              className={`h-2.5 w-2.5 rounded-[2px] ${c.className}`}
-                              style={c.style}
-                              title={`${cell.key} · ${formatTokens(cell.daily)} tokens`}
-                            />
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                  {/* Month labels aligned to columns (13px = 10px cell + 3px gap). */}
-                  <div className="relative mt-1 h-4 text-2xs text-content-faint">
-                    {heat.monthLabels.map((ml) => (
-                      <span key={ml.col} className="absolute" style={{ left: `${ml.col * 13}px` }}>
-                        {ml.label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Breakdowns */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <BreakdownBars title="工具分布" buckets={report.byTool} />
-            <BreakdownBars title="模型分布" buckets={report.byModel} />
-            <BreakdownBars title="项目分布" buckets={report.byProject} />
-          </div>
-        </div>
-      )}
+      <div className="mx-auto w-full max-w-5xl flex-1 overflow-y-auto px-5 py-6">
+        <UsageDashboardContent report={report} />
+      </div>
     </div>
   );
 }
