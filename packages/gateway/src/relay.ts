@@ -110,6 +110,14 @@ type AgentConversationLike = {
   provider?: string;
   title?: string;
   lastActivityAt?: number;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    totalTokens?: number;
+    contextWindow?: number;
+    totalCostUsd?: number;
+  };
 };
 
 function pickConversationSummary(
@@ -170,6 +178,7 @@ function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void 
         conversationId: picked?.id ?? p.activeConversationId,
         title: picked?.title,
         lastActivity: picked?.lastActivityAt ?? Date.now(),
+        usage: picked?.usage ?? null,
       });
       return;
     }
@@ -182,6 +191,7 @@ function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void 
           conversationId: p.conversation.id,
           title: p.conversation.title,
           lastActivity: p.conversation.lastActivityAt,
+          usage: p.conversation.usage ?? null,
         });
       } else if (p.patch?.status) {
         sessions.cacheAgentSummary(envelope.sessionId, {

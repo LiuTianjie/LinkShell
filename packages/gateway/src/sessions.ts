@@ -37,6 +37,18 @@ export interface Session {
   agentConversationId: string | undefined;
   agentTitle: string | undefined;
   agentLastActivity: number | undefined;
+  // Latest token/context usage for the picked conversation (for at-a-glance
+  // display on the session list, without opening the console).
+  agentUsage: AgentUsageSummary | undefined;
+}
+
+export interface AgentUsageSummary {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  totalTokens?: number;
+  contextWindow?: number;
+  totalCostUsd?: number;
 }
 
 const OUTPUT_BUFFER_CAPACITY = 200;
@@ -90,6 +102,7 @@ export class SessionManager {
         agentConversationId: undefined,
         agentTitle: undefined,
         agentLastActivity: undefined,
+        agentUsage: undefined,
       };
       this.sessions.set(sessionId, session);
     }
@@ -267,6 +280,7 @@ export class SessionManager {
       agentConversationId: session.agentConversationId ?? null,
       agentTitle: session.agentTitle ?? null,
       agentLastActivity: session.agentLastActivity ?? null,
+      agentUsage: session.agentUsage ?? null,
     };
   }
 
@@ -278,6 +292,7 @@ export class SessionManager {
       conversationId?: string | null;
       title?: string | null;
       lastActivity?: number | null;
+      usage?: AgentUsageSummary | null;
     },
   ): void {
     const session = this.sessions.get(sessionId);
@@ -287,6 +302,7 @@ export class SessionManager {
     if (summary.conversationId !== undefined) session.agentConversationId = summary.conversationId ?? undefined;
     if (summary.title !== undefined) session.agentTitle = summary.title ?? undefined;
     if (summary.lastActivity !== undefined) session.agentLastActivity = summary.lastActivity ?? undefined;
+    if (summary.usage !== undefined) session.agentUsage = summary.usage ?? undefined;
     session.lastActivity = Date.now();
   }
 

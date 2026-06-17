@@ -38,6 +38,38 @@ function agentStatusClass(status: SessionSummary["agentStatus"]): string {
   }
 }
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+// One-line usage summary for a session card: context-window occupancy % when
+// the window size is known (Claude), else a raw token count (Codex); plus cost
+// when reported. Returns null when there's nothing to show. Mirrors the console
+// header chip so the list and console read consistently.
+function usageSummary(usage: SessionSummary["agentUsage"]): string | null {
+  if (!usage) return null;
+  // Context occupancy = input + cache reads (NOT output): with prompt caching,
+  // input_tokens alone is just the uncached delta and would understate a nearly
+  // full window.
+  const ctxUsed =
+    usage.inputTokens != null || usage.cacheReadTokens != null
+      ? (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0)
+      : null;
+  const parts: string[] = [];
+  if (ctxUsed != null && usage.contextWindow && usage.contextWindow > 0) {
+    parts.push(`${Math.min(100, Math.round((ctxUsed / usage.contextWindow) * 100))}% 上下文`);
+  } else {
+    const shown = usage.totalTokens ?? ctxUsed ?? usage.outputTokens ?? null;
+    if (shown != null) parts.push(`${formatTokens(shown)} tokens`);
+  }
+  if (typeof usage.totalCostUsd === "number" && usage.totalCostUsd > 0) {
+    parts.push(`$${usage.totalCostUsd.toFixed(usage.totalCostUsd < 1 ? 3 : 2)}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 export function SessionListPage({
   session,
   onLogin,
@@ -275,6 +307,7 @@ export function SessionListPage({
                       <p className="mt-1 font-mono text-2xs text-content-muted">
                         {s.cwd ?? "—"} · {s.hasHost ? "在线" : "主机离线"}
                         {s.agentTitle ? ` · ${s.agentTitle}` : ""}
+                        {usageSummary(s.agentUsage) ? ` · ${usageSummary(s.agentUsage)}` : ""}
                       </p>
                     </div>
                   </button>

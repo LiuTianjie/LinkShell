@@ -601,11 +601,11 @@ export function AgentConsolePage({
         className="flex items-center justify-between border-b border-border px-4 py-2"
         style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
       >
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2">
           {isMobile && (
             <button
               onClick={() => setMobileNavOpen(true)}
-              className="codex-btn-ghost px-2 py-1.5"
+              className="codex-btn-ghost shrink-0 px-2 py-1.5"
               aria-label="打开会话列表"
             >
               <IconMenu size={17} />
@@ -616,20 +616,25 @@ export function AgentConsolePage({
           </button>
           <span className={`flex shrink-0 items-center gap-1 text-2xs ${st.color}`}>
             <span className="h-1.5 w-1.5 rounded-full bg-current" />
-            {st.text}
+            {!isMobile && st.text}
           </span>
           {shownAgentStatus && (
             <span
-              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium ${shownAgentStatus.className}`}
+              className={`inline-flex min-w-0 items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium ${shownAgentStatus.className}`}
               title={externalActive ? "外部终端状态" : "当前对话状态"}
             >
               {shownAgentStatus.pulsing && (
-                <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current animate-pulse-dot" />
               )}
-              {shownAgentStatusPrefix ? `${shownAgentStatusPrefix} · ` : ""}
-              {shownAgentStatus.text}
+              {shownAgentStatusPrefix && (
+                <span className="min-w-0 truncate">{shownAgentStatusPrefix}</span>
+              )}
+              <span className="shrink-0">
+                {shownAgentStatusPrefix ? "· " : ""}
+                {shownAgentStatus.text}
+              </span>
               {turnRunning && (
-                <span className="ml-1 font-mono tabular-nums opacity-70">{formatElapsed(elapsedSeconds)}</span>
+                <span className="shrink-0 font-mono tabular-nums opacity-70">{formatElapsed(elapsedSeconds)}</span>
               )}
             </span>
           )}

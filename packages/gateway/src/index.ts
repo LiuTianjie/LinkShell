@@ -492,6 +492,7 @@ async function handleRequest(
         agentConversationId: s.agentConversationId ?? null,
         agentTitle: s.agentTitle ?? null,
         agentLastActivity: s.agentLastActivity ?? null,
+        agentUsage: s.agentUsage ?? null,
       }));
     json(res, 200, { sessions });
     return;

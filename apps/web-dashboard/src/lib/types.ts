@@ -87,6 +87,16 @@ export interface SessionSummary {
   agentConversationId?: string | null;
   agentTitle?: string | null;
   agentLastActivity?: number | null;
+  agentUsage?: AgentUsageSummary | null;
+}
+
+export interface AgentUsageSummary {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  totalTokens?: number;
+  contextWindow?: number;
+  totalCostUsd?: number;
 }
 
 export interface TerminalView {
