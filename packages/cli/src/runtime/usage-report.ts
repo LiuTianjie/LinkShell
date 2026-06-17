@@ -328,8 +328,15 @@ function ingestCodex(acc: Accumulator): number {
   return sessions;
 }
 
+let _cachedReport: UsageReport | null = null;
+let _cachedAt = 0;
+
 export function aggregateUsage(): UsageReport {
+  const now = Date.now();
+  if (_cachedReport && now - _cachedAt < 60_000) return _cachedReport;
   const acc = new Accumulator();
   const sessions = ingestClaude(acc) + ingestCodex(acc);
-  return acc.finish(sessions, Date.now());
+  _cachedReport = acc.finish(sessions, now);
+  _cachedAt = now;
+  return _cachedReport;
 }

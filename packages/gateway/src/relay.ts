@@ -253,6 +253,14 @@ function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void 
           lastActivity: Date.now(),
         });
       }
+      return;
+    }
+    if (envelope.type === "agent.v2.usage.report") {
+      // Cache the full usage report on the session so the session-list page
+      // (HTTP /sessions) can show summary cards without a WebSocket connection.
+      const session = sessions.get(envelope.sessionId);
+      if (session) session.agentUsageReport = envelope.payload;
+      return;
     }
   } catch {
     // Agent summaries are best-effort; never block relay on a status parse.

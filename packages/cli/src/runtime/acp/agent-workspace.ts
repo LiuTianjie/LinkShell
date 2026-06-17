@@ -1709,6 +1709,7 @@ export class AgentWorkspaceProxy {
       case "agent.v2.capabilities.request":
         await this.initialize();
         this.sendCapabilities();
+        this.sendUsageReport();
         break;
       case "agent.v2.conversation.open": {
         const payload = parseTypedPayload("agent.v2.conversation.open", envelope.payload);
@@ -1775,22 +1776,7 @@ export class AgentWorkspaceProxy {
         break;
       }
       case "agent.v2.usage.request": {
-        // Aggregate ALL on-disk transcripts (decoupled from live turns). The
-        // scan is synchronous (~3s over a large corpus); acceptable for an
-        // explicit, on-demand dashboard open. Errors must never break the
-        // session, so swallow + send an empty report.
-        try {
-          const report = aggregateUsage();
-          this.input.send(createEnvelope({
-            type: "agent.v2.usage.report",
-            sessionId: this.input.sessionId,
-            payload: report,
-          }));
-        } catch (error) {
-          if (this.input.verbose) {
-            process.stderr.write(`[agent:v2] usage aggregation failed: ${error instanceof Error ? error.message : String(error)}\n`);
-          }
-        }
+        this.sendUsageReport();
         break;
       }
       case "agent.v2.prompt": {
@@ -4281,6 +4267,27 @@ export class AgentWorkspaceProxy {
       if (turnId) return turnId;
     }
     return firstString(raw, ["turnId", "id"]);
+  }
+
+  // Fire-and-forget usage report — sent on init so the session list page shows
+  // summary cards without anyone clicking a button. First call scans disk (~3s)
+  // so it's deferred off the handler's critical path; cached (60s TTL)
+  // thereafter. Errors silently swallowed (best-effort, never blocks).
+  private sendUsageReport(): void {
+    setTimeout(() => {
+      try {
+        const report = aggregateUsage();
+        this.input.send(createEnvelope({
+          type: "agent.v2.usage.report",
+          sessionId: this.input.sessionId,
+          payload: report,
+        }));
+      } catch (error) {
+        if (this.input.verbose) {
+          process.stderr.write(`[agent:v2] usage aggregation failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      }
+    }, 0);
   }
 }
 

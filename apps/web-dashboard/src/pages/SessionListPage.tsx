@@ -6,7 +6,7 @@ import { claimPairing, listSessions, listMySessions } from "../lib/gateway-api";
 import { getDeviceToken } from "../lib/device-token";
 import { loadKnownSessions, rememberSessions, forgetSession, markAllOffline } from "../lib/storage";
 import { BrandLogo, IconClose, IconChevronRight, IconPlus, IconRefresh, ProviderIcon } from "../components/icons";
-import type { SessionSummary } from "../lib/types";
+import type { SessionSummary, AgentUsageReport } from "../lib/types";
 
 function agentStatusLabel(status: SessionSummary["agentStatus"]): string | null {
   switch (status) {
@@ -50,9 +50,6 @@ function formatTokens(n: number): string {
 // header chip so the list and console read consistently.
 function usageSummary(usage: SessionSummary["agentUsage"]): string | null {
   if (!usage) return null;
-  // Context occupancy = input + cache reads (NOT output): with prompt caching,
-  // input_tokens alone is just the uncached delta and would understate a nearly
-  // full window.
   const ctxUsed =
     usage.inputTokens != null || usage.cacheReadTokens != null
       ? (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0)
@@ -68,6 +65,36 @@ function usageSummary(usage: SessionSummary["agentUsage"]): string | null {
     parts.push(`$${usage.totalCostUsd.toFixed(usage.totalCostUsd < 1 ? 3 : 2)}`);
   }
   return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function formatDuration(ms: number): string {
+  const totalMin = Math.round(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0) return `${h} 小时 ${m} 分`;
+  return `${m} 分`;
+}
+
+function UsageCards({ report }: { report: AgentUsageReport | null | undefined }) {
+  if (!report?.totals) return null;
+  return (
+    <div className="grid grid-cols-2 divide-x divide-border rounded-2xl border border-border bg-surface sm:grid-cols-5">
+      <StatCard value={formatTokens(report.totals.totalTokens)} label="累计 Token 数" />
+      <StatCard value={formatTokens(report.peakDayTokens)} label="峰值 Token 数" />
+      <StatCard value={formatDuration(report.longestTaskMs)} label="最长任务时长" />
+      <StatCard value={`${report.currentStreakDays} 天`} label="当前连续天数" />
+      <StatCard value={`${report.longestStreakDays} 天`} label="最长连续天数" />
+    </div>
+  );
+}
+
+function StatCard({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-1 px-3 py-3">
+      <span className="font-mono text-lg font-semibold text-content-primary tabular-nums">{value}</span>
+      <span className="text-2xs text-content-muted">{label}</span>
+    </div>
+  );
 }
 
 export function SessionListPage({
@@ -220,6 +247,9 @@ export function SessionListPage({
       </header>
 
       <main className="mx-auto max-w-[46rem] animate-fade-in px-6 py-10">
+        {/* Usage summary cards — host-wide aggregate from the first session that carries a report. */}
+        <UsageCards report={sessions.find((s) => s.agentUsageReport)?.agentUsageReport} />
+
         {/* Sessions (primary) */}
         <section className="space-y-5">
           <div className="flex items-center justify-between">

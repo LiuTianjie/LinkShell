@@ -216,6 +216,7 @@ export function startEmbeddedGateway(
             agentTitle: s.agentTitle ?? null,
             agentLastActivity: s.agentLastActivity ?? null,
             agentUsage: s.agentUsage ?? null,
+            agentUsageReport: s.agentUsageReport ?? null,
           }));
         json(res, 200, { sessions });
         return;

@@ -40,6 +40,10 @@ export interface Session {
   // Latest token/context usage for the picked conversation (for at-a-glance
   // display on the session list, without opening the console).
   agentUsage: AgentUsageSummary | undefined;
+  // Latest full usage report from the host (cross-provider aggregate across ALL
+  // on-disk transcripts). Sent automatically on connect; shown as summary cards
+  // on the session list page without entering the console.
+  agentUsageReport: unknown | undefined;
 }
 
 export interface AgentUsageSummary {
@@ -103,6 +107,7 @@ export class SessionManager {
         agentTitle: undefined,
         agentLastActivity: undefined,
         agentUsage: undefined,
+        agentUsageReport: undefined,
       };
       this.sessions.set(sessionId, session);
     }
@@ -281,6 +286,7 @@ export class SessionManager {
       agentTitle: session.agentTitle ?? null,
       agentLastActivity: session.agentLastActivity ?? null,
       agentUsage: session.agentUsage ?? null,
+      agentUsageReport: session.agentUsageReport ?? null,
     };
   }
 

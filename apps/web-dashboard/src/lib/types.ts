@@ -90,6 +90,7 @@ export interface SessionSummary {
   agentTitle?: string | null;
   agentLastActivity?: number | null;
   agentUsage?: AgentUsageSummary | null;
+  agentUsageReport?: AgentUsageReport | null;
 }
 
 export interface AgentUsageSummary {
