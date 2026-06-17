@@ -283,6 +283,55 @@ function contextWindowForModel(model: string | undefined): number | undefined {
   return undefined;
 }
 
+// Normalize a raw provider usage payload (Claude message.usage / result.usage,
+// Codex thread/tokenUsage/updated) into our wire field names. Provider field
+// names vary, so probe snake_case + camelCase. Shared by the live-turn path and
+// the on-disk-transcript path so the two never drift. Returns undefined when no
+// token field resolves. Cost + updatedAt are layered on by callers.
+function normalizeUsageFields(
+  raw: unknown,
+  model: string | undefined,
+): Pick<AgentConversationUsage, "inputTokens" | "outputTokens" | "cacheReadTokens" | "totalTokens" | "contextWindow"> | undefined {
+  const rec = asRecord(raw);
+  if (!rec) return undefined;
+  const num = (...keys: string[]): number | undefined => {
+    for (const k of keys) {
+      const v = rec[k];
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+    }
+    return undefined;
+  };
+  const inputTokens = num("input_tokens", "inputTokens", "input");
+  const outputTokens = num("output_tokens", "outputTokens", "output");
+  const cacheReadTokens = num(
+    "cache_read_input_tokens",
+    "cacheReadInputTokens",
+    "cache_read_tokens",
+    "cached_input_tokens",
+    "cacheReadTokens",
+  );
+  let totalTokens = num("total_tokens", "totalTokens", "total");
+  if (totalTokens == null && (inputTokens != null || outputTokens != null)) {
+    totalTokens = (inputTokens ?? 0) + (outputTokens ?? 0);
+  }
+  if (inputTokens == null && outputTokens == null && cacheReadTokens == null && totalTokens == null) {
+    return undefined;
+  }
+  let contextWindow =
+    num("context_window", "contextWindow", "model_context_window", "window") ??
+    contextWindowForModel(model);
+  // Self-correcting window: tokens-in-context can't exceed the window, so if the
+  // measured occupancy (input + cache reads) already overshoots our assumed
+  // window, the real window must be larger — escalate to 1M. Fixes Claude 1M
+  // sessions, whose transcript records the model as plain "claude-opus-4.8"
+  // (no [1m] tag), which would otherwise show a misleading 100%.
+  const ctxUsed = (inputTokens ?? 0) + (cacheReadTokens ?? 0);
+  if (contextWindow && ctxUsed > contextWindow) {
+    contextWindow = ctxUsed > 1_000_000 ? ctxUsed : 1_000_000;
+  }
+  return { inputTokens, outputTokens, cacheReadTokens, totalTokens, contextWindow };
+}
+
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
@@ -1302,6 +1351,7 @@ function parseRemoteSessions(value: unknown): Array<{
   model?: string;
   createdAt?: number;
   lastActivityAt?: number;
+  usage?: unknown;
 }> {
   const raw = asRecord(value);
   const sessionsValue =
@@ -1318,6 +1368,7 @@ function parseRemoteSessions(value: unknown): Array<{
     model?: string;
     createdAt?: number;
     lastActivityAt?: number;
+    usage?: unknown;
   }> = [];
   for (const entry of sessionsValue) {
     const session = asRecord(entry);
@@ -1336,6 +1387,7 @@ function parseRemoteSessions(value: unknown): Array<{
       model: firstString(source, ["model", "modelId"]),
       createdAt: parseTimestamp(source.createdAt ?? source.created_at),
       lastActivityAt: parseTimestamp(source.lastActivityAt ?? source.updatedAt ?? source.modifiedAt ?? source.lastModified ?? source.updated_at),
+      usage: source.usage,
     });
   }
   return result;
@@ -1981,13 +2033,21 @@ export class AgentWorkspaceProxy {
           const conversationId = existingId ?? makeAgentV2RemoteConversationId(provider, agentSessionId);
           const existing = this.conversations.get(conversationId);
           const cwd = remote.cwd ?? existing?.cwd ?? this.input.cwd;
+          const model = remote.model ?? existing?.model;
+          // Usage read straight from the on-disk transcript (decoupled from any
+          // live LinkShell turn) — so history + externally-started sessions all
+          // carry a context meter. Falls back to any existing live-turn usage.
+          const usageFields = normalizeUsageFields(remote.usage, model);
+          const usage: AgentConversationUsage | undefined = usageFields
+            ? { ...usageFields, updatedAt: remote.lastActivityAt ?? now }
+            : existing?.usage;
           const conversation: AgentConversation = {
             id: conversationId,
             agentSessionId,
             provider,
             cwd,
             title: remote.title ?? existing?.title ?? titleFromCwd(cwd),
-            model: remote.model ?? existing?.model,
+            model,
             reasoningEffort: existing?.reasoningEffort,
             permissionMode: existing?.permissionMode,
             collaborationMode: existing?.collaborationMode,
@@ -1996,6 +2056,7 @@ export class AgentWorkspaceProxy {
             lastMessagePreview: existing?.lastMessagePreview,
             lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
             createdAt: remote.createdAt ?? existing?.createdAt ?? now,
+            usage,
           };
           this.conversations.set(conversation.id, conversation);
           this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
@@ -3847,44 +3908,22 @@ export class AgentWorkspaceProxy {
 
   // Normalize a provider usage payload (Claude result.usage, Codex
   // thread/tokenUsage/updated) into our wire shape, merge onto the conversation,
-  // and emit. Field names vary by provider so we probe snake_case + camelCase.
-  // Missing fields preserve the previous value (cumulative view). No-ops when
-  // nothing meaningful resolves, so a stray empty payload won't blank the meter.
+  // and emit. Missing fields preserve the previous value (cumulative view).
+  // No-ops when nothing meaningful resolves, so a stray empty payload won't
+  // blank the meter.
   private applyConversationUsage(conversationId: string, raw: unknown, costUsd?: number): void {
     const conversation = this.conversations.get(conversationId);
     if (!conversation) return;
-    const rec = asRecord(raw);
-    const num = (...keys: string[]): number | undefined => {
-      for (const k of keys) {
-        const v = rec?.[k];
-        if (typeof v === "number" && Number.isFinite(v)) return v;
-      }
-      return undefined;
-    };
-    const inputTokens = num("input_tokens", "inputTokens", "input");
-    const outputTokens = num("output_tokens", "outputTokens", "output");
-    const cacheReadTokens = num(
-      "cache_read_input_tokens",
-      "cacheReadInputTokens",
-      "cache_read_tokens",
-      "cached_input_tokens",
-      "cacheReadTokens",
-    );
-    let totalTokens = num("total_tokens", "totalTokens", "total");
-    if (totalTokens == null && (inputTokens != null || outputTokens != null)) {
-      totalTokens = (inputTokens ?? 0) + (outputTokens ?? 0);
-    }
-    const contextWindow =
-      num("context_window", "contextWindow", "model_context_window", "window") ??
-      contextWindowForModel(conversation.model);
+    const fields = normalizeUsageFields(raw, conversation.model);
+    if (!fields && costUsd == null) return;
 
     const prev = conversation.usage ?? {};
     const next: AgentConversationUsage = {
-      inputTokens: inputTokens ?? prev.inputTokens,
-      outputTokens: outputTokens ?? prev.outputTokens,
-      cacheReadTokens: cacheReadTokens ?? prev.cacheReadTokens,
-      totalTokens: totalTokens ?? prev.totalTokens,
-      contextWindow: contextWindow ?? prev.contextWindow,
+      inputTokens: fields?.inputTokens ?? prev.inputTokens,
+      outputTokens: fields?.outputTokens ?? prev.outputTokens,
+      cacheReadTokens: fields?.cacheReadTokens ?? prev.cacheReadTokens,
+      totalTokens: fields?.totalTokens ?? prev.totalTokens,
+      contextWindow: fields?.contextWindow ?? prev.contextWindow,
       totalCostUsd: costUsd ?? prev.totalCostUsd,
       updatedAt: Date.now(),
     };

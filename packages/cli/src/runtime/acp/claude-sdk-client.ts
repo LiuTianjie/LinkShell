@@ -235,6 +235,11 @@ export function parseClaudeJsonlSession(input: {
   let createdAt: number | undefined;
   let updatedAt = input.fallbackUpdatedAt;
   let cwd = input.cwd;
+  // Last assistant line's token usage. input_tokens at the latest turn is the
+  // current context-window occupancy (NOT a running sum), so we keep the last
+  // one we see rather than accumulating. Decoupled from any live LinkShell turn
+  // — this is read straight from the on-disk transcript.
+  let usage: Record<string, unknown> | undefined;
   let index = 0;
 
   for (const line of input.text.split(/\r?\n/)) {
@@ -313,6 +318,8 @@ export function parseClaudeJsonlSession(input: {
       }
     } else if (role === "assistant") {
       const assistantMessageId = stringField(message, ["id"]) ?? turnId;
+      const lineUsage = asRecord(message?.usage);
+      if (lineUsage) usage = lineUsage;
       if (typeof content === "string") {
         if (content.trim()) {
           items.push({
@@ -376,6 +383,7 @@ export function parseClaudeJsonlSession(input: {
       preview,
       createdAt,
       updatedAt,
+      usage,
       turns,
     },
   };
@@ -398,6 +406,7 @@ function claudeSessionMetadataFromFile(filePath: string, cwd: string, sessionId:
     createdAt: parseTimestamp(thread.createdAt),
     lastActivityAt: parseTimestamp(thread.updatedAt) ?? stat.mtimeMs,
     lastModified: stat.mtimeMs,
+    usage: asRecord(thread.usage),
   };
 }
 

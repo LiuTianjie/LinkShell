@@ -74,7 +74,19 @@ function buildTree(conversations: AgentConversation[]): FolderGroup[] {
       list.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
     }
   }
-  return [...byFolder.values()].sort((a, b) => a.label.localeCompare(b.label));
+  // Folders sorted by their most-recent activity (max lastActivityAt across all
+  // their conversations), newest first — so a session touched seconds ago (by
+  // ANY process, since lastActivityAt comes from the transcript's mtime, not
+  // just LinkShell-driven turns) floats its folder to the top. Was alphabetical,
+  // which buried recently-used work.
+  const folderRecency = (g: FolderGroup): number => {
+    let max = 0;
+    for (const list of g.providers.values()) {
+      for (const c of list) max = Math.max(max, c.lastActivityAt);
+    }
+    return max;
+  };
+  return [...byFolder.values()].sort((a, b) => folderRecency(b) - folderRecency(a));
 }
 
 function sortedProviders(folder: FolderGroup): ProviderGroup[] {
