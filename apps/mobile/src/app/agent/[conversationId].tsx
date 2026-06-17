@@ -2,9 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAppContext } from "../../contexts/AppContext";
-// Agent console is now the real web-dashboard console embedded in a WebView
-// (true 1:1 parity). The old native screen (../../features/agent) is kept
-// orphaned for one-line rollback until this is device-verified.
+// Agent console is the real web-dashboard console embedded in a WebView
+// (true 1:1 parity). This route resolves the conversation record into a host
+// session, then hands off to the WebView.
 import { AgentWebScreen as AgentConversationScreen } from "../../features/agent-web/AgentWebScreen";
 import { useTheme } from "../../theme";
 

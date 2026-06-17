@@ -150,6 +150,16 @@ interface AgentModeDescriptor {
   description?: string;
 }
 
+interface AgentConversationUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  totalTokens?: number;
+  contextWindow?: number;
+  totalCostUsd?: number;
+  updatedAt?: number;
+}
+
 interface AgentConversation {
   id: string;
   agentSessionId?: string;
@@ -165,6 +175,7 @@ interface AgentConversation {
   lastMessagePreview?: string;
   lastActivityAt: number;
   createdAt: number;
+  usage?: AgentConversationUsage;
 }
 
 interface AgentTimelineItem {
@@ -253,6 +264,21 @@ function firstNumber(value: Record<string, unknown> | undefined, keys: string[])
   for (const key of keys) {
     const next = value[key];
     if (typeof next === "number" && Number.isFinite(next)) return next;
+  }
+  return undefined;
+}
+
+// Best-effort context-window size (tokens) for a model id, used as the "% used"
+// denominator only when the provider doesn't report it directly. Conservative
+// on purpose: returns undefined for anything we can't confidently map, so the
+// UI shows a raw token count instead of a misleading percentage. Claude omits
+// context_window in result.usage, so this fallback is what gives Claude a meter.
+function contextWindowForModel(model: string | undefined): number | undefined {
+  if (!model) return undefined;
+  const m = model.toLowerCase();
+  if (m.includes("claude")) {
+    // 1M-context variants are tagged (e.g. "claude-opus-4-8[1m]"); else 200k.
+    return /\b1m\b|\[1m\]|-1m/.test(m) ? 1_000_000 : 200_000;
   }
   return undefined;
 }
@@ -2860,7 +2886,6 @@ export class AgentWorkspaceProxy {
     if (
       method.startsWith("account/") ||
       method.startsWith("mcpServer/startupStatus/") ||
-      method === "thread/tokenUsage/updated" ||
       method === "serverRequest/resolved" ||
       method === "mcpServer/oauthLogin/completed"
     ) {
@@ -2868,6 +2893,17 @@ export class AgentWorkspaceProxy {
     }
 
     const conversationId = this.conversationIdFromParams(params) ?? this.fallbackConversationId();
+    if (method === "thread/tokenUsage/updated") {
+      // Codex emits cumulative token usage for the thread. Carry it onto the
+      // conversation so clients can show a context meter (parity with Codex's
+      // own /status). Cost is Claude-only; Codex usually omits it.
+      if (conversationId) {
+        const raw = asRecord(params);
+        const usage = asRecord(raw?.usage) ? raw?.usage : params;
+        this.applyConversationUsage(conversationId, usage);
+      }
+      return;
+    }
     if (method === "thread/status/changed") {
       const status = agentStatusFromThreadStatus(params);
       if (conversationId && status) {
@@ -2926,6 +2962,13 @@ export class AgentWorkspaceProxy {
     }
     if (method === "turn/completed") {
       if (conversationId) {
+        // Claude reports cumulative usage + cost on turn completion (Codex sends
+        // it via thread/tokenUsage/updated instead). Capture it for the meter.
+        const raw = asRecord(params);
+        const cost = firstNumber(raw, ["totalCostUsd", "total_cost_usd"]);
+        if (raw?.usage != null || cost != null) {
+          this.applyConversationUsage(conversationId, raw?.usage, cost);
+        }
         this.forgetCurrentTurn(conversationId, this.extractTurnId(params));
         this.updateConversationStatus(conversationId, "idle");
       }
@@ -3800,6 +3843,61 @@ export class AgentWorkspaceProxy {
       sessionId: this.input.sessionId,
       payload: { conversationId: conversation.id, conversation: { ...conversation } },
     }));
+  }
+
+  // Normalize a provider usage payload (Claude result.usage, Codex
+  // thread/tokenUsage/updated) into our wire shape, merge onto the conversation,
+  // and emit. Field names vary by provider so we probe snake_case + camelCase.
+  // Missing fields preserve the previous value (cumulative view). No-ops when
+  // nothing meaningful resolves, so a stray empty payload won't blank the meter.
+  private applyConversationUsage(conversationId: string, raw: unknown, costUsd?: number): void {
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation) return;
+    const rec = asRecord(raw);
+    const num = (...keys: string[]): number | undefined => {
+      for (const k of keys) {
+        const v = rec?.[k];
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+      }
+      return undefined;
+    };
+    const inputTokens = num("input_tokens", "inputTokens", "input");
+    const outputTokens = num("output_tokens", "outputTokens", "output");
+    const cacheReadTokens = num(
+      "cache_read_input_tokens",
+      "cacheReadInputTokens",
+      "cache_read_tokens",
+      "cached_input_tokens",
+      "cacheReadTokens",
+    );
+    let totalTokens = num("total_tokens", "totalTokens", "total");
+    if (totalTokens == null && (inputTokens != null || outputTokens != null)) {
+      totalTokens = (inputTokens ?? 0) + (outputTokens ?? 0);
+    }
+    const contextWindow =
+      num("context_window", "contextWindow", "model_context_window", "window") ??
+      contextWindowForModel(conversation.model);
+
+    const prev = conversation.usage ?? {};
+    const next: AgentConversationUsage = {
+      inputTokens: inputTokens ?? prev.inputTokens,
+      outputTokens: outputTokens ?? prev.outputTokens,
+      cacheReadTokens: cacheReadTokens ?? prev.cacheReadTokens,
+      totalTokens: totalTokens ?? prev.totalTokens,
+      contextWindow: contextWindow ?? prev.contextWindow,
+      totalCostUsd: costUsd ?? prev.totalCostUsd,
+      updatedAt: Date.now(),
+    };
+    if (
+      next.inputTokens == null &&
+      next.outputTokens == null &&
+      next.totalTokens == null &&
+      next.totalCostUsd == null
+    ) {
+      return;
+    }
+    conversation.usage = next;
+    this.emitConversation(conversation);
   }
 
   private emitStatus(conversationId: string, status: AgentStatus, text?: string): void {

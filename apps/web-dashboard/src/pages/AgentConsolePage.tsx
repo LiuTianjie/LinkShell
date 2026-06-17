@@ -16,7 +16,7 @@ import { ThemeToggle } from "../components/ThemeToggle";
 import { isEmbedded } from "../lib/embed";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
 import { useIsMobile } from "../hooks/useMediaQuery";
-import type { ConnectionStatus, AgentStatus, AgentTimelineItem } from "../lib/types";
+import type { ConnectionStatus, AgentStatus, AgentTimelineItem, AgentConversation } from "../lib/types";
 import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, IconGlobe, ProviderIcon } from "../components/icons";
 
 function statusLabel(status: ConnectionStatus): { text: string; color: string } {
@@ -43,6 +43,86 @@ function agentStatusLabel(status?: AgentStatus): { text: string; className: stri
     default:
       return null;
   }
+}
+
+// Compact token count: 1234 → "1.2k", 2_500_000 → "2.5M".
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+// Render the conversation usage snapshot as a header chip. Prefers a
+// context-window occupancy % (parity with Claude Code's /context and Codex's
+// "% left"); falls back to a raw token total when the window size is unknown.
+// Returns null when there's nothing meaningful to show.
+function usageChip(usage: AgentConversation["usage"]): { text: string; title: string } | null {
+  if (!usage) return null;
+  // Context occupancy = tokens actually sent to the model: new input + cache
+  // reads. NOT output (that's generated, not context), and crucially cache
+  // reads must be included — with prompt caching, input_tokens alone is just
+  // the uncached delta (often tiny), so using it would wildly understate a
+  // nearly-full window.
+  const ctxUsed =
+    usage.inputTokens != null || usage.cacheReadTokens != null
+      ? (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0)
+      : null;
+  const parts: string[] = [];
+  let title = "";
+  if (ctxUsed != null && usage.contextWindow && usage.contextWindow > 0) {
+    const pct = Math.min(100, Math.round((ctxUsed / usage.contextWindow) * 100));
+    parts.push(`${pct}%`);
+    title = `上下文 ${formatTokens(ctxUsed)} / ${formatTokens(usage.contextWindow)} tokens`;
+  } else {
+    // No known window (e.g. Codex) → show a raw token count instead of a %.
+    const shown = usage.totalTokens ?? ctxUsed ?? usage.outputTokens ?? null;
+    if (shown != null) {
+      parts.push(formatTokens(shown));
+      title = `${shown.toLocaleString()} tokens`;
+    }
+  }
+  if (typeof usage.totalCostUsd === "number" && usage.totalCostUsd > 0) {
+    parts.push(`$${usage.totalCostUsd.toFixed(usage.totalCostUsd < 1 ? 3 : 2)}`);
+    title = title ? `${title} · $${usage.totalCostUsd.toFixed(4)}` : `$${usage.totalCostUsd.toFixed(4)}`;
+  }
+  if (parts.length === 0) return null;
+  return { text: parts.join(" · "), title };
+}
+
+// Compact elapsed-time format, matching Codex's status line cadence:
+// 0s → 59s → 1m 00s → 1h 02m 05s.
+function formatElapsed(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m ${String(sec).padStart(2, "0")}s`;
+  if (m > 0) return `${m}m ${String(sec).padStart(2, "0")}s`;
+  return `${sec}s`;
+}
+
+// Seconds elapsed since `active` last flipped true. Ticks once per second while
+// active, resets to 0 when it goes idle. Anchors to the client's observation of
+// the running turn (no protocol field carries the turn's true start yet).
+function useElapsedSeconds(active: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!active) {
+      startRef.current = null;
+      setElapsed(0);
+      return;
+    }
+    startRef.current = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => {
+      if (startRef.current != null) {
+        setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return elapsed;
 }
 
 // Lightweight AnimatedPresence: mounts children with an enter animation, then
@@ -409,6 +489,15 @@ export function AgentConsolePage({
   const shownAgentStatusPrefix = externalActive
     ? (snapshot.externalAgentTitle ?? "外部终端")
     : activeConversation?.provider;
+  // Tick an elapsed timer only while the shown turn is actively running (not
+  // while waiting on a permission prompt or errored).
+  const turnRunning = externalActive
+    ? snapshot.externalAgentStatus === "running"
+    : activeConversation?.status === "running";
+  const elapsedSeconds = useElapsedSeconds(turnRunning);
+  // Usage chip (context % / tokens / cost). External-terminal sessions don't
+  // carry agent-v2 usage, so only the embedded conversation's snapshot applies.
+  const usage = externalActive ? null : usageChip(activeConversation?.usage);
   const deviceLabel = `CLI 设备 · ${sessionId.slice(0, 8)}`;
 
   // Stable spawn-terminal callback. TerminalPanel keys an effect on this prop,
@@ -539,6 +628,17 @@ export function AgentConsolePage({
               )}
               {shownAgentStatusPrefix ? `${shownAgentStatusPrefix} · ` : ""}
               {shownAgentStatus.text}
+              {turnRunning && (
+                <span className="ml-1 font-mono tabular-nums opacity-70">{formatElapsed(elapsedSeconds)}</span>
+              )}
+            </span>
+          )}
+          {usage && (
+            <span
+              className="inline-flex shrink-0 items-center rounded-full border border-border bg-surface-overlay px-2 py-0.5 font-mono text-2xs tabular-nums text-content-muted"
+              title={usage.title}
+            >
+              {usage.text}
             </span>
           )}
           {snapshot.lastError && (

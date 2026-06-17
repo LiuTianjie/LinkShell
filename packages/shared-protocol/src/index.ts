@@ -703,6 +703,23 @@ export const agentV2TimelineItemSchema = z.object({
   isStreaming: z.boolean().optional(),
 });
 
+// Token / context usage + cost for a conversation. Both Claude (result.usage +
+// total_cost_usd) and Codex (thread/tokenUsage/updated) expose this; we carry a
+// normalized snapshot on the conversation so web/mobile can show context-window
+// occupancy and cost like Claude Code's /context and Codex's /status. All
+// fields optional — providers populate what they have.
+export const agentV2UsageSchema = z.object({
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  cacheReadTokens: z.number().optional(),
+  totalTokens: z.number().optional(),
+  /** Model's max context window (tokens), when known — denominator for "% used". */
+  contextWindow: z.number().optional(),
+  /** Cumulative session cost in USD (Claude reports this; Codex usually omits). */
+  totalCostUsd: z.number().optional(),
+  updatedAt: z.number().optional(),
+});
+
 export const agentV2ConversationSchema = z.object({
   id: z.string().min(1),
   agentSessionId: z.string().optional(),
@@ -718,6 +735,7 @@ export const agentV2ConversationSchema = z.object({
   lastMessagePreview: z.string().optional(),
   lastActivityAt: z.number(),
   createdAt: z.number(),
+  usage: agentV2UsageSchema.optional(),
 });
 
 export const agentV2CapabilitiesRequestPayloadSchema = z.object({});

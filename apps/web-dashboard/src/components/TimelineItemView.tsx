@@ -2,7 +2,7 @@ import { memo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { IconWrench, IconCheck, IconChevronRight, IconChevronDown, IconFile, IconClose, IconUsers, IconCopy, IconPencil } from "./icons";
+import { IconWrench, IconCheck, IconChevronRight, IconChevronDown, IconFile, IconClose, IconUsers, IconCopy, IconPencil, IconGlobe, IconSearch, IconFolder } from "./icons";
 import type { AgentTimelineItem } from "../lib/types";
 import { parseDiff, diffStats } from "../lib/diff";
 
@@ -267,6 +267,67 @@ export function DiffViewer({ item }: { item: AgentTimelineItem }) {
 
 // ── Tool / command cards ─────────────────────────────────────────────
 
+// Map a raw tool name + JSON input to a semantic icon, friendly label, and a
+// one-line argument summary — so WebSearch/WebFetch/Grep/Glob/Read etc. read
+// like Claude Code / Codex instead of dumping a bare tool name + raw JSON.
+// Always degrades gracefully: unknown tools or unparseable input fall back to
+// the wrench + raw name, and the full input/output stays in the expandable body.
+type ToolDescriptor = {
+  Icon: (p: { size?: number; className?: string }) => ReactNode;
+  label: string;
+  summary?: string;
+};
+
+function clampSummary(s: string, max = 120): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;
+}
+
+function describeToolCall(name: string, input?: string): ToolDescriptor {
+  // input is a JSON string from the host; parse defensively.
+  let args: Record<string, unknown> = {};
+  if (input) {
+    try {
+      const parsed = JSON.parse(input);
+      if (parsed && typeof parsed === "object") args = parsed as Record<string, unknown>;
+    } catch {
+      // leave args empty — summary falls back to nothing, body shows raw input.
+    }
+  }
+  const str = (k: string): string | undefined =>
+    typeof args[k] === "string" ? (args[k] as string) : undefined;
+
+  // Normalize: strip MCP "server · tool" / "server__tool" prefixes for matching,
+  // but keep the original name as the display fallback.
+  const bare = name.split(/ · |__/).pop() ?? name;
+  switch (bare) {
+    case "WebSearch":
+      return { Icon: IconSearch, label: "网络搜索", summary: str("query") };
+    case "WebFetch":
+      return { Icon: IconGlobe, label: "获取网页", summary: str("url") };
+    case "Grep": {
+      const p = str("pattern");
+      const path = str("path");
+      return { Icon: IconSearch, label: "搜索代码", summary: path ? `${p ?? ""} · ${path}` : p };
+    }
+    case "Glob":
+      return { Icon: IconSearch, label: "查找文件", summary: str("pattern") };
+    case "Read":
+      return { Icon: IconFile, label: "读取文件", summary: str("file_path") ?? str("path") };
+    case "LS":
+    case "List":
+      return { Icon: IconFolder, label: "列出目录", summary: str("path") };
+    case "Task":
+      return { Icon: IconUsers, label: "子任务", summary: str("description") ?? str("prompt") };
+    case "TodoWrite":
+      return { Icon: IconCheck, label: "更新任务列表" };
+    case "NotebookEdit":
+      return { Icon: IconPencil, label: "编辑 Notebook", summary: str("notebook_path") };
+    default:
+      return { Icon: IconWrench, label: name };
+  }
+}
+
 function StatusDot({ status }: { status?: string }) {
   const color =
     status === "completed"
@@ -287,9 +348,10 @@ function ToolCard({ item }: { item: AgentTimelineItem }) {
   // Default collapsed once finished; expanded while running (or on failure).
   const [expanded, setExpanded] = useState(status === "running" || status === "failed");
 
-  const headerLabel = cmd
-    ? `$ ${cmd.command ?? "命令"}`
-    : tool?.name ?? "工具调用";
+  // Command executions keep the `$ cmd` shell look; tool calls get a semantic
+  // icon + friendly label + arg summary (so WebSearch/Grep/Read read clearly).
+  const desc = !cmd && tool ? describeToolCall(tool.name, tool.input) : null;
+  const ToolIcon = desc?.Icon ?? IconWrench;
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -309,8 +371,17 @@ function ToolCard({ item }: { item: AgentTimelineItem }) {
           <span className="w-3 shrink-0" />
         )}
         <StatusDot status={status} />
-        {!cmd && <IconWrench size={12} className="shrink-0 text-content-faint" />}
-        <span className="truncate font-mono text-[13px] text-content-secondary">{headerLabel}</span>
+        {cmd ? (
+          <span className="truncate font-mono text-[13px] text-content-secondary">{`$ ${cmd.command ?? "命令"}`}</span>
+        ) : (
+          <>
+            <ToolIcon size={12} className="shrink-0 text-content-faint" />
+            <span className="shrink-0 text-[13px] font-medium text-content-secondary">{desc?.label ?? tool?.name ?? "工具调用"}</span>
+            {desc?.summary && (
+              <span className="truncate font-mono text-[13px] text-content-faint">{clampSummary(desc.summary)}</span>
+            )}
+          </>
+        )}
         {cmd && typeof cmd.exitCode === "number" && (
           <span className={`ml-auto shrink-0 font-mono text-[13px] ${cmd.exitCode === 0 ? "text-success" : "text-danger"}`}>
             exit {cmd.exitCode}
@@ -874,6 +945,29 @@ function renderActivity(
   return <ToolCard item={item} />;
 }
 
+// Wall-clock span of a completed turn: from the earliest item's start to the
+// latest item's finish (updatedAt, falling back to createdAt). Returns a
+// compact label (e.g. "4.2s", "1m 03s") or undefined when sub-second / unknown.
+function turnDurationLabel(items: AgentTimelineItem[]): string | undefined {
+  let start = Infinity;
+  let end = 0;
+  for (const it of items) {
+    if (typeof it.createdAt === "number") start = Math.min(start, it.createdAt);
+    const finish = typeof it.updatedAt === "number" ? it.updatedAt : it.createdAt;
+    if (typeof finish === "number") end = Math.max(end, finish);
+  }
+  if (!Number.isFinite(start) || end <= start) return undefined;
+  const ms = end - start;
+  if (ms < 1000) return undefined;
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m < 60) return `${m}m ${String(s).padStart(2, "0")}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${String(m % 60).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+}
+
 export function TurnActivityGroup({
   items,
   live,
@@ -911,6 +1005,10 @@ export function TurnActivityGroup({
   if (subs) parts.push(`${subs} 次子 Agent`);
   if (!files && !cmds && !tools && !subs && thinks) parts.push("思考");
   const summary = parts.join(" · ") || `${items.length} 项活动`;
+  // Wall-clock span of the turn, from the earliest item start to the latest
+  // item finish. Shown like Codex's exec footer (" • 4.2s"). Hidden when the
+  // span is unknown or sub-second.
+  const duration = turnDurationLabel(items);
 
   if (open) {
     return (
@@ -921,6 +1019,7 @@ export function TurnActivityGroup({
         >
           <IconChevronDown size={12} className="shrink-0 text-content-faint" />
           <span>{summary}</span>
+          {duration && <span className="text-content-faint">· {duration}</span>}
         </button>
         <div className="space-y-2">
           {items.map((it) => (
@@ -938,6 +1037,7 @@ export function TurnActivityGroup({
     >
       <IconChevronRight size={12} className="shrink-0 text-content-faint" />
       <span>{summary}</span>
+      {duration && <span className="text-content-faint">· {duration}</span>}
       <span className="ml-auto text-content-faint">展开</span>
     </button>
   );
