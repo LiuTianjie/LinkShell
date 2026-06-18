@@ -180,15 +180,15 @@ export function UsageDashboardContent({ report }: { report: AgentUsageReport | n
         {heat && (
           <div className="overflow-x-auto">
             <div className="inline-flex flex-col gap-1">
-              <div className="flex gap-[3px]">
+              <div className="flex gap-1">
                 {heat.weeks.map((week, ci) => (
-                  <div key={ci} className="flex flex-col gap-[3px]">
+                  <div key={ci} className="flex flex-col gap-1">
                     {week.map((cell) => {
                       const c = cellColor(cell.value, heat.max);
                       return (
                         <div
                           key={cell.key}
-                          className={`h-2.5 w-2.5 rounded-[2px] ${c.className}`}
+                          className={`h-3 w-3 rounded-[3px] ${c.className}`}
                           style={c.style}
                           title={`${cell.key} · ${formatTokens(cell.daily)} tokens`}
                         />
@@ -197,9 +197,9 @@ export function UsageDashboardContent({ report }: { report: AgentUsageReport | n
                   </div>
                 ))}
               </div>
-              <div className="relative mt-1 h-4 text-2xs text-content-faint">
+              <div className="relative mt-1.5 h-4 text-2xs text-content-faint">
                 {heat.monthLabels.map((ml) => (
-                  <span key={ml.col} className="absolute" style={{ left: `${ml.col * 13}px` }}>
+                  <span key={ml.col} className="absolute" style={{ left: `${ml.col * 16}px` }}>
                     {ml.label}
                   </span>
                 ))}

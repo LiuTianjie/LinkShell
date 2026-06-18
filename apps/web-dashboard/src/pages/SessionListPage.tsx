@@ -218,8 +218,8 @@ export function SessionListPage({
       </header>
 
       <main className="mx-auto max-w-[46rem] animate-fade-in px-6 py-10">
-        {/* Usage dashboard — host-wide aggregate from the first session carrying a report. */}
-        <UsageDashboardContent report={sessions.find((s) => s.agentUsageReport)?.agentUsageReport ?? null} />
+          {/* Usage dashboard — host-wide aggregate from the first session carrying a report. */}
+          <UsageDashboardContent report={sessions.find((s) => s.agentUsageReport)?.agentUsageReport ?? null} />
 
         {/* Sessions (primary) */}
         <section className="space-y-5">
@@ -308,8 +308,10 @@ export function SessionListPage({
                       <p className="mt-1 font-mono text-2xs text-content-muted">
                         {s.cwd ?? "—"} · {s.hasHost ? "在线" : "主机离线"}
                         {s.agentTitle ? ` · ${s.agentTitle}` : ""}
-                        {usageSummary(s.agentUsage) ? ` · ${usageSummary(s.agentUsage)}` : ""}
                       </p>
+                      {usageSummary(s.agentUsage) && (
+                        <p className="mt-0.5 font-mono text-2xs text-content-faint">{usageSummary(s.agentUsage)}</p>
+                      )}
                     </div>
                   </button>
                   <div className="flex items-center gap-2 pl-3">
