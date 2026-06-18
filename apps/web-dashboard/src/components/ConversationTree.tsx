@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useCallback } from "react";
 import type { AgentConversation, AgentCapabilitiesPayload, AgentStatus } from "../lib/types";
 import type { WorkspaceStore } from "../store/workspace-store";
 import {
@@ -148,14 +148,21 @@ export function ConversationTree({
   const enabledProviders = providers.filter((p) => p.enabled);
 
   // Archived conversations are hidden by default; the user can reveal them.
+  // Also hide <synthetic> model conversations (internal Claude heuristics, not
+  // real user sessions) — they clutter "最近会话" with unusable entries.
   const [showArchived, setShowArchived] = useState(false);
   const archivedCount = useMemo(
     () => conversations.filter((c) => c.archived).length,
     [conversations],
   );
+  const filterConversation = useCallback((c: AgentConversation) => {
+    if (c.archived && !showArchived) return false;
+    if (c.model === "<synthetic>") return false;
+    return true;
+  }, [showArchived]);
   const visibleConversations = useMemo(
-    () => (showArchived ? conversations : conversations.filter((c) => !c.archived)),
-    [conversations, showArchived],
+    () => conversations.filter(filterConversation),
+    [conversations, filterConversation],
   );
   const activeConversations = useMemo(
     () => visibleConversations

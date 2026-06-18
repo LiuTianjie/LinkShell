@@ -57,6 +57,7 @@ export interface WorkspaceSnapshot {
   externalAgentStatus: AgentStatus | null;
   externalAgentTitle: string | null;
   externalAgentProvider: string | null;
+  externalAgentConversationId: string | null;
   conversations: AgentConversation[];
   timelines: Map<string, AgentTimelineItem[]>;
   capabilities: AgentCapabilitiesPayload | null;
@@ -125,6 +126,7 @@ export class WorkspaceStore {
   private externalAgentStatus: AgentStatus | null = null;
   private externalAgentTitle: string | null = null;
   private externalAgentProvider: string | null = null;
+  private externalAgentConversationId: string | null = null;
   private conversations: AgentConversation[] = [];
   private timelines = new Map<string, AgentTimelineItem[]>();
   private capabilities: AgentCapabilitiesPayload | null = null;
@@ -165,6 +167,7 @@ export class WorkspaceStore {
       externalAgentStatus: this.externalAgentStatus,
       externalAgentTitle: this.externalAgentTitle,
       externalAgentProvider: this.externalAgentProvider,
+      externalAgentConversationId: this.externalAgentConversationId,
       conversations: this.conversations,
       timelines: this.timelines,
       capabilities: this.capabilities,
@@ -277,6 +280,7 @@ export class WorkspaceStore {
           : p.summary
             ? `外部终端 · ${p.summary}`
             : "外部终端";
+        this.externalAgentConversationId = (p as any).conversationId ?? null;
         this.notify();
       } catch {}
       return;

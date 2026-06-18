@@ -649,6 +649,11 @@ export function AgentConsolePage({
               {usage.text}
             </span>
           )}
+          {snapshot.usage?.totals && (
+            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-surface-overlay px-2 py-0.5 font-mono text-2xs tabular-nums text-content-muted" title="全机用量">
+              <IconCommand size={12} />{formatTokens(snapshot.usage.totals.totalTokens)}
+            </span>
+          )}
           {snapshot.lastError && (
             <button
               onClick={() => store.dismissError()}
@@ -751,7 +756,19 @@ export function AgentConsolePage({
                     store={store}
                     onSelect={(id) => { store.setActiveConversation(id); setMobileNavOpen(false); }}
                     onNewConversation={(p, cwd) => { setMobileNavOpen(false); handleNewConversation(p, cwd); }}
-                    onOpenExternalTerminal={() => { setMobileNavOpen(false); openTerminal(); }}
+                    onOpenExternalTerminal={() => {
+                      const convId = snapshot.externalAgentConversationId
+                        || snapshot.conversations.find((c) =>
+                          c.status === "running" || c.status === "waiting_permission"
+                        )?.id;
+                      if (convId) {
+                        store.setActiveConversation(convId);
+                        setMobileNavOpen(false);
+                      } else {
+                        setMobileNavOpen(false);
+                        openTerminal();
+                      }
+                    }}
                   />
                 </div>
               </aside>
@@ -804,7 +821,14 @@ export function AgentConsolePage({
                 store={store}
                 onSelect={(id) => store.setActiveConversation(id)}
                 onNewConversation={handleNewConversation}
-                onOpenExternalTerminal={openTerminal}
+                onOpenExternalTerminal={() => {
+                  const convId = snapshot.externalAgentConversationId
+                    || snapshot.conversations.find((c) =>
+                      c.status === "running" || c.status === "waiting_permission"
+                    )?.id;
+                  if (convId) store.setActiveConversation(convId);
+                  else openTerminal();
+                }}
               />
             </div>
             {/* Drag handle */}
