@@ -389,10 +389,55 @@ export function parseClaudeJsonlSession(input: {
   };
 }
 
+/** Derive whether an on-disk Claude transcript is being actively driven RIGHT
+ *  NOW by some process (LinkShell or an external `claude` terminal), purely from
+ *  the file. Combines a structural signal (the last record) with a freshness
+ *  signal (mtime), so it neither misses a live external turn nor sticks at
+ *  "running" forever if that process dies mid-turn.
+ *
+ *  - last record is a completed assistant turn (stop_reason "end_turn") → idle,
+ *    regardless of mtime (the turn is definitively done).
+ *  - otherwise the structure is mid-turn (awaiting an assistant response, an
+ *    assistant still calling tools, or a half-written trailing line). If the
+ *    file changed within FRESH_MS, a process is appending → running; if it's
+ *    stale, the driver is gone → idle.
+ *  Verified against real transcripts: mid-turn+fresh→running, mid-turn+stale→
+ *  idle, end_turn+fresh→idle, half-written-line+fresh→running. */
+function deriveTranscriptStatus(text: string, mtimeMs: number, nowMs: number): "running" | "idle" {
+  const FRESH_MS = 10_000;
+  const fresh = nowMs - mtimeMs < FRESH_MS;
+  const lines = text.split(/\r?\n/);
+  let last: Record<string, unknown> | undefined;
+  let sawUnparseableTail = false;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const ln = lines[i];
+    if (!ln || !ln.trim()) continue;
+    try {
+      last = asRecord(JSON.parse(ln));
+      break;
+    } catch {
+      // A trailing half-written line means a writer is mid-append.
+      sawUnparseableTail = true;
+    }
+  }
+  if (!last) return "idle";
+  const message = asRecord(last.message);
+  const role = stringField(message, ["role"]) ?? stringField(last, ["type"]);
+  const stop = message ? message.stop_reason ?? null : null;
+  if (role === "assistant" && stop === "end_turn") return "idle";
+  const midTurn =
+    role === "user" ||
+    last.type === "user" ||
+    (role === "assistant" && (stop === "tool_use" || stop === null)) ||
+    sawUnparseableTail;
+  return midTurn && fresh ? "running" : "idle";
+}
+
 function claudeSessionMetadataFromFile(filePath: string, cwd: string, sessionId: string): Record<string, unknown> {
   const stat = statSync(filePath);
+  const text = readFileSync(filePath, "utf8");
   const parsed = parseClaudeJsonlSession({
-    text: readFileSync(filePath, "utf8"),
+    text,
     cwd,
     sessionId,
     fallbackUpdatedAt: stat.mtimeMs,
@@ -407,6 +452,10 @@ function claudeSessionMetadataFromFile(filePath: string, cwd: string, sessionId:
     lastActivityAt: parseTimestamp(thread.updatedAt) ?? stat.mtimeMs,
     lastModified: stat.mtimeMs,
     usage: asRecord(thread.usage),
+    // Live status read straight from the transcript, so a session another
+    // `claude` process is actively driving shows as "running" in the list
+    // rather than the hardcoded "idle" the workspace would otherwise assign.
+    status: deriveTranscriptStatus(text, stat.mtimeMs, Date.now()),
   };
 }
 

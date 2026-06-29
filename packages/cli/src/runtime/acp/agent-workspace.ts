@@ -1371,6 +1371,7 @@ function parseRemoteSessions(value: unknown): Array<{
   createdAt?: number;
   lastActivityAt?: number;
   usage?: unknown;
+  status?: AgentStatus;
 }> {
   const raw = asRecord(value);
   const sessionsValue =
@@ -1388,6 +1389,7 @@ function parseRemoteSessions(value: unknown): Array<{
     createdAt?: number;
     lastActivityAt?: number;
     usage?: unknown;
+    status?: AgentStatus;
   }> = [];
   for (const entry of sessionsValue) {
     const session = asRecord(entry);
@@ -1399,6 +1401,12 @@ function parseRemoteSessions(value: unknown): Array<{
     const source = nestedThread ?? session;
     const id = firstString(source, ["id", "threadId", "sessionId", "agentSessionId"]);
     if (!id) continue;
+    // Only accept a transcript-derived status the provider actually reported
+    // (Claude's listSessions sets "running"/"idle" from the on-disk transcript).
+    // Anything else is left undefined so the sync site keeps its own status.
+    const reportedStatus = firstString(source, ["status"]);
+    const status: AgentStatus | undefined =
+      reportedStatus === "running" || reportedStatus === "idle" ? reportedStatus : undefined;
     result.push({
       id,
       cwd: firstString(source, ["cwd", "workingDirectory", "workspacePath"]),
@@ -1407,6 +1415,7 @@ function parseRemoteSessions(value: unknown): Array<{
       createdAt: parseTimestamp(source.createdAt ?? source.created_at),
       lastActivityAt: parseTimestamp(source.lastActivityAt ?? source.updatedAt ?? source.modifiedAt ?? source.lastModified ?? source.updated_at),
       usage: source.usage,
+      ...(status ? { status } : {}),
     });
   }
   return result;
@@ -2065,6 +2074,20 @@ export class AgentWorkspaceProxy {
           const usage: AgentConversationUsage | undefined = usageFields
             ? { ...usageFields, updatedAt: remote.lastActivityAt ?? now }
             : existing?.usage;
+          // Status precedence. While LinkShell is driving a turn for this
+          // conversation, the in-memory status is authoritative — the transcript
+          // lags (the SDK hasn't flushed the in-flight turn to disk), so trusting
+          // it would flicker a live "running" turn back to idle. Otherwise, if
+          // the transcript shows an external `claude` process is actively driving
+          // the session, surface that as "running" (the whole point — external
+          // session live state). Failing both, keep the existing status (so
+          // error/waiting_permission survive a re-sync) or default to idle.
+          const linkshellDriving = this.currentTurnIds.has(conversationId);
+          const status: AgentStatus = linkshellDriving
+            ? existing?.status ?? "running"
+            : remote.status === "running"
+              ? "running"
+              : existing?.status ?? "idle";
           const conversation: AgentConversation = {
             id: conversationId,
             agentSessionId,
@@ -2075,7 +2098,7 @@ export class AgentWorkspaceProxy {
             reasoningEffort: existing?.reasoningEffort,
             permissionMode: existing?.permissionMode,
             collaborationMode: existing?.collaborationMode,
-            status: existing?.status ?? "idle",
+            status,
             archived: existing?.archived ?? false,
             lastMessagePreview: existing?.lastMessagePreview,
             lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
