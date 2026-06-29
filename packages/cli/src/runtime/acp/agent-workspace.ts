@@ -2077,17 +2077,23 @@ export class AgentWorkspaceProxy {
           // Status precedence. While LinkShell is driving a turn for this
           // conversation, the in-memory status is authoritative — the transcript
           // lags (the SDK hasn't flushed the in-flight turn to disk), so trusting
-          // it would flicker a live "running" turn back to idle. Otherwise, if
-          // the transcript shows an external `claude` process is actively driving
-          // the session, surface that as "running" (the whole point — external
-          // session live state). Failing both, keep the existing status (so
-          // error/waiting_permission survive a re-sync) or default to idle.
+          // it would flicker a live "running" turn back to idle. Otherwise the
+          // transcript-derived remote.status is authoritative for Claude (it
+          // reports running/idle straight from disk): surface "running" while an
+          // external process drives it, and let its "idle" clear a previously
+          // observed "running" once the external turn finishes. We only fall
+          // back to the existing status to keep error/waiting_permission sticky
+          // across a re-sync — deriveTranscriptStatus never emits those, so they
+          // live only in `existing`; defaulting everything else to idle avoids a
+          // purely-external session getting stuck at "running" forever.
           const linkshellDriving = this.currentTurnIds.has(conversationId);
           const status: AgentStatus = linkshellDriving
             ? existing?.status ?? "running"
             : remote.status === "running"
               ? "running"
-              : existing?.status ?? "idle";
+              : existing?.status === "error" || existing?.status === "waiting_permission"
+                ? existing.status
+                : "idle";
           const conversation: AgentConversation = {
             id: conversationId,
             agentSessionId,
