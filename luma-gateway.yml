@@ -1,5 +1,5 @@
 name: linkshell-gateway
-image: nickname4th/linkshell-gateway:0.4.40
+image: nickname4th/linkshell-gateway:0.4.41
 region: cn
 exposure: cn-edge
 domain: gateway.itool.tech
