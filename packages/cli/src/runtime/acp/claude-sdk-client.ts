@@ -453,6 +453,13 @@ const FALLBACK_MODEL_LABELS: Record<string, string> = {
   "opus[1m]": "Opus 1M",
 };
 
+// Canonical Claude Code model aliases, used whenever live model discovery
+// (supportedModels()) returns nothing. Hoisted so the two listModels() fallback
+// branches stay in sync — a new alias added here reaches both.
+const DEFAULT_FALLBACK_MODELS = ["default", "sonnet", "opus", "opusplan", "haiku", "sonnet[1m]", "opus[1m]"];
+const toModelEntries = (ids: string[]): { id: string; label: string }[] =>
+  ids.map((id) => ({ id, label: FALLBACK_MODEL_LABELS[id] ?? id }));
+
 export class ClaudeSdkClient {
   private query: ClaudeQuery | undefined;
   private startup: ((params?: { options?: Record<string, unknown>; initializeTimeoutMs?: number }) => Promise<{ query(prompt: string): AsyncGenerator<unknown> & { supportedModels(): Promise<{ value: string; displayName: string }[]>; interrupt(): Promise<void> }; close(): void }>) | undefined;
@@ -729,6 +736,18 @@ export class ClaudeSdkClient {
         const q = warm.query("");
         try {
           const sdkModels: { value: string; displayName: string }[] = await (q as unknown as { supportedModels(): Promise<{ value: string; displayName: string }[]> }).supportedModels();
+          // Discover the REAL slash-command set for the installed Claude Code
+          // (built-ins like /goal + project/user custom commands), instead of a
+          // hardcoded list that drifts out of sync. Best-effort: an older SDK
+          // without supportedCommands() just leaves commands undefined and the
+          // static defaults still apply.
+          let commands: { name: string; description?: string; argumentHint?: string }[] | undefined;
+          try {
+            const sdkCommands = await (q as unknown as { supportedCommands?: () => Promise<{ name: string; description?: string; argumentHint?: string }[]> }).supportedCommands?.();
+            if (Array.isArray(sdkCommands) && sdkCommands.length > 0) commands = sdkCommands;
+          } catch {
+            // supportedCommands() unavailable or failed — fall back to static defaults.
+          }
           if (sdkModels.length > 0) {
             // Filter to admin-configured allowlist if present, then map to our format.
             const allow = availableModels;
@@ -738,6 +757,17 @@ export class ClaudeSdkClient {
             return {
               defaultModel,
               models: filtered.map((m) => ({ id: m.value, label: m.displayName || m.value })),
+              ...(commands ? { commands } : {}),
+            };
+          }
+          // No models surfaced, but commands may still be present — return them
+          // so the command palette stays in sync even when the model list is empty.
+          if (commands) {
+            const fallbackModels = availableModels ?? DEFAULT_FALLBACK_MODELS;
+            return {
+              defaultModel,
+              models: toModelEntries(fallbackModels),
+              commands,
             };
           }
         } catch {
@@ -752,12 +782,10 @@ export class ClaudeSdkClient {
     }
 
     // Fallback: admin-configured allowlist, or the full Claude Code alias set.
-    const fallbackModels = availableModels ?? [
-      "default", "sonnet", "opus", "opusplan", "haiku", "sonnet[1m]", "opus[1m]",
-    ];
+    const fallbackModels = availableModels ?? DEFAULT_FALLBACK_MODELS;
     return {
       defaultModel,
-      models: fallbackModels.map((id) => ({ id, label: FALLBACK_MODEL_LABELS[id] ?? id })),
+      models: toModelEntries(fallbackModels),
     };
   }
 

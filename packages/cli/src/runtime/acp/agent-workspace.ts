@@ -945,6 +945,8 @@ const CLAUDE_REMOTE_HIDDEN_COMMANDS = new Set([
   "resume",
   "rewind",
   "settings",
+  "setup-bedrock",
+  "setup-vertex",
   "statusline",
   "stickers",
   "tasks",
@@ -994,6 +996,7 @@ const CLAUDE_BUILT_IN_COMMANDS: Array<{ name: string; description: string; argsM
   { name: "bug", description: "Alias for /feedback" },
   { name: "fewer-permission-prompts", description: "Reduce common permission prompts", argsMode: "none" },
   { name: "focus", description: "Toggle the focus view", argsMode: "none" },
+  { name: "goal", description: "Set or clear a session goal the agent works toward", argsMode: "raw" },
   { name: "heapdump", description: "Write a JavaScript heap snapshot for diagnostics", argsMode: "none" },
   { name: "help", description: "Show help and available commands", argsMode: "none" },
   { name: "hooks", description: "View hook configurations", argsMode: "none" },
@@ -1226,7 +1229,20 @@ function mergeCommands(...groups: Array<AgentCommandDescriptor[] | undefined>): 
       map.set(key, {
         ...existing,
         ...command,
+        // Preserve curated metadata the discovered set doesn't carry: the SDK's
+        // SlashCommand has no destructive/category/argsMode/executionKind
+        // fields, and runtimeCommands hardcodes argsMode:"raw" + executionKind:
+        // "prompt". The merge order is (curated, discovered), so without these
+        // a discovered /clear would clobber the curated destructive flag
+        // (red-dot warning), the grouping, AND the curated argsMode:"none" that
+        // makes the web palette execute it on pick (vs insert-and-wait). For
+        // Codex it would also flip native commands to "prompt". Curated wins on
+        // collision; genuinely new discovered commands fall through to "raw".
+        destructive: command.destructive ?? existing?.destructive,
+        category: command.category ?? existing?.category,
         disabledReason: command.disabledReason ?? existing?.disabledReason,
+        argsMode: existing?.argsMode ?? command.argsMode,
+        executionKind: existing?.executionKind ?? command.executionKind,
       });
     }
   }
@@ -1272,7 +1288,7 @@ function runtimeCommands(provider: AgentProvider, value: unknown): AgentCommandD
     .filter((entry): entry is AgentCommandDescriptor => Boolean(entry));
 }
 
-function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities | undefined {
+function parseModelListCapabilities(provider: AgentProvider, value: unknown): ProviderRuntimeCapabilities | undefined {
   const raw = asRecord(value);
   const modelsValue =
     Array.isArray(value) ? value :
@@ -1326,11 +1342,13 @@ function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities
   const reasoningEfforts = efforts.size
     ? ALL_REASONING_EFFORTS.filter((effort) => efforts.has(effort))
     : undefined;
-  if (models.length === 0 && !defaultModel && !reasoningEfforts?.length) return undefined;
+  const commands = raw && Array.isArray(raw.commands) ? runtimeCommands(provider, raw.commands) : undefined;
+  if (models.length === 0 && !defaultModel && !reasoningEfforts?.length && !commands?.length) return undefined;
   return {
     ...(models.length > 0 ? { models } : {}),
     ...(defaultModel ? { defaultModel } : {}),
     ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
+    ...(commands?.length ? { commands } : {}),
   };
 }
 
@@ -1988,7 +2006,7 @@ export class AgentWorkspaceProxy {
     if (typeof listModels === "function") {
       try {
         const result = await listModels.call(client);
-        runtimeCapabilities = parseModelListCapabilities(result);
+        runtimeCapabilities = parseModelListCapabilities(provider, result);
       } catch (error) {
         if (this.input.verbose) {
           process.stderr.write(`[agent:v2] model/list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);

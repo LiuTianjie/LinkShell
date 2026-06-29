@@ -106,9 +106,22 @@ export function Composer({
     const m = /^\/(\S*)$/.exec(text);
     if (!m || commands.length === 0) return null;
     const q = m[1].toLowerCase();
-    const matches = commands
-      .filter((c) => c.name.toLowerCase().includes(q) || c.title.toLowerCase().includes(q))
-      .slice(0, 8);
+    // Rank prefix matches ahead of substring matches — with the command set
+    // now spanning ~80 entries (harness commands + discovered skills), a plain
+    // substring filter buries exact-prefix hits like "/goal" behind
+    // alphabetically-earlier skills that merely contain the letters.
+    const scored = commands
+      .map((c) => {
+        const name = c.name.toLowerCase();
+        const title = c.title.toLowerCase();
+        if (!q) return { c, rank: 2 };
+        if (name.startsWith(q) || title.startsWith(`/${q}`)) return { c, rank: 0 };
+        if (name.includes(q) || title.includes(q)) return { c, rank: 1 };
+        return null;
+      })
+      .filter((x): x is { c: (typeof commands)[number]; rank: number } => x !== null)
+      .sort((a, b) => a.rank - b.rank);
+    const matches = scored.slice(0, 8).map((x) => x.c);
     return matches.length > 0 ? matches : null;
   }, [text, commands]);
 
