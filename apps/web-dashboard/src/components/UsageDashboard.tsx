@@ -18,8 +18,8 @@ function formatDuration(ms: number): string {
   const totalMin = Math.round(ms / 60000);
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
-  if (h > 0) return `${h} 小时 ${m} 分`;
-  return `${m} 分`;
+  if (h > 0) return `${h}小时${m}分`;
+  return `${m}分`;
 }
 
 type HeatMode = "daily" | "weekly" | "cumulative";
@@ -106,7 +106,7 @@ function cellColor(value: number, max: number): { className: string; style?: Rea
 function StatCard({ value, label }: { value: string; label: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-1 px-4 py-3">
-      <span className="font-mono text-xl font-semibold text-content-primary tabular-nums">{value}</span>
+      <span className="whitespace-nowrap font-mono text-xl font-semibold text-content-primary tabular-nums">{value}</span>
       <span className="text-2xs text-content-muted">{label}</span>
     </div>
   );

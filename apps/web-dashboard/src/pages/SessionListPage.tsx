@@ -222,7 +222,7 @@ export function SessionListPage({
           <UsageDashboardContent report={sessions.find((s) => s.agentUsageReport)?.agentUsageReport ?? null} />
 
         {/* Sessions (primary) */}
-        <section className="space-y-5">
+        <section className="mt-10 space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-[15px] font-semibold text-content-primary">
               我的会话 <span className="font-normal text-content-muted">({sessions.length})</span>

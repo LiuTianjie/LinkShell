@@ -945,6 +945,8 @@ const CLAUDE_REMOTE_HIDDEN_COMMANDS = new Set([
   "resume",
   "rewind",
   "settings",
+  "setup-bedrock",
+  "setup-vertex",
   "statusline",
   "stickers",
   "tasks",
@@ -994,6 +996,7 @@ const CLAUDE_BUILT_IN_COMMANDS: Array<{ name: string; description: string; argsM
   { name: "bug", description: "Alias for /feedback" },
   { name: "fewer-permission-prompts", description: "Reduce common permission prompts", argsMode: "none" },
   { name: "focus", description: "Toggle the focus view", argsMode: "none" },
+  { name: "goal", description: "Set or clear a session goal the agent works toward", argsMode: "raw" },
   { name: "heapdump", description: "Write a JavaScript heap snapshot for diagnostics", argsMode: "none" },
   { name: "help", description: "Show help and available commands", argsMode: "none" },
   { name: "hooks", description: "View hook configurations", argsMode: "none" },
@@ -1226,7 +1229,20 @@ function mergeCommands(...groups: Array<AgentCommandDescriptor[] | undefined>): 
       map.set(key, {
         ...existing,
         ...command,
+        // Preserve curated metadata the discovered set doesn't carry: the SDK's
+        // SlashCommand has no destructive/category/argsMode/executionKind
+        // fields, and runtimeCommands hardcodes argsMode:"raw" + executionKind:
+        // "prompt". The merge order is (curated, discovered), so without these
+        // a discovered /clear would clobber the curated destructive flag
+        // (red-dot warning), the grouping, AND the curated argsMode:"none" that
+        // makes the web palette execute it on pick (vs insert-and-wait). For
+        // Codex it would also flip native commands to "prompt". Curated wins on
+        // collision; genuinely new discovered commands fall through to "raw".
+        destructive: command.destructive ?? existing?.destructive,
+        category: command.category ?? existing?.category,
         disabledReason: command.disabledReason ?? existing?.disabledReason,
+        argsMode: existing?.argsMode ?? command.argsMode,
+        executionKind: existing?.executionKind ?? command.executionKind,
       });
     }
   }
@@ -1272,7 +1288,7 @@ function runtimeCommands(provider: AgentProvider, value: unknown): AgentCommandD
     .filter((entry): entry is AgentCommandDescriptor => Boolean(entry));
 }
 
-function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities | undefined {
+function parseModelListCapabilities(provider: AgentProvider, value: unknown): ProviderRuntimeCapabilities | undefined {
   const raw = asRecord(value);
   const modelsValue =
     Array.isArray(value) ? value :
@@ -1326,11 +1342,13 @@ function parseModelListCapabilities(value: unknown): ProviderRuntimeCapabilities
   const reasoningEfforts = efforts.size
     ? ALL_REASONING_EFFORTS.filter((effort) => efforts.has(effort))
     : undefined;
-  if (models.length === 0 && !defaultModel && !reasoningEfforts?.length) return undefined;
+  const commands = raw && Array.isArray(raw.commands) ? runtimeCommands(provider, raw.commands) : undefined;
+  if (models.length === 0 && !defaultModel && !reasoningEfforts?.length && !commands?.length) return undefined;
   return {
     ...(models.length > 0 ? { models } : {}),
     ...(defaultModel ? { defaultModel } : {}),
     ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
+    ...(commands?.length ? { commands } : {}),
   };
 }
 
@@ -1353,6 +1371,7 @@ function parseRemoteSessions(value: unknown): Array<{
   createdAt?: number;
   lastActivityAt?: number;
   usage?: unknown;
+  status?: AgentStatus;
 }> {
   const raw = asRecord(value);
   const sessionsValue =
@@ -1370,6 +1389,7 @@ function parseRemoteSessions(value: unknown): Array<{
     createdAt?: number;
     lastActivityAt?: number;
     usage?: unknown;
+    status?: AgentStatus;
   }> = [];
   for (const entry of sessionsValue) {
     const session = asRecord(entry);
@@ -1381,6 +1401,12 @@ function parseRemoteSessions(value: unknown): Array<{
     const source = nestedThread ?? session;
     const id = firstString(source, ["id", "threadId", "sessionId", "agentSessionId"]);
     if (!id) continue;
+    // Only accept a transcript-derived status the provider actually reported
+    // (Claude's listSessions sets "running"/"idle" from the on-disk transcript).
+    // Anything else is left undefined so the sync site keeps its own status.
+    const reportedStatus = firstString(source, ["status"]);
+    const status: AgentStatus | undefined =
+      reportedStatus === "running" || reportedStatus === "idle" ? reportedStatus : undefined;
     result.push({
       id,
       cwd: firstString(source, ["cwd", "workingDirectory", "workspacePath"]),
@@ -1389,6 +1415,7 @@ function parseRemoteSessions(value: unknown): Array<{
       createdAt: parseTimestamp(source.createdAt ?? source.created_at),
       lastActivityAt: parseTimestamp(source.lastActivityAt ?? source.updatedAt ?? source.modifiedAt ?? source.lastModified ?? source.updated_at),
       usage: source.usage,
+      ...(status ? { status } : {}),
     });
   }
   return result;
@@ -1988,7 +2015,7 @@ export class AgentWorkspaceProxy {
     if (typeof listModels === "function") {
       try {
         const result = await listModels.call(client);
-        runtimeCapabilities = parseModelListCapabilities(result);
+        runtimeCapabilities = parseModelListCapabilities(provider, result);
       } catch (error) {
         if (this.input.verbose) {
           process.stderr.write(`[agent:v2] model/list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -2047,6 +2074,26 @@ export class AgentWorkspaceProxy {
           const usage: AgentConversationUsage | undefined = usageFields
             ? { ...usageFields, updatedAt: remote.lastActivityAt ?? now }
             : existing?.usage;
+          // Status precedence. While LinkShell is driving a turn for this
+          // conversation, the in-memory status is authoritative — the transcript
+          // lags (the SDK hasn't flushed the in-flight turn to disk), so trusting
+          // it would flicker a live "running" turn back to idle. Otherwise the
+          // transcript-derived remote.status is authoritative for Claude (it
+          // reports running/idle straight from disk): surface "running" while an
+          // external process drives it, and let its "idle" clear a previously
+          // observed "running" once the external turn finishes. We only fall
+          // back to the existing status to keep error/waiting_permission sticky
+          // across a re-sync — deriveTranscriptStatus never emits those, so they
+          // live only in `existing`; defaulting everything else to idle avoids a
+          // purely-external session getting stuck at "running" forever.
+          const linkshellDriving = this.currentTurnIds.has(conversationId);
+          const status: AgentStatus = linkshellDriving
+            ? existing?.status ?? "running"
+            : remote.status === "running"
+              ? "running"
+              : existing?.status === "error" || existing?.status === "waiting_permission"
+                ? existing.status
+                : "idle";
           const conversation: AgentConversation = {
             id: conversationId,
             agentSessionId,
@@ -2057,7 +2104,7 @@ export class AgentWorkspaceProxy {
             reasoningEffort: existing?.reasoningEffort,
             permissionMode: existing?.permissionMode,
             collaborationMode: existing?.collaborationMode,
-            status: existing?.status ?? "idle",
+            status,
             archived: existing?.archived ?? false,
             lastMessagePreview: existing?.lastMessagePreview,
             lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
@@ -2151,6 +2198,24 @@ export class AgentWorkspaceProxy {
     if (activeTurnId) this.rememberTurnConversationId(conversation.id, activeTurnId);
     const model = firstString(thread, ["model", "modelId", "currentModel"]);
     if (model && !conversation.model) conversation.model = model;
+
+    // Seed a scroll-back cursor for Claude, which hydrates via readSession (full
+    // transcript) yet pages via listTurns. The timeline only keeps the last
+    // MAX_TIMELINE_ITEMS, so anything older is dropped here but reachable via
+    // agent.v2.history.request. Cursor = total turn count (end-exclusive): the
+    // first page overlaps the displayed tail (harmlessly deduped by the client's
+    // mergeTimeline) and each subsequent page walks strictly older, terminating
+    // when the cursor reaches 0. This integer-index cursor is Claude-specific —
+    // Codex uses an opaque string cursor captured by the listTurns branch above,
+    // so gate strictly on the provider rather than on listTurns presence (Codex
+    // also exposes listTurns) to avoid poisoning Codex's cursor.
+    if (
+      conversation.provider === "claude" &&
+      !this.historyCursors.has(conversation.id)
+    ) {
+      const turnCount = Array.isArray(thread?.turns) ? thread.turns.length : 0;
+      if (turnCount > 0) this.historyCursors.set(conversation.id, String(turnCount));
+    }
 
     const hydratedItems = timelineItemsFromProviderThread(source, conversation.id);
     if (hydratedItems.length === 0) return;

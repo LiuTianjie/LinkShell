@@ -389,10 +389,55 @@ export function parseClaudeJsonlSession(input: {
   };
 }
 
+/** Derive whether an on-disk Claude transcript is being actively driven RIGHT
+ *  NOW by some process (LinkShell or an external `claude` terminal), purely from
+ *  the file. Combines a structural signal (the last record) with a freshness
+ *  signal (mtime), so it neither misses a live external turn nor sticks at
+ *  "running" forever if that process dies mid-turn.
+ *
+ *  - last record is a completed assistant turn (stop_reason "end_turn") → idle,
+ *    regardless of mtime (the turn is definitively done).
+ *  - otherwise the structure is mid-turn (awaiting an assistant response, an
+ *    assistant still calling tools, or a half-written trailing line). If the
+ *    file changed within FRESH_MS, a process is appending → running; if it's
+ *    stale, the driver is gone → idle.
+ *  Verified against real transcripts: mid-turn+fresh→running, mid-turn+stale→
+ *  idle, end_turn+fresh→idle, half-written-line+fresh→running. */
+function deriveTranscriptStatus(text: string, mtimeMs: number, nowMs: number): "running" | "idle" {
+  const FRESH_MS = 10_000;
+  const fresh = nowMs - mtimeMs < FRESH_MS;
+  const lines = text.split(/\r?\n/);
+  let last: Record<string, unknown> | undefined;
+  let sawUnparseableTail = false;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const ln = lines[i];
+    if (!ln || !ln.trim()) continue;
+    try {
+      last = asRecord(JSON.parse(ln));
+      break;
+    } catch {
+      // A trailing half-written line means a writer is mid-append.
+      sawUnparseableTail = true;
+    }
+  }
+  if (!last) return "idle";
+  const message = asRecord(last.message);
+  const role = stringField(message, ["role"]) ?? stringField(last, ["type"]);
+  const stop = message ? message.stop_reason ?? null : null;
+  if (role === "assistant" && stop === "end_turn") return "idle";
+  const midTurn =
+    role === "user" ||
+    last.type === "user" ||
+    (role === "assistant" && (stop === "tool_use" || stop === null)) ||
+    sawUnparseableTail;
+  return midTurn && fresh ? "running" : "idle";
+}
+
 function claudeSessionMetadataFromFile(filePath: string, cwd: string, sessionId: string): Record<string, unknown> {
   const stat = statSync(filePath);
+  const text = readFileSync(filePath, "utf8");
   const parsed = parseClaudeJsonlSession({
-    text: readFileSync(filePath, "utf8"),
+    text,
     cwd,
     sessionId,
     fallbackUpdatedAt: stat.mtimeMs,
@@ -407,6 +452,10 @@ function claudeSessionMetadataFromFile(filePath: string, cwd: string, sessionId:
     lastActivityAt: parseTimestamp(thread.updatedAt) ?? stat.mtimeMs,
     lastModified: stat.mtimeMs,
     usage: asRecord(thread.usage),
+    // Live status read straight from the transcript, so a session another
+    // `claude` process is actively driving shows as "running" in the list
+    // rather than the hardcoded "idle" the workspace would otherwise assign.
+    status: deriveTranscriptStatus(text, stat.mtimeMs, Date.now()),
   };
 }
 
@@ -452,6 +501,13 @@ const FALLBACK_MODEL_LABELS: Record<string, string> = {
   "sonnet[1m]": "Sonnet 1M",
   "opus[1m]": "Opus 1M",
 };
+
+// Canonical Claude Code model aliases, used whenever live model discovery
+// (supportedModels()) returns nothing. Hoisted so the two listModels() fallback
+// branches stay in sync — a new alias added here reaches both.
+const DEFAULT_FALLBACK_MODELS = ["default", "sonnet", "opus", "opusplan", "haiku", "sonnet[1m]", "opus[1m]"];
+const toModelEntries = (ids: string[]): { id: string; label: string }[] =>
+  ids.map((id) => ({ id, label: FALLBACK_MODEL_LABELS[id] ?? id }));
 
 export class ClaudeSdkClient {
   private query: ClaudeQuery | undefined;
@@ -506,14 +562,8 @@ export class ClaudeSdkClient {
   }
 
   async readSession(input: { sessionId: string; includeTurns?: boolean }): Promise<unknown> {
-    let filePath = join(claudeProjectDir(this.input.cwd), `${input.sessionId}.jsonl`);
-    if (!existsSync(filePath)) {
-      const match = claudeProjectDirs(this.input.cwd)
-        .map((dir) => join(dir, `${input.sessionId}.jsonl`))
-        .find((candidate) => existsSync(candidate));
-      if (match) filePath = match;
-    }
-    if (!existsSync(filePath)) {
+    const filePath = this.resolveSessionFile(input.sessionId);
+    if (!filePath) {
       return {
         thread: {
           id: input.sessionId,
@@ -530,6 +580,65 @@ export class ClaudeSdkClient {
       sessionId: input.sessionId,
       fallbackUpdatedAt: stat.mtimeMs,
     });
+  }
+
+  /** Resolve the on-disk JSONL transcript for a session, preferring the cwd's
+   *  project dir and falling back to a scan of sibling project dirs. */
+  private resolveSessionFile(sessionId: string): string | undefined {
+    const preferred = join(claudeProjectDir(this.input.cwd), `${sessionId}.jsonl`);
+    if (existsSync(preferred)) return preferred;
+    return claudeProjectDirs(this.input.cwd)
+      .map((dir) => join(dir, `${sessionId}.jsonl`))
+      .find((candidate) => existsSync(candidate));
+  }
+
+  /** Page OLDER transcript turns for scroll-back, mirroring Codex's
+   *  thread/turns/list. The whole transcript lives on disk and is already
+   *  parsed by parseClaudeJsonlSession, so we slice a window of chronological
+   *  turns by an integer end-exclusive cursor.
+   *
+   *  Cursor = the exclusive upper-bound turn index for the page. No cursor =
+   *  start at the end (total turn count). A page returns turns [lo, hi) where
+   *  lo = max(0, hi - limit); nextCursor = String(lo) while lo > 0, else absent
+   *  (start of history reached). The web client's mergeTimeline dedupes by id
+   *  and re-sorts by createdAt, so any overlap between this page and what the
+   *  client already shows is harmless. */
+  async listTurns(input: {
+    sessionId: string;
+    limit?: number;
+    cursor?: string;
+    sortDirection?: "asc" | "desc";
+    itemsView?: "summary" | "full";
+  }): Promise<unknown> {
+    const empty = { sessionId: input.sessionId, turns: [], sortDirection: "asc" as const };
+    const filePath = this.resolveSessionFile(input.sessionId);
+    if (!filePath) return empty;
+
+    const stat = statSync(filePath);
+    const parsed = parseClaudeJsonlSession({
+      text: readFileSync(filePath, "utf8"),
+      cwd: this.input.cwd,
+      sessionId: input.sessionId,
+      fallbackUpdatedAt: stat.mtimeMs,
+    });
+    const thread = asRecord(parsed.thread);
+    const allTurns = Array.isArray(thread?.turns) ? thread.turns : [];
+    const total = allTurns.length;
+    if (total === 0) return empty;
+
+    const limit = input.limit && input.limit > 0 ? Math.floor(input.limit) : 50;
+    // Parse the end-exclusive cursor; default to the end of history. Clamp into
+    // [0, total] so a stale/garbage cursor can't slice out of bounds.
+    const parsedCursor = input.cursor !== undefined ? Number.parseInt(input.cursor, 10) : total;
+    const hi = Number.isFinite(parsedCursor) ? Math.max(0, Math.min(total, parsedCursor)) : total;
+    const lo = Math.max(0, hi - limit);
+    const page = allTurns.slice(lo, hi);
+    return {
+      sessionId: input.sessionId,
+      turns: page, // already chronological (ascending)
+      sortDirection: "asc" as const,
+      ...(lo > 0 ? { nextCursor: String(lo) } : {}),
+    };
   }
 
   async prompt(input: {
@@ -729,6 +838,18 @@ export class ClaudeSdkClient {
         const q = warm.query("");
         try {
           const sdkModels: { value: string; displayName: string }[] = await (q as unknown as { supportedModels(): Promise<{ value: string; displayName: string }[]> }).supportedModels();
+          // Discover the REAL slash-command set for the installed Claude Code
+          // (built-ins like /goal + project/user custom commands), instead of a
+          // hardcoded list that drifts out of sync. Best-effort: an older SDK
+          // without supportedCommands() just leaves commands undefined and the
+          // static defaults still apply.
+          let commands: { name: string; description?: string; argumentHint?: string }[] | undefined;
+          try {
+            const sdkCommands = await (q as unknown as { supportedCommands?: () => Promise<{ name: string; description?: string; argumentHint?: string }[]> }).supportedCommands?.();
+            if (Array.isArray(sdkCommands) && sdkCommands.length > 0) commands = sdkCommands;
+          } catch {
+            // supportedCommands() unavailable or failed — fall back to static defaults.
+          }
           if (sdkModels.length > 0) {
             // Filter to admin-configured allowlist if present, then map to our format.
             const allow = availableModels;
@@ -738,6 +859,17 @@ export class ClaudeSdkClient {
             return {
               defaultModel,
               models: filtered.map((m) => ({ id: m.value, label: m.displayName || m.value })),
+              ...(commands ? { commands } : {}),
+            };
+          }
+          // No models surfaced, but commands may still be present — return them
+          // so the command palette stays in sync even when the model list is empty.
+          if (commands) {
+            const fallbackModels = availableModels ?? DEFAULT_FALLBACK_MODELS;
+            return {
+              defaultModel,
+              models: toModelEntries(fallbackModels),
+              commands,
             };
           }
         } catch {
@@ -752,12 +884,10 @@ export class ClaudeSdkClient {
     }
 
     // Fallback: admin-configured allowlist, or the full Claude Code alias set.
-    const fallbackModels = availableModels ?? [
-      "default", "sonnet", "opus", "opusplan", "haiku", "sonnet[1m]", "opus[1m]",
-    ];
+    const fallbackModels = availableModels ?? DEFAULT_FALLBACK_MODELS;
     return {
       defaultModel,
-      models: fallbackModels.map((id) => ({ id, label: FALLBACK_MODEL_LABELS[id] ?? id })),
+      models: toModelEntries(fallbackModels),
     };
   }
 
