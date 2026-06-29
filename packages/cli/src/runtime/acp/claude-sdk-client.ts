@@ -405,15 +405,24 @@ export function parseClaudeJsonlSession(input: {
  *  idle, end_turn+fresh→idle, half-written-line+fresh→running. */
 function deriveTranscriptStatus(text: string, mtimeMs: number, nowMs: number): "running" | "idle" {
   const FRESH_MS = 10_000;
-  const fresh = nowMs - mtimeMs < FRESH_MS;
-  const lines = text.split(/\r?\n/);
+  // A stale file is always idle: every non-fresh path below resolves to "idle"
+  // (end_turn → idle, and the final `midTurn && fresh` is false when !fresh).
+  // Short-circuit so the common case — most sessions in ~/.claude/projects are
+  // old — costs one comparison and parses nothing.
+  if (nowMs - mtimeMs >= FRESH_MS) return "idle";
+  // Fresh file: find the last non-empty record by scanning backward from the
+  // end of the string, instead of text.split() materializing every line of a
+  // possibly-huge transcript just to read its tail.
   let last: Record<string, unknown> | undefined;
   let sawUnparseableTail = false;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const ln = lines[i];
-    if (!ln || !ln.trim()) continue;
+  let end = text.length;
+  while (end > 0) {
+    const nl = text.lastIndexOf("\n", end - 1);
+    const line = text.slice(nl + 1, end).trim();
+    end = nl; // step before this newline; nl === -1 ends the loop (first line)
+    if (!line) continue;
     try {
-      last = asRecord(JSON.parse(ln));
+      last = asRecord(JSON.parse(line));
       break;
     } catch {
       // A trailing half-written line means a writer is mid-append.
@@ -430,7 +439,8 @@ function deriveTranscriptStatus(text: string, mtimeMs: number, nowMs: number): "
     last.type === "user" ||
     (role === "assistant" && (stop === "tool_use" || stop === null)) ||
     sawUnparseableTail;
-  return midTurn && fresh ? "running" : "idle";
+  // fresh is implied here (we returned early when stale).
+  return midTurn ? "running" : "idle";
 }
 
 function claudeSessionMetadataFromFile(filePath: string, cwd: string, sessionId: string): Record<string, unknown> {
