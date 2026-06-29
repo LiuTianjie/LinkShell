@@ -60,7 +60,14 @@ export function createSupabaseStateStore(): GatewayStateStore | undefined {
       throw new Error(`Supabase state store ${res.status}: ${body || res.statusText}`);
     }
     if (res.status === 204) return undefined as T;
-    return (await res.json()) as T;
+    // Writes (POST upsert / DELETE) can return 2xx with an EMPTY body depending
+    // on PostgREST's Prefer handling — calling res.json() on that throws
+    // "Unexpected end of JSON input". Read as text and only parse when non-empty
+    // so writes resolve to undefined cleanly; reads (SELECT) always return a
+    // JSON array ("[]" at minimum), so they still parse.
+    const text = await res.text();
+    if (!text.trim()) return undefined as T;
+    return JSON.parse(text) as T;
   }
 
   return {
@@ -82,7 +89,7 @@ export function createSupabaseStateStore(): GatewayStateStore | undefined {
         `${TOKEN_TABLE}?on_conflict=token`,
         {
           method: "POST",
-          headers: { Prefer: "resolution=merge-duplicates" },
+          headers: { Prefer: "return=minimal,resolution=merge-duplicates" },
           body: JSON.stringify({
             token: record.token,
             session_ids: record.sessionIds,
@@ -113,7 +120,7 @@ export function createSupabaseStateStore(): GatewayStateStore | undefined {
         `${PAIRING_TABLE}?on_conflict=pairing_code`,
         {
           method: "POST",
-          headers: { Prefer: "resolution=merge-duplicates" },
+          headers: { Prefer: "return=minimal,resolution=merge-duplicates" },
           body: JSON.stringify({
             pairing_code: record.pairingCode,
             session_id: record.sessionId,
