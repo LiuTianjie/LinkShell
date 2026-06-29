@@ -513,14 +513,8 @@ export class ClaudeSdkClient {
   }
 
   async readSession(input: { sessionId: string; includeTurns?: boolean }): Promise<unknown> {
-    let filePath = join(claudeProjectDir(this.input.cwd), `${input.sessionId}.jsonl`);
-    if (!existsSync(filePath)) {
-      const match = claudeProjectDirs(this.input.cwd)
-        .map((dir) => join(dir, `${input.sessionId}.jsonl`))
-        .find((candidate) => existsSync(candidate));
-      if (match) filePath = match;
-    }
-    if (!existsSync(filePath)) {
+    const filePath = this.resolveSessionFile(input.sessionId);
+    if (!filePath) {
       return {
         thread: {
           id: input.sessionId,
@@ -537,6 +531,65 @@ export class ClaudeSdkClient {
       sessionId: input.sessionId,
       fallbackUpdatedAt: stat.mtimeMs,
     });
+  }
+
+  /** Resolve the on-disk JSONL transcript for a session, preferring the cwd's
+   *  project dir and falling back to a scan of sibling project dirs. */
+  private resolveSessionFile(sessionId: string): string | undefined {
+    const preferred = join(claudeProjectDir(this.input.cwd), `${sessionId}.jsonl`);
+    if (existsSync(preferred)) return preferred;
+    return claudeProjectDirs(this.input.cwd)
+      .map((dir) => join(dir, `${sessionId}.jsonl`))
+      .find((candidate) => existsSync(candidate));
+  }
+
+  /** Page OLDER transcript turns for scroll-back, mirroring Codex's
+   *  thread/turns/list. The whole transcript lives on disk and is already
+   *  parsed by parseClaudeJsonlSession, so we slice a window of chronological
+   *  turns by an integer end-exclusive cursor.
+   *
+   *  Cursor = the exclusive upper-bound turn index for the page. No cursor =
+   *  start at the end (total turn count). A page returns turns [lo, hi) where
+   *  lo = max(0, hi - limit); nextCursor = String(lo) while lo > 0, else absent
+   *  (start of history reached). The web client's mergeTimeline dedupes by id
+   *  and re-sorts by createdAt, so any overlap between this page and what the
+   *  client already shows is harmless. */
+  async listTurns(input: {
+    sessionId: string;
+    limit?: number;
+    cursor?: string;
+    sortDirection?: "asc" | "desc";
+    itemsView?: "summary" | "full";
+  }): Promise<unknown> {
+    const empty = { sessionId: input.sessionId, turns: [], sortDirection: "asc" as const };
+    const filePath = this.resolveSessionFile(input.sessionId);
+    if (!filePath) return empty;
+
+    const stat = statSync(filePath);
+    const parsed = parseClaudeJsonlSession({
+      text: readFileSync(filePath, "utf8"),
+      cwd: this.input.cwd,
+      sessionId: input.sessionId,
+      fallbackUpdatedAt: stat.mtimeMs,
+    });
+    const thread = asRecord(parsed.thread);
+    const allTurns = Array.isArray(thread?.turns) ? thread.turns : [];
+    const total = allTurns.length;
+    if (total === 0) return empty;
+
+    const limit = input.limit && input.limit > 0 ? Math.floor(input.limit) : 50;
+    // Parse the end-exclusive cursor; default to the end of history. Clamp into
+    // [0, total] so a stale/garbage cursor can't slice out of bounds.
+    const parsedCursor = input.cursor !== undefined ? Number.parseInt(input.cursor, 10) : total;
+    const hi = Number.isFinite(parsedCursor) ? Math.max(0, Math.min(total, parsedCursor)) : total;
+    const lo = Math.max(0, hi - limit);
+    const page = allTurns.slice(lo, hi);
+    return {
+      sessionId: input.sessionId,
+      turns: page, // already chronological (ascending)
+      sortDirection: "asc" as const,
+      ...(lo > 0 ? { nextCursor: String(lo) } : {}),
+    };
   }
 
   async prompt(input: {

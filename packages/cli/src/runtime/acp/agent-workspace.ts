@@ -2170,6 +2170,24 @@ export class AgentWorkspaceProxy {
     const model = firstString(thread, ["model", "modelId", "currentModel"]);
     if (model && !conversation.model) conversation.model = model;
 
+    // Seed a scroll-back cursor for Claude, which hydrates via readSession (full
+    // transcript) yet pages via listTurns. The timeline only keeps the last
+    // MAX_TIMELINE_ITEMS, so anything older is dropped here but reachable via
+    // agent.v2.history.request. Cursor = total turn count (end-exclusive): the
+    // first page overlaps the displayed tail (harmlessly deduped by the client's
+    // mergeTimeline) and each subsequent page walks strictly older, terminating
+    // when the cursor reaches 0. This integer-index cursor is Claude-specific —
+    // Codex uses an opaque string cursor captured by the listTurns branch above,
+    // so gate strictly on the provider rather than on listTurns presence (Codex
+    // also exposes listTurns) to avoid poisoning Codex's cursor.
+    if (
+      conversation.provider === "claude" &&
+      !this.historyCursors.has(conversation.id)
+    ) {
+      const turnCount = Array.isArray(thread?.turns) ? thread.turns.length : 0;
+      if (turnCount > 0) this.historyCursors.set(conversation.id, String(turnCount));
+    }
+
     const hydratedItems = timelineItemsFromProviderThread(source, conversation.id);
     if (hydratedItems.length === 0) return;
     const existing = this.timelines.get(conversation.id) ?? [];
