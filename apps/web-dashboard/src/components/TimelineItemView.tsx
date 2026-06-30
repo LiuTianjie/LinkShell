@@ -530,9 +530,14 @@ function StructuredInputCard({
     setAnswers((prev) => {
       const cur = prev[qId] ?? [];
       if (cur.includes(optId)) return { ...prev, [qId]: cur.filter((x) => x !== optId) };
-      if (limit === 1) return { ...prev, [qId]: [optId] };
+      // No limit (or limit ≤ 1) means single-select: askUserQuestion sends
+      // selectionLimit only for multi-select, so an absent limit is single —
+      // matching how the CLI maps the answer back (multiSelect ⇔ limit > 1).
+      // Treating undefined as unbounded would let a single-select question
+      // accept multiple picks.
+      if (!limit || limit <= 1) return { ...prev, [qId]: [optId] };
       const next = [...cur, optId];
-      return { ...prev, [qId]: limit ? next.slice(-limit) : next };
+      return { ...prev, [qId]: next.slice(-limit) };
     });
   };
 
@@ -552,6 +557,13 @@ function StructuredInputCard({
               <p className="text-2xs font-semibold uppercase tracking-wider text-content-faint">{q.header}</p>
             )}
             <p className="mb-2 text-sm text-content-secondary">{q.question}</p>
+            {q.options && q.options.length > 0 && q.selectionLimit && q.selectionLimit > 1 && (
+              // Multi-select looks identical to single-select (a row of option
+              // buttons), so tell the user they may pick more than one.
+              <p className="mb-2 text-2xs text-content-faint">
+                可多选{q.selectionLimit < q.options.length ? `（最多 ${q.selectionLimit} 项）` : ""}
+              </p>
+            )}
             {q.options && q.options.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {q.options.map((opt) => {
