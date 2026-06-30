@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, relative } from "node:path";
 import {
@@ -1944,10 +1944,81 @@ export class AgentWorkspaceProxy {
   }
 
   stop(): void {
+    for (const watcher of this.fsWatchers) {
+      try { watcher.close(); } catch { /* already closed */ }
+    }
+    this.fsWatchers = [];
+    if (this.fsSyncTimer) {
+      clearTimeout(this.fsSyncTimer);
+      this.fsSyncTimer = undefined;
+    }
     for (const client of this.clients.values()) {
       client.stop();
     }
     this.clients.clear();
+  }
+
+  // ── External-session live refresh ────────────────────────────────────
+  // The console requests the session list only once, at connect. Without this,
+  // a session another `claude`/`codex` process starts (or whose status changes)
+  // after connect never shows up — the tree is frozen at connect time. Watch the
+  // on-disk session stores and re-sync + push when they change, so externally-
+  // driven sessions surface live (this is what CodeIsland does). Event-driven:
+  // zero cost while idle, throttled to at most one re-scan per window during a
+  // burst of writes (an active turn appends constantly).
+  private fsWatchers: ReturnType<typeof watch>[] = [];
+  private fsSyncTimer: ReturnType<typeof setTimeout> | undefined;
+  private fsSyncRunning = false;
+  private static readonly FS_SYNC_THROTTLE_MS = 1500;
+
+  private startSessionWatchers(): void {
+    if (this.fsWatchers.length > 0) return; // already watching
+    const roots = [
+      join(homedir(), ".claude", "projects"),
+      join(homedir(), ".codex", "sessions"),
+    ];
+    for (const root of roots) {
+      if (!existsSync(root)) continue;
+      try {
+        // recursive is supported on macOS/Windows; on Linux this throws, and we
+        // simply don't get live updates (the connect-time scan still works).
+        const watcher = watch(root, { recursive: true, persistent: false }, () => this.scheduleSessionSync());
+        watcher.on("error", () => { /* transient watch error — ignore */ });
+        this.fsWatchers.push(watcher);
+      } catch {
+        // recursive watch unavailable on this platform — skip silently.
+      }
+    }
+  }
+
+  private scheduleSessionSync(): void {
+    if (this.fsSyncTimer) return; // a sync is already scheduled in this window
+    this.fsSyncTimer = setTimeout(() => {
+      this.fsSyncTimer = undefined;
+      void this.syncAndPushSessions();
+    }, AgentWorkspaceProxy.FS_SYNC_THROTTLE_MS);
+  }
+
+  private async syncAndPushSessions(): Promise<void> {
+    if (this.fsSyncRunning) return; // don't overlap with an in-flight sync
+    this.fsSyncRunning = true;
+    try {
+      await this.syncProviderSessions();
+      // Push the conversation list (statuses) — lighter than a full snapshot and
+      // exactly what refreshes the tree. The web handles an unsolicited
+      // conversation.list.result the same as a requested one.
+      this.input.send(createEnvelope({
+        type: "agent.v2.conversation.list.result",
+        sessionId: this.input.sessionId,
+        payload: { conversations: [...this.conversations.values()].filter((c) => !c.archived) },
+      }));
+    } catch (error) {
+      if (this.input.verbose) {
+        process.stderr.write(`[agent:v2] fs-watch sync failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    } finally {
+      this.fsSyncRunning = false;
+    }
   }
 
   private clientForProvider(provider: AgentProvider): AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined {
@@ -1996,6 +2067,9 @@ export class AgentWorkspaceProxy {
     this.status = "idle";
     this.error = undefined;
     this.sendCapabilities();
+    // Start watching the on-disk session stores so externally-started sessions
+    // and status changes surface live, not just at connect time.
+    this.startSessionWatchers();
   }
 
   private async ensureProviderClient(provider: AgentProvider): Promise<AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined> {
