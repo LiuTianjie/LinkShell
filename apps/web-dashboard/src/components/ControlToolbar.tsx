@@ -51,6 +51,7 @@ function PillSelect<T extends string>({
   render,
   onChange,
   title,
+  placeholder,
 }: {
   icon?: ReactNode;
   value: T | undefined;
@@ -58,6 +59,7 @@ function PillSelect<T extends string>({
   render: (v: T) => string;
   onChange: (v: T) => void;
   title?: string;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -70,7 +72,12 @@ function PillSelect<T extends string>({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
   if (options.length === 0) return null;
-  const current = value ?? options[0];
+  // When the conversation carries no explicit value (common for sessions we
+  // discovered off disk rather than drove ourselves), show a neutral label
+  // instead of pretending the first option is selected — the CLI uses the
+  // provider default in that case, so options[0] would misreport e.g. "低"/"只读".
+  const hasValue = value !== undefined && options.includes(value);
+  const label = hasValue ? render(value as T) : placeholder ?? render(options[0]);
   return (
     <div ref={ref} className="relative">
       <button
@@ -80,7 +87,7 @@ function PillSelect<T extends string>({
         className="flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-2xs font-medium text-content-secondary transition-colors hover:bg-surface-overlay hover:text-content-primary"
       >
         {icon}
-        <span className="max-w-[7rem] truncate">{render(current)}</span>
+        <span className="max-w-[7rem] truncate">{label}</span>
         <IconChevronDown size={11} className="text-content-faint" />
       </button>
       {open && (
@@ -94,11 +101,11 @@ function PillSelect<T extends string>({
                 setOpen(false);
               }}
               className={`flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-surface-overlay ${
-                o === current ? "text-content-primary" : "text-content-secondary"
+                hasValue && o === value ? "text-content-primary" : "text-content-secondary"
               }`}
             >
               <span className="truncate">{render(o)}</span>
-              {o === current && <IconCheck size={13} className="shrink-0 text-accent" />}
+              {hasValue && o === value && <IconCheck size={13} className="shrink-0 text-accent" />}
             </button>
           ))}
         </div>
@@ -138,6 +145,7 @@ export function ControlToolbar({
         options={efforts}
         render={(e) => EFFORT_LABEL[e] ?? e}
         onChange={(reasoningEffort) => onChange({ reasoningEffort })}
+        placeholder="默认"
       />
       <PillSelect
         title="权限"
@@ -145,6 +153,7 @@ export function ControlToolbar({
         options={permissions}
         render={(p) => PERMISSION_LABEL[p] ?? p}
         onChange={(permissionMode) => onChange({ permissionMode })}
+        placeholder="默认"
       />
       {supportsPlan && (
         <button
