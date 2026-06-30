@@ -1453,6 +1453,75 @@ function runningCodexSessionIds(nowMs: number): Set<string> {
   return running;
 }
 
+/** Read a Codex session's last-known settings (reasoning effort, plan mode,
+ *  permission/sandbox) from its on-disk rollout, so opening a session LinkShell
+ *  never drove shows the config it actually ran with. Codex records the live
+ *  turn config in `turn_context` records; the last one is the current config.
+ *  Matched by the filename session id (cheap — no per-file reads to locate it),
+ *  newest first. Only called on open (one file), never per-list. */
+function codexSessionConfig(sessionId: string): {
+  reasoningEffort?: string;
+  permissionMode?: AgentPermissionMode;
+  collaborationMode?: AgentCollaborationMode;
+} {
+  const root = join(homedir(), ".codex", "sessions");
+  if (!existsSync(root)) return {};
+  const ID_RE = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl$/;
+  const matches: { path: string; mt: number }[] = [];
+  const walk = (dir: string): void => {
+    let entries: string[];
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      const path = join(dir, name);
+      let stat;
+      try { stat = statSync(path); } catch { continue; }
+      if (stat.isDirectory()) { walk(path); continue; }
+      const match = ID_RE.exec(name);
+      if (match && match[1] === sessionId) matches.push({ path, mt: stat.mtimeMs });
+    }
+  };
+  walk(root);
+  if (matches.length === 0) return {};
+  matches.sort((a, b) => b.mt - a.mt);
+  const newest = matches[0];
+  if (!newest) return {};
+  let lastTurnContext: Record<string, unknown> | undefined;
+  try {
+    const text = readFileSync(newest.path, "utf8");
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      let record: Record<string, unknown> | undefined;
+      try { record = asRecord(JSON.parse(line)); } catch { continue; }
+      if (record?.type === "turn_context") {
+        lastTurnContext = asRecord(record.payload) ?? record;
+      }
+    }
+  } catch {
+    return {};
+  }
+  if (!lastTurnContext) return {};
+  const cfg: { reasoningEffort?: string; permissionMode?: AgentPermissionMode; collaborationMode?: AgentCollaborationMode } = {};
+  const collab = asRecord(lastTurnContext.collaboration_mode);
+  const effort = firstString(asRecord(collab?.settings), ["reasoning_effort"]);
+  if (effort) cfg.reasoningEffort = effort;
+  const mode = firstString(collab, ["mode"]);
+  if (mode === "plan") cfg.collaborationMode = "plan";
+  else if (mode) cfg.collaborationMode = "default";
+  // Map Codex's sandbox policy (kebab-case, e.g. "danger-full-access") to ours.
+  const sandbox = firstString(asRecord(lastTurnContext.sandbox_policy), ["type"]);
+  if (sandbox) {
+    const norm = sandbox.replace(/-/g, "").toLowerCase();
+    cfg.permissionMode = norm.includes("readonly")
+      ? "read_only"
+      : norm.includes("workspace")
+        ? "workspace_write"
+        : norm.includes("danger") || norm.includes("full")
+          ? "full_access"
+          : undefined;
+  }
+  return cfg;
+}
+
 function parseRemoteSessions(value: unknown): Array<{
   id: string;
   cwd?: string;
@@ -2368,6 +2437,34 @@ export class AgentWorkspaceProxy {
     if (activeTurnId) this.rememberTurnConversationId(conversation.id, activeTurnId);
     const model = firstString(thread, ["model", "modelId", "currentModel"]);
     if (model && !conversation.model) conversation.model = model;
+
+    // Fill the control settings (reasoning effort / permission / plan mode) from
+    // the on-disk transcript when we don't already have them, so opening a
+    // session LinkShell never drove shows what it actually ran with instead of
+    // the UI's first-option default. Existing (LinkShell-set) values win — this
+    // only backfills. One file read, on open only; never per-list.
+    if (
+      conversation.reasoningEffort === undefined &&
+      conversation.permissionMode === undefined &&
+      conversation.collaborationMode === undefined
+    ) {
+      try {
+        let cfg: { reasoningEffort?: string; permissionMode?: AgentPermissionMode; collaborationMode?: AgentCollaborationMode } = {};
+        if (conversation.provider === "codex") {
+          cfg = codexSessionConfig(conversation.agentSessionId);
+        } else {
+          const readConfig = (client as { readSessionConfig?: (i: { sessionId: string }) => Promise<unknown> }).readSessionConfig;
+          if (typeof readConfig === "function") {
+            cfg = (asRecord(await readConfig.call(client, { sessionId: conversation.agentSessionId })) ?? {}) as typeof cfg;
+          }
+        }
+        if (cfg.reasoningEffort && !conversation.reasoningEffort) conversation.reasoningEffort = cfg.reasoningEffort;
+        if (cfg.permissionMode && !conversation.permissionMode) conversation.permissionMode = cfg.permissionMode;
+        if (cfg.collaborationMode && !conversation.collaborationMode) conversation.collaborationMode = cfg.collaborationMode;
+      } catch {
+        // Best-effort — a missing/unreadable transcript just leaves the pills at 默认.
+      }
+    }
 
     // Seed a scroll-back cursor for Claude, which hydrates via readSession (full
     // transcript) yet pages via listTurns. The timeline only keeps the last

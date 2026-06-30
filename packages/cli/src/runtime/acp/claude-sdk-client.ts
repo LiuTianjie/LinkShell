@@ -602,6 +602,41 @@ export class ClaudeSdkClient {
       .find((candidate) => existsSync(candidate));
   }
 
+  /** Read a session's last-known settings (permission mode, plan mode) straight
+   *  from its on-disk transcript, so opening a session LinkShell never drove
+   *  shows the config it actually ran with instead of UI defaults. Claude
+   *  records `permissionMode` on user records (not reasoning effort), so effort
+   *  is left undefined. Only called on open (one file), never per-list. */
+  async readSessionConfig(input: { sessionId: string }): Promise<unknown> {
+    const filePath = this.resolveSessionFile(input.sessionId);
+    if (!filePath) return {};
+    let permissionModeRaw: string | undefined;
+    try {
+      const text = readFileSync(filePath, "utf8");
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        let record: Record<string, unknown> | undefined;
+        try { record = asRecord(JSON.parse(line)); } catch { continue; }
+        const pm = stringField(record, ["permissionMode"]);
+        if (pm) permissionModeRaw = pm; // keep the last one — the current mode
+      }
+    } catch {
+      return {};
+    }
+    // Map Claude's permission mode to ours. "default" means no explicit
+    // override → leave undefined so the pill shows 默认 rather than a guess.
+    switch (permissionModeRaw) {
+      case "acceptEdits":
+        return { permissionMode: "workspace_write" };
+      case "bypassPermissions":
+        return { permissionMode: "full_access" };
+      case "plan":
+        return { permissionMode: "read_only", collaborationMode: "plan" };
+      default:
+        return {};
+    }
+  }
+
   /** Page OLDER transcript turns for scroll-back, mirroring Codex's
    *  thread/turns/list. The whole transcript lives on disk and is already
    *  parsed by parseClaudeJsonlSession, so we slice a window of chronological
