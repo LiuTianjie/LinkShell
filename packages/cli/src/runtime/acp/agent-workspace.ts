@@ -1363,6 +1363,96 @@ function parseTimestamp(value: unknown): number | undefined {
   return undefined;
 }
 
+/** Derive running/idle for a Codex session from its on-disk rollout transcript.
+ *  Codex marks turn boundaries with event_msg payloads: task_started opens a
+ *  turn, task_complete / turn_aborted close it. token_count / response_item
+ *  records trail AFTER task_complete, so we must scan backward to the first
+ *  turn-lifecycle event rather than just looking at the last line. Combined with
+ *  an mtime freshness gate so a process that died mid-turn doesn't stick at
+ *  running. Backward string scan (not split) to avoid materializing every line
+ *  of a possibly-multi-MB rollout. */
+function deriveCodexRolloutStatus(text: string, mtimeMs: number, nowMs: number): "running" | "idle" {
+  const FRESH_MS = 15_000; // Codex turns can pause between tool calls; a touch wider than Claude's 10s.
+  if (nowMs - mtimeMs >= FRESH_MS) return "idle";
+  let end = text.length;
+  while (end > 0) {
+    const nl = text.lastIndexOf("\n", end - 1);
+    const line = text.slice(nl + 1, end).trim();
+    end = nl;
+    if (!line) continue;
+    let record: Record<string, unknown> | undefined;
+    try {
+      record = asRecord(JSON.parse(line));
+    } catch {
+      continue; // half-written tail line or non-JSON; keep scanning up.
+    }
+    if (record?.type !== "event_msg") continue;
+    const payloadType = firstString(asRecord(record.payload), ["type"]);
+    if (payloadType === "task_started") return "running";
+    if (payloadType === "task_complete" || payloadType === "turn_aborted") return "idle";
+  }
+  return "idle";
+}
+
+/** Session ids of Codex rollouts being actively written right now. Codex's
+ *  app-server thread/list reports no live status (and only knows threads THIS
+ *  process owns, not an external `codex` the user is running), so we read it off
+ *  disk like we do for Claude. CPU-frugal: stat every rollout (metadata only)
+ *  but READ only the few whose mtime is fresh — stale files are skipped without
+ *  opening. We add BOTH the filename id and the session_meta.session_id from the
+ *  first line, because a forked/continued rollout's filename id differs from the
+ *  meta id and we don't know which one thread/list reports — covering both makes
+ *  the match robust. Best-effort: any fs error yields an empty set. */
+function runningCodexSessionIds(nowMs: number): Set<string> {
+  const running = new Set<string>();
+  const root = join(homedir(), ".codex", "sessions");
+  if (!existsSync(root)) return running;
+  const FRESH_MS = 15_000;
+  const ID_RE = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl$/;
+  const walk = (dir: string): void => {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      const path = join(dir, name);
+      let stat;
+      try {
+        stat = statSync(path);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        walk(path);
+        continue;
+      }
+      const match = ID_RE.exec(name);
+      if (!match || !match[1]) continue;
+      if (nowMs - stat.mtimeMs >= FRESH_MS) continue; // stale — skip without reading
+      try {
+        const text = readFileSync(path, "utf8");
+        if (deriveCodexRolloutStatus(text, stat.mtimeMs, nowMs) !== "running") continue;
+        running.add(match[1]); // filename id
+        // Also add the canonical session id from session_meta (first line), which
+        // differs from the filename id for forked/continued rollouts.
+        const firstLine = text.slice(0, text.indexOf("\n") >= 0 ? text.indexOf("\n") : text.length);
+        try {
+          const metaId = firstString(asRecord(asRecord(JSON.parse(firstLine))?.payload), ["session_id", "id"]);
+          if (metaId) running.add(metaId);
+        } catch {
+          // first line not parseable — filename id already added.
+        }
+      } catch {
+        // Unreadable/raced file — ignore.
+      }
+    }
+  };
+  walk(root);
+  return running;
+}
+
 function parseRemoteSessions(value: unknown): Array<{
   id: string;
   cwd?: string;
@@ -2057,6 +2147,11 @@ export class AgentWorkspaceProxy {
           activeClient = recovered;
           result = await activeClient.listSessions();
         }
+        // Codex's thread/list carries no live status and only knows threads
+        // THIS app-server owns — so an externally-run `codex` shows idle. Read
+        // running state off disk once per sync (CPU-frugal: stats all rollouts,
+        // reads only the fresh few). Claude reports status via parseRemoteSessions.
+        const codexRunning = provider === "codex" ? runningCodexSessionIds(Date.now()) : undefined;
         for (const remote of parseRemoteSessions(result)) {
           const agentSessionId = remote.id;
           // Skip conversations the user explicitly forgot — don't resurrect them.
@@ -2078,18 +2173,19 @@ export class AgentWorkspaceProxy {
           // conversation, the in-memory status is authoritative — the transcript
           // lags (the SDK hasn't flushed the in-flight turn to disk), so trusting
           // it would flicker a live "running" turn back to idle. Otherwise the
-          // transcript-derived remote.status is authoritative for Claude (it
-          // reports running/idle straight from disk): surface "running" while an
-          // external process drives it, and let its "idle" clear a previously
-          // observed "running" once the external turn finishes. We only fall
-          // back to the existing status to keep error/waiting_permission sticky
-          // across a re-sync — deriveTranscriptStatus never emits those, so they
-          // live only in `existing`; defaulting everything else to idle avoids a
-          // purely-external session getting stuck at "running" forever.
+          // transcript-derived running signal is authoritative (Claude reports it
+          // via remote.status; Codex via the on-disk rollout set): surface
+          // "running" while an external process drives it, and let it clear once
+          // the external turn finishes. We only fall back to the existing status
+          // to keep error/waiting_permission sticky across a re-sync — the
+          // transcript signals never emit those, so they live only in `existing`;
+          // defaulting everything else to idle avoids a purely-external session
+          // getting stuck at "running" forever.
+          const remoteRunning = remote.status === "running" || (codexRunning?.has(agentSessionId) ?? false);
           const linkshellDriving = this.currentTurnIds.has(conversationId);
           const status: AgentStatus = linkshellDriving
             ? existing?.status ?? "running"
-            : remote.status === "running"
+            : remoteRunning
               ? "running"
               : existing?.status === "error" || existing?.status === "waiting_permission"
                 ? existing.status
