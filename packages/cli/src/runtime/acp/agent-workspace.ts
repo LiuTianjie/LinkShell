@@ -2370,7 +2370,18 @@ export class AgentWorkspaceProxy {
       ) {
         existingConversation = this.adoptConversationId(existingConversation.id, payload.conversationId);
       }
-      if ((this.timelines.get(existingConversation.id) ?? []).length === 0 && existingConversation.status !== "running") {
+      // Hydrate the transcript from disk when we have no timeline yet, UNLESS
+      // LinkShell is itself driving a live turn for this conversation — in that
+      // case the event stream is the source of truth and re-hydrating would be
+      // redundant/racy. We key on currentTurnIds (LinkShell-driving), NOT on
+      // status === "running": an EXTERNALLY-driven session also reports
+      // "running" now (live-status feature) but has no event stream, so gating
+      // on status would skip hydration and leave its timeline stuck empty
+      // ("加载对话记录…" forever).
+      if (
+        (this.timelines.get(existingConversation.id) ?? []).length === 0 &&
+        !this.currentTurnIds.has(existingConversation.id)
+      ) {
         try {
           const existingAgentSessionId = existingConversation.agentSessionId!;
           let result: unknown;
