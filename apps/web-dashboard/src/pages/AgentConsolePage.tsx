@@ -436,9 +436,19 @@ export function AgentConsolePage({
   // After each timeline change: if older items were prepended (scrollHeight grew
   // while loading history), keep the viewport pinned; otherwise stick to bottom
   // when the user was already there. useLayoutEffect avoids a visible jump.
+  // On a conversation SWITCH, always jump to the latest message — atBottomRef is
+  // shared across conversations, so without this a switch would inherit the
+  // previous conversation's scrolled-up position and land mid-history.
+  const lastScrolledIdRef = useRef<string | null | undefined>(undefined);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    if (lastScrolledIdRef.current !== activeId) {
+      lastScrolledIdRef.current = activeId;
+      atBottomRef.current = true;
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
     if (prevHeightRef.current > 0) {
       el.scrollTop = el.scrollHeight - prevHeightRef.current;
       prevHeightRef.current = 0;
