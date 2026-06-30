@@ -641,7 +641,7 @@ export function AgentConsolePage({
               )}
             </span>
           )}
-          {usage && (
+          {usage && !isMobile && (
             <span
               className="inline-flex shrink-0 items-center rounded-full border border-border bg-surface-overlay px-2 py-0.5 font-mono text-2xs tabular-nums text-content-muted"
               title={usage.title}
@@ -649,7 +649,7 @@ export function AgentConsolePage({
               {usage.text}
             </span>
           )}
-          {snapshot.usage?.totals && (
+          {snapshot.usage?.totals && !isMobile && (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-surface-overlay px-2 py-0.5 font-mono text-2xs tabular-nums text-content-muted" title="全机用量">
               <IconCommand size={12} />{formatTokens(snapshot.usage.totals.totalTokens)}
             </span>
@@ -679,14 +679,16 @@ export function AgentConsolePage({
             <IconSearch size={16} />
           </button>
           {!embedded && <ThemeToggle />}
-          <button
-            onClick={() => setRightPanel((v) => (v === "preview" ? "none" : "preview"))}
-            className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "preview" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
-            title="端口预览"
-            aria-label="端口预览"
-          >
-            <IconGlobe size={16} />
-          </button>
+          {!isMobile && (
+            <button
+              onClick={() => setRightPanel((v) => (v === "preview" ? "none" : "preview"))}
+              className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "preview" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+              title="端口预览"
+              aria-label="端口预览"
+            >
+              <IconGlobe size={16} />
+            </button>
+          )}
           <button
             onClick={() => setRightPanel((v) => (v === "files" ? "none" : "files"))}
             className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "files" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
