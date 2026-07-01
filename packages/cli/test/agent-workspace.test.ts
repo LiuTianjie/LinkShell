@@ -1208,4 +1208,23 @@ describe("MCP server status on capabilities", () => {
     const byName = Object.fromEntries((claude?.mcpServers ?? []).map((s: any) => [s.name, s.status]));
     expect(byName).toEqual({ fs: "connected", db: "failed" });
   });
+
+  it("parses the real SDK McpServerStatus shape (needs-auth, disabled, tools[])", () => {
+    // Ground-truth shapes from @anthropic-ai/claude-agent-sdk sdk.d.ts:968 —
+    // status is 'connected'|'failed'|'needs-auth'|'pending'|'disabled', tools is
+    // an array (its length is our toolCount).
+    const { proxy, sent } = makeClaudeProxy();
+    proxy.handleNotification("initialized", {
+      mcpServers: [
+        { name: "gh", status: "needs-auth" },
+        { name: "old", status: "disabled" },
+        { name: "fs", status: "connected", tools: [{ name: "read" }, { name: "write" }] },
+      ],
+    });
+    const claude = lastCapabilities(sent);
+    const byName = Object.fromEntries((claude?.mcpServers ?? []).map((s: any) => [s.name, s]));
+    expect(byName.gh.status).toBe("needs_auth");
+    expect(byName.old.status).toBe("disabled");
+    expect(byName.fs).toMatchObject({ status: "connected", toolCount: 2 });
+  });
 });

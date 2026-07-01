@@ -151,7 +151,7 @@ interface AgentModeDescriptor {
   description?: string;
 }
 
-type AgentMcpServerStatus = "pending" | "connecting" | "connected" | "failed" | "needs_auth";
+type AgentMcpServerStatus = "pending" | "connecting" | "connected" | "failed" | "needs_auth" | "disabled";
 
 interface AgentMcpServerDescriptor {
   name: string;
@@ -169,6 +169,7 @@ function normalizeMcpStatus(raw: unknown): AgentMcpServerStatus {
   if (s === "failed" || s === "error" || s === "errored" || s === "disconnected") return "failed";
   if (s === "connecting" || s === "starting" || s === "pending_connection") return "connecting";
   if (s === "needs_auth" || s === "unauthorized" || s === "needs_authentication" || s === "auth_required" || s === "pending_auth") return "needs_auth";
+  if (s === "disabled" || s === "off") return "disabled";
   return "pending";
 }
 

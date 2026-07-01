@@ -8,6 +8,7 @@ const MCP_STATUS_LABEL: Record<AgentMcpServerStatus, string> = {
   connected: "已连接",
   failed: "连接失败",
   needs_auth: "需要授权",
+  disabled: "已禁用",
 };
 
 // Per-status dot color, reusing the app's semantic tokens.
@@ -17,13 +18,15 @@ const MCP_STATUS_DOT: Record<AgentMcpServerStatus, string> = {
   connected: "bg-success",
   failed: "bg-danger",
   needs_auth: "bg-warning",
+  disabled: "bg-content-faint",
 };
 
 // The aggregate dot on the button: red if anything failed, amber if anything is
-// still settling / needs auth, green once everything is connected.
+// still settling / needs auth, neutral if everything is disabled, else green.
 function aggregateTone(servers: AgentMcpServerDescriptor[]): string {
   if (servers.some((s) => s.status === "failed")) return "bg-danger";
   if (servers.some((s) => s.status === "pending" || s.status === "connecting" || s.status === "needs_auth")) return "bg-warning";
+  if (servers.every((s) => s.status === "disabled")) return "bg-content-faint";
   return "bg-success";
 }
 

@@ -491,6 +491,7 @@ export const agentMcpServerStatusSchema = z.enum([
   "connected", // ready, tools available
   "failed", // startup/connection error (see error)
   "needs_auth", // OAuth / auth required before use
+  "disabled", // configured but intentionally turned off
 ]);
 
 export const agentMcpServerDescriptorSchema = z.object({
