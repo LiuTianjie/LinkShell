@@ -376,20 +376,32 @@ export function Composer({
       {palette && (
         <div className="codex-card-raised absolute bottom-full left-0 mb-2 max-h-72 w-80 overflow-y-auto p-1">
           {palette.kind === "slash"
-            ? palette.items.map((cmd, i) => (
-                <button
-                  key={cmd.id}
-                  onMouseEnter={() => setHighlight(i)}
-                  onClick={() => pickCommand(cmd)}
-                  className={`flex w-full cursor-pointer items-center justify-between rounded-lg px-2.5 py-1.5 text-left transition-colors ${
-                    i === highlight ? "bg-surface-overlay" : "hover:bg-surface-overlay"
-                  }`}
-                >
-                  <span className="font-mono text-xs text-accent">/{cmd.name}</span>
-                  <span className="ml-2 flex-1 truncate text-xs text-content-muted">{cmd.title}</span>
-                  {cmd.destructive && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" title="破坏性操作" />}
-                </button>
-              ))
+            ? palette.items.map((cmd, i) => {
+                // Show the description on a second line when it adds info beyond
+                // the title (official palettes surface it); skip when redundant.
+                const desc = cmd.description && cmd.description !== cmd.title ? cmd.description : undefined;
+                // Hint that the command takes an argument, matching the official
+                // "/cmd <args>" affordance so users aren't surprised mid-type.
+                const argHint = cmd.argsMode === "required" ? "需要参数" : cmd.argsMode === "optional" ? "可选参数" : undefined;
+                return (
+                  <button
+                    key={cmd.id}
+                    onMouseEnter={() => setHighlight(i)}
+                    onClick={() => pickCommand(cmd)}
+                    className={`flex w-full cursor-pointer flex-col rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                      i === highlight ? "bg-surface-overlay" : "hover:bg-surface-overlay"
+                    }`}
+                  >
+                    <span className="flex w-full items-center">
+                      <span className="font-mono text-xs text-accent">/{cmd.name}</span>
+                      <span className="ml-2 flex-1 truncate text-xs text-content-muted">{cmd.title}</span>
+                      {argHint && <span className="ml-2 shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] text-content-faint">{argHint}</span>}
+                      {cmd.destructive && <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-danger" title="破坏性操作" />}
+                    </span>
+                    {desc && <span className="mt-0.5 truncate text-[11px] text-content-faint">{desc}</span>}
+                  </button>
+                );
+              })
             : palette.items.map((entry, i) => (
                 <button
                   key={entry.path}
