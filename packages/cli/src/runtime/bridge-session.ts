@@ -2066,10 +2066,24 @@ export class BridgeSession {
     if (sessionId) {
       const agentProvider = provider === "codex" ? "codex" : provider === "claude" ? "claude" : "custom";
       const conversationId = makeAgentV2RemoteConversationId(agentProvider, sessionId);
+      const permission = { requestId, toolName, toolInput, context, options };
+      // The web store only renders a clickable allow/deny card when the request
+      // carries a timeline `item` (it just flips the status badge otherwise), so
+      // include one shaped exactly like the workspace's own permission flow.
+      const now = Date.now();
+      const item = {
+        id: `permission:${requestId}`,
+        conversationId,
+        type: "permission" as const,
+        permission,
+        metadata: { protocol: "v2", permissionLive: true, permissionExpired: false, permissionPending: false },
+        createdAt: now,
+        updatedAt: now,
+      };
       this.send(createEnvelope({
         type: "agent.v2.permission.request",
         sessionId: this.sessionId,
-        payload: { conversationId, requestId, toolName, toolInput, context, options },
+        payload: { conversationId, ...permission, item },
       }));
     }
   }
