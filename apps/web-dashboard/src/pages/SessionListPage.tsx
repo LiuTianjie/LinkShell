@@ -6,7 +6,6 @@ import { claimPairing, listSessions, listMySessions } from "../lib/gateway-api";
 import { getDeviceToken } from "../lib/device-token";
 import { loadKnownSessions, rememberSessions, forgetSession, markAllOffline } from "../lib/storage";
 import { BrandLogo, IconClose, IconChevronRight, IconPlus, IconRefresh, ProviderIcon } from "../components/icons";
-import { UsageDashboardContent } from "../components/UsageDashboard";
 import type { SessionSummary } from "../lib/types";
 
 function agentStatusLabel(status: SessionSummary["agentStatus"]): string | null {
@@ -83,6 +82,10 @@ export function SessionListPage({
   // Seed from remembered sessions so "back" shows a clickable list instantly,
   // even before the live /sessions call returns (or if it's momentarily empty).
   const [sessions, setSessions] = useState<SessionSummary[]>(() => loadKnownSessions());
+  // Only online sessions are shown; offline (host gone) ones are hidden from the
+  // list. The full `sessions` state is kept intact so the cache-reconciliation
+  // logic (rememberSessions/markAllOffline) still works across refreshes.
+  const visibleSessions = sessions.filter((s) => s.hasHost);
   const [loading, setLoading] = useState(true);
   const [pairingCode, setPairingCode] = useState("");
   const [claiming, setClaiming] = useState(false);
@@ -218,14 +221,11 @@ export function SessionListPage({
       </header>
 
       <main className="mx-auto max-w-[46rem] animate-fade-in px-6 py-10">
-          {/* Usage dashboard — host-wide aggregate from the first session carrying a report. */}
-          <UsageDashboardContent report={sessions.find((s) => s.agentUsageReport)?.agentUsageReport ?? null} />
-
         {/* Sessions (primary) */}
-        <section className="mt-10 space-y-5">
+        <section className="space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-[15px] font-semibold text-content-primary">
-              我的会话 <span className="font-normal text-content-muted">({sessions.length})</span>
+              我的会话 <span className="font-normal text-content-muted">({visibleSessions.length})</span>
             </h2>
             <div className="flex items-center gap-2">
               <button onClick={refresh} className="codex-btn-ghost text-2xs">
@@ -266,7 +266,7 @@ export function SessionListPage({
             </section>
           )}
 
-          {sessions.length === 0 ? (
+          {visibleSessions.length === 0 ? (
             <div className="codex-card flex flex-col items-center gap-3 px-6 py-20 text-center">
               {loading ? (
                 <p className="text-[15px] leading-7 text-content-muted">加载中…</p>
@@ -279,7 +279,7 @@ export function SessionListPage({
             </div>
           ) : (
             <div className="space-y-3">
-              {sessions.map((s) => (
+              {visibleSessions.map((s) => (
                 <div
                   key={s.id}
                   className="codex-card group flex items-center justify-between p-4 transition-colors hover:bg-surface-overlay"
