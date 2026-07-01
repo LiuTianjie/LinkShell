@@ -2027,6 +2027,42 @@ export class BridgeSession {
     }));
   }
 
+  /** Determine which provider a session id belongs to by which on-disk store
+   *  holds its transcript — Claude writes ~/.claude/projects/<proj>/<id>.jsonl,
+   *  Codex writes ~/.codex/sessions/**​/rollout-*-<id>.jsonl. Deterministic and
+   *  needed because an external session's provider is NOT the spawned PTY's
+   *  provider. best-effort; returns undefined if not found (caller falls back).
+   *  Only hit on a permission request (human-in-loop, rare), so the directory
+   *  scan cost is fine. */
+  private providerForExternalSession(sessionId: string): "claude" | "codex" | undefined {
+    try {
+      const claudeRoot = join(homedir(), ".claude", "projects");
+      if (existsSync(claudeRoot)) {
+        for (const proj of readdirSync(claudeRoot)) {
+          if (existsSync(join(claudeRoot, proj, `${sessionId}.jsonl`))) return "claude";
+        }
+      }
+    } catch { /* ignore */ }
+    try {
+      const codexRoot = join(homedir(), ".codex", "sessions");
+      if (existsSync(codexRoot)) {
+        const suffix = `-${sessionId}.jsonl`;
+        const walk = (dir: string): boolean => {
+          for (const name of readdirSync(dir)) {
+            const p = join(dir, name);
+            let st;
+            try { st = statSync(p); } catch { continue; }
+            if (st.isDirectory()) { if (walk(p)) return true; }
+            else if (name.startsWith("rollout-") && name.endsWith(suffix)) return true;
+          }
+          return false;
+        };
+        if (walk(codexRoot)) return "codex";
+      }
+    } catch { /* ignore */ }
+    return undefined;
+  }
+
   private sendHookPermissionRequest(
     terminalId: string,
     event: Record<string, unknown>,
@@ -2064,7 +2100,14 @@ export class BridgeSession {
     // resolvePendingPermission check in the agent.v2.permission.respond path).
     const sessionId = (event.session_id ?? event.sessionId) as string | undefined;
     if (sessionId) {
-      const agentProvider = provider === "codex" ? "codex" : provider === "claude" ? "claude" : "custom";
+      // Derive the provider from the SESSION, not the spawned PTY's provider.
+      // The same curl hook is written to both ~/.claude and ~/.codex, and the
+      // HTTP server is created with a single provider — so an external Codex
+      // session's request could arrive on a "claude" server and get the wrong
+      // conversationId prefix, landing the card on a phantom conversation.
+      // Look up which store the id lives in (deterministic; verified).
+      const agentProvider = this.providerForExternalSession(sessionId)
+        ?? (provider === "codex" ? "codex" : provider === "claude" ? "claude" : "custom");
       const conversationId = makeAgentV2RemoteConversationId(agentProvider, sessionId);
       const permission = { requestId, toolName, toolInput, context, options };
       // The web store only renders a clickable allow/deny card when the request
