@@ -23,7 +23,7 @@ import { startKeepAwake, type KeepAwakeHandle } from "../utils/keep-awake.js";
 import { loadOrCreateMachineIdentity, type MachineIdentity } from "../machine-id.js";
 import { getValidToken, refreshAccessToken } from "../auth.js";
 import { AgentSessionProxy } from "./acp/agent-session.js";
-import { AgentWorkspaceProxy } from "./acp/agent-workspace.js";
+import { AgentWorkspaceProxy, makeAgentV2RemoteConversationId } from "./acp/agent-workspace.js";
 import { detectAvailableProviders, type AgentProvider } from "./acp/provider-resolver.js";
 
 export interface BridgeSessionOptions {
@@ -734,6 +734,21 @@ export class BridgeSession {
       }
       if (envelope.type === "agent.v2.prompt" || envelope.type === "agent.v2.command.execute") {
         this.refreshAgentPermissionHooks();
+      }
+      // A v2 permission response may be answering an EXTERNAL session's request
+      // that came in through the hook HTTP server (held on a pending connection),
+      // not a workspace-driven one. Resolve that pending hook connection first;
+      // only fall through to the workspace if it wasn't a hook request. Mirrors
+      // the v1 agent.permission.response path.
+      if (envelope.type === "agent.v2.permission.respond") {
+        const p = parseTypedPayload("agent.v2.permission.respond", envelope.payload);
+        if (this.resolvePendingPermission(
+          p.requestId,
+          { outcome: p.outcome === "cancelled" ? "deny" : p.outcome, optionId: p.optionId },
+          "agent.v2.permission.respond",
+        ).resolved) {
+          return;
+        }
       }
       try {
         await this.agentWorkspace.handleEnvelope(envelope);
@@ -1620,7 +1635,7 @@ export class BridgeSession {
             });
             // Send status with requestId so app can route decision back
             this.handleHookEvent(terminalId, event, provider, requestId);
-            this.sendHookPermissionRequest(terminalId, event, requestId);
+            this.sendHookPermissionRequest(terminalId, event, requestId, provider);
           } else {
             // All other hooks: respond immediately
             res.writeHead(200);
@@ -2016,6 +2031,7 @@ export class BridgeSession {
     terminalId: string,
     event: Record<string, unknown>,
     requestId: string,
+    provider?: string,
   ): void {
     const toolName = (event.tool_name ?? event.toolName) as string | undefined;
     const toolInput = stringifyHookInput(event.tool_input ?? event.toolInput);
@@ -2026,6 +2042,7 @@ export class BridgeSession {
         : typeof event.message === "string"
           ? event.message
           : undefined;
+    const options = hookPermissionOptions(suggestions);
     this.send(createEnvelope({
       type: "agent.permission.request",
       sessionId: this.sessionId,
@@ -2035,9 +2052,26 @@ export class BridgeSession {
         toolName,
         toolInput,
         context,
-        options: hookPermissionOptions(suggestions),
+        options,
       },
     }));
+    // Also surface the request on the v2 channel, mapped to the on-disk session
+    // it came from, so the web agent console (which lives entirely on agent.v2)
+    // shows a permission card on the right conversation — not just the v1
+    // terminal view. The hook payload carries the provider's own session id;
+    // map it to the conversation id the session tree already uses. The v2
+    // respond is routed back to this same pending HTTP connection (see the
+    // resolvePendingPermission check in the agent.v2.permission.respond path).
+    const sessionId = (event.session_id ?? event.sessionId) as string | undefined;
+    if (sessionId) {
+      const agentProvider = provider === "codex" ? "codex" : provider === "claude" ? "claude" : "custom";
+      const conversationId = makeAgentV2RemoteConversationId(agentProvider, sessionId);
+      this.send(createEnvelope({
+        type: "agent.v2.permission.request",
+        sessionId: this.sessionId,
+        payload: { conversationId, requestId, toolName, toolInput, context, options },
+      }));
+    }
   }
 
   /**
