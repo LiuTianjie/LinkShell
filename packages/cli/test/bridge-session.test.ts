@@ -294,6 +294,98 @@ describe("BridgeSession external-session permission relay", () => {
   });
 });
 
+describe("BridgeSession hook HTTP server (external-session approval, real HTTP)", () => {
+  // Exercises the layer unit tests skipped: the actual HTTP endpoint claude's
+  // curl hook hits — marker gating, holding the connection, and writing the
+  // decision back. Config-writers are stubbed so the test never touches the
+  // real global ~/.claude/settings.json.
+  function makeHookBridge() {
+    const bridge = makeBridge();
+    bridge.setupClaudeHooks = () => "/tmp/fake-settings.json";
+    bridge.setupCodexHooks = () => "/tmp/fake-config.toml";
+    bridge.setupGeminiHooks = () => "/tmp/fake-gemini.json";
+    bridge.setupCopilotHooks = () => "/tmp/fake-copilot.json";
+    return bridge;
+  }
+
+  async function post(port: number, path: string, body: unknown): Promise<{ status: number; text: string }> {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, text: await res.text() };
+  }
+
+  it("holds a PermissionRequest connection and writes back the remote decision", async () => {
+    const bridge = makeHookBridge();
+    const sent: Envelope[] = [];
+    bridge.send = (e: Envelope) => sent.push(e);
+    const { server, port } = await bridge.setupHookServer("t1", [], "claude", "mk-1");
+    try {
+      // claude's curl POSTs the permission event; the server holds the response.
+      const pending = post(port, "/hook?m=mk-1&lid=", {
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        tool_input: { command: "rm x" },
+        session_id: "ext-1",
+        cwd: "/p",
+      });
+      // Give the request a tick to register, then find the requestId we broadcast.
+      await new Promise((r) => setTimeout(r, 50));
+      const req = sent.find((e) => e.type === "agent.v2.permission.request");
+      expect(req, "server should broadcast a v2 permission request").toBeDefined();
+      const requestId = (req!.payload as any).requestId as string;
+      // User taps allow on their phone → v2 respond resolves the held connection.
+      const resolved = bridge.resolvePendingPermission(requestId, { outcome: "allow" }, "test");
+      expect(resolved.resolved).toBe(true);
+      const { status, text } = await pending;
+      expect(status).toBe(200);
+      // The curl side (claude's hook) must receive a permission decision.
+      expect(JSON.parse(text).hookSpecificOutput.hookEventName).toBe("PermissionRequest");
+    } finally {
+      server.close();
+    }
+  });
+
+  it("ignores hook events whose marker does not match (not from our PTY)", async () => {
+    const bridge = makeHookBridge();
+    const sent: Envelope[] = [];
+    bridge.send = (e: Envelope) => sent.push(e);
+    const { server, port } = await bridge.setupHookServer("t1", [], "claude", "mk-2");
+    try {
+      const { status, text } = await post(port, "/hook?m=WRONG&lid=", {
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        session_id: "ext-2",
+      });
+      expect(status).toBe(200);
+      expect(text).toBe("ok");
+      // Rejected before broadcasting — no permission request leaks out.
+      expect(sent.find((e) => e.type === "agent.v2.permission.request")).toBeUndefined();
+    } finally {
+      server.close();
+    }
+  });
+
+  it("responds immediately to non-permission hook events without holding", async () => {
+    const bridge = makeHookBridge();
+    bridge.send = () => {};
+    const { server, port } = await bridge.setupHookServer("t1", [], "claude", "mk-3");
+    try {
+      const { status, text } = await post(port, "/hook?m=mk-3&lid=", {
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        session_id: "ext-3",
+      });
+      expect(status).toBe(200);
+      expect(text).toBe("ok");
+    } finally {
+      server.close();
+    }
+  });
+});
+
 describe("resolvePairingGateway", () => {
   it("normalizes host:port overrides using the gateway protocol", () => {
     expect(resolvePairingGateway("http://localhost:8787", "192.168.1.20:8787")).toBe(
