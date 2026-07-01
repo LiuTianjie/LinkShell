@@ -403,16 +403,15 @@ export function parseClaudeJsonlSession(input: {
  *    stale, the driver is gone → idle.
  *  Verified against real transcripts: mid-turn+fresh→running, mid-turn+stale→
  *  idle, end_turn+fresh→idle, half-written-line+fresh→running. */
-function deriveTranscriptStatus(text: string, mtimeMs: number, nowMs: number): "running" | "idle" {
-  const FRESH_MS = 10_000;
-  // A stale file is always idle: every non-fresh path below resolves to "idle"
-  // (end_turn → idle, and the final `midTurn && fresh` is false when !fresh).
-  // Short-circuit so the common case — most sessions in ~/.claude/projects are
-  // old — costs one comparison and parses nothing.
-  if (nowMs - mtimeMs >= FRESH_MS) return "idle";
-  // Fresh file: find the last non-empty record by scanning backward from the
-  // end of the string, instead of text.split() materializing every line of a
-  // possibly-huge transcript just to read its tail.
+const TRANSCRIPT_FRESH_MS = 10_000;
+
+/** The structural half of the status verdict: does the LAST record of a
+ *  transcript indicate an in-progress turn (awaiting/producing an assistant
+ *  response, or a half-written trailing line)? This is purely content-derived
+ *  — it does NOT depend on the clock — so it can be cached alongside the parsed
+ *  metadata and reused across syncs until the file's (mtime,size) changes.
+ *  Scans backward from the end to avoid split()-ing a possibly-huge transcript. */
+function deriveTranscriptMidTurn(text: string): boolean {
   let last: Record<string, unknown> | undefined;
   let sawUnparseableTail = false;
   let end = text.length;
@@ -429,44 +428,76 @@ function deriveTranscriptStatus(text: string, mtimeMs: number, nowMs: number): "
       sawUnparseableTail = true;
     }
   }
-  if (!last) return "idle";
+  if (!last) return false;
   const message = asRecord(last.message);
   const role = stringField(message, ["role"]) ?? stringField(last, ["type"]);
   const stop = message ? message.stop_reason ?? null : null;
-  if (role === "assistant" && stop === "end_turn") return "idle";
-  const midTurn =
+  if (role === "assistant" && stop === "end_turn") return false;
+  return (
     role === "user" ||
     last.type === "user" ||
     (role === "assistant" && (stop === "tool_use" || stop === null)) ||
-    sawUnparseableTail;
-  // fresh is implied here (we returned early when stale).
+    sawUnparseableTail
+  );
+}
+
+/** Combine the (clock-independent) structural verdict with the freshness signal.
+ *  A stale file (no writes within FRESH_MS) is always idle; a mid-turn file that
+ *  is still being appended to is running. Cheap: one comparison + one boolean. */
+function statusFromMidTurn(midTurn: boolean, mtimeMs: number, nowMs: number): "running" | "idle" {
+  if (nowMs - mtimeMs >= TRANSCRIPT_FRESH_MS) return "idle";
   return midTurn ? "running" : "idle";
 }
 
-function claudeSessionMetadataFromFile(filePath: string, cwd: string, sessionId: string): Record<string, unknown> {
-  const stat = statSync(filePath);
+/** Derive whether an on-disk Claude transcript is being actively driven RIGHT
+ *  NOW, purely from the file. See {@link deriveTranscriptMidTurn} /
+ *  {@link statusFromMidTurn}; kept as a convenience wrapper for callers that
+ *  hold the full text and the clock but no cache. */
+function deriveTranscriptStatus(text: string, mtimeMs: number, nowMs: number): "running" | "idle" {
+  // Stale short-circuit: most sessions in ~/.claude/projects are old, so avoid
+  // the backward scan entirely when the file can't possibly be running.
+  if (nowMs - mtimeMs >= TRANSCRIPT_FRESH_MS) return "idle";
+  return statusFromMidTurn(deriveTranscriptMidTurn(text), mtimeMs, nowMs);
+}
+
+/** Parse a transcript into the clock-independent, cacheable half of its list
+ *  metadata: everything except `status` (which depends on `now`). The caller
+ *  layers status on via {@link statusFromMidTurn}, and can cache this result
+ *  keyed by (path, mtime, size) so an unchanged transcript is never re-read. */
+function claudeSessionBaseFromFile(
+  filePath: string,
+  cwd: string,
+  sessionId: string,
+  mtimeMs: number,
+): { base: Record<string, unknown>; midTurn: boolean } {
   const text = readFileSync(filePath, "utf8");
   const parsed = parseClaudeJsonlSession({
     text,
     cwd,
     sessionId,
-    fallbackUpdatedAt: stat.mtimeMs,
+    fallbackUpdatedAt: mtimeMs,
   });
   const thread = asRecord(parsed.thread) ?? {};
-  return {
+  const base: Record<string, unknown> = {
     id: sessionId,
     cwd: stringField(thread, ["cwd", "workingDirectory", "workspacePath"]) ?? cwd,
     title: stringField(thread, ["title", "preview"]),
     model: stringField(thread, ["model"]),
     createdAt: parseTimestamp(thread.createdAt),
-    lastActivityAt: parseTimestamp(thread.updatedAt) ?? stat.mtimeMs,
-    lastModified: stat.mtimeMs,
+    lastActivityAt: parseTimestamp(thread.updatedAt) ?? mtimeMs,
+    lastModified: mtimeMs,
     usage: asRecord(thread.usage),
-    // Live status read straight from the transcript, so a session another
-    // `claude` process is actively driving shows as "running" in the list
-    // rather than the hardcoded "idle" the workspace would otherwise assign.
-    status: deriveTranscriptStatus(text, stat.mtimeMs, Date.now()),
   };
+  return { base, midTurn: deriveTranscriptMidTurn(text) };
+}
+
+function claudeSessionMetadataFromFile(filePath: string, cwd: string, sessionId: string): Record<string, unknown> {
+  const stat = statSync(filePath);
+  const { base, midTurn } = claudeSessionBaseFromFile(filePath, cwd, sessionId, stat.mtimeMs);
+  // Live status read straight from the transcript, so a session another
+  // `claude` process is actively driving shows as "running" in the list
+  // rather than the hardcoded "idle" the workspace would otherwise assign.
+  return { ...base, status: statusFromMidTurn(midTurn, stat.mtimeMs, Date.now()) };
 }
 
 function isInsideCwd(cwd: string, candidate: string): boolean {
@@ -525,6 +556,13 @@ export class ClaudeSdkClient {
   private claudeSessionId: string | undefined;
   private abortController: AbortController | undefined;
   private permissionWaiters = new Map<string, (outcome: "allow" | "deny") => void>();
+  // Per-file cache for listSessions: an unchanged transcript (same mtime+size)
+  // is never re-read or re-parsed. fs.watch re-syncs fire every ~1.5s while any
+  // session is active, and ~/.claude/projects can hold hundreds of old
+  // transcripts — without this, each sync would readFileSync + fully parse
+  // every one of them (the "scan storm"). Only the file being actively appended
+  // to changes, so the steady-state cost drops to stat()+status per file.
+  private sessionMetaCache = new Map<string, { mtimeMs: number; size: number; base: Record<string, unknown>; midTurn: boolean }>();
 
   constructor(
     private readonly input: {
@@ -837,6 +875,8 @@ export class ClaudeSdkClient {
   async listSessions(): Promise<unknown> {
     const sessions: Array<Record<string, unknown>> = [];
     const seen = new Set<string>();
+    const now = Date.now();
+    const liveKeys = new Set<string>();
     for (const projectDir of claudeProjectDirs(this.input.cwd)) {
       try {
         for (const entry of readdirSync(projectDir)) {
@@ -844,10 +884,34 @@ export class ClaudeSdkClient {
           const sessionId = entry.replace(".jsonl", "");
           if (seen.has(sessionId)) continue;
           seen.add(sessionId);
-          sessions.push(claudeSessionMetadataFromFile(join(projectDir, entry), this.input.cwd, sessionId));
+          const filePath = join(projectDir, entry);
+          let stat;
+          try {
+            stat = statSync(filePath);
+          } catch {
+            continue; // vanished between readdir and stat
+          }
+          liveKeys.add(filePath);
+          let cached = this.sessionMetaCache.get(filePath);
+          if (!cached || cached.mtimeMs !== stat.mtimeMs || cached.size !== stat.size) {
+            // Miss or stale: re-read + re-parse this ONE file, refresh the cache.
+            const { base, midTurn } = claudeSessionBaseFromFile(filePath, this.input.cwd, sessionId, stat.mtimeMs);
+            cached = { mtimeMs: stat.mtimeMs, size: stat.size, base, midTurn };
+            this.sessionMetaCache.set(filePath, cached);
+          }
+          // status is clock-dependent, so recompute it every call (cheap) even
+          // on a cache hit — a running session goes idle purely by time passing.
+          sessions.push({ ...cached.base, status: statusFromMidTurn(cached.midTurn, stat.mtimeMs, now) });
         }
       } catch {
         // Ignore unreadable Claude project storage.
+      }
+    }
+    // Drop cache entries for transcripts that no longer exist so the map can't
+    // grow without bound across a long-lived process.
+    if (this.sessionMetaCache.size > liveKeys.size) {
+      for (const key of this.sessionMetaCache.keys()) {
+        if (!liveKeys.has(key)) this.sessionMetaCache.delete(key);
       }
     }
     return { sessions };

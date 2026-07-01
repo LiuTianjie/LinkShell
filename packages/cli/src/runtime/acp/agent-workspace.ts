@@ -2019,6 +2019,7 @@ export class AgentWorkspaceProxy {
       try { watcher.close(); } catch { /* already closed */ }
     }
     this.fsWatchers = [];
+    this.watchedRoots.clear();
     if (this.fsSyncTimer) {
       clearTimeout(this.fsSyncTimer);
       this.fsSyncTimer = undefined;
@@ -2038,17 +2039,24 @@ export class AgentWorkspaceProxy {
   // zero cost while idle, throttled to at most one re-scan per window during a
   // burst of writes (an active turn appends constantly).
   private fsWatchers: ReturnType<typeof watch>[] = [];
+  private watchedRoots = new Set<string>();
   private fsSyncTimer: ReturnType<typeof setTimeout> | undefined;
   private fsSyncRunning = false;
+  private lastPushedConversationSignature: string | undefined;
   private static readonly FS_SYNC_THROTTLE_MS = 1500;
 
   private startSessionWatchers(): void {
-    if (this.fsWatchers.length > 0) return; // already watching
     const roots = [
       join(homedir(), ".claude", "projects"),
       join(homedir(), ".codex", "sessions"),
     ];
     for (const root of roots) {
+      // Retry per-root each time we're called, so a store directory created
+      // AFTER startup (e.g. the user runs `codex` for the first time this
+      // session) gets a watcher attached lazily — instead of being gated out
+      // forever by a single "already watching" flag. Roots that don't exist yet
+      // stay un-added so a later call retries them.
+      if (this.watchedRoots.has(root)) continue;
       if (!existsSync(root)) continue;
       try {
         // recursive is supported on macOS/Windows; on Linux this throws, and we
@@ -2056,6 +2064,7 @@ export class AgentWorkspaceProxy {
         const watcher = watch(root, { recursive: true, persistent: false }, () => this.scheduleSessionSync());
         watcher.on("error", () => { /* transient watch error — ignore */ });
         this.fsWatchers.push(watcher);
+        this.watchedRoots.add(root);
       } catch {
         // recursive watch unavailable on this platform — skip silently.
       }
@@ -2075,13 +2084,26 @@ export class AgentWorkspaceProxy {
     this.fsSyncRunning = true;
     try {
       await this.syncProviderSessions();
+      // A store directory may have appeared since the last call — attach a
+      // watcher to it now (no-op for roots already watched).
+      this.startSessionWatchers();
+      const conversations = [...this.conversations.values()].filter((c) => !c.archived);
+      // Only broadcast when the list actually changed since the last push. An
+      // fs-watch fires on every transcript append (once per streamed token for
+      // an active session), but most of those don't change any field the tree
+      // renders — re-sending the whole list each time is wasted relay traffic
+      // and client re-renders. A cheap signature over the render-relevant fields
+      // gates the push.
+      const signature = this.conversationListSignature(conversations);
+      if (signature === this.lastPushedConversationSignature) return;
+      this.lastPushedConversationSignature = signature;
       // Push the conversation list (statuses) — lighter than a full snapshot and
       // exactly what refreshes the tree. The web handles an unsolicited
       // conversation.list.result the same as a requested one.
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.list.result",
         sessionId: this.input.sessionId,
-        payload: { conversations: [...this.conversations.values()].filter((c) => !c.archived) },
+        payload: { conversations },
       }));
     } catch (error) {
       if (this.input.verbose) {
@@ -2090,6 +2112,18 @@ export class AgentWorkspaceProxy {
     } finally {
       this.fsSyncRunning = false;
     }
+  }
+
+  /** A compact fingerprint of the fields the session tree actually renders, so
+   *  syncAndPushSessions can skip a broadcast when nothing visible changed.
+   *  Deliberately excludes usage token counts / lastActivityAt timestamps that
+   *  tick on every append without altering the tree — status, title, model, and
+   *  membership are what matter. */
+  private conversationListSignature(conversations: AgentConversation[]): string {
+    return conversations
+      .map((c) => `${c.id}${c.status}${c.title ?? ""}${c.model ?? ""}${c.provider ?? ""}`)
+      .sort()
+      .join("");
   }
 
   private clientForProvider(provider: AgentProvider): AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined {
@@ -3565,6 +3599,14 @@ export class AgentWorkspaceProxy {
     const bufferedOutput = this.toolOutputBuffers.get(toolCall.id);
     if (bufferedOutput && !toolCall.output) toolCall.output = bufferedOutput;
     this.upsertTool(conversationId, toolCall);
+    // The buffer only exists to stitch streaming deltas onto the final item.
+    // Once the tool call reaches a terminal state its output is folded into the
+    // toolCall above and will never be appended to again, so drop the buffer —
+    // otherwise the map grows unbounded across a long-lived workspace (one entry
+    // per tool call / exec ever seen).
+    if (toolCall.status === "completed" || toolCall.status === "failed") {
+      this.toolOutputBuffers.delete(toolCall.id);
+    }
   }
 
   private handleToolDelta(method: string, params: unknown): void {

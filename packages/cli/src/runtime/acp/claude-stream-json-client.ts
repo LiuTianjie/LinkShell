@@ -124,6 +124,10 @@ export class ClaudeStreamJsonClient {
   private child: ChildProcessWithoutNullStreams | undefined;
   private claudeSessionId: string | undefined;
   private pendingCancel = false;
+  // Per-file cache for listSessions: skip re-reading/parsing an unchanged
+  // transcript (same mtime+size). fs.watch re-syncs fire every ~1.5s, so
+  // without this each sync would re-parse every transcript in ~/.claude/projects.
+  private sessionMetaCache = new Map<string, { mtimeMs: number; size: number; entry: Record<string, unknown> }>();
 
   constructor(
     private readonly input: {
@@ -537,6 +541,7 @@ export class ClaudeStreamJsonClient {
   async listSessions(): Promise<unknown> {
     const sessions: Array<Record<string, unknown>> = [];
     const seen = new Set<string>();
+    const liveKeys = new Set<string>();
     for (const projectDir of claudeProjectDirs(this.input.cwd)) {
       try {
         for (const entry of readdirSync(projectDir)) {
@@ -545,28 +550,46 @@ export class ClaudeStreamJsonClient {
           if (seen.has(sessionId)) continue;
           seen.add(sessionId);
           const filePath = join(projectDir, entry);
-          const stat = statSync(filePath);
-          const parsed = parseClaudeJsonlSession({
-            text: readFileSync(filePath, "utf8"),
-            cwd: this.input.cwd,
-            sessionId,
-            fallbackUpdatedAt: stat.mtimeMs,
-          });
-          const thread = parsed.thread && typeof parsed.thread === "object"
-            ? parsed.thread as Record<string, unknown>
-            : {};
-          sessions.push({
-            id: sessionId,
-            cwd: stringField(thread, ["cwd", "workingDirectory", "workspacePath"]) ?? this.input.cwd,
-            title: stringField(thread, ["title", "preview"]),
-            model: stringField(thread, ["model"]),
-            createdAt: thread.createdAt,
-            lastActivityAt: thread.updatedAt ?? stat.mtimeMs,
-            lastModified: stat.mtimeMs,
-          });
+          let stat;
+          try {
+            stat = statSync(filePath);
+          } catch {
+            continue; // vanished between readdir and stat
+          }
+          liveKeys.add(filePath);
+          let cached = this.sessionMetaCache.get(filePath);
+          if (!cached || cached.mtimeMs !== stat.mtimeMs || cached.size !== stat.size) {
+            const parsed = parseClaudeJsonlSession({
+              text: readFileSync(filePath, "utf8"),
+              cwd: this.input.cwd,
+              sessionId,
+              fallbackUpdatedAt: stat.mtimeMs,
+            });
+            const thread = parsed.thread && typeof parsed.thread === "object"
+              ? parsed.thread as Record<string, unknown>
+              : {};
+            const item: Record<string, unknown> = {
+              id: sessionId,
+              cwd: stringField(thread, ["cwd", "workingDirectory", "workspacePath"]) ?? this.input.cwd,
+              title: stringField(thread, ["title", "preview"]),
+              model: stringField(thread, ["model"]),
+              createdAt: thread.createdAt,
+              lastActivityAt: thread.updatedAt ?? stat.mtimeMs,
+              lastModified: stat.mtimeMs,
+            };
+            cached = { mtimeMs: stat.mtimeMs, size: stat.size, entry: item };
+            this.sessionMetaCache.set(filePath, cached);
+          }
+          sessions.push(cached.entry);
         }
       } catch {
         // directory read failed
+      }
+    }
+    // Prune cache entries for transcripts that no longer exist.
+    if (this.sessionMetaCache.size > liveKeys.size) {
+      for (const key of this.sessionMetaCache.keys()) {
+        if (!liveKeys.has(key)) this.sessionMetaCache.delete(key);
       }
     }
 
