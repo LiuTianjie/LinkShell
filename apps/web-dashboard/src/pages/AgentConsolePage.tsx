@@ -19,6 +19,7 @@ import { CommandPalette, type PaletteAction } from "../components/CommandPalette
 import { useIsMobile } from "../hooks/useMediaQuery";
 import type { ConnectionStatus, AgentStatus, AgentTimelineItem, AgentConversation } from "../lib/types";
 import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, IconGlobe, IconCommand, ProviderIcon } from "../components/icons";
+import { McpStatusButton } from "../components/McpStatusButton";
 
 function statusLabel(status: ConnectionStatus): { text: string; color: string } {
   if (status === "connected") return { text: "已连接", color: "text-success" };
@@ -723,6 +724,7 @@ export function AgentConsolePage({
           >
             <IconCommand size={16} />
           </button>
+          <McpStatusButton mcpServers={activeCapability?.mcpServers} />
         </div>
       </header>
 
@@ -973,6 +975,9 @@ export function AgentConsolePage({
                           onOpenDiff={(it) => { setDiffItem(it); setRightPanel("none"); }}
                           onOpenAgent={(detail) => { setAgentDetail(detail); setDiffItem(null); setRightPanel("none"); }}
                           onEditMessage={handleEditMessage}
+                          onFork={activeConversation.provider === "claude"
+                            ? (turnId) => store.forkConversation(activeId, turnId)
+                            : undefined}
                         />
                       </div>
                     ) : (

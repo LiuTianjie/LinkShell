@@ -2,7 +2,7 @@ import { memo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { IconWrench, IconCheck, IconChevronRight, IconChevronDown, IconFile, IconClose, IconUsers, IconCopy, IconPencil, IconGlobe, IconSearch, IconFolder } from "./icons";
+import { IconWrench, IconCheck, IconChevronRight, IconChevronDown, IconFile, IconClose, IconUsers, IconCopy, IconPencil, IconGlobe, IconSearch, IconFolder, IconGitFork } from "./icons";
 import type { AgentTimelineItem } from "../lib/types";
 import { parseDiff, diffStats } from "../lib/diff";
 
@@ -1069,6 +1069,8 @@ export interface TimelineItemProps {
   onOpenAgent?: (detail: SubagentDetail) => void;
   /** Edit & resend a prior user message (loads its text into the composer). */
   onEditMessage?: (text: string) => void;
+  /** Fork a NEW conversation from this turn (Claude only — undefined hides it). */
+  onFork?: (turnId: string) => void;
   /** Active search query — message text highlights matches when set. */
   highlightQuery?: string;
 }
@@ -1085,6 +1087,7 @@ export const TimelineItemView = memo(
     onOpenDiff,
     onOpenAgent,
     onEditMessage,
+    onFork,
     highlightQuery,
   }: TimelineItemProps) {
     // structured input (e.g. AskUserQuestion)
@@ -1187,6 +1190,16 @@ export const TimelineItemView = memo(
                 <IconPencil size={13} />
               </button>
             )}
+            {onFork && (
+              <button
+                onClick={() => onFork(item.itemId ?? item.id)}
+                title="从此处分叉出新会话"
+                aria-label="从此处分叉"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-border bg-surface text-content-muted transition-colors hover:text-content-primary"
+              >
+                <IconGitFork size={13} />
+              </button>
+            )}
             <CopyButton text={item.text!} />
           </div>
         )}
@@ -1204,5 +1217,6 @@ export const TimelineItemView = memo(
     prev.onOpenDiff === next.onOpenDiff &&
     prev.onOpenAgent === next.onOpenAgent &&
     prev.onEditMessage === next.onEditMessage &&
+    prev.onFork === next.onFork &&
     prev.highlightQuery === next.highlightQuery,
 );

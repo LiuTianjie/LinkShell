@@ -483,6 +483,23 @@ export const agentModeDescriptorSchema = z.object({
   description: z.string().optional(),
 });
 
+// MCP server connection status, surfaced in the console so users see whether a
+// configured MCP server actually came up (parity with Claude Code / Codex).
+export const agentMcpServerStatusSchema = z.enum([
+  "pending", // known from config, not yet connected
+  "connecting", // handshake in progress
+  "connected", // ready, tools available
+  "failed", // startup/connection error (see error)
+  "needs_auth", // OAuth / auth required before use
+]);
+
+export const agentMcpServerDescriptorSchema = z.object({
+  name: z.string().min(1),
+  status: agentMcpServerStatusSchema,
+  error: z.string().optional(), // failure detail, shown on hover
+  toolCount: z.number().int().optional(), // tools exposed once connected
+});
+
 export const agentProviderCapabilitySchema = z.object({
   id: agentProviderSchema,
   label: z.string().min(1),
@@ -500,6 +517,7 @@ export const agentProviderCapabilitySchema = z.object({
   modes: z.array(agentModeDescriptorSchema).optional(),
   currentMode: z.string().optional(),
   features: z.record(z.boolean()).optional(),
+  mcpServers: z.array(agentMcpServerDescriptorSchema).optional(),
 });
 
 export const agentCapabilitiesPayloadSchema = z.object({
@@ -754,6 +772,11 @@ export const agentV2ConversationOpenPayloadSchema = z.object({
   permissionMode: agentPermissionModeSchema.optional(),
   collaborationMode: agentCollaborationModeSchema.optional(),
   title: z.string().optional(),
+  // Fork: create a NEW conversation seeded from an existing one's transcript,
+  // truncated at forkFromTurnId (omitted → full clone from the end). Claude only
+  // in v1 — the CLI falls back to a plain new conversation for other providers.
+  forkFromConversationId: z.string().optional(),
+  forkFromTurnId: z.string().optional(),
 });
 
 export const agentV2ConversationOpenedPayloadSchema = z.object({

@@ -151,6 +151,65 @@ interface AgentModeDescriptor {
   description?: string;
 }
 
+type AgentMcpServerStatus = "pending" | "connecting" | "connected" | "failed" | "needs_auth";
+
+interface AgentMcpServerDescriptor {
+  name: string;
+  status: AgentMcpServerStatus;
+  error?: string;
+  toolCount?: number;
+}
+
+// Normalize the many status spellings Claude/Codex emit into our enum. Unknown
+// values fall back to "pending" (known-but-not-yet-up) rather than dropping the
+// server. Kept liberal because the real event vocabulary isn't fully pinned.
+function normalizeMcpStatus(raw: unknown): AgentMcpServerStatus {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+  if (s === "connected" || s === "ok" || s === "ready" || s === "running" || s === "success") return "connected";
+  if (s === "failed" || s === "error" || s === "errored" || s === "disconnected") return "failed";
+  if (s === "connecting" || s === "starting" || s === "pending_connection") return "connecting";
+  if (s === "needs_auth" || s === "unauthorized" || s === "needs_authentication" || s === "auth_required" || s === "pending_auth") return "needs_auth";
+  return "pending";
+}
+
+// Parse an MCP server list from either an array of {name,status,...} objects or
+// a {name: status} record — Claude's init `mcp_servers` shape isn't fixed.
+function parseMcpServerList(value: unknown): AgentMcpServerDescriptor[] {
+  const out: AgentMcpServerDescriptor[] = [];
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const rec = asRecord(entry);
+      if (rec) {
+        const name = firstString(rec, ["name", "server", "serverName", "id"]);
+        if (!name) continue;
+        out.push({
+          name,
+          status: normalizeMcpStatus(rec.status ?? rec.state),
+          error: firstString(rec, ["error", "message", "reason"]),
+          toolCount: firstNumber(rec, ["toolCount", "tools", "toolsCount"]) ?? (Array.isArray(rec.tools) ? rec.tools.length : undefined),
+        });
+      } else if (typeof entry === "string" && entry) {
+        out.push({ name: entry, status: "pending" });
+      }
+    }
+    return out;
+  }
+  const rec = asRecord(value);
+  if (rec) {
+    for (const [name, raw] of Object.entries(rec)) {
+      if (!name) continue;
+      const inner = asRecord(raw);
+      out.push({
+        name,
+        status: normalizeMcpStatus(inner ? (inner.status ?? inner.state) : raw),
+        error: inner ? firstString(inner, ["error", "message", "reason"]) : undefined,
+        toolCount: inner ? (firstNumber(inner, ["toolCount", "tools", "toolsCount"]) ?? (Array.isArray(inner.tools) ? inner.tools.length : undefined)) : undefined,
+      });
+    }
+  }
+  return out;
+}
+
 interface AgentConversationUsage {
   inputTokens?: number;
   outputTokens?: number;
@@ -880,6 +939,9 @@ interface ProviderRuntimeCapabilities {
   commands?: AgentCommandDescriptor[];
   modes?: AgentModeDescriptor[];
   currentMode?: string;
+  // MCP server connection status, keyed by server name (last-writer-wins across
+  // the init seed and live startupStatus events).
+  mcpServers?: Map<string, AgentMcpServerDescriptor>;
 }
 
 const ALL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
@@ -1345,12 +1407,15 @@ function parseModelListCapabilities(provider: AgentProvider, value: unknown): Pr
     ? ALL_REASONING_EFFORTS.filter((effort) => efforts.has(effort))
     : undefined;
   const commands = raw && Array.isArray(raw.commands) ? runtimeCommands(provider, raw.commands) : undefined;
-  if (models.length === 0 && !defaultModel && !reasoningEfforts?.length && !commands?.length) return undefined;
+  const mcpList = raw ? parseMcpServerList(raw.mcpServers ?? raw.mcp_servers) : [];
+  const mcpServers = mcpList.length > 0 ? new Map(mcpList.map((s) => [s.name, s])) : undefined;
+  if (models.length === 0 && !defaultModel && !reasoningEfforts?.length && !commands?.length && !mcpServers) return undefined;
   return {
     ...(models.length > 0 ? { models } : {}),
     ...(defaultModel ? { defaultModel } : {}),
     ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
     ...(commands?.length ? { commands } : {}),
+    ...(mcpServers ? { mcpServers } : {}),
   };
 }
 
@@ -2305,11 +2370,23 @@ export class AgentWorkspaceProxy {
         commands: runtimeCapabilities?.commands,
         modes: runtimeCapabilities?.modes,
         currentMode: runtimeCapabilities?.currentMode,
+        // Preserve any MCP status already accumulated from startupStatus events.
+        mcpServers: runtimeCapabilities?.mcpServers ?? this.providerCapabilities.get(provider)?.mcpServers,
       };
       this.providerCapabilities.set(provider, merged);
       return;
     }
-    if (runtimeCapabilities) this.providerCapabilities.set(provider, runtimeCapabilities);
+    if (runtimeCapabilities) {
+      // Don't clobber MCP status that arrived via startupStatus before discovery;
+      // fold both sources into one map.
+      const priorMcp = this.providerCapabilities.get(provider)?.mcpServers;
+      if (priorMcp && priorMcp.size > 0) {
+        const map = new Map(priorMcp);
+        for (const [name, desc] of runtimeCapabilities.mcpServers ?? []) map.set(name, desc);
+        runtimeCapabilities = { ...runtimeCapabilities, mcpServers: map };
+      }
+      this.providerCapabilities.set(provider, runtimeCapabilities);
+    }
   }
 
   private async syncProviderSessions(): Promise<void> {
@@ -2586,6 +2663,9 @@ export class AgentWorkspaceProxy {
           reasoningEffort: supportsReasoningEffort,
           streamJsonFallback: isClaudeFallback,
         },
+        mcpServers: runtimeCapabilities?.mcpServers && runtimeCapabilities.mcpServers.size > 0
+          ? [...runtimeCapabilities.mcpServers.values()]
+          : undefined,
       };
     });
     const anyEnabled = providers.some((p) => p.enabled);
@@ -2621,6 +2701,8 @@ export class AgentWorkspaceProxy {
     permissionMode?: AgentPermissionMode;
     collaborationMode?: AgentCollaborationMode;
     title?: string;
+    forkFromConversationId?: string;
+    forkFromTurnId?: string;
   }): Promise<AgentConversation | undefined> {
     const provider = payload.provider ?? this.input.availableProviders[0];
     if (!provider) {
@@ -2662,6 +2744,42 @@ export class AgentWorkspaceProxy {
         return this.openOfflineHistory(payload, message, cwd);
       }
       return this.openFailure(payload, message, cwd);
+    }
+
+    // Fork: seed a NEW conversation from an existing one's transcript, truncated
+    // at forkFromTurnId. Claude only — the SDK client exposes forkSession(); the
+    // stream-json fallback and Codex don't, so we notify and fall through to a
+    // plain new conversation rather than pretend. On success we set agentSessionId
+    // to the freshly-written transcript id and let the normal load path hydrate it.
+    if (payload.forkFromConversationId) {
+      const source = this.conversations.get(payload.forkFromConversationId);
+      const sourceSessionId = source?.agentSessionId;
+      const forkable = (client as { forkSession?: (i: { sourceSessionId: string; uptoTurnId?: string }) => { sessionId: string } | undefined }).forkSession;
+      if (provider === "claude" && typeof forkable === "function" && sourceSessionId) {
+        if (source?.cwd && !payload.cwd) cwd = source.cwd;
+        const forked = forkable.call(client, { sourceSessionId, uptoTurnId: payload.forkFromTurnId });
+        if (forked?.sessionId) {
+          agentSessionId = forked.sessionId;
+          // Inherit the source's config so the fork opens like its parent.
+          payload = {
+            ...payload,
+            model: payload.model ?? source?.model,
+            reasoningEffort: payload.reasoningEffort ?? source?.reasoningEffort,
+            permissionMode: payload.permissionMode ?? source?.permissionMode,
+            collaborationMode: payload.collaborationMode ?? source?.collaborationMode,
+            title: payload.title ?? (source?.title ? `${source.title} (分叉)` : undefined),
+          };
+          existingConversation = undefined; // force the new-conversation path
+        } else {
+          this.emitNotice({ kind: "warning", title: "分叉失败", detail: "无法复制该会话的历史记录，已新建空会话。" });
+        }
+      } else {
+        this.emitNotice({
+          kind: "native_unsupported",
+          title: "暂不支持分叉",
+          detail: provider === "claude" ? "该会话无法分叉。" : `${providerLabel(provider)} 暂不支持从历史分叉，已新建空会话。`,
+        });
+      }
     }
 
     if (existingConversation && existingConversation.status !== "error" && existingConversation.agentSessionId) {
@@ -3300,6 +3418,39 @@ export class AgentWorkspaceProxy {
     return {};
   }
 
+  // Merge MCP server descriptors into a provider's runtime capabilities,
+  // last-writer-wins by server name. Creates the map lazily.
+  private mergeMcpServers(provider: AgentProvider, servers: AgentMcpServerDescriptor[]): void {
+    if (servers.length === 0) return;
+    const existing = this.providerCapabilities.get(provider) ?? {};
+    const map = existing.mcpServers ?? new Map<string, AgentMcpServerDescriptor>();
+    for (const server of servers) map.set(server.name, server);
+    this.providerCapabilities.set(provider, { ...existing, mcpServers: map });
+  }
+
+  // A live `mcpServer/startupStatus/<name>` notification. The server name is
+  // presumed to be the method suffix (falls back to a name field in params);
+  // the status/error/toolCount shape is parsed defensively since the real event
+  // vocabulary isn't fully pinned. Re-emits capabilities so the console updates.
+  private handleMcpStartupStatus(method: string, params: unknown): void {
+    // MCP is Claude-only today; target the enabled provider that supports it.
+    const provider = this.input.availableProviders.find((p) => p === "claude" && this.clients.has(p))
+      ?? this.input.availableProviders.find((p) => this.clients.has(p));
+    if (!provider) return;
+    const raw = asRecord(params) ?? {};
+    const suffix = method.slice(method.lastIndexOf("/") + 1);
+    const name = (suffix && suffix !== "startupStatus" ? suffix : undefined)
+      ?? firstString(raw, ["name", "server", "serverName"]);
+    if (!name) return;
+    this.mergeMcpServers(provider, [{
+      name,
+      status: normalizeMcpStatus(raw.status ?? raw.state),
+      error: firstString(raw, ["error", "message", "reason"]),
+      toolCount: firstNumber(raw, ["toolCount", "tools", "toolsCount"]) ?? (Array.isArray(raw.tools) ? raw.tools.length : undefined),
+    }]);
+    this.sendCapabilities();
+  }
+
   private handleNotification(method: string, params: unknown): void {
     if (this.input.verbose) {
       process.stderr.write(`[agent:v2] ${method} ${stringify(params).slice(0, 500)}\n`);
@@ -3327,11 +3478,26 @@ export class AgentWorkspaceProxy {
           this.emitConversation(conversation);
         }
       }
+      // Seed the MCP server list from the init payload (stream-json carries
+      // `mcp_servers`; the SDK path may carry `mcpServers`). Late per-server
+      // startupStatus events refine this afterward.
+      if (provider) {
+        const initMcp =
+          parseMcpServerList((asRecord(params) ?? {}).mcpServers ??
+            (asRecord(params) ?? {}).mcp_servers);
+        if (initMcp.length > 0) {
+          this.mergeMcpServers(provider, initMcp);
+          this.sendCapabilities();
+        }
+      }
+      return;
+    }
+    if (method.startsWith("mcpServer/startupStatus/")) {
+      this.handleMcpStartupStatus(method, params);
       return;
     }
     if (
       method.startsWith("account/") ||
-      method.startsWith("mcpServer/startupStatus/") ||
       method === "serverRequest/resolved" ||
       method === "mcpServer/oauthLogin/completed"
     ) {

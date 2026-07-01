@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 
@@ -640,6 +641,61 @@ export class ClaudeSdkClient {
       .find((candidate) => existsSync(candidate));
   }
 
+  /** Fork a session: copy the source transcript into a NEW session file,
+   *  truncated to include everything up to and including the turn `uptoTurnId`
+   *  (omitted → full clone). Claude has no native fork primitive, so this
+   *  simulates one by writing a fresh <uuid>.jsonl alongside the source. The
+   *  source file is NEVER modified. Turn ids match the per-line uuid/id (or the
+   *  `claude-history-<n>` fallback) that parseClaudeJsonlSession assigns, where
+   *  <n> counts non-empty lines — replicated here so the cut lands exactly on
+   *  the turn the client asked for. Returns the new session id, or undefined if
+   *  the source can't be read or the new file can't be created. */
+  forkSession(input: { sourceSessionId: string; uptoTurnId?: string }): { sessionId: string } | undefined {
+    const sourceFile = this.resolveSessionFile(input.sourceSessionId);
+    if (!sourceFile) return undefined;
+    let text: string;
+    try {
+      text = readFileSync(sourceFile, "utf8");
+    } catch {
+      return undefined;
+    }
+    const lines = text.split("\n");
+    let cutIndex = lines.length - 1; // default: keep everything (full clone)
+    if (input.uptoTurnId) {
+      let nonEmpty = 0;
+      let found = -1;
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i]?.trim();
+        if (!line) continue;
+        nonEmpty += 1;
+        let turnId: string;
+        try {
+          const rec = asRecord(JSON.parse(line));
+          turnId = stringField(rec, ["uuid", "id"]) ?? `claude-history-${nonEmpty}`;
+        } catch {
+          continue; // unparseable line — parser skips it too (index still bumped)
+        }
+        if (turnId === input.uptoTurnId) {
+          found = i;
+          break;
+        }
+      }
+      if (found < 0) return undefined; // turn not found — don't silently full-clone
+      cutIndex = found;
+    }
+    const truncated = lines.slice(0, cutIndex + 1).join("\n") + "\n";
+    const newId = randomUUID();
+    const dir = claudeProjectDir(this.input.cwd);
+    const newPath = join(dir, `${newId}.jsonl`);
+    try {
+      // wx: fail if it somehow already exists — never overwrite.
+      writeFileSync(newPath, truncated, { flag: "wx" });
+    } catch {
+      return undefined;
+    }
+    return { sessionId: newId };
+  }
+
   /** Read a session's last-known settings (permission mode, plan mode) straight
    *  from its on-disk transcript, so opening a session LinkShell never drove
    *  shows the config it actually ran with instead of UI defaults. Claude
@@ -959,6 +1015,16 @@ export class ClaudeSdkClient {
           } catch {
             // supportedCommands() unavailable or failed — fall back to static defaults.
           }
+          // Discover MCP server status the same best-effort way. Older SDKs
+          // without mcpServerStatus() just leave mcpServers undefined; live
+          // startupStatus events still populate it. Shape is passed through
+          // verbatim to the workspace parser, which tolerates array/record forms.
+          let mcpServers: unknown;
+          try {
+            mcpServers = await (q as unknown as { mcpServerStatus?: () => Promise<unknown> }).mcpServerStatus?.();
+          } catch {
+            // mcpServerStatus() unavailable or failed — rely on live events.
+          }
           if (sdkModels.length > 0) {
             // Filter to admin-configured allowlist if present, then map to our format.
             const allow = availableModels;
@@ -969,16 +1035,18 @@ export class ClaudeSdkClient {
               defaultModel,
               models: filtered.map((m) => ({ id: m.value, label: m.displayName || m.value })),
               ...(commands ? { commands } : {}),
+              ...(mcpServers ? { mcpServers } : {}),
             };
           }
           // No models surfaced, but commands may still be present — return them
           // so the command palette stays in sync even when the model list is empty.
-          if (commands) {
+          if (commands || mcpServers) {
             const fallbackModels = availableModels ?? DEFAULT_FALLBACK_MODELS;
             return {
               defaultModel,
               models: toModelEntries(fallbackModels),
-              commands,
+              ...(commands ? { commands } : {}),
+              ...(mcpServers ? { mcpServers } : {}),
             };
           }
         } catch {

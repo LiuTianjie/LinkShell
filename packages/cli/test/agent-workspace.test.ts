@@ -1140,3 +1140,72 @@ describe("AgentWorkspaceProxy event routing", () => {
     });
   });
 });
+
+describe("MCP server status on capabilities", () => {
+  function makeClaudeProxy() {
+    const sent: any[] = [];
+    const proxy = new AgentWorkspaceProxy({
+      sessionId: "session-1",
+      cwd: "/tmp",
+      availableProviders: ["claude"],
+      send: (envelope) => sent.push(envelope),
+    }) as any;
+    // A registered client is what handleMcpStartupStatus keys off to pick the
+    // provider (MCP is Claude-only today).
+    proxy.clients.set("claude", { forkSession: () => undefined });
+    return { proxy, sent };
+  }
+
+  function lastCapabilities(sent: any[]) {
+    const envelope = [...sent].reverse().find((e) => e.type === "agent.v2.capabilities");
+    return envelope?.payload.providers?.find((p: any) => p.id === "claude");
+  }
+
+  it("carries a connected MCP server (with tool count) from a startupStatus notification", () => {
+    const { proxy, sent } = makeClaudeProxy();
+    proxy.handleNotification("mcpServer/startupStatus/everything", { status: "connected", tools: 12 });
+    const claude = lastCapabilities(sent);
+    expect(claude?.mcpServers).toEqual([
+      { name: "everything", status: "connected", toolCount: 12 },
+    ]);
+  });
+
+  it("maps an error status to failed and passes the error through", () => {
+    const { proxy, sent } = makeClaudeProxy();
+    proxy.handleNotification("mcpServer/startupStatus/broken", { status: "error", error: "spawn failed" });
+    const claude = lastCapabilities(sent);
+    expect(claude?.mcpServers).toEqual([
+      { name: "broken", status: "failed", error: "spawn failed" },
+    ]);
+  });
+
+  it("normalizes an unknown status to pending rather than dropping the server", () => {
+    const { proxy, sent } = makeClaudeProxy();
+    proxy.handleNotification("mcpServer/startupStatus/weird", { status: "who-knows" });
+    const claude = lastCapabilities(sent);
+    expect(claude?.mcpServers?.[0]).toMatchObject({ name: "weird", status: "pending" });
+  });
+
+  it("accumulates multiple servers and updates status last-writer-wins", () => {
+    const { proxy, sent } = makeClaudeProxy();
+    proxy.handleNotification("mcpServer/startupStatus/a", { status: "connecting" });
+    proxy.handleNotification("mcpServer/startupStatus/b", { status: "connected" });
+    proxy.handleNotification("mcpServer/startupStatus/a", { status: "connected" });
+    const claude = lastCapabilities(sent);
+    const byName = Object.fromEntries((claude?.mcpServers ?? []).map((s: any) => [s.name, s.status]));
+    expect(byName).toEqual({ a: "connected", b: "connected" });
+  });
+
+  it("seeds the MCP list from an initialized notification's mcpServers", () => {
+    const { proxy, sent } = makeClaudeProxy();
+    proxy.handleNotification("initialized", {
+      mcpServers: [
+        { name: "fs", status: "connected" },
+        { name: "db", status: "failed", error: "no socket" },
+      ],
+    });
+    const claude = lastCapabilities(sent);
+    const byName = Object.fromEntries((claude?.mcpServers ?? []).map((s: any) => [s.name, s.status]));
+    expect(byName).toEqual({ fs: "connected", db: "failed" });
+  });
+});

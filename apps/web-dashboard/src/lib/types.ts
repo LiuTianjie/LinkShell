@@ -5,6 +5,8 @@ import type {
   agentV2EventPayloadSchema,
   agentV2CapabilitiesPayloadSchema,
   agentProviderCapabilitySchema,
+  agentMcpServerStatusSchema,
+  agentMcpServerDescriptorSchema,
   agentPermissionSchema,
   agentV2StructuredInputSchema,
   agentV2FileChangeSchema,
@@ -32,6 +34,8 @@ export type AgentConversation = z.infer<typeof agentV2ConversationSchema>;
 export type AgentV2Event = z.infer<typeof agentV2EventPayloadSchema>;
 export type AgentCapabilitiesPayload = z.infer<typeof agentV2CapabilitiesPayloadSchema>;
 export type AgentProviderCapability = z.infer<typeof agentProviderCapabilitySchema>;
+export type AgentMcpServerStatus = z.infer<typeof agentMcpServerStatusSchema>;
+export type AgentMcpServerDescriptor = z.infer<typeof agentMcpServerDescriptorSchema>;
 export type AgentPermission = z.infer<typeof agentPermissionSchema>;
 export type AgentStructuredInput = z.infer<typeof agentV2StructuredInputSchema>;
 export type AgentFileChange = z.infer<typeof agentV2FileChangeSchema>;

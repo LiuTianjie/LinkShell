@@ -625,6 +625,25 @@ export class WorkspaceStore {
     return conversationId;
   }
 
+  /** Fork the current conversation into a NEW one, seeded from its transcript
+   *  truncated at `turnId` (Claude only — the CLI notifies + falls back for
+   *  other providers). Inherits provider/cwd from the source; the CLI fills in
+   *  model/effort/permission from the source transcript. On success the CLI
+   *  emits conversation.opened and we switch to it (same as a new conversation). */
+  forkConversation(sourceConversationId: string, turnId: string): string | undefined {
+    const source = this.conversations.find((c) => c.id === sourceConversationId);
+    if (!source || source.provider !== "claude") return undefined;
+    const conversationId = genId("agent");
+    this.bridge.sendAgent("agent.v2.conversation.open", {
+      conversationId,
+      provider: source.provider,
+      cwd: source.cwd,
+      forkFromConversationId: sourceConversationId,
+      forkFromTurnId: turnId,
+    });
+    return conversationId;
+  }
+
   sendPrompt(input: SendPromptInput): void {
     const contentBlocks: AgentContentBlock[] = [];
     if (input.text.trim()) contentBlocks.push({ type: "text", text: input.text });
