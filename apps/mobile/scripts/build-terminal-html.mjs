@@ -84,6 +84,48 @@ if (term.textarea) {
 
 setTimeout(function(){fitAddon.fit();sendSize();},150);
 
+// ---- NaN mouse-report fix (root cause) ------------------------------------
+// xterm 6.1.0-beta.197 bug: after a touch fling, Gesture._inertia dispatches
+// synthetic CHANGE CustomEvents that carry only translationX/translationY —
+// no clientX/clientY. When a TUI (e.g. Claude Code) has SGR mouse tracking
+// enabled, touch scroll is routed through _handleTouchScrollAsWheel →
+// MouseCoordsService.getMouseReportCoords → getCoordsRelativeToElement, which
+// computes undefined - rect.left = NaN. The bounds check in _triggerMouseEvent
+// (col<0 || col>=cols) is false for NaN, so the SGR encoder emits the literal
+// string "\\x1b[<65;NaN;NaNM"; the TUI's CSI parser rejects it and "NaN" lands
+// as typed input.
+// Least-invasive seam: wrap getMouseReportCoords to return undefined when the
+// computed coords are not finite. Its only callers (_sendEvent /
+// _handleTouchScrollAsWheel) already handle undefined by skipping the report,
+// and finger-down drag events DO carry clientX/clientY, so normal touch
+// wheel-scrolling of the TUI keeps working — only the coordinate-less inertia
+// reports are dropped. We patch the live instance via term._core (this is our
+// own bundled runtime; the minified lib cannot be patched cleanly).
+(function(){
+  try {
+    var core = term._core;
+    if (!core) return;
+    var svc = core._mouseCoordsService;
+    if (!svc || typeof svc.getMouseReportCoords !== 'function') {
+      // Minified property name may differ between builds: scan for the service.
+      svc = null;
+      for (var k in core) {
+        var v = core[k];
+        if (v && typeof v.getMouseReportCoords === 'function') { svc = v; break; }
+      }
+    }
+    if (!svc) return;
+    var orig = svc.getMouseReportCoords.bind(svc);
+    svc.getMouseReportCoords = function(event, element){
+      var r = orig(event, element);
+      if (r && (!isFinite(r.col) || !isFinite(r.row) || !isFinite(r.x) || !isFinite(r.y))) {
+        return undefined; // reject NaN/Infinity coords from synthetic gesture events
+      }
+      return r;
+    };
+  } catch (e) {}
+})();
+
 // xterm 6.x gesture system calls preventDefault on touchstart, blocking native focus.
 // Re-implement tap-to-focus manually.
 var _isAndroid = /Android/i.test(navigator.userAgent);
@@ -162,6 +204,26 @@ function setFontSize(nextSize){
   sendSize();
 }
 
+// ---- NaN mouse-report fix (last-resort sanitizer) --------------------------
+// Defense in depth for the bug patched above: if any escape sequence with NaN
+// parameters slips through (e.g. a different NaN source inside the minified
+// bundle), strip it before it reaches the PTY. Precision matters: a user CAN
+// legitimately type or paste the word "NaN", so we only remove "NaN" when it
+// appears INSIDE a CSI escape sequence (\\x1b[ ... final byte). Plain text is
+// never touched — pasted text sits outside any CSI match (bracketed paste
+// markers \\x1b[200~/\\x1b[201~ self-terminate at '~' before the content), and
+// single keystrokes contain no ESC.
+var NAN_CSI_RE = new RegExp('\\\\x1b\\\\[[<>=?]?(?:[0-9;:]|NaN)*NaN(?:[0-9;:]|NaN)*[a-zA-Z~]', 'g');
+function sanitizeInput(data) {
+  if (typeof data !== 'string' || data.indexOf('NaN') === -1) return data;
+  return data.replace(NAN_CSI_RE, '');
+}
+function postInput(data) {
+  data = sanitizeInput(data);
+  if (!data) return;
+  window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:data}));
+}
+
 // IME composition guard + iOS voice dictation fix
 var _composing = false;
 var _lastComposed = '';
@@ -186,7 +248,7 @@ if (term.textarea) {
     _composing = false;
     if (e.data) {
       _lastComposed = e.data;
-      window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:e.data}));
+      postInput(e.data);
     }
   });
 
@@ -208,10 +270,10 @@ if (term.textarea) {
       var bs = '';
       for (var i = 0; i < _dictationText.length; i++) bs += '\\b';
       if (bs) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:bs}));
+        postInput(bs);
       }
       // Send the full new text
-      window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:newText}));
+      postInput(newText);
       _dictationText = newText;
 
       // Auto-end dictation session after 2s of inactivity
@@ -227,7 +289,7 @@ if (term.textarea) {
       var mySeq = ++_inputSeq;
       setTimeout(function(){
         if (_ackedSeq < mySeq) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:e.data}));
+          postInput(e.data);
         }
       }, 30);
     }
@@ -242,7 +304,7 @@ term.onData(function(data){
     return;
   }
   _lastComposed = '';
-  window.ReactNativeWebView.postMessage(JSON.stringify({type:'input',data:data}));
+  postInput(data);
 });
 term.onResize(function(){sendSize();});
 window.addEventListener('resize',function(){fitAddon.fit();});
