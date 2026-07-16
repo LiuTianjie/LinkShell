@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { createRoot } from "react-dom/client";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LoginPage } from "./pages/LoginPage";
 import { SessionListPage } from "./pages/SessionListPage";
 import { AgentConsolePage } from "./pages/AgentConsolePage";
@@ -58,6 +59,19 @@ function App() {
   // Embedded only: expose a hook the native host calls (via injectJavaScript)
   // when the user flips the app's theme while the WebView is mounted, so the
   // embedded console re-themes live instead of only at boot.
+  // Embedded only: the HTML ships a permissive viewport (pinch-zoom allowed in
+  // mobile browsers), but inside the native WebView zooming fights the app
+  // chrome — re-tighten it at runtime.
+  useEffect(() => {
+    if (!isEmbed) return;
+    document
+      .querySelector('meta[name="viewport"]')
+      ?.setAttribute(
+        "content",
+        "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+      );
+  }, [isEmbed]);
+
   useEffect(() => {
     if (!isEmbed) return;
     const w = window as unknown as {
@@ -120,4 +134,8 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);

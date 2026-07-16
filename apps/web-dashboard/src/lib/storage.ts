@@ -92,7 +92,44 @@ export function markAllOffline(): SessionSummary[] {
 export function forgetSession(sessionId: string): SessionSummary[] {
   const next = loadKnownSessions().filter((s) => s.id !== sessionId);
   write(KNOWN_SESSIONS_KEY, next);
+  removeSessionData(sessionId);
   return next;
+}
+
+/** Delete a session's persisted chat data: conversations, timelines, and the
+ *  drafts of each of its conversations (drafts are keyed by conversationId,
+ *  so resolve them via the stored conversation list before removing it). */
+function removeSessionData(sessionId: string): void {
+  try {
+    for (const conv of loadConversations(sessionId)) {
+      localStorage.removeItem(DRAFT_PREFIX + conv.id);
+    }
+    localStorage.removeItem(CONV_PREFIX + sessionId);
+    localStorage.removeItem(TIMELINE_PREFIX + sessionId);
+  } catch {
+    // Unavailable — non-fatal, stale data just lingers.
+  }
+}
+
+/** Sweep conv/timeline (and their drafts) whose sessionId is no longer in the
+ *  known-sessions list — e.g. sessions forgotten before this cleanup existed,
+ *  or evicted by the 50-entry cap. Runs once per page load (module init). */
+function sweepOrphanedSessionData(): void {
+  try {
+    const known = new Set(loadKnownSessions().map((s) => s.id));
+    const orphaned = new Set<string>();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      const prefix = [CONV_PREFIX, TIMELINE_PREFIX].find((p) => key.startsWith(p));
+      if (!prefix) continue;
+      const sessionId = key.slice(prefix.length);
+      if (!known.has(sessionId)) orphaned.add(sessionId);
+    }
+    for (const sessionId of orphaned) removeSessionData(sessionId);
+  } catch {
+    // Unavailable — non-fatal.
+  }
 }
 
 // ── Conversations (per session) ─────────────────────────────────────
@@ -143,3 +180,6 @@ export function saveTimelines(
   }
   write(TIMELINE_PREFIX + sessionId, obj);
 }
+
+// One-time cleanup per page load, after all helpers above are defined.
+sweepOrphanedSessionData();

@@ -2,7 +2,28 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Pre-paint theme: mirror src/lib/theme.ts (key "linkshell_theme",
+         light/dark/system, default dark) so first paint matches the stored
+         preference and there's no flash of the wrong theme. -->
+    <script>
+      (function () {
+        try {
+          var v = localStorage.getItem("linkshell_theme");
+          var t =
+            v === "light" || v === "dark"
+              ? v
+              : v === "system"
+                ? window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+                  ? "light"
+                  : "dark"
+                : "dark";
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {}
+      })();
+    </script>
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0d0f" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
     <link rel="icon" type="image/png" href="/logos/linkshell.png" />
     <title>LinkShell</title>
   </head>

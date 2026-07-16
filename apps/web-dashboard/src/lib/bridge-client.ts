@@ -356,9 +356,10 @@ export class BridgeClient {
     this.terminalBuffers.delete(terminalId);
   }
 
-  /** Send an agent.v2.* (or any) client message; protocol version is implied. */
-  sendAgent<T>(type: ProtocolMessageType, payload: T): void {
-    this.send(type, payload);
+  /** Send an agent.v2.* (or any) client message; protocol version is implied.
+   *  Returns false when the socket isn't OPEN so callers can queue/retry. */
+  sendAgent<T>(type: ProtocolMessageType, payload: T): boolean {
+    return this.send(type, payload);
   }
 
   protocolVersion(): number {

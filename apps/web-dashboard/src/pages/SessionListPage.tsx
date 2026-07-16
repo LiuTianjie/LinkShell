@@ -79,13 +79,25 @@ export function SessionListPage({
   onOpenSession: (sessionId: string) => void;
 }) {
   const [config, setConfig] = useState(loadGatewayConfig());
+  // Gateway URL is committed on blur/Enter (not per keystroke) so the 5s
+  // refresh loop never fires requests at half-typed origins.
+  const [gatewayInput, setGatewayInput] = useState(config.httpUrl);
+  const [gatewayInvalid, setGatewayInvalid] = useState(false);
   // Seed from remembered sessions so "back" shows a clickable list instantly,
   // even before the live /sessions call returns (or if it's momentarily empty).
   const [sessions, setSessions] = useState<SessionSummary[]>(() => loadKnownSessions());
-  // Only online sessions are shown; offline (host gone) ones are hidden from the
-  // list. The full `sessions` state is kept intact so the cache-reconciliation
-  // logic (rememberSessions/markAllOffline) still works across refreshes.
-  const visibleSessions = sessions.filter((s) => s.hasHost);
+  // Online sessions first (sorted by recency); offline (host gone) ones live in
+  // a collapsed group below — still reachable so they can be removed. The full
+  // `sessions` state is kept intact so the cache-reconciliation logic
+  // (rememberSessions/markAllOffline) still works across refreshes.
+  const recency = (s: SessionSummary) => Math.max(s.lastActivity ?? 0, s.agentLastActivity ?? 0);
+  const onlineSessions = sessions
+    .filter((s) => s.hasHost)
+    .sort((a, b) => recency(b) - recency(a)); // Array#sort is stable
+  const offlineSessions = sessions.filter((s) => !s.hasHost).sort((a, b) => recency(b) - recency(a));
+  // Badge cards with their hostname when sessions span multiple machines.
+  const multiHost = new Set(sessions.map((s) => s.hostname).filter(Boolean)).size > 1;
+  const [showOffline, setShowOffline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pairingCode, setPairingCode] = useState("");
   const [claiming, setClaiming] = useState(false);
@@ -187,9 +199,93 @@ export function SessionListPage({
     setSessions(forgetSession(sessionId));
   };
 
-  const handleGatewayChange = (url: string) => {
-    saveGatewayUrl(url);
-    setConfig({ httpUrl: url.replace(/\/+$/, "") });
+  // Commit the gateway URL only when it parses as an http(s) origin; called on
+  // blur and Enter. Invalid input shows a subtle error state and the committed
+  // config (used by the 5s refresh loop) stays untouched.
+  const commitGatewayUrl = () => {
+    const trimmed = gatewayInput.trim().replace(/\/+$/, "");
+    if (trimmed === config.httpUrl) {
+      setGatewayInvalid(false);
+      return;
+    }
+    let valid = false;
+    try {
+      const parsed = new URL(trimmed);
+      valid = parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      valid = false;
+    }
+    if (!valid) {
+      setGatewayInvalid(true);
+      return;
+    }
+    setGatewayInvalid(false);
+    setGatewayInput(trimmed);
+    saveGatewayUrl(trimmed);
+    setConfig({ httpUrl: trimmed });
+  };
+
+  // One session card. Online cards open the console on click; offline cards
+  // (host gone) have no connect action — only 移除 remains.
+  const renderCard = (s: SessionSummary) => {
+    const body = (
+      <div>
+        <p className="flex items-center gap-2 text-[15px] font-medium text-content-primary">
+          <span className={`h-1.5 w-1.5 rounded-full ${s.hasHost ? "bg-success" : "bg-content-faint"}`} />
+          {s.projectName || s.hostname || s.id.slice(0, 8)}
+          {multiHost && s.hostname && (
+            <span className="codex-chip">{s.hostname}</span>
+          )}
+          {s.provider && (
+            <span className="codex-chip">
+              <ProviderIcon provider={s.provider} size={12} />
+              {s.provider}
+            </span>
+          )}
+          {agentStatusLabel(s.agentStatus) && (
+            <span className={`rounded-full border px-2 py-0.5 text-2xs font-medium ${agentStatusClass(s.agentStatus)}`}>
+              {s.agentProvider && s.agentProvider !== s.provider ? `${s.agentProvider} · ` : ""}
+              {agentStatusLabel(s.agentStatus)}
+            </span>
+          )}
+        </p>
+        <p className="mt-1 font-mono text-2xs text-content-muted">
+          {s.cwd ?? "—"} · {s.hasHost ? "在线" : "主机离线"}
+          {s.agentTitle ? ` · ${s.agentTitle}` : ""}
+        </p>
+        {usageSummary(s.agentUsage) && (
+          <p className="mt-0.5 font-mono text-2xs text-content-faint">{usageSummary(s.agentUsage)}</p>
+        )}
+      </div>
+    );
+    return (
+      <div
+        key={s.id}
+        className={`codex-card group flex items-center justify-between p-4 transition-colors ${s.hasHost ? "hover:bg-surface-overlay" : "opacity-70"}`}
+      >
+        {s.hasHost ? (
+          <button
+            onClick={() => onOpenSession(s.id)}
+            className="flex flex-1 cursor-pointer items-center justify-between text-left"
+          >
+            {body}
+          </button>
+        ) : (
+          <div className="flex flex-1 items-center justify-between text-left">{body}</div>
+        )}
+        <div className="flex items-center gap-2 pl-3">
+          <button
+            onClick={() => handleForget(s.id)}
+            className="cursor-pointer rounded-lg p-1.5 text-content-faint opacity-0 transition-colors hover:text-danger group-hover:opacity-100"
+            title="从列表移除"
+            aria-label="移除会话"
+          >
+            <IconClose size={14} />
+          </button>
+          {s.hasHost && <IconChevronRight size={16} className="text-content-faint" />}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -225,7 +321,7 @@ export function SessionListPage({
         <section className="space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-[15px] font-semibold text-content-primary">
-              我的会话 <span className="font-normal text-content-muted">({visibleSessions.length})</span>
+              我的会话 <span className="font-normal text-content-muted">({onlineSessions.length})</span>
             </h2>
             <div className="flex items-center gap-2">
               <button onClick={refresh} className="codex-btn-ghost text-2xs">
@@ -241,12 +337,22 @@ export function SessionListPage({
           {showPairing && (
             <section className="codex-card animate-slide-in p-5">
               <label className="mb-1.5 block text-2xs font-semibold uppercase tracking-wider text-content-faint">网关地址</label>
-              <input
-                value={config.httpUrl}
-                onChange={(e) => handleGatewayChange(e.target.value)}
-                className="codex-input mb-4 font-mono text-2xs"
-                placeholder="https://gateway.itool.tech"
-              />
+              <div className="mb-4">
+                <input
+                  value={gatewayInput}
+                  onChange={(e) => {
+                    setGatewayInput(e.target.value);
+                    setGatewayInvalid(false);
+                  }}
+                  onBlur={commitGatewayUrl}
+                  onKeyDown={(e) => e.key === "Enter" && commitGatewayUrl()}
+                  className={`codex-input font-mono text-2xs ${gatewayInvalid ? "border-danger/60" : ""}`}
+                  placeholder="https://gateway.itool.tech"
+                />
+                {gatewayInvalid && (
+                  <p className="mt-1.5 text-2xs text-danger">请输入有效的 http(s) 地址</p>
+                )}
+              </div>
               <label className="mb-1.5 block text-2xs font-semibold uppercase tracking-wider text-content-faint">配对码（在主机运行 linkshell 获取）</label>
               <div className="flex gap-2">
                 <input
@@ -266,7 +372,7 @@ export function SessionListPage({
             </section>
           )}
 
-          {visibleSessions.length === 0 ? (
+          {onlineSessions.length === 0 && offlineSessions.length === 0 ? (
             <div className="codex-card flex flex-col items-center gap-3 px-6 py-20 text-center">
               {loading ? (
                 <p className="text-[15px] leading-7 text-content-muted">加载中…</p>
@@ -279,54 +385,22 @@ export function SessionListPage({
             </div>
           ) : (
             <div className="space-y-3">
-              {visibleSessions.map((s) => (
-                <div
-                  key={s.id}
-                  className="codex-card group flex items-center justify-between p-4 transition-colors hover:bg-surface-overlay"
-                >
+              {onlineSessions.map((s) => renderCard(s))}
+              {offlineSessions.length > 0 && (
+                <div className="space-y-3 pt-2">
                   <button
-                    onClick={() => onOpenSession(s.id)}
-                    className="flex flex-1 cursor-pointer items-center justify-between text-left"
+                    onClick={() => setShowOffline((v) => !v)}
+                    className="flex w-full cursor-pointer items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-content-faint transition-colors hover:text-content-muted"
                   >
-                    <div>
-                      <p className="flex items-center gap-2 text-[15px] font-medium text-content-primary">
-                        <span className={`h-1.5 w-1.5 rounded-full ${s.hasHost ? "bg-success" : "bg-content-faint"}`} />
-                        {s.projectName || s.hostname || s.id.slice(0, 8)}
-                        {s.provider && (
-                          <span className="codex-chip">
-                            <ProviderIcon provider={s.provider} size={12} />
-                            {s.provider}
-                          </span>
-                        )}
-                        {agentStatusLabel(s.agentStatus) && (
-                          <span className={`rounded-full border px-2 py-0.5 text-2xs font-medium ${agentStatusClass(s.agentStatus)}`}>
-                            {s.agentProvider && s.agentProvider !== s.provider ? `${s.agentProvider} · ` : ""}
-                            {agentStatusLabel(s.agentStatus)}
-                          </span>
-                        )}
-                      </p>
-                      <p className="mt-1 font-mono text-2xs text-content-muted">
-                        {s.cwd ?? "—"} · {s.hasHost ? "在线" : "主机离线"}
-                        {s.agentTitle ? ` · ${s.agentTitle}` : ""}
-                      </p>
-                      {usageSummary(s.agentUsage) && (
-                        <p className="mt-0.5 font-mono text-2xs text-content-faint">{usageSummary(s.agentUsage)}</p>
-                      )}
-                    </div>
+                    <IconChevronRight
+                      size={12}
+                      className={`transition-transform ${showOffline ? "rotate-90" : ""}`}
+                    />
+                    离线 ({offlineSessions.length})
                   </button>
-                  <div className="flex items-center gap-2 pl-3">
-                    <button
-                      onClick={() => handleForget(s.id)}
-                      className="cursor-pointer rounded-lg p-1.5 text-content-faint opacity-0 transition-colors hover:text-danger group-hover:opacity-100"
-                      title="从列表移除"
-                      aria-label="移除会话"
-                    >
-                      <IconClose size={14} />
-                    </button>
-                    <IconChevronRight size={16} className="text-content-faint" />
-                  </div>
+                  {showOffline && offlineSessions.map((s) => renderCard(s))}
                 </div>
-              ))}
+              )}
             </div>
           )}
         </section>

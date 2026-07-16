@@ -4,7 +4,7 @@
 // React components never touch the BridgeClient directly.
 
 import { parseTypedPayload } from "@linkshell/protocol";
-import type { Envelope } from "@linkshell/protocol";
+import type { Envelope, ProtocolMessageType } from "@linkshell/protocol";
 import { BridgeClient } from "../lib/bridge-client";
 import type { BridgeEvent } from "../lib/bridge-client";
 import {
@@ -62,7 +62,9 @@ export interface WorkspaceSnapshot {
   timelines: Map<string, AgentTimelineItem[]>;
   capabilities: AgentCapabilitiesPayload | null;
   activeConversationId: string | null;
-  lastError: { code: string; message: string } | null;
+  // sticky errors (auth/subscription/protocol) never auto-clear; UI should
+  // render them as a persistent banner until dismissError() is called.
+  lastError: { code: string; message: string; sticky?: boolean } | null;
   // Per-conversation older-history pagination state (for scroll-up loading).
   history: Map<string, HistoryState>;
   // Transient toast notices (model/effort/permission changes, info, warnings).
@@ -74,6 +76,15 @@ export interface WorkspaceSnapshot {
 function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
   return `${prefix}-${Date.now().toString(36)}-${rand}`;
+}
+
+// Errors the user must act on (re-login, renew subscription, upgrade client)
+// are pinned until manually dismissed; everything else auto-clears after 6s.
+// Codes come from the gateway (auth_required / invalid_token / unauthorized /
+// subscription_expired) and any future AUTH_* / SUBSCRIPTION_* / protocol or
+// version mismatch variants.
+function isStickyErrorCode(code: string): boolean {
+  return /auth|unauthorized|token|subscription|version|protocol/i.test(code);
 }
 
 function agentStatusFromTerminalPhase(phase: string): AgentStatus | null {
@@ -119,6 +130,15 @@ export class WorkspaceStore {
   // Queued-item ids currently being auto-flushed, to fire once per item.
   private autoFlushing = new Set<string>();
   private reqCounter = 0;
+  // Outbox for NON-idempotent sends (prompts, permission/input responses,
+  // cancel) that failed because the socket wasn't OPEN. Flushed on reconnect;
+  // entries older than 60s are dropped with a notice instead of firing a
+  // stale action against a moved-on conversation. Idempotent requests
+  // (snapshot/capabilities/list) are never buffered — reconnect re-issues them.
+  private outbox: { type: ProtocolMessageType; payload: unknown; queuedAt: number }[] = [];
+  // Per-conversation debounce timers for snapshot recovery after an
+  // agent.v2.event patch targeted an item we've never seen.
+  private snapshotRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   // Mutable working state; snapshot is rebuilt from it on change.
   private status: ConnectionStatus = "idle";
@@ -131,7 +151,7 @@ export class WorkspaceStore {
   private timelines = new Map<string, AgentTimelineItem[]>();
   private capabilities: AgentCapabilitiesPayload | null = null;
   private activeConversationId: string | null = null;
-  private lastError: { code: string; message: string } | null = null;
+  private lastError: { code: string; message: string; sticky?: boolean } | null = null;
   // Timer that auto-clears a transient error banner after a few seconds.
   private errorClearTimer: ReturnType<typeof setTimeout> | undefined;
   private history = new Map<string, HistoryState>();
@@ -212,6 +232,8 @@ export class WorkspaceStore {
   destroy(): void {
     this.flushPersist();
     if (this.errorClearTimer) clearTimeout(this.errorClearTimer);
+    for (const t of this.snapshotRecoveryTimers.values()) clearTimeout(t);
+    this.snapshotRecoveryTimers.clear();
     this.unsub();
     this.bridge.disconnect();
     this.listeners.clear();
@@ -227,12 +249,14 @@ export class WorkspaceStore {
       case "status":
         this.status = e.status;
         if (e.status === "connected") {
-          // A successful (re)connect clears any stale error banner — otherwise a
-          // transient close code (e.g. 1006) lingers red in the header long
-          // after the connection has recovered.
-          this.lastError = null;
+          // A successful (re)connect clears any stale TRANSIENT error banner —
+          // otherwise a momentary close code (e.g. 1006) lingers red in the
+          // header long after the connection recovered. Sticky errors (auth/
+          // subscription/protocol) stay until the user dismisses them.
+          if (!this.lastError?.sticky) this.lastError = null;
           this.requestCapabilities();
           this.requestSnapshot();
+          this.flushOutbox();
         }
         this.notify();
         break;
@@ -240,20 +264,28 @@ export class WorkspaceStore {
         this.isController = this.bridge.isController;
         this.notify();
         break;
-      case "session.error":
-        this.lastError = { code: e.code, message: e.message };
+      case "session.error": {
+        const sticky = isStickyErrorCode(e.code);
+        this.lastError = { code: e.code, message: e.message, sticky };
         this.notify();
-        // Auto-dismiss the error banner: most session.error events are
-        // transient (a momentary close code, a recoverable hiccup). Leaving a
-        // red code pinned to the header forever looks broken. A genuine
-        // persistent failure will re-emit and re-show it.
-        if (this.errorClearTimer) clearTimeout(this.errorClearTimer);
-        this.errorClearTimer = setTimeout(() => {
-          this.lastError = null;
+        // Auto-dismiss TRANSIENT errors: most session.error events are a
+        // momentary close code or a recoverable hiccup, and leaving a red code
+        // pinned to the header forever looks broken. Sticky errors (auth/
+        // subscription/protocol mismatch) need user action, so they stay
+        // until dismissError().
+        if (this.errorClearTimer) {
+          clearTimeout(this.errorClearTimer);
           this.errorClearTimer = undefined;
-          this.notify();
-        }, 6000);
+        }
+        if (!sticky) {
+          this.errorClearTimer = setTimeout(() => {
+            this.lastError = null;
+            this.errorClearTimer = undefined;
+            this.notify();
+          }, 6000);
+        }
         break;
+      }
       case "agent":
         this.handleAgentEnvelope(e.envelope);
         break;
@@ -426,7 +458,11 @@ export class WorkspaceStore {
           );
         }
         const current = this.timelines.get(p.conversationId) ?? [];
-        const updated = applyEvent(current, p);
+        const updated = applyEvent(current, p, () =>
+          // Patch for an item we've never seen (missed upsert) — recover via a
+          // debounced per-conversation snapshot request instead of losing it.
+          this.scheduleSnapshotRecovery(p.conversationId),
+        );
         if (updated !== current) {
           this.setTimeline(p.conversationId, updated);
           // Keep the conversation preview/status fresh from the latest item.
@@ -506,6 +542,69 @@ export class WorkspaceStore {
           : c,
       )
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  }
+
+  // ── Outbox (reliable non-idempotent sends) ──────────────────────────
+  // Send now if the socket is OPEN; otherwise buffer for the reconnect flush.
+  // Use ONLY for non-idempotent actions (prompt / permission / structured
+  // input / cancel) — idempotent requests are simply re-issued on connect.
+  private sendReliable(type: ProtocolMessageType, payload: unknown): boolean {
+    const ok = this.bridge.sendAgent(type, payload);
+    if (!ok) {
+      this.outbox.push({ type, payload, queuedAt: Date.now() });
+    }
+    return ok;
+  }
+
+  // Flush buffered sends after (re)connect. Entries older than 60s are
+  // dropped with a notice — replaying a stale prompt/cancel against a
+  // conversation that has moved on does more harm than good.
+  private flushOutbox(): void {
+    if (this.outbox.length === 0) return;
+    const pending = this.outbox;
+    this.outbox = [];
+    const now = Date.now();
+    let dropped = 0;
+    for (let i = 0; i < pending.length; i++) {
+      const entry = pending[i];
+      if (now - entry.queuedAt > 60_000) {
+        dropped += 1;
+        continue;
+      }
+      // If the socket dropped again mid-flush, keep the remainder buffered
+      // (sendReliable already re-buffered the failed entry itself).
+      if (!this.sendReliable(entry.type, entry.payload)) {
+        this.outbox.push(...pending.slice(i + 1));
+        break;
+      }
+    }
+    if (dropped > 0) {
+      const id = genId("notice");
+      this.notices = [
+        ...this.notices,
+        {
+          id,
+          kind: "warning",
+          title: "发送失败",
+          detail: `${dropped} 条消息因连接中断超过 60 秒未能送达，已丢弃`,
+        },
+      ].slice(-4);
+      this.notify();
+      setTimeout(() => this.dismissNotice(id), 6000);
+    }
+  }
+
+  // Debounced (~1s per conversation) snapshot request, used to recover when an
+  // agent.v2.event patch targets an item we've never seen (missed upsert).
+  private scheduleSnapshotRecovery(conversationId: string): void {
+    if (this.snapshotRecoveryTimers.has(conversationId)) return;
+    this.snapshotRecoveryTimers.set(
+      conversationId,
+      setTimeout(() => {
+        this.snapshotRecoveryTimers.delete(conversationId);
+        this.requestSnapshot(conversationId);
+      }, 1000),
+    );
   }
 
   // ── Client actions ──────────────────────────────────────────────────
@@ -696,7 +795,7 @@ export class WorkspaceStore {
 
     if (delivery === "queued") return; // held locally; flushed when idle
 
-    this.bridge.sendAgent("agent.v2.prompt", {
+    this.sendReliable("agent.v2.prompt", {
       conversationId: input.conversationId,
       clientMessageId,
       contentBlocks,
@@ -723,8 +822,12 @@ export class WorkspaceStore {
       (item.text ? [{ type: "text" as const, text: item.text }] : []);
     if (contentBlocks.length === 0) return;
 
-    this.patchItem(conversationId, itemId, { queuedSent: true });
-    this.bridge.sendAgent("agent.v2.prompt", {
+    // Send FIRST, mark sent only on success — marking before a failed send
+    // would strand the message as "sent" forever with no retry. On failure it
+    // simply stays queued and the next flush pass (idle event / reconnect
+    // snapshot) retries it. Not routed through the outbox: the queue itself
+    // is the retry buffer, and double-buffering would risk a double-send.
+    const ok = this.bridge.sendAgent("agent.v2.prompt", {
       conversationId,
       clientMessageId: (item.metadata?.clientMessageId as string) ?? genId("msg"),
       contentBlocks,
@@ -734,6 +837,10 @@ export class WorkspaceStore {
       permissionMode: conv?.permissionMode,
       collaborationMode: conv?.collaborationMode,
     });
+    if (ok) {
+      this.patchItem(conversationId, itemId, { queuedSent: true });
+      this.notify();
+    }
   }
 
   discardQueuedFollowUp(conversationId: string, itemId: string): void {
@@ -774,7 +881,7 @@ export class WorkspaceStore {
   }
 
   cancel(conversationId: string): void {
-    this.bridge.sendAgent("agent.v2.cancel", { conversationId });
+    this.sendReliable("agent.v2.cancel", { conversationId });
   }
 
   respondPermission(
@@ -791,7 +898,7 @@ export class WorkspaceStore {
       { permissionPending: true, pendingOutcome: outcome, optionId },
     );
     this.notify();
-    this.bridge.sendAgent("agent.v2.permission.respond", {
+    this.sendReliable("agent.v2.permission.respond", {
       conversationId,
       requestId,
       outcome,
@@ -810,7 +917,7 @@ export class WorkspaceStore {
       { inputSubmitting: true, answers },
     );
     this.notify();
-    this.bridge.sendAgent("agent.v2.structured_input.respond", {
+    this.sendReliable("agent.v2.structured_input.respond", {
       conversationId,
       requestId,
       answers,

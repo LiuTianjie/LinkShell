@@ -1,4 +1,4 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -265,6 +265,98 @@ export function DiffViewer({ item }: { item: AgentTimelineItem }) {
   );
 }
 
+// ── Inline mini-diff (Edit / Write / MultiEdit previews) ────────────
+// Renders an old→new string pair the same way DiffViewer paints lines:
+// removed lines tinted red with a "−" gutter, added lines green with "+".
+// Used both in the timeline tool cards and in permission previews, where we
+// only have the tool input (old_string/new_string), not a unified diff.
+
+function InlineDiff({ oldText, newText }: { oldText?: string; newText?: string }) {
+  const removed = oldText ? oldText.split("\n") : [];
+  const added = newText ? newText.split("\n") : [];
+  if (removed.length === 0 && added.length === 0) return null;
+  const row = (text: string, isAdd: boolean, key: string) => (
+    <div key={key} className={`flex ${isAdd ? "bg-diff-add" : "bg-diff-remove"}`}>
+      <span className={`flex-1 whitespace-pre px-3 py-0.5 ${isAdd ? "text-diff-addText" : "text-diff-removeText"}`}>
+        <span className="mr-2 select-none opacity-60">{isAdd ? "+" : "−"}</span>
+        {text || " "}
+      </span>
+    </div>
+  );
+  return (
+    <div className="max-h-72 overflow-auto rounded-lg border border-border bg-surface-raised font-mono text-[13px] leading-[1.6]">
+      {removed.map((l, i) => row(l, false, `r${i}`))}
+      {added.map((l, i) => row(l, true, `a${i}`))}
+    </div>
+  );
+}
+
+/** Short display form of an absolute file path (last two segments). */
+function shortPath(p?: string): string | undefined {
+  if (!p) return undefined;
+  const parts = p.split("/").filter(Boolean);
+  return parts.length > 2 ? parts.slice(-2).join("/") : p;
+}
+
+// One-edit shape inside an Edit/MultiEdit input.
+type EditPair = { old_string?: string; new_string?: string };
+
+function isEditPair(v: unknown): v is EditPair {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return typeof o.old_string === "string" || typeof o.new_string === "string";
+}
+
+// TodoWrite checklist entry.
+type TodoEntry = { content: string; status: string; activeForm?: string };
+
+function parseTodos(v: unknown): TodoEntry[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: TodoEntry[] = [];
+  for (const t of v) {
+    if (!t || typeof t !== "object") return null;
+    const o = t as Record<string, unknown>;
+    if (typeof o.content !== "string" || typeof o.status !== "string") return null;
+    out.push({
+      content: o.content,
+      status: o.status,
+      activeForm: typeof o.activeForm === "string" ? o.activeForm : undefined,
+    });
+  }
+  return out;
+}
+
+function TodoChecklist({ todos }: { todos: TodoEntry[] }) {
+  return (
+    <ul className="space-y-1.5">
+      {todos.map((todo, i) => (
+        <li key={i} className="flex items-start gap-2 text-sm leading-6">
+          <span className="mt-1 shrink-0">
+            {todo.status === "completed" ? (
+              <IconCheck size={12} className="text-success" />
+            ) : todo.status === "in_progress" ? (
+              <span className="block h-2.5 w-2.5 animate-pulse-dot rounded-full bg-accent" />
+            ) : (
+              <span className="block h-2.5 w-2.5 rounded-full border border-content-faint" />
+            )}
+          </span>
+          <span
+            className={`min-w-0 flex-1 ${
+              todo.status === "completed"
+                ? "text-content-muted line-through"
+                : todo.status === "in_progress"
+                  ? "font-semibold text-content-primary"
+                  : "text-content-secondary"
+            }`}
+          >
+            {todo.status === "in_progress" && todo.activeForm ? todo.activeForm : todo.content}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // ── Tool / command cards ─────────────────────────────────────────────
 
 // Map a raw tool name + JSON input to a semantic icon, friendly label, and a
@@ -276,6 +368,10 @@ type ToolDescriptor = {
   Icon: (p: { size?: number; className?: string }) => ReactNode;
   label: string;
   summary?: string;
+  /** Rich expandable body (diff preview / todo checklist). When set, it
+   *  replaces the raw-JSON input dump; absent (e.g. malformed input) falls
+   *  back to the raw JSON rendering. */
+  body?: ReactNode;
 };
 
 function clampSummary(s: string, max = 120): string {
@@ -319,8 +415,43 @@ function describeToolCall(name: string, input?: string): ToolDescriptor {
       return { Icon: IconFolder, label: "列出目录", summary: str("path") };
     case "Task":
       return { Icon: IconUsers, label: "子任务", summary: str("description") ?? str("prompt") };
-    case "TodoWrite":
-      return { Icon: IconCheck, label: "更新任务列表" };
+    case "Edit": {
+      const file = str("file_path");
+      const body = isEditPair(args) ? (
+        <InlineDiff oldText={args.old_string} newText={args.new_string} />
+      ) : undefined;
+      return { Icon: IconPencil, label: "编辑文件", summary: shortPath(file), body };
+    }
+    case "MultiEdit": {
+      const file = str("file_path");
+      const edits = Array.isArray(args.edits) ? args.edits.filter(isEditPair) : [];
+      const body =
+        edits.length > 0 ? (
+          <div className="space-y-2">
+            {edits.map((e, i) => (
+              <InlineDiff key={i} oldText={e.old_string} newText={e.new_string} />
+            ))}
+          </div>
+        ) : undefined;
+      return { Icon: IconPencil, label: "编辑文件", summary: shortPath(file), body };
+    }
+    case "Write": {
+      const file = str("file_path");
+      const content = str("content");
+      const body = content != null ? <InlineDiff newText={content} /> : undefined;
+      return { Icon: IconPencil, label: "写入文件", summary: shortPath(file), body };
+    }
+    case "TodoWrite": {
+      const todos = parseTodos(args.todos);
+      if (!todos) return { Icon: IconCheck, label: "更新任务列表" };
+      const done = todos.filter((t) => t.status === "completed").length;
+      return {
+        Icon: IconCheck,
+        label: "更新任务列表",
+        summary: `${done}/${todos.length}`,
+        body: <TodoChecklist todos={todos} />,
+      };
+    }
     case "NotebookEdit":
       return { Icon: IconPencil, label: "编辑 Notebook", summary: str("notebook_path") };
     default:
@@ -401,10 +532,14 @@ function ToolCard({ item }: { item: AgentTimelineItem }) {
               />
             </div>
           )}
-          {tool?.input && (
-            <pre className="max-h-40 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-faint">
-              {tool.input}
-            </pre>
+          {desc?.body ? (
+            desc.body
+          ) : (
+            tool?.input && (
+              <pre className="max-h-40 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-faint">
+                {tool.input}
+              </pre>
+            )
           )}
           {tool?.output && (
             <pre className="mt-2 max-h-60 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-secondary">
@@ -419,6 +554,65 @@ function ToolCard({ item }: { item: AgentTimelineItem }) {
 
 // ── Permission request ───────────────────────────────────────────────
 
+// Rich preview of the tool input awaiting authorization: Edit/Write/MultiEdit
+// get the same inline diff as the timeline cards, Bash gets a `$ command`
+// mono block, everything else keeps the compact raw-JSON dump (null → caller
+// falls back to the JSON <pre>).
+function permissionPreview(toolName?: string, toolInput?: string): ReactNode | null {
+  if (!toolName || !toolInput) return null;
+  let args: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(toolInput);
+    if (!parsed || typeof parsed !== "object") return null;
+    args = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const bare = toolName.split(/ · |__/).pop() ?? toolName;
+  switch (bare) {
+    case "Edit":
+      return isEditPair(args) ? (
+        <InlineDiff oldText={args.old_string} newText={args.new_string} />
+      ) : null;
+    case "MultiEdit": {
+      const edits = Array.isArray(args.edits) ? args.edits.filter(isEditPair) : [];
+      return edits.length > 0 ? (
+        <div className="space-y-2">
+          {edits.map((e, i) => (
+            <InlineDiff key={i} oldText={e.old_string} newText={e.new_string} />
+          ))}
+        </div>
+      ) : null;
+    }
+    case "Write":
+      return typeof args.content === "string" ? <InlineDiff newText={args.content} /> : null;
+    case "Bash": {
+      if (typeof args.command !== "string") return null;
+      return (
+        <div>
+          <pre className="max-h-32 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-secondary">
+            {`$ ${args.command}`}
+          </pre>
+          {typeof args.description === "string" && args.description && (
+            <p className="mt-1.5 text-xs text-content-muted">{args.description}</p>
+          )}
+        </div>
+      );
+    }
+    default:
+      return null;
+  }
+}
+
+/** True when the user is typing somewhere (composer, inputs, contenteditable) —
+ *  used to keep the permission Enter-shortcut from stealing the keystroke. */
+function isTypingTarget(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return true;
+  return (el as HTMLElement).isContentEditable === true;
+}
+
 function PermissionCard({
   item,
   onRespond,
@@ -430,17 +624,34 @@ function PermissionCard({
   // store round-trip (which was one render behind — the "needs two clicks" bug).
   const [clicked, setClicked] = useState(false);
   const perm = item.permission;
-  if (!perm) return null;
   const pending = clicked || item.metadata?.permissionPending === true;
-  const options = perm.options.length > 0 ? perm.options : [
+  const options = perm && perm.options.length > 0 ? perm.options : [
     { id: "deny", label: "拒绝", kind: "deny" as const },
     { id: "allow_once", label: "允许一次", kind: "allow" as const },
   ];
   const respond = (outcome: "allow" | "deny", optionId: string) => {
-    if (pending) return;
+    if (!perm || pending) return;
     setClicked(true);
     onRespond(perm.requestId, outcome, optionId);
   };
+  // Enter = 允许（第一个 allow 选项）。Guard: never fire while the user is
+  // typing in the composer / any input, and only while still pending.
+  const allowOption = options.find((o) => o.kind === "allow");
+  const allowOptionId = allowOption?.id;
+  useEffect(() => {
+    if (!perm || pending || !allowOptionId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (e.isComposing || isTypingTarget(document.activeElement)) return;
+      e.preventDefault();
+      respond("allow", allowOptionId);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, allowOptionId, perm?.requestId]);
+  if (!perm) return null;
+  const preview = permissionPreview(perm.toolName, perm.toolInput);
   return (
     <div className="rounded-xl border border-warning/40 bg-surface p-4">
       <p className="text-sm font-medium text-warning">需要授权</p>
@@ -448,10 +659,14 @@ function PermissionCard({
       {perm.toolName && (
         <p className="mt-1.5 font-mono text-[13px] text-content-faint">{perm.toolName}</p>
       )}
-      {perm.toolInput && (
-        <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-faint">
-          {perm.toolInput}
-        </pre>
+      {preview ? (
+        <div className="mt-2">{preview}</div>
+      ) : (
+        perm.toolInput && (
+          <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-faint">
+            {perm.toolInput}
+          </pre>
+        )
       )}
       <div className="mt-3 flex flex-wrap gap-2">
         {options.map((opt) => (

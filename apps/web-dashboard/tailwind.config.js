@@ -46,8 +46,10 @@ export default {
         danger: ch("--c-danger"),
       },
       fontFamily: {
-        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
-        sans: ["Inter", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        // System stacks only — no webfont download (Google Fonts is render-
+        // blocking and unreachable in CN).
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", "monospace"],
+        sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "PingFang SC", "Microsoft YaHei", "sans-serif"],
       },
       fontSize: {
         "2xs": ["0.6875rem", { lineHeight: "1rem" }],

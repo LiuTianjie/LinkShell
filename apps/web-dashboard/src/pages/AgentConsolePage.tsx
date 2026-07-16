@@ -3,16 +3,17 @@ import type { Session } from "../lib/supabase";
 import { getValidSession } from "../lib/supabase";
 import { loadGatewayConfig } from "../lib/gateway-config";
 import { useWorkspace } from "../hooks/useWorkspace";
+import { useTurnNotifications, requestTurnNotificationPermission } from "../hooks/useTurnNotifications";
 import { TimelineItemView, DiffViewer, TurnActivityGroup, isActivityItem, isQueuedItem, QueuedMessages, SubagentDetailView, type SubagentDetail } from "../components/TimelineItemView";
 import { Composer, type PendingImage } from "../components/Composer";
-import { TerminalPanel } from "../components/TerminalPanel";
+import { TerminalPanel } from "../components/lazy-panels";
 import { ConversationTree } from "../components/ConversationTree";
 import { ControlToolbar } from "../components/ControlToolbar";
-import { FileBrowser } from "../components/FileBrowser";
+import { FileBrowser } from "../components/lazy-panels";
 import { FolderPicker } from "../components/FolderPicker";
-import { PortPreview } from "../components/PortPreview";
-import { UsageDashboard } from "../components/UsageDashboard";
-import { IconChevronRight, IconChevronLeft, IconClose, IconPlug, IconMenu, BrandLogo } from "../components/icons";
+import { PortPreview } from "../components/lazy-panels";
+import { UsageDashboard } from "../components/lazy-panels";
+import { IconChevronRight, IconChevronLeft, IconChevronDown, IconClose, IconPlug, IconMenu, BrandLogo } from "../components/icons";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { isEmbedded } from "../lib/embed";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
@@ -345,6 +346,30 @@ export function AgentConsolePage({
   const running = activeConversation?.status === "running";
   const historyState = activeId ? snapshot.history.get(activeId) : undefined;
 
+  // Turn-completion notifications (Web Notification + title badge) when a
+  // turn finishes or asks for permission while the tab is in the background.
+  useTurnNotifications(snapshot.conversations);
+
+  // Refs mirroring state the global keydown handler (empty deps) needs to
+  // read without re-subscribing: is a turn running, and is any overlay open
+  // (Esc should only interrupt the turn when nothing else claims the key).
+  const runningRef = useRef(false);
+  runningRef.current = running;
+  const storeRef = useRef(store);
+  storeRef.current = store;
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId ?? null;
+  const escBlockedRef = useRef(false);
+  escBlockedRef.current =
+    paletteOpen ||
+    usageOpen ||
+    mobileNavOpen ||
+    pendingProvider != null ||
+    diffItem != null ||
+    agentDetail != null;
+  const searchOpenRef = useRef(false);
+  searchOpenRef.current = searchOpen;
+
   // Last user message in this conversation — recalled by ↑ in an empty composer.
   const lastUserText = useMemo(() => {
     for (let i = timeline.length - 1; i >= 0; i--) {
@@ -404,7 +429,13 @@ export function AgentConsolePage({
         setSearchOpen(true);
         requestAnimationFrame(() => searchInputRef.current?.focus());
       } else if (e.key === "Escape") {
-        setSearchOpen(false);
+        // Search-close keeps priority; only when no search/palette/overlay is
+        // open does Esc interrupt the running turn (parity with Claude Code).
+        if (searchOpenRef.current) {
+          setSearchOpen(false);
+        } else if (runningRef.current && activeIdRef.current && !escBlockedRef.current) {
+          storeRef.current.cancel(activeIdRef.current);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -421,18 +452,61 @@ export function AgentConsolePage({
   // older history is prepended; atBottomRef tracks whether to stick to bottom.
   const prevHeightRef = useRef(0);
   const atBottomRef = useRef(true);
+  // Inner content element observed for height changes (streaming growth).
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  // Mirror of atBottomRef as state, to show/hide the jump-to-latest button.
+  const [atBottom, setAtBottom] = useState(true);
+  // New output arrived while scrolled up → subtle dot on the jump button.
+  const [unseenOutput, setUnseenOutput] = useState(false);
 
   // Track whether the user is near the bottom (so streaming sticks) and trigger
   // loading older history when they scroll near the top.
   const handleTimelineScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    atBottomRef.current = nearBottom;
+    setAtBottom(nearBottom);
+    if (nearBottom) setUnseenOutput(false);
     if (el.scrollTop < 60 && activeId && historyState?.hasMore && !historyState.loading) {
       prevHeightRef.current = el.scrollHeight;
       store.loadOlderHistory(activeId);
     }
   };
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    atBottomRef.current = true;
+    setAtBottom(true);
+    setUnseenOutput(false);
+    el.scrollTop = el.scrollHeight;
+  }, []);
+
+  // Stick-to-bottom during streaming: timeline.length only changes when items
+  // are added, but streaming grows an EXISTING item's text, so we observe the
+  // content element's size. Any height change while pinned re-snaps to the
+  // bottom; growth while scrolled up lights the jump button's dot. Keyed on
+  // activeId so the observer re-attaches when the conversation view remounts.
+  useEffect(() => {
+    const content = contentRef.current;
+    const el = scrollRef.current;
+    if (!content || !el) return;
+    let lastHeight = content.getBoundingClientRect().height;
+    const ro = new ResizeObserver(() => {
+      const h = content.getBoundingClientRect().height;
+      const grew = h > lastHeight;
+      lastHeight = h;
+      if (atBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      } else if (grew && !prevHeightRef.current) {
+        // Height growth that isn't a history prepend = new output below.
+        setUnseenOutput(true);
+      }
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [activeId]);
 
   // After each timeline change: if older items were prepended (scrollHeight grew
   // while loading history), keep the viewport pinned; otherwise stick to bottom
@@ -447,6 +521,8 @@ export function AgentConsolePage({
     if (lastScrolledIdRef.current !== activeId) {
       lastScrolledIdRef.current = activeId;
       atBottomRef.current = true;
+      setAtBottom(true);
+      setUnseenOutput(false);
       el.scrollTop = el.scrollHeight;
       return;
     }
@@ -481,6 +557,9 @@ export function AgentConsolePage({
 
   const handleSend = (text: string, images: PendingImage[]) => {
     if (!activeId) return;
+    // Lazy notification-permission request on first send (user gesture),
+    // never on page load.
+    requestTurnNotificationPermission();
     store.sendPrompt({
       conversationId: activeId,
       text,
@@ -891,7 +970,7 @@ export function AgentConsolePage({
                 onScroll={handleTimelineScroll}
                 className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-8"
               >
-                <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6">
+                <div ref={contentRef} className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6">
                 {historyState?.loading && (
                   <p className="text-center text-2xs text-content-muted">加载更早的消息…</p>
                 )}
@@ -1005,6 +1084,25 @@ export function AgentConsolePage({
                   ))}
                 </div>
               </div>
+              {/* Floating jump-to-latest — shown when scrolled away from the
+                   bottom, anchored just above the composer. The dot lights up
+                   when new output arrives while the user is scrolled up. */}
+              {!atBottom && (
+                <div className="pointer-events-none relative z-10 h-0">
+                  <button
+                    onClick={scrollToBottom}
+                    className="codex-card-raised pointer-events-auto absolute bottom-2 right-4 flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-2xs text-content-secondary transition-colors animate-fade-in hover:text-content-primary"
+                    aria-label="回到底部"
+                    title="回到底部"
+                  >
+                    {unseenOutput && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                    )}
+                    <IconChevronDown size={14} />
+                    回到底部
+                  </button>
+                </div>
+              )}
               <div className="mx-auto w-full min-w-0 max-w-3xl px-4 pb-4">
                 {planReady && (
                   <div className="mb-2 flex items-center gap-3 rounded-xl border border-accent-dim/40 bg-surface px-3.5 py-2.5 animate-slide-in">

@@ -48,10 +48,13 @@ export function mergeTimeline(
     : merged;
 }
 
-/** Apply an agent.v2.event (item upsert OR incremental patch) to a timeline. */
+/** Apply an agent.v2.event (item upsert OR incremental patch) to a timeline.
+ *  `onUnmatchedPatch` fires when a patch targets an item we've never seen —
+ *  the caller can use it to request a snapshot and recover the missing item. */
 export function applyEvent(
   existing: AgentTimelineItem[],
   event: AgentV2Event,
+  onUnmatchedPatch?: (itemId: string) => void,
 ): AgentTimelineItem[] {
   // Full-item upsert.
   if (event.item) {
@@ -108,7 +111,12 @@ export function applyEvent(
     });
     // A patch for an item we haven't seen yet is dropped (host will resend via
     // snapshot); this mirrors the mobile behavior of not synthesizing items.
-    return matched ? next : existing;
+    // Notify the caller so it can request that snapshot instead of losing data.
+    if (!matched) {
+      onUnmatchedPatch?.(patch.itemId);
+      return existing;
+    }
+    return next;
   }
 
   return existing;
