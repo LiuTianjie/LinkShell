@@ -42,6 +42,9 @@ export interface HistoryState {
   loading: boolean;
   hasMore: boolean;
   cursor?: string;
+  // True while re-syncing an already-rendered (cached) timeline with the host —
+  // the UI shows a slim inline indicator instead of the full loading spinner.
+  syncing?: boolean;
 }
 
 export interface Notice {
@@ -127,6 +130,11 @@ export class WorkspaceStore {
   // Conversations we've sent an open for but not yet received opened back, so we
   // don't re-trigger the host's disk load on every re-selection.
   private openInFlight = new Set<string>();
+  // Conversations the host has confirmed opened THIS session. A conversation
+  // hydrated from the localStorage cache renders instantly, but until it's in
+  // this set we still send conversation.open on selection so the timeline
+  // re-syncs with the on-disk transcript (mergeTimeline dedupes by id).
+  private openedThisSession = new Set<string>();
   // Queued-item ids currently being auto-flushed, to fire once per item.
   private autoFlushing = new Set<string>();
   private reqCounter = 0;
@@ -393,11 +401,24 @@ export class WorkspaceStore {
           p.conversation.id,
           mergeTimeline(this.timelines.get(p.conversation.id) ?? [], normalizeItems(p.snapshot)),
         );
-        // Seed history pagination: assume older history may exist (the first
-        // load-older request corrects hasMore). Only meaningful when the host
-        // can page (Codex); other providers report hasMore=false immediately.
-        if (!this.history.has(p.conversation.id)) {
-          this.history.set(p.conversation.id, { loading: false, hasMore: true });
+        // The open completed: unconditionally clear loading/syncing (ensure-
+        // HistoryLoaded set them before sending open) while preserving any
+        // pagination cursor/hasMore already learned. Seeding hasMore:true is
+        // only meaningful when the host can page (Codex); other providers
+        // report hasMore=false on the first load-older request.
+        const seedHistory = (id: string) => {
+          const prev = this.history.get(id);
+          this.history.set(id, {
+            loading: false,
+            hasMore: prev?.hasMore ?? true,
+            cursor: prev?.cursor,
+            syncing: false,
+          });
+          this.openedThisSession.add(id);
+        };
+        seedHistory(p.conversation.id);
+        if (p.requestedConversationId && p.requestedConversationId !== p.conversation.id) {
+          seedHistory(p.requestedConversationId);
         }
         // Clear in-flight guard for both the requested id and the canonical id
         // the host returned (the host may reconcile local → server id).
@@ -643,17 +664,51 @@ export class WorkspaceStore {
     if (this.openInFlight.has(conversationId)) return;
     const existing = this.timelines.get(conversationId) ?? [];
     const hasRealHistory = existing.some((i) => i.metadata?.optimistic !== true);
-    if (hasRealHistory) return;
+    // Already confirmed opened by the host this session → nothing to sync.
+    if (hasRealHistory && this.openedThisSession.has(conversationId)) return;
     const conv = this.conversations.find((c) => c.id === conversationId);
     if (!conv) return;
     this.openInFlight.add(conversationId);
-    // Signal the UI that we're loading history for this conversation so it
-    // shows a spinner instead of the bare "发送第一条指令…" placeholder.
-    this.history.set(conversationId, { loading: true, hasMore: true });
+    const prev = this.history.get(conversationId);
+    if (hasRealHistory) {
+      // Timeline was hydrated from the localStorage cache: keep rendering it
+      // instantly, but still open on the host so it re-syncs with the on-disk
+      // transcript. syncing (not loading) → the UI shows a slim inline
+      // indicator instead of hiding the cached content behind a spinner.
+      this.history.set(conversationId, {
+        loading: prev?.loading ?? false,
+        hasMore: prev?.hasMore ?? true,
+        cursor: prev?.cursor,
+        syncing: true,
+      });
+    } else {
+      // Signal the UI that we're loading history for this conversation so it
+      // shows a spinner instead of the bare "发送第一条指令…" placeholder.
+      this.history.set(conversationId, { loading: true, hasMore: prev?.hasMore ?? true, cursor: prev?.cursor });
+    }
     this.notify();
     // Sweep the guard if the host never replies, so re-selecting can retry
-    // instead of being permanently blocked (blank history forever).
-    setTimeout(() => this.openInFlight.delete(conversationId), 12_000);
+    // instead of being permanently blocked (blank history forever) — and clear
+    // the loading/syncing flags + warn, so the spinner doesn't spin forever.
+    setTimeout(() => {
+      if (!this.openInFlight.delete(conversationId)) return;
+      const state = this.history.get(conversationId);
+      if (state && (state.loading || state.syncing)) {
+        this.history.set(conversationId, {
+          loading: false,
+          hasMore: state.hasMore,
+          cursor: state.cursor,
+          syncing: false,
+        });
+        const id = genId("notice");
+        this.notices = [
+          ...this.notices,
+          { id, kind: "warning", title: "加载对话记录超时" },
+        ].slice(-4);
+        setTimeout(() => this.dismissNotice(id), 6000);
+        this.notify();
+      }
+    }, 12_000);
     this.bridge.sendAgent("agent.v2.conversation.open", {
       conversationId,
       agentSessionId: conv.agentSessionId,

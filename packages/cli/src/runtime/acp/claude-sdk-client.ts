@@ -241,6 +241,11 @@ export function parseClaudeJsonlSession(input: {
   // one we see rather than accumulating. Decoupled from any live LinkShell turn
   // — this is read straight from the on-disk transcript.
   let usage: Record<string, unknown> | undefined;
+  // Last-seen raw permissionMode ("default" | "acceptEdits" | ...). Claude
+  // records it on user records; the LAST one is the session's current mode.
+  // Captured here so readSessionConfig can be a cache field read instead of a
+  // second full parse of the transcript.
+  let permissionMode: string | undefined;
   let index = 0;
 
   for (const line of input.text.split(/\r?\n/)) {
@@ -256,6 +261,7 @@ export function parseClaudeJsonlSession(input: {
       continue;
     }
 
+    permissionMode = stringField(raw, ["permissionMode"]) ?? permissionMode;
     const timestamp = parseTimestamp(raw.timestamp ?? raw.createdAt ?? raw.created_at);
     cwd = stringField(raw, ["cwd", "workingDirectory", "workspacePath"]) ?? cwd;
     if (timestamp !== undefined) {
@@ -386,6 +392,7 @@ export function parseClaudeJsonlSession(input: {
       updatedAt,
       usage,
       turns,
+      ...(permissionMode ? { permissionMode } : {}),
     },
   };
 }
@@ -564,6 +571,44 @@ export class ClaudeSdkClient {
   // every one of them (the "scan storm"). Only the file being actively appended
   // to changes, so the steady-state cost drops to stat()+status per file.
   private sessionMetaCache = new Map<string, { mtimeMs: number; size: number; base: Record<string, unknown>; midTurn: boolean }>();
+  // Full parsed-transcript cache shared by readSession / readSessionConfig /
+  // listTurns, keyed by file path and validated by (mtime,size) like
+  // sessionMetaCache above. Opening a conversation hits all three of those in
+  // quick succession, and every history page re-slices the same parse — on a
+  // 39MB transcript that was ~257ms per open plus ~93ms per scroll page of
+  // redundant readFileSync + per-line JSON.parse. Unlike sessionMetaCache this
+  // holds the FULL turn list (large for big transcripts), so it is bounded to a
+  // small LRU (Map iteration order + delete/re-set on hit = LRU).
+  private parsedTranscriptCache = new Map<string, { mtimeMs: number; size: number; parsed: Record<string, unknown> }>();
+  private static readonly PARSED_TRANSCRIPT_CACHE_MAX = 8;
+
+  /** Read + parse a session transcript through the LRU cache. Returns the
+   *  parseClaudeJsonlSession result (stable for a given (mtime,size)); an
+   *  appended-to or rewritten file re-parses on next access. */
+  private parsedTranscript(filePath: string, sessionId: string): Record<string, unknown> {
+    const stat = statSync(filePath);
+    const cached = this.parsedTranscriptCache.get(filePath);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      // Refresh recency so the hottest transcripts survive the LRU bound.
+      this.parsedTranscriptCache.delete(filePath);
+      this.parsedTranscriptCache.set(filePath, cached);
+      return cached.parsed;
+    }
+    const parsed = parseClaudeJsonlSession({
+      text: readFileSync(filePath, "utf8"),
+      cwd: this.input.cwd,
+      sessionId,
+      fallbackUpdatedAt: stat.mtimeMs,
+    });
+    this.parsedTranscriptCache.delete(filePath);
+    this.parsedTranscriptCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, parsed });
+    while (this.parsedTranscriptCache.size > ClaudeSdkClient.PARSED_TRANSCRIPT_CACHE_MAX) {
+      const oldest = this.parsedTranscriptCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.parsedTranscriptCache.delete(oldest);
+    }
+    return parsed;
+  }
 
   constructor(
     private readonly input: {
@@ -622,13 +667,7 @@ export class ClaudeSdkClient {
         },
       };
     }
-    const stat = statSync(filePath);
-    return parseClaudeJsonlSession({
-      text: readFileSync(filePath, "utf8"),
-      cwd: this.input.cwd,
-      sessionId: input.sessionId,
-      fallbackUpdatedAt: stat.mtimeMs,
-    });
+    return this.parsedTranscript(filePath, input.sessionId);
   }
 
   /** Resolve the on-disk JSONL transcript for a session, preferring the cwd's
@@ -706,14 +745,10 @@ export class ClaudeSdkClient {
     if (!filePath) return {};
     let permissionModeRaw: string | undefined;
     try {
-      const text = readFileSync(filePath, "utf8");
-      for (const line of text.split(/\r?\n/)) {
-        if (!line.trim()) continue;
-        let record: Record<string, unknown> | undefined;
-        try { record = asRecord(JSON.parse(line)); } catch { continue; }
-        const pm = stringField(record, ["permissionMode"]);
-        if (pm) permissionModeRaw = pm; // keep the last one — the current mode
-      }
+      // The shared parse already tracked the last-seen permissionMode, so this
+      // is a cache field read on the open path (readSession runs right before).
+      const thread = asRecord(this.parsedTranscript(filePath, input.sessionId).thread);
+      permissionModeRaw = stringField(thread, ["permissionMode"]);
     } catch {
       return {};
     }
@@ -753,13 +788,7 @@ export class ClaudeSdkClient {
     const filePath = this.resolveSessionFile(input.sessionId);
     if (!filePath) return empty;
 
-    const stat = statSync(filePath);
-    const parsed = parseClaudeJsonlSession({
-      text: readFileSync(filePath, "utf8"),
-      cwd: this.input.cwd,
-      sessionId: input.sessionId,
-      fallbackUpdatedAt: stat.mtimeMs,
-    });
+    const parsed = this.parsedTranscript(filePath, input.sessionId);
     const thread = asRecord(parsed.thread);
     const allTurns = Array.isArray(thread?.turns) ? thread.turns : [];
     const total = allTurns.length;

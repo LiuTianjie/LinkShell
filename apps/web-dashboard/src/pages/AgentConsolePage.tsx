@@ -974,6 +974,15 @@ export function AgentConsolePage({
                 {historyState?.loading && (
                   <p className="text-center text-2xs text-content-muted">加载更早的消息…</p>
                 )}
+                {historyState?.syncing && timeline.length > 0 && (
+                  // Cached transcript is on screen; the host is re-syncing it.
+                  <div className="flex justify-center">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-overlay px-2 py-0.5 text-2xs text-content-muted">
+                      <span className="h-2.5 w-2.5 animate-spin rounded-full border border-content-faint border-t-accent" />
+                      正在同步…
+                    </span>
+                  </div>
+                )}
                 {searchOpen && searchQuery.trim() ? (
                   // Search results: flat, chronological, every matching item.
                   (() => {

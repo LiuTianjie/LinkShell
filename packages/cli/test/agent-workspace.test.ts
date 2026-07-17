@@ -244,6 +244,44 @@ describe("AgentWorkspaceProxy event routing", () => {
     expect(historyErrors).toHaveLength(0);
   });
 
+  it("dedupes concurrent ensureProviderClient calls into one client start", async () => {
+    const { proxy } = makeProxy();
+    let starts = 0;
+    const client = { newSession: async () => ({ sessionId: "thread-x" }) };
+    proxy.startProviderClient = async () => {
+      starts += 1;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+      proxy.clients.set("codex", client);
+      return client;
+    };
+
+    // Eager initialize() racing conversation.open — both must share one spawn.
+    const [first, second] = await Promise.all([
+      proxy.ensureProviderClient("codex"),
+      proxy.ensureProviderClient("codex"),
+    ]);
+
+    expect(starts).toBe(1);
+    expect(first).toBe(client);
+    expect(second).toBe(client);
+    // Settled promise is dropped so a later restart is possible.
+    expect(proxy.clientStartPromises.size).toBe(0);
+  });
+
+  it("retries a failed client start instead of memoizing the failure", async () => {
+    const { proxy } = makeProxy();
+    let starts = 0;
+    proxy.startProviderClient = async () => {
+      starts += 1;
+      return undefined; // start failed (e.g. CLI missing)
+    };
+
+    expect(await proxy.ensureProviderClient("codex")).toBeUndefined();
+    expect(await proxy.ensureProviderClient("codex")).toBeUndefined();
+    expect(starts).toBe(2);
+    expect(proxy.clientStartPromises.size).toBe(0);
+  });
+
   it("opens requested local history when provider is down before host syncs it", async () => {
     const { proxy, sent } = makeProxy();
     proxy.conversations.clear();

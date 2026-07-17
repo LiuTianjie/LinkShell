@@ -1918,6 +1918,9 @@ function previewFromTimelineItem(item: AgentTimelineItem): string | undefined {
 
 export class AgentWorkspaceProxy {
   private clients = new Map<AgentProvider, AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient>();
+  // In-flight client starts, so concurrent ensureProviderClient calls (eager
+  // initialize() racing conversation.open) share one subprocess spawn.
+  private clientStartPromises = new Map<AgentProvider, Promise<AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined>>();
   private agentProtocols = new Map<AgentProvider, AgentProtocol>();
   private providerCapabilities = new Map<AgentProvider, ProviderRuntimeCapabilities>();
   private providerErrors = new Map<AgentProvider, string>();
@@ -2247,6 +2250,23 @@ export class AgentWorkspaceProxy {
     const existing = this.clients.get(provider);
     if (existing) return existing;
 
+    // Dedupe concurrent starts: eager initialize() and conversation.open can
+    // race here before this.clients is populated (it's only set AFTER the
+    // client finishes initializing), which would spawn the provider subprocess
+    // twice. Memoize the in-flight promise so both callers share one spawn;
+    // drop it once settled so a failed start can be retried.
+    const inflight = this.clientStartPromises.get(provider);
+    if (inflight) return inflight;
+    const start = this.startProviderClient(provider);
+    this.clientStartPromises.set(provider, start);
+    try {
+      return await start;
+    } finally {
+      this.clientStartPromises.delete(provider);
+    }
+  }
+
+  private async startProviderClient(provider: AgentProvider): Promise<AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined> {
     const resolved = resolveAgentCommand({
       provider,
       command: this.input.command,
@@ -2299,7 +2319,7 @@ export class AgentWorkspaceProxy {
       const client = await tryCreateClient(resolved);
       this.clients.set(provider, client);
       this.providerErrors.delete(provider);
-      await this.refreshProviderCapabilities(provider, client, resolved.protocol);
+      this.refreshProviderCapabilitiesInBackground(provider, client, resolved.protocol);
       this.status = "idle";
       this.error = undefined;
       this.sendCapabilities();
@@ -2319,7 +2339,7 @@ export class AgentWorkspaceProxy {
           const client = await tryCreateClient(fallback);
           this.clients.set(provider, client);
           this.providerErrors.delete(provider);
-          await this.refreshProviderCapabilities(provider, client, fallback.protocol);
+          this.refreshProviderCapabilitiesInBackground(provider, client, fallback.protocol);
           this.status = "idle";
           this.error = undefined;
           this.sendCapabilities();
@@ -2337,6 +2357,27 @@ export class AgentWorkspaceProxy {
       this.sendCapabilities();
       return undefined;
     }
+  }
+
+  /** Kick off runtime capability discovery WITHOUT blocking the caller.
+   *  refreshProviderCapabilities spawns a warm provider subprocess (measured
+   *  858ms warm, multi-second cold for Claude), and nothing on the open/prompt
+   *  path needs it — sendCapabilities and prompt-time model resolution both
+   *  degrade gracefully to static fallbacks until providerCapabilities is
+   *  populated. When discovery lands we push a fresh agent.v2.capabilities so
+   *  clients pick up the real model/command list. */
+  private refreshProviderCapabilitiesInBackground(
+    provider: AgentProvider,
+    client: AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient,
+    protocol: AgentProtocol,
+  ): void {
+    void this.refreshProviderCapabilities(provider, client, protocol)
+      .then(() => this.sendCapabilities())
+      .catch((error) => {
+        if (this.input.verbose) {
+          process.stderr.write(`[agent:v2] capability refresh failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      });
   }
 
   private async refreshProviderCapabilities(
