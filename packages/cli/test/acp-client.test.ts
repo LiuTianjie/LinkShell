@@ -138,16 +138,13 @@ describe("AcpClient codex app-server protocol", () => {
           reasoning_effort: "high",
         },
       },
-      // workspace_write → codex's tagged sandbox + on-request approval
-      // (the old object-shaped `permissions` was rejected by codex serde).
-      sandboxPolicy: {
-        type: "workspaceWrite",
-        networkAccess: false,
-      },
+      // workspace_write → official named profile + on-request approval.
+      // Do not send sandboxPolicy alongside permissions — Codex rejects that.
+      permissions: ":workspace",
       approvalPolicy: "on-request",
     });
     expect(entries[5].params).toEqual({ threadId: "thread-1" });
-    expect(entries[4].params).not.toHaveProperty("permissions");
+    expect(entries[4].params).not.toHaveProperty("sandboxPolicy");
     expect(entries[4].params).not.toHaveProperty("permissionProfile");
   });
 
@@ -216,6 +213,117 @@ describe("AcpClient codex app-server protocol", () => {
       mode: "plan",
       settings: { model: "default" },
     });
+  });
+
+  it("pages thread/list with limit 100 and returns { data }", async () => {
+    const fake = makeFakeAppServer();
+    const client = new AcpClient({
+      command: fake.command,
+      protocol: "codex-app-server",
+      framing: "newline",
+      cwd: fake.cwd,
+      onNotification: () => {},
+      onRequest: () => ({}),
+      onExit: () => {},
+    });
+    clients.push(client);
+
+    await client.initialize();
+    const listed = await client.listSessions();
+
+    expect(listed).toMatchObject({
+      data: [{ id: "thread-1", title: "Test thread" }],
+    });
+    const entries = await waitForLogEntries(fake.logPath, 3);
+    expect(entries.map((entry) => entry.method)).toEqual([
+      "initialize",
+      "initialized",
+      "thread/list",
+    ]);
+    expect(entries[2].params).toEqual({ limit: 100 });
+  });
+
+  it("sends camelCase thread/settings/update and review/start payloads", async () => {
+    const fake = makeFakeAppServer();
+    const client = new AcpClient({
+      command: fake.command,
+      protocol: "codex-app-server",
+      framing: "newline",
+      cwd: fake.cwd,
+      onNotification: () => {},
+      onRequest: () => ({}),
+      onExit: () => {},
+    });
+    clients.push(client);
+
+    await client.initialize();
+    await client.updateThreadSettings({
+      sessionId: "thread-1",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      permissionMode: "workspace_write",
+      collaborationMode: "plan",
+      cwd: fake.cwd,
+    });
+    await client.startReview({ sessionId: "thread-1", prompt: "review the diff" });
+    await client.forkThread({ sessionId: "thread-1", lastTurnId: "turn-9" });
+    await client.listSkills({ cwd: fake.cwd });
+
+    const entries = await waitForLogEntries(fake.logPath, 6);
+    expect(entries.map((entry) => entry.method)).toEqual([
+      "initialize",
+      "initialized",
+      "thread/settings/update",
+      "review/start",
+      "thread/fork",
+      "skills/list",
+    ]);
+    expect(entries[2].params).toMatchObject({
+      threadId: "thread-1",
+      model: "gpt-5.5",
+      effort: "high",
+      permissions: ":workspace",
+      approvalPolicy: "on-request",
+      collaborationMode: {
+        mode: "plan",
+        settings: { model: "gpt-5.5", reasoning_effort: "high" },
+      },
+    });
+    expect(entries[3].params).toEqual({
+      threadId: "thread-1",
+      target: { type: "custom", instructions: "review the diff" },
+    });
+    expect(entries[4].params).toEqual({ threadId: "thread-1", lastTurnId: "turn-9" });
+    expect(entries[5].params).toEqual({ cwds: [fake.cwd] });
+    expect(entries[2].params).not.toHaveProperty("sandboxPolicy");
+  });
+
+  it("lists MCP servers and starts OAuth via official app-server RPCs", async () => {
+    const fake = makeFakeAppServer();
+    const client = new AcpClient({
+      command: fake.command,
+      protocol: "codex-app-server",
+      framing: "newline",
+      cwd: fake.cwd,
+      onNotification: () => {},
+      onRequest: () => ({}),
+      onExit: () => {},
+    });
+    clients.push(client);
+
+    await client.initialize();
+    await client.listMcpServers();
+    await client.startMcpOAuth({ serverName: "github" });
+
+    const entries = await waitForLogEntries(fake.logPath, 4);
+    expect(entries.map((entry) => entry.method)).toEqual([
+      "initialize",
+      "initialized",
+      "mcpServerStatus/list",
+      "mcpServer/oauth/login",
+    ]);
+    expect(entries[2].params).toEqual({ detail: "full" });
+    expect(entries[3].params).toEqual({ name: "github" });
   });
 
   it("uses thread/turns/list for paged Codex history", async () => {

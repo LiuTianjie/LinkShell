@@ -67,7 +67,7 @@ export interface BrowseResult {
 
 export interface AgentCapabilities {
   enabled: boolean;
-  provider?: "codex" | "claude" | "custom";
+  provider?: string;
   machineId?: string;
   protocolVersion?: number;
   error?: string;

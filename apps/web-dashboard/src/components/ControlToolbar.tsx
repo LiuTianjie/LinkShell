@@ -79,7 +79,7 @@ function PillSelect<T extends string>({
   const hasValue = value !== undefined && options.includes(value);
   const label = hasValue ? render(value as T) : placeholder ?? render(options[0]);
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative shrink-0">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -91,7 +91,7 @@ function PillSelect<T extends string>({
         <IconChevronDown size={11} className="text-content-faint" />
       </button>
       {open && (
-        <div className="codex-card-raised absolute bottom-full left-0 z-20 mb-1.5 min-w-[8rem] overflow-hidden p-1 animate-fade-in">
+        <div className="codex-card-raised absolute bottom-full left-0 z-20 mb-1.5 min-w-[8rem] max-w-[calc(100vw-2rem)] overflow-hidden p-1 animate-fade-in">
           {options.map((o) => (
             <button
               key={o}
@@ -159,7 +159,7 @@ export function ControlToolbar({
         <button
           type="button"
           onClick={() => onChange({ collaborationMode: planOn ? "default" : "plan" })}
-          className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-2xs font-medium transition-colors ${
+          className={`inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-2xs font-medium transition-colors ${
             planOn
               ? "bg-accent-dim text-white"
               : "text-content-secondary hover:bg-surface-overlay hover:text-content-primary"

@@ -324,9 +324,7 @@ export function resolvePairingGateway(
 }
 
 function normalizeAgentProvider(provider: unknown): AgentProvider {
-  if (provider === "claude" || provider === "custom") {
-    return provider;
-  }
+  if (typeof provider === "string" && provider.trim()) return provider.trim();
   return "codex";
 }
 
@@ -384,6 +382,7 @@ export class BridgeSession {
   private keepAwake: KeepAwakeHandle | undefined;
   private agentSession: AgentSessionProxy | undefined;
   private agentWorkspace: AgentWorkspaceProxy | undefined;
+  private outboundAgentQueue: Envelope[] = [];
   private machineIdentity: MachineIdentity | undefined;
   // Default host workspace shown to clients and used by the initial PTY.
   private readonly defaultCwd: string;
@@ -647,6 +646,10 @@ export class BridgeSession {
           },
         }),
       );
+      if (this.outboundAgentQueue.length > 0) {
+        const queued = this.outboundAgentQueue.splice(0);
+        for (const envelope of queued) this.send(envelope);
+      }
       this.startHeartbeat();
       this.startWsPing();
     });
@@ -2409,6 +2412,12 @@ export class BridgeSession {
 
   private send(message: Envelope): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      if (message.type.startsWith("agent.v2.")) {
+        this.outboundAgentQueue.push(message);
+        if (this.outboundAgentQueue.length > 40) {
+          this.outboundAgentQueue.splice(0, this.outboundAgentQueue.length - 40);
+        }
+      }
       return;
     }
     const machineId = this.machineIdentity?.machineId;

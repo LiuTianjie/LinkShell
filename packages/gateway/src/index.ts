@@ -15,7 +15,8 @@ import { PairingManager } from "./pairings.js";
 import { TokenManager } from "./tokens.js";
 import { HostAuthManager } from "./host-auth.js";
 import { createSupabaseStateStore } from "./state-store.js";
-import { handleSocketMessage } from "./relay.js";
+import { handleSocketMessage, replayAgentToSocket } from "./relay.js";
+import { PresenceHub, startPresenceWatcher } from "./presence.js";
 import {
   agentPermissionHttpBodySchema,
   forwardAgentPermissionHttp,
@@ -49,6 +50,8 @@ const stateStore = createSupabaseStateStore();
 const sessionManager = new SessionManager();
 const pairingManager = new PairingManager(stateStore);
 const tokenManager = new TokenManager(stateStore);
+const presenceHub = new PresenceHub();
+sessionManager.onPresenceChange = (session) => presenceHub.notify(session);
 const hostAuthManager = new HostAuthManager();
 await Promise.all([pairingManager.hydrate(), tokenManager.hydrate()]);
 
@@ -473,28 +476,8 @@ async function handleRequest(
     const sessions = sessionManager
       .listActive()
       .filter((s) => allowedIds.has(s.id))
-      .map((s) => ({
-        id: s.id,
-        state: s.state,
-        hasHost: !!s.host && s.host.socket.readyState === s.host.socket.OPEN,
-        clientCount: s.clients.size,
-        controllerId: s.controllerId ?? null,
-        lastActivity: s.lastActivity,
-        createdAt: s.createdAt,
-        provider: s.provider ?? null,
-        machineId: s.machineId ?? null,
-        hostname: s.hostname ?? null,
-        platform: s.platform ?? null,
-        cwd: s.cwd ?? null,
-        projectName: s.projectName ?? null,
-        agentStatus: s.agentStatus ?? null,
-        agentProvider: s.agentProvider ?? null,
-        agentConversationId: s.agentConversationId ?? null,
-        agentTitle: s.agentTitle ?? null,
-        agentLastActivity: s.agentLastActivity ?? null,
-        agentUsage: s.agentUsage ?? null,
-        agentUsageReport: s.agentUsageReport ?? null,
-      }));
+      .map((s) => sessionManager.getSummary(s.id))
+      .filter(Boolean);
     json(res, 200, { sessions });
     return;
   }
@@ -638,7 +621,32 @@ wss.on(
   "connection",
   (socket: WebSocket, _request: IncomingMessage, url: URL) => {
     const sessionId = url.searchParams.get("sessionId");
-    const role = url.searchParams.get("role") as "host" | "client" | null;
+    const role = url.searchParams.get("role") as "host" | "client" | "watcher" | null;
+
+    if (role === "watcher") {
+      const token = url.searchParams.get("token");
+      const authResult = (_request as any).__authResult as
+        | { userId?: string }
+        | undefined;
+      const tokenValid = Boolean(token && tokenManager.validate(token));
+      const userId = authResult?.userId;
+      if (!tokenValid && !userId) {
+        socket.close(4001, "unauthorized");
+        return;
+      }
+      startPresenceWatcher({
+        socket,
+        sessions: sessionManager,
+        hub: presenceHub,
+        sessionIds: () =>
+          token && tokenManager.validate(token)
+            ? tokenManager.getSessionIds(token)
+            : new Set<string>(),
+        userId,
+        pingIntervalMs: PING_INTERVAL,
+      });
+      return;
+    }
 
     if (!sessionId || !role || (role !== "host" && role !== "client")) {
       socket.close(1008, "missing sessionId or role");
@@ -777,6 +785,7 @@ wss.on(
             ),
           );
         }
+        replayAgentToSocket(socket, sessionId, sessionManager);
       }
     }
 

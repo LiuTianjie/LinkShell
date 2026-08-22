@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, useCallback } from "react";
 import type { AgentConversation, AgentCapabilitiesPayload, AgentStatus } from "../lib/types";
+import { attentionStatus } from "../lib/agent-presence";
 import type { WorkspaceStore } from "../store/workspace-store";
 import {
   IconDevice,
@@ -96,25 +97,39 @@ function sortedProviders(folder: FolderGroup): ProviderGroup[] {
 }
 
 function providerLabel(id: string): string {
-  if (id === "claude") return "Claude";
-  if (id === "codex") return "Codex";
-  return id;
+  switch (id) {
+    case "claude":
+      return "Claude";
+    case "codex":
+      return "Codex";
+    case "gemini":
+      return "Gemini";
+    case "copilot":
+      return "Copilot";
+    case "opencode":
+      return "OpenCode";
+    case "cursor":
+      return "Cursor";
+    case "kimi":
+      return "Kimi";
+    default:
+      return id;
+  }
 }
 
-function statusBadge(status: AgentStatus): { text: string; className: string; pulsing?: boolean } {
-  switch (status) {
-    case "running":
-      return { text: "运行中", className: "border-success/30 bg-success/10 text-success", pulsing: true };
-    case "waiting_permission":
-      return { text: "等待授权", className: "border-warning/40 bg-warning/10 text-warning", pulsing: true };
-    case "error":
-      return { text: "异常", className: "border-danger/30 bg-danger/10 text-danger" };
-    case "unavailable":
-      return { text: "不可用", className: "border-border bg-surface-overlay text-content-faint" };
-    case "idle":
-    default:
-      return { text: "空闲", className: "border-border bg-surface-overlay text-content-muted" };
-  }
+function AttentionBadge({ status }: { status: AgentStatus }) {
+  const badge = status === "unavailable"
+    ? { text: "不可用", className: "border-border bg-surface-overlay text-content-faint" }
+    : attentionStatus(status);
+  if (!badge) return null;
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}>
+      {badge.pulsing && (
+        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
+      )}
+      {badge.text}
+    </span>
+  );
 }
 
 export interface ConversationTreeProps {
@@ -261,17 +276,7 @@ export function ConversationTree({
                     <span className="truncate text-[13px] font-medium text-content-primary">
                       {externalAgentTitle ?? "外部终端"}
                     </span>
-                    {(() => {
-                      const status = statusBadge(externalAgentStatus);
-                      return (
-                        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${status.className}`}>
-                          {status.pulsing && (
-                            <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
-                          )}
-                          {status.text}
-                        </span>
-                      );
-                    })()}
+                    <AttentionBadge status={externalAgentStatus} />
                   </span>
                   <span className="mt-0.5 block truncate font-mono text-2xs text-content-muted">
                     {deviceLabel}
@@ -284,7 +289,6 @@ export function ConversationTree({
                 (c.title && c.title.trim()) ||
                 (c.lastMessagePreview && c.lastMessagePreview.trim().slice(0, 40)) ||
                 `对话 ${c.id.slice(-6)}`;
-              const status = statusBadge(c.status);
               return (
                 <button
                   key={`active:${c.id}`}
@@ -300,12 +304,7 @@ export function ConversationTree({
                       <span className="truncate text-[13px] font-medium text-content-primary">
                         {name}
                       </span>
-                      <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${status.className}`}>
-                        {status.pulsing && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
-                        )}
-                        {status.text}
-                      </span>
+                      <AttentionBadge status={c.status} />
                     </span>
                     <span className="mt-0.5 block truncate font-mono text-2xs text-content-muted">
                       {folderLabel(c.cwd)}
@@ -386,7 +385,6 @@ export function ConversationTree({
                               `对话 ${c.id.slice(-6)}`;
                             const isRenaming = renamingId === c.id;
                             const isMenuOpen = menuOpenId === c.id;
-                            const status = statusBadge(c.status);
                             return (
                             <div key={c.id} className="group relative">
                               {isRenaming ? (
@@ -425,12 +423,7 @@ export function ConversationTree({
                                     <span className="truncate text-[13px] text-content-primary">
                                       {name}
                                     </span>
-                                    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${status.className}`}>
-                                      {status.pulsing && (
-                                        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
-                                      )}
-                                      {status.text}
-                                    </span>
+                                    <AttentionBadge status={c.status} />
                                     {c.archived && (
                                       <span className="shrink-0 rounded bg-surface-overlay px-1 text-2xs text-content-faint">
                                         已归档
@@ -471,7 +464,7 @@ export function ConversationTree({
                                     onClick={closeMenu}
                                     aria-label="关闭菜单"
                                   />
-                                  <div className="absolute right-1.5 top-9 z-20 w-36 overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-xl">
+                                  <div className="absolute right-1.5 top-9 z-20 w-40 overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-xl">
                                     <button
                                       onClick={() => startRename(c)}
                                       className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-2xs text-content-secondary transition-colors hover:bg-surface-overlay"
@@ -499,7 +492,7 @@ export function ConversationTree({
                                       className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-2xs text-danger transition-colors hover:bg-danger/10"
                                     >
                                       <IconTrash size={13} />{" "}
-                                      {confirmDeleteId === c.id ? "确认删除？" : "删除"}
+                                      {confirmDeleteId === c.id ? "确认从列表移除？" : "从列表移除"}
                                     </button>
                                   </div>
                                 </>

@@ -5,67 +5,15 @@ import { loadGatewayConfig, saveGatewayUrl } from "../lib/gateway-config";
 import { claimPairing, listSessions, listMySessions } from "../lib/gateway-api";
 import { getDeviceToken } from "../lib/device-token";
 import { loadKnownSessions, rememberSessions, forgetSession, markAllOffline } from "../lib/storage";
+import { connectPresenceWatcher, type PresenceLiveState } from "../lib/presence-client";
 import { BrandLogo, IconClose, IconChevronRight, IconPlus, IconRefresh, ProviderIcon } from "../components/icons";
+import {
+  attentionStatus,
+  sessionHeadline,
+  sessionStory,
+  sessionUrgency,
+} from "../lib/agent-presence";
 import type { SessionSummary } from "../lib/types";
-
-function agentStatusLabel(status: SessionSummary["agentStatus"]): string | null {
-  switch (status) {
-    case "running":
-      return "运行中";
-    case "waiting_permission":
-      return "等待授权";
-    case "error":
-      return "异常";
-    case "idle":
-      return "空闲";
-    default:
-      return null;
-  }
-}
-
-function agentStatusClass(status: SessionSummary["agentStatus"]): string {
-  switch (status) {
-    case "running":
-      return "border-success/30 bg-success/10 text-success";
-    case "waiting_permission":
-      return "border-warning/40 bg-warning/10 text-warning";
-    case "error":
-      return "border-danger/30 bg-danger/10 text-danger";
-    case "idle":
-      return "border-border bg-surface-overlay text-content-muted";
-    default:
-      return "border-border bg-surface-overlay text-content-muted";
-  }
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-// One-line usage summary for a session card: context-window occupancy % when
-// the window size is known (Claude), else a raw token count (Codex); plus cost
-// when reported. Returns null when there's nothing to show. Mirrors the console
-// header chip so the list and console read consistently.
-function usageSummary(usage: SessionSummary["agentUsage"]): string | null {
-  if (!usage) return null;
-  const ctxUsed =
-    usage.inputTokens != null || usage.cacheReadTokens != null
-      ? (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0)
-      : null;
-  const parts: string[] = [];
-  if (ctxUsed != null && usage.contextWindow && usage.contextWindow > 0) {
-    parts.push(`${Math.min(100, Math.round((ctxUsed / usage.contextWindow) * 100))}% 上下文`);
-  } else {
-    const shown = usage.totalTokens ?? ctxUsed ?? usage.outputTokens ?? null;
-    if (shown != null) parts.push(`${formatTokens(shown)} tokens`);
-  }
-  if (typeof usage.totalCostUsd === "number" && usage.totalCostUsd > 0) {
-    parts.push(`$${usage.totalCostUsd.toFixed(usage.totalCostUsd < 1 ? 3 : 2)}`);
-  }
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
 
 export function SessionListPage({
   session,
@@ -93,7 +41,11 @@ export function SessionListPage({
   const recency = (s: SessionSummary) => Math.max(s.lastActivity ?? 0, s.agentLastActivity ?? 0);
   const onlineSessions = sessions
     .filter((s) => s.hasHost)
-    .sort((a, b) => recency(b) - recency(a)); // Array#sort is stable
+    .sort((a, b) => {
+      const urgency = sessionUrgency(a) - sessionUrgency(b);
+      if (urgency !== 0) return urgency;
+      return recency(b) - recency(a);
+    });
   const offlineSessions = sessions.filter((s) => !s.hasHost).sort((a, b) => recency(b) - recency(a));
   // Badge cards with their hostname when sessions span multiple machines.
   const multiHost = new Set(sessions.map((s) => s.hostname).filter(Boolean)).size > 1;
@@ -104,9 +56,10 @@ export function SessionListPage({
   const [error, setError] = useState<string | null>(null);
   // The pairing form is secondary once sessions exist — show it on demand.
   const [showPairing, setShowPairing] = useState(false);
+  const [liveState, setLiveState] = useState<PresenceLiveState>("poll");
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       // Two ownership models, merged: (1) /sessions/mine — sessions the logged-in
       // user owns automatically after `linkshell login` (pro users never pair);
@@ -145,15 +98,43 @@ export function SessionListPage({
   }, [config, session?.accessToken]);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
   useEffect(() => {
+    return connectPresenceWatcher({
+      config,
+      deviceToken: getDeviceToken(),
+      jwt: session?.accessToken ?? null,
+      onState: setLiveState,
+      onPresence: (sessionId, patch) => {
+        setSessions((prev) => {
+          const existing = prev.find((s) => s.id === sessionId);
+          if (!existing) {
+            void refresh({ silent: true });
+            return prev;
+          }
+          return prev.map((s) =>
+            s.id === sessionId
+              ? {
+                  ...s,
+                  ...patch,
+                  lastActivity: patch.lastActivity ?? s.lastActivity,
+                }
+              : s,
+          );
+        });
+      },
+    });
+  }, [config, session?.accessToken, refresh]);
+
+  useEffect(() => {
+    const intervalMs = liveState === "live" ? 30_000 : 8_000;
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") refresh();
-    }, 5000);
+      if (document.visibilityState === "visible") void refresh({ silent: true });
+    }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, liveState]);
 
   const handleClaim = async () => {
     const code = pairingCode.trim();
@@ -201,7 +182,7 @@ export function SessionListPage({
 
   // Commit the gateway URL only when it parses as an http(s) origin; called on
   // blur and Enter. Invalid input shows a subtle error state and the committed
-  // config (used by the 5s refresh loop) stays untouched.
+  // config (used by the background refresh) stays untouched.
   const commitGatewayUrl = () => {
     const trimmed = gatewayInput.trim().replace(/\/+$/, "");
     if (trimmed === config.httpUrl) {
@@ -228,41 +209,55 @@ export function SessionListPage({
   // One session card. Online cards open the console on click; offline cards
   // (host gone) have no connect action — only 移除 remains.
   const renderCard = (s: SessionSummary) => {
+    const story = sessionStory(s, { showHost: multiHost });
+    const attention = attentionStatus(s.agentStatus);
+    const stripe =
+      s.agentStatus === "waiting_permission"
+        ? "bg-warning"
+        : s.agentStatus === "running"
+          ? "bg-accent"
+          : s.agentStatus === "error"
+            ? "bg-danger"
+            : null;
+    const storyClass =
+      story.tone === "warning"
+        ? "text-warning"
+        : story.tone === "danger"
+          ? "text-danger"
+          : "text-content-muted";
     const body = (
-      <div>
+      <div className="min-w-0">
         <p className="flex items-center gap-2 text-[15px] font-medium text-content-primary">
-          <span className={`h-1.5 w-1.5 rounded-full ${s.hasHost ? "bg-success" : "bg-content-faint"}`} />
-          {s.projectName || s.hostname || s.id.slice(0, 8)}
-          {multiHost && s.hostname && (
-            <span className="codex-chip">{s.hostname}</span>
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.hasHost ? (s.agentStatus === "running" || s.agentStatus === "waiting_permission" ? "bg-accent animate-pulse-dot" : "bg-success") : "bg-content-faint"}`} />
+          <span className="truncate">{sessionHeadline(s)}</span>
+          {s.agentProvider && (
+            <ProviderIcon provider={s.agentProvider} size={12} />
           )}
-          {s.provider && (
-            <span className="codex-chip">
-              <ProviderIcon provider={s.provider} size={12} />
-              {s.provider}
-            </span>
-          )}
-          {agentStatusLabel(s.agentStatus) && (
-            <span className={`rounded-full border px-2 py-0.5 text-2xs font-medium ${agentStatusClass(s.agentStatus)}`}>
-              {s.agentProvider && s.agentProvider !== s.provider ? `${s.agentProvider} · ` : ""}
-              {agentStatusLabel(s.agentStatus)}
+          {attention && (
+            <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium ${attention.className}`}>
+              {attention.pulsing && (
+                <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
+              )}
+              {attention.text}
             </span>
           )}
         </p>
-        <p className="mt-1 font-mono text-2xs text-content-muted">
-          {s.cwd ?? "—"} · {s.hasHost ? "在线" : "主机离线"}
-          {s.agentTitle ? ` · ${s.agentTitle}` : ""}
+        <p className={`mt-1 truncate text-2xs ${storyClass}`}>
+          {story.text}
         </p>
-        {usageSummary(s.agentUsage) && (
-          <p className="mt-0.5 font-mono text-2xs text-content-faint">{usageSummary(s.agentUsage)}</p>
-        )}
       </div>
     );
     return (
       <div
         key={s.id}
-        className={`codex-card group flex items-center justify-between p-4 transition-colors ${s.hasHost ? "hover:bg-surface-overlay" : "opacity-70"}`}
+        className={`codex-card group relative flex items-center justify-between overflow-hidden p-4 transition-colors ${s.hasHost ? "hover:bg-surface-overlay" : "opacity-70"} ${s.agentStatus === "running" ? "border-accent/25" : s.agentStatus === "waiting_permission" ? "border-warning/30" : s.agentStatus === "error" ? "border-danger/25" : ""}`}
       >
+        {stripe && (
+          <span
+            aria-hidden
+            className={`absolute inset-y-0 left-0 w-0.5 ${stripe}`}
+          />
+        )}
         {s.hasHost ? (
           <button
             onClick={() => onOpenSession(s.id)}
@@ -290,7 +285,10 @@ export function SessionListPage({
 
   return (
     <div className="min-h-screen bg-canvas">
-      <header className="glass-bar sticky top-0 z-10 flex h-14 items-center justify-between gap-3 border-b border-border px-4 sm:px-6">
+      <header
+        className="glass-bar sticky top-0 z-10 flex min-h-14 items-center justify-between gap-3 border-b border-border px-4 sm:px-6"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
         <div className="flex shrink-0 items-center gap-2.5">
           <BrandLogo size={26} />
           <h1 className="font-mono text-[15px] font-semibold text-content-primary">LinkShell</h1>
@@ -303,7 +301,7 @@ export function SessionListPage({
           )}
           {session ? (
             <>
-              <span className="min-w-0 truncate text-[13px] text-content-muted">{session.user.email}</span>
+              <span className="hidden min-w-0 truncate text-[13px] text-content-muted sm:inline">{session.user.email}</span>
               <button onClick={async () => { await signOut(); onLogout(); }} className="codex-btn-ghost shrink-0 whitespace-nowrap text-2xs">
                 退出
               </button>
@@ -316,15 +314,27 @@ export function SessionListPage({
         </div>
       </header>
 
-      <main className="mx-auto max-w-[46rem] animate-fade-in px-6 py-10">
+      <main className="mx-auto max-w-[46rem] animate-fade-in px-4 py-6 sm:px-6 sm:py-10">
         {/* Sessions (primary) */}
         <section className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[15px] font-semibold text-content-primary">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="flex flex-wrap items-center gap-2 text-[15px] font-semibold text-content-primary">
               我的会话 <span className="font-normal text-content-muted">({onlineSessions.length})</span>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium ${
+                  liveState === "live"
+                    ? "border-success/30 bg-success/10 text-success"
+                    : "border-border bg-surface-overlay text-content-muted"
+                }`}
+              >
+                {liveState === "live" && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
+                )}
+                {liveState === "live" ? "实时" : liveState === "connecting" ? "连接中" : "轮询"}
+              </span>
             </h2>
             <div className="flex items-center gap-2">
-              <button onClick={refresh} className="codex-btn-ghost text-2xs">
+              <button onClick={() => void refresh()} className="codex-btn-ghost text-2xs">
                 <IconRefresh size={13} /> 刷新
               </button>
               <button onClick={() => setShowPairing((v) => !v)} className="codex-btn-primary text-2xs">

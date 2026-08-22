@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { enqueueWrite } from "./write-queue";
 
-export type AgentProvider = "codex" | "claude" | "custom";
+export type AgentProvider = string;
 export type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
 export type AgentReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";

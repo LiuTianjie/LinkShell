@@ -120,3 +120,15 @@ export function clientWsUrl(
   if (input.jwt) url.searchParams.set("auth_token", input.jwt);
   return url.toString();
 }
+
+/** List-page watcher: no sessionId, role=watcher. Same token/JWT as HTTP list. */
+export function watcherWsUrl(
+  config: GatewayConfig,
+  input: { deviceToken?: string | null; jwt?: string | null },
+): string {
+  const url = new URL(`${wsBase(config)}/ws`);
+  url.searchParams.set("role", "watcher");
+  if (input.deviceToken) url.searchParams.set("token", input.deviceToken);
+  if (input.jwt) url.searchParams.set("auth_token", input.jwt);
+  return url.toString();
+}

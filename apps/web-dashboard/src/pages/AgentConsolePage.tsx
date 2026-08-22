@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Session } from "../lib/supabase";
 import { getValidSession } from "../lib/supabase";
 import { loadGatewayConfig } from "../lib/gateway-config";
@@ -13,7 +13,7 @@ import { FileBrowser } from "../components/lazy-panels";
 import { FolderPicker } from "../components/FolderPicker";
 import { PortPreview } from "../components/lazy-panels";
 import { UsageDashboard } from "../components/lazy-panels";
-import { IconChevronRight, IconChevronLeft, IconChevronDown, IconClose, IconPlug, IconMenu, BrandLogo } from "../components/icons";
+import { IconChevronRight, IconChevronLeft, IconChevronDown, IconClose, IconPlug, IconMenu, IconDots, BrandLogo } from "../components/icons";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { isEmbedded } from "../lib/embed";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
@@ -29,6 +29,65 @@ function statusLabel(status: ConnectionStatus): { text: string; color: string } 
   if (status === "host_disconnected") return { text: "主机离线", color: "text-warning" };
   if (status.startsWith("error")) return { text: "错误", color: "text-danger" };
   return { text: "未连接", color: "text-content-muted" };
+}
+
+function HeaderOverflowMenu({ children }: { children: (close: () => void) => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`cursor-pointer rounded-md p-1.5 transition-colors ${open ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+        title="更多"
+        aria-label="更多"
+        aria-expanded={open}
+      >
+        <IconDots size={16} />
+      </button>
+      {open && (
+        <div className="codex-card-raised absolute right-0 top-full z-30 mt-1.5 min-w-[11rem] overflow-hidden p-1 animate-fade-in">
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OverflowItem({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${
+        active
+          ? "bg-accent-dim/20 text-content-primary"
+          : "text-content-secondary hover:bg-surface-overlay hover:text-content-primary"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
 }
 
 function agentStatusLabel(status?: AgentStatus): { text: string; className: string; pulsing?: boolean } | null {
@@ -572,16 +631,25 @@ export function AgentConsolePage({
   };
 
   const st = statusLabel(snapshot.status);
+  const conversationActive =
+    activeConversation?.status === "running" ||
+    activeConversation?.status === "waiting_permission" ||
+    activeConversation?.status === "error";
   const externalActive =
-    snapshot.externalAgentStatus === "running" ||
-    snapshot.externalAgentStatus === "waiting_permission" ||
-    snapshot.externalAgentStatus === "error";
-  const shownAgentStatus = externalActive
-    ? agentStatusLabel(snapshot.externalAgentStatus ?? undefined)
-    : agentStatusLabel(activeConversation?.status);
-  const shownAgentStatusPrefix = externalActive
-    ? (snapshot.externalAgentTitle ?? "外部终端")
-    : activeConversation?.provider;
+    !conversationActive &&
+    (snapshot.externalAgentStatus === "running" ||
+      snapshot.externalAgentStatus === "waiting_permission" ||
+      snapshot.externalAgentStatus === "error");
+  const shownAgentStatus = conversationActive
+    ? agentStatusLabel(activeConversation?.status)
+    : externalActive
+      ? agentStatusLabel(snapshot.externalAgentStatus ?? undefined)
+      : agentStatusLabel(activeConversation?.status);
+  const shownAgentStatusPrefix = conversationActive
+    ? activeConversation?.provider
+    : externalActive
+      ? (snapshot.externalAgentTitle ?? "外部终端")
+      : activeConversation?.provider;
   // Tick an elapsed timer only while the shown turn is actively running (not
   // while waiting on a permission prompt or errored).
   const turnRunning = externalActive
@@ -689,12 +757,13 @@ export function AgentConsolePage({
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden">
-      {/* Top bar. pt safe-area inset so it clears the notch / status bar. */}
+      {/* Top bar. On phones this stays a single unwrapped row so icons cannot
+          spill into the transcript. Secondary tools live in the overflow. */}
       <header
-        className="flex items-center justify-between border-b border-border px-4 py-2"
-        style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
+        className="flex items-center justify-between gap-2 overflow-hidden border-b border-border px-3 py-1.5 md:px-4 md:py-2"
+        style={{ paddingTop: "max(0.375rem, env(safe-area-inset-top))" }}
       >
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
           {isMobile && (
             <button
               onClick={() => setMobileNavOpen(true)}
@@ -704,14 +773,18 @@ export function AgentConsolePage({
               <IconMenu size={17} />
             </button>
           )}
-          <button onClick={onBack} className="codex-btn-ghost shrink-0 text-2xs" aria-label="返回会话列表">
-            ← 会话
+          <button
+            onClick={onBack}
+            className="codex-btn-ghost shrink-0 px-2 py-1.5 text-2xs"
+            aria-label="返回会话列表"
+          >
+            {isMobile ? <IconChevronLeft size={17} /> : "← 会话"}
           </button>
           <span className={`flex shrink-0 items-center gap-1 text-2xs ${st.color}`}>
             <span className="h-1.5 w-1.5 rounded-full bg-current" />
             {!isMobile && st.text}
           </span>
-          {shownAgentStatus && (
+          {shownAgentStatus && !(isMobile && !externalActive && activeConversation?.status === "idle") && (
             <span
               className={`inline-flex min-w-0 items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium ${shownAgentStatus.className}`}
               title={externalActive ? "外部终端状态" : "当前对话状态"}
@@ -719,11 +792,11 @@ export function AgentConsolePage({
               {shownAgentStatus.pulsing && (
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current animate-pulse-dot" />
               )}
-              {shownAgentStatusPrefix && (
+              {!isMobile && shownAgentStatusPrefix && (
                 <span className="min-w-0 truncate">{shownAgentStatusPrefix}</span>
               )}
               <span className="shrink-0">
-                {shownAgentStatusPrefix ? "· " : ""}
+                {!isMobile && shownAgentStatusPrefix ? "· " : ""}
                 {shownAgentStatus.text}
               </span>
               {turnRunning && (
@@ -754,7 +827,7 @@ export function AgentConsolePage({
             </button>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             onClick={() => {
               if (!activeId) return;
@@ -768,42 +841,94 @@ export function AgentConsolePage({
           >
             <IconSearch size={16} />
           </button>
-          {!embedded && <ThemeToggle />}
-          {!isMobile && (
-            <button
-              onClick={() => setRightPanel((v) => (v === "preview" ? "none" : "preview"))}
-              className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "preview" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
-              title="端口预览"
-              aria-label="端口预览"
-            >
-              <IconGlobe size={16} />
-            </button>
+          {isMobile ? (
+            <>
+              <McpStatusButton
+                mcpServers={activeCapability?.mcpServers}
+                provider={activeConversation?.provider}
+                authLinks={snapshot.mcpAuthLinks}
+                onLogin={(provider, serverName) => store.startMcpLogin(provider, serverName)}
+              />
+              <HeaderOverflowMenu>
+                {(close) => (
+                  <>
+                    {!embedded && (
+                      <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5">
+                        <span className="text-xs text-content-secondary">主题</span>
+                        <ThemeToggle />
+                      </div>
+                    )}
+                    <OverflowItem
+                      icon={<IconFolder size={15} />}
+                      label="文件"
+                      active={rightPanel === "files"}
+                      onClick={() => { setRightPanel((v) => (v === "files" ? "none" : "files")); close(); }}
+                    />
+                    <OverflowItem
+                      icon={<IconTerminal size={15} />}
+                      label="终端"
+                      active={terminalOpen}
+                      onClick={() => { toggleTerminal(); close(); }}
+                    />
+                    <OverflowItem
+                      icon={<IconGlobe size={15} />}
+                      label="端口预览"
+                      active={rightPanel === "preview"}
+                      onClick={() => { setRightPanel((v) => (v === "preview" ? "none" : "preview")); close(); }}
+                    />
+                    <OverflowItem
+                      icon={<IconCommand size={15} />}
+                      label="用量统计"
+                      active={usageOpen}
+                      onClick={() => { store.requestUsage(); setUsageOpen(true); close(); }}
+                    />
+                  </>
+                )}
+              </HeaderOverflowMenu>
+            </>
+          ) : (
+            <>
+              {!embedded && <ThemeToggle />}
+              <button
+                onClick={() => setRightPanel((v) => (v === "preview" ? "none" : "preview"))}
+                className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "preview" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+                title="端口预览"
+                aria-label="端口预览"
+              >
+                <IconGlobe size={16} />
+              </button>
+              <button
+                onClick={() => setRightPanel((v) => (v === "files" ? "none" : "files"))}
+                className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "files" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+                title="文件"
+                aria-label="文件"
+              >
+                <IconFolder size={16} />
+              </button>
+              <button
+                onClick={toggleTerminal}
+                className={`cursor-pointer rounded-md p-1.5 transition-colors ${terminalOpen ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+                title="终端 (⌘J)"
+                aria-label="终端"
+              >
+                <IconTerminal size={16} />
+              </button>
+              <button
+                onClick={() => { store.requestUsage(); setUsageOpen(true); }}
+                className={`cursor-pointer rounded-md p-1.5 transition-colors ${usageOpen ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
+                title="用量统计"
+                aria-label="用量统计"
+              >
+                <IconCommand size={16} />
+              </button>
+              <McpStatusButton
+                mcpServers={activeCapability?.mcpServers}
+                provider={activeConversation?.provider}
+                authLinks={snapshot.mcpAuthLinks}
+                onLogin={(provider, serverName) => store.startMcpLogin(provider, serverName)}
+              />
+            </>
           )}
-          <button
-            onClick={() => setRightPanel((v) => (v === "files" ? "none" : "files"))}
-            className={`cursor-pointer rounded-md p-1.5 transition-colors ${rightPanel === "files" ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
-            title="文件"
-            aria-label="文件"
-          >
-            <IconFolder size={16} />
-          </button>
-          <button
-            onClick={toggleTerminal}
-            className={`cursor-pointer rounded-md p-1.5 transition-colors ${terminalOpen ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
-            title="终端 (⌘J)"
-            aria-label="终端"
-          >
-            <IconTerminal size={16} />
-          </button>
-          <button
-            onClick={() => { store.requestUsage(); setUsageOpen(true); }}
-            className={`cursor-pointer rounded-md p-1.5 transition-colors ${usageOpen ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
-            title="用量统计"
-            aria-label="用量统计"
-          >
-            <IconCommand size={16} />
-          </button>
-          <McpStatusButton mcpServers={activeCapability?.mcpServers} />
         </div>
       </header>
 
@@ -832,10 +957,18 @@ export function AgentConsolePage({
           mobileNavOpen && (
             <div className="absolute inset-0 z-30 flex animate-fade-in">
               <aside className="flex w-[82%] max-w-xs flex-col border-r border-border bg-surface shadow-2xl animate-drawer-in">
-                <div className="flex items-center border-b border-border px-3 py-2">
+                <div className="flex items-center justify-between border-b border-border px-3 py-2">
                   <span className="text-2xs font-semibold uppercase tracking-wide text-content-muted">
                     会话
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setMobileNavOpen(false)}
+                    className="codex-btn-ghost px-2 py-1"
+                    aria-label="关闭会话列表"
+                  >
+                    <IconClose size={15} />
+                  </button>
                 </div>
                 <div className="min-h-0 flex-1">
                   <ConversationTree
@@ -968,7 +1101,7 @@ export function AgentConsolePage({
               <div
                 ref={scrollRef}
                 onScroll={handleTimelineScroll}
-                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-8"
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-5 md:px-4 md:py-8"
               >
                 <div ref={contentRef} className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6">
                 {historyState?.loading && (
@@ -1100,7 +1233,7 @@ export function AgentConsolePage({
                 <div className="pointer-events-none relative z-10 h-0">
                   <button
                     onClick={scrollToBottom}
-                    className="codex-card-raised pointer-events-auto absolute bottom-2 right-4 flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-2xs text-content-secondary transition-colors animate-fade-in hover:text-content-primary"
+                    className="codex-card-raised pointer-events-auto absolute bottom-2 right-3 flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-2xs text-content-secondary transition-colors animate-fade-in hover:text-content-primary md:right-4"
                     aria-label="回到底部"
                     title="回到底部"
                   >
@@ -1112,7 +1245,7 @@ export function AgentConsolePage({
                   </button>
                 </div>
               )}
-              <div className="mx-auto w-full min-w-0 max-w-3xl px-4 pb-4">
+              <div className="mx-auto w-full min-w-0 max-w-3xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:pb-4">
                 {planReady && (
                   <div className="mb-2 flex items-center gap-3 rounded-xl border border-accent-dim/40 bg-surface px-3.5 py-2.5 animate-slide-in">
                     <span className="min-w-0 flex-1 text-sm text-content-secondary">
@@ -1152,11 +1285,9 @@ export function AgentConsolePage({
                   onExecuteCommand={(commandId, args) => store.executeCommand(activeId, commandId, args)}
                 />
               </div>
-              {/* Terminal bottom panel — the whole chat surface (timeline +
-                   composer) sits above this panel, so opening it pushes the
-                   input upward instead of leaving the composer in front of the
-                   terminal. */}
-              {(terminalOpen || terminalClosing) && (
+              {/* Terminal bottom panel (desktop). On phones this would crush
+                   the transcript, so mobile uses a full-screen overlay instead. */}
+              {!isMobile && (terminalOpen || terminalClosing) && (
                 <div
                   className={`relative shrink-0 overflow-hidden border-t border-border bg-surface ${
                     terminalClosing ? "animate-panel-out-down" : "animate-panel-in-up"
@@ -1191,7 +1322,7 @@ export function AgentConsolePage({
         {(() => {
           // Compute the panel's content first; wrap once below so the resize
           // handle + sizing logic isn't duplicated across every branch.
-          let content: React.ReactNode = null;
+          let content: ReactNode = null;
           if (agentDetail) {
             content = (
               <>
@@ -1252,7 +1383,7 @@ export function AgentConsolePage({
 
           // Persist the last visible content so we can play the exit animation
           // on it before unmounting. Without this the panel vanishes instantly.
-          const lastContentRef = useRef<React.ReactNode>(null);
+          const lastContentRef = useRef<ReactNode>(null);
           if (content !== null) lastContentRef.current = content;
 
           const rightShow = content !== null;
@@ -1288,6 +1419,65 @@ export function AgentConsolePage({
             </aside>
           );
         })()}
+
+        {isMobile && (terminalOpen || terminalClosing) && (
+          <aside
+            className={`absolute inset-0 z-30 flex flex-col bg-canvas ${
+              terminalClosing ? "animate-panel-out-right" : "animate-fade-in"
+            }`}
+            onAnimationEnd={() => {
+              if (terminalClosing) {
+                setTerminalClosing(false);
+                setTerminalOpen(false);
+              }
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+              <span className="text-2xs font-semibold uppercase tracking-wide text-content-muted">
+                终端
+              </span>
+              <button type="button" onClick={toggleTerminal} className="codex-btn-ghost px-2 py-1.5" aria-label="关闭终端">
+                <IconClose size={15} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1">
+              <TerminalPanel
+                bridge={store.client}
+                onNewTerminal={handleNewTerminal}
+              />
+            </div>
+          </aside>
+        )}
+
+        {snapshot.notices.length > 0 && (
+          <div
+            className={`pointer-events-none z-40 flex flex-col gap-2 ${
+              isMobile
+                ? "absolute left-3 right-3 top-2"
+                : "fixed right-4 top-16 w-80"
+            }`}
+          >
+            {snapshot.notices.map((n) => (
+              <button
+                key={n.id}
+                onClick={() => store.dismissNotice(n.id)}
+                className={`codex-card-raised pointer-events-auto animate-fade-in cursor-pointer px-3 py-2 text-left ${
+                  n.kind === "warning" ? "border-warning/40" : ""
+                }`}
+              >
+                <p className="flex items-center gap-1.5 text-xs font-medium text-content-primary">
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      n.kind === "warning" ? "bg-warning" : "bg-accent"
+                    }`}
+                  />
+                  {n.title}
+                </p>
+                {n.detail && <p className="mt-0.5 pl-3 text-2xs text-content-muted">{n.detail}</p>}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Folder picker shown before a new conversation is created. */}
@@ -1301,31 +1491,6 @@ export function AgentConsolePage({
         />
       )}
 
-
-      {/* Transient notices (model/effort/permission changes, info, warnings). */}
-      {snapshot.notices.length > 0 && (
-        <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2">
-          {snapshot.notices.map((n) => (
-            <button
-              key={n.id}
-              onClick={() => store.dismissNotice(n.id)}
-              className={`codex-card-raised pointer-events-auto animate-fade-in cursor-pointer px-3 py-2 text-left ${
-                n.kind === "warning" ? "border-warning/40" : ""
-              }`}
-            >
-              <p className="flex items-center gap-1.5 text-xs font-medium text-content-primary">
-                <span
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                    n.kind === "warning" ? "bg-warning" : "bg-accent"
-                  }`}
-                />
-                {n.title}
-              </p>
-              {n.detail && <p className="mt-0.5 pl-3 text-2xs text-content-muted">{n.detail}</p>}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Command palette (⌘/Ctrl+K): fuzzy-search conversations + actions. */}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={paletteActions} />

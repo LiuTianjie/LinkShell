@@ -58,11 +58,11 @@ export function FolderPicker({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center sm:p-4"
       onClick={onCancel}
     >
       <div
-        className="codex-card flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden"
+        className="codex-card flex max-h-[85dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl sm:rounded-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -123,7 +123,7 @@ export function FolderPicker({
         </div>
 
         {/* Footer: confirm current dir */}
-        <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+        <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-3">
           <span className="truncate font-mono text-2xs text-content-muted" title={path}>
             将在此创建：{path}
           </span>

@@ -3,7 +3,10 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 
-export type AgentProvider = "codex" | "claude" | "custom";
+import type { KnownAgentProvider } from "./agent-process-discovery.js";
+
+export type AgentProvider = string;
+export type { KnownAgentProvider };
 export type AgentProtocol = "acp" | "codex-app-server" | "claude-agent-sdk" | "claude-stream-json";
 export type AgentFraming = "content-length" | "newline";
 
@@ -102,9 +105,21 @@ function resolveBinary(bin: string): string | null {
   return null;
 }
 
+const INSTALL_BINARIES: Array<{ provider: KnownAgentProvider; binaries: string[] }> = [
+  { provider: "claude", binaries: ["claude"] },
+  { provider: "codex", binaries: ["codex"] },
+  { provider: "gemini", binaries: ["gemini"] },
+  { provider: "copilot", binaries: ["copilot"] },
+  { provider: "opencode", binaries: ["opencode", "opencode-ai"] },
+  { provider: "cursor", binaries: ["cursor-agent"] },
+  { provider: "kimi", binaries: ["kimi"] },
+];
+
 export function detectAvailableProviders(): AgentProvider[] {
   const available: AgentProvider[] = [];
-  if (resolveBinary("claude")) available.push("claude");
-  if (resolveBinary("codex")) available.push("codex");
+  for (const entry of INSTALL_BINARIES) {
+    if (entry.binaries.some((bin) => resolveBinary(bin))) available.push(entry.provider);
+  }
   return available;
 }
+

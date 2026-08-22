@@ -404,7 +404,10 @@ export const terminalHistoryResponsePayloadSchema = z.object({
 
 // ── Agent GUI / ACP payloads ───────────────────────────────────────
 
-export const agentProviderSchema = z.enum(["codex", "claude", "custom"]);
+// Open catalog: Codex / Claude have a remote conversation protocol; Gemini,
+// Copilot, OpenCode, Cursor, Kimi and others are still valid provider ids so
+// process discovery can name them without inventing an RPC adapter.
+export const agentProviderSchema = z.string().min(1);
 export const agentReasoningEffortSchema = z.enum([
   "none",
   "minimal",
@@ -956,6 +959,29 @@ export const agentV2ConversationUpdatePayloadSchema = z.object({
   conversationId: z.string().min(1),
   title: z.string().optional(),
   archived: z.boolean().optional(),
+  // Immediate settings — applied on the host now, not only on the next prompt.
+  model: z.string().optional(),
+  reasoningEffort: agentReasoningEffortSchema.optional(),
+  permissionMode: agentPermissionModeSchema.optional(),
+  collaborationMode: agentCollaborationModeSchema.optional(),
+});
+
+// Gateway → list-page watchers. One envelope per session whose visible
+// agent/host summary changed. sessionId on the envelope is the LinkShell
+// session, not a conversation id.
+export const sessionPresencePayloadSchema = z.object({
+  hasHost: z.boolean(),
+  agentStatus: agentV2StatusSchema.optional().nullable(),
+  agentProvider: z.string().optional().nullable(),
+  agentConversationId: z.string().optional().nullable(),
+  agentTitle: z.string().optional().nullable(),
+  // Short "what it's doing / asking" line for the session list. Permission
+  // requests stash the tool+target here so the list can say "运行命令 · pnpm test"
+  // instead of a bare 等待授权.
+  agentDetail: z.string().optional().nullable(),
+  agentLastActivity: z.number().optional().nullable(),
+  lastActivity: z.number().optional(),
+  agentUsage: agentV2UsageSchema.optional().nullable(),
 });
 
 // "Delete" a conversation. Semantics: FORGET it from the workspace's tracked
@@ -969,6 +995,20 @@ export const agentV2ConversationDeletePayloadSchema = z.object({
 // Host → clients: a conversation was forgotten; clients remove it from their list.
 export const agentV2ConversationDeletedPayloadSchema = z.object({
   conversationId: z.string().min(1),
+});
+
+// Client asks the host to start MCP OAuth for a server that reported needs_auth.
+export const agentV2McpLoginPayloadSchema = z.object({
+  provider: agentProviderSchema.optional(),
+  serverName: z.string().min(1),
+});
+
+// Host returns a browser URL (or an error the console can show inline).
+export const agentV2McpLoginResultPayloadSchema = z.object({
+  provider: agentProviderSchema.optional(),
+  serverName: z.string().min(1),
+  authorizationUrl: z.string().min(1).optional(),
+  error: z.string().optional(),
 });
 
 // ── Protocol message type registry ──────────────────────────────────
@@ -992,6 +1032,7 @@ export const protocolMessageSchemas = {
   "control.release": controlReleasePayloadSchema,
   "session.host_disconnected": sessionHostDisconnectedPayloadSchema,
   "session.host_reconnected": sessionHostReconnectedPayloadSchema,
+  "session.presence": sessionPresencePayloadSchema,
   "screen.start": screenStartPayloadSchema,
   "screen.stop": screenStopPayloadSchema,
   "screen.frame": screenFramePayloadSchema,
@@ -1052,6 +1093,8 @@ export const protocolMessageSchemas = {
   "agent.v2.history.result": agentV2HistoryResultPayloadSchema,
   "agent.v2.usage.request": agentV2UsageRequestPayloadSchema,
   "agent.v2.usage.report": agentV2UsageReportPayloadSchema,
+  "agent.v2.mcp.login": agentV2McpLoginPayloadSchema,
+  "agent.v2.mcp.login.result": agentV2McpLoginResultPayloadSchema,
 } as const;
 
 export type ProtocolMessageType = keyof typeof protocolMessageSchemas;
@@ -1067,6 +1110,7 @@ export const agentV2HostToClientMessageTypes = [
   "agent.v2.history.result",
   "agent.v2.conversation.deleted",
   "agent.v2.usage.report",
+  "agent.v2.mcp.login.result",
 ] as const satisfies readonly ProtocolMessageType[];
 
 export const agentV2ClientWriteMessageTypes = [
@@ -1078,6 +1122,7 @@ export const agentV2ClientWriteMessageTypes = [
   "agent.v2.cancel",
   "agent.v2.permission.respond",
   "agent.v2.structured_input.respond",
+  "agent.v2.mcp.login",
 ] as const satisfies readonly ProtocolMessageType[];
 
 export const agentV2ClientReadMessageTypes = [

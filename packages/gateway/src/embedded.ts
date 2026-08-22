@@ -12,7 +12,8 @@ import { z, ZodError } from "zod";
 import { SessionManager } from "./sessions.js";
 import { PairingManager } from "./pairings.js";
 import { TokenManager } from "./tokens.js";
-import { handleSocketMessage } from "./relay.js";
+import { handleSocketMessage, replayAgentToSocket } from "./relay.js";
+import { PresenceHub, startPresenceWatcher } from "./presence.js";
 import {
   agentPermissionHttpBodySchema,
   forwardAgentPermissionHttp,
@@ -111,6 +112,8 @@ export function startEmbeddedGateway(
   const sessionManager = new SessionManager();
   const pairingManager = new PairingManager();
   const tokenManager = new TokenManager();
+  const presenceHub = new PresenceHub();
+  sessionManager.onPresenceChange = (session) => presenceHub.notify(session);
 
   const server = createServer(async (req, res) => {
     if (req.method === "OPTIONS") {
@@ -196,28 +199,8 @@ export function startEmbeddedGateway(
         const sessions = sessionManager
           .listActive()
           .filter((s) => allowedIds.has(s.id))
-          .map((s) => ({
-            id: s.id,
-            state: s.state,
-            hasHost: !!s.host && s.host.socket.readyState === s.host.socket.OPEN,
-            clientCount: s.clients.size,
-            controllerId: s.controllerId ?? null,
-            lastActivity: s.lastActivity,
-            createdAt: s.createdAt,
-            provider: s.provider ?? null,
-            machineId: s.machineId ?? null,
-            hostname: s.hostname ?? null,
-            platform: s.platform ?? null,
-            cwd: s.cwd ?? null,
-            projectName: s.projectName ?? null,
-            agentStatus: s.agentStatus ?? null,
-            agentProvider: s.agentProvider ?? null,
-            agentConversationId: s.agentConversationId ?? null,
-            agentTitle: s.agentTitle ?? null,
-            agentLastActivity: s.agentLastActivity ?? null,
-            agentUsage: s.agentUsage ?? null,
-            agentUsageReport: s.agentUsageReport ?? null,
-          }));
+          .map((s) => sessionManager.getSummary(s.id))
+          .filter(Boolean);
         json(res, 200, { sessions });
         return;
       }
@@ -362,7 +345,23 @@ export function startEmbeddedGateway(
     "connection",
     (socket: WebSocket, _request: IncomingMessage, url: URL) => {
       const sessionId = url.searchParams.get("sessionId");
-      const role = url.searchParams.get("role") as "host" | "client" | null;
+      const role = url.searchParams.get("role") as "host" | "client" | "watcher" | null;
+
+      if (role === "watcher") {
+        const token = url.searchParams.get("token");
+        if (!token || !tokenManager.validate(token)) {
+          socket.close(4001, "unauthorized");
+          return;
+        }
+        startPresenceWatcher({
+          socket,
+          sessions: sessionManager,
+          hub: presenceHub,
+          sessionIds: () => tokenManager.getSessionIds(token),
+          pingIntervalMs: PING_INTERVAL,
+        });
+        return;
+      }
 
       if (!sessionId || !role || (role !== "host" && role !== "client")) {
         socket.close(1008, "missing sessionId or role");
@@ -418,6 +417,10 @@ export function startEmbeddedGateway(
           }),
         ),
       );
+
+      if (role === "client") {
+        replayAgentToSocket(socket, sessionId, sessionManager);
+      }
 
       // Ping/pong for liveness — terminate sockets that stop answering pings.
       const liveSocket = socket as WebSocket & { isAlive?: boolean };

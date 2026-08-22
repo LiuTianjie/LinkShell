@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentMcpServerDescriptor, AgentMcpServerStatus } from "../lib/types";
-import { IconPlug, IconChevronDown } from "./icons";
+import type { AgentMcpServerDescriptor, AgentMcpServerStatus, AgentProvider } from "../lib/types";
+import { IconPlug } from "./icons";
 
 const MCP_STATUS_LABEL: Record<AgentMcpServerStatus, string> = {
   pending: "等待中",
@@ -30,10 +30,24 @@ function aggregateTone(servers: AgentMcpServerDescriptor[]): string {
   return "bg-success";
 }
 
+function authLinkKey(provider: AgentProvider | undefined, serverName: string): string {
+  return `${provider ?? "unknown"}:${serverName}`;
+}
+
 /** Header button showing MCP server connection status (parity with Claude Code /
  *  Codex). Renders nothing when the active provider has no MCP servers, so it
  *  stays out of the way for the common case. */
-export function McpStatusButton({ mcpServers }: { mcpServers?: AgentMcpServerDescriptor[] }) {
+export function McpStatusButton({
+  mcpServers,
+  provider,
+  authLinks,
+  onLogin,
+}: {
+  mcpServers?: AgentMcpServerDescriptor[];
+  provider?: AgentProvider;
+  authLinks?: Record<string, string>;
+  onLogin?: (provider: AgentProvider | undefined, serverName: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -61,24 +75,48 @@ export function McpStatusButton({ mcpServers }: { mcpServers?: AgentMcpServerDes
         <span className={`h-1.5 w-1.5 rounded-full ${aggregateTone(mcpServers)}`} />
       </button>
       {open && (
-        <div className="codex-card-raised absolute right-0 top-full z-20 mt-1.5 min-w-[13rem] overflow-hidden p-1 animate-fade-in">
+        <div className="codex-card-raised absolute right-0 top-full z-20 mt-1.5 min-w-[13rem] max-w-[calc(100vw-1.5rem)] overflow-hidden p-1 animate-fade-in">
           <div className="px-2 py-1 text-2xs font-medium uppercase tracking-wide text-content-faint">
             MCP 服务器
           </div>
-          {mcpServers.map((server) => (
-            <div
-              key={server.name}
-              className="flex items-center gap-2 rounded px-2 py-1.5 text-xs"
-              title={server.error ?? MCP_STATUS_LABEL[server.status]}
-            >
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${MCP_STATUS_DOT[server.status]}`} />
-              <span className="flex-1 truncate text-content-primary">{server.name}</span>
-              {typeof server.toolCount === "number" && server.status === "connected" && (
-                <span className="text-2xs text-content-faint">{server.toolCount} 个工具</span>
-              )}
-              <span className="text-2xs text-content-muted">{MCP_STATUS_LABEL[server.status]}</span>
-            </div>
-          ))}
+          {mcpServers.map((server) => {
+            const href = authLinks?.[authLinkKey(provider, server.name)];
+            return (
+              <div
+                key={server.name}
+                className="flex items-center gap-2 rounded px-2 py-1.5 text-xs"
+                title={server.error ?? MCP_STATUS_LABEL[server.status]}
+              >
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${MCP_STATUS_DOT[server.status]}`} />
+                <span className="min-w-0 flex-1 truncate text-content-primary">{server.name}</span>
+                {typeof server.toolCount === "number" && server.status === "connected" && (
+                  <span className="text-2xs text-content-faint">{server.toolCount} 个工具</span>
+                )}
+                {server.status === "needs_auth" && onLogin && (
+                  <button
+                    type="button"
+                    onClick={() => onLogin(provider, server.name)}
+                    className="cursor-pointer rounded px-1.5 py-0.5 text-2xs text-accent hover:bg-accent/10"
+                  >
+                    授权
+                  </button>
+                )}
+                {href && (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-2xs text-accent hover:underline"
+                  >
+                    打开授权页
+                  </a>
+                )}
+                {server.status !== "needs_auth" && (
+                  <span className="text-2xs text-content-muted">{MCP_STATUS_LABEL[server.status]}</span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

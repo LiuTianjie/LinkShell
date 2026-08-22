@@ -92,6 +92,7 @@ export interface SessionSummary {
   agentProvider?: string | null;
   agentConversationId?: string | null;
   agentTitle?: string | null;
+  agentDetail?: string | null;
   agentLastActivity?: number | null;
   agentUsage?: AgentUsageSummary | null;
   agentUsageReport?: AgentUsageReport | null;

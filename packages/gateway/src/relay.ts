@@ -109,6 +109,7 @@ type AgentConversationLike = {
   status?: string;
   provider?: string;
   title?: string;
+  lastMessagePreview?: string;
   lastActivityAt?: number;
   usage?: {
     inputTokens?: number;
@@ -119,6 +120,73 @@ type AgentConversationLike = {
     totalCostUsd?: number;
   };
 };
+
+function truncateDetail(text: string, max = 72): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+function commandOrPathFromToolInput(toolInput?: string): { command?: string; path?: string } {
+  if (!toolInput) return {};
+  try {
+    const parsed = JSON.parse(toolInput) as Record<string, unknown>;
+    if (parsed && typeof parsed === "object") {
+      return {
+        command: typeof parsed.command === "string" ? parsed.command : undefined,
+        path: typeof parsed.path === "string"
+          ? parsed.path
+          : typeof parsed.file_path === "string"
+            ? parsed.file_path
+            : undefined,
+      };
+    }
+  } catch {
+    const match = toolInput.match(/\$\s+([^\n]+)/);
+    if (match?.[1]) return { command: match[1].trim() };
+  }
+  return {};
+}
+
+/** List-line for a live permission request: "运行命令 · pnpm test". */
+function permissionAttentionDetail(p: {
+  toolName?: string;
+  toolInput?: string;
+  context?: string;
+}): string | undefined {
+  const { command, path } = commandOrPathFromToolInput(p.toolInput);
+  const name = (p.toolName ?? "").toLowerCase();
+  if (command) {
+    return truncateDetail(
+      /bash|shell|command/.test(name) || !p.toolName
+        ? `运行命令 · ${command}`
+        : `${p.toolName} · ${command}`,
+    );
+  }
+  if (path) {
+    const leaf = path.split("/").filter(Boolean).pop() ?? path;
+    if (/write|edit|multiedit/.test(name)) return truncateDetail(`改文件 · ${leaf}`);
+    if (/(^|_)read(_|$)|readfile/.test(name)) return truncateDetail(`读取 · ${leaf}`);
+    return truncateDetail(`${p.toolName || "文件"} · ${leaf}`);
+  }
+  if (p.context?.trim()) return truncateDetail(p.context.trim());
+  if (p.toolName) return truncateDetail(`需要授权 · ${p.toolName}`);
+  return undefined;
+}
+
+function conversationAttentionDetail(
+  conversation: AgentConversationLike | undefined,
+  status: string | undefined,
+  current?: { agentStatus?: string; agentDetail?: string },
+): string | null | undefined {
+  if (status === "waiting_permission") {
+    if (current?.agentStatus === "waiting_permission" && current.agentDetail) return undefined;
+    return conversation?.lastMessagePreview;
+  }
+  if (status === "running" || status === "error") {
+    return conversation?.lastMessagePreview ?? null;
+  }
+  return status ? null : undefined;
+}
 
 function pickConversationSummary(
   conversations: AgentConversationLike[],
@@ -169,14 +237,45 @@ function shouldPromoteTerminalStatus(status: string, current?: string): boolean 
 
 function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void {
   try {
+    if (envelope.type === "agent.v2.conversation.list.result") {
+      const p = parseTypedPayload("agent.v2.conversation.list.result", envelope.payload);
+      const picked = pickConversationSummary(p.conversations);
+      const status = aggregateAgentStatus(p.conversations, picked?.status ?? "idle");
+      sessions.cacheAgentSummary(envelope.sessionId, {
+        status,
+        provider: picked?.provider,
+        conversationId: picked?.id,
+        title: picked?.title,
+        detail: conversationAttentionDetail(picked, status, sessions.get(envelope.sessionId)),
+        lastActivity: picked?.lastActivityAt ?? Date.now(),
+        usage: picked?.usage ?? null,
+      });
+      return;
+    }
+    if (envelope.type === "agent.v2.conversation.opened") {
+      const p = parseTypedPayload("agent.v2.conversation.opened", envelope.payload);
+      const conversation = p.conversation;
+      sessions.cacheAgentSummary(envelope.sessionId, {
+        status: conversation.status,
+        provider: conversation.provider,
+        conversationId: conversation.id,
+        title: conversation.title,
+        detail: conversationAttentionDetail(conversation, conversation.status, sessions.get(envelope.sessionId)),
+        lastActivity: conversation.lastActivityAt ?? Date.now(),
+        usage: conversation.usage ?? null,
+      });
+      return;
+    }
     if (envelope.type === "agent.v2.snapshot") {
       const p = parseTypedPayload("agent.v2.snapshot", envelope.payload);
       const picked = pickConversationSummary(p.conversations, p.activeConversationId);
+      const status = aggregateAgentStatus(p.conversations, picked?.status ?? "idle");
       sessions.cacheAgentSummary(envelope.sessionId, {
-        status: aggregateAgentStatus(p.conversations, picked?.status ?? "idle"),
+        status,
         provider: picked?.provider,
         conversationId: picked?.id ?? p.activeConversationId,
         title: picked?.title,
+        detail: conversationAttentionDetail(picked, status, sessions.get(envelope.sessionId)),
         lastActivity: picked?.lastActivityAt ?? Date.now(),
         usage: picked?.usage ?? null,
       });
@@ -184,12 +283,14 @@ function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void 
     }
     if (envelope.type === "agent.v2.event") {
       const p = parseTypedPayload("agent.v2.event", envelope.payload);
+      const current = sessions.get(envelope.sessionId);
       if (p.conversation) {
         sessions.cacheAgentSummary(envelope.sessionId, {
           status: p.conversation.status,
           provider: p.conversation.provider,
           conversationId: p.conversation.id,
           title: p.conversation.title,
+          detail: conversationAttentionDetail(p.conversation, p.conversation.status, current),
           lastActivity: p.conversation.lastActivityAt,
           usage: p.conversation.usage ?? null,
         });
@@ -197,6 +298,7 @@ function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void 
         sessions.cacheAgentSummary(envelope.sessionId, {
           status: p.patch.status,
           conversationId: p.conversationId,
+          detail: conversationAttentionDetail(undefined, p.patch.status, current),
           lastActivity: Date.now(),
         });
       }
@@ -207,6 +309,7 @@ function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void 
       sessions.cacheAgentSummary(envelope.sessionId, {
         status: "waiting_permission",
         conversationId: p.conversationId,
+        detail: permissionAttentionDetail(p),
         lastActivity: Date.now(),
       });
       return;
@@ -236,6 +339,7 @@ function cacheAgentEnvelope(envelope: Envelope, sessions: SessionManager): void 
       sessions.cacheAgentSummary(envelope.sessionId, {
         status: "waiting_permission",
         conversationId: p.agentSessionId,
+        detail: permissionAttentionDetail(p),
         lastActivity: Date.now(),
       });
       return;
@@ -274,6 +378,7 @@ function handleHostMessage(
 ): void {
   if (agentV2MessageRoute(envelope.type) === "host_to_client") {
     cacheAgentEnvelope(envelope, sessions);
+    sessions.bufferAgentEnvelope(session.id, envelope);
     broadcastToClients(session, envelope);
     return;
   }
@@ -463,6 +568,7 @@ function handleClientMessage(
       for (const statusMsg of statusReplay) {
         socket.send(serializeEnvelope(statusMsg));
       }
+      replayAgentToSocket(socket, session.id, sessions);
       // Also forward resume to host so it can fill gaps beyond gateway buffer.
       sendToHost(session, session.machineId
         ? {
@@ -547,6 +653,19 @@ function broadcastToClients(
     if (client.socket.readyState !== client.socket.OPEN) continue;
     if (client.socket.bufferedAmount > MAX_CLIENT_BUFFER_BYTES) continue;
     client.socket.send(data);
+  }
+}
+
+/** Replay the last agent snapshot + recent host→client agent envelopes. */
+export function replayAgentToSocket(
+  socket: WebSocket,
+  sessionId: string,
+  sessions: SessionManager,
+): void {
+  if (socket.readyState !== socket.OPEN) return;
+  for (const envelope of sessions.getAgentReplay(sessionId)) {
+    if (socket.bufferedAmount > MAX_CLIENT_BUFFER_BYTES) break;
+    socket.send(serializeEnvelope(envelope));
   }
 }
 

@@ -12,6 +12,14 @@ import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
 import { aggregateUsage } from "../usage-report.js";
 import type { AgentProtocol, AgentProvider } from "./provider-resolver.js";
 import { resolveAgentCommand } from "./provider-resolver.js";
+import {
+  agentProviderLabel,
+  discoverAgentProcessesAsync,
+  isLiveConversationId,
+  isProtocolAgentProvider,
+  liveConversationId,
+  type AgentProcessSnapshot,
+} from "./agent-process-discovery.js";
 
 type AgentStatus = "unavailable" | "idle" | "running" | "waiting_permission" | "error";
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
@@ -173,6 +181,21 @@ function normalizeMcpStatus(raw: unknown): AgentMcpServerStatus {
   return "pending";
 }
 
+function mcpStatusFromRecord(rec: Record<string, unknown>): AgentMcpServerStatus {
+  if (normalizeMcpStatus(rec.authStatus ?? rec.auth) === "needs_auth") return "needs_auth";
+  return normalizeMcpStatus(rec.status ?? rec.state ?? rec.authStatus);
+}
+
+function mcpListFromProviderResult(value: unknown): AgentMcpServerDescriptor[] {
+  const raw = asRecord(value);
+  const list =
+    Array.isArray(value) ? value :
+    Array.isArray(raw?.data) ? raw.data :
+    Array.isArray(raw?.servers) ? raw.servers :
+    value;
+  return parseMcpServerList(list);
+}
+
 // Parse an MCP server list from either an array of {name,status,...} objects or
 // a {name: status} record — Claude's init `mcp_servers` shape isn't fixed.
 function parseMcpServerList(value: unknown): AgentMcpServerDescriptor[] {
@@ -185,7 +208,7 @@ function parseMcpServerList(value: unknown): AgentMcpServerDescriptor[] {
         if (!name) continue;
         out.push({
           name,
-          status: normalizeMcpStatus(rec.status ?? rec.state),
+          status: mcpStatusFromRecord(rec),
           error: firstString(rec, ["error", "message", "reason"]),
           toolCount: firstNumber(rec, ["toolCount", "tools", "toolsCount"]) ?? (Array.isArray(rec.tools) ? rec.tools.length : undefined),
         });
@@ -202,7 +225,7 @@ function parseMcpServerList(value: unknown): AgentMcpServerDescriptor[] {
       const inner = asRecord(raw);
       out.push({
         name,
-        status: normalizeMcpStatus(inner ? (inner.status ?? inner.state) : raw),
+        status: inner ? mcpStatusFromRecord(inner) : normalizeMcpStatus(raw),
         error: inner ? firstString(inner, ["error", "message", "reason"]) : undefined,
         toolCount: inner ? (firstNumber(inner, ["toolCount", "tools", "toolsCount"]) ?? (Array.isArray(inner.tools) ? inner.tools.length : undefined)) : undefined,
       });
@@ -454,6 +477,42 @@ function normalizePlanStatus(value: unknown): AgentPlanStep["status"] {
   if (value === "completed" || value === "done") return "completed";
   if (value === "inProgress" || value === "running" || value === "active") return "in_progress";
   return "pending";
+}
+
+function applyThreadSettingsToConversation(conversation: AgentConversation, value: unknown): void {
+  const raw = asRecord(value);
+  const settings = asRecord(raw?.threadSettings) ?? asRecord(raw?.settings) ?? raw;
+  if (!settings) return;
+  const model = firstString(settings, ["model", "modelId", "currentModel"]);
+  if (model) conversation.model = model;
+  const effort = firstString(settings, ["effort", "reasoningEffort", "reasoning_effort"])
+    ?? firstString(asRecord(asRecord(settings.collaborationMode ?? settings.collaboration_mode)?.settings), ["reasoning_effort", "reasoningEffort"]);
+  if (effort) conversation.reasoningEffort = effort;
+  const collab = asRecord(settings.collaborationMode ?? settings.collaboration_mode);
+  const mode = typeof settings.collaborationMode === "string"
+    ? settings.collaborationMode
+    : typeof settings.collaboration_mode === "string"
+      ? settings.collaboration_mode
+      : firstString(collab, ["mode"]);
+  if (mode === "plan") conversation.collaborationMode = "plan";
+  else if (mode === "default") conversation.collaborationMode = "default";
+  const permission = firstString(settings, ["permissionMode", "permission_mode"]);
+  if (permission === "read_only" || permission === "workspace_write" || permission === "full_access") {
+    conversation.permissionMode = permission;
+    return;
+  }
+  const sandboxValue = settings.sandboxPolicy ?? settings.sandbox_policy;
+  const sandbox = asRecord(sandboxValue);
+  const sandboxType = typeof sandboxValue === "string" ? sandboxValue : firstString(sandbox, ["type"]);
+  if (!sandboxType) return;
+  const norm = sandboxType.replace(/-/g, "").toLowerCase();
+  conversation.permissionMode = norm.includes("readonly")
+    ? "read_only"
+    : norm.includes("workspace")
+      ? "workspace_write"
+      : norm.includes("danger") || norm.includes("full")
+        ? "full_access"
+        : conversation.permissionMode;
 }
 
 function agentStatusFromThreadStatus(value: unknown): AgentStatus | undefined {
@@ -923,9 +982,7 @@ function previewText(text: string): string {
 }
 
 function providerLabel(provider: AgentProvider): string {
-  if (provider === "codex") return "Codex";
-  if (provider === "claude") return "Claude";
-  return "Custom";
+  return agentProviderLabel(provider);
 }
 
 interface AgentModelOption {
@@ -1314,6 +1371,27 @@ function mergeCommands(...groups: Array<AgentCommandDescriptor[] | undefined>): 
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function parseSkillCommands(provider: AgentProvider, value: unknown): AgentCommandDescriptor[] {
+  const raw = asRecord(value);
+  const groups =
+    Array.isArray(value) ? value :
+    Array.isArray(raw?.data) ? raw.data :
+    Array.isArray(raw?.skills) ? [raw] :
+    [];
+  const skills: unknown[] = [];
+  for (const group of groups) {
+    if (typeof group === "string" && group) {
+      skills.push(group);
+      continue;
+    }
+    const rec = asRecord(group);
+    if (!rec) continue;
+    if (Array.isArray(rec.skills)) skills.push(...rec.skills);
+    else if (firstString(rec, ["name", "command", "id"])) skills.push(group);
+  }
+  return runtimeCommands(provider, skills);
+}
+
 function runtimeCommands(provider: AgentProvider, value: unknown): AgentCommandDescriptor[] {
   const raw = asRecord(value);
   const commandsValue =
@@ -1628,12 +1706,11 @@ function parseRemoteSessions(value: unknown): Array<{
     const source = nestedThread ?? session;
     const id = firstString(source, ["id", "threadId", "sessionId", "agentSessionId"]);
     if (!id) continue;
-    // Only accept a transcript-derived status the provider actually reported
-    // (Claude's listSessions sets "running"/"idle" from the on-disk transcript).
-    // Anything else is left undefined so the sync site keeps its own status.
-    const reportedStatus = firstString(source, ["status"]);
-    const status: AgentStatus | undefined =
-      reportedStatus === "running" || reportedStatus === "idle" ? reportedStatus : undefined;
+    // Claude reports "running"/"idle" strings; Codex thread/list uses a tagged
+    // object ({ type: "active"|"idle"|"notLoaded"|"systemError" }). Both map
+    // through the same helper. Unknown / notLoaded stay undefined so the sync
+    // site keeps its own status.
+    const status = agentStatusFromThreadStatus(source.status);
     result.push({
       id,
       cwd: firstString(source, ["cwd", "workingDirectory", "workspacePath"]),
@@ -1933,10 +2010,9 @@ export class AgentWorkspaceProxy {
   private conversations = new Map<string, AgentConversation>();
   private conversationByAgentSessionId = new Map<string, string>();
   private timelines = new Map<string, AgentTimelineItem[]>();
-  // Conversations the user "deleted" (forgot). We never touch the agent's
-  // on-disk transcript, so syncProviderSessions would otherwise re-list and
-  // resurrect them. Tombstone by agentSessionId (the stable provider key) so a
-  // forgotten conversation stays gone for the life of this workspace process.
+  // Conversations the user forgot from the LinkShell list. Tombstone by
+  // agentSessionId so syncProviderSessions cannot resurrect them. This is
+  // NOT Codex thread/delete (that hard-deletes the on-disk rollout).
   private deletedAgentSessionIds = new Set<string>();
   // Opaque codex turns cursor per conversation, pointing at OLDER history to
   // page through (captured at hydration, advanced on each history.request).
@@ -1950,6 +2026,13 @@ export class AgentWorkspaceProxy {
   private itemConversationIds = new Map<string, string>();
   private toolConversationIds = new Map<string, string>();
 
+  private processPollTimer: ReturnType<typeof setInterval> | undefined;
+  private processPollInFlight = false;
+  private processMissCounts = new Map<string, number>();
+  private lastDiscoveredProviders = new Set<string>();
+  private static readonly PROCESS_POLL_MS = 3_000;
+  private static readonly PROCESS_MISS_LIMIT = 2;
+
   constructor(
     private readonly input: {
       sessionId: string;
@@ -1958,6 +2041,7 @@ export class AgentWorkspaceProxy {
       command?: string;
       send: (envelope: Envelope) => void;
       verbose?: boolean;
+      discoverProcesses?: () => AgentProcessSnapshot[];
     },
   ) {}
 
@@ -1977,35 +2061,83 @@ export class AgentWorkspaceProxy {
         const payload = parseTypedPayload("agent.v2.conversation.update", envelope.payload);
         const conversation = this.conversations.get(payload.conversationId);
         if (!conversation) break;
+        const raw = asRecord(envelope.payload) ?? {};
+        const model = payload.model ?? (typeof raw.model === "string" ? raw.model : undefined);
+        const reasoningEffort = payload.reasoningEffort
+          ?? (typeof raw.reasoningEffort === "string" ? raw.reasoningEffort : undefined);
+        const permissionMode = payload.permissionMode
+          ?? (raw.permissionMode === "read_only" || raw.permissionMode === "workspace_write" || raw.permissionMode === "full_access"
+            ? raw.permissionMode
+            : undefined);
+        const collaborationMode = payload.collaborationMode
+          ?? (raw.collaborationMode === "default" || raw.collaborationMode === "plan"
+            ? raw.collaborationMode
+            : undefined);
         if (payload.title !== undefined) {
           const trimmed = payload.title.trim();
           conversation.title = trimmed === "" ? undefined : trimmed;
         }
         if (payload.archived !== undefined) conversation.archived = payload.archived;
+        if (model !== undefined) {
+          const trimmed = model.trim();
+          if (trimmed) conversation.model = trimmed;
+        }
+        if (reasoningEffort !== undefined) conversation.reasoningEffort = reasoningEffort;
+        if (permissionMode !== undefined) conversation.permissionMode = permissionMode;
+        if (collaborationMode !== undefined) conversation.collaborationMode = collaborationMode;
         conversation.lastActivityAt = Date.now();
         // Echo the updated record so every client refreshes (the web store
         // force-replaces by id on any event carrying `conversation`).
         this.emitConversation(conversation);
+        if (conversation.provider === "codex" && conversation.agentSessionId) {
+          const client = this.clientForProvider(conversation.provider);
+          const settingsChanged =
+            model !== undefined ||
+            reasoningEffort !== undefined ||
+            permissionMode !== undefined ||
+            collaborationMode !== undefined;
+          try {
+            const acp = client as AcpClient | undefined;
+            if (payload.title !== undefined && typeof acp?.setThreadName === "function") {
+              await acp.setThreadName({
+                sessionId: conversation.agentSessionId,
+                name: conversation.title ?? "",
+              });
+            }
+            if (payload.archived === true && typeof acp?.archiveThread === "function") {
+              await acp.archiveThread({ sessionId: conversation.agentSessionId });
+            } else if (payload.archived === false && typeof acp?.unarchiveThread === "function") {
+              await acp.unarchiveThread({ sessionId: conversation.agentSessionId });
+            }
+            if (settingsChanged && typeof acp?.updateThreadSettings === "function") {
+              await acp.updateThreadSettings({
+                sessionId: conversation.agentSessionId,
+                model,
+                reasoningEffort,
+                permissionMode,
+                collaborationMode,
+                cwd: conversation.cwd,
+              });
+            }
+          } catch (error) {
+            if (this.input.verbose) {
+              process.stderr.write(`[agent:v2] conversation update provider call failed: ${error instanceof Error ? error.message : String(error)}\n`);
+            }
+          }
+        }
         break;
       }
       case "agent.v2.conversation.delete": {
         const payload = parseTypedPayload("agent.v2.conversation.delete", envelope.payload);
-        const conversation = this.conversations.get(payload.conversationId);
-        // Forget the conversation from the workspace's tracked set. We do NOT
-        // delete the provider's on-disk transcript — only stop tracking it and
-        // tombstone its session id so syncProviderSessions won't re-add it.
-        if (conversation?.agentSessionId) {
-          this.deletedAgentSessionIds.add(conversation.agentSessionId);
-          this.conversationByAgentSessionId.delete(conversation.agentSessionId);
-        }
-        this.conversations.delete(payload.conversationId);
-        this.timelines.delete(payload.conversationId);
-        this.historyCursors.delete(payload.conversationId);
-        this.input.send(createEnvelope({
-          type: "agent.v2.conversation.deleted",
-          sessionId: this.input.sessionId,
-          payload: { conversationId: payload.conversationId },
-        }));
+        // Forget from LinkShell only. Never call Codex thread/delete here —
+        // that hard-deletes the on-disk rollout. Archive is the destructive-ish
+        // user action; this menu item is "hide from the tree".
+        this.forgetConversationLocally(payload.conversationId);
+        break;
+      }
+      case "agent.v2.mcp.login": {
+        const payload = parseTypedPayload("agent.v2.mcp.login", envelope.payload);
+        await this.startMcpLogin(payload);
         break;
       }
       case "agent.v2.conversation.list": {
@@ -2084,6 +2216,10 @@ export class AgentWorkspaceProxy {
   }
 
   stop(): void {
+    if (this.processPollTimer) {
+      clearInterval(this.processPollTimer);
+      this.processPollTimer = undefined;
+    }
     for (const watcher of this.fsWatchers) {
       try { watcher.close(); } catch { /* already closed */ }
     }
@@ -2112,7 +2248,9 @@ export class AgentWorkspaceProxy {
   private fsSyncTimer: ReturnType<typeof setTimeout> | undefined;
   private fsSyncRunning = false;
   private lastPushedConversationSignature: string | undefined;
+  private lastHydrateAt = new Map<string, number>();
   private static readonly FS_SYNC_THROTTLE_MS = 1500;
+  private static readonly EXTERNAL_HYDRATE_THROTTLE_MS = 2000;
 
   private startSessionWatchers(): void {
     const roots = [
@@ -2164,16 +2302,36 @@ export class AgentWorkspaceProxy {
       // and client re-renders. A cheap signature over the render-relevant fields
       // gates the push.
       const signature = this.conversationListSignature(conversations);
-      if (signature === this.lastPushedConversationSignature) return;
-      this.lastPushedConversationSignature = signature;
-      // Push the conversation list (statuses) — lighter than a full snapshot and
-      // exactly what refreshes the tree. The web handles an unsolicited
-      // conversation.list.result the same as a requested one.
-      this.input.send(createEnvelope({
-        type: "agent.v2.conversation.list.result",
-        sessionId: this.input.sessionId,
-        payload: { conversations },
-      }));
+      if (signature !== this.lastPushedConversationSignature) {
+        this.lastPushedConversationSignature = signature;
+        // Push the conversation list (statuses) — lighter than a full snapshot and
+        // exactly what refreshes the tree. The web handles an unsolicited
+        // conversation.list.result the same as a requested one.
+        this.input.send(createEnvelope({
+          type: "agent.v2.conversation.list.result",
+          sessionId: this.input.sessionId,
+          payload: { conversations },
+        }));
+      }
+      // External sessions (status running / waiting_permission but LinkShell is
+      // not driving the turn) have no live event stream on this app-server.
+      // Re-hydrate on a short throttle so the Web timeline still moves.
+      const now = Date.now();
+      for (const conversation of conversations) {
+        if (conversation.status !== "running" && conversation.status !== "waiting_permission") continue;
+        if (this.currentTurnIds.has(conversation.id)) continue;
+        const last = this.lastHydrateAt.get(conversation.id) ?? 0;
+        if (now - last < AgentWorkspaceProxy.EXTERNAL_HYDRATE_THROTTLE_MS) continue;
+        this.lastHydrateAt.set(conversation.id, now);
+        try {
+          await this.hydrateConversationFromProvider(conversation, undefined, { rememberActiveTurn: false });
+          this.sendSnapshot(conversation.id);
+        } catch (error) {
+          if (this.input.verbose) {
+            process.stderr.write(`[agent:v2] external hydrate failed for ${conversation.id}: ${error instanceof Error ? error.message : String(error)}\n`);
+          }
+        }
+      }
     } catch (error) {
       if (this.input.verbose) {
         process.stderr.write(`[agent:v2] fs-watch sync failed: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -2190,7 +2348,7 @@ export class AgentWorkspaceProxy {
    *  membership are what matter. */
   private conversationListSignature(conversations: AgentConversation[]): string {
     return conversations
-      .map((c) => `${c.id}${c.status}${c.title ?? ""}${c.model ?? ""}${c.provider ?? ""}`)
+      .map((c) => `${c.id}${c.status}${c.title ?? ""}${c.model ?? ""}${c.provider ?? ""}${c.lastMessagePreview ?? ""}`)
       .sort()
       .join("");
   }
@@ -2244,6 +2402,156 @@ export class AgentWorkspaceProxy {
     // Start watching the on-disk session stores so externally-started sessions
     // and status changes surface live, not just at connect time.
     this.startSessionWatchers();
+    this.startProcessDiscovery();
+  }
+
+  private startProcessDiscovery(): void {
+    void this.pollDiscoveredProcesses();
+    if (this.processPollTimer) return;
+    this.processPollTimer = setInterval(() => {
+      void this.pollDiscoveredProcesses();
+    }, AgentWorkspaceProxy.PROCESS_POLL_MS);
+    this.processPollTimer.unref?.();
+  }
+
+  private async pollDiscoveredProcesses(): Promise<void> {
+    if (this.processPollInFlight) return;
+    this.processPollInFlight = true;
+    try {
+      const snapshots = this.input.discoverProcesses
+        ? this.input.discoverProcesses()
+        : await discoverAgentProcessesAsync();
+      this.applyDiscoveredProcesses(snapshots);
+    } catch {
+      // A failed ps scan must not tear down the workspace or hitch the PTY.
+    } finally {
+      this.processPollInFlight = false;
+    }
+  }
+
+  /** Open Island rule: a visible agent session is a live process. Two missed
+   *  polls (~6s) drop the running signal so a killed CLI does not linger. */
+  reconcileDiscoveredProcesses(): void {
+    let snapshots: AgentProcessSnapshot[] = [];
+    try {
+      snapshots = this.input.discoverProcesses?.() ?? [];
+    } catch {
+      snapshots = [];
+    }
+    this.applyDiscoveredProcesses(snapshots);
+  }
+
+  private applyDiscoveredProcesses(snapshots: AgentProcessSnapshot[]): void {
+
+    const seenKeys = new Set<string>();
+    const discoveredProviders = new Set<string>();
+    let listChanged = false;
+
+    for (const snapshot of snapshots) {
+      discoveredProviders.add(snapshot.provider);
+      const key = snapshot.sessionId
+        ? `${snapshot.provider}:${snapshot.sessionId}`
+        : `${snapshot.provider}:${snapshot.pid}`;
+      seenKeys.add(key);
+      this.processMissCounts.set(key, 0);
+
+      const existingId = snapshot.sessionId
+        ? this.conversationByAgentSessionId.get(snapshot.sessionId)
+        : undefined;
+      const liveId = liveConversationId(snapshot);
+      const conversationId = existingId ?? liveId;
+      const existing = this.conversations.get(conversationId);
+      const cwd = snapshot.cwd ?? existing?.cwd ?? this.input.cwd;
+      const driving = this.currentTurnIds.has(conversationId);
+      const status: AgentStatus = driving
+        ? existing?.status ?? "running"
+        : existing?.status === "waiting_permission"
+          ? "waiting_permission"
+          : "running";
+
+      if (existing) {
+        const changed = existing.status !== status || existing.cwd !== cwd || !existing.title;
+        existing.status = status;
+        existing.cwd = cwd;
+        if (!existing.title) existing.title = agentProviderLabel(snapshot.provider);
+        if (snapshot.sessionId && !existing.agentSessionId) {
+          existing.agentSessionId = snapshot.sessionId;
+          this.conversationByAgentSessionId.set(snapshot.sessionId, existing.id);
+        }
+        if (changed) {
+          listChanged = true;
+          this.emitConversation(existing);
+        }
+        continue;
+      }
+
+      const now = Date.now();
+      const conversation: AgentConversation = {
+        id: conversationId,
+        agentSessionId: snapshot.sessionId,
+        provider: snapshot.provider,
+        cwd,
+        title: agentProviderLabel(snapshot.provider),
+        status,
+        archived: false,
+        lastMessagePreview: "本机终端中的 Agent 进程",
+        lastActivityAt: now,
+        createdAt: now,
+      };
+      this.conversations.set(conversation.id, conversation);
+      if (snapshot.sessionId) this.conversationByAgentSessionId.set(snapshot.sessionId, conversation.id);
+      this.emitConversation(conversation);
+      listChanged = true;
+    }
+
+    for (const [key, misses] of this.processMissCounts) {
+      if (seenKeys.has(key)) continue;
+      const next = misses + 1;
+      this.processMissCounts.set(key, next);
+      if (next < AgentWorkspaceProxy.PROCESS_MISS_LIMIT) continue;
+      this.processMissCounts.delete(key);
+      const [provider, idPart] = key.split(":");
+      if (!provider || !idPart) continue;
+      const conversation = [...this.conversations.values()].find((item) => {
+        if (item.provider !== provider) return false;
+        if (item.agentSessionId === idPart) return true;
+        return item.id === `agent-live-${provider}-${idPart}`;
+      });
+      if (!conversation) continue;
+      if (this.currentTurnIds.has(conversation.id)) continue;
+      if (conversation.status === "waiting_permission") continue;
+      if (conversation.status === "running") {
+        conversation.status = "idle";
+        conversation.lastActivityAt = Date.now();
+        this.emitConversation(conversation);
+        listChanged = true;
+      }
+      if (isLiveConversationId(conversation.id) && !conversation.agentSessionId) {
+        this.conversations.delete(conversation.id);
+        this.timelines.delete(conversation.id);
+        this.input.send(createEnvelope({
+          type: "agent.v2.conversation.deleted",
+          sessionId: this.input.sessionId,
+          payload: { conversationId: conversation.id },
+        }));
+        listChanged = true;
+      }
+    }
+
+    const catalogChanged =
+      discoveredProviders.size !== this.lastDiscoveredProviders.size ||
+      [...discoveredProviders].some((provider) => !this.lastDiscoveredProviders.has(provider));
+    this.lastDiscoveredProviders = discoveredProviders;
+    if (catalogChanged) this.sendCapabilities();
+    if (listChanged) {
+      const conversations = [...this.conversations.values()].filter((item) => !item.archived);
+      this.lastPushedConversationSignature = this.conversationListSignature(conversations);
+      this.input.send(createEnvelope({
+        type: "agent.v2.conversation.list.result",
+        sessionId: this.input.sessionId,
+        payload: { conversations },
+      }));
+    }
   }
 
   private async ensureProviderClient(provider: AgentProvider): Promise<AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined> {
@@ -2398,9 +2706,11 @@ export class AgentWorkspaceProxy {
         }
       }
     }
+    const listedMcp = await this.listProviderMcpServers(client);
     if (provider === "codex") {
       // Codex `model/list` is unreliable across versions — make sure mobile always
       // sees a usable model picker by merging in a static fallback list.
+      const skillCommands = await this.loadProviderSkillCommands(provider, client);
       const merged: ProviderRuntimeCapabilities = {
         models: runtimeCapabilities?.models?.length
           ? runtimeCapabilities.models
@@ -2409,13 +2719,14 @@ export class AgentWorkspaceProxy {
         reasoningEfforts: runtimeCapabilities?.reasoningEfforts?.length
           ? runtimeCapabilities.reasoningEfforts
           : [...ALL_REASONING_EFFORTS],
-        commands: runtimeCapabilities?.commands,
+        commands: mergeCommands(runtimeCapabilities?.commands, skillCommands),
         modes: runtimeCapabilities?.modes,
         currentMode: runtimeCapabilities?.currentMode,
         // Preserve any MCP status already accumulated from startupStatus events.
         mcpServers: runtimeCapabilities?.mcpServers ?? this.providerCapabilities.get(provider)?.mcpServers,
       };
       this.providerCapabilities.set(provider, merged);
+      if (listedMcp.length > 0) this.mergeMcpServers(provider, listedMcp);
       return;
     }
     if (runtimeCapabilities) {
@@ -2427,7 +2738,47 @@ export class AgentWorkspaceProxy {
         for (const [name, desc] of runtimeCapabilities.mcpServers ?? []) map.set(name, desc);
         runtimeCapabilities = { ...runtimeCapabilities, mcpServers: map };
       }
+      const skillCommands = await this.loadProviderSkillCommands(provider, client);
+      if (skillCommands.length > 0) {
+        runtimeCapabilities = {
+          ...runtimeCapabilities,
+          commands: mergeCommands(runtimeCapabilities.commands, skillCommands),
+        };
+      }
       this.providerCapabilities.set(provider, runtimeCapabilities);
+    }
+    if (listedMcp.length > 0) this.mergeMcpServers(provider, listedMcp);
+  }
+
+  private async listProviderMcpServers(
+    client: AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient,
+  ): Promise<AgentMcpServerDescriptor[]> {
+    const listMcpServers = (client as { listMcpServers?: () => Promise<unknown> }).listMcpServers;
+    if (typeof listMcpServers !== "function") return [];
+    try {
+      return mcpListFromProviderResult(await listMcpServers.call(client));
+    } catch (error) {
+      if (this.input.verbose) {
+        process.stderr.write(`[agent:v2] mcpServerStatus/list failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+      return [];
+    }
+  }
+
+  private async loadProviderSkillCommands(
+    provider: AgentProvider,
+    client: AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient,
+  ): Promise<AgentCommandDescriptor[]> {
+    const listSkills = (client as { listSkills?: (input: { cwd: string }) => Promise<unknown> }).listSkills;
+    if (typeof listSkills !== "function") return [];
+    try {
+      const result = await listSkills.call(client, { cwd: this.input.cwd });
+      return parseSkillCommands(provider, result);
+    } catch (error) {
+      if (this.input.verbose) {
+        process.stderr.write(`[agent:v2] skills/list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+      return [];
     }
   }
 
@@ -2485,9 +2836,11 @@ export class AgentWorkspaceProxy {
             ? existing?.status ?? "running"
             : remoteRunning
               ? "running"
-              : existing?.status === "error" || existing?.status === "waiting_permission"
-                ? existing.status
-                : "idle";
+              : remote.status === "error"
+                ? "error"
+                : existing?.status === "error" || existing?.status === "waiting_permission"
+                  ? existing.status
+                  : "idle";
           const conversation: AgentConversation = {
             id: conversationId,
             agentSessionId,
@@ -2520,6 +2873,7 @@ export class AgentWorkspaceProxy {
   private async hydrateConversationFromProvider(
     conversation: AgentConversation,
     seedResult?: unknown,
+    options?: { rememberActiveTurn?: boolean },
   ): Promise<void> {
     let client = this.clientForProvider(conversation.provider);
     if (!client || !conversation.agentSessionId) return;
@@ -2589,7 +2943,9 @@ export class AgentWorkspaceProxy {
 
     const thread = threadFromProviderResult(source);
     const activeTurnId = activeTurnIdFromThread(thread);
-    if (activeTurnId) this.rememberTurnConversationId(conversation.id, activeTurnId);
+    if (activeTurnId && options?.rememberActiveTurn !== false) {
+      this.rememberTurnConversationId(conversation.id, activeTurnId);
+    }
     const model = firstString(thread, ["model", "modelId", "currentModel"]);
     if (model && !conversation.model) conversation.model = model;
 
@@ -2662,7 +3018,11 @@ export class AgentWorkspaceProxy {
   }
 
   private sendCapabilities(): void {
-    const providers = this.input.availableProviders.map((provider) => {
+    const catalog = [...new Set([
+      ...this.input.availableProviders,
+      ...this.lastDiscoveredProviders,
+    ])];
+    const providers = catalog.map((provider) => {
       const client = this.clients.get(provider);
       const protocol = this.agentProtocols.get(provider);
       const runtimeCapabilities = this.providerCapabilities.get(provider);
@@ -2671,6 +3031,7 @@ export class AgentWorkspaceProxy {
       const isClaudeFallback = protocol === "claude-stream-json";
       const supportsPermission = enabled && !isClaudeFallback;
       const supportsReasoningEffort = enabled && !isClaudeFallback;
+      const protocolBacked = isProtocolAgentProvider(provider);
       const commands = mergeCommands(
         defaultProviderCommands(provider, this.input.cwd, enabled),
         runtimeCapabilities?.commands,
@@ -2680,7 +3041,11 @@ export class AgentWorkspaceProxy {
         id: provider,
         label: providerLabel(provider),
         enabled,
-        reason: enabled ? undefined : this.providerErrors.get(provider) ?? `${providerLabel(provider)} 未安装或启动失败`,
+        reason: enabled
+          ? undefined
+          : protocolBacked
+            ? this.providerErrors.get(provider) ?? `${providerLabel(provider)} 未安装或启动失败`
+            : `${providerLabel(provider)} 已在本机检测；远程对话请在终端继续`,
         supportsImages,
         supportsPermission,
         supportsPlan: enabled,
@@ -2717,11 +3082,11 @@ export class AgentWorkspaceProxy {
       sessionId: this.input.sessionId,
       payload: {
         enabled: anyEnabled,
-        provider: this.input.availableProviders[0] ?? "codex",
+        provider: this.input.availableProviders[0] ?? catalog[0] ?? "codex",
         providers,
         protocolVersion: 1,
         workspaceProtocolVersion: 2,
-        error: anyEnabled ? undefined : "没有可用的 Agent provider。请安装 Claude Code 或 Codex CLI。",
+        error: anyEnabled ? undefined : "没有可远程驱动的 Agent。请安装 Claude Code 或 Codex CLI；其它 Agent 只要在本机终端运行就会出现在列表里。",
         supportsSessionList: anyEnabled,
         supportsSessionLoad: anyEnabled,
         supportsImages: providers.some((p) => p.supportsImages),
@@ -2750,18 +3115,44 @@ export class AgentWorkspaceProxy {
     if (!provider) {
       return this.openFailure(payload, "没有可用的 Agent provider。");
     }
-    if (!this.input.availableProviders.includes(provider)) {
-      return this.openFailure(
-        payload,
-        `${providerLabel(provider)} 未安装或不可用。`,
-      );
-    }
 
     let cwd = payload.cwd ?? this.input.cwd;
     let agentSessionId = payload.agentSessionId;
     let existingConversation =
       (payload.conversationId ? this.conversations.get(payload.conversationId) : undefined) ??
       (agentSessionId ? this.conversations.get(this.conversationByAgentSessionId.get(agentSessionId) ?? "") : undefined);
+    if (
+      existingConversation &&
+      !this.clientForProvider(existingConversation.provider) &&
+      !isProtocolAgentProvider(existingConversation.provider)
+    ) {
+      this.activeConversationId = existingConversation.id;
+      this.input.send(createEnvelope({
+        type: "agent.v2.conversation.opened",
+        sessionId: this.input.sessionId,
+        payload: {
+          conversation: existingConversation,
+          snapshot: this.timelines.get(existingConversation.id) ?? [],
+          requestedConversationId: payload.conversationId,
+        },
+      }));
+      return existingConversation;
+    }
+    if (!isProtocolAgentProvider(provider) && !resolveAgentCommand({
+      provider,
+      command: this.input.command,
+    })) {
+      return this.openFailure(
+        payload,
+        `${providerLabel(provider)} 还不能从远程新建对话。在本机终端启动后，会话会出现在列表里。`,
+      );
+    }
+    if (!this.input.availableProviders.includes(provider) && !existingConversation) {
+      return this.openFailure(
+        payload,
+        `${providerLabel(provider)} 未安装或不可用。`,
+      );
+    }
     if (!payload.cwd && existingConversation?.cwd) cwd = existingConversation.cwd;
 
     let client = await this.ensureProviderClient(provider);
@@ -2789,14 +3180,15 @@ export class AgentWorkspaceProxy {
     }
 
     // Fork: seed a NEW conversation from an existing one's transcript, truncated
-    // at forkFromTurnId. Claude only — the SDK client exposes forkSession(); the
-    // stream-json fallback and Codex don't, so we notify and fall through to a
-    // plain new conversation rather than pretend. On success we set agentSessionId
-    // to the freshly-written transcript id and let the normal load path hydrate it.
+    // at forkFromTurnId. Claude uses the SDK forkSession(); Codex uses
+    // thread/fork. Other providers notify and fall through to a plain new
+    // conversation. On success we set agentSessionId to the new thread id and
+    // let the normal load path hydrate it.
     if (payload.forkFromConversationId) {
       const source = this.conversations.get(payload.forkFromConversationId);
       const sourceSessionId = source?.agentSessionId;
       const forkable = (client as { forkSession?: (i: { sourceSessionId: string; uptoTurnId?: string }) => { sessionId: string } | undefined }).forkSession;
+      const forkThread = (client as { forkThread?: (i: { sessionId: string; lastTurnId?: string }) => Promise<unknown> }).forkThread;
       if (provider === "claude" && typeof forkable === "function" && sourceSessionId) {
         if (source?.cwd && !payload.cwd) cwd = source.cwd;
         const forked = forkable.call(client, { sourceSessionId, uptoTurnId: payload.forkFromTurnId });
@@ -2814,6 +3206,35 @@ export class AgentWorkspaceProxy {
           existingConversation = undefined; // force the new-conversation path
         } else {
           this.emitNotice({ kind: "warning", title: "分叉失败", detail: "无法复制该会话的历史记录，已新建空会话。" });
+        }
+      } else if (provider === "codex" && typeof forkThread === "function" && sourceSessionId) {
+        if (source?.cwd && !payload.cwd) cwd = source.cwd;
+        try {
+          const forked = await forkThread.call(client, {
+            sessionId: sourceSessionId,
+            lastTurnId: payload.forkFromTurnId,
+          });
+          const forkedId = this.extractSessionId(forked);
+          if (forkedId) {
+            agentSessionId = forkedId;
+            payload = {
+              ...payload,
+              model: payload.model ?? source?.model,
+              reasoningEffort: payload.reasoningEffort ?? source?.reasoningEffort,
+              permissionMode: payload.permissionMode ?? source?.permissionMode,
+              collaborationMode: payload.collaborationMode ?? source?.collaborationMode,
+              title: payload.title ?? (source?.title ? `${source.title} (分叉)` : undefined),
+            };
+            existingConversation = undefined;
+          } else {
+            this.emitNotice({ kind: "warning", title: "分叉失败", detail: "无法复制该会话的历史记录，已新建空会话。" });
+          }
+        } catch (error) {
+          this.emitNotice({
+            kind: "warning",
+            title: "分叉失败",
+            detail: error instanceof Error ? error.message : "无法复制该会话的历史记录，已新建空会话。",
+          });
         }
       } else {
         this.emitNotice({
@@ -3057,7 +3478,9 @@ export class AgentWorkspaceProxy {
     if (!conversation.agentSessionId) {
       this.rejectAgentAction(
         conversation,
-        "Agent session 尚未就绪，消息没有发送。请重新打开对话后再试。",
+        isLiveConversationId(conversation.id) || !isProtocolAgentProvider(conversation.provider)
+          ? `${providerLabel(conversation.provider)} 正在本机终端中运行。远程对话协议尚未接入，请打开终端面板继续。`
+          : "Agent session 尚未就绪，消息没有发送。请重新打开对话后再试。",
       );
       return;
     }
@@ -3065,7 +3488,9 @@ export class AgentWorkspaceProxy {
     if (!client) {
       this.rejectAgentAction(
         conversation,
-        this.providerErrors.get(conversation.provider) ?? `${providerLabel(conversation.provider)} 未连接，消息没有发送。`,
+        isLiveConversationId(conversation.id) || !isProtocolAgentProvider(conversation.provider)
+          ? `${providerLabel(conversation.provider)} 正在本机终端中运行。远程对话协议尚未接入，请打开终端面板继续。`
+          : this.providerErrors.get(conversation.provider) ?? `${providerLabel(conversation.provider)} 未连接，消息没有发送。`,
         "error",
       );
       return;
@@ -3411,14 +3836,37 @@ export class AgentWorkspaceProxy {
         return;
       }
 
-      if (command.name === "review" || command.name === "subagents") {
-        const prompt = command.name === "review"
-          ? args || "Review the current local changes."
-          : args || "Run subagents for distinct tasks in parallel when useful, then synthesize the results.";
+      if (command.name === "review") {
+        const startReview = (client as { startReview?: (input: { sessionId: string; prompt?: string }) => Promise<unknown> })?.startReview;
+        if (typeof startReview === "function" && conversation.agentSessionId) {
+          conversation.status = "running";
+          conversation.lastActivityAt = now;
+          this.emitConversation(conversation);
+          const result = await startReview.call(client, {
+            sessionId: conversation.agentSessionId,
+            prompt: args || undefined,
+          });
+          const turnId = this.extractTurnId(result);
+          if (turnId) this.rememberTurnConversationId(conversation.id, turnId);
+          return;
+        }
         await this.sendPrompt({
           conversationId: conversation.id,
           clientMessageId: id(command.name),
-          contentBlocks: [{ type: "text", text: prompt }],
+          contentBlocks: [{ type: "text", text: args || "Review the current local changes." }],
+          model: conversation.model,
+          reasoningEffort: conversation.reasoningEffort,
+          permissionMode: conversation.permissionMode,
+          collaborationMode: conversation.collaborationMode,
+        });
+        return;
+      }
+
+      if (command.name === "subagents") {
+        await this.sendPrompt({
+          conversationId: conversation.id,
+          clientMessageId: id(command.name),
+          contentBlocks: [{ type: "text", text: args || "Run subagents for distinct tasks in parallel when useful, then synthesize the results." }],
           model: conversation.model,
           reasoningEffort: conversation.reasoningEffort,
           permissionMode: conversation.permissionMode,
@@ -3460,8 +3908,72 @@ export class AgentWorkspaceProxy {
     return {};
   }
 
-  // Merge MCP server descriptors into a provider's runtime capabilities,
-  // last-writer-wins by server name. Creates the map lazily.
+  private async startMcpLogin(payload: { provider?: AgentProvider; serverName: string }): Promise<void> {
+    const provider = payload.provider
+      ?? this.input.availableProviders.find((item) => this.clients.has(item))
+      ?? this.input.availableProviders[0];
+    const sendResult = (input: { authorizationUrl?: string; error?: string }) => {
+      this.input.send(createEnvelope({
+        type: "agent.v2.mcp.login.result",
+        sessionId: this.input.sessionId,
+        payload: {
+          ...(provider ? { provider } : {}),
+          serverName: payload.serverName,
+          authorizationUrl: input.authorizationUrl,
+          error: input.error,
+        },
+      }));
+    };
+    if (!provider) {
+      sendResult({ error: "没有可用的 Agent 提供方。" });
+      return;
+    }
+    const client = this.clientForProvider(provider);
+    const startMcpOAuth = (client as { startMcpOAuth?: (input: { serverName: string }) => Promise<unknown> } | undefined)?.startMcpOAuth;
+    if (typeof startMcpOAuth !== "function") {
+      sendResult({ error: "请在主机上的 Claude / Codex 完成该 MCP 的授权。" });
+      return;
+    }
+    try {
+      const result = await startMcpOAuth.call(client, { serverName: payload.serverName });
+      const raw = asRecord(result);
+      const authorizationUrl = firstString(raw, [
+        "authorizationUrl",
+        "authorization_url",
+        "url",
+        "loginUrl",
+      ]);
+      if (!authorizationUrl) {
+        sendResult({ error: "主机没有返回授权地址。" });
+        return;
+      }
+      this.mergeMcpServers(provider, [{
+        name: payload.serverName,
+        status: "needs_auth",
+      }]);
+      this.sendCapabilities();
+      sendResult({ authorizationUrl });
+    } catch (error) {
+      sendResult({ error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private handleMcpOAuthCompleted(params: unknown): void {
+    const raw = asRecord(params) ?? {};
+    const name = firstString(raw, ["name", "server", "serverName"]);
+    if (!name) return;
+    const success = raw.success !== false && !raw.error;
+    const provider = this.input.availableProviders.find((item) => this.clients.has(item))
+      ?? this.input.availableProviders[0];
+    if (!provider) return;
+    this.mergeMcpServers(provider, [{
+      name,
+      status: success ? "connected" : "needs_auth",
+      error: success ? undefined : firstString(raw, ["error", "message"]),
+    }]);
+    this.sendCapabilities();
+  }
+
   private mergeMcpServers(provider: AgentProvider, servers: AgentMcpServerDescriptor[]): void {
     if (servers.length === 0) return;
     const existing = this.providerCapabilities.get(provider) ?? {};
@@ -3486,7 +3998,7 @@ export class AgentWorkspaceProxy {
     if (!name) return;
     this.mergeMcpServers(provider, [{
       name,
-      status: normalizeMcpStatus(raw.status ?? raw.state),
+      status: mcpStatusFromRecord(raw),
       error: firstString(raw, ["error", "message", "reason"]),
       toolCount: firstNumber(raw, ["toolCount", "tools", "toolsCount"]) ?? (Array.isArray(raw.tools) ? raw.tools.length : undefined),
     }]);
@@ -3538,11 +4050,11 @@ export class AgentWorkspaceProxy {
       this.handleMcpStartupStatus(method, params);
       return;
     }
-    if (
-      method.startsWith("account/") ||
-      method === "serverRequest/resolved" ||
-      method === "mcpServer/oauthLogin/completed"
-    ) {
+    if (method === "mcpServer/oauthLogin/completed") {
+      this.handleMcpOAuthCompleted(params);
+      return;
+    }
+    if (method.startsWith("account/") || method === "serverRequest/resolved") {
       return;
     }
 
@@ -3575,6 +4087,45 @@ export class AgentWorkspaceProxy {
             : undefined;
         this.updateConversationStatus(conversationId, status, message);
       }
+      return;
+    }
+    if (method === "thread/name/updated") {
+      if (conversationId) {
+        const raw = asRecord(params);
+        const title = firstString(raw, ["name", "title"]) ?? firstString(asRecord(raw?.thread), ["name", "title"]);
+        const conversation = this.conversations.get(conversationId);
+        if (conversation && title !== undefined) {
+          conversation.title = title;
+          conversation.lastActivityAt = Date.now();
+          this.emitConversation(conversation);
+        }
+      }
+      return;
+    }
+    if (method === "thread/settings/updated") {
+      if (conversationId) {
+        const conversation = this.conversations.get(conversationId);
+        if (conversation) {
+          applyThreadSettingsToConversation(conversation, params);
+          conversation.lastActivityAt = Date.now();
+          this.emitConversation(conversation);
+        }
+      }
+      return;
+    }
+    if (method === "thread/archived" || method === "thread/unarchived") {
+      if (conversationId) {
+        const conversation = this.conversations.get(conversationId);
+        if (conversation) {
+          conversation.archived = method === "thread/archived";
+          conversation.lastActivityAt = Date.now();
+          this.emitConversation(conversation);
+        }
+      }
+      return;
+    }
+    if (method === "thread/deleted") {
+      if (conversationId) this.forgetConversationLocally(conversationId);
       return;
     }
     if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") {
@@ -3636,6 +4187,13 @@ export class AgentWorkspaceProxy {
     switch (method) {
       case "item/agentMessage/delta":
         this.handleAgentMessageDelta(params);
+        return;
+      case "item/reasoning/summaryTextDelta":
+      case "item/reasoning/textDelta":
+        this.handleReasoningDelta(params);
+        return;
+      case "item/reasoning/summaryPartAdded":
+        this.handleReasoningDelta(params, { partBoundary: true });
         return;
       case "turn/plan/updated":
         this.handlePlanUpdated(params);
@@ -3700,8 +4258,66 @@ export class AgentWorkspaceProxy {
       updatedAt: Date.now(),
       isStreaming: true,
     };
-    this.upsertItem(conversationId, item);
+    this.applyStreamingTextDelta(conversationId, item, existing, delta);
     this.updateConversationPreview(conversationId, text, "running");
+  }
+
+  private handleReasoningDelta(params: unknown, options?: { partBoundary?: boolean }): void {
+    const raw = asRecord(params);
+    if (!raw) return;
+    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
+    if (!conversationId) return;
+    const itemId = firstString(raw, ["itemId", "id", "messageId"]) ?? id("thinking");
+    const existing = this.findItem(conversationId, itemId);
+    const delta = firstString(raw, ["delta", "text", "content", "summary"])
+      ?? (options?.partBoundary ? "\n" : undefined);
+    if (!delta) return;
+    const text = `${existing?.text ?? ""}${delta}`;
+    const item: AgentTimelineItem = {
+      id: itemId,
+      conversationId,
+      type: "status",
+      kind: "thinking",
+      role: "system",
+      turnId: this.extractTurnId(raw) ?? this.currentTurnIds.get(conversationId),
+      itemId,
+      content: [{ type: "text", text }],
+      text,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+      isStreaming: true,
+    };
+    this.applyStreamingTextDelta(conversationId, item, existing, delta);
+  }
+
+  private applyStreamingTextDelta(
+    conversationId: string,
+    item: AgentTimelineItem,
+    existing: AgentTimelineItem | undefined,
+    delta: string,
+  ): void {
+    if (!existing) {
+      this.upsertItem(conversationId, item);
+      return;
+    }
+    this.rememberItemConversationId(conversationId, item);
+    const timeline = this.timelines.get(conversationId) ?? [];
+    const index = timeline.findIndex((entry) => entry.id === item.id);
+    if (index >= 0) timeline[index] = item;
+    else timeline.push(item);
+    this.timelines.set(conversationId, timeline);
+    this.input.send(createEnvelope({
+      type: "agent.v2.event",
+      sessionId: this.input.sessionId,
+      payload: {
+        conversationId,
+        patch: {
+          itemId: item.id,
+          textDelta: delta,
+          updatedAt: item.updatedAt,
+        },
+      },
+    }));
   }
 
   private handlePlanUpdated(params: unknown): void {
@@ -4174,20 +4790,14 @@ export class AgentWorkspaceProxy {
     const requestId = firstString(raw, ["requestId", "id", "permissionId"]) ?? id("perm");
     const rawToolCall = asRecord(raw.toolCall) ?? raw;
     // Codex app-server command/file approvals carry `command`/`reason`/`cwd`
-    // (not toolCall/context). Surface them so the card actually shows what's
-    // being approved; fall back to the Claude/MCP shape otherwise.
-    const codexCommand = firstString(raw, ["command"]);
-    const codexCwd = firstString(raw, ["cwd"]);
+    // (not toolCall/context). Keep those fields as JSON so the web card can
+    // render `$ command` / a path instead of a raw dump.
     const permission: AgentPermission = {
       requestId,
-      toolName:
-        firstString(rawToolCall, ["toolName", "tool", "name", "title", "kind"]) ??
-        (codexCommand ? "shell" : undefined),
-      toolInput: codexCommand
-        ? (codexCwd ? `$ ${codexCommand}\n# cwd: ${codexCwd}` : `$ ${codexCommand}`)
-        : stringify(rawToolCall.input ?? rawToolCall.toolInput ?? rawToolCall),
+      toolName: permissionToolName(raw, rawToolCall),
+      toolInput: permissionToolInput(raw, rawToolCall),
       context: firstString(raw, ["context", "description", "message", "title", "reason"]),
-      options: parsePermissionOptions(raw.options),
+      options: permissionOptionsFromRequest(raw, source),
     };
     this.pendingPermissions.set(requestId, permission);
     if (source) this.permissionSources.set(requestId, source);
@@ -4496,6 +5106,23 @@ export class AgentWorkspaceProxy {
       type: "agent.v2.event",
       sessionId: this.input.sessionId,
       payload: { conversationId, conversation: conversation ? { ...conversation } : undefined, item },
+    }));
+  }
+
+  private forgetConversationLocally(conversationId: string): void {
+    const conversation = this.conversations.get(conversationId);
+    if (conversation?.agentSessionId) {
+      this.deletedAgentSessionIds.add(conversation.agentSessionId);
+      this.conversationByAgentSessionId.delete(conversation.agentSessionId);
+    }
+    this.conversations.delete(conversationId);
+    this.timelines.delete(conversationId);
+    this.historyCursors.delete(conversationId);
+    this.lastHydrateAt.delete(conversationId);
+    this.input.send(createEnvelope({
+      type: "agent.v2.conversation.deleted",
+      sessionId: this.input.sessionId,
+      payload: { conversationId },
     }));
   }
 
@@ -4886,6 +5513,84 @@ export class AgentWorkspaceProxy {
   }
 }
 
+function permissionToolName(
+  raw: Record<string, unknown>,
+  rawToolCall: Record<string, unknown>,
+): string | undefined {
+  const named = firstString(rawToolCall, ["toolName", "tool", "name", "title", "kind"]);
+  if (named) return named;
+  if (firstString(raw, ["command"])) return "shell";
+  if (permissionFilePath(raw)) return "Edit";
+  return undefined;
+}
+
+function permissionFilePath(raw: Record<string, unknown>): string | undefined {
+  const direct = firstString(raw, ["path", "filePath", "file_path"]);
+  if (direct) return direct;
+  const changes = Array.isArray(raw.changes) ? raw.changes : undefined;
+  const first = changes ? asRecord(changes[0]) : undefined;
+  return firstString(first, ["path", "filePath", "file_path"]);
+}
+
+function permissionToolInput(
+  raw: Record<string, unknown>,
+  rawToolCall: Record<string, unknown>,
+): string {
+  const command = firstString(raw, ["command"]);
+  const cwd = firstString(raw, ["cwd"]);
+  const path = permissionFilePath(raw);
+  if (command || path) {
+    return JSON.stringify({
+      ...(command ? { command } : {}),
+      ...(cwd ? { cwd } : {}),
+      ...(path ? { path } : {}),
+    });
+  }
+  return stringify(rawToolCall.input ?? rawToolCall.toolInput ?? rawToolCall);
+}
+
+function officialDecisionKey(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  const raw = asRecord(value);
+  return firstString(raw, ["decision", "id", "kind", "type", "optionId"]);
+}
+
+function officialDecisionOption(key: string): AgentPermission["options"][number] | undefined {
+  const normalized = key.replace(/[\s_-]/g, "").toLowerCase();
+  if (normalized === "accept" || normalized === "allow" || normalized === "allowonce") {
+    return { id: key === "accept" ? "accept" : key, label: "允许一次", kind: "allow" };
+  }
+  if (
+    normalized === "acceptforsession" ||
+    normalized === "allowsession" ||
+    normalized === "allowforsession" ||
+    normalized === "session"
+  ) {
+    return { id: "acceptForSession", label: "本会话允许", kind: "allow" };
+  }
+  if (normalized === "decline" || normalized === "deny" || normalized === "reject") {
+    return { id: normalized === "decline" ? "decline" : key, label: "拒绝", kind: "deny" };
+  }
+  if (normalized === "cancel") {
+    return { id: "cancel", label: "取消", kind: "deny" };
+  }
+  return undefined;
+}
+
+function parseOfficialDecisions(value: unknown[]): AgentPermission["options"] {
+  const options: AgentPermission["options"] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const key = officialDecisionKey(entry);
+    if (!key) continue;
+    const mapped = officialDecisionOption(key);
+    if (!mapped || seen.has(mapped.id)) continue;
+    seen.add(mapped.id);
+    options.push(mapped);
+  }
+  return options;
+}
+
 function parsePermissionOptions(value: unknown): AgentPermission["options"] {
   if (!Array.isArray(value)) {
     return [
@@ -4894,19 +5599,27 @@ function parsePermissionOptions(value: unknown): AgentPermission["options"] {
     ];
   }
 
+  const official = parseOfficialDecisions(value);
+  if (official.length > 0 && value.every((entry) => officialDecisionOption(officialDecisionKey(entry) ?? ""))) {
+    return official;
+  }
+
   const options = value
     .map((entry, index) => {
       const raw = asRecord(entry) ?? {};
-      const idValue = raw.optionId ?? raw.id ?? raw.kind ?? `option-${index + 1}`;
-      const labelValue = raw.name ?? raw.label ?? raw.kind ?? String(idValue);
+      const idValue = raw.optionId ?? raw.id ?? raw.kind ?? raw.decision ?? `option-${index + 1}`;
+      const labelValue = raw.name ?? raw.label ?? raw.kind ?? raw.decision ?? String(idValue);
       const id = String(idValue);
       const label = String(labelValue);
+      const official = officialDecisionOption(id);
+      if (official) return { ...official, id, label: official.label === "允许一次" && label !== id ? label : official.label };
       const normalized = `${id} ${label}`.toLowerCase();
-      const kind: AgentPermission["options"][number]["kind"] = normalized.includes("reject") || normalized.includes("deny")
-        ? "deny"
-        : normalized.includes("allow")
-          ? "allow"
-          : "other";
+      const kind: AgentPermission["options"][number]["kind"] =
+        /reject|deny|decline|cancel/.test(normalized)
+          ? "deny"
+          : /allow|accept/.test(normalized)
+            ? "allow"
+            : "other";
       return { id, label, kind };
     })
     .filter((option) => option.id.length > 0 && option.label.length > 0);
@@ -4917,6 +5630,38 @@ function parsePermissionOptions(value: unknown): AgentPermission["options"] {
         { id: "allow", label: "允许", kind: "allow" },
         { id: "deny", label: "拒绝", kind: "deny" },
       ];
+}
+
+function permissionOptionsFromRequest(
+  raw: Record<string, unknown>,
+  source?: string,
+): AgentPermission["options"] {
+  const decisions = raw.availableDecisions;
+  if (Array.isArray(decisions) && decisions.length > 0) {
+    const official = parseOfficialDecisions(decisions);
+    if (official.length > 0) return official;
+  }
+  if (Array.isArray(raw.options)) {
+    return parsePermissionOptions(raw.options);
+  }
+  if (source === "item/commandExecution/requestApproval" || source === "item/fileChange/requestApproval") {
+    return [
+      { id: "accept", label: "允许一次", kind: "allow" },
+      { id: "acceptForSession", label: "本会话允许", kind: "allow" },
+      { id: "decline", label: "拒绝", kind: "deny" },
+    ];
+  }
+  if (source === "item/permissions/requestApproval") {
+    return [
+      { id: "turn", label: "本次允许", kind: "allow" },
+      { id: "session", label: "本会话允许", kind: "allow" },
+      { id: "deny", label: "拒绝", kind: "deny" },
+    ];
+  }
+  return [
+    { id: "allow", label: "允许", kind: "allow" },
+    { id: "deny", label: "拒绝", kind: "deny" },
+  ];
 }
 
 function selectPermissionOption(
@@ -5013,7 +5758,10 @@ function formatPermissionResponse(
   optionId: string,
 ): unknown {
   if (source === "item/commandExecution/requestApproval" || source === "item/fileChange/requestApproval") {
-    return { decision: outcome === "allow" ? "accept" : outcome === "deny" ? "decline" : "cancel" };
+    if (outcome === "cancelled" || optionId === "cancel") return { decision: "cancel" };
+    if (outcome === "deny") return { decision: "decline" };
+    if (optionId === "acceptForSession") return { decision: "acceptForSession" };
+    return { decision: "accept" };
   }
   if (source === "item/permissions/requestApproval") {
     if (outcome === "allow") {

@@ -36,6 +36,8 @@ export interface Session {
   agentProvider: string | undefined;
   agentConversationId: string | undefined;
   agentTitle: string | undefined;
+  // Short "what it's doing / asking" line for the session list.
+  agentDetail: string | undefined;
   agentLastActivity: number | undefined;
   // Latest token/context usage for the picked conversation (for at-a-glance
   // display on the session list, without opening the console).
@@ -44,6 +46,10 @@ export interface Session {
   // on-disk transcripts). Sent automatically on connect; shown as summary cards
   // on the session list page without entering the console.
   agentUsageReport: unknown | undefined;
+  // Last agent.v2.snapshot + recent host→client agent envelopes, so a
+  // reconnecting console can catch up without waiting on the host.
+  lastAgentSnapshot: Envelope | undefined;
+  agentReplay: Envelope[];
 }
 
 export interface AgentUsageSummary {
@@ -57,6 +63,7 @@ export interface AgentUsageSummary {
 
 const OUTPUT_BUFFER_CAPACITY = 200;
 const OUTPUT_BUFFER_MAX_BYTES = 8 * 1024 * 1024; // 8MB per terminal buffer
+const AGENT_REPLAY_CAPACITY = 80;
 const HOST_RECONNECT_WINDOW = 60_000; // 60s
 const CLEANUP_INTERVAL = 30_000;
 
@@ -74,9 +81,15 @@ function approxEnvelopeBytes(envelope: Envelope): number {
 export class SessionManager {
   private sessions = new Map<string, Session>();
   private cleanupTimer: ReturnType<typeof setInterval>;
+  /** Fired when host liveness or visible agent summary fields change. */
+  onPresenceChange?: (session: Session) => void;
 
   constructor() {
     this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL);
+  }
+
+  private emitPresence(session: Session): void {
+    this.onPresenceChange?.(session);
   }
 
   getOrCreate(sessionId: string): Session {
@@ -105,9 +118,12 @@ export class SessionManager {
         agentProvider: undefined,
         agentConversationId: undefined,
         agentTitle: undefined,
+        agentDetail: undefined,
         agentLastActivity: undefined,
         agentUsage: undefined,
         agentUsageReport: undefined,
+        lastAgentSnapshot: undefined,
+        agentReplay: [],
       };
       this.sessions.set(sessionId, session);
     }
@@ -124,6 +140,7 @@ export class SessionManager {
     session.state = "active";
     session.hostDisconnectedAt = undefined;
     session.lastActivity = Date.now();
+    this.emitPresence(session);
   }
 
   addClient(sessionId: string, device: ConnectedDevice): void {
@@ -143,6 +160,7 @@ export class SessionManager {
     session.host = undefined;
     session.state = "host_disconnected";
     session.hostDisconnectedAt = Date.now();
+    this.emitPresence(session);
     return { clients: session.clients };
   }
 
@@ -284,6 +302,7 @@ export class SessionManager {
       agentProvider: session.agentProvider ?? null,
       agentConversationId: session.agentConversationId ?? null,
       agentTitle: session.agentTitle ?? null,
+      agentDetail: session.agentDetail ?? null,
       agentLastActivity: session.agentLastActivity ?? null,
       agentUsage: session.agentUsage ?? null,
       agentUsageReport: session.agentUsageReport ?? null,
@@ -297,19 +316,65 @@ export class SessionManager {
       provider?: string | null;
       conversationId?: string | null;
       title?: string | null;
+      detail?: string | null;
       lastActivity?: number | null;
       usage?: AgentUsageSummary | null;
     },
-  ): void {
+  ): boolean {
     const session = this.sessions.get(sessionId);
-    if (!session) return;
+    if (!session) return false;
+    const prev = {
+      status: session.agentStatus,
+      provider: session.agentProvider,
+      conversationId: session.agentConversationId,
+      title: session.agentTitle,
+      detail: session.agentDetail,
+    };
     if (summary.status) session.agentStatus = summary.status;
     if (summary.provider !== undefined) session.agentProvider = summary.provider ?? undefined;
     if (summary.conversationId !== undefined) session.agentConversationId = summary.conversationId ?? undefined;
     if (summary.title !== undefined) session.agentTitle = summary.title ?? undefined;
+    if (summary.detail !== undefined) {
+      session.agentDetail = summary.detail ?? undefined;
+    } else if (summary.status && summary.status !== "waiting_permission") {
+      // Permission lines are only meaningful while waiting. A running/idle
+      // status without a new preview must not keep "运行命令 · …" around.
+      session.agentDetail = undefined;
+    }
     if (summary.lastActivity !== undefined) session.agentLastActivity = summary.lastActivity ?? undefined;
     if (summary.usage !== undefined) session.agentUsage = summary.usage ?? undefined;
     session.lastActivity = Date.now();
+    const changed =
+      prev.status !== session.agentStatus ||
+      prev.provider !== session.agentProvider ||
+      prev.conversationId !== session.agentConversationId ||
+      prev.title !== session.agentTitle ||
+      prev.detail !== session.agentDetail;
+    if (changed) this.emitPresence(session);
+    return changed;
+  }
+
+  bufferAgentEnvelope(sessionId: string, envelope: Envelope): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    if (envelope.type === "agent.v2.snapshot") {
+      session.lastAgentSnapshot = envelope;
+      session.agentReplay = [];
+      return;
+    }
+    session.agentReplay.push(envelope);
+    if (session.agentReplay.length > AGENT_REPLAY_CAPACITY) {
+      session.agentReplay.splice(0, session.agentReplay.length - AGENT_REPLAY_CAPACITY);
+    }
+  }
+
+  getAgentReplay(sessionId: string): Envelope[] {
+    const session = this.sessions.get(sessionId);
+    if (!session) return [];
+    return [
+      ...(session.lastAgentSnapshot ? [session.lastAgentSnapshot] : []),
+      ...session.agentReplay,
+    ];
   }
 
   setMetadata(

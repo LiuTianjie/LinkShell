@@ -130,6 +130,22 @@ describe("agent.v2.conversation.opened schema", () => {
     expect(payload.requestedConversationId).toBe("agent-temp-client");
     expect(payload.conversation.id).toBe("agent-remote-codex-thread-1");
   });
+
+  it("accepts process-discovered providers that are not Codex or Claude", () => {
+    const conversation = parseTypedPayload("agent.v2.conversation.opened", {
+      conversation: {
+        id: "agent-live-gemini-22",
+        provider: "gemini",
+        cwd: "/repo",
+        title: "Gemini",
+        status: "running",
+        createdAt: 1,
+        lastActivityAt: 1,
+      },
+      snapshot: [],
+    }).conversation;
+    expect(conversation.provider).toBe("gemini");
+  });
 });
 
 describe("protocol message registry", () => {
@@ -142,6 +158,48 @@ describe("protocol message registry", () => {
     expect(agentV2MessageRoute("agent.v2.prompt")).toBe("client_write");
     expect(agentV2MessageRoute("agent.v2.snapshot.request")).toBe("client_read");
     expect(agentV2MessageRoute("terminal.output")).toBeNull();
+    expect(agentV2MessageRoute("session.presence")).toBeNull();
+  });
+
+  it("accepts immediate settings on conversation.update", () => {
+    const parsed = parseTypedPayload("agent.v2.conversation.update", {
+      conversationId: "c1",
+      model: "gpt-5",
+      reasoningEffort: "high",
+      permissionMode: "workspace_write",
+      collaborationMode: "plan",
+    });
+    expect(parsed).toMatchObject({
+      conversationId: "c1",
+      model: "gpt-5",
+      reasoningEffort: "high",
+      permissionMode: "workspace_write",
+      collaborationMode: "plan",
+    });
+  });
+
+  it("accepts mcp login + result payloads", () => {
+    expect(parseTypedPayload("agent.v2.mcp.login", {
+      provider: "codex",
+      serverName: "github",
+    })).toMatchObject({ provider: "codex", serverName: "github" });
+    expect(parseTypedPayload("agent.v2.mcp.login.result", {
+      serverName: "github",
+      authorizationUrl: "https://example.com/oauth",
+    }).authorizationUrl).toContain("oauth");
+  });
+
+  it("accepts session.presence summaries", () => {
+    const parsed = parseTypedPayload("session.presence", {
+      hasHost: true,
+      agentStatus: "waiting_permission",
+      agentTitle: "fix login",
+      agentDetail: "运行命令 · pnpm test",
+      lastActivity: 1,
+    });
+    expect(parsed.hasHost).toBe(true);
+    expect(parsed.agentStatus).toBe("waiting_permission");
+    expect(parsed.agentDetail).toBe("运行命令 · pnpm test");
   });
 
   it("classifies every registered agent.v2 message exactly once", () => {

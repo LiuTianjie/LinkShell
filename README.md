@@ -82,7 +82,7 @@ linkshell start --daemon --provider claude
 
 The CLI starts a built-in Gateway + terminal bridge in the background, then prints a pairing code and QR code. Scan to connect. Disconnecting the app does not affect the background process. On macOS, the bridge prevents idle system sleep by default so locking the screen does not usually drop the session.
 
-Terminal providers currently include `claude`, `codex`, `gemini`, `copilot`, and `custom`. The Agent Workspace auto-detects ACP-capable Claude Code and Codex installations when `--agent-ui` is enabled.
+Terminal providers currently include `claude`, `codex`, `gemini`, `copilot`, and `custom`. The Agent Workspace auto-detects ACP-capable Claude Code and Codex installations when `--agent-ui` is enabled. Other live agent processes (Gemini, Copilot, OpenCode, Cursor Agent, Kimi) are discovered from the host and shown in the session tree; remote prompting for those still happens in the terminal.
 
 ## Commands
 

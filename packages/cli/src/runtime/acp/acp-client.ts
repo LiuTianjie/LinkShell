@@ -15,26 +15,23 @@ function normalizeMcpServers(value: unknown): unknown[] {
   });
 }
 
-// Codex app-server turn/start sandbox + approval, per the authoritative schema
-// (codex 0.133.0 generate-json-schema). `sandboxPolicy` is a tagged object
-// (camelCase type) that actually restricts the sandbox; `approvalPolicy`
-// controls when Codex asks for approval (→ a permission card on the client).
-// NOTE: the separate `permissions` field is a NAMED-PROFILE reference and
-// "cannot be combined with sandboxPolicy" — so we never send it.
-function sandboxPolicyForMode(
+// Codex prefers a named permission profile (`permissions: ":workspace"`) and
+// rejects combining it with the legacy tagged `sandboxPolicy`. Map our three
+// LinkShell modes onto official profile ids; keep sandboxPolicy only for
+// full_access, which has no stable named profile in the public docs.
+function permissionOverridesForMode(
   mode: AgentPermissionMode | undefined,
-  cwd: string,
-): unknown | undefined {
-  if (!mode) return undefined;
+): { permissions?: string; sandboxPolicy?: { type: string } } {
+  if (!mode) return {};
   switch (mode) {
     case "read_only":
-      return { type: "readOnly", networkAccess: false };
+      return { permissions: ":read-only" };
     case "workspace_write":
-      return { type: "workspaceWrite", writableRoots: [cwd], networkAccess: false };
+      return { permissions: ":workspace" };
     case "full_access":
-      return { type: "dangerFullAccess" };
+      return { sandboxPolicy: { type: "dangerFullAccess" } };
     default:
-      return undefined;
+      return {};
   }
 }
 
@@ -155,11 +152,145 @@ export class AcpClient {
     return Promise.reject(new Error("Provider does not support listTurns."));
   }
 
-  listSessions(): Promise<unknown> {
-    if (this.protocol === "codex-app-server") {
-      return this.transport.request("thread/list", { limit: 20 });
+  async listSessions(): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return this.transport.request("session/list", {});
     }
-    return this.transport.request("session/list", {});
+    const allThreads: unknown[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const result = await this.transport.request("thread/list", {
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      const raw = result && typeof result === "object" ? result as Record<string, unknown> : undefined;
+      const threads =
+        Array.isArray(result) ? result :
+        Array.isArray(raw?.data) ? raw.data :
+        Array.isArray(raw?.threads) ? raw.threads :
+        Array.isArray(raw?.sessions) ? raw.sessions :
+        Array.isArray(raw?.items) ? raw.items :
+        [];
+      allThreads.push(...threads);
+      const nextCursor =
+        (typeof raw?.nextCursor === "string" && raw.nextCursor) ||
+        (typeof raw?.next_cursor === "string" && raw.next_cursor) ||
+        undefined;
+      if (!nextCursor || threads.length === 0) break;
+      cursor = nextCursor;
+    }
+    return { data: allThreads };
+  }
+
+  updateThreadSettings(input: {
+    sessionId: string;
+    model?: string;
+    reasoningEffort?: string;
+    permissionMode?: AgentPermissionMode;
+    collaborationMode?: AgentCollaborationMode;
+    cwd?: string;
+  }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support updateThreadSettings."));
+    }
+    const model = input.model?.trim();
+    const collaborationMode = input.collaborationMode && input.collaborationMode !== "default"
+      ? {
+          mode: input.collaborationMode,
+          settings: {
+            model: model || "default",
+            ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
+          },
+        }
+      : undefined;
+    const permission = permissionOverridesForMode(input.permissionMode);
+    const approvalPolicy = approvalPolicyForMode(input.permissionMode);
+    return this.transport.request("thread/settings/update", {
+      threadId: input.sessionId,
+      ...(model ? { model } : {}),
+      ...(input.reasoningEffort ? { effort: input.reasoningEffort } : {}),
+      ...permission,
+      ...(approvalPolicy ? { approvalPolicy } : {}),
+      ...(collaborationMode ? { collaborationMode } : {}),
+    });
+  }
+
+  setThreadName(input: { sessionId: string; name: string }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support setThreadName."));
+    }
+    return this.transport.request("thread/name/set", {
+      threadId: input.sessionId,
+      name: input.name,
+    });
+  }
+
+  archiveThread(input: { sessionId: string }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support archiveThread."));
+    }
+    return this.transport.request("thread/archive", { threadId: input.sessionId });
+  }
+
+  unarchiveThread(input: { sessionId: string }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support unarchiveThread."));
+    }
+    return this.transport.request("thread/unarchive", { threadId: input.sessionId });
+  }
+
+  deleteThread(input: { sessionId: string }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support deleteThread."));
+    }
+    return this.transport.request("thread/delete", { threadId: input.sessionId });
+  }
+
+  forkThread(input: { sessionId: string; lastTurnId?: string }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support forkThread."));
+    }
+    return this.transport.request("thread/fork", {
+      threadId: input.sessionId,
+      ...(input.lastTurnId ? { lastTurnId: input.lastTurnId } : {}),
+    });
+  }
+
+  startReview(input: { sessionId: string; prompt?: string }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support startReview."));
+    }
+    const prompt = input.prompt?.trim();
+    return this.transport.request("review/start", {
+      threadId: input.sessionId,
+      target: prompt
+        ? { type: "custom", instructions: prompt }
+        : { type: "uncommittedChanges" },
+    });
+  }
+
+  listSkills(input: { cwd: string }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support listSkills."));
+    }
+    return this.transport.request("skills/list", { cwds: [input.cwd] });
+  }
+
+  listMcpServers(input?: { threadId?: string }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support listMcpServers."));
+    }
+    return this.transport.request("mcpServerStatus/list", {
+      detail: "full",
+      ...(input?.threadId ? { threadId: input.threadId } : {}),
+    });
+  }
+
+  startMcpOAuth(input: { serverName: string }): Promise<unknown> {
+    if (this.protocol !== "codex-app-server") {
+      return Promise.reject(new Error("Provider does not support startMcpOAuth."));
+    }
+    return this.transport.request("mcpServer/oauth/login", { name: input.serverName });
   }
 
   listModels(): Promise<unknown> {
@@ -191,15 +322,15 @@ export class AcpClient {
             settings: collaborationSettings,
           }
         : undefined;
-      const sandboxPolicy = sandboxPolicyForMode(input.permissionMode, input.cwd);
+      const permission = permissionOverridesForMode(input.permissionMode);
       const approvalPolicy = approvalPolicyForMode(input.permissionMode);
       const turnStartParams = {
         threadId: input.sessionId,
         model,
         effort: input.reasoningEffort,
-        // Inline sandbox + approval per the codex app-server schema. Omitted
-        // when no mode is set so Codex falls back to its config.toml default.
-        ...(sandboxPolicy ? { sandboxPolicy } : {}),
+        // Named profile when we have one; sandboxPolicy only for full_access.
+        // Omitted entirely when no mode is set so Codex uses config.toml.
+        ...permission,
         ...(approvalPolicy ? { approvalPolicy } : {}),
         collaborationMode,
         input: input.content.map((block) => {

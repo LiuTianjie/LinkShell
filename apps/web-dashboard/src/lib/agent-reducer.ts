@@ -140,7 +140,8 @@ export function groupByConversation(
   return grouped;
 }
 
-/** Merge conversation records by id, newest wins. */
+/** Merge conversation records by id. Host status always wins — a client
+ *  optimistic lastActivityAt must not hide idle/error from the host. */
 export function mergeConversations(
   existing: AgentConversation[],
   incoming: AgentConversation[],
@@ -149,7 +150,16 @@ export function mergeConversations(
   for (const c of existing) byId.set(c.id, c);
   for (const c of incoming) {
     const prev = byId.get(c.id);
-    if (!prev || c.lastActivityAt >= prev.lastActivityAt) byId.set(c.id, c);
+    if (!prev) {
+      byId.set(c.id, c);
+      continue;
+    }
+    byId.set(c.id, {
+      ...prev,
+      ...c,
+      status: c.status,
+      lastActivityAt: Math.max(prev.lastActivityAt ?? 0, c.lastActivityAt ?? 0),
+    });
   }
   return [...byId.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 }

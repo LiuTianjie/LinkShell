@@ -74,11 +74,17 @@ export interface WorkspaceSnapshot {
   notices: Notice[];
   // Latest on-demand usage report (null until requested + received).
   usage: AgentUsageReport | null;
+  // MCP OAuth URLs keyed as `${provider}:${serverName}` after the host starts login.
+  mcpAuthLinks: Record<string, string>;
 }
 
 function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
   return `${prefix}-${Date.now().toString(36)}-${rand}`;
+}
+
+function mcpAuthKey(provider: string | undefined, serverName: string): string {
+  return `${provider ?? "unknown"}:${serverName}`;
 }
 
 // Errors the user must act on (re-login, renew subscription, upgrade client)
@@ -165,6 +171,7 @@ export class WorkspaceStore {
   private history = new Map<string, HistoryState>();
   private notices: Notice[] = [];
   private usage: AgentUsageReport | null = null;
+  private mcpAuthLinks: Record<string, string> = {};
   // Enabled-provider signature; re-request snapshot when it changes (providers
   // come online after connect, so the first snapshot was empty).
   private lastProviderSig = "";
@@ -204,6 +211,7 @@ export class WorkspaceStore {
       history: this.history,
       notices: this.notices,
       usage: this.usage,
+      mcpAuthLinks: this.mcpAuthLinks,
     };
   }
 
@@ -264,6 +272,7 @@ export class WorkspaceStore {
           if (!this.lastError?.sticky) this.lastError = null;
           this.requestCapabilities();
           this.requestSnapshot();
+          this.requestConversationList();
           this.flushOutbox();
         }
         this.notify();
@@ -377,6 +386,7 @@ export class WorkspaceStore {
           this.lastProviderSig = sig;
           this.requestSnapshot();
         }
+        this.pruneConnectedMcpAuthLinks();
         this.notify();
         return;
       }
@@ -452,6 +462,44 @@ export class WorkspaceStore {
       if (type === "agent.v2.conversation.deleted") {
         const p = parseTypedPayload("agent.v2.conversation.deleted", envelope.payload);
         this.removeConversationLocal(p.conversationId);
+        this.notify();
+        return;
+      }
+      if (type === "agent.v2.mcp.login.result") {
+        const p = parseTypedPayload("agent.v2.mcp.login.result", envelope.payload);
+        const key = mcpAuthKey(p.provider, p.serverName);
+        if (p.error) {
+          const next = { ...this.mcpAuthLinks };
+          delete next[key];
+          this.mcpAuthLinks = next;
+          this.pushNotice({
+            kind: "warning",
+            title: `MCP ${p.serverName} 授权失败`,
+            detail: p.error,
+          });
+          return;
+        }
+        if (p.authorizationUrl) {
+          this.mcpAuthLinks = { ...this.mcpAuthLinks, [key]: p.authorizationUrl };
+          this.notify();
+          try {
+            const opened = window.open(p.authorizationUrl, "_blank", "noopener,noreferrer");
+            if (!opened) {
+              this.pushNotice({
+                kind: "info",
+                title: "请打开授权页",
+                detail: "浏览器拦截了弹窗，请在 MCP 面板里点击「打开授权页」。",
+              });
+            }
+          } catch {
+            this.pushNotice({
+              kind: "info",
+              title: "请打开授权页",
+              detail: "无法自动打开授权页，请在 MCP 面板里手动打开。",
+            });
+          }
+          return;
+        }
         this.notify();
         return;
       }
@@ -628,6 +676,30 @@ export class WorkspaceStore {
     );
   }
 
+  private pushNotice(input: { kind: string; title: string; detail?: string; durationMs?: number }): void {
+    const id = genId("notice");
+    this.notices = [
+      ...this.notices,
+      { id, kind: input.kind, title: input.title, detail: input.detail },
+    ].slice(-4);
+    this.notify();
+    setTimeout(() => this.dismissNotice(id), input.durationMs && input.durationMs > 0 ? input.durationMs : 5000);
+  }
+
+  private pruneConnectedMcpAuthLinks(): void {
+    const links = this.mcpAuthLinks;
+    const keys = Object.keys(links);
+    if (keys.length === 0) return;
+    const next = { ...links };
+    for (const provider of this.capabilities?.providers ?? []) {
+      for (const server of provider.mcpServers ?? []) {
+        if (server.status !== "connected") continue;
+        delete next[mcpAuthKey(provider.id, server.name)];
+      }
+    }
+    this.mcpAuthLinks = next;
+  }
+
   // ── Client actions ──────────────────────────────────────────────────
   dismissNotice(id: string): void {
     const next = this.notices.filter((n) => n.id !== id);
@@ -664,8 +736,13 @@ export class WorkspaceStore {
     if (this.openInFlight.has(conversationId)) return;
     const existing = this.timelines.get(conversationId) ?? [];
     const hasRealHistory = existing.some((i) => i.metadata?.optimistic !== true);
-    // Already confirmed opened by the host this session → nothing to sync.
-    if (hasRealHistory && this.openedThisSession.has(conversationId)) return;
+    // Already opened this session: skip unless the host says it's still
+    // running — external Codex/Claude turns keep writing to disk after the
+    // first hydrate, so we must re-open to pick up new items.
+    if (hasRealHistory && this.openedThisSession.has(conversationId)) {
+      const live = this.conversations.find((c) => c.id === conversationId);
+      if (live?.status !== "running" && live?.status !== "waiting_permission") return;
+    }
     const conv = this.conversations.find((c) => c.id === conversationId);
     if (!conv) return;
     this.openInFlight.add(conversationId);
@@ -1008,8 +1085,7 @@ export class WorkspaceStore {
     });
   }
 
-  /** Update a conversation's local settings (model/effort/permission/plan).
-   *  The next prompt carries these, so the change takes effect on next turn. */
+  /** Update conversation settings locally and persist them on the host now. */
   updateConversationSettings(
     conversationId: string,
     patch: Partial<
@@ -1023,6 +1099,10 @@ export class WorkspaceStore {
       c.id === conversationId ? { ...c, ...patch } : c,
     );
     this.notify();
+    this.bridge.sendAgent("agent.v2.conversation.update", {
+      conversationId,
+      ...patch,
+    });
   }
 
   /** Rename a conversation. Optimistically updates the local title, then asks
@@ -1060,6 +1140,15 @@ export class WorkspaceStore {
     this.removeConversationLocal(conversationId);
     this.notify();
     this.bridge.sendAgent("agent.v2.conversation.delete", { conversationId });
+  }
+
+  /** Ask the host to start MCP OAuth. The authorization URL (or error) comes
+   *  back as agent.v2.mcp.login.result. */
+  startMcpLogin(provider: AgentProvider | undefined, serverName: string): void {
+    this.bridge.sendAgent("agent.v2.mcp.login", {
+      ...(provider ? { provider } : {}),
+      serverName,
+    });
   }
 
   // Drop a conversation and its timeline/history from local state. Shared by the

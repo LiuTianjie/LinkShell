@@ -374,7 +374,7 @@ export function Composer({
     <div className="relative">
       {/* Slash command / @-mention palette */}
       {palette && (
-        <div className="codex-card-raised absolute bottom-full left-0 mb-2 max-h-72 w-80 overflow-y-auto p-1">
+        <div className="codex-card-raised absolute bottom-full left-0 mb-2 max-h-72 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto p-1">
           {palette.kind === "slash"
             ? palette.items.map((cmd, i) => {
                 // Show the description on a second line when it adds info beyond
@@ -511,7 +511,7 @@ export function Composer({
               <IconPlus size={17} />
             </button>
           )}
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
+          <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {controls}
           </div>
           {running && onCancel ? (

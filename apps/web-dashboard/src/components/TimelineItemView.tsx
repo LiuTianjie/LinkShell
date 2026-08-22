@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { IconWrench, IconCheck, IconChevronRight, IconChevronDown, IconFile, IconClose, IconUsers, IconCopy, IconPencil, IconGlobe, IconSearch, IconFolder, IconGitFork } from "./icons";
 import type { AgentTimelineItem } from "../lib/types";
+import { permissionHeadline } from "../lib/agent-presence";
 import { parseDiff, diffStats } from "../lib/diff";
 
 // ── Copy-to-clipboard button (hover-revealed) ───────────────────────
@@ -568,40 +569,46 @@ function permissionPreview(toolName?: string, toolInput?: string): ReactNode | n
   } catch {
     return null;
   }
-  const bare = toolName.split(/ · |__/).pop() ?? toolName;
-  switch (bare) {
-    case "Edit":
-      return isEditPair(args) ? (
-        <InlineDiff oldText={args.old_string} newText={args.new_string} />
-      ) : null;
-    case "MultiEdit": {
-      const edits = Array.isArray(args.edits) ? args.edits.filter(isEditPair) : [];
-      return edits.length > 0 ? (
-        <div className="space-y-2">
-          {edits.map((e, i) => (
-            <InlineDiff key={i} oldText={e.old_string} newText={e.new_string} />
-          ))}
-        </div>
-      ) : null;
-    }
-    case "Write":
-      return typeof args.content === "string" ? <InlineDiff newText={args.content} /> : null;
-    case "Bash": {
-      if (typeof args.command !== "string") return null;
-      return (
-        <div>
-          <pre className="max-h-32 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-secondary">
-            {`$ ${args.command}`}
-          </pre>
-          {typeof args.description === "string" && args.description && (
-            <p className="mt-1.5 text-xs text-content-muted">{args.description}</p>
-          )}
-        </div>
-      );
-    }
-    default:
-      return null;
+  const bare = (toolName.split(/ · |__/).pop() ?? toolName).toLowerCase();
+  if (bare === "edit") {
+    return isEditPair(args) ? (
+      <InlineDiff oldText={args.old_string} newText={args.new_string} />
+    ) : typeof args.path === "string" ? (
+      <pre className="max-h-32 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-secondary">
+        {args.path}
+      </pre>
+    ) : null;
   }
+  if (bare === "multiedit") {
+    const edits = Array.isArray(args.edits) ? args.edits.filter(isEditPair) : [];
+    return edits.length > 0 ? (
+      <div className="space-y-2">
+        {edits.map((e, i) => (
+          <InlineDiff key={i} oldText={e.old_string} newText={e.new_string} />
+        ))}
+      </div>
+    ) : null;
+  }
+  if (bare === "write") {
+    return typeof args.content === "string" ? <InlineDiff newText={args.content} /> : null;
+  }
+  if (bare === "bash" || bare === "shell" || bare === "command" || bare === "commandexecution") {
+    if (typeof args.command !== "string") return null;
+    return (
+      <div>
+        <pre className="max-h-32 overflow-auto rounded-lg bg-surface-raised px-3 py-2 font-mono text-[13px] text-content-secondary">
+          {`$ ${args.command}`}
+        </pre>
+        {typeof args.cwd === "string" && args.cwd && (
+          <p className="mt-1.5 font-mono text-xs text-content-faint">{args.cwd}</p>
+        )}
+        {typeof args.description === "string" && args.description && (
+          <p className="mt-1.5 text-xs text-content-muted">{args.description}</p>
+        )}
+      </div>
+    );
+  }
+  return null;
 }
 
 /** True when the user is typing somewhere (composer, inputs, contenteditable) —
@@ -625,10 +632,13 @@ function PermissionCard({
   const [clicked, setClicked] = useState(false);
   const perm = item.permission;
   const pending = clicked || item.metadata?.permissionPending === true;
-  const options = perm && perm.options.length > 0 ? perm.options : [
+  const options = [...(perm && perm.options.length > 0 ? perm.options : [
+    { id: "allow", label: "允许一次", kind: "allow" as const },
     { id: "deny", label: "拒绝", kind: "deny" as const },
-    { id: "allow_once", label: "允许一次", kind: "allow" as const },
-  ];
+  ])].sort((a, b) => {
+    if (a.kind === b.kind) return 0;
+    return a.kind === "allow" ? -1 : 1;
+  });
   const respond = (outcome: "allow" | "deny", optionId: string) => {
     if (!perm || pending) return;
     setClicked(true);
@@ -652,13 +662,11 @@ function PermissionCard({
   }, [pending, allowOptionId, perm?.requestId]);
   if (!perm) return null;
   const preview = permissionPreview(perm.toolName, perm.toolInput);
+  const allowCount = options.filter((opt) => opt.kind === "allow").length;
   return (
     <div className="rounded-xl border border-warning/40 bg-surface p-4">
-      <p className="text-sm font-medium text-warning">需要授权</p>
+      <p className="text-sm font-medium text-content-primary">{permissionHeadline(perm.toolName)}</p>
       {perm.context && <p className="mt-1.5 text-sm text-content-secondary">{perm.context}</p>}
-      {perm.toolName && (
-        <p className="mt-1.5 font-mono text-[13px] text-content-faint">{perm.toolName}</p>
-      )}
       {preview ? (
         <div className="mt-2">{preview}</div>
       ) : (
@@ -668,21 +676,27 @@ function PermissionCard({
           </pre>
         )
       )}
-      <div className="mt-3 flex flex-wrap gap-2">
-        {options.map((opt) => (
-          <button
-            key={opt.id}
-            disabled={pending}
-            onClick={() => respond(opt.kind === "allow" ? "allow" : "deny", opt.id)}
-            className={
-              opt.kind === "allow"
-                ? "codex-btn-primary text-xs"
-                : "codex-btn-outline text-xs border-danger/40 text-danger hover:border-danger hover:bg-danger/10 hover:text-danger"
-            }
-          >
-            {opt.label}
-          </button>
-        ))}
+      <div className="mt-4 flex flex-wrap gap-2">
+        {options.map((opt) => {
+          const allowIndex = opt.kind === "allow"
+            ? options.filter((item) => item.kind === "allow").findIndex((item) => item.id === opt.id)
+            : -1;
+          const buttonClass = opt.kind === "allow"
+            ? allowIndex === 0 || allowCount === 1
+              ? "codex-btn-primary min-h-11 px-4 text-sm"
+              : "codex-btn-outline min-h-11 px-4 text-sm"
+            : "codex-btn-ghost min-h-11 px-4 text-sm";
+          return (
+            <button
+              key={opt.id}
+              disabled={pending}
+              onClick={() => respond(opt.kind === "allow" ? "allow" : "deny", opt.id)}
+              className={buttonClass}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
       {pending && <p className="mt-2 text-xs text-content-muted">已发送…</p>}
     </div>

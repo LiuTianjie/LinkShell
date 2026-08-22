@@ -112,7 +112,7 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-canvas/60 px-4 pt-[12vh] backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-canvas/60 px-3 pt-[8vh] backdrop-blur-sm animate-fade-in sm:px-4 sm:pt-[12vh]"
       onClick={onClose}
     >
       <div
@@ -129,7 +129,7 @@ export function CommandPalette({
             placeholder={placeholder}
             className="min-w-0 flex-1 bg-transparent text-[15px] text-content-primary placeholder-content-muted outline-none"
           />
-          <kbd className="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-content-faint">esc</kbd>
+          <kbd className="hidden shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-content-faint sm:inline">esc</kbd>
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-1.5">
           {filtered.length === 0 ? (

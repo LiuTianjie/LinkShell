@@ -10,6 +10,7 @@ function makeProxy() {
     sessionId: "session-1",
     cwd: "/tmp",
     availableProviders: ["codex"],
+    discoverProcesses: () => [],
     send: (envelope) => sent.push(envelope),
   }) as any;
   proxy.conversations.set("conversation-a", {
@@ -42,6 +43,32 @@ describe("AgentWorkspaceProxy event routing", () => {
   it("uses provider-scoped stable conversation ids for remote provider sessions", () => {
     expect(makeAgentV2RemoteConversationId("codex", "thread/a:b")).toBe("agent-remote-codex-thread-a-b");
     expect(makeAgentV2RemoteConversationId("claude", "thread/a:b")).toBe("agent-remote-claude-thread-a-b");
+  });
+
+  it("forks a Codex thread via forkThread and opens the returned id", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.initialized = true;
+    proxy.clients.set("codex", {
+      forkThread: async (input: any) => ({ thread: { id: "thread-forked" } }),
+      loadSession: async (input: any) => ({ thread: { id: input.sessionId, turns: [] } }),
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-fork",
+      type: "agent.v2.conversation.open",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {
+        cwd: "/tmp",
+        provider: "codex",
+        forkFromConversationId: "conversation-a",
+        forkFromTurnId: "turn-cut",
+      },
+    });
+
+    const opened = sent.find((envelope) => envelope.type === "agent.v2.conversation.opened");
+    expect(opened?.payload.conversation.agentSessionId).toBe("thread-forked");
+    expect(opened?.payload.conversation.id).toBe("agent-remote-codex-thread-forked");
   });
 
   it("returns a stable provider-scoped id for newly opened provider sessions", async () => {
@@ -150,6 +177,54 @@ describe("AgentWorkspaceProxy event routing", () => {
     expect(proxy.conversations.get("conversation-a").model).toBe("gpt-5.5-mini");
     const conversationEvents = sent.filter((envelope) => envelope.type === "agent.v2.event" && envelope.payload.conversation);
     expect(conversationEvents.at(-1)?.payload.conversation.model).toBe("gpt-5.5-mini");
+  });
+
+  it("streams Codex reasoning summary deltas as thinking items and textDelta patches", () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.get("conversation-b").status = "idle";
+
+    proxy.handleNotification("item/reasoning/summaryTextDelta", {
+      threadId: "thread-a",
+      itemId: "reason-1",
+      delta: "Considering",
+    });
+
+    expect(sent[0].payload.item).toMatchObject({
+      id: "reason-1",
+      type: "status",
+      kind: "thinking",
+      role: "system",
+      text: "Considering",
+    });
+
+    sent.length = 0;
+    proxy.handleNotification("item/reasoning/summaryTextDelta", {
+      threadId: "thread-a",
+      itemId: "reason-1",
+      delta: " the tests",
+    });
+
+    expect(sent[0].payload.patch).toMatchObject({
+      itemId: "reason-1",
+      textDelta: " the tests",
+    });
+    expect(proxy.findItem("conversation-a", "reason-1").text).toBe("Considering the tests");
+  });
+
+  it("patches subsequent agent message deltas after the first upsert", () => {
+    const { proxy, sent } = makeProxy();
+    proxy.rememberTurnConversationId("conversation-a", "turn-a");
+
+    proxy.handleAgentMessageDelta({ turnId: "turn-a", itemId: "assistant-1", delta: "hello" });
+    expect(sent[0].payload.item.text).toBe("hello");
+
+    sent.length = 0;
+    proxy.handleAgentMessageDelta({ turnId: "turn-a", itemId: "assistant-1", delta: " world" });
+    expect(sent[0].payload.patch).toMatchObject({
+      itemId: "assistant-1",
+      textDelta: " world",
+    });
+    expect(proxy.findItem("conversation-a", "assistant-1").text).toBe("hello world");
   });
 
   it("maps Codex thread/status/changed notifications onto conversation state", () => {
@@ -379,6 +454,74 @@ describe("AgentWorkspaceProxy event routing", () => {
     expect(item?.metadata?.permissionOutcome).toBe("allow");
   });
 
+  it("maps official Codex availableDecisions onto accept / acceptForSession", async () => {
+    const { proxy, sent } = makeProxy();
+    const pending = proxy.handlePermission({
+      threadId: "thread-a",
+      requestId: "perm-session",
+      command: "pnpm test",
+      cwd: "/tmp",
+      availableDecisions: ["accept", "acceptForSession", "decline"],
+    }, true, "item/commandExecution/requestApproval");
+
+    const request = sent.find((envelope) => envelope.type === "agent.v2.permission.request");
+    expect(request?.payload.options).toEqual([
+      { id: "accept", label: "允许一次", kind: "allow" },
+      { id: "acceptForSession", label: "本会话允许", kind: "allow" },
+      { id: "decline", label: "拒绝", kind: "deny" },
+    ]);
+    expect(JSON.parse(request?.payload.toolInput)).toEqual({
+      command: "pnpm test",
+      cwd: "/tmp",
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-perm-session",
+      type: "agent.v2.permission.respond",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {
+        conversationId: "conversation-a",
+        requestId: "perm-session",
+        outcome: "allow",
+        optionId: "acceptForSession",
+      },
+    });
+
+    await expect(pending).resolves.toEqual({ decision: "acceptForSession" });
+  });
+
+  it("does not invent a session-scoped decision when Codex did not offer one", async () => {
+    const { proxy, sent } = makeProxy();
+    const pending = proxy.handlePermission({
+      threadId: "thread-a",
+      requestId: "perm-once",
+      command: "ls",
+      availableDecisions: ["accept", "decline"],
+    }, true, "item/commandExecution/requestApproval");
+
+    const request = sent.find((envelope) => envelope.type === "agent.v2.permission.request");
+    expect(request?.payload.options.map((option: { id: string }) => option.id)).toEqual([
+      "accept",
+      "decline",
+    ]);
+
+    await proxy.handleEnvelope({
+      id: "env-perm-once",
+      type: "agent.v2.permission.respond",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {
+        conversationId: "conversation-a",
+        requestId: "perm-once",
+        outcome: "allow",
+        optionId: "accept",
+      },
+    });
+
+    await expect(pending).resolves.toEqual({ decision: "accept" });
+  });
+
   it("ignores duplicate structured input responses after submission", async () => {
     const { proxy, sent } = makeProxy();
     proxy.handleStructuredInput({
@@ -559,6 +702,165 @@ describe("AgentWorkspaceProxy event routing", () => {
     expect(restartCalls).toBe(1);
     const snapshot = sent.find((envelope) => envelope.type === "agent.v2.snapshot");
     expect(snapshot?.payload.conversations[0].agentSessionId).toBe("thread-after-restart");
+  });
+
+  it("applies conversation.update settings locally and forwards them to Codex", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.get("conversation-a").archived = false;
+    const calls: string[] = [];
+    proxy.clients.set("codex", {
+      setThreadName: async (input: any) => { calls.push(`name:${input.name}`); },
+      archiveThread: async () => { calls.push("archive"); },
+      updateThreadSettings: async (input: any) => { calls.push(`settings:${input.model}:${input.reasoningEffort}`); },
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-update",
+      type: "agent.v2.conversation.update",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {
+        conversationId: "conversation-a",
+        title: "Renamed",
+        archived: true,
+        model: "gpt-5.5",
+        reasoningEffort: "high",
+        permissionMode: "workspace_write",
+        collaborationMode: "plan",
+      },
+    });
+
+    const conversation = proxy.conversations.get("conversation-a");
+    expect(conversation.title).toBe("Renamed");
+    expect(conversation.archived).toBe(true);
+    expect(conversation.model).toBe("gpt-5.5");
+    expect(conversation.reasoningEffort).toBe("high");
+    expect(conversation.permissionMode).toBe("workspace_write");
+    expect(conversation.collaborationMode).toBe("plan");
+    expect(calls).toEqual(["name:Renamed", "archive", "settings:gpt-5.5:high"]);
+    const echoed = sent.find((envelope) => envelope.type === "agent.v2.event" && envelope.payload.conversation);
+    expect(echoed?.payload.conversation.title).toBe("Renamed");
+  });
+
+  it("forgets a conversation from the list without calling Codex thread/delete", async () => {
+    const { proxy, sent } = makeProxy();
+    const calls: string[] = [];
+    proxy.clients.set("codex", {
+      deleteThread: async () => { calls.push("delete"); },
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-delete",
+      type: "agent.v2.conversation.delete",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: { conversationId: "conversation-a" },
+    });
+
+    expect(calls).toEqual([]);
+    expect(proxy.conversations.has("conversation-a")).toBe(false);
+    expect(proxy.deletedAgentSessionIds.has("thread-a")).toBe(true);
+    expect(sent.some((envelope) =>
+      envelope.type === "agent.v2.conversation.deleted" &&
+      envelope.payload.conversationId === "conversation-a",
+    )).toBe(true);
+  });
+
+  it("starts Codex MCP OAuth and returns the authorization url", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.clients.set("codex", {
+      startMcpOAuth: async () => ({ authorization_url: "https://example.com/oauth" }),
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-mcp-login",
+      type: "agent.v2.mcp.login",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: { provider: "codex", serverName: "github" },
+    });
+
+    const result = sent.find((envelope) => envelope.type === "agent.v2.mcp.login.result");
+    expect(result?.payload).toMatchObject({
+      provider: "codex",
+      serverName: "github",
+      authorizationUrl: "https://example.com/oauth",
+    });
+  });
+
+  it("tells the client to finish Claude MCP auth on the host", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.input.availableProviders = ["claude"];
+    proxy.clients.set("claude", {});
+
+    await proxy.handleEnvelope({
+      id: "env-mcp-claude",
+      type: "agent.v2.mcp.login",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: { provider: "claude", serverName: "gh" },
+    });
+
+    const result = sent.find((envelope) => envelope.type === "agent.v2.mcp.login.result");
+    expect(result?.payload.error).toMatch(/主机/);
+  });
+
+  it("merges Codex mcpServerStatus/list into capabilities and maps authStatus", async () => {
+    const { proxy } = makeProxy();
+    proxy.clients.set("codex", {
+      listMcpServers: async () => ({
+        data: [{ name: "github", authStatus: "needs_auth" }],
+      }),
+    });
+
+    await proxy.refreshProviderCapabilities("codex", proxy.clients.get("codex"), "codex-app-server");
+
+    expect(proxy.providerCapabilities.get("codex")?.mcpServers.get("github")).toMatchObject({
+      name: "github",
+      status: "needs_auth",
+    });
+  });
+
+  it("marks an MCP server connected after oauthLogin/completed", () => {
+    const { proxy, sent } = makeProxy();
+    proxy.clients.set("codex", {});
+    proxy.handleNotification("mcpServer/oauthLogin/completed", { name: "github", success: true });
+    const last = [...sent].reverse().find((envelope) => envelope.type === "agent.v2.capabilities");
+    const codex = last?.payload.providers?.find((provider: { id: string }) => provider.id === "codex");
+    expect(codex?.mcpServers).toEqual([
+      { name: "github", status: "connected" },
+    ]);
+  });
+
+  it("maps thread/list object status { type: active } to running", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.clear();
+    proxy.conversationByAgentSessionId.clear();
+    proxy.initialized = true;
+    proxy.clients.set("codex", {
+      listSessions: async () => ({
+        data: [
+          {
+            id: "thread-active-1",
+            cwd: "/repo",
+            title: "Live",
+            status: { type: "active" },
+          },
+        ],
+      }),
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-active-status",
+      type: "agent.v2.snapshot.request",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {},
+    });
+
+    const snapshot = sent.find((envelope) => envelope.type === "agent.v2.snapshot");
+    expect(snapshot?.payload.conversations[0].agentSessionId).toBe("thread-active-1");
+    expect(snapshot?.payload.conversations[0].status).toBe("running");
   });
 
   it("parses Codex thread/list data[] results", async () => {
@@ -902,6 +1204,27 @@ describe("AgentWorkspaceProxy event routing", () => {
     expect(caps.reasoningEfforts).toEqual(["low", "medium", "high", "xhigh"]);
   });
 
+  it("merges Codex skills/list names into provider commands", async () => {
+    const { proxy } = makeProxy();
+    proxy.providerCapabilities.clear();
+    const stubClient = {
+      listModels: async () => ({ data: [{ id: "gpt-5.5", displayName: "GPT-5.5", isDefault: true }] }),
+      listSkills: async () => ({
+        data: [{
+          cwd: "/tmp",
+          skills: [
+            { name: "skill-creator", description: "Create a skill" },
+          ],
+        }],
+      }),
+    };
+
+    await proxy.refreshProviderCapabilities("codex", stubClient, "codex-app-server");
+
+    const names = (proxy.providerCapabilities.get("codex").commands ?? []).map((command: any) => command.name);
+    expect(names).toContain("skill-creator");
+  });
+
   it("steers an active Codex turn instead of starting a second turn", async () => {
     const { proxy, sent } = makeProxy();
     proxy.agentProtocols.set("codex", "codex-app-server");
@@ -1186,6 +1509,7 @@ describe("MCP server status on capabilities", () => {
       sessionId: "session-1",
       cwd: "/tmp",
       availableProviders: ["claude"],
+      discoverProcesses: () => [],
       send: (envelope) => sent.push(envelope),
     }) as any;
     // A registered client is what handleMcpStartupStatus keys off to pick the
@@ -1264,5 +1588,71 @@ describe("MCP server status on capabilities", () => {
     expect(byName.gh.status).toBe("needs_auth");
     expect(byName.old.status).toBe("disabled");
     expect(byName.fs).toMatchObject({ status: "connected", toolCount: 2 });
+  });
+
+  it("treats authStatus needs_auth as needing authorization even when connected", () => {
+    const { proxy, sent } = makeClaudeProxy();
+    proxy.handleNotification("initialized", {
+      mcpServers: [{ name: "gh", status: "connected", authStatus: "needs_auth" }],
+    });
+    const claude = lastCapabilities(sent);
+    expect(claude?.mcpServers?.[0]).toMatchObject({ name: "gh", status: "needs_auth" });
+  });
+});
+
+describe("host process discovery", () => {
+  it("surfaces a live Gemini process and drops it after two missed polls", () => {
+    const { proxy, sent } = makeProxy();
+    let live = [
+      { provider: "gemini", pid: "22", command: "gemini", cwd: "/tmp/proj" },
+    ];
+    proxy.input.discoverProcesses = () => live;
+
+    proxy.reconcileDiscoveredProcesses();
+    expect(proxy.conversations.get("agent-live-gemini-22")).toMatchObject({
+      provider: "gemini",
+      status: "running",
+      cwd: "/tmp/proj",
+    });
+    expect(sent.some((envelope) => envelope.type === "agent.v2.conversation.list.result")).toBe(true);
+
+    live = [];
+    proxy.reconcileDiscoveredProcesses();
+    expect(proxy.conversations.has("agent-live-gemini-22")).toBe(true);
+    proxy.reconcileDiscoveredProcesses();
+    expect(proxy.conversations.has("agent-live-gemini-22")).toBe(false);
+    expect(sent.some((envelope) => envelope.type === "agent.v2.conversation.deleted")).toBe(true);
+  });
+
+  it("does not invent a remote protocol for a process-only provider", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.input.discoverProcesses = () => [
+      { provider: "kimi", pid: "9", command: "kimi", cwd: "/tmp" },
+    ];
+    proxy.reconcileDiscoveredProcesses();
+
+    await proxy.handleEnvelope({
+      id: "env-open-kimi",
+      type: "agent.v2.conversation.open",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: { conversationId: "agent-live-kimi-9", provider: "kimi" },
+    });
+    const opened = sent.find((envelope) => envelope.type === "agent.v2.conversation.opened");
+    expect(opened?.payload.conversation.id).toBe("agent-live-kimi-9");
+
+    await proxy.handleEnvelope({
+      id: "env-prompt-kimi",
+      type: "agent.v2.prompt",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {
+        conversationId: "agent-live-kimi-9",
+        clientMessageId: "m1",
+        contentBlocks: [{ type: "text", text: "hi" }],
+      },
+    });
+    const error = sent.find((envelope) => envelope.payload?.item?.type === "error");
+    expect(error?.payload?.item?.error).toContain("终端面板");
   });
 });

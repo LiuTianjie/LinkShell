@@ -82,7 +82,7 @@ linkshell start --daemon --provider claude
 
 CLI 会在后台启动内置 Gateway + 终端桥接，打印配对码和 QR 码。手机扫码即连。App 断开不影响后台进程。macOS 上会默认阻止系统闲置睡眠，所以锁屏后一般不会掉线。
 
-终端 provider 目前支持 `claude`、`codex`、`gemini`、`copilot` 和 `custom`。启用 `--agent-ui` 后，Agent Workspace 会自动检测支持 ACP/结构化协议的 Claude Code 与 Codex。
+终端 provider 目前支持 `claude`、`codex`、`gemini`、`copilot` 和 `custom`。启用 `--agent-ui` 后，Agent Workspace 会自动检测支持 ACP/结构化协议的 Claude Code 与 Codex。本机正在跑的 Gemini、Copilot、OpenCode、Cursor Agent、Kimi 也会出现在会话树里；这些 Agent 的远程输入仍走终端。
 
 ## 命令一览
 
@@ -179,7 +179,7 @@ linkshell start --daemon --provider claude --screen
 
 ### Agent Workspace
 
-LinkShell 在 Terminal、Desktop、Browser 之外提供 Agent 标签，用结构化卡片展示对话、工具调用和权限请求。CLI 启动时自动检测已安装的 Agent provider（Claude Code、Codex CLI），启动可用 provider，并把模型、权限、推理强度等能力同步给 App。
+LinkShell 在 Terminal、Desktop、Browser 之外提供 Agent 标签，用结构化卡片展示对话、工具调用和权限请求。CLI 启动时自动检测已安装的 Agent provider（Claude Code、Codex CLI），启动可用 provider，并把模型、权限、推理强度等能力同步给 App。本机其它 Agent 进程按 Open Island 的方式用 `ps` 发现，只在状态变化时刷新列表，避免卡住终端。
 
 ```bash
 # 自动检测 Claude Code / Codex CLI，手机端均可使用
