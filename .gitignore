@@ -39,6 +39,7 @@ apps/mobile/src/generated/
 Thumbs.db
 .idea/
 .vscode/
+.cursor/
 
 # Runtime leftovers
 *.log.claude/
