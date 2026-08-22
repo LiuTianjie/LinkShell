@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { FloatingPanel } from "./FloatingPanel";
 import type { AgentMcpServerDescriptor, AgentMcpServerStatus, AgentProvider } from "../lib/types";
 import { IconPlug } from "./icons";
 
@@ -49,22 +50,15 @@ export function McpStatusButton({
   onLogin?: (provider: AgentProvider | undefined, serverName: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
 
   if (!mcpServers || mcpServers.length === 0) return null;
   const connected = mcpServers.filter((s) => s.status === "connected").length;
 
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         title={`MCP 服务器（${connected}/${mcpServers.length} 已连接）`}
@@ -74,8 +68,14 @@ export function McpStatusButton({
         <IconPlug size={16} />
         <span className={`h-1.5 w-1.5 rounded-full ${aggregateTone(mcpServers)}`} />
       </button>
-      {open && (
-        <div className="codex-card-raised absolute right-0 top-full z-20 mt-1.5 min-w-[13rem] max-w-[calc(100vw-1.5rem)] overflow-hidden p-1 animate-fade-in">
+      <FloatingPanel
+        open={open}
+        anchorRef={btnRef}
+        placement="bottom-end"
+        onClose={() => setOpen(false)}
+        className="codex-card-raised overflow-hidden p-1 animate-fade-in"
+        minWidth={208}
+      >
           <div className="px-2 py-1 text-2xs font-medium uppercase tracking-wide text-content-faint">
             MCP 服务器
           </div>
@@ -117,8 +117,7 @@ export function McpStatusButton({
               </div>
             );
           })}
-        </div>
-      )}
+      </FloatingPanel>
     </div>
   );
 }

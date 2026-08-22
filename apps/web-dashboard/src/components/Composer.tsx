@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo, useEffect, type KeyboardEvent, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode } from "react";
+import { FloatingPanel } from "./FloatingPanel";
 import type { AgentCommandDescriptor } from "../lib/types";
 import { IconPlus, IconArrowUp, IconStop, IconClose, IconFile, IconFolder } from "./icons";
 import { useIsMobile } from "../hooks/useMediaQuery";
@@ -71,6 +72,7 @@ export function Composer({
   const [mentionFetchedDir, setMentionFetchedDir] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const isMobile = useIsMobile();
 
   // Load the persisted draft when the active conversation changes.
@@ -371,10 +373,18 @@ export function Composer({
   };
 
   return (
-    <div className="relative">
-      {/* Slash command / @-mention palette */}
+    <div ref={rootRef} className="relative">
+      {/* Slash command / @-mention palette — portaled so overflow-x-auto
+          on the composer toolbar cannot clip or dismiss it. */}
       {palette && (
-        <div className="codex-card-raised absolute bottom-full left-0 mb-2 max-h-72 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto p-1">
+      <FloatingPanel
+        open
+        anchorRef={rootRef}
+        placement="top-start"
+        onClose={() => {}}
+        className="codex-card-raised max-h-72 overflow-y-auto p-1"
+        minWidth={280}
+      >
           {palette.kind === "slash"
             ? palette.items.map((cmd, i) => {
                 // Show the description on a second line when it adds info beyond
@@ -420,7 +430,7 @@ export function Composer({
                   {entry.isDirectory && <span className="text-content-faint">/</span>}
                 </button>
               ))}
-        </div>
+      </FloatingPanel>
       )}
 
       {/* Image preview chips */}

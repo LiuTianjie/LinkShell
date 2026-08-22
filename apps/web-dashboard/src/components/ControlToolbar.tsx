@@ -1,4 +1,5 @@
-import { useRef, useState, useEffect, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { FloatingPanel } from "./FloatingPanel";
 import type {
   AgentConversation,
   AgentProviderCapability,
@@ -62,15 +63,7 @@ function PillSelect<T extends string>({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
   if (options.length === 0) return null;
   // When the conversation carries no explicit value (common for sessions we
   // discovered off disk rather than drove ourselves), show a neutral label
@@ -79,8 +72,9 @@ function PillSelect<T extends string>({
   const hasValue = value !== undefined && options.includes(value);
   const label = hasValue ? render(value as T) : placeholder ?? render(options[0]);
   return (
-    <div ref={ref} className="relative shrink-0">
+    <div className="relative shrink-0">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         title={title}
@@ -90,26 +84,31 @@ function PillSelect<T extends string>({
         <span className="max-w-[7rem] truncate">{label}</span>
         <IconChevronDown size={11} className="text-content-faint" />
       </button>
-      {open && (
-        <div className="codex-card-raised absolute bottom-full left-0 z-20 mb-1.5 min-w-[8rem] max-w-[calc(100vw-2rem)] overflow-hidden p-1 animate-fade-in">
-          {options.map((o) => (
-            <button
-              key={o}
-              type="button"
-              onClick={() => {
-                onChange(o);
-                setOpen(false);
-              }}
-              className={`flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-surface-overlay ${
-                hasValue && o === value ? "text-content-primary" : "text-content-secondary"
-              }`}
-            >
-              <span className="truncate">{render(o)}</span>
-              {hasValue && o === value && <IconCheck size={13} className="shrink-0 text-accent" />}
-            </button>
-          ))}
-        </div>
-      )}
+      <FloatingPanel
+        open={open}
+        anchorRef={btnRef}
+        placement="top-start"
+        onClose={() => setOpen(false)}
+        className="codex-card-raised overflow-hidden p-1 animate-fade-in"
+        minWidth={128}
+      >
+        {options.map((o) => (
+          <button
+            key={o}
+            type="button"
+            onClick={() => {
+              onChange(o);
+              setOpen(false);
+            }}
+            className={`flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-left text-xs transition-colors hover:bg-surface-overlay ${
+              hasValue && o === value ? "text-content-primary" : "text-content-secondary"
+            }`}
+          >
+            <span className="truncate">{render(o)}</span>
+            {hasValue && o === value && <IconCheck size={13} className="shrink-0 text-accent" />}
+          </button>
+        ))}
+      </FloatingPanel>
     </div>
   );
 }

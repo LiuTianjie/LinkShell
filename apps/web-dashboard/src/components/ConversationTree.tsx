@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, useCallback } from "react";
+import { FloatingPanel } from "./FloatingPanel";
 import type { AgentConversation, AgentCapabilitiesPayload, AgentStatus } from "../lib/types";
 import { attentionStatus } from "../lib/agent-presence";
 import type { WorkspaceStore } from "../store/workspace-store";
@@ -28,6 +29,73 @@ interface FolderGroup {
 interface ProviderGroup {
   provider: string;
   conversations: AgentConversation[];
+}
+
+function ConversationRowMenu({
+  open,
+  confirmDelete,
+  archived,
+  onToggle,
+  onClose,
+  onRename,
+  onArchive,
+  onDelete,
+}: {
+  open: boolean;
+  confirmDelete: boolean;
+  archived: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onRename: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+}) {
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        className={`absolute right-1.5 top-1.5 cursor-pointer rounded-md p-1 text-content-faint transition-colors hover:bg-surface-overlay hover:text-content-primary ${
+          open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        }`}
+        title="更多操作"
+        aria-label="更多操作"
+      >
+        <IconDots size={14} />
+      </button>
+      <FloatingPanel
+        open={open}
+        anchorRef={btnRef}
+        placement="bottom-end"
+        onClose={onClose}
+        className="overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-xl"
+        minWidth={160}
+      >
+        <button
+          onClick={onRename}
+          className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-2xs text-content-secondary transition-colors hover:bg-surface-overlay"
+        >
+          <IconPencil size={13} /> 改名
+        </button>
+        <button
+          onClick={onArchive}
+          className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-2xs text-content-secondary transition-colors hover:bg-surface-overlay"
+        >
+          <IconArchive size={13} /> {archived ? "取消归档" : "归档"}
+        </button>
+        <button
+          onClick={onDelete}
+          className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-2xs text-danger transition-colors hover:bg-danger/10"
+        >
+          <IconTrash size={13} /> {confirmDelete ? "确认从列表移除？" : "从列表移除"}
+        </button>
+      </FloatingPanel>
+    </>
+  );
 }
 
 function folderLabel(cwd: string): string {
@@ -438,64 +506,30 @@ export function ConversationTree({
                                 </button>
                               )}
 
-                              {/* Row actions: ⋯ menu trigger (hover-revealed) */}
                               {!isRenaming && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
+                                <ConversationRowMenu
+                                  open={isMenuOpen}
+                                  confirmDelete={confirmDeleteId === c.id}
+                                  archived={!!c.archived}
+                                  onToggle={() => {
                                     setConfirmDeleteId(null);
                                     setMenuOpenId(isMenuOpen ? null : c.id);
                                   }}
-                                  className={`absolute right-1.5 top-1.5 cursor-pointer rounded-md p-1 text-content-faint transition-colors hover:bg-surface-overlay hover:text-content-primary ${
-                                    isMenuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                                  }`}
-                                  title="更多操作"
-                                  aria-label="更多操作"
-                                >
-                                  <IconDots size={14} />
-                                </button>
-                              )}
-
-                              {isMenuOpen && (
-                                <>
-                                  {/* Click-away backdrop */}
-                                  <button
-                                    className="fixed inset-0 z-10 cursor-default"
-                                    onClick={closeMenu}
-                                    aria-label="关闭菜单"
-                                  />
-                                  <div className="absolute right-1.5 top-9 z-20 w-40 overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-xl">
-                                    <button
-                                      onClick={() => startRename(c)}
-                                      className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-2xs text-content-secondary transition-colors hover:bg-surface-overlay"
-                                    >
-                                      <IconPencil size={13} /> 改名
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        store.setConversationArchived(c.id, !c.archived);
-                                        closeMenu();
-                                      }}
-                                      className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-2xs text-content-secondary transition-colors hover:bg-surface-overlay"
-                                    >
-                                      <IconArchive size={13} /> {c.archived ? "取消归档" : "归档"}
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        if (confirmDeleteId === c.id) {
-                                          store.deleteConversation(c.id);
-                                          closeMenu();
-                                        } else {
-                                          setConfirmDeleteId(c.id);
-                                        }
-                                      }}
-                                      className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-2xs text-danger transition-colors hover:bg-danger/10"
-                                    >
-                                      <IconTrash size={13} />{" "}
-                                      {confirmDeleteId === c.id ? "确认从列表移除？" : "从列表移除"}
-                                    </button>
-                                  </div>
-                                </>
+                                  onClose={closeMenu}
+                                  onRename={() => startRename(c)}
+                                  onArchive={() => {
+                                    store.setConversationArchived(c.id, !c.archived);
+                                    closeMenu();
+                                  }}
+                                  onDelete={() => {
+                                    if (confirmDeleteId === c.id) {
+                                      store.deleteConversation(c.id);
+                                      closeMenu();
+                                    } else {
+                                      setConfirmDeleteId(c.id);
+                                    }
+                                  }}
+                                />
                               )}
                             </div>
                             );

@@ -21,6 +21,7 @@ import { useIsMobile } from "../hooks/useMediaQuery";
 import type { ConnectionStatus, AgentStatus, AgentTimelineItem, AgentConversation } from "../lib/types";
 import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, IconGlobe, IconCommand, ProviderIcon } from "../components/icons";
 import { McpStatusButton } from "../components/McpStatusButton";
+import { FloatingPanel } from "../components/FloatingPanel";
 
 function statusLabel(status: ConnectionStatus): { text: string; color: string } {
   if (status === "connected") return { text: "已连接", color: "text-success" };
@@ -33,18 +34,11 @@ function statusLabel(status: ConnectionStatus): { text: string; color: string } 
 
 function HeaderOverflowMenu({ children }: { children: (close: () => void) => ReactNode }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={`cursor-pointer rounded-md p-1.5 transition-colors ${open ? "bg-accent-dim text-white" : "text-content-muted hover:bg-surface-overlay hover:text-content-primary"}`}
@@ -54,11 +48,16 @@ function HeaderOverflowMenu({ children }: { children: (close: () => void) => Rea
       >
         <IconDots size={16} />
       </button>
-      {open && (
-        <div className="codex-card-raised absolute right-0 top-full z-30 mt-1.5 min-w-[11rem] overflow-hidden p-1 animate-fade-in">
-          {children(() => setOpen(false))}
-        </div>
-      )}
+      <FloatingPanel
+        open={open}
+        anchorRef={btnRef}
+        placement="bottom-end"
+        onClose={() => setOpen(false)}
+        className="codex-card-raised overflow-hidden p-1 animate-fade-in"
+        minWidth={176}
+      >
+        {children(() => setOpen(false))}
+      </FloatingPanel>
     </div>
   );
 }
@@ -78,7 +77,7 @@ function OverflowItem({
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${
+      className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2.5 text-left text-xs transition-colors ${
         active
           ? "bg-accent-dim/20 text-content-primary"
           : "text-content-secondary hover:bg-surface-overlay hover:text-content-primary"
@@ -760,7 +759,7 @@ export function AgentConsolePage({
       {/* Top bar. On phones this stays a single unwrapped row so icons cannot
           spill into the transcript. Secondary tools live in the overflow. */}
       <header
-        className="flex items-center justify-between gap-2 overflow-hidden border-b border-border px-3 py-1.5 md:px-4 md:py-2"
+        className="flex items-center justify-between gap-2 overflow-visible border-b border-border px-3 py-1.5 md:px-4 md:py-2"
         style={{ paddingTop: "max(0.375rem, env(safe-area-inset-top))" }}
       >
         <div className="flex min-w-0 items-center gap-1.5">

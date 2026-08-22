@@ -25,6 +25,7 @@ import { getValidToken, refreshAccessToken } from "../auth.js";
 import { AgentSessionProxy } from "./acp/agent-session.js";
 import { AgentWorkspaceProxy, makeAgentV2RemoteConversationId } from "./acp/agent-workspace.js";
 import { detectAvailableProviders, type AgentProvider } from "./acp/provider-resolver.js";
+import { buildLinkShellHookCommand, shouldWriteProjectHooksJson } from "./hook-command.js";
 
 export interface BridgeSessionOptions {
   gatewayUrl: string;
@@ -83,6 +84,7 @@ const DEFAULT_TUNNEL_PORTS = [3000, 3001, 4321, 5173, 5174, 8080, 8000, 8081];
 const PERMISSION_REQUEST_TIMEOUT_MS = Number(
   process.env.LINKSHELL_PERMISSION_TIMEOUT_MS ?? 5 * 60_000,
 );
+const HOOK_COMMAND_TIMEOUT_SEC = Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000);
 const LINKSHELL_PERMISSION_GUARD_MARKER = "LINKSHELL_PERMISSION_GUARD";
 
 interface TerminalInstance {
@@ -1467,7 +1469,7 @@ export class BridgeSession {
       hookPort = result.port;
       hookConfigPaths.push(result.configPath);
       // Also set up hooks for other providers (curlCmd already has marker from setupHookServer)
-      const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${result.port}/hook?m=${hookMarker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
+      const curlCmd = buildLinkShellHookCommand(result.port, hookMarker, HOOK_COMMAND_TIMEOUT_SEC);
       hookConfigPaths.push(this.setupCodexHooks(terminalId, curlCmd, hookMarker));
       hookConfigPaths.push(this.setupGeminiHooks(terminalId, curlCmd, hookMarker));
       hookConfigPaths.push(this.setupCopilotHooks(terminalId, curlCmd, hookMarker));
@@ -1586,8 +1588,8 @@ export class BridgeSession {
       const reqLid = reqUrl.searchParams.get("lid") ?? "";
       if (reqMarker !== marker || (reqLid !== "" && reqLid !== marker)) {
         this.log(`ignoring hook event: m=${reqMarker} lid=${reqLid} (expected ${marker})`);
-        res.writeHead(200);
-        res.end("ok");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end("{}");
         return;
       }
       let body = "";
@@ -1597,8 +1599,8 @@ export class BridgeSession {
         body += chunk.toString();
         if (Buffer.byteLength(body, "utf8") > HOOK_BODY_LIMIT) {
           bodyTooLarge = true;
-          res.writeHead(413);
-          res.end("payload too large");
+          res.writeHead(413, { "Content-Type": "application/json" });
+          res.end("{}");
           req.destroy();
         }
       });
@@ -1640,14 +1642,15 @@ export class BridgeSession {
             this.handleHookEvent(terminalId, event, provider, requestId);
             this.sendHookPermissionRequest(terminalId, event, requestId, provider);
           } else {
-            // All other hooks: respond immediately
-            res.writeHead(200);
-            res.end("ok");
+            // All other hooks: respond immediately with valid JSON so clients
+            // that parse stdout (Cursor) fail-open instead of blocking the tool.
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end("{}");
             this.handleHookEvent(terminalId, event, provider);
           }
         } catch (e) {
-          res.writeHead(200);
-          res.end("ok");
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end("{}");
           this.log(`hook parse error: ${e}`);
         }
       });
@@ -1663,7 +1666,7 @@ export class BridgeSession {
     });
     this.log(`hook server for ${terminalId} (${provider}) listening on port ${port}, marker=${marker}`);
 
-    const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${port}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
+    const curlCmd = buildLinkShellHookCommand(port, marker, HOOK_COMMAND_TIMEOUT_SEC);
     let configPath: string;
 
     if (provider === "codex") {
@@ -1684,7 +1687,7 @@ export class BridgeSession {
     const term = this.terminals.get(DEFAULT_TERMINAL_ID);
     if (!term?.hookPort) return;
     const marker = term.hookMarker;
-    const curlCmd = `curl -s --connect-timeout 1 --max-time ${Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000)} -X POST "http://127.0.0.1:${term.hookPort}/hook?m=${marker}&lid=$LINKSHELL_ID" -H 'Content-Type: application/json' --data-binary @- || true`;
+    const curlCmd = buildLinkShellHookCommand(term.hookPort, marker, HOOK_COMMAND_TIMEOUT_SEC);
     const providers = resolveAgentWorkspaceProviders(this.options);
     try {
       for (const provider of providers) {
@@ -1717,7 +1720,7 @@ export class BridgeSession {
       hooks: [{
         type: "command",
         command: curlCmd,
-        timeout: Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000),
+        timeout: HOOK_COMMAND_TIMEOUT_SEC,
       }],
     };
 
@@ -1780,7 +1783,7 @@ export class BridgeSession {
       hooks: [{
         type: "command",
         command: curlCmd,
-        timeout: Math.ceil((PERMISSION_REQUEST_TIMEOUT_MS + 30_000) / 1000),
+        timeout: HOOK_COMMAND_TIMEOUT_SEC,
       }],
     };
     const hookEvents: Record<string, typeof hookEntry | typeof permissionEntry> = {
@@ -1839,9 +1842,25 @@ export class BridgeSession {
   }
 
   private setupCopilotHooks(terminalId: string, curlCmd: string, marker: string): string {
-    // Copilot loads hooks from CWD as hooks.json
+    // Copilot loads hooks from CWD as hooks.json. Cursor's coding agent also
+    // reads that file when the folder is a Cursor project — writing it here
+    // freezes every IDE tool call the moment the hook server is down or
+    // returns non-JSON.
     const cwd = this.terminals.get(terminalId)?.cwd ?? this.defaultCwd;
     const hooksPath = join(cwd, "hooks.json");
+    if (!shouldWriteProjectHooksJson(cwd)) {
+      this.sweepLinkShellHookEntries(hooksPath);
+      try {
+        if (existsSync(hooksPath)) {
+          const raw = JSON.parse(readFileSync(hooksPath, "utf8")) as { hooks?: unknown };
+          if (!raw.hooks || (typeof raw.hooks === "object" && Object.keys(raw.hooks as object).length === 0)) {
+            unlinkSync(hooksPath);
+          }
+        }
+      } catch { /* leave whatever is on disk */ }
+      this.log(`skip writing ${hooksPath}: Cursor project would inherit it and freeze the IDE agent`);
+      return hooksPath;
+    }
     const mkHook = () => ({
       type: "command",
       bash: curlCmd,

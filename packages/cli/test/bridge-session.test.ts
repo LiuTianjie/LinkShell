@@ -360,7 +360,7 @@ describe("BridgeSession hook HTTP server (external-session approval, real HTTP)"
         session_id: "ext-2",
       });
       expect(status).toBe(200);
-      expect(text).toBe("ok");
+      expect(text).toBe("{}");
       // Rejected before broadcasting — no permission request leaks out.
       expect(sent.find((e) => e.type === "agent.v2.permission.request")).toBeUndefined();
     } finally {
@@ -379,7 +379,7 @@ describe("BridgeSession hook HTTP server (external-session approval, real HTTP)"
         session_id: "ext-3",
       });
       expect(status).toBe(200);
-      expect(text).toBe("ok");
+      expect(text).toBe("{}");
     } finally {
       server.close();
     }

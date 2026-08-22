@@ -44,3 +44,7 @@ Thumbs.db
 # Runtime leftovers
 *.log.claude/
 .claude/worktrees/
+
+# Copilot/Cursor hook leftovers written into a project CWD. Never commit these —
+# Cursor's coding agent treats project-root hooks.json as its own hook file.
+/hooks.json
