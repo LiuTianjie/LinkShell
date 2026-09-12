@@ -19,6 +19,7 @@ import { isEmbedded } from "../lib/embed";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import type { ConnectionStatus, AgentStatus, AgentTimelineItem, AgentConversation } from "../lib/types";
+import { conversationControlFlags } from "../lib/conversation-controls";
 import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, IconGlobe, IconCommand, ProviderIcon } from "../components/icons";
 import { McpStatusButton } from "../components/McpStatusButton";
 import { FloatingPanel } from "../components/FloatingPanel";
@@ -401,6 +402,7 @@ export function AgentConsolePage({
   const activeCapability = activeConversation
     ? providers.find((p) => p.id === activeConversation.provider)
     : undefined;
+  const controls = conversationControlFlags(snapshot.capabilities, activeConversation?.provider);
   const running = activeConversation?.status === "running";
   const historyState = activeId ? snapshot.history.get(activeId) : undefined;
 
@@ -699,7 +701,7 @@ export function AgentConsolePage({
         run: () => store.setActiveConversation(c.id),
       });
     }
-    if (activeId && running) {
+    if (activeId && running && controls.cancel) {
       actions.push({
         id: "cancel",
         label: "停止当前回合",
@@ -752,7 +754,7 @@ export function AgentConsolePage({
     );
     return actions;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabledProviders, snapshot.conversations, activeId, running]);
+  }, [enabledProviders, snapshot.conversations, activeId, running, controls.cancel]);
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden">
@@ -1195,7 +1197,7 @@ export function AgentConsolePage({
                           onOpenDiff={(it) => { setDiffItem(it); setRightPanel("none"); }}
                           onOpenAgent={(detail) => { setAgentDetail(detail); setDiffItem(null); setRightPanel("none"); }}
                           onEditMessage={handleEditMessage}
-                          onFork={activeConversation.provider === "claude"
+                          onFork={controls.fork
                             ? (turnId) => store.forkConversation(activeId, turnId)
                             : undefined}
                         />
@@ -1265,7 +1267,7 @@ export function AgentConsolePage({
                 <Composer
                   disabled={snapshot.status !== "connected"}
                   running={running}
-                  supportsImages={activeCapability?.supportsImages}
+                  supportsImages={controls.images}
                   commands={activeCapability?.commands}
                   conversationId={activeId}
                   lastUserText={lastUserText}
@@ -1276,11 +1278,12 @@ export function AgentConsolePage({
                     <ControlToolbar
                       conversation={activeConversation}
                       capability={activeCapability}
+                      flags={controls}
                       onChange={(patch) => store.updateConversationSettings(activeId, patch)}
                     />
                   }
                   onSend={handleSend}
-                  onCancel={() => store.cancel(activeId)}
+                  onCancel={controls.cancel ? () => store.cancel(activeId) : undefined}
                   onExecuteCommand={(commandId, args) => store.executeCommand(activeId, commandId, args)}
                 />
               </div>

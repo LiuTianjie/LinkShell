@@ -6,6 +6,7 @@ import type {
   AgentReasoningEffort,
   AgentPermissionMode,
 } from "../lib/types";
+import type { ConversationControlFlags } from "../lib/conversation-controls";
 import { IconCheck, IconChevronDown } from "./icons";
 
 // Codex-style compact controls that live INSIDE the composer's bottom bar:
@@ -39,6 +40,7 @@ interface SettingsPatch {
 export interface ControlToolbarProps {
   conversation: AgentConversation;
   capability: AgentProviderCapability | undefined;
+  flags: ConversationControlFlags;
   onChange: (patch: SettingsPatch) => void;
 }
 
@@ -116,20 +118,19 @@ function PillSelect<T extends string>({
 export function ControlToolbar({
   conversation,
   capability,
+  flags,
   onChange,
 }: ControlToolbarProps) {
   const models = capability?.models ?? [];
-  // Host sends a placeholder [{id:"default", label:"默认模型"}] for providers
-  // that don't expose a real model list (e.g. Claude CLI). Hide the picker then.
   const realModels = models.filter((m) => m.id !== "default");
-  const efforts = capability?.reasoningEfforts ?? [];
-  const permissions = capability?.permissionModes ?? [];
-  const supportsPlan = capability?.supportsPlan ?? false;
+  const efforts = flags.effort ? capability?.reasoningEfforts ?? [] : [];
+  const permissions = flags.permissionMode ? capability?.permissionModes ?? [] : [];
+  const supportsPlan = flags.plan;
   const planOn = conversation.collaborationMode === "plan";
 
   return (
     <>
-      {realModels.length > 0 && (
+      {flags.model && realModels.length > 0 && (
         <PillSelect
           title="模型"
           value={conversation.model ?? capability?.defaultModel ?? realModels[0]?.id}

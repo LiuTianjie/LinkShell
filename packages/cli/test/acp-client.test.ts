@@ -387,6 +387,88 @@ describe("resolveAgentCommand", () => {
       framing: "newline",
     });
   });
+
+  it("spawns gemini and cursor ACP adapters over NDJSON, not Content-Length", () => {
+    expect(resolveAgentCommand({ provider: "gemini" })).toMatchObject({
+      command: "gemini --acp",
+      protocol: "acp",
+      framing: "newline",
+    });
+    expect(resolveAgentCommand({ provider: "cursor" })).toMatchObject({
+      command: "cursor-agent acp",
+      protocol: "acp",
+      framing: "newline",
+    });
+    expect(resolveAgentCommand({ provider: "gemini", command: "gemini --acp" })).toMatchObject({
+      protocol: "acp",
+      framing: "newline",
+    });
+  });
+});
+
+describe("AcpClient NDJSON ACP adapters", () => {
+  function makeFakeNdjsonAgent(): { command: string; logPath: string; cwd: string } {
+    const cwd = mkdtempSync(join(tmpdir(), "linkshell-acp-ndjson-"));
+    const serverPath = join(cwd, "fake-ndjson-acp.mjs");
+    const logPath = join(cwd, "messages.jsonl");
+    writeFileSync(serverPath, `
+import { appendFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+const logPath = ${JSON.stringify(logPath)};
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+rl.on("line", (line) => {
+  if (!line.trim()) return;
+  const message = JSON.parse(line);
+  appendFileSync(logPath, JSON.stringify(message) + "\\n");
+  if (!("id" in message)) return;
+  if (message.method === "initialize") {
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        protocolVersion: 1,
+        agentCapabilities: {
+          loadSession: true,
+          promptCapabilities: { image: true, audio: false },
+        },
+      },
+    });
+    return;
+  }
+  send({ jsonrpc: "2.0", id: message.id, result: {} });
+});
+`, "utf8");
+    return { command: `node ${JSON.stringify(serverPath)}`, logPath, cwd };
+  }
+
+  it("initializes over NDJSON, advertises cancel without a cancel capability flag, and sends session/cancel", async () => {
+    const fake = makeFakeNdjsonAgent();
+    const client = new AcpClient({
+      command: fake.command,
+      protocol: "acp",
+      framing: "newline",
+      cwd: fake.cwd,
+      onNotification: () => {},
+      onRequest: () => ({}),
+      onExit: () => {},
+    });
+    clients.push(client);
+
+    await client.initialize();
+    expect(client.advertised.cancel).toBe(true);
+    expect(client.advertised.loadSession).toBe(true);
+    expect(client.advertised.setModel).toBe(false);
+    expect(client.advertised.audio).toBe(false);
+
+    client.cancel({ sessionId: "sess-1" });
+    const entries = await waitForLogEntries(fake.logPath, 2);
+    expect(entries.map((entry) => entry.method)).toEqual(["initialize", "session/cancel"]);
+    expect(entries[0].method).toBe("initialize");
+    expect(JSON.stringify(entries[0].params ?? {})).not.toMatch(/Content-Length/i);
+  });
 });
 
 describe("Claude SDK option mapping", () => {

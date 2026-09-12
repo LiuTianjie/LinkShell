@@ -1,38 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-
-/**
- * Optional expansion written into hook commands. Claude Code scans `$VAR` /
- * `${VAR}` and *skips* the hook (noisy "required env var(s) not set") when
- * those vars are missing. Native `claude` has no `LINKSHELL_ID`. `:-` makes
- * the client treat it as optional; an empty lid is already accepted by the
- * hook server (some CLIs do not inherit the PTY env).
- */
-export const LINKSHELL_ID_EXPANSION = "${LINKSHELL_ID:-}";
-
-/**
- * Shell command written into Claude / Codex / Copilot / Gemini hook configs.
- *
- * Cursor (and some other clients) parse hook stdout as JSON and *block the
- * tool* when the body is empty, "ok", or otherwise invalid. A bare
- * `curl … || true` is not enough: a down server still prints nothing, and
- * our own observe-path used to print the word `ok`.
- *
- * Always emit a JSON object. Forward the server body only when it looks like
- * one (permission decisions). Otherwise fail-open with `{}`.
- *
- * Cursor's own coding agent also reads a project `hooks.json`. If this command
- * ever runs inside Cursor, skip the network hop entirely so a LinkShell
- * session cannot freeze the IDE agent.
- */
-export function buildLinkShellHookCommand(port: number, marker: string, timeoutSec: number): string {
-  const url = `http://127.0.0.1:${port}/hook?m=${marker}&lid=${LINKSHELL_ID_EXPANSION}`;
-  return [
-    `if [ -n "\${CURSOR_TRACE_ID:-}" ] || [ -n "\${CURSOR_PROJECT_DIR:-}" ]; then printf '%s\\n' '{}'; exit 0; fi`,
-    `body=$(curl -s --connect-timeout 1 --max-time ${timeoutSec} -X POST "${url}" -H 'Content-Type: application/json' --data-binary @- 2>/dev/null) || true`,
-    `case "$body" in '{'*) printf '%s\\n' "$body" ;; *) printf '%s\\n' '{}' ;; esac`,
-  ].join("; ");
-}
 
 /** Pre-marker CLI: `curl -X POST http://127.0.0.1:<port>/hook --data-binary @-`. */
 const LEGACY_LOCAL_HOOK =
@@ -55,19 +22,52 @@ export function isLinkShellHookEntry(entry: unknown, marker?: string): boolean {
   return LEGACY_LOCAL_HOOK.test(raw) && raw.includes("--data-binary @-");
 }
 
-/**
- * Rewrite leftover `lid=$LINKSHELL_ID` (no default) so Claude Code no longer
- * treats LINKSHELL_ID as a required env var. Leaves `${LINKSHELL_ID:-}` alone.
- */
-export function rewriteBareLinkShellId(source: string): string {
-  return source.replace(/lid=\$LINKSHELL_ID(?!:-)/g, () => `lid=${LINKSHELL_ID_EXPANSION}`);
+function sweepHooksObject(hooks: Record<string, unknown>): boolean {
+  let changed = false;
+  for (const [eventName, entries] of Object.entries(hooks)) {
+    if (!Array.isArray(entries)) continue;
+    const filtered = entries.filter((entry) => !isLinkShellHookEntry(entry));
+    if (filtered.length !== entries.length) {
+      changed = true;
+      if (filtered.length === 0) delete hooks[eventName];
+      else hooks[eventName] = filtered;
+    }
+  }
+  return changed;
 }
 
-/** Copilot loads CWD `hooks.json`. Cursor's coding agent also reads that file
- *  when the folder is a Cursor project, so writing it there freezes the IDE. */
-export function shouldWriteProjectHooksJson(
-  cwd: string,
-  exists: (path: string) => boolean = existsSync,
-): boolean {
-  return !exists(join(cwd, ".cursor"));
+/** Remove leftover LinkShell hook entries from one JSON settings/hooks file. */
+export function sweepLinkShellHookEntries(configPath: string): boolean {
+  if (!existsSync(configPath)) return false;
+  try {
+    const raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    const hooks = raw.hooks;
+    if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return false;
+    const changed = sweepHooksObject(hooks as Record<string, unknown>);
+    if (!changed) return false;
+    if (Object.keys(hooks as object).length === 0) delete raw.hooks;
+    writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One-shot leftover sweep. LinkShell no longer writes hook configs; this only
+ * deletes historical curl-hook entries so they cannot fire after upgrade.
+ */
+export function sweepLinkShellHookConfigs(home: string, extraPaths: string[] = []): string[] {
+  const candidates = [
+    join(home, ".claude", "settings.json"),
+    join(home, ".claude", "settings.local.json"),
+    join(home, ".codex", "hooks.json"),
+    join(home, ".gemini", "settings.json"),
+    ...extraPaths,
+  ];
+  const swept: string[] = [];
+  for (const path of candidates) {
+    if (sweepLinkShellHookEntries(path)) swept.push(path);
+  }
+  return swept;
 }

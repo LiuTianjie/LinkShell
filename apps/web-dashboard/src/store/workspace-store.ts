@@ -4,6 +4,7 @@
 // React components never touch the BridgeClient directly.
 
 import { parseTypedPayload } from "@linkshell/protocol";
+import { conversationControlFlags } from "../lib/conversation-controls";
 import type { Envelope, ProtocolMessageType } from "@linkshell/protocol";
 import { BridgeClient } from "../lib/bridge-client";
 import type { BridgeEvent } from "../lib/bridge-client";
@@ -272,7 +273,6 @@ export class WorkspaceStore {
           if (!this.lastError?.sticky) this.lastError = null;
           this.requestCapabilities();
           this.requestSnapshot();
-          this.requestConversationList();
           this.flushOutbox();
         }
         this.notify();
@@ -385,6 +385,9 @@ export class WorkspaceStore {
         if (sig && sig !== this.lastProviderSig) {
           this.lastProviderSig = sig;
           this.requestSnapshot();
+        }
+        if (conversationControlFlags(this.capabilities).list) {
+          this.requestConversationList();
         }
         this.pruneConnectedMcpAuthLinks();
         this.notify();
@@ -806,6 +809,7 @@ export class WorkspaceStore {
     this.bridge.sendAgent("agent.v2.snapshot.request", conversationId ? { conversationId } : {});
   }
   requestConversationList(includeArchived = false): void {
+    if (!conversationControlFlags(this.capabilities).list) return;
     this.bridge.sendAgent("agent.v2.conversation.list", { includeArchived });
   }
 
@@ -857,13 +861,10 @@ export class WorkspaceStore {
   }
 
   /** Fork the current conversation into a NEW one, seeded from its transcript
-   *  truncated at `turnId` (Claude only — the CLI notifies + falls back for
-   *  other providers). Inherits provider/cwd from the source; the CLI fills in
-   *  model/effort/permission from the source transcript. On success the CLI
-   *  emits conversation.opened and we switch to it (same as a new conversation). */
+   *  truncated at `turnId`. Only sent when the host advertised sessionFork. */
   forkConversation(sourceConversationId: string, turnId: string): string | undefined {
     const source = this.conversations.find((c) => c.id === sourceConversationId);
-    if (!source || source.provider !== "claude") return undefined;
+    if (!source || !conversationControlFlags(this.capabilities, source.provider).fork) return undefined;
     const conversationId = genId("agent");
     this.bridge.sendAgent("agent.v2.conversation.open", {
       conversationId,
@@ -876,7 +877,7 @@ export class WorkspaceStore {
   }
 
   sendPrompt(input: SendPromptInput): void {
-    const contentBlocks: AgentContentBlock[] = [];
+    let contentBlocks: AgentContentBlock[] = [];
     if (input.text.trim()) contentBlocks.push({ type: "text", text: input.text });
     for (const img of input.images ?? []) {
       contentBlocks.push({ type: "image", data: img.data, mimeType: img.mimeType });
@@ -884,6 +885,11 @@ export class WorkspaceStore {
     if (contentBlocks.length === 0) return;
 
     const conv = this.conversations.find((c) => c.id === input.conversationId);
+    const flags = conversationControlFlags(this.capabilities, conv?.provider);
+    if (!flags.images) {
+      contentBlocks = contentBlocks.filter((block) => block.type !== "image");
+    }
+    if (contentBlocks.length === 0) return;
     const running = conv?.status === "running" || conv?.status === "waiting_permission";
     // While a turn is running, new messages QUEUE (shown but not sent) and are
     // auto-flushed as a new_turn when the conversation goes idle. Otherwise send
@@ -1013,6 +1019,8 @@ export class WorkspaceStore {
   }
 
   cancel(conversationId: string): void {
+    const conv = this.conversations.find((c) => c.id === conversationId);
+    if (!conversationControlFlags(this.capabilities, conv?.provider).cancel) return;
     this.sendReliable("agent.v2.cancel", { conversationId });
   }
 
@@ -1022,6 +1030,8 @@ export class WorkspaceStore {
     outcome: "allow" | "deny" | "cancelled",
     optionId?: string,
   ): void {
+    const conv = this.conversations.find((c) => c.id === conversationId);
+    if (!conversationControlFlags(this.capabilities, conv?.provider).permission) return;
     // Optimistically mark the matching permission item pending for instant UI
     // feedback; the host's follow-up event will set the final state.
     this.patchItemByPredicate(
@@ -1095,13 +1105,21 @@ export class WorkspaceStore {
       >
     >,
   ): void {
+    const conv = this.conversations.find((c) => c.id === conversationId);
+    const flags = conversationControlFlags(this.capabilities, conv?.provider);
+    const next = { ...patch };
+    if (!flags.model) delete next.model;
+    if (!flags.effort) delete next.reasoningEffort;
+    if (!flags.permissionMode) delete next.permissionMode;
+    if (!flags.plan) delete next.collaborationMode;
+    if (Object.keys(next).length === 0) return;
     this.conversations = this.conversations.map((c) =>
-      c.id === conversationId ? { ...c, ...patch } : c,
+      c.id === conversationId ? { ...c, ...next } : c,
     );
     this.notify();
     this.bridge.sendAgent("agent.v2.conversation.update", {
       conversationId,
-      ...patch,
+      ...next,
     });
   }
 

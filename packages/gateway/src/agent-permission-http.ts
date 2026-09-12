@@ -156,57 +156,10 @@ export async function forwardAgentPermissionHttp(input: {
 
   try {
     const envelopes = createPermissionEnvelopes(body);
-    const waitsForDelivery = envelopes.some((envelope) => envelope.type === "permission.decision");
-    const ackPromise = waitsForDelivery ? waitForAck(body.sessionId, body.requestId) : null;
     for (const envelope of envelopes) {
       session.host.socket.send(serializeEnvelope(envelope));
     }
     session.lastActivity = Date.now();
-    if (ackPromise) {
-      const ack = await ackPromise;
-      if (!ack) {
-        return {
-          status: 504,
-          forwarded: envelopes.map((envelope) => ({
-            type: envelope.type,
-            terminalId: envelope.terminalId,
-          })),
-          body: {
-            error: "permission_ack_timeout",
-            message: "Timed out waiting for host permission delivery acknowledgement",
-          },
-        };
-      }
-      if (!ack.delivered) {
-        return {
-          status: 409,
-          forwarded: envelopes.map((envelope) => ({
-            type: envelope.type,
-            terminalId: envelope.terminalId,
-          })),
-          ack,
-          body: {
-            error: "permission_not_delivered",
-            message: ack.message ?? "Permission response was not delivered to the Agent",
-            resolved: ack.resolved,
-            delivered: ack.delivered,
-          },
-        };
-      }
-      return {
-        status: 200,
-        forwarded: envelopes.map((envelope) => ({
-          type: envelope.type,
-          terminalId: envelope.terminalId,
-        })),
-        ack,
-        body: {
-          ok: true,
-          resolved: ack.resolved,
-          delivered: ack.delivered,
-        },
-      };
-    }
     return {
       status: 200,
       forwarded: envelopes.map((envelope) => ({
@@ -227,64 +180,19 @@ export async function forwardAgentPermissionHttp(input: {
 }
 
 function createPermissionEnvelopes(body: AgentPermissionHttpBody) {
-  if (body.protocol === "v2") {
-    const payload = parseTypedPayload("agent.v2.permission.respond", {
-      conversationId: body.conversationId,
-      requestId: body.requestId,
-      outcome: body.outcome,
-      optionId: body.optionId || undefined,
-    });
-    return [createEnvelope({
-      type: "agent.v2.permission.respond",
-      sessionId: body.sessionId,
-      deviceId: "live-activity",
-      payload,
-    })];
+  const conversationId = body.conversationId;
+  if (!conversationId) {
+    throw new Error("conversationId is required for agent permission");
   }
-
-  if (body.protocol === "legacy") {
-    const legacyPayload = parseTypedPayload("agent.permission.response", {
-      agentSessionId: body.agentSessionId || undefined,
-      requestId: body.requestId,
-      outcome: body.outcome,
-      optionId: body.optionId || undefined,
-    });
-    const envelopes = [createEnvelope({
-      type: "agent.permission.response",
-      sessionId: body.sessionId,
-      deviceId: "live-activity",
-      payload: legacyPayload,
-    })];
-
-    // `pr-*` requests are terminal PermissionRequest hooks surfaced through the
-    // legacy Agent UI channel. Send the terminal decision too so older hosts, and
-    // hosts that route hook permissions through terminal handling, can resolve it
-    // without involving the mobile websocket/controller path.
-    if (body.requestId.startsWith("pr-")) {
-      const decisionPayload = parseTypedPayload("permission.decision", {
-        requestId: body.requestId,
-        decision: body.outcome === "allow" ? "allow" : "deny",
-      });
-      envelopes.push(createEnvelope({
-        type: "permission.decision",
-        sessionId: body.sessionId,
-        terminalId: body.terminalId ?? "default",
-        deviceId: "live-activity",
-        payload: decisionPayload,
-      }));
-    }
-
-    return envelopes;
-  }
-
-  const payload = parseTypedPayload("permission.decision", {
+  const payload = parseTypedPayload("agent.v2.permission.respond", {
+    conversationId,
     requestId: body.requestId,
-    decision: body.outcome === "allow" ? "allow" : "deny",
+    outcome: body.outcome,
+    optionId: body.optionId || undefined,
   });
   return [createEnvelope({
-    type: "permission.decision",
+    type: "agent.v2.permission.respond",
     sessionId: body.sessionId,
-    terminalId: body.terminalId ?? "default",
     deviceId: "live-activity",
     payload,
   })];

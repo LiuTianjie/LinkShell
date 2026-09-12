@@ -56,9 +56,7 @@ describe("BridgeSession agent v2 routing", () => {
   it("routes shared agent v2 client read/write messages to AgentWorkspace", async () => {
     const bridge = makeBridge();
     const handleEnvelope = vi.fn(async () => {});
-    const refreshAgentPermissionHooks = vi.fn();
     bridge.agentWorkspace = { handleEnvelope };
-    bridge.refreshAgentPermissionHooks = refreshAgentPermissionHooks;
 
     const read = createEnvelope({
       type: "agent.v2.snapshot.request",
@@ -95,7 +93,17 @@ describe("BridgeSession agent v2 routing", () => {
       "agent.v2.prompt",
       "agent.v2.command.execute",
     ]);
-    expect(refreshAgentPermissionHooks).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not expose hook-config writers or hook HTTP servers", () => {
+    const proto = Object.getPrototypeOf(makeBridge());
+    expect(proto.setupClaudeHooks).toBeUndefined();
+    expect(proto.setupCodexHooks).toBeUndefined();
+    expect(proto.setupGeminiHooks).toBeUndefined();
+    expect(proto.setupCopilotHooks).toBeUndefined();
+    expect(proto.setupHookServer).toBeUndefined();
+    expect(proto.refreshAgentPermissionHooks).toBeUndefined();
+    expect(proto.sendHookPermissionRequest).toBeUndefined();
   });
 
   it("reports disabled agent v2 capabilities when AgentWorkspace is unavailable", async () => {
@@ -191,80 +199,11 @@ describe("BridgeSession reconnect resilience", () => {
   });
 });
 
-describe("BridgeSession external-session permission relay", () => {
-  it("emits a v2 permission request mapped to the on-disk session with a clickable item", () => {
-    const bridge = makeBridge();
-    const sent: Envelope[] = [];
-    bridge.send = (envelope: Envelope) => sent.push(envelope);
-
-    // Simulate what the hook HTTP server passes in for an EXTERNAL claude session.
-    const event = {
-      hook_event_name: "PermissionRequest",
-      tool_name: "Bash",
-      tool_input: { command: "rm -rf build" },
-      session_id: "ext-sess-123",
-      cwd: "/Users/me/proj",
-      permission_prompt: "Allow Bash?",
-    };
-    bridge.sendHookPermissionRequest("terminal-1", event, "req-1", "claude");
-
-    // v1 (terminal) envelope still goes out, plus the new v2 one.
-    const v2 = sent.find((e) => e.type === "agent.v2.permission.request");
-    expect(v2, "a v2 permission request must be emitted").toBeDefined();
-    const p = v2!.payload as Record<string, any>;
-    // conversationId must match how the session tree builds it, so the card lands
-    // on the right external-session card rather than a phantom conversation.
-    expect(p.conversationId).toBe("agent-remote-claude-ext-sess-123");
-    expect(p.requestId).toBe("req-1");
-    expect(p.toolName).toBe("Bash");
-    // The web store only renders a clickable allow/deny card when item is present.
-    expect(p.item, "item is required for the web to render a card").toBeDefined();
-    expect(p.item.type).toBe("permission");
-    expect(p.item.conversationId).toBe("agent-remote-claude-ext-sess-123");
-    expect(p.item.permission.requestId).toBe("req-1");
-    expect(p.item.metadata.permissionLive).toBe(true);
-  });
-
-  it("does not emit a v2 request when the hook payload has no session id", () => {
-    const bridge = makeBridge();
-    const sent: Envelope[] = [];
-    bridge.send = (envelope: Envelope) => sent.push(envelope);
-    bridge.sendHookPermissionRequest("terminal-1", { tool_name: "Bash" }, "req-2", "claude");
-    expect(sent.find((e) => e.type === "agent.v2.permission.request")).toBeUndefined();
-  });
-
-  it("routes a v2 permission response to the pending hook connection, not the workspace", async () => {
+describe("BridgeSession ACP permission routing", () => {
+  it("delivers v2 permission responses to the workspace, not a hook HTTP path", async () => {
     const bridge = makeBridge();
     const handleEnvelope = vi.fn(async () => {});
     bridge.agentWorkspace = { handleEnvelope };
-    // A hook request is pending on the HTTP connection when resolvePendingPermission finds it.
-    const resolvePendingPermission = vi.fn(() => ({ resolved: true, delivered: true }));
-    bridge.resolvePendingPermission = resolvePendingPermission;
-
-    await bridge.handleMessage(
-      createEnvelope({
-        type: "agent.v2.permission.respond",
-        sessionId: "session-1",
-        payload: {
-          conversationId: "agent-remote-claude-ext-sess-123",
-          requestId: "req-1",
-          outcome: "allow",
-        },
-      }),
-    );
-
-    expect(resolvePendingPermission).toHaveBeenCalledOnce();
-    expect(resolvePendingPermission.mock.calls[0]![1]).toMatchObject({ outcome: "allow" });
-    // A hook-owned request is answered on its HTTP connection — must NOT also
-    // go to the workspace (which would double-handle / error).
-    expect(handleEnvelope).not.toHaveBeenCalled();
-  });
-
-  it("falls through to the workspace when the v2 response is not a pending hook request", async () => {
-    const bridge = makeBridge();
-    const handleEnvelope = vi.fn(async () => {});
-    bridge.agentWorkspace = { handleEnvelope };
-    bridge.resolvePendingPermission = vi.fn(() => ({ resolved: false, delivered: false }));
 
     await bridge.handleMessage(
       createEnvelope({
@@ -274,115 +213,9 @@ describe("BridgeSession external-session permission relay", () => {
       }),
     );
 
-    // Not a hook request → workspace handles it as usual.
     expect(handleEnvelope).toHaveBeenCalledOnce();
     expect(handleEnvelope.mock.calls[0]![0].type).toBe("agent.v2.permission.respond");
-  });
-
-  it("maps a codex session id to a codex conversation id", () => {
-    const bridge = makeBridge();
-    const sent: Envelope[] = [];
-    bridge.send = (envelope: Envelope) => sent.push(envelope);
-    bridge.sendHookPermissionRequest(
-      "terminal-1",
-      { tool_name: "shell", session_id: "cx-9", cwd: "/x" },
-      "req-3",
-      "codex",
-    );
-    const v2 = sent.find((e) => e.type === "agent.v2.permission.request");
-    expect((v2!.payload as any).conversationId).toBe("agent-remote-codex-cx-9");
-  });
-});
-
-describe("BridgeSession hook HTTP server (external-session approval, real HTTP)", () => {
-  // Exercises the layer unit tests skipped: the actual HTTP endpoint claude's
-  // curl hook hits — marker gating, holding the connection, and writing the
-  // decision back. Config-writers are stubbed so the test never touches the
-  // real global ~/.claude/settings.json.
-  function makeHookBridge() {
-    const bridge = makeBridge();
-    bridge.setupClaudeHooks = () => "/tmp/fake-settings.json";
-    bridge.setupCodexHooks = () => "/tmp/fake-config.toml";
-    bridge.setupGeminiHooks = () => "/tmp/fake-gemini.json";
-    bridge.setupCopilotHooks = () => "/tmp/fake-copilot.json";
-    return bridge;
-  }
-
-  async function post(port: number, path: string, body: unknown): Promise<{ status: number; text: string }> {
-    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return { status: res.status, text: await res.text() };
-  }
-
-  it("holds a PermissionRequest connection and writes back the remote decision", async () => {
-    const bridge = makeHookBridge();
-    const sent: Envelope[] = [];
-    bridge.send = (e: Envelope) => sent.push(e);
-    const { server, port } = await bridge.setupHookServer("t1", [], "claude", "mk-1");
-    try {
-      // claude's curl POSTs the permission event; the server holds the response.
-      const pending = post(port, "/hook?m=mk-1&lid=", {
-        hook_event_name: "PermissionRequest",
-        tool_name: "Bash",
-        tool_input: { command: "rm x" },
-        session_id: "ext-1",
-        cwd: "/p",
-      });
-      // Give the request a tick to register, then find the requestId we broadcast.
-      await new Promise((r) => setTimeout(r, 50));
-      const req = sent.find((e) => e.type === "agent.v2.permission.request");
-      expect(req, "server should broadcast a v2 permission request").toBeDefined();
-      const requestId = (req!.payload as any).requestId as string;
-      // User taps allow on their phone → v2 respond resolves the held connection.
-      const resolved = bridge.resolvePendingPermission(requestId, { outcome: "allow" }, "test");
-      expect(resolved.resolved).toBe(true);
-      const { status, text } = await pending;
-      expect(status).toBe(200);
-      // The curl side (claude's hook) must receive a permission decision.
-      expect(JSON.parse(text).hookSpecificOutput.hookEventName).toBe("PermissionRequest");
-    } finally {
-      server.close();
-    }
-  });
-
-  it("ignores hook events whose marker does not match (not from our PTY)", async () => {
-    const bridge = makeHookBridge();
-    const sent: Envelope[] = [];
-    bridge.send = (e: Envelope) => sent.push(e);
-    const { server, port } = await bridge.setupHookServer("t1", [], "claude", "mk-2");
-    try {
-      const { status, text } = await post(port, "/hook?m=WRONG&lid=", {
-        hook_event_name: "PermissionRequest",
-        tool_name: "Bash",
-        session_id: "ext-2",
-      });
-      expect(status).toBe(200);
-      expect(text).toBe("{}");
-      // Rejected before broadcasting — no permission request leaks out.
-      expect(sent.find((e) => e.type === "agent.v2.permission.request")).toBeUndefined();
-    } finally {
-      server.close();
-    }
-  });
-
-  it("responds immediately to non-permission hook events without holding", async () => {
-    const bridge = makeHookBridge();
-    bridge.send = () => {};
-    const { server, port } = await bridge.setupHookServer("t1", [], "claude", "mk-3");
-    try {
-      const { status, text } = await post(port, "/hook?m=mk-3&lid=", {
-        hook_event_name: "PreToolUse",
-        tool_name: "Read",
-        session_id: "ext-3",
-      });
-      expect(status).toBe(200);
-      expect(text).toBe("{}");
-    } finally {
-      server.close();
-    }
+    expect(bridge.resolvePendingPermission).toBeUndefined();
   });
 });
 

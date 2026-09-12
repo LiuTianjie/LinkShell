@@ -199,6 +199,9 @@ importers:
       vite:
         specifier: ^6.3.2
         version: 6.4.2(@types/node@22.19.17)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
+      vitest:
+        specifier: ^3.2.1
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
 
   packages/cli:
     dependencies:
@@ -11747,7 +11750,7 @@ snapshots:
   werift-common@0.0.3:
     dependencies:
       '@shinyoshiaki/jspack': 0.0.6
-      debug: 4.4.0
+      debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
     optional: true
@@ -11768,7 +11771,7 @@ snapshots:
     dependencies:
       '@shinyoshiaki/jspack': 0.0.6
       buffer-crc32: 1.0.0
-      debug: 4.4.0
+      debug: 4.4.3
       int64-buffer: 1.1.0
       ip: 2.0.1
       lodash: 4.18.1

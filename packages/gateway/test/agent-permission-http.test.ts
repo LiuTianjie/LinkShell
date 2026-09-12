@@ -4,7 +4,6 @@ import { parseEnvelope, parseTypedPayload } from "@linkshell/protocol";
 import {
   type AgentPermissionHttpBody,
   forwardAgentPermissionHttp,
-  resolveAgentPermissionHttpAck,
 } from "../src/agent-permission-http.js";
 import { SessionManager } from "../src/sessions.js";
 import { TokenManager } from "../src/tokens.js";
@@ -187,53 +186,46 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("forwards terminal protocol payloads as permission.decision with terminalId", async () => {
+  it("forwards terminal protocol payloads as agent.v2.permission.respond when conversationId is set", async () => {
     const h = createHarness();
     try {
       const body: AgentPermissionHttpBody = {
         protocol: "terminal",
         sessionId: h.sessionId,
+        conversationId: "conversation-1",
         terminalId: "terminal-1",
         requestId: "request-1",
         outcome: "cancelled",
       };
-      const resultPromise = forwardAgentPermissionHttp({
+      const result = await forwardAgentPermissionHttp({
         token: h.token,
         body,
         sessionManager: h.sessionManager,
         tokenManager: h.tokenManager,
       });
 
-      const envelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
-      expect(envelope.type).toBe("permission.decision");
-      expect((envelope as any).terminalId).toBe("terminal-1");
-      expect(parseTypedPayload("permission.decision", envelope.payload)).toEqual({
-        requestId: "request-1",
-        decision: "deny",
-      });
-      resolveAgentPermissionHttpAck({
-        sessionId: h.sessionId,
-        ack: {
-          requestId: "request-1",
-          decision: "deny",
-          resolved: true,
-          delivered: true,
-        },
-      });
-      const result = await resultPromise;
       expect(result.status).toBe(200);
-      expect(result.body).toEqual({ ok: true, resolved: true, delivered: true });
+      expect(result.body).toEqual({ ok: true });
+      expect(h.send).toHaveBeenCalledTimes(1);
+      const envelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
+      expect(envelope.type).toBe("agent.v2.permission.respond");
+      expect(parseTypedPayload("agent.v2.permission.respond", envelope.payload)).toEqual({
+        conversationId: "conversation-1",
+        requestId: "request-1",
+        outcome: "cancelled",
+      });
     } finally {
       h.destroy();
     }
   });
 
-  it("forwards legacy protocol payloads with agentSessionId", async () => {
+  it("forwards legacy protocol payloads as agent.v2.permission.respond", async () => {
     const h = createHarness();
     try {
       const body: AgentPermissionHttpBody = {
         protocol: "legacy",
         sessionId: h.sessionId,
+        conversationId: "conversation-1",
         agentSessionId: "agent-session-1",
         requestId: "request-1",
         outcome: "deny",
@@ -248,9 +240,9 @@ describe("Live Activity permission HTTP forwarding", () => {
       expect(result.status).toBe(200);
       expect(h.send).toHaveBeenCalledTimes(1);
       const envelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
-      expect(envelope.type).toBe("agent.permission.response");
-      expect(parseTypedPayload("agent.permission.response", envelope.payload)).toEqual({
-        agentSessionId: "agent-session-1",
+      expect(envelope.type).toBe("agent.v2.permission.respond");
+      expect(parseTypedPayload("agent.v2.permission.respond", envelope.payload)).toEqual({
+        conversationId: "conversation-1",
         requestId: "request-1",
         outcome: "deny",
       });
@@ -259,7 +251,7 @@ describe("Live Activity permission HTTP forwarding", () => {
     }
   });
 
-  it("also forwards terminal decisions for legacy terminal hook requests", async () => {
+  it("rejects agent-auth HTTP without conversationId instead of emitting permission.decision", async () => {
     const h = createHarness();
     try {
       const body: AgentPermissionHttpBody = {
@@ -270,41 +262,16 @@ describe("Live Activity permission HTTP forwarding", () => {
         outcome: "allow",
         optionId: "allow_once",
       };
-      const resultPromise = forwardAgentPermissionHttp({
+      const result = await forwardAgentPermissionHttp({
         token: h.token,
         body,
         sessionManager: h.sessionManager,
         tokenManager: h.tokenManager,
       });
 
-      expect(h.send).toHaveBeenCalledTimes(2);
-      const legacyEnvelope = parseEnvelope(h.send.mock.calls[0]![0] as string);
-      expect(legacyEnvelope.type).toBe("agent.permission.response");
-      expect(parseTypedPayload("agent.permission.response", legacyEnvelope.payload)).toEqual({
-        requestId: "pr-123-abcdef",
-        outcome: "allow",
-        optionId: "allow_once",
-      });
-
-      const terminalEnvelope = parseEnvelope(h.send.mock.calls[1]![0] as string);
-      expect(terminalEnvelope.type).toBe("permission.decision");
-      expect((terminalEnvelope as any).terminalId).toBe("terminal-1");
-      expect(parseTypedPayload("permission.decision", terminalEnvelope.payload)).toEqual({
-        requestId: "pr-123-abcdef",
-        decision: "allow",
-      });
-      resolveAgentPermissionHttpAck({
-        sessionId: h.sessionId,
-        ack: {
-          requestId: "pr-123-abcdef",
-          decision: "allow",
-          resolved: true,
-          delivered: true,
-        },
-      });
-      const result = await resultPromise;
-      expect(result.status).toBe(200);
-      expect(result.body).toEqual({ ok: true, resolved: true, delivered: true });
+      expect(result.status).toBe(400);
+      expect(result.body.error).toBe("invalid_payload");
+      expect(h.send).not.toHaveBeenCalled();
     } finally {
       h.destroy();
     }

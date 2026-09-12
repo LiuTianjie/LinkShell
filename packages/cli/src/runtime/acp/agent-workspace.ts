@@ -6,7 +6,7 @@ import {
   parseTypedPayload,
   type Envelope,
 } from "@linkshell/protocol";
-import { AcpClient } from "./acp-client.js";
+import { AcpClient, type AdvertisedAcpCapabilities } from "./acp-client.js";
 import { ClaudeSdkClient } from "./claude-sdk-client.js";
 import { ClaudeStreamJsonClient } from "./claude-stream-json-client.js";
 import { aggregateUsage } from "../usage-report.js";
@@ -475,7 +475,9 @@ function normalizeToolStatus(value: unknown, completedFallback = false): AgentTo
 
 function normalizePlanStatus(value: unknown): AgentPlanStep["status"] {
   if (value === "completed" || value === "done") return "completed";
-  if (value === "inProgress" || value === "running" || value === "active") return "in_progress";
+  if (value === "inProgress" || value === "in_progress" || value === "running" || value === "active") {
+    return "in_progress";
+  }
   return "pending";
 }
 
@@ -808,7 +810,11 @@ function contentBlocksFromItem(item: Record<string, unknown>): AgentContentBlock
   return text ? [{ type: "text", text }] : [];
 }
 
-function protocolSupportsImages(protocol: AgentProtocol | undefined): boolean {
+function protocolSupportsImages(
+  protocol: AgentProtocol | undefined,
+  advertised?: AdvertisedAcpCapabilities,
+): boolean {
+  if (protocol === "acp") return Boolean(advertised?.images);
   return protocol === "codex-app-server" ||
     protocol === "claude-agent-sdk" ||
     protocol === "claude-stream-json";
@@ -997,6 +1003,7 @@ interface ProviderRuntimeCapabilities {
   commands?: AgentCommandDescriptor[];
   modes?: AgentModeDescriptor[];
   currentMode?: string;
+  advertised?: AdvertisedAcpCapabilities;
   // MCP server connection status, keyed by server name (last-writer-wins across
   // the init seed and live startupStatus events).
   mcpServers?: Map<string, AgentMcpServerDescriptor>;
@@ -2089,6 +2096,21 @@ export class AgentWorkspaceProxy {
         // Echo the updated record so every client refreshes (the web store
         // force-replaces by id on any event carrying `conversation`).
         this.emitConversation(conversation);
+        if (conversation.agentSessionId) {
+          const client = this.clientForProvider(conversation.provider);
+          if (client instanceof AcpClient && model?.trim() && client.advertised.setModel && conversation.provider !== "codex") {
+            try {
+              await client.setSessionModel({
+                sessionId: conversation.agentSessionId,
+                modelId: model.trim(),
+              });
+            } catch (error) {
+              if (this.input.verbose) {
+                process.stderr.write(`[agent:v2] session/set_model failed: ${error instanceof Error ? error.message : String(error)}\n`);
+              }
+            }
+          }
+        }
         if (conversation.provider === "codex" && conversation.agentSessionId) {
           const client = this.clientForProvider(conversation.provider);
           const settingsChanged =
@@ -2693,7 +2715,14 @@ export class AgentWorkspaceProxy {
     client: AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient,
     protocol: AgentProtocol,
   ): Promise<void> {
-    if (client instanceof AcpClient && protocol !== "codex-app-server") return;
+    if (client instanceof AcpClient) {
+      const prior = this.providerCapabilities.get(provider);
+      this.providerCapabilities.set(provider, {
+        ...prior,
+        advertised: client.advertised,
+      });
+      if (protocol !== "codex-app-server") return;
+    }
     const listModels = (client as { listModels?: () => Promise<unknown> }).listModels;
     let runtimeCapabilities: ProviderRuntimeCapabilities | undefined;
     if (typeof listModels === "function") {
@@ -2722,6 +2751,8 @@ export class AgentWorkspaceProxy {
         commands: mergeCommands(runtimeCapabilities?.commands, skillCommands),
         modes: runtimeCapabilities?.modes,
         currentMode: runtimeCapabilities?.currentMode,
+        advertised: this.providerCapabilities.get(provider)?.advertised
+          ?? (client instanceof AcpClient ? client.advertised : undefined),
         // Preserve any MCP status already accumulated from startupStatus events.
         mcpServers: runtimeCapabilities?.mcpServers ?? this.providerCapabilities.get(provider)?.mcpServers,
       };
@@ -2745,7 +2776,12 @@ export class AgentWorkspaceProxy {
           commands: mergeCommands(runtimeCapabilities.commands, skillCommands),
         };
       }
-      this.providerCapabilities.set(provider, runtimeCapabilities);
+      this.providerCapabilities.set(provider, {
+        ...runtimeCapabilities,
+        advertised: runtimeCapabilities.advertised
+          ?? this.providerCapabilities.get(provider)?.advertised
+          ?? (client instanceof AcpClient ? client.advertised : undefined),
+      });
     }
     if (listedMcp.length > 0) this.mergeMcpServers(provider, listedMcp);
   }
@@ -3026,11 +3062,23 @@ export class AgentWorkspaceProxy {
       const client = this.clients.get(provider);
       const protocol = this.agentProtocols.get(provider);
       const runtimeCapabilities = this.providerCapabilities.get(provider);
+      const advertised = runtimeCapabilities?.advertised
+        ?? (client instanceof AcpClient ? client.advertised : undefined);
       const enabled = Boolean(client);
-      const supportsImages = enabled && protocolSupportsImages(protocol);
+      const isAcp = protocol === "acp";
+      const supportsImages = enabled && protocolSupportsImages(protocol, advertised);
       const isClaudeFallback = protocol === "claude-stream-json";
       const supportsPermission = enabled && !isClaudeFallback;
       const supportsReasoningEffort = enabled && !isClaudeFallback;
+      const supportsSessionList = enabled && (isAcp ? Boolean(advertised?.listSession) : !isClaudeFallback);
+      const supportsSessionLoad = enabled && (isAcp ? Boolean(advertised?.loadSession) : !isClaudeFallback);
+      const supportsCancel = enabled && (isAcp ? Boolean(advertised?.cancel) : true);
+      const supportsFork = enabled && (isAcp
+        ? Boolean(advertised?.forkSession)
+        : protocol === "codex-app-server" || protocol === "claude-agent-sdk");
+      const supportsSetModel = enabled && (isAcp
+        ? Boolean(advertised?.setModel)
+        : protocol === "codex-app-server");
       const protocolBacked = isProtocolAgentProvider(provider);
       const commands = mergeCommands(
         defaultProviderCommands(provider, this.input.cwd, enabled),
@@ -3048,8 +3096,8 @@ export class AgentWorkspaceProxy {
             : `${providerLabel(provider)} 已在本机检测；远程对话请在终端继续`,
         supportsImages,
         supportsPermission,
-        supportsPlan: enabled,
-        supportsCancel: enabled,
+        supportsPlan: enabled && (isAcp ? Boolean(advertised?.embeddedContext) : true),
+        supportsCancel,
         models: runtimeCapabilities?.models ?? [{ id: "default", label: "默认模型" }],
         defaultModel: runtimeCapabilities?.defaultModel ?? "default",
         reasoningEfforts: supportsReasoningEffort
@@ -3064,11 +3112,17 @@ export class AgentWorkspaceProxy {
         currentMode,
         features: {
           images: supportsImages,
+          audio: Boolean(advertised?.audio),
           permissions: supportsPermission,
-          plan: enabled,
-          cancel: enabled,
+          plan: enabled && (protocol === "acp" ? Boolean(advertised?.embeddedContext) : true),
+          cancel: supportsCancel,
           reasoningEffort: supportsReasoningEffort,
           streamJsonFallback: isClaudeFallback,
+          loadSession: supportsSessionLoad,
+          sessionList: supportsSessionList,
+          sessionFork: supportsFork,
+          setModel: supportsSetModel,
+          mcp: Boolean(advertised?.mcp) || Boolean(runtimeCapabilities?.mcpServers && runtimeCapabilities.mcpServers.size > 0),
         },
         mcpServers: runtimeCapabilities?.mcpServers && runtimeCapabilities.mcpServers.size > 0
           ? [...runtimeCapabilities.mcpServers.values()]
@@ -3087,13 +3141,13 @@ export class AgentWorkspaceProxy {
         protocolVersion: 1,
         workspaceProtocolVersion: 2,
         error: anyEnabled ? undefined : "没有可远程驱动的 Agent。请安装 Claude Code 或 Codex CLI；其它 Agent 只要在本机终端运行就会出现在列表里。",
-        supportsSessionList: anyEnabled,
-        supportsSessionLoad: anyEnabled,
+        supportsSessionList: providers.some((p) => p.features.sessionList),
+        supportsSessionLoad: providers.some((p) => p.features.loadSession),
         supportsImages: providers.some((p) => p.supportsImages),
-        supportsAudio: false,
+        supportsAudio: providers.some((p) => p.features.audio),
         supportsPermission: anyPermission,
-        supportsPlan: anyEnabled,
-        supportsCancel: anyEnabled,
+        supportsPlan: providers.some((p) => p.supportsPlan),
+        supportsCancel: providers.some((p) => p.supportsCancel),
       },
     }));
   }
@@ -3207,7 +3261,7 @@ export class AgentWorkspaceProxy {
         } else {
           this.emitNotice({ kind: "warning", title: "分叉失败", detail: "无法复制该会话的历史记录，已新建空会话。" });
         }
-      } else if (provider === "codex" && typeof forkThread === "function" && sourceSessionId) {
+      } else if (typeof forkThread === "function" && sourceSessionId) {
         if (source?.cwd && !payload.cwd) cwd = source.cwd;
         try {
           const forked = await forkThread.call(client, {
@@ -3497,7 +3551,9 @@ export class AgentWorkspaceProxy {
     }
 
     const protocol = this.protocolForProvider(conversation.provider);
-    if (payload.contentBlocks.some((block) => block.type === "image") && !protocolSupportsImages(protocol)) {
+    const advertised = this.providerCapabilities.get(conversation.provider)?.advertised
+      ?? (client instanceof AcpClient ? client.advertised : undefined);
+    if (payload.contentBlocks.some((block) => block.type === "image") && !protocolSupportsImages(protocol, advertised)) {
       this.rejectAgentAction(
         conversation,
         "当前 Agent provider 暂不支持图片输入，请升级 CLI 或切换到 Codex。",
@@ -4589,32 +4645,96 @@ export class AgentWorkspaceProxy {
 
   private handleSessionUpdate(params: unknown): void {
     const raw = asRecord(params) ?? {};
-    const nested = asRecord(raw.params) ?? {};
-    const text =
-      firstString(raw, ["delta", "text", "content", "message"]) ??
-      firstString(nested, ["delta", "text", "content", "message"]);
-    const content = contentBlocksFromItem(raw);
-    if (!text && content.length === 0) return;
-    const conversationId = this.conversationIdFromParams(raw) ?? this.fallbackConversationId();
+    const update = asRecord(raw.update) ?? raw;
+    const conversationId = this.conversationIdFromParams(raw)
+      ?? this.conversationIdFromParams(update)
+      ?? this.fallbackConversationId();
     if (!conversationId) return;
-    if (firstString(raw, ["toolName", "tool", "name"])) {
+    const kind = normalizedIdentifier(firstString(update, ["sessionUpdate", "session_update", "type"]));
+
+    if (kind === "agentthoughtchunk" || kind === "agentthought") {
+      const contentBlock = asRecord(update.content);
+      const thought = (typeof contentBlock?.text === "string" ? contentBlock.text : undefined)
+        ?? firstString(update, ["delta", "text", "content", "message"]);
+      if (!thought) return;
+      this.handleReasoningDelta({
+        ...raw,
+        itemId: firstString(update, ["itemId", "id"]) ?? "thinking",
+        delta: thought,
+      });
+      return;
+    }
+
+    if (kind === "toolcall" || kind === "toolcallupdate") {
+      const toolCallId = firstString(update, ["toolCallId", "id"]) ?? id("tool");
+      const existing = this.findTool(conversationId, toolCallId);
+      const statusRaw = firstString(update, ["status"]);
+      const status: AgentToolCall["status"] =
+        statusRaw === "in_progress" ? "running"
+          : statusRaw === "completed" || statusRaw === "failed" || statusRaw === "pending" || statusRaw === "running"
+            ? statusRaw
+            : existing?.status ?? "running";
+      const input = stringifyDefined(update.rawInput ?? update.input);
+      const output = stringifyDefined(update.rawOutput ?? update.output);
       this.upsertTool(conversationId, {
-        id: firstString(raw, ["toolCallId", "callId", "id"]) ?? id("tool"),
-        name: firstString(raw, ["toolName", "tool", "name"]) ?? "tool",
-        input: stringify(raw.input ?? raw.toolInput ?? ""),
-        output: stringify(raw.output ?? raw.result ?? ""),
+        id: toolCallId,
+        name: firstString(update, ["title", "kind", "name"]) ?? existing?.name ?? "tool",
+        ...(input ? { input } : {}),
+        ...(output ? { output } : {}),
+        createdAt: existing?.createdAt ?? Date.now(),
+        status,
+      });
+      return;
+    }
+
+    if (kind === "plan") {
+      const entries = Array.isArray(update.entries) ? update.entries : [];
+      this.handlePlanUpdated({
+        ...raw,
+        plan: entries.map((entry) => {
+          const step = asRecord(entry) ?? {};
+          return {
+            text: firstString(step, ["content", "text", "title", "description"]),
+            status: step.status,
+          };
+        }),
+      });
+      return;
+    }
+
+    const nested = asRecord(raw.params) ?? asRecord(update.params) ?? {};
+    const contentBlock = asRecord(update.content);
+    const text =
+      firstString(update, ["delta", "text", "content", "message"]) ??
+      firstString(raw, ["delta", "text", "content", "message"]) ??
+      firstString(nested, ["delta", "text", "content", "message"]) ??
+      (typeof contentBlock?.text === "string" ? contentBlock.text : undefined);
+    const content = contentBlocksFromItem(update).length > 0
+      ? contentBlocksFromItem(update)
+      : contentBlocksFromItem(raw);
+    if (firstString(raw, ["toolName", "tool", "name"]) || firstString(update, ["toolName", "tool", "name"])) {
+      this.upsertTool(conversationId, {
+        id: firstString(update, ["toolCallId", "callId", "id"])
+          ?? firstString(raw, ["toolCallId", "callId", "id"])
+          ?? id("tool"),
+        name: firstString(update, ["toolName", "tool", "name"])
+          ?? firstString(raw, ["toolName", "tool", "name"])
+          ?? "tool",
+        input: stringify(update.input ?? update.toolInput ?? raw.input ?? raw.toolInput ?? ""),
+        output: stringify(update.output ?? update.result ?? raw.output ?? raw.result ?? ""),
         createdAt: Date.now(),
-        status: raw.status === "completed" || raw.status === "failed" || raw.status === "running"
-          ? raw.status
+        status: update.status === "completed" || raw.status === "completed" || update.status === "failed" || raw.status === "failed" || update.status === "running" || raw.status === "running"
+          ? ((update.status ?? raw.status) as AgentToolCall["status"])
           : "running",
       });
       return;
     }
+    if (!text && content.length === 0) return;
     const role = raw.role === "user" || raw.role === "system" ? raw.role : "assistant";
     const blocks = content.length > 0 ? content : [{ type: "text" as const, text }];
     const preview = textFromBlocks(blocks);
     this.upsertItem(conversationId, {
-      id: firstString(raw, ["messageId", "id"]) ?? id("msg"),
+      id: firstString(update, ["messageId", "id"]) ?? firstString(raw, ["messageId", "id"]) ?? id("msg"),
       conversationId,
       type: "message",
       role,
@@ -4622,7 +4742,7 @@ export class AgentWorkspaceProxy {
       text: preview,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      isStreaming: raw.done === false || raw.isStreaming === true,
+      isStreaming: raw.done === false || raw.isStreaming === true || kind === "agentmessagechunk",
     });
     this.updateConversationPreview(conversationId, preview || "图片附件", raw.done === true ? "idle" : "running");
   }

@@ -31,7 +31,8 @@ export function resolveAgentCommand(input: {
       provider: input.provider,
       command: explicit,
       protocol: isCodexAppServer ? "codex-app-server" : isClaudeCli ? "claude-stream-json" : "acp",
-      framing: isCodexAppServer || isClaudeCli ? "newline" : "content-length",
+      // Gemini --acp, cursor-agent acp, and other ACP CLIs speak NDJSON, not LSP Content-Length.
+      framing: "newline",
     };
   }
 
@@ -61,7 +62,25 @@ export function resolveAgentCommand(input: {
     };
   }
 
-  // custom: caller must provide --agent-command
+  if (input.provider === "gemini") {
+    return {
+      provider: "gemini",
+      command: "gemini --acp",
+      protocol: "acp",
+      framing: "newline",
+    };
+  }
+
+  if (input.provider === "cursor") {
+    return {
+      provider: "cursor",
+      command: "cursor-agent acp",
+      protocol: "acp",
+      framing: "newline",
+    };
+  }
+
+  // copilot / opencode / kimi / custom: PTY-only unless caller passes --agent-command
   return null;
 }
 

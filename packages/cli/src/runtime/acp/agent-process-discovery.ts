@@ -28,7 +28,7 @@ export const KNOWN_AGENT_PROVIDERS = [
 
 export type KnownAgentProvider = (typeof KNOWN_AGENT_PROVIDERS)[number];
 
-export const PROTOCOL_AGENT_PROVIDERS = new Set<string>(["codex", "claude"]);
+export const PROTOCOL_AGENT_PROVIDERS = new Set<string>(["codex", "claude", "gemini", "cursor"]);
 
 export interface AgentProcessSnapshot {
   provider: string;
@@ -96,6 +96,8 @@ export function isControlPlaneCommand(command: string): boolean {
   if (lowered.includes("stream-json") && (lowered.includes("--print") || lowered.includes("--output-format"))) {
     return true;
   }
+  if (/\b--acp\b/.test(lowered)) return true;
+  if (commandBinaryName(command) === "cursor-agent" && /\sacp(\s|$)/.test(lowered)) return true;
   return false;
 }
 

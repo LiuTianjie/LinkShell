@@ -4,6 +4,75 @@ import type { AgentFraming, AgentProtocol } from "./provider-resolver.js";
 type AgentPermissionMode = "read_only" | "workspace_write" | "full_access";
 type AgentCollaborationMode = "default" | "plan";
 
+export interface AdvertisedAcpCapabilities {
+  protocolVersion?: number;
+  loadSession: boolean;
+  listSession: boolean;
+  forkSession: boolean;
+  setModel: boolean;
+  cancel: boolean;
+  images: boolean;
+  audio: boolean;
+  embeddedContext: boolean;
+  mcp: boolean;
+  methods: string[];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function truthy(value: unknown): boolean {
+  return value === true || value === "true" || value === 1;
+}
+
+function collectAdvertisedMethods(...sources: Array<Record<string, unknown> | undefined>): string[] {
+  const methods = new Set<string>();
+  for (const source of sources) {
+    if (!source) continue;
+    const lists = [source.methods, source.supportedMethods, source.sessionMethods];
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        if (typeof item === "string" && item.trim()) methods.add(item.trim());
+      }
+    }
+    for (const [key, value] of Object.entries(source)) {
+      if (key.includes("/") && truthy(value)) methods.add(key);
+    }
+  }
+  return [...methods];
+}
+
+/** Parse ACP `initialize` result. Unadvertised optional methods stay false. */
+export function parseAcpInitializeCapabilities(result: unknown): AdvertisedAcpCapabilities {
+  const raw = asRecord(result) ?? {};
+  const agentCaps = asRecord(raw.agentCapabilities) ?? asRecord(raw.capabilities) ?? {};
+  const sessionCaps = asRecord(raw.sessionCapabilities) ?? asRecord(agentCaps.sessionCapabilities) ?? {};
+  const promptCaps = asRecord(agentCaps.promptCapabilities) ?? {};
+  const mcpCaps = asRecord(agentCaps.mcpCapabilities);
+  const methods = collectAdvertisedMethods(raw, agentCaps, sessionCaps);
+  const has = (...keys: string[]) =>
+    keys.some((key) => truthy(agentCaps[key]) || truthy(sessionCaps[key]) || methods.includes(key));
+  return {
+    protocolVersion: typeof raw.protocolVersion === "number" ? raw.protocolVersion : undefined,
+    loadSession: has("loadSession", "session/load"),
+    listSession: has("listSession", "listSessions", "session/list"),
+    forkSession: has("forkSession", "session/fork"),
+    setModel: has("setModel", "session/set_model"),
+    // ACP v1 MUST session/cancel. AgentCapabilities has no cancel flag, so a
+    // real-shaped initialize that omits it still supports cancel.
+    cancel: true,
+    images: truthy(promptCaps.image) || has("image", "images"),
+    audio: truthy(promptCaps.audio) || has("audio"),
+    embeddedContext: truthy(promptCaps.embeddedContext),
+    mcp: Boolean(mcpCaps && Object.keys(mcpCaps).length > 0) || has("mcp"),
+    methods,
+  };
+}
+
 function normalizeMcpServers(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (!value || typeof value !== "object") return [];
@@ -55,6 +124,8 @@ function approvalPolicyForMode(
 export class AcpClient {
   private readonly transport: JsonRpcStdioTransport;
   private readonly protocol: AgentProtocol;
+  lastInitializeResult: unknown;
+  advertised: AdvertisedAcpCapabilities = parseAcpInitializeCapabilities(undefined);
 
   constructor(input: {
     command: string;
@@ -83,9 +154,20 @@ export class AcpClient {
         capabilities: { experimentalApi: true },
       });
       this.transport.notify("initialized", {});
+      this.lastInitializeResult = result;
+      this.advertised = {
+        ...parseAcpInitializeCapabilities(result),
+        loadSession: true,
+        listSession: true,
+        forkSession: true,
+        setModel: true,
+        cancel: true,
+        images: true,
+        mcp: true,
+      };
       return result;
     }
-    return this.transport.request("initialize", {
+    const result = await this.transport.request("initialize", {
       protocolVersion: 1,
       clientInfo: { name: "LinkShell", version: "0.1" },
       clientCapabilities: {
@@ -93,6 +175,9 @@ export class AcpClient {
         terminal: false,
       },
     });
+    this.lastInitializeResult = result;
+    this.advertised = { ...parseAcpInitializeCapabilities(result), cancel: true };
+    return result;
   }
 
   newSession(input: { cwd: string; mcpServers?: unknown }): Promise<unknown> {
@@ -115,6 +200,9 @@ export class AcpClient {
         cwd: input.cwd,
         excludeTurns: false,
       });
+    }
+    if (!this.advertised.loadSession) {
+      return Promise.reject(new Error("Provider did not advertise session/load."));
     }
     return this.transport.request("session/load", {
       sessionId: input.sessionId,
@@ -154,6 +242,9 @@ export class AcpClient {
 
   async listSessions(): Promise<unknown> {
     if (this.protocol !== "codex-app-server") {
+      if (!this.advertised.listSession) {
+        return Promise.reject(new Error("Provider did not advertise session/list."));
+      }
       return this.transport.request("session/list", {});
     }
     const allThreads: unknown[] = [];
@@ -247,12 +338,31 @@ export class AcpClient {
   }
 
   forkThread(input: { sessionId: string; lastTurnId?: string }): Promise<unknown> {
-    if (this.protocol !== "codex-app-server") {
-      return Promise.reject(new Error("Provider does not support forkThread."));
+    if (this.protocol === "codex-app-server") {
+      return this.transport.request("thread/fork", {
+        threadId: input.sessionId,
+        ...(input.lastTurnId ? { lastTurnId: input.lastTurnId } : {}),
+      });
     }
-    return this.transport.request("thread/fork", {
-      threadId: input.sessionId,
+    if (!this.advertised.forkSession) {
+      return Promise.reject(new Error("Provider did not advertise session/fork."));
+    }
+    return this.transport.request("session/fork", {
+      sessionId: input.sessionId,
       ...(input.lastTurnId ? { lastTurnId: input.lastTurnId } : {}),
+    });
+  }
+
+  setSessionModel(input: { sessionId: string; modelId: string }): Promise<unknown> {
+    if (this.protocol === "codex-app-server") {
+      return this.updateThreadSettings({ sessionId: input.sessionId, model: input.modelId });
+    }
+    if (!this.advertised.setModel) {
+      return Promise.reject(new Error("Provider did not advertise session/set_model."));
+    }
+    return this.transport.request("session/set_model", {
+      sessionId: input.sessionId,
+      modelId: input.modelId,
     });
   }
 
@@ -385,6 +495,7 @@ export class AcpClient {
       }).catch(() => {});
       return;
     }
+    if (!this.advertised.cancel) return;
     this.transport.notify("session/cancel", { sessionId: input.sessionId });
   }
 
