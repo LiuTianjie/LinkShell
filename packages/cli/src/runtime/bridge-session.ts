@@ -25,7 +25,12 @@ import { getValidToken, refreshAccessToken } from "../auth.js";
 import { AgentSessionProxy } from "./acp/agent-session.js";
 import { AgentWorkspaceProxy, makeAgentV2RemoteConversationId } from "./acp/agent-workspace.js";
 import { detectAvailableProviders, type AgentProvider } from "./acp/provider-resolver.js";
-import { buildLinkShellHookCommand, shouldWriteProjectHooksJson } from "./hook-command.js";
+import {
+  buildLinkShellHookCommand,
+  isLinkShellHookEntry,
+  rewriteBareLinkShellId,
+  shouldWriteProjectHooksJson,
+} from "./hook-command.js";
 
 export interface BridgeSessionOptions {
   gatewayUrl: string;
@@ -124,20 +129,6 @@ type HookPermissionChoice =
       outcome: "allow" | "deny" | "cancelled";
       optionId?: string;
     };
-
-function isLinkShellHookEntry(entry: unknown, marker?: string): boolean {
-  let raw = "";
-  try {
-    raw = JSON.stringify(entry);
-  } catch {
-    raw = String(entry);
-  }
-  return (
-    (marker ? raw.includes(`/hook?m=${marker}`) : false) ||
-    raw.includes("/hook?m=lsh-") ||
-    (raw.includes("/hook?m=") && raw.includes("LINKSHELL_ID"))
-  );
-}
 
 function withLinkShellHookEntry<T>(
   entries: unknown[] | undefined,
@@ -2420,13 +2411,29 @@ export class BridgeSession {
     const home = homedir();
     const candidates = [
       join(home, ".claude", "settings.json"),
+      // Old CLI versions wrote hooks here; Claude Code still runs them.
+      join(home, ".claude", "settings.local.json"),
       join(home, ".codex", "hooks.json"),
       join(home, ".gemini", "settings.json"),
       join(this.defaultCwd, "hooks.json"), // copilot (per-cwd)
     ];
     for (const path of candidates) {
+      this.rewriteBareLinkShellIdInFile(path);
       this.sweepLinkShellHookEntries(path);
     }
+  }
+
+  /** Silence Claude Code's "required env var(s) not set: ${LINKSHELL_ID}" on leftover hooks. */
+  private rewriteBareLinkShellIdInFile(configPath: string): void {
+    if (!existsSync(configPath)) return;
+    try {
+      const raw = readFileSync(configPath, "utf8");
+      const next = rewriteBareLinkShellId(raw);
+      if (next !== raw) {
+        writeFileSync(configPath, next);
+        this.log(`rewrote optional LINKSHELL_ID expansion in ${configPath}`);
+      }
+    } catch { /* ignore parse/io errors */ }
   }
 
   private send(message: Envelope): void {
