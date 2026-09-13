@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentWorkspaceProxy,
+  CodexRolloutParser,
   makeAgentV2RemoteConversationId,
+  timelineItemsFromCodexRolloutText,
 } from "../src/runtime/acp/agent-workspace.js";
 
 function makeProxy() {
@@ -1653,6 +1655,126 @@ describe("host process discovery", () => {
       },
     });
     const error = sent.find((envelope) => envelope.payload?.item?.type === "error");
-    expect(error?.payload?.item?.error).toContain("终端面板");
+    expect(error?.payload?.item?.error).toMatch(/终端|旁观/);
+  });
+});
+
+describe("Codex rollout attach (same file, not a copy)", () => {
+  const rollout = [
+    JSON.stringify({ type: "session_meta", payload: { session_id: "s1", cwd: "/repo" } }),
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-09-13T00:00:00Z",
+      payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "<app-context> skip" }] },
+    }),
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-09-13T00:00:01Z",
+      payload: { type: "message", id: "u1", role: "user", content: [{ type: "input_text", text: "总结一下上周都做了什么？" }] },
+    }),
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-09-13T00:00:02Z",
+      payload: { type: "message", id: "a1", role: "assistant", content: [{ type: "output_text", text: "按上周统计..." }] },
+    }),
+  ].join("\n") + "\n";
+
+  it("parses the on-disk rollout into the existing conversation timeline", () => {
+    const items = timelineItemsFromCodexRolloutText(rollout, "conv-1");
+    expect(items.map((item) => item.role)).toEqual(["user", "assistant"]);
+    expect(items[0]?.text).toContain("总结一下");
+    expect(items[1]?.text).toContain("按上周统计");
+  });
+
+  it("tails new jsonl lines on the same parser instead of duplicating a session", () => {
+    const parser = new CodexRolloutParser();
+    const first = parser.consume(rollout, "conv-1");
+    const more = parser.consume(
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-09-13T00:00:03Z",
+        payload: { type: "message", id: "a2", role: "assistant", content: [{ type: "output_text", text: "补充一条新回复" }] },
+      }) + "\n",
+      "conv-1",
+    );
+    expect(first).toHaveLength(2);
+    expect(more).toHaveLength(1);
+    expect(more[0]?.id).toBe("a2");
+    expect(more[0]?.text).toContain("补充一条新回复");
+  });
+
+  it("opens an external Codex conversation without newSession or loadSession", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.initialized = true;
+    proxy.attachedExternalCodex.add("conversation-a");
+    proxy.timelines.set("conversation-a", []);
+    let newSessionCalls = 0;
+    let loadSessionCalls = 0;
+    proxy.clients.set("codex", {
+      newSession: async () => {
+        newSessionCalls += 1;
+        return { sessionId: "thread-copy-should-not-happen" };
+      },
+      loadSession: async () => {
+        loadSessionCalls += 1;
+        return { thread: { id: "thread-copy-should-not-happen", turns: [] } };
+      },
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-attach",
+      type: "agent.v2.conversation.open",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: { conversationId: "conversation-a", provider: "codex", cwd: "/tmp" },
+    });
+
+    expect(newSessionCalls).toBe(0);
+    expect(loadSessionCalls).toBe(0);
+    const opened = sent.find((envelope) => envelope.type === "agent.v2.conversation.opened");
+    expect(opened?.payload.conversation.agentSessionId).toBe("thread-a");
+    expect(opened?.payload.conversation.id).toBe("conversation-a");
+  });
+
+  it("rejects prompt and cancel on an attached Codex session without calling app-server", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.initialized = true;
+    proxy.attachedExternalCodex.add("conversation-a");
+    proxy.conversations.get("conversation-a").control = "attached";
+    let promptCalls = 0;
+    let cancelCalls = 0;
+    proxy.clients.set("codex", {
+      prompt: async () => {
+        promptCalls += 1;
+        return {};
+      },
+      cancel: () => {
+        cancelCalls += 1;
+      },
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-prompt-ro",
+      type: "agent.v2.prompt",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {
+        conversationId: "conversation-a",
+        clientMessageId: "m-ro",
+        contentBlocks: [{ type: "text", text: "插一句" }],
+      },
+    });
+    await proxy.handleEnvelope({
+      id: "env-cancel-ro",
+      type: "agent.v2.cancel",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: { conversationId: "conversation-a" },
+    });
+
+    expect(promptCalls).toBe(0);
+    expect(cancelCalls).toBe(0);
+    const errors = sent.filter((envelope) => envelope.payload?.item?.type === "error" || envelope.payload?.item?.error);
+    expect(JSON.stringify(sent)).toMatch(/旁观|无法停止/);
   });
 });

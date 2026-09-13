@@ -4,7 +4,7 @@
 // React components never touch the BridgeClient directly.
 
 import { parseTypedPayload } from "@linkshell/protocol";
-import { conversationControlFlags } from "../lib/conversation-controls";
+import { conversationControlFlags, conversationIsOwned, writableConversationFlags } from "../lib/conversation-controls";
 import type { Envelope, ProtocolMessageType } from "@linkshell/protocol";
 import { BridgeClient } from "../lib/bridge-client";
 import type { BridgeEvent } from "../lib/bridge-client";
@@ -864,7 +864,7 @@ export class WorkspaceStore {
    *  truncated at `turnId`. Only sent when the host advertised sessionFork. */
   forkConversation(sourceConversationId: string, turnId: string): string | undefined {
     const source = this.conversations.find((c) => c.id === sourceConversationId);
-    if (!source || !conversationControlFlags(this.capabilities, source.provider).fork) return undefined;
+    if (!source || !writableConversationFlags(this.capabilities, source).fork) return undefined;
     const conversationId = genId("agent");
     this.bridge.sendAgent("agent.v2.conversation.open", {
       conversationId,
@@ -885,7 +885,8 @@ export class WorkspaceStore {
     if (contentBlocks.length === 0) return;
 
     const conv = this.conversations.find((c) => c.id === input.conversationId);
-    const flags = conversationControlFlags(this.capabilities, conv?.provider);
+    if (!conversationIsOwned(conv)) return;
+    const flags = writableConversationFlags(this.capabilities, conv);
     if (!flags.images) {
       contentBlocks = contentBlocks.filter((block) => block.type !== "image");
     }
@@ -1020,7 +1021,7 @@ export class WorkspaceStore {
 
   cancel(conversationId: string): void {
     const conv = this.conversations.find((c) => c.id === conversationId);
-    if (!conversationControlFlags(this.capabilities, conv?.provider).cancel) return;
+    if (!writableConversationFlags(this.capabilities, conv).cancel) return;
     this.sendReliable("agent.v2.cancel", { conversationId });
   }
 
@@ -1031,7 +1032,7 @@ export class WorkspaceStore {
     optionId?: string,
   ): void {
     const conv = this.conversations.find((c) => c.id === conversationId);
-    if (!conversationControlFlags(this.capabilities, conv?.provider).permission) return;
+    if (!writableConversationFlags(this.capabilities, conv).permission) return;
     // Optimistically mark the matching permission item pending for instant UI
     // feedback; the host's follow-up event will set the final state.
     this.patchItemByPredicate(
@@ -1106,7 +1107,7 @@ export class WorkspaceStore {
     >,
   ): void {
     const conv = this.conversations.find((c) => c.id === conversationId);
-    const flags = conversationControlFlags(this.capabilities, conv?.provider);
+    const flags = writableConversationFlags(this.capabilities, conv);
     const next = { ...patch };
     if (!flags.model) delete next.model;
     if (!flags.effort) delete next.reasoningEffort;

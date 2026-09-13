@@ -46,6 +46,11 @@ function feature(cap: AgentProviderCapability | undefined, name: string): boolea
  * Map host `agent.v2.capabilities` onto conversation-console controls.
  * Unadvertised flags stay false — the UI must not send the matching write.
  */
+/** LinkShell-owned sessions are writable; attached external sessions are read-only. */
+export function conversationIsOwned(conversation: { control?: string } | undefined): boolean {
+  return conversation?.control !== "attached";
+}
+
 export function conversationControlFlags(
   capabilities: AgentCapabilitiesPayload | null | undefined,
   providerId?: string,
@@ -67,6 +72,15 @@ export function conversationControlFlags(
     effort: feature(cap, "reasoningEffort") ?? false,
     permissionMode: permission && (cap?.permissionModes?.length ?? 0) > 0,
   };
+}
+
+export function writableConversationFlags(
+  capabilities: AgentCapabilitiesPayload | null | undefined,
+  conversation?: { control?: string; provider?: string },
+): ConversationControlFlags {
+  const flags = conversationControlFlags(capabilities, conversation?.provider);
+  if (conversationIsOwned(conversation)) return flags;
+  return { ...OFF, list: flags.list };
 }
 
 export function conversationWriteType(

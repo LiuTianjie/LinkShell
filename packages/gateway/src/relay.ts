@@ -16,7 +16,6 @@ import {
   handleTunnelWsData,
   handleTunnelWsClose,
 } from "./tunnel.js";
-import { resolveAgentPermissionHttpAck } from "./agent-permission-http.js";
 
 export function handleSocketMessage(
   socket: WebSocket,
@@ -423,18 +422,6 @@ function handleHostMessage(
     case "session.heartbeat":
       break;
     case "permission.decision.result": {
-      const p = parseTypedPayload("permission.decision.result", envelope.payload);
-      resolveAgentPermissionHttpAck({
-        sessionId: session.id,
-        ack: {
-          requestId: p.requestId,
-          decision: p.decision,
-          resolved: p.resolved,
-          delivered: p.delivered,
-          source: p.source,
-          message: p.message,
-        },
-      });
       broadcastToClients(session, envelope);
       break;
     }

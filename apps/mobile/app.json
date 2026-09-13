@@ -28,7 +28,6 @@
           "cameraPermission": "Allow LinkShell to scan pairing QR codes from your terminal."
         }
       ],
-      "./plugins/with-live-activity",
       [
         "expo-router",
         {

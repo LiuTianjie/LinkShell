@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync, watch } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, relative } from "node:path";
 import {
@@ -249,11 +249,14 @@ interface AgentConversation {
   agentSessionId?: string;
   provider: AgentProvider;
   cwd: string;
+  workspaceRoots?: string[];
+  group?: string;
   title?: string;
   model?: string;
   reasoningEffort?: string;
   permissionMode?: AgentPermissionMode;
   collaborationMode?: AgentCollaborationMode;
+  control?: "owned" | "attached";
   status: AgentStatus;
   archived: boolean;
   lastMessagePreview?: string;
@@ -1675,6 +1678,226 @@ function codexSessionConfig(sessionId: string): {
   return cfg;
 }
 
+const CODEX_ROLLOUT_NAME =
+  /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl$/;
+
+function walkCodexRollouts(
+  root: string,
+  onFile: (path: string, filenameId: string, mtimeMs: number) => void,
+): void {
+  if (!existsSync(root)) return;
+  const walk = (dir: string): void => {
+    let entries: string[];
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      const path = join(dir, name);
+      let stat;
+      try { stat = statSync(path); } catch { continue; }
+      if (stat.isDirectory()) { walk(path); continue; }
+      const match = CODEX_ROLLOUT_NAME.exec(name);
+      if (match?.[1]) onFile(path, match[1], stat.mtimeMs);
+    }
+  };
+  walk(root);
+}
+
+function findCodexRolloutPath(sessionId: string, root = join(homedir(), ".codex", "sessions")): string | undefined {
+  const byName: { path: string; mt: number }[] = [];
+  const recent: { path: string; mt: number }[] = [];
+  walkCodexRollouts(root, (path, filenameId, mt) => {
+    recent.push({ path, mt });
+    if (filenameId === sessionId) byName.push({ path, mt });
+  });
+  if (byName.length > 0) {
+    byName.sort((a, b) => b.mt - a.mt);
+    return byName[0]?.path;
+  }
+  recent.sort((a, b) => b.mt - a.mt);
+  for (const candidate of recent.slice(0, 80)) {
+    try {
+      const fdText = readFileSync(candidate.path, "utf8");
+      const first = fdText.slice(0, fdText.indexOf("\n") >= 0 ? fdText.indexOf("\n") : fdText.length);
+      const metaId = firstString(asRecord(asRecord(JSON.parse(first))?.payload), ["session_id", "id"]);
+      if (metaId === sessionId) return candidate.path;
+    } catch { /* skip */ }
+  }
+  return undefined;
+}
+
+function findLatestCodexRolloutForCwd(cwd: string, root = join(homedir(), ".codex", "sessions")): { path: string; sessionId: string } | undefined {
+  const wanted = cwd.replace(/\/+$/, "");
+  const candidates: { path: string; sessionId: string; mt: number }[] = [];
+  walkCodexRollouts(root, (path, filenameId, mt) => {
+    candidates.push({ path, sessionId: filenameId, mt });
+  });
+  candidates.sort((a, b) => b.mt - a.mt);
+  for (const candidate of candidates.slice(0, 40)) {
+    try {
+      const text = readFileSync(candidate.path, "utf8");
+      const first = text.slice(0, text.indexOf("\n") >= 0 ? text.indexOf("\n") : text.length);
+      const payload = asRecord(asRecord(JSON.parse(first))?.payload);
+      const fileCwd = firstString(payload, ["cwd"])?.replace(/\/+$/, "");
+      const metaId = firstString(payload, ["session_id", "id"]) ?? candidate.sessionId;
+      if (fileCwd === wanted) return { path: candidate.path, sessionId: metaId };
+    } catch { continue; }
+  }
+  return undefined;
+}
+
+function publicWorkspaceRoots(roots: unknown): string[] | undefined {
+  if (!Array.isArray(roots)) return undefined;
+  const cleaned = roots
+    .filter((root): root is string => typeof root === "string" && root.length > 0)
+    .filter((root) => !root.includes("/.codex/visualizations/"));
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function isInjectedCodexUserText(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed.startsWith("<app-context>") ||
+    trimmed.startsWith("<recommended_plugins>") ||
+    trimmed.startsWith("<skills_instructions>") ||
+    trimmed.startsWith("# AGENTS.md") ||
+    trimmed.startsWith("You are `/root`")
+  );
+}
+
+function textsFromCodexContent(content: unknown): string[] {
+  if (typeof content === "string" && content.trim()) return [content];
+  if (!Array.isArray(content)) return [];
+  const texts: string[] = [];
+  for (const block of content) {
+    const rec = asRecord(block);
+    const text = typeof rec?.text === "string" ? rec.text : undefined;
+    if (text?.trim()) texts.push(text);
+  }
+  return texts;
+}
+
+/** Incremental Codex jsonl parser so live TUI/desktop sessions can tail the file. */
+export class CodexRolloutParser {
+  private toolNames = new Map<string, string>();
+  private index = 0;
+  workspaceRoots: string[] | undefined;
+  sessionCwd: string | undefined;
+
+  consume(text: string, conversationId: string): AgentTimelineItem[] {
+    const items: AgentTimelineItem[] = [];
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const next = this.consumeLine(line, conversationId);
+      if (next) items.push(next);
+    }
+    return items;
+  }
+
+  private consumeLine(line: string, conversationId: string): AgentTimelineItem | undefined {
+    let record: Record<string, unknown> | undefined;
+    try { record = asRecord(JSON.parse(line)); } catch { return undefined; }
+    if (!record) return undefined;
+    const payload = asRecord(record.payload) ?? record;
+    const recordType = firstString(record, ["type"]);
+    const payloadType = firstString(payload, ["type"]);
+    const roots = publicWorkspaceRoots(payload.workspace_roots ?? payload.workspaceRoots);
+    if (roots) this.workspaceRoots = roots;
+    const cwd = firstString(payload, ["cwd"]);
+    if (cwd) this.sessionCwd = cwd;
+    const createdAt = parseTimestamp(record.timestamp ?? payload.timestamp) ?? Date.now();
+    if (recordType === "response_item" && payloadType === "message") {
+      const roleRaw = firstString(payload, ["role"]);
+      if (roleRaw !== "user" && roleRaw !== "assistant") return undefined;
+      const texts = textsFromCodexContent(payload.content).filter((text) =>
+        roleRaw === "assistant" || !isInjectedCodexUserText(text),
+      );
+      if (texts.length === 0) return undefined;
+      const text = texts.join("\n\n");
+      this.index += 1;
+      return {
+        id: firstString(payload, ["id"]) ?? id(`codex-msg-${this.index}`),
+        conversationId,
+        type: "message",
+        kind: "chat",
+        role: roleRaw,
+        text,
+        content: [{ type: "text", text }],
+        createdAt,
+        updatedAt: createdAt,
+      };
+    }
+    if (recordType === "response_item" && payloadType === "reasoning") {
+      const texts = textsFromCodexContent(payload.content ?? payload.summary);
+      if (texts.length === 0) return undefined;
+      this.index += 1;
+      return {
+        id: firstString(payload, ["id"]) ?? id(`codex-think-${this.index}`),
+        conversationId,
+        type: "status",
+        kind: "thinking",
+        text: texts.join("\n"),
+        createdAt,
+        updatedAt: createdAt,
+      };
+    }
+    if (recordType === "response_item" && (payloadType === "custom_tool_call" || payloadType === "function_call")) {
+      const callId = firstString(payload, ["call_id", "id"]) ?? id(`codex-tool-${this.index}`);
+      const name = firstString(payload, ["name"]) ?? "tool";
+      this.toolNames.set(callId, name);
+      const input = firstString(payload, ["input", "arguments"]) ?? stringify(payload.input ?? payload.arguments ?? "");
+      this.index += 1;
+      return {
+        id: `tool:${callId}`,
+        conversationId,
+        type: "tool_call",
+        kind: name === "exec" || name.includes("command") ? "command_execution" : "tool_activity",
+        itemId: callId,
+        toolCall: {
+          id: callId,
+          name,
+          input,
+          createdAt,
+          status: "running",
+        },
+        createdAt,
+        updatedAt: createdAt,
+      };
+    }
+    if (recordType === "response_item" && (payloadType === "custom_tool_call_output" || payloadType === "function_call_output")) {
+      const callId = firstString(payload, ["call_id", "id"]);
+      if (!callId) return undefined;
+      const outputTexts = textsFromCodexContent(payload.output);
+      const output = outputTexts.join("\n") || stringify(payload.output ?? "");
+      this.index += 1;
+      return {
+        id: `tool:${callId}`,
+        conversationId,
+        type: "tool_call",
+        kind: "tool_activity",
+        itemId: callId,
+        toolCall: {
+          id: callId,
+          name: this.toolNames.get(callId) ?? "tool",
+          output,
+          createdAt,
+          status: "completed",
+        },
+        createdAt,
+        updatedAt: createdAt,
+      };
+    }
+    return undefined;
+  }
+}
+
+/** Parse a Codex on-disk rollout into timeline items. App-server thread/read
+ *  only sees threads it owns; desktop/TUI sessions live in jsonl. */
+export function timelineItemsFromCodexRolloutText(
+  text: string,
+  conversationId: string,
+): AgentTimelineItem[] {
+  return new CodexRolloutParser().consume(text, conversationId).slice(-MAX_TIMELINE_ITEMS);
+}
+
 function parseRemoteSessions(value: unknown): Array<{
   id: string;
   cwd?: string;
@@ -2204,6 +2427,14 @@ export class AgentWorkspaceProxy {
         const payload = parseTypedPayload("agent.v2.cancel", envelope.payload);
         const conversation = this.conversations.get(payload.conversationId);
         if (!conversation) break;
+        if (conversation.control === "attached" || this.attachedExternalCodex.has(conversation.id)) {
+          this.rejectAgentAction(
+            conversation,
+            `${providerLabel(conversation.provider)} 这场会话在本机终端/桌面里运行。Web 无法停止它，请在那边操作。`,
+            conversation.status,
+          );
+          break;
+        }
         const turnId = this.currentTurnIds.get(payload.conversationId);
         if (this.protocolForProvider(conversation.provider) === "codex-app-server" && !turnId) {
           this.rejectAgentAction(
@@ -2271,8 +2502,18 @@ export class AgentWorkspaceProxy {
   private fsSyncRunning = false;
   private lastPushedConversationSignature: string | undefined;
   private lastHydrateAt = new Map<string, number>();
-  private static readonly FS_SYNC_THROTTLE_MS = 1500;
-  private static readonly EXTERNAL_HYDRATE_THROTTLE_MS = 2000;
+  /** Session ids this LinkShell process created via app-server `newSession`. */
+  private ownedCodexSessionIds = new Set<string>();
+  /** Conversations attached to an external Codex TUI/desktop rollout (same file, not a copy). */
+  private attachedExternalCodex = new Set<string>();
+  private codexFollow = new Map<string, {
+    path: string;
+    offset: number;
+    carry: string;
+    parser: CodexRolloutParser;
+  }>();
+  private static readonly FS_SYNC_THROTTLE_MS = 400;
+  private static readonly EXTERNAL_HYDRATE_THROTTLE_MS = 400;
 
   private startSessionWatchers(): void {
     const roots = [
@@ -2347,7 +2588,9 @@ export class AgentWorkspaceProxy {
         this.lastHydrateAt.set(conversation.id, now);
         try {
           await this.hydrateConversationFromProvider(conversation, undefined, { rememberActiveTurn: false });
-          this.sendSnapshot(conversation.id);
+          if (this.followCodexRolloutDisk(conversation, true) > 0) {
+            this.sendSnapshot(conversation.id);
+          }
         } catch (error) {
           if (this.input.verbose) {
             process.stderr.write(`[agent:v2] external hydrate failed for ${conversation.id}: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -2477,11 +2720,17 @@ export class AgentWorkspaceProxy {
       seenKeys.add(key);
       this.processMissCounts.set(key, 0);
 
-      const existingId = snapshot.sessionId
-        ? this.conversationByAgentSessionId.get(snapshot.sessionId)
+      let sessionId = snapshot.sessionId;
+      if (!sessionId && snapshot.provider === "codex") {
+        const matched = findLatestCodexRolloutForCwd(snapshot.cwd ?? this.input.cwd);
+        if (matched) sessionId = matched.sessionId;
+      }
+      const existingId = sessionId
+        ? this.conversationByAgentSessionId.get(sessionId)
         : undefined;
-      const liveId = liveConversationId(snapshot);
-      const conversationId = existingId ?? liveId;
+      const liveId = liveConversationId({ ...snapshot, sessionId });
+      const conversationId = existingId
+        ?? (sessionId ? makeAgentV2RemoteConversationId(snapshot.provider, sessionId) : liveId);
       const existing = this.conversations.get(conversationId);
       const cwd = snapshot.cwd ?? existing?.cwd ?? this.input.cwd;
       const driving = this.currentTurnIds.has(conversationId);
@@ -2496,10 +2745,12 @@ export class AgentWorkspaceProxy {
         existing.status = status;
         existing.cwd = cwd;
         if (!existing.title) existing.title = agentProviderLabel(snapshot.provider);
-        if (snapshot.sessionId && !existing.agentSessionId) {
-          existing.agentSessionId = snapshot.sessionId;
-          this.conversationByAgentSessionId.set(snapshot.sessionId, existing.id);
+        if (sessionId && !existing.agentSessionId) {
+          existing.agentSessionId = sessionId;
+          this.conversationByAgentSessionId.set(sessionId, existing.id);
         }
+        this.attachedExternalCodex.add(existing.id);
+        existing.control = "attached";
         if (changed) {
           listChanged = true;
           this.emitConversation(existing);
@@ -2510,7 +2761,7 @@ export class AgentWorkspaceProxy {
       const now = Date.now();
       const conversation: AgentConversation = {
         id: conversationId,
-        agentSessionId: snapshot.sessionId,
+        agentSessionId: sessionId,
         provider: snapshot.provider,
         cwd,
         title: agentProviderLabel(snapshot.provider),
@@ -2519,9 +2770,11 @@ export class AgentWorkspaceProxy {
         lastMessagePreview: "本机终端中的 Agent 进程",
         lastActivityAt: now,
         createdAt: now,
+        control: "attached",
       };
       this.conversations.set(conversation.id, conversation);
-      if (snapshot.sessionId) this.conversationByAgentSessionId.set(snapshot.sessionId, conversation.id);
+      if (sessionId) this.conversationByAgentSessionId.set(sessionId, conversation.id);
+      this.attachedExternalCodex.add(conversation.id);
       this.emitConversation(conversation);
       listChanged = true;
     }
@@ -2893,6 +3146,8 @@ export class AgentWorkspaceProxy {
             lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
             createdAt: remote.createdAt ?? existing?.createdAt ?? now,
             usage,
+            group: existing?.group ?? (provider === "claude" ? titleFromCwd(cwd) : existing?.group),
+            workspaceRoots: existing?.workspaceRoots,
           };
           this.conversations.set(conversation.id, conversation);
           this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
@@ -3031,7 +3286,13 @@ export class AgentWorkspaceProxy {
       if (turnCount > 0) this.historyCursors.set(conversation.id, String(turnCount));
     }
 
-    const hydratedItems = timelineItemsFromProviderThread(source, conversation.id);
+    let hydratedItems = timelineItemsFromProviderThread(source, conversation.id);
+    if (conversation.provider === "codex") {
+      this.followCodexRolloutDisk(conversation, false);
+    }
+    if (hydratedItems.length === 0) {
+      hydratedItems = this.timelines.get(conversation.id) ?? [];
+    }
     if (hydratedItems.length === 0) return;
     const existing = this.timelines.get(conversation.id) ?? [];
     const merged = new Map<string, AgentTimelineItem>();
@@ -3048,9 +3309,84 @@ export class AgentWorkspaceProxy {
     const lastPreview = [...nextItems].reverse()
       .map((item) => previewText(previewFromTimelineItem(item) ?? ""))
       .find(Boolean);
-    if (lastPreview && !conversation.lastMessagePreview) {
-      conversation.lastMessagePreview = lastPreview;
+    if (lastPreview) conversation.lastMessagePreview = lastPreview;
+  }
+
+  /** Tail a Codex desktop/TUI rollout. `emit` sends agent.v2.event for new lines
+   *  so a phone/web client sees tokens as the jsonl grows, not only on open. */
+  private followCodexRolloutDisk(conversation: AgentConversation, emit: boolean): number {
+    if (conversation.provider !== "codex") return 0;
+    let path = conversation.agentSessionId
+      ? findCodexRolloutPath(conversation.agentSessionId)
+      : undefined;
+    if (!path && conversation.cwd) {
+      const matched = findLatestCodexRolloutForCwd(conversation.cwd);
+      if (matched) {
+        path = matched.path;
+        if (!conversation.agentSessionId) {
+          conversation.agentSessionId = matched.sessionId;
+          this.conversationByAgentSessionId.set(matched.sessionId, conversation.id);
+        }
+      }
     }
+    if (!path) return 0;
+    let follow = this.codexFollow.get(conversation.id);
+    if (!follow || follow.path !== path) {
+      follow = { path, offset: 0, carry: "", parser: new CodexRolloutParser() };
+      this.codexFollow.set(conversation.id, follow);
+    }
+    let stat;
+    try {
+      stat = statSync(path);
+    } catch {
+      return 0;
+    }
+    if (stat.size < follow.offset) {
+      follow.offset = 0;
+      follow.carry = "";
+      follow.parser = new CodexRolloutParser();
+    }
+    if (stat.size === follow.offset && !follow.carry) return 0;
+    const length = stat.size - follow.offset;
+    const buf = Buffer.alloc(length);
+    const fd = openSync(path, "r");
+    try {
+      readSync(fd, buf, 0, length, follow.offset);
+    } finally {
+      closeSync(fd);
+    }
+    follow.offset = stat.size;
+    const combined = follow.carry + buf.toString("utf8");
+    const lastNl = combined.lastIndexOf("\n");
+    if (lastNl < 0) {
+      follow.carry = combined;
+      return 0;
+    }
+    const complete = combined.slice(0, lastNl + 1);
+    follow.carry = combined.slice(lastNl + 1);
+    const items = follow.parser.consume(complete, conversation.id);
+    if (items.length === 0) return 0;
+    if (emit) {
+      for (const item of items) this.upsertItem(conversation.id, item);
+    } else {
+      const existing = this.timelines.get(conversation.id) ?? [];
+      const merged = new Map(existing.map((item) => [item.id, item] as const));
+      for (const item of items) merged.set(item.id, item);
+      const nextItems = [...merged.values()]
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(-MAX_TIMELINE_ITEMS);
+      this.timelines.set(conversation.id, nextItems);
+      for (const item of nextItems) this.rememberItemConversationId(conversation.id, item);
+    }
+    const timeline = this.timelines.get(conversation.id) ?? [];
+    const lastPreview = [...timeline].reverse()
+      .map((item) => previewText(previewFromTimelineItem(item) ?? ""))
+      .find(Boolean);
+    if (lastPreview) conversation.lastMessagePreview = lastPreview;
+    conversation.lastActivityAt = Date.now();
+    if (follow.parser.workspaceRoots?.length) conversation.workspaceRoots = follow.parser.workspaceRoots;
+    if (follow.parser.sessionCwd && !conversation.cwd) conversation.cwd = follow.parser.sessionCwd;
+    return items.length;
   }
 
   private sendCapabilities(): void {
@@ -3299,7 +3635,46 @@ export class AgentWorkspaceProxy {
       }
     }
 
-    if (existingConversation && existingConversation.status !== "error" && existingConversation.agentSessionId) {
+    if (
+      existingConversation &&
+      !existingConversation.agentSessionId &&
+      provider === "codex"
+    ) {
+      const matched = findLatestCodexRolloutForCwd(existingConversation.cwd ?? cwd);
+      if (matched) {
+        existingConversation.agentSessionId = matched.sessionId;
+        this.conversationByAgentSessionId.set(matched.sessionId, existingConversation.id);
+      }
+    }
+
+    if (existingConversation && existingConversation.status !== "error") {
+      const owned = Boolean(
+        existingConversation.agentSessionId &&
+        this.ownedCodexSessionIds.has(existingConversation.agentSessionId),
+      );
+      // External Codex (desktop/TUI) is the same session on disk. Attach by
+      // tailing that rollout — never loadSession/newSession (those mint another thread).
+      if (
+        provider === "codex" &&
+        !owned &&
+        this.attachedExternalCodex.has(existingConversation.id) &&
+        !this.currentTurnIds.has(existingConversation.id)
+      ) {
+        existingConversation.control = "attached";
+        this.followCodexRolloutDisk(existingConversation, false);
+        this.activeConversationId = existingConversation.id;
+        this.input.send(createEnvelope({
+          type: "agent.v2.conversation.opened",
+          sessionId: this.input.sessionId,
+          payload: {
+            conversation: existingConversation,
+            snapshot: this.timelines.get(existingConversation.id) ?? [],
+            requestedConversationId: payload.conversationId,
+          },
+        }));
+        return existingConversation;
+      }
+      if (existingConversation.agentSessionId) {
       const requestedCanonicalId = makeAgentV2RemoteConversationId(provider, existingConversation.agentSessionId);
       if (
         payload.conversationId &&
@@ -3342,6 +3717,7 @@ export class AgentWorkspaceProxy {
           if (this.input.verbose) {
             process.stderr.write(`[agent:v2] resume failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
           }
+          await this.hydrateConversationFromProvider(existingConversation, undefined);
         }
       }
       this.activeConversationId = existingConversation.id;
@@ -3355,6 +3731,7 @@ export class AgentWorkspaceProxy {
         },
       }));
       return existingConversation;
+      }
     }
 
     try {
@@ -3372,6 +3749,7 @@ export class AgentWorkspaceProxy {
           : await client.newSession({ cwd });
       }
       agentSessionId = this.extractSessionId(result) ?? agentSessionId ?? id("agent-session");
+      if (provider === "codex") this.ownedCodexSessionIds.add(agentSessionId);
       const now = Date.now();
       const conversationId = makeAgentV2RemoteConversationId(provider, agentSessionId);
       const conversation: AgentConversation = {
@@ -3381,6 +3759,7 @@ export class AgentWorkspaceProxy {
         provider,
         cwd,
         title: payload.title ?? existingConversation?.title ?? titleFromCwd(cwd),
+        control: "owned",
         model: payload.model ?? existingConversation?.model,
         reasoningEffort: payload.reasoningEffort ?? existingConversation?.reasoningEffort,
         permissionMode: payload.permissionMode ?? existingConversation?.permissionMode,
@@ -3529,11 +3908,19 @@ export class AgentWorkspaceProxy {
       this.conversations.get(payload.conversationId) ??
       await this.openConversation({ conversationId: payload.conversationId });
     if (!conversation) return;
+    if (conversation.control === "attached" || this.attachedExternalCodex.has(conversation.id)) {
+      this.rejectAgentAction(
+        conversation,
+        `${providerLabel(conversation.provider)} 这场会话在本机终端/桌面里运行。Web 只旁观同一份记录，停止和插话请在那边操作。`,
+        conversation.status,
+      );
+      return;
+    }
     if (!conversation.agentSessionId) {
       this.rejectAgentAction(
         conversation,
         isLiveConversationId(conversation.id) || !isProtocolAgentProvider(conversation.provider)
-          ? `${providerLabel(conversation.provider)} 正在本机终端中运行。远程对话协议尚未接入，请打开终端面板继续。`
+          ? `${providerLabel(conversation.provider)} 正在本机终端中运行。请打开终端面板继续。`
           : "Agent session 尚未就绪，消息没有发送。请重新打开对话后再试。",
       );
       return;

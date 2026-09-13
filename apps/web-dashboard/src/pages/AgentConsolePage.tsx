@@ -19,7 +19,7 @@ import { isEmbedded } from "../lib/embed";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import type { ConnectionStatus, AgentStatus, AgentTimelineItem, AgentConversation } from "../lib/types";
-import { conversationControlFlags } from "../lib/conversation-controls";
+import { conversationIsOwned, writableConversationFlags } from "../lib/conversation-controls";
 import { IconSearch, IconPlus, IconStop, IconTerminal, IconFolder, IconGlobe, IconCommand, ProviderIcon } from "../components/icons";
 import { McpStatusButton } from "../components/McpStatusButton";
 import { FloatingPanel } from "../components/FloatingPanel";
@@ -402,7 +402,8 @@ export function AgentConsolePage({
   const activeCapability = activeConversation
     ? providers.find((p) => p.id === activeConversation.provider)
     : undefined;
-  const controls = conversationControlFlags(snapshot.capabilities, activeConversation?.provider);
+  const controls = writableConversationFlags(snapshot.capabilities, activeConversation);
+  const owned = conversationIsOwned(activeConversation);
   const running = activeConversation?.status === "running";
   const historyState = activeId ? snapshot.history.get(activeId) : undefined;
 
@@ -1184,7 +1185,7 @@ export function AgentConsolePage({
                       <div key={u.item.id} className="min-w-0 animate-fade-in">
                         <TimelineItemView
                           item={u.item}
-                          canSteer={activeConversation.provider === "codex" && running}
+                          canSteer={owned && activeConversation.provider === "codex" && running}
                           onPermission={(requestId, outcome, optionId) =>
                             store.respondPermission(activeId, requestId, outcome, optionId)
                           }
@@ -1247,6 +1248,11 @@ export function AgentConsolePage({
                 </div>
               )}
               <div className="mx-auto w-full min-w-0 max-w-3xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:pb-4">
+                {!owned && (
+                  <div className="mb-2 rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm text-content-secondary">
+                    只读旁观 · 这场会话在本机 {activeConversation.provider === "codex" ? "Codex" : "终端"} 里运行。停止和插话请在那边操作；Web 只同步同一份记录。
+                  </div>
+                )}
                 {planReady && (
                   <div className="mb-2 flex items-center gap-3 rounded-xl border border-accent-dim/40 bg-surface px-3.5 py-2.5 animate-slide-in">
                     <span className="min-w-0 flex-1 text-sm text-content-secondary">
@@ -1265,7 +1271,7 @@ export function AgentConsolePage({
                   onDiscard={(itemId) => store.discardQueuedFollowUp(activeId, itemId)}
                 />
                 <Composer
-                  disabled={snapshot.status !== "connected"}
+                  disabled={snapshot.status !== "connected" || !owned}
                   running={running}
                   supportsImages={controls.images}
                   commands={activeCapability?.commands}

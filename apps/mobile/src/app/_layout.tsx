@@ -26,7 +26,6 @@ import { addServer, getDefaultServer, removeServerWithHistory } from "../storage
 import { ThemeProvider, useTheme } from "../theme";
 import { fetchWithTimeout } from "../utils/fetch-with-timeout";
 import { parsePairingLink } from "../utils/pairing-link";
-import { useAgentLiveActivity } from "../hooks/useAgentLiveActivity";
 
 const DEFAULT_GATEWAY = "http://localhost:8787";
 export default function RootLayout() {
@@ -245,9 +244,6 @@ function AppInner() {
       .then(() => setSessionRefreshKey((key) => key + 1))
       .catch(() => {});
   }, [manager.sessions]);
-
-  // Agent Live Activity
-  useAgentLiveActivity(agentWorkspace, manager);
 
   // App state
   const handleForeground = useCallback(async () => {

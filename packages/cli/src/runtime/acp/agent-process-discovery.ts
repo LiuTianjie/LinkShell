@@ -22,13 +22,14 @@ export const KNOWN_AGENT_PROVIDERS = [
   "copilot",
   "opencode",
   "cursor",
+  "grok",
   "kimi",
   "custom",
 ] as const;
 
 export type KnownAgentProvider = (typeof KNOWN_AGENT_PROVIDERS)[number];
 
-export const PROTOCOL_AGENT_PROVIDERS = new Set<string>(["codex", "claude", "gemini", "cursor"]);
+export const PROTOCOL_AGENT_PROVIDERS = new Set<string>(["codex", "claude", "gemini", "cursor", "grok"]);
 
 export interface AgentProcessSnapshot {
   provider: string;
@@ -65,6 +66,8 @@ export function agentProviderLabel(provider: string): string {
       return "OpenCode";
     case "cursor":
       return "Cursor";
+    case "grok":
+      return "Grok";
     case "kimi":
       return "Kimi";
     case "custom":
@@ -98,6 +101,7 @@ export function isControlPlaneCommand(command: string): boolean {
   }
   if (/\b--acp\b/.test(lowered)) return true;
   if (commandBinaryName(command) === "cursor-agent" && /\sacp(\s|$)/.test(lowered)) return true;
+  if (commandBinaryName(command) === "grok" && /\bagent\b/.test(lowered) && /\bstdio\b/.test(lowered)) return true;
   return false;
 }
 
@@ -122,6 +126,7 @@ export function classifyAgentCommand(command: string): string | undefined {
   }
   if (binary === "kimi" && (first === "kimi" || first.endsWith("/kimi"))) return "kimi";
   if (binary === "copilot" || first.endsWith("/copilot")) return "copilot";
+  if (binary === "grok" || first.endsWith("/grok")) return "grok";
   return undefined;
 }
 

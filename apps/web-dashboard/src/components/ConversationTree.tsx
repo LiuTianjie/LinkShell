@@ -15,21 +15,9 @@ import {
   IconTrash,
   ProviderIcon,
 } from "./icons";
+import { buildProviderOrganization, bucketDefaultCwd, folderLabel } from "../lib/conversation-organization";
 
-// Tree: Device (host) → Folder (cwd) → Provider (Claude/Codex) → Conversation.
-// Within one console we're on a single CLI device, so the device is the root
-// label; conversations group by cwd, then provider.
-
-interface FolderGroup {
-  cwd: string;
-  label: string;
-  providers: Map<string, AgentConversation[]>; // provider → conversations
-}
-
-interface ProviderGroup {
-  provider: string;
-  conversations: AgentConversation[];
-}
+// Tree: Device → Provider → native bucket (Codex workspace / Claude group / folder).
 
 function ConversationRowMenu({
   open,
@@ -98,12 +86,6 @@ function ConversationRowMenu({
   );
 }
 
-function folderLabel(cwd: string): string {
-  if (!cwd || cwd === "—") return "(未知目录)";
-  const parts = cwd.replace(/\/+$/, "").split("/");
-  return parts[parts.length - 1] || cwd;
-}
-
 function conversationPriority(c: AgentConversation, activeConversationId: string | null): number {
   if (c.status === "waiting_permission") return 0;
   if (c.status === "running") return 1;
@@ -124,46 +106,6 @@ function isActiveConversation(c: AgentConversation): boolean {
   return c.status === "waiting_permission" || c.status === "running" || c.status === "error";
 }
 
-function buildTree(conversations: AgentConversation[]): FolderGroup[] {
-  const byFolder = new Map<string, FolderGroup>();
-  for (const c of conversations) {
-    const cwd = c.cwd || "—";
-    let group = byFolder.get(cwd);
-    if (!group) {
-      group = { cwd, label: folderLabel(cwd), providers: new Map() };
-      byFolder.set(cwd, group);
-    }
-    const list = group.providers.get(c.provider) ?? [];
-    list.push(c);
-    group.providers.set(c.provider, list);
-  }
-  // Sort conversations newest-first within each provider.
-  for (const g of byFolder.values()) {
-    for (const list of g.providers.values()) {
-      list.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-    }
-  }
-  // Folders sorted by their most-recent activity (max lastActivityAt across all
-  // their conversations), newest first — so a session touched seconds ago (by
-  // ANY process, since lastActivityAt comes from the transcript's mtime, not
-  // just LinkShell-driven turns) floats its folder to the top. Was alphabetical,
-  // which buried recently-used work.
-  const folderRecency = (g: FolderGroup): number => {
-    let max = 0;
-    for (const list of g.providers.values()) {
-      for (const c of list) max = Math.max(max, c.lastActivityAt);
-    }
-    return max;
-  };
-  return [...byFolder.values()].sort((a, b) => folderRecency(b) - folderRecency(a));
-}
-
-function sortedProviders(folder: FolderGroup): ProviderGroup[] {
-  return [...folder.providers.entries()]
-    .map(([provider, conversations]) => ({ provider, conversations }))
-    .sort((a, b) => providerLabel(a.provider).localeCompare(providerLabel(b.provider)));
-}
-
 function providerLabel(id: string): string {
   switch (id) {
     case "claude":
@@ -178,6 +120,8 @@ function providerLabel(id: string): string {
       return "OpenCode";
     case "cursor":
       return "Cursor";
+    case "grok":
+      return "Grok";
     case "kimi":
       return "Kimi";
     default:
@@ -258,7 +202,7 @@ export function ConversationTree({
     externalAgentStatus === "waiting_permission" ||
     externalAgentStatus === "error";
   const hasActiveSection = hasExternalActive || activeConversations.length > 0;
-  const tree = useMemo(() => buildTree(visibleConversations), [visibleConversations]);
+  const tree = useMemo(() => buildProviderOrganization(visibleConversations), [visibleConversations]);
 
   // All folders/providers expanded by default; collapse state tracked by key.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -392,59 +336,74 @@ export function ConversationTree({
             {showArchived || archivedCount === 0 ? "还没有对话" : "没有未归档的对话"}
           </p>
         ) : (
-          tree.map((folder) => {
-            const fKey = `folder:${folder.cwd}`;
-            const fCollapsed = collapsed.has(fKey);
+          tree.map((providerNode) => {
+            const pKey = `prov:${providerNode.provider}`;
+            const pCollapsed = collapsed.has(pKey);
+            const count = providerNode.buckets.reduce((n, b) => n + b.conversations.length, 0);
             return (
-              <div key={folder.cwd} className="py-1">
-                <button
-                  onClick={() => toggle(fKey)}
-                  className="tree-row"
-                  title={folder.cwd}
-                >
-                  {fCollapsed ? (
-                    <IconChevronRight size={12} className="shrink-0 text-content-faint" />
-                  ) : (
-                    <IconChevronDown size={12} className="shrink-0 text-content-faint" />
-                  )}
-                  <IconFolder size={13} className="shrink-0 text-content-faint" />
-                  <span className="truncate text-2xs font-semibold uppercase tracking-wider text-content-faint">
-                    {folder.label}
-                  </span>
-                </button>
-                {!fCollapsed &&
-                  sortedProviders(folder).map(({ provider: prov, conversations: convs }) => {
-                    const pKey = `prov:${folder.cwd}:${prov}`;
-                    const pCollapsed = collapsed.has(pKey);
+              <div key={providerNode.provider} className="py-1">
+                <div className="flex items-center gap-1">
+                  <button onClick={() => toggle(pKey)} className="tree-row flex-1">
+                    {pCollapsed ? (
+                      <IconChevronRight size={12} className="shrink-0 text-content-faint" />
+                    ) : (
+                      <IconChevronDown size={12} className="shrink-0 text-content-faint" />
+                    )}
+                    <ProviderIcon provider={providerNode.provider} size={13} />
+                    <span className="text-[13px] font-medium text-content-secondary">
+                      {providerLabel(providerNode.provider)}
+                    </span>
+                    <span className="text-2xs text-content-faint">({count})</span>
+                  </button>
+                  <button
+                    onClick={() => onNewConversation(providerNode.provider)}
+                    className="cursor-pointer rounded-lg p-1.5 text-content-faint transition-colors hover:bg-surface-overlay hover:text-accent"
+                    title={`新建 ${providerLabel(providerNode.provider)} 对话`}
+                    aria-label="新建对话"
+                  >
+                    <IconPlus size={13} />
+                  </button>
+                </div>
+                {!pCollapsed &&
+                  providerNode.buckets.map((bucket) => {
+                    const bKey = `bucket:${providerNode.provider}:${bucket.key}`;
+                    const bCollapsed = collapsed.has(bKey);
                     return (
-                      <div key={prov} className="pl-3">
+                      <div key={bucket.key} className="pl-3">
                         <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => toggle(pKey)}
-                            className="tree-row flex-1"
-                          >
-                            {pCollapsed ? (
-                              <IconChevronRight size={12} className="shrink-0 text-content-faint" />
-                            ) : (
-                              <IconChevronDown size={12} className="shrink-0 text-content-faint" />
-                            )}
-                            <ProviderIcon provider={prov} size={13} />
-                            <span className="text-[13px] font-medium text-content-secondary">
-                              {providerLabel(prov)}
+                        <button
+                          onClick={() => toggle(bKey)}
+                          className="tree-row flex-1"
+                          title={bucket.kind === "workspace" ? "多项目工作区" : bucket.label}
+                        >
+                          {bCollapsed ? (
+                            <IconChevronRight size={12} className="shrink-0 text-content-faint" />
+                          ) : (
+                            <IconChevronDown size={12} className="shrink-0 text-content-faint" />
+                          )}
+                          <IconFolder size={13} className="shrink-0 text-content-faint" />
+                          <span className="truncate text-2xs font-semibold uppercase tracking-wider text-content-faint">
+                            {bucket.label}
+                          </span>
+                          {bucket.kind === "workspace" && (
+                            <span className="shrink-0 rounded bg-surface-overlay px-1 text-[10px] text-content-faint">
+                              工作区
                             </span>
-                            <span className="text-2xs text-content-faint">({convs.length})</span>
-                          </button>
+                          )}
+                        </button>
+                        {bucket.kind !== "workspace" && (
                           <button
-                            onClick={() => onNewConversation(prov, folder.cwd === "—" ? undefined : folder.cwd)}
+                            onClick={() => onNewConversation(providerNode.provider, bucketDefaultCwd(bucket))}
                             className="cursor-pointer rounded-lg p-1.5 text-content-faint transition-colors hover:bg-surface-overlay hover:text-accent"
-                            title="在此目录新建对话"
+                            title="在此分组新建对话"
                             aria-label="新建对话"
                           >
                             <IconPlus size={13} />
                           </button>
+                        )}
                         </div>
-                        {!pCollapsed &&
-                          convs.map((c) => {
+                        {!bCollapsed &&
+                          bucket.conversations.map((c) => {
                             // Prefer a real title; else the first message preview
                             // (ChatGPT-style); else a short id. Never blank.
                             const name =

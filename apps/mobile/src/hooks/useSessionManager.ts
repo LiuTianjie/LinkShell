@@ -2071,8 +2071,6 @@ export function useSessionManager(): SessionManagerHandle {
         { queue: true, dedupeKey: `permission:${requestId}` },
       );
       if (!accepted) return false;
-      // Clear topPermission from structuredStatus so buildState
-      // doesn't re-add the permission to the Live Activity
       const term = s.terminals.get(terminalId);
       if (term?.structuredStatus) {
         const ss = term.structuredStatus;

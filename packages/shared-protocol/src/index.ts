@@ -747,11 +747,17 @@ export const agentV2ConversationSchema = z.object({
   agentSessionId: z.string().optional(),
   provider: agentProviderSchema.default("codex"),
   cwd: z.string(),
+  /** Codex multi-repo workspace; a session is not owned by a single folder. */
+  workspaceRoots: z.array(z.string()).optional(),
+  /** Claude (and similar) project/group label when not 1:1 with cwd. */
+  group: z.string().optional(),
   title: z.string().optional(),
   model: z.string().optional(),
   reasoningEffort: agentReasoningEffortSchema.optional(),
   permissionMode: agentPermissionModeSchema.optional(),
   collaborationMode: agentCollaborationModeSchema.optional(),
+  /** owned = LinkShell runtime (full control). attached = same on-disk session, read-only. */
+  control: z.enum(["owned", "attached"]).default("owned"),
   status: agentV2StatusSchema.default("idle"),
   archived: z.boolean().default(false),
   lastMessagePreview: z.string().optional(),

@@ -80,6 +80,15 @@ export function resolveAgentCommand(input: {
     };
   }
 
+  if (input.provider === "grok") {
+    return {
+      provider: "grok",
+      command: "grok agent stdio",
+      protocol: "acp",
+      framing: "newline",
+    };
+  }
+
   // copilot / opencode / kimi / custom: PTY-only unless caller passes --agent-command
   return null;
 }
@@ -131,6 +140,7 @@ const INSTALL_BINARIES: Array<{ provider: KnownAgentProvider; binaries: string[]
   { provider: "copilot", binaries: ["copilot"] },
   { provider: "opencode", binaries: ["opencode", "opencode-ai"] },
   { provider: "cursor", binaries: ["cursor-agent"] },
+  { provider: "grok", binaries: ["grok"] },
   { provider: "kimi", binaries: ["kimi"] },
 ];
 

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { AgentCapabilitiesPayload } from "./types";
-import { conversationControlFlags, conversationWriteType } from "./conversation-controls";
+import {
+  conversationControlFlags,
+  conversationIsOwned,
+  conversationWriteType,
+  writableConversationFlags,
+} from "./conversation-controls";
 
 function caps(partial: Partial<AgentCapabilitiesPayload> & { providers?: AgentCapabilitiesPayload["providers"] }): AgentCapabilitiesPayload {
   return {
@@ -110,5 +115,29 @@ describe("conversationControlFlags", () => {
     expect(flags.effort).toBe(false);
     expect(conversationWriteType(flags).fork).toBe("");
     expect(conversationWriteType(flags).model).toBe("");
+  });
+
+  it("treats attached conversations as read-only even when the provider is capable", () => {
+    expect(conversationIsOwned({ control: "owned" })).toBe(true);
+    expect(conversationIsOwned({ control: "attached" })).toBe(false);
+    const capsFull = caps({
+      supportsCancel: true,
+      supportsPermission: true,
+      providers: [{
+        id: "codex",
+        label: "Codex",
+        enabled: true,
+        supportsCancel: true,
+        supportsPermission: true,
+        features: { cancel: true, permissions: true, setModel: true },
+      }],
+    });
+    const writable = writableConversationFlags(capsFull, { control: "attached", provider: "codex" });
+    expect(writable.cancel).toBe(false);
+    expect(writable.permission).toBe(false);
+    expect(writable.model).toBe(false);
+    expect(conversationWriteType(writable).cancel).toBe("");
+    const owned = writableConversationFlags(capsFull, { control: "owned", provider: "codex" });
+    expect(owned.cancel).toBe(true);
   });
 });

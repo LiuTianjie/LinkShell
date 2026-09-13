@@ -399,6 +399,11 @@ describe("resolveAgentCommand", () => {
       protocol: "acp",
       framing: "newline",
     });
+    expect(resolveAgentCommand({ provider: "grok" })).toMatchObject({
+      command: "grok agent stdio",
+      protocol: "acp",
+      framing: "newline",
+    });
     expect(resolveAgentCommand({ provider: "gemini", command: "gemini --acp" })).toMatchObject({
       protocol: "acp",
       framing: "newline",
