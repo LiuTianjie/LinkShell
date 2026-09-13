@@ -1216,13 +1216,15 @@ export function AgentConsolePage({
                   );
                 })()}
                 {timeline.length === 0 &&
-                  (activeConversation?.lastMessagePreview || historyState?.loading ? (
-                    // Existing conversation whose transcript is still loading
-                    // (we switched to it instantly; history streams in after).
+                  (historyState?.loading ? (
                     <div className="flex flex-col items-center gap-2 py-16 text-content-muted">
                       <span className="h-5 w-5 animate-spin rounded-full border-2 border-content-faint border-t-accent" />
                       <p className="text-sm">加载对话记录…</p>
                     </div>
+                  ) : !owned ? (
+                    <p className="py-12 text-center text-sm text-content-muted">
+                      这场会话在本机终端里。Web 只旁观同一份记录；没有可导入的 transcript 时这里是空的。
+                    </p>
                   ) : (
                     <p className="py-12 text-center text-sm text-content-muted">发送第一条指令…</p>
                   ))}

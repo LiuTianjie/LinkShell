@@ -1777,4 +1777,43 @@ describe("Codex rollout attach (same file, not a copy)", () => {
     const errors = sent.filter((envelope) => envelope.payload?.item?.type === "error" || envelope.payload?.item?.error);
     expect(JSON.stringify(sent)).toMatch(/旁观|无法停止/);
   });
+
+  it("opens a live Grok process immediately without spawning grok agent stdio", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.initialized = true;
+    const liveId = "agent-live-grok-99";
+    proxy.conversations.set(liveId, {
+      id: liveId,
+      provider: "grok",
+      cwd: "/tmp",
+      status: "running",
+      archived: false,
+      lastActivityAt: Date.now(),
+      createdAt: Date.now(),
+      lastMessagePreview: "本机终端中的 Agent 进程",
+      control: "attached",
+    });
+    let newSessionCalls = 0;
+    proxy.clients.set("grok", {
+      newSession: async () => {
+        newSessionCalls += 1;
+        return { sessionId: "should-not-happen" };
+      },
+      initialize: async () => ({}),
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-grok-live",
+      type: "agent.v2.conversation.open",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: { conversationId: liveId, provider: "grok", cwd: "/tmp" },
+    });
+
+    expect(newSessionCalls).toBe(0);
+    const opened = sent.find((envelope) => envelope.type === "agent.v2.conversation.opened");
+    expect(opened?.payload.conversation.id).toBe(liveId);
+    expect(opened?.payload.conversation.control).toBe("attached");
+    expect(opened?.payload.snapshot).toEqual([]);
+  });
 });

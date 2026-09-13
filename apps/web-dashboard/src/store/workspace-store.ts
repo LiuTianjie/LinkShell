@@ -788,7 +788,7 @@ export class WorkspaceStore {
         setTimeout(() => this.dismissNotice(id), 6000);
         this.notify();
       }
-    }, 12_000);
+    }, 4_000);
     this.bridge.sendAgent("agent.v2.conversation.open", {
       conversationId,
       agentSessionId: conv.agentSessionId,

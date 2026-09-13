@@ -2394,7 +2394,7 @@ export class AgentWorkspaceProxy {
         this.input.send(createEnvelope({
           type: "agent.v2.conversation.list.result",
           sessionId: this.input.sessionId,
-          payload: { conversations },
+          payload: { conversations: this.listedConversations(conversations) },
         }));
         break;
       }
@@ -2502,6 +2502,8 @@ export class AgentWorkspaceProxy {
   private fsSyncRunning = false;
   private lastPushedConversationSignature: string | undefined;
   private lastHydrateAt = new Map<string, number>();
+  /** Conversations the web actually opened — the only ones we tail/hydrate. */
+  private watchedConversationIds = new Set<string>();
   /** Session ids this LinkShell process created via app-server `newSession`. */
   private ownedCodexSessionIds = new Set<string>();
   /** Conversations attached to an external Codex TUI/desktop rollout (same file, not a copy). */
@@ -2512,8 +2514,9 @@ export class AgentWorkspaceProxy {
     carry: string;
     parser: CodexRolloutParser;
   }>();
-  private static readonly FS_SYNC_THROTTLE_MS = 400;
+  private static readonly FS_SYNC_THROTTLE_MS = 1500;
   private static readonly EXTERNAL_HYDRATE_THROTTLE_MS = 400;
+  private static readonly LIST_IDLE_CAP = 40;
 
   private startSessionWatchers(): void {
     const roots = [
@@ -2557,7 +2560,9 @@ export class AgentWorkspaceProxy {
       // A store directory may have appeared since the last call — attach a
       // watcher to it now (no-op for roots already watched).
       this.startSessionWatchers();
-      const conversations = [...this.conversations.values()].filter((c) => !c.archived);
+      const conversations = this.listedConversations(
+        [...this.conversations.values()].filter((c) => !c.archived),
+      );
       // Only broadcast when the list actually changed since the last push. An
       // fs-watch fires on every transcript append (once per streamed token for
       // an active session), but most of those don't change any field the tree
@@ -2576,20 +2581,22 @@ export class AgentWorkspaceProxy {
           payload: { conversations },
         }));
       }
-      // External sessions (status running / waiting_permission but LinkShell is
-      // not driving the turn) have no live event stream on this app-server.
-      // Re-hydrate on a short throttle so the Web timeline still moves.
+      // Only tail conversations the client opened. Scanning every running
+      // disk session (hundreds of Codex rollouts) floods the gateway.
       const now = Date.now();
-      for (const conversation of conversations) {
-        if (conversation.status !== "running" && conversation.status !== "waiting_permission") continue;
+      for (const conversationId of this.watchedConversationIds) {
+        const conversation = this.conversations.get(conversationId);
+        if (!conversation) continue;
+        if (conversation.control !== "attached") continue;
         if (this.currentTurnIds.has(conversation.id)) continue;
         const last = this.lastHydrateAt.get(conversation.id) ?? 0;
         if (now - last < AgentWorkspaceProxy.EXTERNAL_HYDRATE_THROTTLE_MS) continue;
         this.lastHydrateAt.set(conversation.id, now);
         try {
-          await this.hydrateConversationFromProvider(conversation, undefined, { rememberActiveTurn: false });
-          if (this.followCodexRolloutDisk(conversation, true) > 0) {
-            this.sendSnapshot(conversation.id);
+          if (conversation.provider === "codex") {
+            if (this.followCodexRolloutDisk(conversation, true) > 0) {
+              this.sendSnapshot(conversation.id);
+            }
           }
         } catch (error) {
           if (this.input.verbose) {
@@ -2611,6 +2618,62 @@ export class AgentWorkspaceProxy {
    *  Deliberately excludes usage token counts / lastActivityAt timestamps that
    *  tick on every append without altering the tree — status, title, model, and
    *  membership are what matter. */
+  private listedConversations(conversations: AgentConversation[]): AgentConversation[] {
+    const ranked = [...conversations].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+    const out: AgentConversation[] = [];
+    const seen = new Set<string>();
+    const take = (conversation: AgentConversation) => {
+      if (seen.has(conversation.id)) return;
+      seen.add(conversation.id);
+      out.push(conversation);
+    };
+    for (const conversation of ranked) {
+      if (
+        conversation.status === "running" ||
+        conversation.status === "waiting_permission" ||
+        conversation.control === "owned" ||
+        this.watchedConversationIds.has(conversation.id)
+      ) {
+        take(conversation);
+      }
+    }
+    for (const conversation of ranked) {
+      if (out.length >= AgentWorkspaceProxy.LIST_IDLE_CAP) break;
+      take(conversation);
+    }
+    return out;
+  }
+
+  private pickListedRemotes<T extends { id: string; lastActivityAt?: number }>(
+    remotes: T[],
+    provider: AgentProvider,
+    runningIds?: Set<string>,
+  ): T[] {
+    const ranked = [...remotes].sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
+    const out: T[] = [];
+    const seen = new Set<string>();
+    const take = (remote: T) => {
+      if (seen.has(remote.id)) return;
+      seen.add(remote.id);
+      out.push(remote);
+    };
+    for (const remote of ranked) {
+      const conversationId = makeAgentV2RemoteConversationId(provider, remote.id);
+      if (
+        this.ownedCodexSessionIds.has(remote.id) ||
+        this.watchedConversationIds.has(conversationId) ||
+        runningIds?.has(remote.id)
+      ) {
+        take(remote);
+      }
+    }
+    for (const remote of ranked) {
+      if (out.length >= AgentWorkspaceProxy.LIST_IDLE_CAP) break;
+      take(remote);
+    }
+    return out;
+  }
+
   private conversationListSignature(conversations: AgentConversation[]): string {
     return conversations
       .map((c) => `${c.id}${c.status}${c.title ?? ""}${c.model ?? ""}${c.provider ?? ""}${c.lastMessagePreview ?? ""}`)
@@ -2819,7 +2882,9 @@ export class AgentWorkspaceProxy {
     this.lastDiscoveredProviders = discoveredProviders;
     if (catalogChanged) this.sendCapabilities();
     if (listChanged) {
-      const conversations = [...this.conversations.values()].filter((item) => !item.archived);
+      const conversations = this.listedConversations(
+        [...this.conversations.values()].filter((item) => !item.archived),
+      );
       this.lastPushedConversationSignature = this.conversationListSignature(conversations);
       this.input.send(createEnvelope({
         type: "agent.v2.conversation.list.result",
@@ -3090,7 +3155,7 @@ export class AgentWorkspaceProxy {
         // running state off disk once per sync (CPU-frugal: stats all rollouts,
         // reads only the fresh few). Claude reports status via parseRemoteSessions.
         const codexRunning = provider === "codex" ? runningCodexSessionIds(Date.now()) : undefined;
-        for (const remote of parseRemoteSessions(result)) {
+        for (const remote of this.pickListedRemotes(parseRemoteSessions(result), provider, codexRunning)) {
           const agentSessionId = remote.id;
           // Skip conversations the user explicitly forgot — don't resurrect them.
           if (this.deletedAgentSessionIds.has(agentSessionId)) continue;
@@ -3488,6 +3553,35 @@ export class AgentWorkspaceProxy {
     }));
   }
 
+  private shouldOpenAsAttachedView(conversation: AgentConversation): boolean {
+    return conversation.control === "attached"
+      || this.attachedExternalCodex.has(conversation.id)
+      || isLiveConversationId(conversation.id);
+  }
+
+  private openAttachedView(
+    conversation: AgentConversation,
+    requestedConversationId?: string,
+  ): AgentConversation {
+    conversation.control = "attached";
+    this.attachedExternalCodex.add(conversation.id);
+    this.watchedConversationIds.add(conversation.id);
+    if (conversation.provider === "codex") {
+      this.followCodexRolloutDisk(conversation, false);
+    }
+    this.activeConversationId = conversation.id;
+    this.input.send(createEnvelope({
+      type: "agent.v2.conversation.opened",
+      sessionId: this.input.sessionId,
+      payload: {
+        conversation,
+        snapshot: this.timelines.get(conversation.id) ?? [],
+        requestedConversationId,
+      },
+    }));
+    return conversation;
+  }
+
   private async openConversation(payload: {
     conversationId?: string;
     agentSessionId?: string;
@@ -3544,6 +3638,10 @@ export class AgentWorkspaceProxy {
       );
     }
     if (!payload.cwd && existingConversation?.cwd) cwd = existingConversation.cwd;
+
+    if (existingConversation && this.shouldOpenAsAttachedView(existingConversation)) {
+      return this.openAttachedView(existingConversation, payload.conversationId);
+    }
 
     let client = await this.ensureProviderClient(provider);
     if (!client) {
@@ -3773,6 +3871,7 @@ export class AgentWorkspaceProxy {
       this.conversations.set(conversation.id, conversation);
       this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
       this.activeConversationId = conversation.id;
+      this.watchedConversationIds.add(conversation.id);
       this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
       await this.hydrateConversationFromProvider(conversation, result);
       this.input.send(createEnvelope({
