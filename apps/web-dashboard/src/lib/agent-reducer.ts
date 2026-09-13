@@ -164,6 +164,22 @@ export function mergeConversations(
   return [...byId.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 }
 
+/** Host catalog is the source of truth for the tree. Cached rows not in the
+ *  incoming window are dropped so a 200-session disk store cannot accumulate
+ *  in the web client across reconnects. Active/keep ids survive a partial push. */
+export function adoptHostCatalog(
+  existing: AgentConversation[],
+  incoming: AgentConversation[],
+  keepIds: Iterable<string> = [],
+): AgentConversation[] {
+  const keep = new Set(keepIds);
+  for (const conversation of incoming) keep.add(conversation.id);
+  return mergeConversations(
+    existing.filter((conversation) => keep.has(conversation.id)),
+    incoming,
+  );
+}
+
 /** A short preview string for a conversation row, derived from an item. */
 export function previewFromItem(item: AgentTimelineItem): string | undefined {
   if (item.text) return item.text.slice(0, 120).replace(/\s+/g, " ").trim();

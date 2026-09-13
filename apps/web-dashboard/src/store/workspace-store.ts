@@ -12,6 +12,7 @@ import {
   applyEvent,
   mergeTimeline,
   mergeConversations,
+  adoptHostCatalog,
   groupByConversation,
   normalizeItems,
   previewFromItem,
@@ -395,7 +396,11 @@ export class WorkspaceStore {
       }
       if (type === "agent.v2.snapshot") {
         const p = parseTypedPayload("agent.v2.snapshot", envelope.payload);
-        this.conversations = mergeConversations(this.conversations, p.conversations);
+        this.conversations = adoptHostCatalog(
+          this.conversations,
+          p.conversations,
+          this.activeConversationId ? [this.activeConversationId] : [],
+        );
         if (p.activeConversationId) this.activeConversationId = p.activeConversationId;
         const grouped = groupByConversation(p.items);
         const next = new Map(this.timelines);
@@ -458,7 +463,11 @@ export class WorkspaceStore {
       }
       if (type === "agent.v2.conversation.list.result") {
         const p = parseTypedPayload("agent.v2.conversation.list.result", envelope.payload);
-        this.conversations = mergeConversations(this.conversations, p.conversations);
+        this.conversations = adoptHostCatalog(
+          this.conversations,
+          p.conversations,
+          this.activeConversationId ? [this.activeConversationId] : [],
+        );
         this.notify();
         return;
       }
@@ -727,11 +736,8 @@ export class WorkspaceStore {
   setActiveConversation(conversationId: string | null): void {
     this.activeConversationId = conversationId;
     this.notify();
-    // Lazy-load history: when switching to a known conversation whose timeline
-    // has no real (non-optimistic) items yet, ask the host to OPEN it. The host
-    // loads the on-disk transcript via loadSession and replies with
-    // conversation.opened carrying the full snapshot. A plain snapshot.request
-    // does NOT trigger that disk load, so open is the correct call.
+    // Ask the host to OPEN the conversation so it starts interest-based
+    // hydrate/tail. snapshot.request only returns already-watched timelines.
     if (conversationId) this.ensureHistoryLoaded(conversationId);
   }
 
@@ -739,18 +745,24 @@ export class WorkspaceStore {
     if (this.openInFlight.has(conversationId)) return;
     const existing = this.timelines.get(conversationId) ?? [];
     const hasRealHistory = existing.some((i) => i.metadata?.optimistic !== true);
-    // Already opened this session: skip unless the host says it's still
-    // running — external Codex/Claude turns keep writing to disk after the
-    // first hydrate, so we must re-open to pick up new items.
-    if (hasRealHistory && this.openedThisSession.has(conversationId)) {
-      const live = this.conversations.find((c) => c.id === conversationId);
-      if (live?.status !== "running" && live?.status !== "waiting_permission") return;
-    }
     const conv = this.conversations.find((c) => c.id === conversationId);
     if (!conv) return;
+    const attached = conv.control === "attached";
+    const expectOnDiskTranscript = conv.provider === "codex" || conv.provider === "claude";
+    // Host already opened this conversation: attached views keep tailing on
+    // the host, so re-open would only flash a spinner. Owned live turns still
+    // re-open to pick up disk-flushed items after the first hydrate.
+    if (this.openedThisSession.has(conversationId)) {
+      if (attached) return;
+      if (hasRealHistory && conv.status !== "running" && conv.status !== "waiting_permission") return;
+    }
     this.openInFlight.add(conversationId);
     const prev = this.history.get(conversationId);
-    if (hasRealHistory) {
+    if (attached && !expectOnDiskTranscript && !hasRealHistory) {
+      // Live Grok/Gemini/etc have no importable transcript. Don't trap the
+      // pane on "加载对话记录…".
+      this.history.set(conversationId, { loading: false, hasMore: false, cursor: prev?.cursor, syncing: false });
+    } else if (hasRealHistory) {
       // Timeline was hydrated from the localStorage cache: keep rendering it
       // instantly, but still open on the host so it re-syncs with the on-disk
       // transcript. syncing (not loading) → the UI shows a slim inline
@@ -762,8 +774,6 @@ export class WorkspaceStore {
         syncing: true,
       });
     } else {
-      // Signal the UI that we're loading history for this conversation so it
-      // shows a spinner instead of the bare "发送第一条指令…" placeholder.
       this.history.set(conversationId, { loading: true, hasMore: prev?.hasMore ?? true, cursor: prev?.cursor });
     }
     this.notify();

@@ -1724,6 +1724,134 @@ function findCodexRolloutPath(sessionId: string, root = join(homedir(), ".codex"
   return undefined;
 }
 
+type RemoteSessionRecord = {
+  id: string;
+  cwd?: string;
+  title?: string;
+  model?: string;
+  createdAt?: number;
+  lastActivityAt?: number;
+  usage?: unknown;
+  status?: AgentStatus;
+};
+
+function readJsonlPrefix(path: string, maxBytes = 8192): string | undefined {
+  let fd: number | undefined;
+  try {
+    const size = statSync(path).size;
+    if (size <= 0) return "";
+    fd = openSync(path, "r");
+    const buf = Buffer.alloc(Math.min(maxBytes, size));
+    readSync(fd, buf, 0, buf.length, 0);
+    return buf.toString("utf8");
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
+/** Newest Codex rollouts as catalog metadata. Reads the first line only. */
+function listCodexSessionsFromDisk(limit = 80): RemoteSessionRecord[] {
+  const files: { path: string; filenameId: string; mt: number }[] = [];
+  walkCodexRollouts(join(homedir(), ".codex", "sessions"), (path, filenameId, mt) => {
+    files.push({ path, filenameId, mt });
+  });
+  files.sort((a, b) => b.mt - a.mt);
+  const out: RemoteSessionRecord[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (out.length >= limit) break;
+    const prefix = readJsonlPrefix(file.path);
+    const first = prefix
+      ? prefix.slice(0, prefix.indexOf("\n") >= 0 ? prefix.indexOf("\n") : prefix.length)
+      : "";
+    let sessionId = file.filenameId;
+    let cwd: string | undefined;
+    let createdAt: number | undefined;
+    if (first) {
+      try {
+        const payload = asRecord(asRecord(JSON.parse(first))?.payload) ?? asRecord(JSON.parse(first));
+        sessionId = firstString(payload, ["session_id", "id"]) ?? file.filenameId;
+        cwd = firstString(payload, ["cwd"]);
+        createdAt = parseTimestamp(payload?.timestamp ?? asRecord(JSON.parse(first))?.timestamp);
+      } catch {
+        sessionId = file.filenameId;
+      }
+    }
+    if (seen.has(sessionId)) continue;
+    seen.add(sessionId);
+    out.push({
+      id: sessionId,
+      cwd,
+      title: cwd ? titleFromCwd(cwd) : undefined,
+      createdAt,
+      lastActivityAt: file.mt,
+    });
+  }
+  return out;
+}
+
+function listClaudeSessionsFromDisk(limit = 80): RemoteSessionRecord[] {
+  const root = join(homedir(), ".claude", "projects");
+  if (!existsSync(root)) return [];
+  const files: { id: string; mt: number; cwd?: string }[] = [];
+  let projectDirs: string[] = [];
+  try {
+    projectDirs = readdirSync(root).map((name) => join(root, name));
+  } catch {
+    return [];
+  }
+  for (const dir of projectDirs) {
+    let stat;
+    try { stat = statSync(dir); } catch { continue; }
+    if (!stat.isDirectory()) continue;
+    const dirName = basename(dir);
+    const cwd = dirName.startsWith("-") ? `/${dirName.slice(1).replace(/-/g, "/")}` : undefined;
+    let entries: string[];
+    try { entries = readdirSync(dir); } catch { continue; }
+    for (const name of entries) {
+      if (!name.endsWith(".jsonl")) continue;
+      const path = join(dir, name);
+      let fileStat;
+      try { fileStat = statSync(path); } catch { continue; }
+      if (!fileStat.isFile()) continue;
+      files.push({
+        id: name.replace(/\.jsonl$/, ""),
+        mt: fileStat.mtimeMs,
+        cwd,
+      });
+    }
+  }
+  files.sort((a, b) => b.mt - a.mt);
+  const out: RemoteSessionRecord[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (out.length >= limit) break;
+    if (seen.has(file.id)) continue;
+    seen.add(file.id);
+    out.push({
+      id: file.id,
+      cwd: file.cwd,
+      title: file.cwd ? titleFromCwd(file.cwd) : undefined,
+      lastActivityAt: file.mt,
+    });
+  }
+  return out;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 function findLatestCodexRolloutForCwd(cwd: string, root = join(homedir(), ".codex", "sessions")): { path: string; sessionId: string } | undefined {
   const wanted = cwd.replace(/\/+$/, "");
   const candidates: { path: string; sessionId: string; mt: number }[] = [];
@@ -2225,8 +2353,8 @@ function previewFromTimelineItem(item: AgentTimelineItem): string | undefined {
 
 export class AgentWorkspaceProxy {
   private clients = new Map<AgentProvider, AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient>();
-  // In-flight client starts, so concurrent ensureProviderClient calls (eager
-  // initialize() racing conversation.open) share one subprocess spawn.
+  // In-flight client starts, so concurrent ensureProviderClient calls
+  // (prompt racing conversation.open) share one subprocess spawn.
   private clientStartPromises = new Map<AgentProvider, Promise<AcpClient | ClaudeSdkClient | ClaudeStreamJsonClient | undefined>>();
   private agentProtocols = new Map<AgentProvider, AgentProtocol>();
   private providerCapabilities = new Map<AgentProvider, ProviderRuntimeCapabilities>();
@@ -2280,7 +2408,6 @@ export class AgentWorkspaceProxy {
       case "agent.v2.capabilities.request":
         await this.initialize();
         this.sendCapabilities();
-        this.sendUsageReport();
         break;
       case "agent.v2.conversation.open": {
         const payload = parseTypedPayload("agent.v2.conversation.open", envelope.payload);
@@ -2517,6 +2644,8 @@ export class AgentWorkspaceProxy {
   private static readonly FS_SYNC_THROTTLE_MS = 1500;
   private static readonly EXTERNAL_HYDRATE_THROTTLE_MS = 400;
   private static readonly LIST_IDLE_CAP = 40;
+  private static readonly LIST_HARD_CAP = 80;
+  private static readonly CLIENT_START_TIMEOUT_MS = 12_000;
 
   private startSessionWatchers(): void {
     const roots = [
@@ -2628,6 +2757,7 @@ export class AgentWorkspaceProxy {
       out.push(conversation);
     };
     for (const conversation of ranked) {
+      if (out.length >= AgentWorkspaceProxy.LIST_HARD_CAP) break;
       if (
         conversation.status === "running" ||
         conversation.status === "waiting_permission" ||
@@ -2721,14 +2851,11 @@ export class AgentWorkspaceProxy {
   private async initialize(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
-    // Eagerly start all detected providers so capabilities report real status
-    const startPromises = this.input.availableProviders.map((p) => this.ensureProviderClient(p));
-    await Promise.allSettled(startPromises);
     this.status = "idle";
     this.error = undefined;
+    // Presence only. Spawning every detected CLI here (especially
+    // `grok agent stdio`) blocked the sequential control plane on connect.
     this.sendCapabilities();
-    // Start watching the on-disk session stores so externally-started sessions
-    // and status changes surface live, not just at connect time.
     this.startSessionWatchers();
     this.startProcessDiscovery();
   }
@@ -2898,10 +3025,9 @@ export class AgentWorkspaceProxy {
     const existing = this.clients.get(provider);
     if (existing) return existing;
 
-    // Dedupe concurrent starts: eager initialize() and conversation.open can
-    // race here before this.clients is populated (it's only set AFTER the
-    // client finishes initializing), which would spawn the provider subprocess
-    // twice. Memoize the in-flight promise so both callers share one spawn;
+    // Dedupe concurrent starts: conversation.open and prompt can race here
+    // before this.clients is populated (it's only set AFTER initialize).
+    // Memoize the in-flight promise so both callers share one spawn;
     // drop it once settled so a failed start can be retried.
     const inflight = this.clientStartPromises.get(provider);
     if (inflight) return inflight;
@@ -2959,8 +3085,17 @@ export class AgentWorkspaceProxy {
             onRequest: (method, params) => this.handleRequest(method, params),
             onExit: (message) => this.handleProviderExit(provider, message),
       });
-      await client.initialize();
-      return client;
+      try {
+        await withTimeout(
+          client.initialize(),
+          AgentWorkspaceProxy.CLIENT_START_TIMEOUT_MS,
+          `${providerLabel(provider)} 启动超时`,
+        );
+        return client;
+      } catch (error) {
+        try { client.stop(); } catch { /* ignore */ }
+        throw error;
+      }
     };
 
     try {
@@ -3136,92 +3271,114 @@ export class AgentWorkspaceProxy {
     }
   }
 
-  private async syncProviderSessions(): Promise<void> {
-    await this.initialize();
-    for (const [provider, client] of this.clients) {
-      try {
-        let activeClient = client;
-        let result: unknown;
-        try {
-          result = await activeClient.listSessions();
-        } catch (error) {
-          const recovered = await this.recycleProviderClient(provider, error);
-          if (!recovered) throw error;
-          activeClient = recovered;
-          result = await activeClient.listSessions();
-        }
-        // Codex's thread/list carries no live status and only knows threads
-        // THIS app-server owns — so an externally-run `codex` shows idle. Read
-        // running state off disk once per sync (CPU-frugal: stats all rollouts,
-        // reads only the fresh few). Claude reports status via parseRemoteSessions.
-        const codexRunning = provider === "codex" ? runningCodexSessionIds(Date.now()) : undefined;
-        for (const remote of this.pickListedRemotes(parseRemoteSessions(result), provider, codexRunning)) {
-          const agentSessionId = remote.id;
-          // Skip conversations the user explicitly forgot — don't resurrect them.
-          if (this.deletedAgentSessionIds.has(agentSessionId)) continue;
-          const existingId = this.conversationByAgentSessionId.get(agentSessionId);
-          const now = Date.now();
-          const conversationId = existingId ?? makeAgentV2RemoteConversationId(provider, agentSessionId);
-          const existing = this.conversations.get(conversationId);
-          const cwd = remote.cwd ?? existing?.cwd ?? this.input.cwd;
-          const model = remote.model ?? existing?.model;
-          // Usage read straight from the on-disk transcript (decoupled from any
-          // live LinkShell turn) — so history + externally-started sessions all
-          // carry a context meter. Falls back to any existing live-turn usage.
-          const usageFields = normalizeUsageFields(remote.usage, model);
-          const usage: AgentConversationUsage | undefined = usageFields
-            ? { ...usageFields, updatedAt: remote.lastActivityAt ?? now }
-            : existing?.usage;
-          // Status precedence. While LinkShell is driving a turn for this
-          // conversation, the in-memory status is authoritative — the transcript
-          // lags (the SDK hasn't flushed the in-flight turn to disk), so trusting
-          // it would flicker a live "running" turn back to idle. Otherwise the
-          // transcript-derived running signal is authoritative (Claude reports it
-          // via remote.status; Codex via the on-disk rollout set): surface
-          // "running" while an external process drives it, and let it clear once
-          // the external turn finishes. We only fall back to the existing status
-          // to keep error/waiting_permission sticky across a re-sync — the
-          // transcript signals never emit those, so they live only in `existing`;
-          // defaulting everything else to idle avoids a purely-external session
-          // getting stuck at "running" forever.
-          const remoteRunning = remote.status === "running" || (codexRunning?.has(agentSessionId) ?? false);
-          const linkshellDriving = this.currentTurnIds.has(conversationId);
-          const status: AgentStatus = linkshellDriving
-            ? existing?.status ?? "running"
-            : remoteRunning
-              ? "running"
-              : remote.status === "error"
-                ? "error"
-                : existing?.status === "error" || existing?.status === "waiting_permission"
-                  ? existing.status
-                  : "idle";
-          const conversation: AgentConversation = {
-            id: conversationId,
-            agentSessionId,
-            provider,
-            cwd,
-            title: remote.title ?? existing?.title ?? titleFromCwd(cwd),
-            model,
-            reasoningEffort: existing?.reasoningEffort,
-            permissionMode: existing?.permissionMode,
-            collaborationMode: existing?.collaborationMode,
-            status,
-            archived: existing?.archived ?? false,
-            lastMessagePreview: existing?.lastMessagePreview,
-            lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
-            createdAt: remote.createdAt ?? existing?.createdAt ?? now,
-            usage,
-            group: existing?.group ?? (provider === "claude" ? titleFromCwd(cwd) : existing?.group),
-            workspaceRoots: existing?.workspaceRoots,
-          };
-          this.conversations.set(conversation.id, conversation);
-          this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
-          this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
-        }
-      } catch (error) {
+  private listDiskSessions(provider: AgentProvider): RemoteSessionRecord[] {
+    if (provider === "codex") return listCodexSessionsFromDisk(AgentWorkspaceProxy.LIST_HARD_CAP);
+    if (provider === "claude") return listClaudeSessionsFromDisk(AgentWorkspaceProxy.LIST_HARD_CAP);
+    return [];
+  }
+
+  private async listClientSessions(provider: AgentProvider): Promise<RemoteSessionRecord[]> {
+    const client = this.clients.get(provider);
+    if (!client) return [];
+    try {
+      return parseRemoteSessions(await client.listSessions());
+    } catch (error) {
+      const recovered = await this.recycleProviderClient(provider, error);
+      if (!recovered) {
         if (this.input.verbose) {
           process.stderr.write(`[agent:v2] session list failed for ${provider}: ${error instanceof Error ? error.message : String(error)}\n`);
         }
+        return [];
+      }
+      try {
+        return parseRemoteSessions(await recovered.listSessions());
+      } catch (retryError) {
+        if (this.input.verbose) {
+          process.stderr.write(`[agent:v2] session list failed for ${provider}: ${retryError instanceof Error ? retryError.message : String(retryError)}\n`);
+        }
+        return [];
+      }
+    }
+  }
+
+  private upsertRemoteSession(
+    provider: AgentProvider,
+    remote: RemoteSessionRecord,
+    now: number,
+    runningIds?: Set<string>,
+  ): void {
+    const agentSessionId = remote.id;
+    if (this.deletedAgentSessionIds.has(agentSessionId)) return;
+    const existingId = this.conversationByAgentSessionId.get(agentSessionId);
+    const conversationId = existingId ?? makeAgentV2RemoteConversationId(provider, agentSessionId);
+    const existing = this.conversations.get(conversationId);
+    const cwd = remote.cwd ?? existing?.cwd ?? this.input.cwd;
+    const model = remote.model ?? existing?.model;
+    const usageFields = normalizeUsageFields(remote.usage, model);
+    const usage: AgentConversationUsage | undefined = usageFields
+      ? { ...usageFields, updatedAt: remote.lastActivityAt ?? now }
+      : existing?.usage;
+    const remoteRunning = remote.status === "running" || (runningIds?.has(agentSessionId) ?? false);
+    const linkshellDriving = this.currentTurnIds.has(conversationId);
+    const owned = Boolean(agentSessionId && this.ownedCodexSessionIds.has(agentSessionId));
+    const attached = !owned && (
+      existing?.control === "attached" ||
+      this.attachedExternalCodex.has(conversationId) ||
+      remoteRunning
+    );
+    if (attached) this.attachedExternalCodex.add(conversationId);
+    const status: AgentStatus = linkshellDriving
+      ? existing?.status ?? "running"
+      : remoteRunning
+        ? "running"
+        : remote.status === "error"
+          ? "error"
+          : existing?.status === "error" || existing?.status === "waiting_permission"
+            ? existing.status
+            : "idle";
+    const conversation: AgentConversation = {
+      id: conversationId,
+      agentSessionId,
+      provider,
+      cwd,
+      title: remote.title ?? existing?.title ?? titleFromCwd(cwd),
+      model,
+      reasoningEffort: existing?.reasoningEffort,
+      permissionMode: existing?.permissionMode,
+      collaborationMode: existing?.collaborationMode,
+      control: owned ? "owned" : attached ? "attached" : existing?.control,
+      status,
+      archived: existing?.archived ?? false,
+      lastMessagePreview: existing?.lastMessagePreview,
+      lastActivityAt: remote.lastActivityAt ?? existing?.lastActivityAt ?? now,
+      createdAt: remote.createdAt ?? existing?.createdAt ?? now,
+      usage,
+      group: existing?.group ?? (provider === "claude" ? titleFromCwd(cwd) : existing?.group),
+      workspaceRoots: existing?.workspaceRoots,
+    };
+    this.conversations.set(conversation.id, conversation);
+    this.conversationByAgentSessionId.set(agentSessionId, conversation.id);
+    this.timelines.set(conversation.id, this.timelines.get(conversation.id) ?? []);
+  }
+
+  private async syncProviderSessions(): Promise<void> {
+    await this.initialize();
+    const now = Date.now();
+    const codexRunning = runningCodexSessionIds(now);
+    const providers = new Set<AgentProvider>([
+      ...this.input.availableProviders,
+      ...this.clients.keys(),
+    ]);
+    for (const provider of providers) {
+      const byId = new Map<string, RemoteSessionRecord>();
+      for (const remote of this.listDiskSessions(provider)) byId.set(remote.id, remote);
+      for (const remote of await this.listClientSessions(provider)) {
+        const prev = byId.get(remote.id);
+        byId.set(remote.id, prev ? { ...prev, ...remote } : remote);
+      }
+      const runningIds = provider === "codex" ? codexRunning : undefined;
+      for (const remote of this.pickListedRemotes([...byId.values()], provider, runningIds)) {
+        this.upsertRemoteSession(provider, remote, now, runningIds);
       }
     }
   }
@@ -3460,26 +3617,40 @@ export class AgentWorkspaceProxy {
       ...this.lastDiscoveredProviders,
     ])];
     const providers = catalog.map((provider) => {
+      const resolved = resolveAgentCommand({
+        provider,
+        command: this.input.command,
+      });
       const client = this.clients.get(provider);
-      const protocol = this.agentProtocols.get(provider);
+      const protocol = this.agentProtocols.get(provider) ?? resolved?.protocol;
       const runtimeCapabilities = this.providerCapabilities.get(provider);
       const advertised = runtimeCapabilities?.advertised
         ?? (client instanceof AcpClient ? client.advertised : undefined);
-      const enabled = Boolean(client);
+      const canStart = Boolean(resolved) && (
+        this.input.availableProviders.includes(provider) || Boolean(this.input.command?.trim())
+      );
+      const enabled = Boolean(client) || canStart;
       const isAcp = protocol === "acp";
-      const supportsImages = enabled && protocolSupportsImages(protocol, advertised);
+      const supportsImages = Boolean(client) && protocolSupportsImages(protocol, advertised);
       const isClaudeFallback = protocol === "claude-stream-json";
-      const supportsPermission = enabled && !isClaudeFallback;
-      const supportsReasoningEffort = enabled && !isClaudeFallback;
-      const supportsSessionList = enabled && (isAcp ? Boolean(advertised?.listSession) : !isClaudeFallback);
-      const supportsSessionLoad = enabled && (isAcp ? Boolean(advertised?.loadSession) : !isClaudeFallback);
-      const supportsCancel = enabled && (isAcp ? Boolean(advertised?.cancel) : true);
-      const supportsFork = enabled && (isAcp
+      const supportsPermission = Boolean(client) && !isClaudeFallback;
+      const supportsReasoningEffort = (Boolean(client) || (canStart && protocol === "codex-app-server")) && !isClaudeFallback;
+      const diskListable = provider === "codex" || provider === "claude";
+      const supportsSessionList = Boolean(client)
+        ? (isAcp ? Boolean(advertised?.listSession) : !isClaudeFallback)
+        : canStart && diskListable;
+      const supportsSessionLoad = Boolean(client)
+        ? (isAcp ? Boolean(advertised?.loadSession) : !isClaudeFallback)
+        : canStart;
+      const supportsCancel = Boolean(client)
+        ? (isAcp ? Boolean(advertised?.cancel) : true)
+        : canStart && !isAcp;
+      const supportsFork = Boolean(client) && (isAcp
         ? Boolean(advertised?.forkSession)
         : protocol === "codex-app-server" || protocol === "claude-agent-sdk");
-      const supportsSetModel = enabled && (isAcp
-        ? Boolean(advertised?.setModel)
-        : protocol === "codex-app-server");
+      const supportsSetModel = Boolean(client)
+        ? (isAcp ? Boolean(advertised?.setModel) : protocol === "codex-app-server")
+        : canStart && protocol === "codex-app-server";
       const protocolBacked = isProtocolAgentProvider(provider);
       const commands = mergeCommands(
         defaultProviderCommands(provider, this.input.cwd, enabled),
@@ -3499,8 +3670,8 @@ export class AgentWorkspaceProxy {
         supportsPermission,
         supportsPlan: enabled && (isAcp ? Boolean(advertised?.embeddedContext) : true),
         supportsCancel,
-        models: runtimeCapabilities?.models ?? [{ id: "default", label: "默认模型" }],
-        defaultModel: runtimeCapabilities?.defaultModel ?? "default",
+        models: runtimeCapabilities?.models ?? (provider === "codex" ? [...CODEX_FALLBACK_MODELS] : [{ id: "default", label: "默认模型" }]),
+        defaultModel: runtimeCapabilities?.defaultModel ?? (provider === "codex" ? CODEX_FALLBACK_DEFAULT_MODEL : "default"),
         reasoningEfforts: supportsReasoningEffort
           ? runtimeCapabilities?.reasoningEfforts ?? [...ALL_REASONING_EFFORTS]
           : [],
@@ -3554,9 +3725,18 @@ export class AgentWorkspaceProxy {
   }
 
   private shouldOpenAsAttachedView(conversation: AgentConversation): boolean {
-    return conversation.control === "attached"
-      || this.attachedExternalCodex.has(conversation.id)
-      || isLiveConversationId(conversation.id);
+    if (conversation.control === "attached") return true;
+    if (this.attachedExternalCodex.has(conversation.id)) return true;
+    if (isLiveConversationId(conversation.id)) return true;
+    if (
+      conversation.provider === "codex" &&
+      conversation.agentSessionId &&
+      !this.ownedCodexSessionIds.has(conversation.agentSessionId) &&
+      conversation.status === "running"
+    ) {
+      return true;
+    }
+    return false;
   }
 
   private openAttachedView(
@@ -3595,6 +3775,7 @@ export class AgentWorkspaceProxy {
     forkFromConversationId?: string;
     forkFromTurnId?: string;
   }): Promise<AgentConversation | undefined> {
+    await this.initialize();
     const provider = payload.provider ?? this.input.availableProviders[0];
     if (!provider) {
       return this.openFailure(payload, "没有可用的 Agent provider。");
@@ -3640,6 +3821,14 @@ export class AgentWorkspaceProxy {
     if (!payload.cwd && existingConversation?.cwd) cwd = existingConversation.cwd;
 
     if (existingConversation && this.shouldOpenAsAttachedView(existingConversation)) {
+      return this.openAttachedView(existingConversation, payload.conversationId);
+    }
+    if (
+      existingConversation?.provider === "codex" &&
+      existingConversation.agentSessionId &&
+      !this.ownedCodexSessionIds.has(existingConversation.agentSessionId) &&
+      runningCodexSessionIds(Date.now()).has(existingConversation.agentSessionId)
+    ) {
       return this.openAttachedView(existingConversation, payload.conversationId);
     }
 
@@ -5846,10 +6035,16 @@ export class AgentWorkspaceProxy {
   }
 
   private sendSnapshot(conversationId?: string): void {
-    const conversations = [...this.conversations.values()];
+    const conversations = this.listedConversations(
+      [...this.conversations.values()].filter((conversation) => !conversation.archived),
+    );
+    if (conversationId && !conversations.some((conversation) => conversation.id === conversationId)) {
+      const extra = this.conversations.get(conversationId);
+      if (extra) conversations.push(extra);
+    }
     const items = conversationId
       ? this.timelines.get(conversationId) ?? []
-      : [...this.timelines.values()].flat();
+      : [...this.watchedConversationIds].flatMap((id) => this.timelines.get(id) ?? []);
     this.input.send(createEnvelope({
       type: "agent.v2.snapshot",
       sessionId: this.input.sessionId,

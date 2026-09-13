@@ -15,6 +15,9 @@ function makeProxy() {
     discoverProcesses: () => [],
     send: (envelope) => sent.push(envelope),
   }) as any;
+  proxy.listDiskSessions = () => [];
+  proxy.startSessionWatchers = () => {};
+  proxy.startProcessDiscovery = () => {};
   proxy.conversations.set("conversation-a", {
     id: "conversation-a",
     agentSessionId: "thread-a",
@@ -1815,5 +1818,120 @@ describe("Codex rollout attach (same file, not a copy)", () => {
     expect(opened?.payload.conversation.id).toBe(liveId);
     expect(opened?.payload.conversation.control).toBe("attached");
     expect(opened?.payload.snapshot).toEqual([]);
+  });
+
+  it("does not spawn provider clients on capabilities/list/snapshot", async () => {
+    const { proxy } = makeProxy();
+    let starts = 0;
+    proxy.startProviderClient = async () => {
+      starts += 1;
+      return undefined;
+    };
+
+    await proxy.handleEnvelope({
+      id: "env-caps",
+      type: "agent.v2.capabilities.request",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {},
+    });
+    await proxy.handleEnvelope({
+      id: "env-list",
+      type: "agent.v2.conversation.list",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {},
+    });
+    await proxy.handleEnvelope({
+      id: "env-snap",
+      type: "agent.v2.snapshot.request",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {},
+    });
+
+    expect(starts).toBe(0);
+    expect(proxy.initialized).toBe(true);
+  });
+
+  it("advertises installed Codex as enabled before the app-server starts", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.conversations.clear();
+
+    await proxy.handleEnvelope({
+      id: "env-caps-enabled",
+      type: "agent.v2.capabilities.request",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: {},
+    });
+
+    const caps = sent.find((envelope) => envelope.type === "agent.v2.capabilities");
+    const codex = caps?.payload.providers.find((provider: { id: string }) => provider.id === "codex");
+    expect(codex?.enabled).toBe(true);
+    expect(codex?.features.sessionList).toBe(true);
+    expect(proxy.clients.size).toBe(0);
+  });
+
+  it("opens a running unowned Codex session as attached without loadSession", async () => {
+    const { proxy, sent } = makeProxy();
+    proxy.initialized = true;
+    proxy.conversations.get("conversation-a").status = "running";
+    proxy.conversations.get("conversation-a").control = undefined;
+    let loadSessionCalls = 0;
+    let newSessionCalls = 0;
+    proxy.clients.set("codex", {
+      loadSession: async () => {
+        loadSessionCalls += 1;
+        return { thread: { id: "thread-copy", turns: [] } };
+      },
+      newSession: async () => {
+        newSessionCalls += 1;
+        return { sessionId: "thread-copy" };
+      },
+    });
+
+    await proxy.handleEnvelope({
+      id: "env-running-attach",
+      type: "agent.v2.conversation.open",
+      sessionId: "session-1",
+      timestamp: Date.now(),
+      payload: { conversationId: "conversation-a", provider: "codex", cwd: "/tmp" },
+    });
+
+    expect(loadSessionCalls).toBe(0);
+    expect(newSessionCalls).toBe(0);
+    const opened = sent.find((envelope) => envelope.type === "agent.v2.conversation.opened");
+    expect(opened?.payload.conversation.control).toBe("attached");
+  });
+
+  it("caps idle conversations and keeps running plus watched", () => {
+    const { proxy } = makeProxy();
+    proxy.conversations.clear();
+    for (let i = 0; i < 50; i++) {
+      proxy.conversations.set(`idle-${i}`, {
+        id: `idle-${i}`,
+        provider: "codex",
+        cwd: "/tmp",
+        status: "idle",
+        archived: false,
+        lastActivityAt: i,
+        createdAt: i,
+      });
+    }
+    proxy.conversations.set("run-1", {
+      id: "run-1",
+      provider: "codex",
+      cwd: "/tmp",
+      status: "running",
+      archived: false,
+      lastActivityAt: 1000,
+      createdAt: 1000,
+    });
+    proxy.watchedConversationIds.add("idle-0");
+    const listed = proxy.listedConversations([...proxy.conversations.values()]);
+    expect(listed).toHaveLength(40);
+    expect(listed.some((conversation: { id: string }) => conversation.id === "run-1")).toBe(true);
+    expect(listed.some((conversation: { id: string }) => conversation.id === "idle-0")).toBe(true);
   });
 });

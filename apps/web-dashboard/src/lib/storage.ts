@@ -134,11 +134,19 @@ function sweepOrphanedSessionData(): void {
 
 // ── Conversations (per session) ─────────────────────────────────────
 
+const MAX_CACHED_CONVERSATIONS = 80;
+
 export function loadConversations(sessionId: string): AgentConversation[] {
-  return read<AgentConversation[]>(CONV_PREFIX + sessionId) ?? [];
+  const loaded = read<AgentConversation[]>(CONV_PREFIX + sessionId) ?? [];
+  return [...loaded]
+    .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
+    .slice(0, MAX_CACHED_CONVERSATIONS);
 }
 export function saveConversations(sessionId: string, conversations: AgentConversation[]): void {
-  write(CONV_PREFIX + sessionId, conversations);
+  const capped = [...conversations]
+    .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
+    .slice(0, MAX_CACHED_CONVERSATIONS);
+  write(CONV_PREFIX + sessionId, capped);
 }
 
 // ── Composer drafts (per conversation) ──────────────────────────────
