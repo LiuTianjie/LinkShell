@@ -1,215 +1,149 @@
 <p align="center">
-  <img src="docs/assets/adaptive-icon.png" alt="LinkShell" width="160" style="border-radius:24px" />
+  <img src="docs/assets/adaptive-icon.png" alt="LinkShell" width="96" />
 </p>
 
 <h1 align="center">LinkShell</h1>
 
 <p align="center">
-  <strong>Remote Terminal and Agent Workspace for Claude Code, Codex, Gemini, and Copilot</strong>
+  <strong>Leave your desk. Keep your workspace.</strong><br />
+  Your local terminals, coding agents, and development previews — on your phone or in a browser.
 </p>
 
 <p align="center">
-  Remotely control local AI terminals, Agent Workspace conversations, desktop sharing, and dev server previews from your phone
+  <a href="https://www.npmjs.com/package/linkshell-cli"><img src="https://img.shields.io/npm/v/linkshell-cli?style=flat-square&amp;color=818cf8" alt="CLI version on npm" /></a>
+  <a href="https://github.com/LiuTianjie/LinkShell/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/LiuTianjie/LinkShell/test.yml?style=flat-square&amp;label=tests" alt="Test status" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-64748b?style=flat-square" alt="MIT license" /></a>
 </p>
 
 <p align="center">
-  <strong>English</strong>
-  &nbsp;&nbsp;|&nbsp;&nbsp;
-  <a href="README_CN.md">中文</a>
+  <a href="https://liutianjie.github.io/LinkShell/">Website</a> ·
+  <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iOS app</a> ·
+  <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a> ·
+  <a href="docs/deploy.md">Self-hosting</a> ·
+  <a href="README_CN.md">简体中文</a>
 </p>
 
 <p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/">🌐 Website</a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">📦 Releases</a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="docs/user-guide.md">📖 Docs</a>
+  <img src="docs/assets/2.png" alt="Claude Code in the LinkShell mobile terminal" width="245" />
+  <img src="docs/assets/3.png" alt="Gemini CLI in the LinkShell mobile terminal" width="245" />
+  <img src="docs/assets/4.png" alt="Switching between terminal sessions in LinkShell" width="245" />
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/github/license/LiuTianjie/LinkShell?style=flat-square" alt="License" />
-  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Android%20%7C%20macOS%20%7C%20Linux-blue?style=flat-square" alt="Platform" />
-  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome" />
-</p>
+LinkShell connects you to work running on your own computer. Continue a terminal session, review a coding agent's progress, respond to supported approval requests, or open a local development server from your phone.
 
-<p align="center">
-  <a href="https://www.producthunt.com/products/linkshell?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-linkshell" target="_blank" rel="noopener noreferrer"><img alt="LinkShell - Control your AI terminal sessions from your phone. | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1120419&amp;theme=dark&amp;t=1775998159516" /></a>
-</p>
+The CLI runs a terminal bridge and an embedded gateway. Pair a client to that gateway and your workspace is reachable over the network. For access across networks, use a self-hosted gateway or the optional hosted service. Your code and agent processes keep running on the host machine.
 
-<p align="center">
-  <video src="https://github.com/user-attachments/assets/cc09d3a7-239c-4d5c-a2a7-76f64d4af070" width="280" autoplay loop muted playsinline></video>
-  &nbsp;&nbsp;
-  <video src="https://github.com/user-attachments/assets/d24a1699-fb8e-4a27-a51d-27a290f7ec73" width="280" autoplay loop muted playsinline></video>
-</p>
+## Get connected
 
-## 📲 Download
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">
-        <img src="https://img.shields.io/badge/iOS-App_Store-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download on App Store" />
-      </a>
-      <br /><sub>iOS 14+</sub>
-    </td>
-    <td align="center">
-      <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">
-        <img src="https://img.shields.io/badge/Android-Download_APK-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" />
-      </a>
-      <br /><sub>Android 8+</sub>
-    </td>
-  </tr>
-</table>
-
-> Android APK is available from GitHub Releases. iOS version is available on the App Store.
-
-## Get Started
+Install Node.js and any coding CLI you want to use on the host. Then, from your project directory:
 
 ```bash
-# npm
 npm install -g linkshell-cli
+linkshell start --daemon
+```
 
-# Homebrew (macOS)
+1. Open the [iOS app](https://apps.apple.com/cn/app/linkshell/id6761547516) or [Android app](https://github.com/LiuTianjie/LinkShell/releases/latest) on the same network.
+2. Scan the QR code printed by the CLI, or enter the gateway address and pairing code.
+3. Use the terminal, or select an available provider in **Agent Workspace**.
+
+Prefer a browser? Open the gateway URL shown by the CLI and pair there. The web console ships with the CLI and is served by the gateway.
+
+The terminal starts your default shell. Run `claude`, `codex`, `gemini`, `copilot`, or another installed command inside it. Agent Workspace is enabled by default and detects supported Claude Code and Codex installations.
+
+> Upgrading from an older guide? `--provider claude` and the other named terminal providers are deprecated. Use the default shell, or `--command <executable>` to launch a specific program. `--agent-provider` separately selects a structured Agent Workspace provider.
+
+<details>
+<summary>Other installation methods</summary>
+
+Homebrew on macOS:
+
+```bash
 brew install LiuTianjie/linkshell/linkshell
+```
 
-# or curl
+Shell installer:
+
+```bash
 curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 ```
 
-```bash
-linkshell start --daemon --provider claude
-```
+</details>
 
-The CLI starts a built-in Gateway + terminal bridge in the background, then prints a pairing code and QR code. Scan to connect. Disconnecting the app does not affect the background process. On macOS, the bridge prevents idle system sleep by default so locking the screen does not usually drop the session.
+## One connection, four views
 
-Terminal providers currently include `claude`, `codex`, `gemini`, `copilot`, and `custom`. The Agent Workspace auto-detects ACP-capable Claude Code and Codex installations when `--agent-ui` is enabled. Other live agent processes (Gemini, Copilot, OpenCode, Cursor Agent, Kimi) are discovered from the host and shown in the session tree; remote prompting for those still happens in the terminal.
+| View | What you can do |
+| --- | --- |
+| **Terminal** | Interact with real host PTYs through xterm.js, switch terminals, and run your existing CLI tools |
+| **Agent Workspace** | Read structured conversations, tool activity, plans, and file changes; respond to input and approval requests supported by the provider |
+| **Browser** | Preview a host development server through HTTP and WebSocket forwarding, including HMR |
+| **Desktop** | View the host display when screen sharing is enabled, using WebRTC with a screenshot-stream fallback |
 
-## Commands
-
-```bash
-linkshell start --daemon --provider claude   # Start in background (built-in Gateway + bridge)
-linkshell start --daemon --provider claude --no-keep-awake  # macOS: allow idle sleep
-linkshell start --provider claude             # Start in foreground
-linkshell start --daemon --provider gemini    # Bridge Gemini CLI
-linkshell start --daemon --provider copilot   # Bridge GitHub Copilot CLI
-linkshell start --daemon --agent-ui           # Enable Agent Workspace (auto-detects Claude/Codex)
-linkshell status                              # Check running status
-linkshell stop                                # Stop all background processes
-tail -f ~/.linkshell/bridge.log               # View logs
-
-linkshell gateway --daemon                    # Start Gateway separately in background (for server deployment)
-linkshell gateway status                      # Check Gateway status
-linkshell gateway stop                        # Stop Gateway
-
-linkshell setup                               # Interactive configuration
-linkshell doctor                              # Environment check
-linkshell upgrade                             # Upgrade to latest version
-linkshell login                               # Log in (enables premium gateway)
-linkshell logout                              # Log out
-```
-
-## Architecture
-
-```
-Your Computer                                    Your Phone
-┌──────────────────────┐   WebSocket   ┌──────────┐
-│ CLI + Built-in GW    │ ◄───────────► │ App      │
-│ (PTY + Relay)        │               │ (xterm)  │
-└──────────────────────┘               └──────────┘
-```
-
-By default, the CLI includes a built-in Gateway — one command does it all. You can also deploy the Gateway separately on a public server:
-
-```
-Your Computer              Public Server                Your Phone
-┌──────────┐  WebSocket   ┌──────────┐   WebSocket   ┌──────────┐
-│ CLI      │ ────────────►│ Gateway  │◄──────────── │ App      │
-│ (PTY)    │              │ (Relay)  │              │ (xterm)  │
-└──────────┘              └──────────┘              └──────────┘
-```
-
-## Usage
-
-### Simple Mode (Built-in Gateway, LAN)
-
-```bash
-linkshell start --daemon --provider claude
-```
-
-With your phone and computer on the same WiFi, the CLI auto-detects the LAN IP and generates a QR code.
-
-### macOS Lock Screen / Sleep
-
-`linkshell start` enables macOS keep-awake by default while the bridge is running. This uses `caffeinate -i -w <bridge-pid>` to prevent idle system sleep without keeping the display on or unlocking the screen.
-
-```bash
-linkshell start --daemon --provider claude
-```
-
-To favor battery life and allow idle sleep:
-
-```bash
-linkshell start --daemon --provider claude --no-keep-awake
-# or
-LINKSHELL_KEEP_AWAKE=0 linkshell start --daemon --provider claude
-```
-
-### Remote Desktop Viewing
-
-```bash
-linkshell start --daemon --provider claude --screen
-```
-
-With `--screen`, the app can switch to the Desktop tab to view your computer screen. Supports WebRTC (30fps) and screenshot streaming (fallback), automatically selecting the best option.
-
-> **Prerequisite:** [ffmpeg](https://ffmpeg.org/) must be installed.
->
-> ```bash
-> # macOS
-> brew install ffmpeg
->
-> # Ubuntu / Debian
-> sudo apt install ffmpeg
->
-> # Windows (Chocolatey)
-> choco install ffmpeg
-> ```
->
-> Once installed, the CLI auto-detects screen devices and starts H.264 encoding. If [werift](https://github.com/nicktomlin/werift) is also installed (`npm i -g werift`), WebRTC low-latency transport is preferred; otherwise it falls back to screenshot streaming.
+The CLI can stay in the background while clients disconnect and reconnect. On macOS it prevents **idle system sleep** by default while the bridge runs, without keeping the display on. The host still needs to remain running and network-reachable.
 
 ### Agent Workspace
 
-LinkShell exposes an Agent tab alongside Terminal, Desktop, and Browser. It auto-detects installed agent providers (Claude Code, Codex CLI), starts available providers, and reports provider capabilities to the app.
+Supported providers expose their capabilities to the client: models, reasoning effort, permission modes, image/text input, tool events, and session history. Availability depends on the selected provider and its installed version.
+
+| Agent | Terminal | Structured workspace |
+| --- | --- | --- |
+| Claude Code | Run `claude` in the shell | Claude Agent SDK; stream-json fallback when available |
+| Codex | Run `codex` in the shell | Codex app-server |
+| Gemini CLI, GitHub Copilot CLI, and other tools | Run the installed command in the shell | No equivalent structured adapter is promised |
 
 ```bash
-# Auto-detects Claude Code and/or Codex CLI — both available to the mobile app
-linkshell start --daemon --agent-ui
+# Automatically detect supported agents
+linkshell start --daemon
 
-# Explicit provider override (if needed)
-linkshell start --daemon --agent-ui --agent-provider codex
+# Select the Codex workspace explicitly
+linkshell start --daemon --agent-provider codex
+
+# Foreground terminal bridge with the Agent Workspace disabled
+linkshell start --no-agent-ui
 ```
 
-The current Agent Workspace v2 supports provider selection, dynamic model lists from CLI capabilities, reasoning effort and permission mode controls, image/text input blocks, structured input prompts, permission approval, plan/timeline events, command/file-change cards, subagent activity, reconnect snapshots, and local conversation history. Claude Code is supported through the Claude Agent SDK when available, with stream-json fallback; Codex uses `codex app-server --listen stdio://`.
+Other discovered local agents may appear in the session tree; discovery does not turn their terminal sessions into structured conversations. Without a supported provider, the terminal remains available.
 
-If no local agent provider is available, the app shows an unavailable Agent state and the terminal session continues normally.
+Claude's stream-json fallback does not provide interactive tool approvals. Use the SDK path when you need permission-gated control; the UI's available controls follow the active adapter's capabilities.
 
-### Port Forwarding (Preview Dev Server)
+### Preview a development server
 
-After starting a dev server in the remote terminal, you can preview pages directly on your phone:
+Start the server in the host terminal, for example with `npm run dev`. In the app's **Browser** view, enter its port, such as `3000`.
 
-1. Start a service in the terminal, e.g. `npm run dev` (listening on port 3000)
-2. Switch to the Browser tab (globe icon) in the app
-3. Enter the port number and tap Go
+LinkShell forwards HTTP assets and WebSocket traffic, so supported development servers can retain hot reload. The app offers mobile/desktop viewport modes and a full-screen preview. [Gateway deployment and proxy setup](docs/deploy.md).
 
-Supports:
-- Full loading of static assets, CSS, JS, images, etc.
-- HMR / WebSocket hot reload (Vite, Next.js, etc.)
-- PC / mobile view switching
-- Fullscreen preview mode
+### View your desktop
 
-> Requires `linkshell-cli >= 0.2.53`, `@linkshell/gateway >= 0.2.17`
+Install `ffmpeg` on the host, then enable screen sharing:
 
-### Remote Mode (Standalone Gateway, Cross-Network)
+```bash
+linkshell start --daemon --screen
+```
+
+Grant the host's screen-capture permission where required. The CLI uses the optional `werift` dependency for WebRTC when available and falls back to screenshot streaming otherwise. Desktop sharing is a view of the host screen; terminal and agent interaction use their own channels.
+
+## Choose a connection model
+
+| Mode | Gateway location | Account | Best suited to |
+| --- | --- | --- | --- |
+| **Local network** | Embedded in the CLI | No hosted account required; pair each client | Phone and computer on the same reachable network |
+| **Self-hosted** | Your server | No hosted account required by default | Access across networks with your own relay |
+| **Hosted** | Official gateway | Sign-in and Pro entitlement | Managed relay and account-owned sessions |
+
+```mermaid
+flowchart LR
+    subgraph Host[Your computer]
+        Shell[Shell / coding CLIs] <--> Bridge[LinkShell bridge]
+        Agents[Structured agent adapters] <--> Bridge
+        Dev[Local development server] <--> Bridge
+    end
+    Bridge <-->|WebSocket| Gateway[Gateway]
+    Gateway <-->|WebSocket / HTTP| Phone[iOS / Android app]
+    Gateway <-->|WebSocket / HTTP| Browser[Web console]
+```
+
+In local mode the gateway runs on the same computer as the bridge. In remote mode both the host and clients connect to a reachable gateway. The gateway also serves the web console from its own origin.
+
+### Run your own gateway
 
 On the server:
 
@@ -218,142 +152,96 @@ npm install -g linkshell-cli
 linkshell gateway --daemon --port 8787
 ```
 
-On your computer:
+Put the gateway behind an HTTPS reverse proxy with WebSocket support. Then, on the computer running your project:
 
 ```bash
-linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider claude
+linkshell start --daemon --gateway wss://relay.example.com/ws
 ```
 
-You can also deploy the Gateway with Docker:
+Connect the app or browser to `https://relay.example.com` and pair. Docker deployment, reverse proxy examples, firewall requirements, and optional authentication are covered in the [deployment guide](docs/deploy.md).
+
+## Security and session behavior
+
+- **Pairing grants access.** Clients use session-bound device tokens after pairing. Protect pairing codes, QR codes, and stored credentials.
+- **The gateway is trusted infrastructure.** Remote deployments should use HTTPS/WSS. LinkShell does not currently provide end-to-end encryption, so a relay operator is inside the trust boundary.
+- **Host permissions still apply.** Terminal commands and agent actions execute with the host process's access. Pair only clients you trust.
+- **Reconnect is bounded.** Acknowledgments, buffered output replay, heartbeats, and backoff support temporary disconnects. They do not guarantee recovery after a host restart, expired session, or lost process.
+- **AI providers remain separate.** The installed agent's account and provider configuration govern its model requests. The optional hosted gateway subscription is a separate service.
+
+The mobile client stores conversation history locally for recovery. Gateway session and replay state are not a backup of your terminal or project. Protocol and gateway details are documented in [shared-protocol](packages/shared-protocol/README.md) and [gateway](packages/gateway/README.md).
+
+## Everyday commands
+
+| Task | Command |
+| --- | --- |
+| Start in the background | `linkshell start --daemon` |
+| Start in the foreground | `linkshell start` |
+| Run a specific program | `linkshell start --command bash` |
+| Allow idle sleep on macOS | `linkshell start --daemon --no-keep-awake` |
+| Inspect the bridge and gateway | `linkshell status` |
+| Stop background processes | `linkshell stop` |
+| Check the environment | `linkshell doctor` |
+| Read bridge logs | `tail -f ~/.linkshell/bridge.log` |
+| Configure interactively | `linkshell setup` |
+| Upgrade the CLI | `linkshell upgrade` |
+| Sign in to the hosted service | `linkshell login` |
+
+If a daemon is already running, stop it before restarting with different flags. Use `linkshell --help` and `linkshell start --help` for the installed version's command reference.
+
+## Development
+
+The repository is a pnpm workspace. CI currently uses Node.js 20; the package manager is pinned in `package.json`.
 
 ```bash
-# From Docker Hub (recommended)
-docker pull nickname4th/linkshell-gateway:latest
-docker run -d -p 8787:8787 --name linkshell-gateway nickname4th/linkshell-gateway:latest
-
-# Apple Silicon / arm64 hosts: current Docker Hub images are linux/amd64.
-docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
-
-# Or build from source
-git clone https://github.com/LiuTianjie/LinkShell
+git clone https://github.com/LiuTianjie/LinkShell.git
 cd LinkShell
-docker compose up -d
-```
-
-See [docs/deploy.md](docs/deploy.md) for detailed deployment instructions.
-
-### Manage Background Processes
-
-```bash
-linkshell status    # Check Bridge and Gateway status
-linkshell stop      # Stop all background processes
-```
-
-### Connect from Phone
-
-In the app:
-- Scan the QR code printed by the CLI (recommended)
-- Or manually enter the Gateway address + 6-digit pairing code
-- Or select from the session list
-
-Reconnecting after disconnection does not affect background processes — just scan or enter the pairing code to resume.
-
-### Web Console (Browser)
-
-Besides the phone app, **every gateway serves a web console same-origin at its own address** — the same Agent + terminal interface as mobile. The CLI ships this web bundle (the built-in gateway has it too), so there's nothing extra to deploy.
-
-Just open the gateway URL in a browser:
-
-- **LAN**: open the LAN address printed by `linkshell start`, e.g. `http://192.168.1.10:8787`
-- **Self-hosted gateway**: open your deployed domain, e.g. `https://gateway.example.com`
-- **Official gateway (Pro)**: open the official gateway URL
-
-The page connects to whichever gateway served it ("web follows the gateway"). You'll see that gateway's session list; click any session to open the Agent console or terminal.
-
-Login is **optional**, not a gate:
-
-- LAN / self-hosted: no login needed — device trust (TOFU on first connect) is enough
-- Pro: sign in (top-right) to see every session owned by your account across official gateways (`/sessions/mine`) without scanning a code
-
-## Local Development
-
-```bash
 pnpm install
-pnpm dev:gateway    # Start gateway (localhost:8787)
-pnpm dev:web        # Web debug client (localhost:5173)
-pnpm dev:app        # Expo App
-
-# CLI local development
-pnpm --filter linkshell-cli dev start --provider custom --command bash
+pnpm -r --filter './packages/*' build
+pnpm test
 ```
 
-## Handoff Docs
+Run the surfaces you need in separate terminals:
 
-1. [docs/ai-handoff.md](docs/ai-handoff.md) — Repository-level handoff guide
-2. [apps/mobile/README.md](apps/mobile/README.md) — Mobile information architecture
+```bash
+pnpm dev:gateway
+pnpm --filter @linkshell/web-dashboard dev
+pnpm dev:app
 
-## Project Structure
-
-```
-├── packages/
-│   ├── shared-protocol/       # Shared protocol (Zod schema, message types, version negotiation)
-│   ├── cli/                   # CLI (PTY, providers, Agent Workspace, built-in Gateway, daemon)
-│   └── gateway/               # Cloud gateway (pairing, sessions, routing, control, auth, rate limiting)
-│       └── Dockerfile
-├── apps/
-│   ├── mobile/                # Expo App (xterm.js WebView, Agent Workspace, desktop/browser tabs)
-│   ├── web-dashboard/         # Browser console (Vite + React + Tailwind): Agent + terminal, session list, login, subscription — served same-origin by every gateway
-│   └── web-debug/             # Web debug client (Vite + xterm.js + debug panel)
-├── docs/
-│   ├── site/                  # Landing page + install script
-│   ├── brew/                  # Homebrew formula
-│   ├── ai-handoff.md          # Handoff guide
-│   ├── deploy.md              # Gateway deployment docs
-│   └── user-guide.md          # End-user documentation
-├── docker-compose.yml
-├── .env.example
-└── PRD.md
+# Local CLI development
+pnpm --filter linkshell-cli dev start --command bash
 ```
 
-## Gateway API
+| Directory | Responsibility |
+| --- | --- |
+| `packages/cli` | PTYs, daemon lifecycle, agent adapters, screen sharing, and embedded gateway |
+| `packages/gateway` | Pairing, session relay, device tokens, access control, and HTTP/WebSocket tunnels |
+| `packages/shared-protocol` | Zod schemas, message envelopes, and protocol negotiation |
+| `apps/mobile` | Expo / React Native app with xterm.js terminal views |
+| `apps/web-dashboard` | React web console, bundled for gateway delivery |
+| `docs/site` | Public website and installer |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/healthz` | Health check |
-| `POST` | `/pairings` | Create pairing (6-digit code, valid for 10 minutes) |
-| `POST` | `/pairings/claim` | Exchange code for sessionId |
-| `GET` | `/pairings/:code/status` | Query pairing status |
-| `GET` | `/sessions` | List active sessions |
-| `GET` | `/sessions/:id` | Session details |
-| `WS` | `/ws?sessionId=&role=` | Real-time connection |
-| `GET/POST` | `/tunnel/:sessionId/:port/**` | HTTP port forwarding |
-| `WS` | `/tunnel/:sessionId/:port/**` | WebSocket port forwarding (HMR) |
+Focused bug reports and pull requests are welcome. Include CLI and gateway versions, host OS, client type, connection mode, and a minimal reproduction. Redact pairing codes, device tokens, and terminal content from logs. Use `pnpm typecheck` and the relevant tests for code changes.
 
-## Reliability
+For mobile work, see [the app guide](apps/mobile/README.md). For repository orientation and publishing, see [maintainer notes](docs/ai-handoff.md) and [release SOP](docs/release-sop.md). The [user guide](docs/user-guide.md) contains additional workflows; this README and CLI help reflect the current shell-first startup behavior.
 
-- ACK confirmation + dual-layer buffering (CLI 1000 messages + Gateway 200 messages)
-- Exponential backoff auto-reconnect (both CLI and App)
-- Heartbeat detection (15s/20s)
-- Session persistence (host disconnect retained for 60s, idle cleanup after 30min)
-- Single-device control management
-- Protocol version negotiation
-- Agent Workspace v2 snapshots for reconnect and resume
-- CORS + rate limiting + graceful shutdown
-- Daemon mode (both CLI and Gateway support background running)
+## Support the project
 
-## Sponsors
+Sponsored by [AI18N](https://ai18n.chat/), an AI API gateway with OpenAI- and Anthropic-compatible interfaces for Claude models.
 
-- [AI18N](https://ai18n.chat/) — Unified AI API Gateway with OpenAI / Anthropic compatible API for Claude models
+<details>
+<summary>Buy the author a coffee</summary>
 
-## Buy Me a Coffee
-
-If LinkShell has been helpful to you, consider buying the author a coffee:
+If LinkShell helps you stay connected to your work, you can support its development:
 
 <p>
-  <img src="docs/assets/pay_wechat.jpg" alt="WeChat Pay" width="180" />
-  <img src="docs/assets/pay_ali.jpg" alt="Alipay" width="180" />
+  <img src="docs/assets/pay_wechat.jpg" alt="WeChat Pay donation code" width="160" />
+  <img src="docs/assets/pay_ali.jpg" alt="Alipay donation code" width="160" />
 </p>
+
+</details>
+
+[Watch demo 1](https://github.com/user-attachments/assets/cc09d3a7-239c-4d5c-a2a7-76f64d4af070) · [Watch demo 2](https://github.com/user-attachments/assets/d24a1699-fb8e-4a27-a51d-27a290f7ec73) · [Product Hunt](https://www.producthunt.com/products/linkshell)
 
 ## License
 
-MIT
+[MIT](LICENSE).
