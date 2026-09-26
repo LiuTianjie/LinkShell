@@ -1,5 +1,8 @@
 import { execSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { loadConfig, getConfigPath } from "../config.js";
+
+const requireFromCli = createRequire(import.meta.url);
 
 interface CheckResult {
   name: string;
@@ -53,10 +56,16 @@ export async function runDoctor(gatewayUrl?: string): Promise<void> {
 
   results.push(check("node-pty", () => {
     try {
-      execSync("node -e \"require('node-pty')\"", { timeout: 5000, stdio: "pipe" });
+      // Resolve against this installation, not the user's current project.
+      requireFromCli("node-pty");
       return "loaded";
-    } catch {
-      throw new Error("native module not built — run: pnpm approve-builds && pnpm install --force");
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `could not load node-pty from this LinkShell installation: ${reason}. ` +
+        "Reinstall linkshell-cli with the package manager you used to install it. " +
+        "For a pnpm source checkout, approve node-pty build scripts and reinstall.",
+      );
     }
   }));
 
