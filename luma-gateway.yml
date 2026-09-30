@@ -1,13 +1,17 @@
 name: linkshell-gateway
-image: nickname4th/linkshell-gateway:0.4.55
+image: nickname4th/linkshell-gateway:0.5.0
 region: cn
 exposure: cn-edge
 domain: gateway.itool.tech
 port: 8787
 publishPort: 8787
 replicas: 1
+# The v2 relay's pairings and keys (SQLite); losing them unpairs every phone.
+volumes:
+  - linkshell-gateway-relay:/data
 env:
   PORT: "8787"
+  RELAY_DATA_PATH: /data/relay.db
   AUTH_REQUIRED: "true"
   SUPABASE_URL: ${SUPABASE_URL}
   SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
