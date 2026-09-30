@@ -34,7 +34,8 @@ function load(): Saved {
   } catch {
     // Fall through to the default.
   }
-  return { relay: [], direct: [{ url: DEFAULT_HOST_URL, name: "本机开发" }] };
+  // Development builds start on a host on this Mac; a real install starts with none.
+  return { relay: [], direct: __DEV__ ? [{ url: DEFAULT_HOST_URL, name: "本机开发" }] : [] };
 }
 
 function persist(saved: Saved): void {

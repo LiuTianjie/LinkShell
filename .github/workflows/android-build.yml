@@ -13,7 +13,7 @@ jobs:
     runs-on: [self-hosted, macOS]
     defaults:
       run:
-        working-directory: apps/mobile
+        working-directory: apps/client
 
     steps:
       - uses: actions/checkout@v4
@@ -29,48 +29,21 @@ jobs:
         working-directory: .
 
       - name: Build workspace packages
-        run: pnpm -r --filter '!@linkshell/app' build
+        run: pnpm -r --filter './packages/*' build
         working-directory: .
 
-      # Parse version from tag: v1.2.3 -> version=1.2.3, versionCode=10203
       - name: Set version from tag
         id: version
-        run: |
-          TAG="${GITHUB_REF#refs/tags/v}"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$TAG"
-          CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
-          echo "name=$TAG" >> "$GITHUB_OUTPUT"
-          echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          echo "Version: $TAG  VersionCode: $CODE"
+        run: echo "name=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
-      - name: Update app.json version
-        run: |
-          node -e "
-            const fs = require('fs');
-            const app = JSON.parse(fs.readFileSync('app.json','utf8'));
-            app.expo.version = '${{ steps.version.outputs.name }}';
-            app.expo.android.versionCode = ${{ steps.version.outputs.code }};
-            fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
-          "
-
-      - name: Build terminal HTML
-        run: node scripts/build-terminal-html.mjs
-
-      - name: Expo prebuild
-        run: npx expo prebuild --platform android --clean
-
-      - name: Build AAB
-        run: ./gradlew bundleRelease
-        working-directory: apps/mobile/android
-
-      - name: Build APK
-        run: ./gradlew assembleRelease
-        working-directory: apps/mobile/android
+      # v2.0.1 -> version 2.0.1, versionCode 20001; AAB + APK in build/release.
+      - name: Build AAB and APK
+        run: node scripts/release.mjs android "${{ steps.version.outputs.name }}"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: LinkShell ${{ steps.version.outputs.name }}
           files: |
-            apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
-            apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+            apps/client/build/release/LinkShell-${{ steps.version.outputs.name }}.aab
+            apps/client/build/release/LinkShell-${{ steps.version.outputs.name }}.apk

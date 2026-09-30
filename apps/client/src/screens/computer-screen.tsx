@@ -8,7 +8,8 @@ import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
 import { LiveDot } from "@/components/status";
 import { useAccount } from "@/lib/account";
-import { useActions, useClient, useConnection } from "@/lib/client";
+import { useActions, useClient, useConnection, useHasComputer } from "@/lib/client";
+import { Welcome } from "@/components/welcome";
 import { listComputers, useComputers } from "@/lib/computers";
 import { haptics } from "@/lib/haptics";
 import { agentLook } from "@/theme/agents";
@@ -178,6 +179,7 @@ export function ComputerScreen() {
   const live = useComputers((state) => state.live);
   const computers = useMemo(() => listComputers({ saved, live }), [saved, live]);
   const [refreshing, setRefreshing] = useState(false);
+  const hasComputer = useHasComputer();
   const online = status === "online";
   const platform = platformName(machine?.platform ?? "");
   const agents = [...(machine?.agents ?? [])].sort((a, b) => Number(b.installed) - Number(a.installed));
@@ -214,6 +216,8 @@ export function ComputerScreen() {
             },
           ]}
         />
+        {hasComputer ? (
+        <>
         <View
           style={{
             backgroundColor: colors.card,
@@ -320,7 +324,10 @@ export function ComputerScreen() {
             </Text>
           ) : null}
         </View>
-
+        </>
+        ) : (
+          <Welcome />
+        )}
       </ScrollView>
       <StatusBarFade />
     </>

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Release the mobile app (iOS + Android) by pushing a vX.Y.Z tag.
+# Release the mobile app (iOS + Android) by pushing a vX.Y.Z tag. (apps/client)
 #
 # Pushing `vX.Y.Z` triggers two self-hosted-macOS workflows:
 #   - .github/workflows/ios-build.yml     → archive + upload to TestFlight
@@ -14,7 +14,7 @@
 #   ./scripts/release-mobile.sh 1.1.5            # tag HEAD as v1.1.5 and push
 #   ./scripts/release-mobile.sh                  # auto-suggest next patch, then confirm
 #   ./scripts/release-mobile.sh 1.1.5 --yes      # skip confirmation prompt
-#   ./scripts/release-mobile.sh 1.1.5 --skip-typecheck
+#   ./scripts/release-mobile.sh 2.0.1 --skip-typecheck
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -85,7 +85,7 @@ BUILD_CODE=$((MA * 10000 + MI * 100 + PA))
 if [[ "$SKIP_TYPECHECK" -eq 0 ]]; then
   echo
   echo "━━━ Typecheck (mobile app) ━━━"
-  pnpm --filter @linkshell/app typecheck
+  pnpm --filter @linkshell/client typecheck
 else
   echo "━━━ Typecheck skipped (--skip-typecheck) ━━━"
 fi

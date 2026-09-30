@@ -11,7 +11,8 @@ import { SessionRow, positionOf, type RowPosition } from "@/components/session-r
 import { TerminalRow } from "@/components/terminal-row";
 import { terminalState, useTerminals } from "@/lib/terminals";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
-import { useActions, useClient } from "@/lib/client";
+import { useActions, useClient, useHasComputer } from "@/lib/client";
+import { Welcome } from "@/components/welcome";
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
@@ -114,6 +115,7 @@ export function HomeScreen() {
   const loaded = useClient((state) => state.sessionsLoaded);
   const error = useClient((state) => state.sessionsError);
   const offline = useClient((state) => unreachable(state.status));
+  const hasComputer = useHasComputer();
   const { refresh } = useActions();
   const now = useNow();
   const [refreshing, setRefreshing] = useState(false);
@@ -193,7 +195,9 @@ export function HomeScreen() {
           ) : null
         }
         ListEmptyComponent={
-          !loaded ? (
+          !hasComputer ? (
+            <Welcome />
+          ) : !loaded ? (
             error ? (
               <EmptyState
                 icon={{ sf: "exclamationmark.triangle", md: "warning" }}

@@ -6,7 +6,8 @@ import { ConnectionBanner } from "@/components/connection-banner";
 import { Icon } from "@/components/icon";
 import { ListRow, positionOf, type RowPosition } from "@/components/session-row";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
-import { useClient } from "@/lib/client";
+import { useClient, useHasComputer } from "@/lib/client";
+import { Welcome } from "@/components/welcome";
 import { relativeTime, shortPath } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
@@ -33,6 +34,7 @@ export function ProjectsScreen() {
   const projects = useClient((state) => state.projects);
   const loaded = useClient((state) => state.sessionsLoaded);
   const offline = useClient((state) => unreachable(state.status));
+  const hasComputer = useHasComputer();
   const [query, setQuery] = useState("");
   const now = useNow();
 
@@ -56,7 +58,9 @@ export function ProjectsScreen() {
           <PageSearch value={query} onChangeText={setQuery} placeholder="搜索项目" />
         </PageHeader>
         <ConnectionBanner />
-        {!loaded ? (
+        {!hasComputer ? (
+          <Welcome />
+        ) : !loaded ? (
           offline ? <WaitingForComputer what="电脑上的项目" /> : <LoadingState label="正在读取项目…" />
         ) : shown.length === 0 ? (
           query ? (

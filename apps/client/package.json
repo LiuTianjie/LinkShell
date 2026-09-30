@@ -54,11 +54,13 @@
   },
   "scripts": {
     "start": "expo start",
-    "ios": "expo run:ios",
-    "android": "expo run:android",
+    "ios": "APP_VARIANT=development expo run:ios",
+    "android": "APP_VARIANT=development expo run:android",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "prod:ios": "node scripts/release.mjs ios",
+    "prod:android": "node scripts/release.mjs android"
   },
   "private": true,
   "enriched-markdown": {

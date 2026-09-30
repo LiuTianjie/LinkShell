@@ -37,7 +37,11 @@ interface ConnectionContextValue {
 
 const ConnectionContext = createContext<ConnectionContextValue | null>(null);
 
+/** No computer added yet (a new install): nothing to connect to until one is. */
+const NO_COMPUTER_KEY = "none";
+
 function fallbackComputer(): Computer {
+  if (!__DEV__) return { key: NO_COMPUTER_KEY, kind: "direct", url: "", name: "电脑" };
   return { key: `direct:${DEFAULT_HOST_URL}`, kind: "direct", url: DEFAULT_HOST_URL, name: "本机开发" };
 }
 
@@ -78,6 +82,7 @@ export function ClientProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const { store, link } = connection;
+    if (connection.key === NO_COMPUTER_KEY) return;
     store.getState().connect();
     // Sockets die quietly in the background; come back as soon as the app does.
     const subscription = AppState.addEventListener("change", (state) => {
@@ -109,6 +114,11 @@ function useConnectionContext(): ConnectionContextValue {
   const value = use(ConnectionContext);
   if (!value) throw new Error("ClientProvider is missing");
   return value;
+}
+
+/** False until the first computer is added (pairing or a Pro account). */
+export function useHasComputer(): boolean {
+  return useConnectionContext().connection.key !== NO_COMPUTER_KEY;
 }
 
 export function useConnection() {
