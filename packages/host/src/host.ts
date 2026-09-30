@@ -127,6 +127,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     hostname: process.env.LINKSHELL_MACHINE_NAME || hostname(),
     platform: platform(),
     hostVersion: options.version,
+    home: homedir(),
     agents: hub.agents(),
   });
   const terminals = new TerminalManager(options.env, store);

@@ -51,7 +51,7 @@ const program = new Command();
 program
   .name("linkshell")
   .description(
-    "Bridge a local terminal session to a remote gateway. Launch any CLI (Claude/Codex/etc.) manually inside the shell.",
+    "Your coding agents and terminals, on your phone. Run `linkshell host --daemon`, then `linkshell pair` (or `linkshell login` for the official gateway).",
   )
   .version(pkg.version);
 
@@ -133,7 +133,7 @@ for (const [agent, description] of [
 
 program
   .command("start")
-  .description("Start a bridge session (with built-in or remote gateway)")
+  .description("Start a v1 bridge session (for the v1 app; with built-in or remote gateway)")
   .option(
     "--gateway <url>",
     "Gateway websocket URL (omit to start built-in gateway)",
@@ -548,7 +548,7 @@ program
 
 program
   .command("login")
-  .description("Log in to LinkShell (enables premium gateway)")
+  .description("Log in to LinkShell (Pro: the official gateway, no pairing needed)")
   .action(async () => {
     const result = await runLogin();
     if (!result) return;
@@ -664,7 +664,7 @@ program
 
 program
   .command("list")
-  .description("List your sessions on official gateways")
+  .description("List your v1 sessions on official gateways")
   .action(async () => {
     const { getValidToken, loadAuth, SUPABASE_URL, SUPABASE_ANON_KEY } =
       await import("./auth.js");

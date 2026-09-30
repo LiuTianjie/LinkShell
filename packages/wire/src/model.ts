@@ -144,6 +144,8 @@ export const machineInfoSchema = z.object({
   hostname: z.string(),
   platform: z.string(),
   hostVersion: z.string(),
+  /** The host user's home directory, so apps can show paths as `~/…`. */
+  home: z.string().optional(),
   agents: z.array(agentInfoSchema),
 });
 export type MachineInfo = z.infer<typeof machineInfoSchema>;

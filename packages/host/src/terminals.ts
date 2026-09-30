@@ -296,9 +296,10 @@ export class TerminalManager {
     });
     const command = options.command?.trim() || undefined;
     const terminal = new Terminal(pty, cwd, shell, options.cols, options.rows, command, (t) => {
-      if (this.stopped) return;
+      // Closed (or the host stopping): it's gone; its shell exiting is no news.
+      if (this.stopped || !this.terminals.has(t.id)) return;
       // Ended: keep it as history.
-      if (!t.running && this.terminals.has(t.id)) {
+      if (!t.running) {
         this.save(t);
         this.terminals.delete(t.id);
         this.history.set(t.id, { record: t.record(), interrupted: false });

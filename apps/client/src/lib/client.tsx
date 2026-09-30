@@ -1,3 +1,4 @@
+import { setHostHome } from "@/lib/format";
 import { createContext, use, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 import { randomUUID } from "expo-crypto";
@@ -50,7 +51,13 @@ function createConnection(computer: Computer): Connection {
           createSocket: () => new TunnelSocket(relayFor(computer.gateway), deviceIdentity(), computer.machine),
         });
   const url = computer.kind === "direct" ? computer.url : computer.gateway;
-  return { key: computer.key, computer, url, link, store: createClientStore(link, { newId: randomUUID }) };
+  const store = createClientStore(link, { newId: randomUUID });
+  // Paths render as ~/… with this computer's home, set before anything renders them.
+  setHostHome(undefined);
+  store.subscribe((state, previous) => {
+    if (state.machine !== previous.machine) setHostHome(state.machine?.home);
+  });
+  return { key: computer.key, computer, url, link, store };
 }
 
 export function ClientProvider({ children }: { children: ReactNode }) {

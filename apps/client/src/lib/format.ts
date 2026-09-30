@@ -52,6 +52,15 @@ export function baseName(path: string): string {
 }
 
 /** Replaces the home directory prefix with "~". */
+let hostHome: string | undefined;
+
+/** The connected computer's home directory (from its machine info). */
+export function setHostHome(home: string | undefined): void {
+  hostHome = home && home !== "/" ? home.replace(/\/$/, "") : undefined;
+}
+
+/** A path on the computer, with its home directory as `~`. */
 export function shortPath(path: string): string {
+  if (hostHome && (path === hostHome || path.startsWith(`${hostHome}/`))) return `~${path.slice(hostHome.length)}`;
   return path.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~");
 }

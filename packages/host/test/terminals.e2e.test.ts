@@ -64,6 +64,9 @@ describe("terminals", () => {
     await a.client.call("terminals.close", { terminalId: terminal.id });
     await until(() => changes.includes("closed"));
     expect((await a.client.call("terminals.list", {})).terminals).toEqual([]);
+    // The killed shell's exit isn't announced afterwards (it would reappear as "exited").
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(changes[changes.length - 1]).toBe("closed");
   });
 
   it("keeps running while no one watches, and catches a device up", async () => {
