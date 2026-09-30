@@ -108,7 +108,7 @@ ufw allow 8787/tcp    # 直接暴露网关时
 
 ```bash
 curl http://localhost:8787/healthz
-# {"ok":true,"version":"…","relay":…}
+# {"ok":true, …}
 ```
 
 ## 资源
