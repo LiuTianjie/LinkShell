@@ -86,6 +86,18 @@ export default function RootLayout() {
                   }}
                 />
                 <Stack.Screen name="preview" options={{ title: "预览" }} />
+                <Stack.Screen
+                  name="rename"
+                  options={{
+                    presentation: "formSheet",
+                    sheetGrabberVisible: true,
+                    sheetAllowedDetents: [0.42],
+                    sheetCornerRadius: 28,
+                    contentStyle: sheetContent,
+                    headerShown: false,
+                  }}
+                />
+                <Stack.Screen name="archived" options={{ title: "已归档" }} />
                 <Stack.Screen name="screen" options={{ title: "屏幕" }} />
                 <Stack.Screen
                   name="ports"

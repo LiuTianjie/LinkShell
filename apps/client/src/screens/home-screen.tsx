@@ -2,7 +2,8 @@ import { LegendList } from "@legendapp/list/react-native";
 import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
 import { router, Stack } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { Icon } from "@/components/icon";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { NeedCard } from "@/components/need-card";
 import { SectionHeader } from "@/components/section-header";
@@ -176,6 +177,19 @@ export function HomeScreen() {
             </PageHeader>
             <ConnectionBanner />
           </View>
+        }
+        ListFooterComponent={
+          loaded && !empty ? (
+            <Pressable
+              onPress={() => router.push("/archived")}
+              accessibilityRole="button"
+              hitSlop={8}
+              style={{ alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 18 }}
+            >
+              <Icon sf="archivebox" md="archive" size={13} color={colors.tertiaryLabel} />
+              <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>已归档的会话</Text>
+            </Pressable>
+          ) : null
         }
         ListEmptyComponent={
           !loaded ? (

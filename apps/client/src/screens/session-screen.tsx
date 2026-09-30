@@ -2,10 +2,12 @@ import type { LegendListRef } from "@legendapp/list/react-native";
 import type { TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, Text, View } from "react-native";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
-import Animated, { FadeIn, FadeOut, useSharedValue } from "react-native-reanimated";
+import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AgentTile } from "@/components/agent-tile";
 import { Composer } from "@/components/composer";
@@ -70,6 +72,9 @@ export function SessionScreen() {
   const actions = useActions();
   const insets = useSafeAreaInsets();
   const composerInset = useSharedValue(0);
+  const headerHeight = useHeaderHeight();
+  // The space between the header and the composer, for the empty-session intro.
+  const introFrame = useAnimatedStyle(() => ({ bottom: composerInset.get(), paddingTop: headerHeight }));
   const listRef = useRef<LegendListRef>(null);
   const [atEnd, setAtEnd] = useState(true);
 
@@ -145,16 +150,18 @@ export function SessionScreen() {
   // A session with a title or preview has history, even before its first import.
   const hasHistory = summary.lastSeq > 0 || !!summary.preview || !!summary.title;
   const loading = !ready && !cachedAtOpen && online && hasHistory;
-  const header =
-    loading ? null : items.length === 0 ? (
-      <View style={{ alignItems: "center", gap: 10, paddingTop: 48, paddingHorizontal: 32 }}>
+  // An empty session: the intro sits centred above the composer, outside the
+  // list (which aligns its content to the bottom, as a chat should).
+  const intro =
+    loading || items.length > 0 ? null : (
+      <View style={{ alignItems: "center", gap: 10, paddingHorizontal: 32 }}>
         <AgentTile agent={summary.agent} size={56} />
         <Text style={[type.headline, { color: colors.label }]}>{look.name}</Text>
         <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>
           {tier ? tierCopy[tier].detail : `在 ${baseName(summary.cwd)} 里开始对话`}
         </Text>
       </View>
-    ) : null;
+    );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.plain }}>
@@ -204,6 +211,16 @@ export function SessionScreen() {
                 icon: { sf: "globe", md: "language" },
                 onPress: () => router.push({ pathname: "/ports", params: { cwd: summary.cwd } }),
               },
+              { title: "重命名", icon: { sf: "pencil", md: "edit" }, onPress: () => renameSession(summary) },
+              {
+                title: summary.archived ? "取消归档" : "归档",
+                icon: summary.archived ? { sf: "tray.and.arrow.up", md: "unarchive" } : { sf: "archivebox", md: "archive" },
+                onPress: () => {
+                  void toggleArchived(summary, actions).then((done) => {
+                    if (done && !summary.archived) router.back();
+                  });
+                },
+              },
               {
                 title: "复制会话 ID",
                 icon: { sf: "doc.on.doc", md: "content_copy" },
@@ -219,6 +236,12 @@ export function SessionScreen() {
                   void Clipboard.setStringAsync(summary.cwd);
                   haptics.success();
                 },
+              },
+              {
+                title: "删除",
+                icon: { sf: "trash", md: "delete" },
+                destructive: true,
+                onPress: () => confirmDelete(summary, actions, () => router.back()),
               },
             ],
           },
@@ -238,12 +261,16 @@ export function SessionScreen() {
         keyboardOffset={0}
         onFailedMessage={onFailedMessage}
         onScroll={onScroll}
-        header={header}
       />
       </TimelineSession.Provider>
       </LinkBase>
       )}
 
+      {intro ? (
+        <Animated.View pointerEvents="none" style={[{ position: "absolute", left: 0, right: 0, top: 0, justifyContent: "center" }, introFrame]}>
+          {intro}
+        </Animated.View>
+      ) : null}
       {loading ? <TimelineSkeleton label="正在载入对话…" /> : null}
       {Platform.OS === "ios" ? <TopFade height={insets.top + 60} /> : null}
 
@@ -282,6 +309,8 @@ export function SessionScreen() {
           onLayout={(event) => composerInset.set(event.nativeEvent.layout.height)}
           onSend={(content) => actions.send(id, content)}
           onStop={() => guard(() => actions.cancel(id), "停止失败")}
+          queue={summary.queue}
+          onUnqueue={(clientMessageId) => void guard(() => actions.unqueue(id, clientMessageId).then(() => {}), "取消失败")}
           onRespond={(requestId, optionId) => actions.respond(id, requestId, optionId)}
           onTakeover={() => actions.takeover(id)}
           onConfig={(optionId, value) => void guard(() => actions.setConfig(id, optionId, value), "切换失败")}

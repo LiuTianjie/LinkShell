@@ -1,9 +1,9 @@
 import type { MenuAction } from "@react-native-menu/menu";
 import { AppMenu } from "@/components/app-menu";
 import type { SessionConfigOption } from "@linkshell/wire";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { haptics } from "@/lib/haptics";
-import { chipLabel, isRisky, optionLabel, valueHint, valueLabel } from "@/lib/labels";
+import { chipLabel, isRisky, isToggle, modelChipLabel, optionLabel, valueHint, valueLabel } from "@/lib/labels";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "./icon";
@@ -129,8 +129,10 @@ export function ModelMenu({
         style={{ height: 30, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", gap: 3, opacity: disabled ? 0.5 : 1 }}
       >
         <Text numberOfLines={1} style={[type.footnote, { color: colors.label, fontWeight: "600", maxWidth: 170 }]}>
-          {valueLabel(model, model.current)}
-          <Text style={{ color: colors.secondaryLabel, fontWeight: "500" }}> · {valueLabel(effort, effort.current)}</Text>
+          {modelChipLabel(model)}
+          {effort.current !== "default" ? (
+            <Text style={{ color: colors.secondaryLabel, fontWeight: "500" }}> · {valueLabel(effort, effort.current)}</Text>
+          ) : null}
         </Text>
         <Icon sf="chevron.down" md="expand_more" size={8} color={colors.tertiaryLabel} weight="bold" />
       </View>
@@ -156,9 +158,45 @@ export function ConfigMenus({
       {merged ? <ModelMenu model={model} effort={effort} onChange={onChange} disabled={disabled} /> : null}
       {options
         .filter((option) => !merged || (option !== model && option !== effort))
-        .map((option) => (
-          <ConfigMenu key={option.id} option={option} disabled={disabled} onChange={(value) => onChange(option.id, value)} />
-        ))}
+        .map((option) =>
+          isToggle(option) ? (
+            <ToggleChip key={option.id} option={option} disabled={disabled} onChange={(value) => onChange(option.id, value)} />
+          ) : (
+            <ConfigMenu key={option.id} option={option} disabled={disabled} onChange={(value) => onChange(option.id, value)} />
+          ),
+        )}
     </>
+  );
+}
+
+/** An on/off setting as one tap: lit when on. */
+function ToggleChip({ option, onChange, disabled }: { option: SessionConfigOption; onChange: (value: string) => void; disabled?: boolean }) {
+  const on = option.current === "on";
+  const label = optionLabel(option).replace(/模式$/, "");
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={() => {
+        haptics.selection();
+        onChange(on ? "off" : "on");
+      }}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: on, disabled }}
+      accessibilityLabel={optionLabel(option)}
+      accessibilityHint={valueHint(option, "on")}
+      style={{
+        height: 30,
+        paddingHorizontal: 8,
+        borderRadius: 15,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 3,
+        backgroundColor: on ? colors.accentSoft : undefined,
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <Icon sf={on ? "bolt.fill" : "bolt"} md="bolt" size={12} color={on ? colors.accent : colors.tertiaryLabel} />
+      <Text style={[type.footnote, { color: on ? colors.accent : colors.secondaryLabel, fontWeight: on ? "600" : "400" }]}>{label}</Text>
+    </Pressable>
   );
 }

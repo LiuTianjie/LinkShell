@@ -46,6 +46,13 @@ export interface ClientActions {
   release(sessionId: string): Promise<void>;
   setConfig(sessionId: string, optionId: string, value: string): Promise<void>;
   createSession(input: { agent: string; cwd: string; prompt?: ContentBlock[] }): Promise<SessionSummary>;
+  /** Drops a message still waiting in the host's queue. */
+  unqueue(sessionId: string, clientMessageId: string): Promise<boolean>;
+  archive(sessionId: string, archived: boolean): Promise<void>;
+  rename(sessionId: string, title: string): Promise<void>;
+  deleteSession(sessionId: string): Promise<void>;
+  /** Adds archived sessions to `sessions` (the regular list leaves them out). */
+  loadArchived(): Promise<void>;
 }
 
 export type ClientStore = StoreApi<ClientState & ClientActions>;
@@ -95,6 +102,19 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       return views === state.views ? state : { views };
     });
   };
+
+  /** A deleted session: gone from every list and view. */
+  function forget(sessionId: string): void {
+    store.setState((state) => {
+      const without = <T,>(record: Record<string, T>) => {
+        if (!(sessionId in record)) return record;
+        const next = { ...record };
+        delete next[sessionId];
+        return next;
+      };
+      return { sessions: without(state.sessions), views: without(state.views), open: without(state.open), ready: without(state.ready) };
+    });
+  }
 
   const store = createStore<ClientState & ClientActions>()((set, get) => {
     const updateView = (sessionId: string, fn: (view: SessionView) => SessionView) =>
@@ -152,6 +172,11 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
           ]);
           set((state) => {
             const sessions = { ...state.sessions };
+            // A complete list: anything live it doesn't mention was deleted meanwhile.
+            if (list.sessions.length < 200) {
+              const listed = new Set(list.sessions.map((session) => session.id));
+              for (const [id, session] of Object.entries(sessions)) if (!session.archived && !listed.has(id)) delete sessions[id];
+            }
             for (const session of list.sessions) sessions[session.id] = session;
             return { machine, sessions, projects: projects.projects, sessionsLoaded: true, sessionsError: undefined };
           });
@@ -192,7 +217,11 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         const clientMessageId = newId();
         set((state) => ({ outbox: { ...state.outbox, [clientMessageId]: { sessionId, content } } }));
         updateView(sessionId, (view) => addOptimisticMessage(view, clientMessageId, content));
-        return deliver(clientMessageId);
+        const delivery = await deliver(clientMessageId);
+        // Waiting in the host's queue: it shows there (summary.queue) until its
+        // turn starts, when the agent's echo puts it in the timeline.
+        if (delivery === "queued") updateView(sessionId, (view) => removeItem(view, `local-${clientMessageId}`));
+        return delivery;
       },
 
       async retry(clientMessageId) {
@@ -233,6 +262,35 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         await link.call("sessions.setConfig", { sessionId, optionId, value });
       },
 
+      async unqueue(sessionId, clientMessageId) {
+        const { removed } = await link.call("sessions.unqueue", { sessionId, clientMessageId });
+        return removed;
+      },
+
+      async archive(sessionId, archived) {
+        const { session } = await link.call("sessions.archive", { sessionId, archived });
+        set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
+      },
+
+      async rename(sessionId, title) {
+        const { session } = await link.call("sessions.rename", { sessionId, title });
+        set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
+      },
+
+      async deleteSession(sessionId) {
+        await link.call("sessions.delete", { sessionId });
+        forget(sessionId);
+      },
+
+      async loadArchived() {
+        const list = await link.call("sessions.list", { limit: 200, includeArchived: true });
+        set((state) => {
+          const sessions = { ...state.sessions };
+          for (const session of list.sessions) sessions[session.id] = session;
+          return { sessions };
+        });
+      },
+
       async createSession(input) {
         const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd }, 60_000);
         set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
@@ -244,6 +302,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   });
 
   link.onStatus((status, detail) => store.setState({ status, statusDetail: detail || undefined }));
+  link.on("session.removed", ({ sessionId }) => forget(sessionId));
   link.onSummary((summary) => store.setState((state) => ({ sessions: { ...state.sessions, [summary.id]: summary } })));
   // Events arrive one per socket message; a history backlog is hundreds of
   // them. Apply them in batches, at most one store update per frame.

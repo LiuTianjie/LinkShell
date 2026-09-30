@@ -4,9 +4,9 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { delimiter, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { RpcError, type ContentBlock, type SessionUpdate } from "@linkshell/wire";
+import { RpcError, type ContentBlock, type SessionConfigOption, type SessionUpdate } from "@linkshell/wire";
 import { AcpDriver } from "../acp/driver.js";
-import { AcpItemTracker, toConfigOptions, toHistory } from "../acp/mapper.js";
+import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
 import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, HistoryItem, LaunchSpec } from "../types.js";
 import { claudeConfigDir, findTranscript, readTranscript, transcriptLine, transcriptTimes, TranscriptTail } from "./transcript.js";
@@ -76,6 +76,15 @@ export interface ClaudeDriverOptions {
 export class ClaudeDriver extends AcpDriver {
   private readonly modes = new Map<string, Mode>();
   private readonly tails = new Map<string, TranscriptTail>();
+  /**
+   * The settings Claude offers (model, effort, permission mode…), as the
+   * adapter reported them for any session: what a desktop-driven session
+   * shows before the phone has it open over ACP.
+   */
+  private template?: SourcedConfigOption[];
+  private templateLoading?: Promise<SourcedConfigOption[] | undefined>;
+  /** Desktop-driven sessions: the model of the latest reply, from the transcript. */
+  private readonly lastModels = new Map<string, string>();
   /** Per session: TodoWrite calls shown as the plan, whose results the tail skips. */
   private readonly hiddenTools = new Map<string, Set<string>>();
   private readonly claudeCommand: string;
@@ -143,13 +152,68 @@ export class ClaudeDriver extends AcpDriver {
       state.tracker = new AcpItemTracker();
       history = toHistory(transcript.updates, state.tracker, (update) => transcriptTimes.get(update));
       offset = transcript.size;
+      if (transcript.model) this.lastModels.set(nativeId, transcript.model);
       if (transcript.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: transcript.title });
     }
     this.startTail(nativeId, context.cwd, offset);
     const mode = this.modes.get(nativeId) ?? "idle";
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_driver", driver: driverOf(mode) });
     if (mode === "remote") this.emitConfig(nativeId, state);
+    else void this.loadTemplate(context.cwd).then(() => this.emitDesktopConfig(nativeId));
     return history;
+  }
+
+  protected override emitConfig(nativeId: string, state: Parameters<AcpDriver["emitConfig"]>[1]): void {
+    if (state.config.length > 0) this.template = state.config;
+    super.emitConfig(nativeId, state);
+  }
+
+  /**
+   * Claude's settings list without a session to ask: a throwaway session that
+   * never gets a message (Claude writes no transcript for it), closed at once.
+   */
+  private loadTemplate(cwd: string): Promise<SourcedConfigOption[] | undefined> {
+    if (this.template) return Promise.resolve(this.template);
+    this.templateLoading ??= (async () => {
+      try {
+        const response = await this.rpc<Record<string, unknown>>("session/new", { cwd, mcpServers: [] });
+        const options = toConfigOptions(response);
+        if (options.length > 0) this.template ??= options;
+        if (typeof response.sessionId === "string" && this.connection?.capabilities.sessionCapabilities?.close) {
+          void this.rpc("session/close", { sessionId: response.sessionId }).catch(() => {});
+        }
+        return this.template;
+      } catch (error) {
+        this.host?.log(`[claude] couldn't read Claude's settings: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+      } finally {
+        this.templateLoading = undefined;
+      }
+    })();
+    return this.templateLoading;
+  }
+
+  private pendingConfig(nativeId: string): Record<string, string> {
+    try {
+      return JSON.parse(this.host?.state(this.id, nativeId).get("pendingConfig") ?? "{}") as Record<string, string>;
+    } catch {
+      return {};
+    }
+  }
+
+  /** A desktop-driven session's settings: the template, its model, and choices waiting for the phone. */
+  private emitDesktopConfig(nativeId: string): void {
+    if (!this.template || this.modes.get(nativeId) === "remote") return;
+    const pending = this.pendingConfig(nativeId);
+    const model = this.lastModels.get(nativeId);
+    const options: SessionConfigOption[] = this.template.map(({ source: _source, ...option }) => {
+      let current = option.current;
+      if (option.category === "model" && model) current = matchModel(option, model) ?? current;
+      const chosen = pending[option.id];
+      if (chosen && option.values.some((value) => value.value === chosen)) current = chosen;
+      return { ...option, current };
+    });
+    this.host?.update(this.id, nativeId, { sessionUpdate: "ls_config", options });
   }
 
   override async createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession> {
@@ -205,8 +269,16 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   override async setConfig(nativeId: string, optionId: string, value: string): Promise<void> {
-    await this.ensureRemote(nativeId);
-    await super.setConfig(nativeId, optionId, value);
+    if (this.modes.get(nativeId) === "remote" && this.sessions.get(nativeId)?.loaded) {
+      await super.setConfig(nativeId, optionId, value);
+      return;
+    }
+    // The desktop has it (or nobody): choosing a model mustn't take the session
+    // from the terminal. Remember it; it applies when the phone next drives.
+    const option = this.template?.find((entry) => entry.id === optionId);
+    if (!option || !option.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `unknown setting ${optionId}=${value}`);
+    this.host?.state(this.id, nativeId).set("pendingConfig", JSON.stringify({ ...this.pendingConfig(nativeId), [optionId]: value }));
+    this.emitDesktopConfig(nativeId);
   }
 
   async takeover(nativeId: string): Promise<void> {
@@ -323,6 +395,15 @@ export class ClaudeDriver extends AcpDriver {
       target.config = toConfigOptions(response);
       target.loaded = true;
     }
+    // Settings chosen while the desktop had the session.
+    const pending = this.pendingConfig(nativeId);
+    for (const [optionId, value] of Object.entries(pending)) {
+      const option = target.config.find((entry) => entry.id === optionId);
+      if (option && option.current !== value && option.values.some((entry) => entry.value === value)) {
+        await super.setConfig(nativeId, optionId, value).catch((error: unknown) => this.host?.log(`[claude] couldn't apply ${optionId}: ${String(error)}`));
+      }
+    }
+    if (Object.keys(pending).length) this.host?.state(this.id, nativeId).set("pendingConfig", "{}");
     this.setWriter(nativeId, "remote");
     this.setMode(nativeId, "remote");
     this.emitConfig(nativeId, target);
@@ -382,4 +463,20 @@ export class ClaudeDriver extends AcpDriver {
       desktop.activity(`📱 ${update.content.text.split("\n")[0]!.slice(0, 160)}`);
     } else if (update.sessionUpdate === "ls_turn" && update.state === "ended") desktop.activity("   (回合结束)");
   }
+}
+
+/**
+ * The option value for a model id from a transcript ("claude-opus-5-5"):
+ * "default" when that's what default resolves to, else the entry with that
+ * name ("Opus 5.5").
+ */
+export function matchModel(option: SessionConfigOption, modelId: string): string | undefined {
+  if (option.values.some((value) => value.value === modelId)) return modelId;
+  const parts = modelId.replace(/^claude-/, "").replace(/-\d{8}$/, "").split("-");
+  const family = parts.shift();
+  if (!family || parts.length === 0) return undefined;
+  const name = `${family[0]!.toUpperCase()}${family.slice(1)} ${parts.join(".")}`;
+  const byDefault = option.values.find((value) => value.value === "default" && value.description === name);
+  if (byDefault) return byDefault.value;
+  return option.values.find((value) => value.name === name)?.value;
 }

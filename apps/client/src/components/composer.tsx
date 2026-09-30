@@ -1,5 +1,5 @@
 import type { PendingPermission } from "@linkshell/client-core";
-import type { AgentInfo, ContentBlock, SessionConfigOption, SessionDriver } from "@linkshell/wire";
+import type { AgentInfo, ContentBlock, QueuedMessage, SessionConfigOption, SessionDriver } from "@linkshell/wire";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
@@ -43,6 +43,9 @@ export interface ComposerProps {
   onRespond: (requestId: string, optionId: string) => Promise<void>;
   onTakeover: () => Promise<void>;
   onConfig: (optionId: string, value: string) => void;
+  /** Messages the computer holds until the current turn ends. */
+  queue?: QueuedMessage[];
+  onUnqueue: (clientMessageId: string) => void;
 }
 
 type Blocked = { title: string; detail?: string } | null;
@@ -116,13 +119,16 @@ export function Composer(props: ComposerProps) {
     setText("");
     setAttachments([]);
     const delivery = await props.onSend(content);
-    if (delivery === "queued") showFlash(`已排队，${name} 忙完这一轮就处理`);
+    if (delivery === "queued") showFlash(`排队中：${name} 忙完这一轮就发`);
     else if (delivery === "steered") showFlash("已插话，正在调整方向");
     else if (delivery === "failed") haptics.error();
   };
 
   const stop = async () => {
     haptics.medium();
+    // Stopping drops what's queued; its text comes back here, like the terminal does.
+    const queued = (props.queue ?? []).map((entry) => entry.text).filter(Boolean);
+    if (queued.length) setText((current) => [...queued, current].filter(Boolean).join("\n\n"));
     setStopping(true);
     try {
       await props.onStop();
@@ -236,6 +242,45 @@ export function Composer(props: ComposerProps) {
                     {command.description}
                   </Text>
                 </Pressable>
+              ))}
+            </View>
+          ) : null}
+          {props.queue?.length ? (
+            <View style={{ paddingHorizontal: 6, paddingTop: 8, gap: 4 }}>
+              {props.queue.map((entry, index) => (
+                <View
+                  key={entry.clientMessageId}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    minHeight: 34,
+                    paddingLeft: 10,
+                    paddingRight: 4,
+                    borderRadius: 12,
+                    borderCurve: "continuous",
+                    backgroundColor: colors.fill,
+                  }}
+                >
+                  <Icon sf="clock" md="schedule" size={12} color={colors.secondaryLabel} />
+                  <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.label }]}>
+                    {entry.text || (entry.images ? `${entry.images} 张图片` : "")}
+                    {entry.text && entry.images ? <Text style={{ color: colors.secondaryLabel }}> · {entry.images} 张图片</Text> : null}
+                  </Text>
+                  <Text style={[type.caption, { color: colors.tertiaryLabel }]}>{index === 0 ? "下一条" : "排队中"}</Text>
+                  <Pressable
+                    onPress={() => {
+                      haptics.selection();
+                      props.onUnqueue(entry.clientMessageId);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="取消这条排队消息"
+                    hitSlop={6}
+                    style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Icon sf="xmark.circle.fill" md="cancel" size={16} color={colors.tertiaryLabel} />
+                  </Pressable>
+                </View>
               ))}
             </View>
           ) : null}

@@ -406,21 +406,25 @@ export function mergeByTime(main: SessionUpdate[], nested: SessionUpdate[]): Ses
   return out;
 }
 
-export function readTranscript(path: string): { updates: SessionUpdate[]; title?: string; size: number } {
+export function readTranscript(path: string): { updates: SessionUpdate[]; title?: string; size: number; model?: string } {
   const size = statSync(path).size;
   const text = readRange(path, 0, size);
   const complete = text.slice(0, text.lastIndexOf("\n") + 1);
   let title: string | undefined;
+  let model: string | undefined;
   const updates: SessionUpdate[] = [];
   const hidden = new Set<string>();
   for (const raw of complete.split("\n")) {
     if (!raw.trim()) continue;
     const result = transcriptLine(raw, { hidden });
+    // The model of the latest reply: what the session is using.
+    const reply = raw.includes('"type":"assistant"') ? /"model":"([^"]+)"/.exec(raw)?.[1] : undefined;
+    if (reply && reply !== "<synthetic>") model = reply;
     if (result.ts !== undefined) for (const update of result.updates) transcriptTimes.set(update, result.ts);
     updates.push(...result.updates);
     if (result.title) title = result.title;
   }
-  return { updates: mergeByTime(updates, readSubagents(path)), title, size: Buffer.byteLength(complete) };
+  return { updates: mergeByTime(updates, readSubagents(path)), title, model, size: Buffer.byteLength(complete) };
 }
 
 function readRange(path: string, start: number, end: number): string {

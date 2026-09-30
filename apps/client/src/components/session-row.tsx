@@ -10,6 +10,10 @@ import { mono, type } from "@/theme/type";
 import { AgentTile } from "./agent-tile";
 import { Icon } from "./icon";
 import { PressableScale } from "./pressable-scale";
+import { AppMenu } from "./app-menu";
+import { haptics } from "@/lib/haptics";
+import { useActions } from "@/lib/client";
+import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
 import { LiveDot, stateColor } from "./status";
 
 /** The agent tile beside a row's title. */
@@ -84,6 +88,7 @@ export function ListRow({
   position,
   onPress,
   accessibilityLabel,
+  menu,
 }: {
   leading: React.ReactNode;
   title: string;
@@ -97,10 +102,12 @@ export function ListRow({
   position: RowPosition;
   onPress: () => void;
   accessibilityLabel: string;
+  /** Long-press actions. */
+  menu?: RowMenuItem[];
 }) {
   const top = position === "first" || position === "only";
   const bottom = position === "last" || position === "only";
-  return (
+  const row = (
     <PressableScale onPress={onPress} pressedScale={0.985} accessibilityRole="button" accessibilityLabel={accessibilityLabel}>
       <View
         style={{
@@ -154,6 +161,24 @@ export function ListRow({
       </View>
     </PressableScale>
   );
+  if (!menu?.length) return row;
+  return (
+    <AppMenu
+      shouldOpenOnLongPress
+      onOpenMenu={() => haptics.medium()}
+      actions={menu.map((item, index) => ({ id: String(index), title: item.title, image: item.icon.sf, attributes: { destructive: item.destructive } }))}
+      onPressAction={({ nativeEvent }) => menu[Number(nativeEvent.event)]?.onPress()}
+    >
+      {row}
+    </AppMenu>
+  );
+}
+
+export interface RowMenuItem {
+  title: string;
+  icon: { sf: import("./icon").IconProps["sf"]; md: import("./icon").IconProps["md"] };
+  destructive?: boolean;
+  onPress: () => void;
 }
 
 export const SessionRow = memo(function SessionRow({
@@ -172,6 +197,16 @@ export const SessionRow = memo(function SessionRow({
   const failed = session.state === "error";
   const project = showProject ? baseName(session.cwd) : undefined;
   const title = sessionTitle(session);
+  const actions = useActions();
+  const menu: RowMenuItem[] = [
+    { title: "重命名", icon: { sf: "pencil", md: "edit" }, onPress: () => renameSession(session) },
+    {
+      title: session.archived ? "取消归档" : "归档",
+      icon: session.archived ? { sf: "tray.and.arrow.up", md: "unarchive" } : { sf: "archivebox", md: "archive" },
+      onPress: () => void toggleArchived(session, actions),
+    },
+    { title: "删除", icon: { sf: "trash", md: "delete" }, destructive: true, onPress: () => confirmDelete(session, actions) },
+  ];
   const detail = running
     ? activityText(session.activity)
     : failed
@@ -194,6 +229,7 @@ export const SessionRow = memo(function SessionRow({
       position={position}
       onPress={() => openSession(session.id)}
       accessibilityLabel={[title, project, look.name, detail].filter(Boolean).join("，")}
+      menu={menu}
     />
   );
 });

@@ -54,7 +54,7 @@ async function boot(e: Env, busyWindowMs = 60_000) {
     drivers: () => [
       new ClaudeDriver({ env: e.env, hostVersion: "test", claudeCommand: FAKE_CLAUDE, adapter: { command: FAKE_ACP, args: [] }, busyWindowMs }),
     ],
-    log: () => {},
+    log: process.env.DEBUG_HOST ? (m) => console.log("[host]", m) : () => {},
   });
   cleanups.push(() => host.stop());
   return host;
@@ -188,6 +188,36 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(p2.userTexts(desk.id)).toEqual(["hello from desk", "from phone", "back at desk"]);
     expect(p2.agentTexts(desk.id)).toEqual(["echo: hello from desk", "echo: from phone", "echo: back at desk"]);
+  }, 30_000);
+
+  it("shows the settings of a desktop-driven session; a choice waits for the takeover instead of forcing it", async () => {
+    const e = makeEnv();
+    const host = await boot(e);
+    const p = await phone(host);
+    const desk = await terminal(host, e);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    desk.type("hello from desk");
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: hello from desk"));
+    const lastConfig = () =>
+      p.of(desk.id).findLast((event) => event.update.sessionUpdate === "ls_config")?.update as
+        | { options: { id: string; current: string }[] }
+        | undefined;
+    await waitFor(() => lastConfig()?.options.some((option) => option.id === "model"));
+
+    // Chosen while the desktop drives: remembered, no takeover.
+    await p.client.call("sessions.setConfig", { sessionId: desk.id, optionId: "model", value: "smart" });
+    expect(desk.yields).toEqual([]);
+    expect(host.hub.getSession(desk.id).driver).toBe("desktop");
+    await waitFor(() => lastConfig()?.options.find((option) => option.id === "model")?.current === "smart");
+
+    // The phone takes over by sending: the choice applies to the resumed session.
+    await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "p1", content: text("from phone") });
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: from phone"));
+    expect(host.hub.getSession(desk.id).driver).toBe("remote");
+    await waitFor(() => lastConfig()?.options.find((option) => option.id === "model")?.current === "smart");
+    // No throwaway session from reading the settings shows up.
+    await host.hub.refreshDiscovery();
+    expect((await p.client.call("sessions.list", {})).sessions.map((session) => session.id)).toEqual([desk.id]);
   }, 30_000);
 
   it("shows tool calls from the desktop with their results", async () => {
