@@ -10,7 +10,8 @@ TAP_DIR="/tmp/homebrew-linkshell"
 echo "Updating Homebrew formula for v${VERSION}..."
 
 # Download and hash
-curl -sL -o /tmp/linkshell-cli.tgz "$TARBALL_URL"
+curl -fsSL -o /tmp/linkshell-cli.tgz "$TARBALL_URL"
+tar -tzf /tmp/linkshell-cli.tgz >/dev/null
 SHA=$(shasum -a 256 /tmp/linkshell-cli.tgz | awk '{print $1}')
 echo "SHA256: ${SHA}"
 
