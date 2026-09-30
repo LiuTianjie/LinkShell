@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import { useColorScheme } from "react-native";
+import { Platform, useColorScheme } from "react-native";
 import { openLink, useLinkBase } from "@/lib/links";
 import { EnrichedMarkdownText, type MarkdownStyle } from "react-native-enriched-markdown";
 import { palette, type Palette } from "@/theme/colors";
@@ -20,7 +20,16 @@ function markdownStyle(p: Palette, dark: boolean, variant: "chat" | "thought"): 
     h6: { ...body, fontWeight: "600", color: p.secondaryLabel, marginBottom: 4 },
     list: { ...body, bulletColor: p.secondaryLabel, markerColor: p.secondaryLabel, gapWidth: 8, marginLeft: 18, itemSpacing: 4, marginBottom: 10 },
     blockquote: { ...body, color: p.secondaryLabel, borderColor: p.quote, borderWidth: 3, gapWidth: 12, marginBottom: 10 },
-    code: { fontFamily: mono, fontSize: 14, color: p.inlineCode, backgroundColor: p.inlineCodeBackground },
+    // Android resolves a named family through React Native's font manager, where "monospace"
+    // falls back to the proportional default; empty means the library's own monospace.
+    // The border matches the fill: the library's default is a pink outline.
+    code: {
+      fontFamily: Platform.OS === "android" ? "" : mono,
+      fontSize: 14,
+      color: p.inlineCode,
+      backgroundColor: p.inlineCodeBackground,
+      borderColor: p.inlineCodeBackground,
+    },
     codeBlock: {
       fontFamily: mono,
       fontSize: 13,
@@ -44,12 +53,16 @@ function markdownStyle(p: Palette, dark: boolean, variant: "chat" | "thought"): 
       borderColor: p.separator,
       borderRadius: 12,
       headerBackgroundColor: p.tableHeader,
+      // The library's defaults are light-only (white rows, near-black header text).
+      headerTextColor: p.label,
+      rowEvenBackgroundColor: "transparent",
+      rowOddBackgroundColor: p.inlineCodeBackground,
       cellPaddingHorizontal: 10,
       cellPaddingVertical: 7,
       marginBottom: 12,
     },
     thematicBreak: { color: p.separator, height: 1, marginTop: 8, marginBottom: 14 },
-    taskList: { checkedColor: p.accent, borderColor: p.tertiaryLabel, checkmarkColor: "#ffffff", checkboxSize: 16 },
+    taskList: { checkedColor: p.accent, borderColor: p.tertiaryLabel, checkmarkColor: "#ffffff", checkboxSize: 16, checkedTextColor: p.secondaryLabel },
   };
 }
 
