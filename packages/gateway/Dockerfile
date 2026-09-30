@@ -5,18 +5,24 @@ RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared-protocol/package.json packages/shared-protocol/
+COPY packages/wire/package.json packages/wire/
+COPY packages/gateway-v2/package.json packages/gateway-v2/
 COPY packages/gateway/package.json packages/gateway/
 COPY apps/web-dashboard/package.json apps/web-dashboard/
 
-RUN pnpm install --frozen-lockfile --filter @linkshell/gateway --filter @linkshell/protocol --filter @linkshell/web-dashboard
+RUN pnpm install --frozen-lockfile --filter @linkshell/gateway --filter @linkshell/protocol --filter @linkshell/wire --filter @linkshell/gateway-v2 --filter @linkshell/web-dashboard
 
 COPY packages/shared-protocol/ packages/shared-protocol/
+COPY packages/wire/ packages/wire/
+COPY packages/gateway-v2/ packages/gateway-v2/
 COPY packages/gateway/ packages/gateway/
 COPY apps/web-dashboard/ apps/web-dashboard/
 COPY tsconfig.base.json ./
 
-# Protocol first (gateway + web both depend on its built dist), then both apps.
+# Libraries first (gateway + web depend on their built dist), then both apps.
 RUN pnpm --filter @linkshell/protocol build \
+  && pnpm --filter @linkshell/wire build \
+  && pnpm --filter @linkshell/gateway-v2 build \
   && pnpm --filter @linkshell/gateway build \
   && pnpm --filter @linkshell/web-dashboard build
 
@@ -47,12 +53,14 @@ COPY --from=builder /app/apps/web-dashboard/dist web/
 # Workspace root package.json needed for module resolution
 COPY --from=builder /app/package.json ./
 
-RUN chown -R linkshell:linkshell /app
+# The v2 relay keeps pairings and keys here: mount a persistent volume.
+RUN mkdir -p /data && chown -R linkshell:linkshell /app /data
 USER linkshell
 
 ENV NODE_ENV=production
 ENV PORT=8787
 ENV WEB_DIST=/app/web
+ENV RELAY_DATA_PATH=/data/relay.db
 EXPOSE 8787
 
 CMD ["node", "packages/gateway/dist/gateway/src/index.js"]

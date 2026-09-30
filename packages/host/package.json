@@ -1,0 +1,53 @@
+{
+  "name": "@linkshell/host",
+  "version": "0.1.0",
+  "description": "LinkShell v2 host daemon: owns agent sessions and terminals on your computer, serves them to your devices.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LiuTianjie/LinkShell.git",
+    "directory": "packages/host"
+  },
+  "type": "module",
+  "main": "dist/host/src/index.js",
+  "types": "dist/host/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/host/src/index.d.ts",
+      "import": "./dist/host/src/index.js",
+      "default": "./dist/host/src/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "live:codex": "tsx scripts/live-codex-check.ts",
+    "live:claude": "tsx scripts/live-claude-check.ts"
+  },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.84.0",
+    "@linkshell/wire": "workspace:*",
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.18.1",
+    "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.3",
+    "vitest": "^3.2.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

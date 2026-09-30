@@ -24,7 +24,11 @@ import {
   handleTunnelRequest,
   cleanupSessionTunnels,
 } from "./tunnel.js";
-import { AUTH_REQUIRED, requireAuth, checkWsAuth, validateRequest, checkSubscriptionByUserId, canReadSessionDetail } from "./auth-middleware.js";
+import { AUTH_REQUIRED, SUPABASE_ANON_KEY, SUPABASE_URL, requireAuth, checkWsAuth, validateRequest, checkSubscriptionByUserId, canReadSessionDetail } from "./auth-middleware.js";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { Gateway as RelayGateway, supabaseVerifier } from "@linkshell/gateway-v2";
+import { RELAY_PATH } from "@linkshell/wire";
 import { setCors } from "./cors.js";
 import { serveWeb, serveWebAsset, webEnabled, webDistPath } from "./static-web.js";
 
@@ -282,7 +286,7 @@ async function handleRequest(
 
   // Health check
   if (method === "GET" && url.pathname === "/healthz") {
-    json(res, 200, { ok: true, version: GATEWAY_VERSION });
+    json(res, 200, { ok: true, version: GATEWAY_VERSION, relay: relay.connected });
     return;
   }
 
@@ -508,8 +512,46 @@ const wss = new WebSocketServer({
   maxPayload: MAX_WS_MESSAGE_SIZE,
 });
 
+// ── v2 relay (end-to-end encrypted, routes ciphertext only) ─────────
+// Served on the same port at RELAY_PATH. Pairings and machine/device keys are
+// kept in SQLite at RELAY_DATA_PATH (a persistent volume in production).
+const relayDataPath = process.env.RELAY_DATA_PATH ?? "./data/relay.db";
+mkdirSync(dirname(relayDataPath), { recursive: true });
+const relay = new RelayGateway({
+  port: 0,
+  databasePath: relayDataPath,
+  verifyToken: SUPABASE_URL && SUPABASE_ANON_KEY ? supabaseVerifier(SUPABASE_URL, SUPABASE_ANON_KEY) : undefined,
+  log: (message) => log("info", `[relay] ${message}`),
+  // The official gateway is a subscription service: a computer needs an active
+  // Pro account to use it (as with v1). Devices only reach computers they're
+  // paired with or share an account with, so they need nothing more.
+  admit: AUTH_REQUIRED
+    ? async ({ role, userId }) => {
+        if (role !== "machine") return undefined;
+        if (!userId) return "官方网关需要登录 Pro 账号：在电脑上运行 linkshell login";
+        const subscription = await checkSubscriptionByUserId(userId);
+        // A lookup failure isn't a lapsed subscription; don't lock people out over it.
+        if (subscription.status === "inactive") return "官方网关需要 Pro 订阅：https://itool.tech";
+        if (subscription.status === "unknown") log("warn", `[relay] subscription check unavailable (${subscription.reason}); admitting ${userId}`);
+        return undefined;
+      }
+    : undefined,
+});
+relay.attach();
+
 server.on("upgrade", (request, socket, head) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+
+  if (url.pathname === RELAY_PATH) {
+    const ip = getClientIp(request);
+    if (!isRateLimitBypassed(ip) && !wsConnectLimiter.allow(ip)) {
+      socket.write("HTTP/1.1 429 Too Many Requests\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    relay.handleUpgrade(request, socket, head);
+    return;
+  }
 
   // Tunnel WebSocket upgrade (for HMR etc.)
   const tunnelParsed = parseTunnelPath(url.pathname);
@@ -851,6 +893,7 @@ function shutdown() {
   pairingManager.destroy();
   tokenManager.destroy();
   hostAuthManager.destroy();
+  void relay.stop();
   server.close(() => {
     process.stdout.write("[gateway] stopped\n");
     process.exit(0);

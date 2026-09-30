@@ -1,0 +1,48 @@
+{
+  "name": "@linkshell/gateway-v2",
+  "version": "0.1.0",
+  "description": "LinkShell v2 relay: routes end-to-end encrypted frames between computers and devices, and brokers pairing.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LiuTianjie/LinkShell.git",
+    "directory": "packages/gateway-v2"
+  },
+  "type": "module",
+  "main": "dist/gateway-v2/src/index.js",
+  "types": "dist/gateway-v2/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/gateway-v2/src/index.d.ts",
+      "import": "./dist/gateway-v2/src/index.js",
+      "default": "./dist/gateway-v2/src/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/main.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@linkshell/wire": "workspace:*",
+    "ws": "^8.18.1",
+    "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.3",
+    "vitest": "^3.2.1"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
