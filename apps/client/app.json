@@ -1,0 +1,85 @@
+{
+  "expo": {
+    "name": "LinkShell",
+    "slug": "linkshell-client",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bd.linkshell.v2",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "LinkShell connects to the LinkShell host on your computer.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1F1F21",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.bd.linkshell.v2"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "linkshell",
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "root": "./src/app"
+        }
+      ],
+      "expo-image",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/LinkShellSymbols.ttf"
+          ]
+        }
+      ],
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "LinkShell 需要访问你的照片，才能把图片发给 Agent。",
+          "cameraPermission": "LinkShell 需要使用相机，才能拍照发给 Agent。"
+        }
+      ],
+      "./plugins/with-brand-colors.js",
+      "./plugins/with-loopback-cleartext.js",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "用于扫描电脑上的配对二维码",
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 120,
+          "resizeMode": "contain",
+          "backgroundColor": "#F2F2F7",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#000000"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

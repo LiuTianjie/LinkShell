@@ -1,0 +1,36 @@
+{
+  "name": "@linkshell/client-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/client-core/src/index.js",
+  "types": "dist/client-core/src/index.d.ts",
+  "react-native": "src/index.ts",
+  "exports": {
+    ".": {
+      "react-native": "./src/index.ts",
+      "types": "./dist/client-core/src/index.d.ts",
+      "import": "./dist/client-core/src/index.js",
+      "default": "./dist/client-core/src/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@linkshell/wire": "workspace:*",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.1",
+    "ws": "^8.18.1",
+    "@types/ws": "^8.5.14",
+    "@linkshell/host": "workspace:*"
+  }
+}

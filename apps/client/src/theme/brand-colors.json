@@ -1,0 +1,122 @@
+{
+  "accent": [
+    "#4a6cf7",
+    "#7d95ff"
+  ],
+  "accentSoft": [
+    "rgba(74,108,247,0.11)",
+    "rgba(125,149,255,0.18)"
+  ],
+  "running": [
+    "#4a6cf7",
+    "#7d95ff"
+  ],
+  "waitingSoft": [
+    "rgba(232,131,12,0.12)",
+    "rgba(255,166,61,0.16)"
+  ],
+  "okSoft": [
+    "rgba(15,149,96,0.12)",
+    "rgba(61,214,140,0.15)"
+  ],
+  "dangerSoft": [
+    "rgba(220,61,61,0.10)",
+    "rgba(255,107,107,0.15)"
+  ],
+  "userBubble": [
+    "#F0F0F4",
+    "#26262B"
+  ],
+  "code": [
+    "#f1f1f6",
+    "#1c1c22"
+  ],
+  "codeText": [
+    "#2a2b35",
+    "#e4e4ec"
+  ],
+  "diffAdd": [
+    "rgba(15,149,96,0.12)",
+    "rgba(61,214,140,0.14)"
+  ],
+  "diffDel": [
+    "rgba(220,61,61,0.10)",
+    "rgba(255,107,107,0.14)"
+  ],
+  "diffAddText": [
+    "#0b7a4f",
+    "#7fddb4"
+  ],
+  "diffDelText": [
+    "#b42f2f",
+    "#ff9a9a"
+  ],
+  "label": [
+    "#000000",
+    "#FFFFFF"
+  ],
+  "secondaryLabel": [
+    "rgba(60,60,67,0.6)",
+    "rgba(235,235,245,0.6)"
+  ],
+  "tertiaryLabel": [
+    "rgba(60,60,67,0.3)",
+    "rgba(235,235,245,0.3)"
+  ],
+  "placeholder": [
+    "rgba(60,60,67,0.3)",
+    "rgba(235,235,245,0.3)"
+  ],
+  "separator": [
+    "rgba(60,60,67,0.18)",
+    "rgba(84,84,88,0.6)"
+  ],
+  "background": [
+    "#F2F2F7",
+    "#000000"
+  ],
+  "card": [
+    "#FFFFFF",
+    "#1C1C1E"
+  ],
+  "cardRaised": [
+    "#FFFFFF",
+    "#2C2C2E"
+  ],
+  "inset": [
+    "#F2F2F7",
+    "#1C1C1E"
+  ],
+  "plain": [
+    "#FFFFFF",
+    "#000000"
+  ],
+  "fill": [
+    "rgba(118,118,128,0.12)",
+    "rgba(118,118,128,0.24)"
+  ],
+  "fillStrong": [
+    "rgba(120,120,128,0.16)",
+    "rgba(120,120,128,0.32)"
+  ],
+  "waiting": [
+    "#E8830C",
+    "#FF9F0A"
+  ],
+  "ok": [
+    "#0F9560",
+    "#30D158"
+  ],
+  "danger": [
+    "#DC3D3D",
+    "#FF453A"
+  ],
+  "sheet": [
+    "#F2F2F7",
+    "#1C1C1E"
+  ],
+  "sheetCard": [
+    "#FFFFFF",
+    "#2C2C2E"
+  ]
+}
