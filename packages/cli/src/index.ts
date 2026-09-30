@@ -55,6 +55,79 @@ program
   )
   .version(pkg.version);
 
+// ── host (v2 session daemon) ────────────────────────────────────────
+
+const hostCmd = program
+  .command("host")
+  .description("Run the LinkShell host that owns agent sessions (v2)")
+  .option("--daemon", "Run in background (detached)")
+  .option("--dev-port <port>", "Also serve the host API on 127.0.0.1:<port> (local development clients only)")
+  .option("--gateway <url>", "Reach this computer through a v2 gateway (saved; 'off' to disable)")
+  .option("--_foreground-host", undefined) // internal
+  .action(async (options) => {
+    const { runHostForeground, ensureHostRunning, readHostConfig, writeHostConfig, assertHostRuntime } = await import("./commands/host.js");
+    assertHostRuntime();
+    if (options.devPort) process.env.LINKSHELL_DEV_PORT = String(options.devPort);
+    if (options.gateway) {
+      const { defaultHome } = await import("@linkshell/host");
+      const home = defaultHome();
+      writeHostConfig(home, { ...readHostConfig(home), gateway: options.gateway === "off" ? undefined : options.gateway });
+    }
+    if (options.daemon && !options._foregroundHost) {
+      const socket = await ensureHostRunning();
+      const daemon = await import("./utils/daemon.js");
+      process.stderr.write(`\n  LinkShell host running (${socket})\n`);
+      process.stderr.write(`  Log:    ${daemon.getLogFile("host")}\n`);
+      process.stderr.write(`  Status: linkshell host status\n`);
+      process.stderr.write(`  Stop:   linkshell host stop\n\n`);
+      return;
+    }
+    await runHostForeground(pkg.version);
+  });
+
+hostCmd
+  .command("status")
+  .description("Show the host, its agents and sessions")
+  .action(async () => {
+    const { printHostStatus } = await import("./commands/host.js");
+    await printHostStatus();
+  });
+
+hostCmd
+  .command("stop")
+  .description("Stop the background host")
+  .action(async () => {
+    const daemon = await import("./utils/daemon.js");
+    process.stderr.write(daemon.stopDaemon("host") ? "  LinkShell host stopped\n" : "  LinkShell host is not running\n");
+  });
+
+program
+  .command("pair")
+  .description("Pair a phone with this computer through the gateway (shows a QR code)")
+  .action(async () => {
+    const { runPair } = await import("./commands/pair.js");
+    await runPair();
+  });
+
+// `linkshell codex …` / `linkshell claude …` start the agent's own TUI attached
+// to the host, so the session is live here and on every paired device.
+// All arguments go to the agent.
+for (const [agent, description] of [
+  ["codex", "Start Codex attached to the LinkShell host (arguments pass through)"],
+  ["claude", "Start Claude Code with phone handoff (arguments pass through)"],
+] as const) {
+  program
+    .command(agent)
+    .description(description)
+    .argument("[args...]")
+    .allowUnknownOption(true)
+    .helpOption(false)
+    .action(async (args: string[]) => {
+      const { runAgentShim } = await import("./commands/host.js");
+      await runAgentShim(agent, args ?? []);
+    });
+}
+
 // ── start ───────────────────────────────────────────────────────────
 
 program

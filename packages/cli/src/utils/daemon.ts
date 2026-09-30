@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 
-const LINKSHELL_DIR = join(homedir(), ".linkshell");
+const LINKSHELL_DIR = process.env.LINKSHELL_HOME || join(homedir(), ".linkshell");
 
-type ServiceName = "gateway" | "bridge";
+type ServiceName = "gateway" | "bridge" | "host";
 
 export interface ServiceMetadata {
   keepAwake?: boolean;
@@ -92,7 +92,8 @@ export function spawnDaemon(service: ServiceName, args: string[]): number {
     {
       detached: true,
       stdio: ["ignore", out, err],
-      env: process.env,
+      // The launching terminal's environment is the most faithful one agents can get.
+      env: { ...process.env, LINKSHELL_ENV_FROM_TERMINAL: "1" },
     },
   );
 

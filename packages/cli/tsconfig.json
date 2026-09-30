@@ -3,7 +3,14 @@
   "compilerOptions": {
     "rootDir": "..",
     "outDir": "dist",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts", "../shared-protocol/src/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "../shared-protocol/src/**/*.ts",
+    "../host/src/**/*.ts",
+    "../wire/src/**/*.ts"
+  ]
 }
