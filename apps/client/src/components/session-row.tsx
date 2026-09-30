@@ -1,7 +1,7 @@
 import type { SessionSummary } from "@linkshell/wire";
-import { router } from "expo-router";
-import { memo } from "react";
-import { StyleSheet, Text, View, type ColorValue } from "react-native";
+import { Link, router, type Href } from "expo-router";
+import { memo, useRef } from "react";
+import { Platform, StyleSheet, Text, View, type ColorValue } from "react-native";
 import { activityText, plainPreview, sessionTitle } from "@/lib/describe";
 import { baseName, relativeTime } from "@/lib/format";
 import { agentLook } from "@/theme/agents";
@@ -10,7 +10,7 @@ import { mono, type } from "@/theme/type";
 import { AgentTile } from "./agent-tile";
 import { Icon } from "./icon";
 import { PressableScale } from "./pressable-scale";
-import { AppMenu } from "./app-menu";
+import { OwnedFloatingMenu, type FloatingMenuHandle } from "./app-menu";
 import { haptics } from "@/lib/haptics";
 import { useActions } from "@/lib/client";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
@@ -87,6 +87,7 @@ export function ListRow({
   warn = false,
   position,
   onPress,
+  href,
   accessibilityLabel,
   menu,
 }: {
@@ -101,14 +102,26 @@ export function ListRow({
   warn?: boolean;
   position: RowPosition;
   onPress: () => void;
+  /** Where onPress goes; on iOS the long-press menu needs it (a context menu on the link). */
+  href?: Href;
   accessibilityLabel: string;
   /** Long-press actions. */
   menu?: RowMenuItem[];
 }) {
+  const floating = useRef<FloatingMenuHandle>(null);
+  const iosMenu = Platform.OS === "ios" && !!menu?.length && !!href;
+  const androidMenu = Platform.OS !== "ios" && !!menu?.length;
   const top = position === "first" || position === "only";
   const bottom = position === "last" || position === "only";
   const row = (
-    <PressableScale onPress={onPress} pressedScale={0.985} accessibilityRole="button" accessibilityLabel={accessibilityLabel}>
+    <PressableScale
+      // Under a Link, the link presses.
+      onPress={iosMenu ? undefined : onPress}
+      onLongPress={androidMenu ? () => floating.current?.open() : undefined}
+      pressedScale={0.985}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
       <View
         style={{
           backgroundColor: colors.card,
@@ -161,16 +174,31 @@ export function ListRow({
       </View>
     </PressableScale>
   );
-  if (!menu?.length) return row;
+  if (iosMenu) {
+    // The system context menu, which (unlike a menu wrapped around the row) leaves taps alone.
+    return (
+      <Link href={href!} asChild>
+        <Link.Trigger>{row}</Link.Trigger>
+        <Link.Menu>
+          {menu!.map((item) => (
+            <Link.MenuAction key={item.title} icon={item.icon.sf} destructive={item.destructive} onPress={item.onPress}>
+              {item.title}
+            </Link.MenuAction>
+          ))}
+        </Link.Menu>
+      </Link>
+    );
+  }
+  if (!androidMenu) return row;
   return (
-    <AppMenu
-      shouldOpenOnLongPress
+    <OwnedFloatingMenu
+      handle={floating}
       onOpenMenu={() => haptics.medium()}
-      actions={menu.map((item, index) => ({ id: String(index), title: item.title, image: item.icon.sf, attributes: { destructive: item.destructive } }))}
-      onPressAction={({ nativeEvent }) => menu[Number(nativeEvent.event)]?.onPress()}
+      actions={menu!.map((item, index) => ({ id: String(index), title: item.title, image: item.icon.sf, attributes: { destructive: item.destructive } }))}
+      onPressAction={({ nativeEvent }) => menu![Number(nativeEvent.event)]?.onPress()}
     >
       {row}
-    </AppMenu>
+    </OwnedFloatingMenu>
   );
 }
 
@@ -228,6 +256,7 @@ export const SessionRow = memo(function SessionRow({
       warn={failed}
       position={position}
       onPress={() => openSession(session.id)}
+      href={{ pathname: "/session/[id]", params: { id: session.id } }}
       accessibilityLabel={[title, project, look.name, detail].filter(Boolean).join("，")}
       menu={menu}
     />

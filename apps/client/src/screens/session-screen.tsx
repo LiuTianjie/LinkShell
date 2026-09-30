@@ -108,7 +108,8 @@ export function SessionScreen() {
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement, contentInset } = event.nativeEvent;
     const distance = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height);
-    const next = distance < 120;
+    // Content shorter than the screen has nowhere to jump to.
+    const next = distance < 120 || contentSize.height <= layoutMeasurement.height + 1;
     setAtEnd((current) => (current === next ? current : next));
   }, []);
 
@@ -152,8 +153,10 @@ export function SessionScreen() {
   const loading = !ready && !cachedAtOpen && online && hasHistory;
   // An empty session: the intro sits centred above the composer, outside the
   // list (which aligns its content to the bottom, as a chat should).
+  // Notices ("the terminal quit") don't start a conversation; messages and tools do.
+  const started = items.some((item) => item.kind === "user" || item.kind === "agent" || item.kind === "tool" || item.kind === "thought" || item.kind === "plan");
   const intro =
-    loading || items.length > 0 ? null : (
+    loading || started ? null : (
       <View style={{ alignItems: "center", gap: 10, paddingHorizontal: 32 }}>
         <AgentTile agent={summary.agent} size={56} />
         <Text style={[type.headline, { color: colors.label }]}>{look.name}</Text>

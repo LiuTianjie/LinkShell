@@ -1,5 +1,5 @@
 import { MenuView, type MenuAction, type NativeActionEvent } from "@react-native-menu/menu";
-import { useRef, useState } from "react";
+import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { Modal, Platform, Pressable, ScrollView, Text, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
 import Animated, { Easing, FadeIn, FadeOut } from "react-native-reanimated";
 import { haptics } from "@/lib/haptics";
@@ -19,6 +19,19 @@ export interface AppMenuProps {
   shouldOpenOnLongPress?: boolean;
   style?: StyleProp<ViewStyle>;
   children: React.ReactNode;
+}
+
+export interface FloatingMenuHandle {
+  open(): void;
+}
+
+/**
+ * Android only: the floating card opened by the caller (a row's own long
+ * press), for children that handle their own touches — wrapping them in
+ * another Pressable would never see the long press.
+ */
+export function OwnedFloatingMenu({ handle, ...props }: Omit<AppMenuProps, "shouldOpenOnLongPress"> & { handle: Ref<FloatingMenuHandle> }) {
+  return <FloatingMenu {...props} handle={handle} />;
 }
 
 export function AppMenu(props: AppMenuProps) {
@@ -49,7 +62,16 @@ interface Anchor {
 const CARD_MIN = 232;
 const GUTTER = 12;
 
-function FloatingMenu({ title, actions, onPressAction, onOpenMenu, shouldOpenOnLongPress, style, children }: AppMenuProps) {
+function FloatingMenu({
+  title,
+  actions,
+  onPressAction,
+  onOpenMenu,
+  shouldOpenOnLongPress,
+  style,
+  children,
+  handle,
+}: AppMenuProps & { handle?: Ref<FloatingMenuHandle> }) {
   const anchorRef = useRef<View>(null);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   // Submenus push onto this stack.
@@ -64,6 +86,7 @@ function FloatingMenu({ title, actions, onPressAction, onOpenMenu, shouldOpenOnL
       setAnchor({ x, y, width, height });
     });
   };
+  useImperativeHandle(handle, () => ({ open }));
   const close = () => setAnchor(null);
   const choose = (action: MenuAction) => {
     if (action.subactions?.length) {
@@ -86,14 +109,20 @@ function FloatingMenu({ title, actions, onPressAction, onOpenMenu, shouldOpenOnL
 
   return (
     <>
-      <Pressable
-        ref={anchorRef}
-        onPress={shouldOpenOnLongPress ? undefined : open}
-        onLongPress={shouldOpenOnLongPress ? open : undefined}
-        style={style}
-      >
-        {children}
-      </Pressable>
+      {handle ? (
+        <View ref={anchorRef} collapsable={false} style={style}>
+          {children}
+        </View>
+      ) : (
+        <Pressable
+          ref={anchorRef}
+          onPress={shouldOpenOnLongPress ? undefined : open}
+          onLongPress={shouldOpenOnLongPress ? open : undefined}
+          style={style}
+        >
+          {children}
+        </Pressable>
+      )}
       {anchor && level ? (
         <Modal visible transparent statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={close}>
           <Pressable onPress={close} style={{ flex: 1 }} accessibilityLabel="关闭菜单">
