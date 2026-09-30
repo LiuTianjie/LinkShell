@@ -88,7 +88,6 @@ Claude Code 与 Codex 的核心工作流都强依赖本地终端环境，但终�
 ├── docs/
 │   ├── ai-handoff.md           # AI 交接文档
 │   ├── deploy.md               # Gateway 部署指南
-│   ├── user-guide.md           # 用户使用文档
 │   └── site/                   # 落地页
 ├── package.json
 ├── pnpm-workspace.yaml

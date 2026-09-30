@@ -26,7 +26,6 @@ LinkShell 是一个三段式终端桥接系统：
 ├── docs/
 │   ├── ai-handoff.md           # 当前文件
 │   ├── deploy.md               # 部署文档
-│   ├── user-guide.md           # 用户视角使用文档
 │   └── site/                   # 落地页静态资源
 ├── README.md                   # 仓库级说明
 └── PRD.md                      # 产品和系统设计背景

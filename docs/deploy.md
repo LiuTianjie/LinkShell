@@ -1,103 +1,59 @@
-# LinkShell Gateway 部署指南
+# 自建 LinkShell 网关
 
-## 方式 1：用 CLI 直接跑（最简单）
+网关让手机在任何网络下都能连到你的电脑。它只做两件事：转发手机和电脑之间**端到端加密**的数据，以及在配对时让两边碰头。网关看不到你的代码和对话，也不需要多少资源。
 
-不需要 clone 仓库，不需要 Docker。
+> 不想自己部署？Pro 订阅提供官方网关：电脑上 `linkshell login`，App 里登录同一账号即可。
+
+## 1. 运行网关
+
+### 用 CLI（最简单）
 
 ```bash
-npm install -g linkshell-cli
+npm i -g linkshell-cli          # 需要 Node.js 22.13+
+linkshell gateway --port 8787 --daemon
 
-# 后台运行（推荐）
-linkshell gateway --daemon --port 8787
-
-# 查看状态
 linkshell gateway status
-
-# 查看日志
 tail -f ~/.linkshell/gateway.log
-
-# 停止
 linkshell gateway stop
 ```
 
-## 方式 2：Docker 部署
+配对关系保存在 `~/.linkshell/relay.db`，重启网关后依然有效。
 
-### 从 Docker Hub 拉取（推荐）
+### 用 Docker
 
 ```bash
-docker pull nickname4th/linkshell-gateway:latest
-docker run -d \
-  -p 8787:8787 \
-  --name linkshell-gateway \
-  --restart unless-stopped \
+docker run -d --name linkshell-gateway --restart unless-stopped \
+  -p 8787:8787 -v linkshell-gateway:/data \
   nickname4th/linkshell-gateway:latest
 ```
 
-当前 Docker Hub 镜像为 `linux/amd64`。如果在 Apple Silicon / arm64 主机上拉取，请显式指定平台：
+- 配对关系保存在 `/data/relay.db`，请挂载卷（上面的 `-v`），否则重建容器后需要重新配对。
+- 镜像目前是 `linux/amd64`。在 arm64 主机上加 `--platform linux/amd64`。
+- 更新：`docker pull nickname4th/linkshell-gateway:latest`，然后删掉旧容器、用同样的命令重新运行。
 
-```bash
-docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
-docker run --platform linux/amd64 -d \
-  -p 8787:8787 \
-  --name linkshell-gateway \
-  --restart unless-stopped \
-  nickname4th/linkshell-gateway:latest
+从源码构建：`git clone https://github.com/LiuTianjie/LinkShell && cd LinkShell && docker compose up -d`。
+
+## 2. 加上 HTTPS
+
+在公网上请用 HTTPS 反向代理，让电脑和手机通过 `wss://` 连接。
+
+### Caddy（自动申请证书）
+
+```caddyfile
+gw.example.com {
+    reverse_proxy 127.0.0.1:8787
+}
 ```
 
-### 从源码构建
-
-```bash
-git clone https://github.com/LiuTianjie/LinkShell
-cd LinkShell
-docker compose up -d
-```
-
-Gateway 默认监听 `8787` 端口。
-
-### 自定义端口
-
-```bash
-# 方式 1：环境变量
-PORT=9000 docker compose up -d
-
-# 方式 2：.env 文件
-cp .env.example .env
-# 编辑 .env 修改 PORT
-docker compose up -d
-```
-
-### 查看日志
-
-```bash
-docker compose logs -f gateway
-```
-
-### 更新
-
-```bash
-# Docker Hub 方式
-docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
-docker stop linkshell-gateway && docker rm linkshell-gateway
-docker run --platform linux/amd64 -d -p 8787:8787 --name linkshell-gateway --restart unless-stopped nickname4th/linkshell-gateway:latest
-
-# 源码方式
-git pull
-docker compose up -d --build
-```
-
-## 反向代理（HTTPS）
-
-生产环境建议用 nginx 反代并启用 HTTPS。
-
-### nginx 配置示例
+### Nginx
 
 ```nginx
 server {
     listen 443 ssl;
-    server_name relay.example.com;
+    server_name gw.example.com;
 
-    ssl_certificate /etc/letsencrypt/live/relay.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/relay.example.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/gw.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/gw.example.com/privkey.pem;
 
     location / {
         proxy_pass http://127.0.0.1:8787;
@@ -105,120 +61,60 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
     }
 }
-
-server {
-    listen 80;
-    server_name relay.example.com;
-    return 301 https://$host$request_uri;
-}
 ```
 
-关键点：
-- `proxy_http_version 1.1` + `Upgrade` + `Connection` 头是 WebSocket 必需的
-- `proxy_read_timeout 86400s` 防止 nginx 断开长连接
-- 用 Let's Encrypt 免费获取证书：`certbot --nginx -d relay.example.com`
+`Upgrade` / `Connection` 头是 WebSocket 必需的；较长的 `proxy_read_timeout` 防止空闲连接被断开。证书可以用 `certbot --nginx -d gw.example.com` 免费申请。
 
-### 使用 HTTPS 后的连接方式
+## 3. 连接电脑和手机
+
+在电脑上：
 
 ```bash
-# CLI
-linkshell start --gateway wss://relay.example.com/ws --provider claude
-
-# App 里输入
-# https://relay.example.com
+linkshell host --gateway wss://gw.example.com --daemon   # 地址会被记住
+linkshell pair
 ```
 
-## 防火墙
+终端里会出现二维码和 6 位配对码。在 App 的「电脑 → 添加电脑」里扫码或输入配对码。配对一次长期有效，电脑重启不需要重新配对。
 
-只需开放 Gateway 端口（默认 8787）或 nginx 的 443 端口：
+- 换网关：`linkshell host stop && linkshell host --gateway wss://另一个地址 --daemon`，然后重新配对。
+- 关闭网关连接：`linkshell host --gateway off`。
+
+### 只在家里用
+
+网关可以直接跑在这台电脑上，不需要服务器和证书：
 
 ```bash
-# UFW
-ufw allow 8787/tcp
-
-# 或者只开 HTTPS
-ufw allow 443/tcp
+linkshell gateway --daemon
+linkshell host --gateway ws://192.168.1.20:8787 --daemon   # 换成电脑的局域网 IP
+linkshell pair
 ```
 
-## 健康检查
+手机需要和电脑在同一个局域网里。
+
+## 防火墙与健康检查
+
+只需要开放网关端口（8787），或反向代理的 443：
+
+```bash
+ufw allow 443/tcp     # 使用 HTTPS 反代时
+ufw allow 8787/tcp    # 直接暴露网关时
+```
 
 ```bash
 curl http://localhost:8787/healthz
-# {"ok":true}
+# {"ok":true,"version":"…","relay":…}
 ```
 
-## 资源需求
+## 资源
 
-Gateway 是纯消息转发，资源消耗很低：
-- 内存：约 50MB 基础 + 每个活跃会话约 1MB
-- CPU：几乎可忽略
-- 带宽：取决于终端输出量，通常很小
-- 最小配置：1 核 512MB 即可运行
+网关只转发数据：内存几十 MB，CPU 几乎可以忽略，带宽取决于你在手机上看了多少输出。一台最小规格的云服务器就够用。
 
-## 官方 Gateway 部署（需订阅验证）
+## 1.x
 
-如果你要部署一个需要订阅验证的官方 Gateway（仅允许 Pro 用户连接），需要额外配置 Supabase 环境变量。
-
-### Docker 方式
-
-```bash
-docker run -d \
-  -p 8787:8787 \
-  --name linkshell-gateway \
-  --restart unless-stopped \
-  -e AUTH_REQUIRED=true \
-  -e SUPABASE_URL=https://your-project.supabase.co \
-  -e SUPABASE_ANON_KEY=your-anon-key \
-  -e SUPABASE_SERVICE_ROLE_KEY=your-service-role-key \
-  nickname4th/linkshell-gateway:latest
-```
-
-首次部署官方 Gateway 时，建议先在 Supabase SQL Editor 执行：
-
-```sql
--- 见仓库内 docs/supabase-gateway-state.sql
-```
-
-这会创建 `linkshell_gateway_tokens` 和 `linkshell_gateway_pairings` 两张表，用来持久化设备 token 和短期配对状态。表不存在时 Gateway 会自动退回内存态，但 Docker 重启或滚动部署后用户可能需要重新配对。
-
-### docker-compose 方式
-
-```bash
-cp .env.example .env
-# 编辑 .env，设置：
-# AUTH_REQUIRED=true
-# SUPABASE_URL=https://your-project.supabase.co
-# SUPABASE_ANON_KEY=your-anon-key
-# SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-
-docker compose up -d
-```
-
-### 环境变量说明
-
-| 变量 | 必需 | 说明 |
-|------|------|------|
-| `AUTH_REQUIRED` | 否 | 设为 `true` 启用订阅验证，默认 `false` |
-| `SUPABASE_URL` | AUTH_REQUIRED=true 时必需 | Supabase 项目 URL |
-| `SUPABASE_ANON_KEY` | AUTH_REQUIRED=true 时必需 | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | AUTH_REQUIRED=true 时必需 | 用于服务端订阅到期检查 |
-| `SUPABASE_GATEWAY_TOKEN_TABLE` | 否 | Gateway token 持久化表名，默认 `linkshell_gateway_tokens` |
-| `SUPABASE_GATEWAY_PAIRING_TABLE` | 否 | Gateway 配对状态持久化表名，默认 `linkshell_gateway_pairings` |
-| `PAIRING_TTL_MS` | 否 | 配对码有效期，默认 10 分钟 |
-
-### 行为差异
-
-- `AUTH_REQUIRED=false`（默认）：任何人都可以连接，适合自建 Gateway
-- `AUTH_REQUIRED=true`：
-  - 所有 HTTP 和 WebSocket 连接需要有效的 Supabase JWT
-  - 验证用户是否有活跃的 Pro 订阅
-  - 非订阅用户收到 `subscription_required` 错误，提示去 itool.tech 订阅
-  - 每 5 分钟检查已连接用户的订阅状态，到期自动断开
-  - 配置 Supabase 后会持久化设备 token 和未过期配对状态，提升 Docker 重启后的恢复体验
+同一个网关也继续服务 1.x 的 `linkshell start` 和 1.x App，不需要单独部署。

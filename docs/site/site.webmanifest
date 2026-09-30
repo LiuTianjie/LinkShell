@@ -1,12 +1,12 @@
 {
   "name": "LinkShell",
   "short_name": "LinkShell",
-  "description": "Remote terminal and Agent Workspace control for Claude Code, OpenAI Codex, Gemini, Copilot, and shell sessions from iOS and Android.",
+  "description": "Follow, steer and approve the coding agents running on your computer from your phone.",
   "start_url": "https://liutianjie.github.io/LinkShell/",
   "scope": "https://liutianjie.github.io/LinkShell/",
   "display": "standalone",
-  "background_color": "#1a1a1e",
-  "theme_color": "#1a1a1e",
+  "background_color": "#f6f7fb",
+  "theme_color": "#4a6cf7",
   "lang": "en",
   "icons": [
     {

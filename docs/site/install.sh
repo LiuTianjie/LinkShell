@@ -19,17 +19,19 @@ echo ""
 if command -v node >/dev/null 2>&1; then
   NODE_VER=$(node -v | sed 's/^v//')
   NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1)
-  if [ "$NODE_MAJOR" -lt 18 ]; then
-    fail "Node.js v${NODE_VER} found, but >= 18 is required. Please upgrade Node.js first."
+  NODE_MINOR=$(echo "$NODE_VER" | cut -d. -f2)
+  # The host keeps its sessions in node:sqlite (unflagged from 22.13).
+  if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 13 ]; }; then
+    fail "Node.js v${NODE_VER} found, but LinkShell needs 22.13 or newer. Upgrade Node.js first (nvm install 22, or brew upgrade node)."
   fi
   ok "Node.js v${NODE_VER}"
 else
-  fail "Node.js not found. Please install Node.js >= 18 first: https://nodejs.org"
+  fail "Node.js not found. Please install Node.js 22.13 or newer first: https://nodejs.org"
 fi
 
 # ── Check npm ───────────────────────────────────────────────────────
 if ! command -v npm >/dev/null 2>&1; then
-  fail "npm not found. Please install Node.js >= 18 which includes npm."
+  fail "npm not found. Please install Node.js 22.13 or newer, which includes npm."
 fi
 
 # ── Install ─────────────────────────────────────────────────────────
@@ -48,9 +50,10 @@ if command -v linkshell >/dev/null 2>&1; then
   ok "linkshell ${VER}"
   echo ""
   info "Get started:"
-  echo "    linkshell start --agent-ui   # start bridge + Agent Workspace"
-  echo "    linkshell doctor             # check providers and environment"
-  echo "    linkshell setup              # interactive configuration"
+  echo "    linkshell host --daemon      # start LinkShell in the background"
+  echo "    linkshell login              # Pro: the official gateway, no pairing"
+  echo "    linkshell pair               # or pair a phone through your own gateway"
+  echo "    linkshell claude             # Claude Code you can hand to your phone"
   echo ""
 else
   echo ""

@@ -15,6 +15,9 @@ services:
       - SUPABASE_URL=${SUPABASE_URL:-}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+    volumes:
+      # Pairings and machine/device keys (RELAY_DATA_PATH=/data/relay.db).
+      - linkshell-gateway:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8787/healthz"]
@@ -26,3 +29,6 @@ services:
       resources:
         limits:
           memory: 256M
+
+volumes:
+  linkshell-gateway:

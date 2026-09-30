@@ -1,58 +1,47 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-lang="zh">
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <base href="../" />
-  <title>LinkShell 定价 | Free 与 Pro 官方 Gateway</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LinkShell 定价 | 免费使用，Pro 提供官方网关</title>
   <meta name="description"
-    content="LinkShell 免费版包含终端桥接、二维码配对、Claude Code、OpenAI Codex、Gemini、Copilot 支持、Agent Workspace、远程桌面、端口转发和自建 Gateway；Pro 解锁官方托管 Gateway 和 App 自动发现会话。" />
+    content="LinkShell 全部功能免费，自建网关即可使用。Pro 每月 $1，提供官方网关：不用部署服务器，登录同一账号即可连接。" />
   <meta name="keywords"
-    content="LinkShell, remote terminal, Claude Code, OpenAI Codex, Codex CLI, terminal bridge, mobile terminal, remote desktop, port forwarding, CLI gateway, WebSocket gateway, iOS terminal, Android terminal" />
+    content="LinkShell, Claude Code, OpenAI Codex, Gemini CLI, GitHub Copilot, coding agent, mobile, remote terminal, handoff, iOS, Android, end-to-end encryption, self-hosted gateway" />
   <meta name="author" content="LinkShell" />
-  <meta name="creator" content="LinkShell" />
-  <meta name="publisher" content="LinkShell" />
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
   <meta name="googlebot" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
-  <meta name="bingbot" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="format-detection" content="telephone=no,email=no,address=no" />
   <meta name="application-name" content="LinkShell" />
   <meta name="apple-mobile-web-app-title" content="LinkShell" />
-  <meta name="theme-color" content="#1a1a1e" />
-  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0d0e12" media="(prefers-color-scheme: dark)" />
+  <meta name="color-scheme" content="light dark" />
   <link rel="canonical" href="https://liutianjie.github.io/LinkShell/pricing/" />
   <link rel="manifest" href="site.webmanifest" />
   <link rel="icon" type="image/png" href="assets/adaptive-icon.png" />
   <link rel="apple-touch-icon" href="assets/adaptive-icon.png" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="LinkShell" />
-  <meta property="og:title" content="LinkShell 定价 | Free 与 Pro 官方 Gateway" />
+  <meta property="og:title" content="LinkShell 定价 | 免费使用，Pro 提供官方网关" />
   <meta property="og:description"
-    content="免费使用 LinkShell 全部核心功能。升级 Pro 后可使用官方托管 Gateway，无需自建服务器，App 自动发现会话。" />
+    content="LinkShell 全部功能免费，自建网关即可使用。Pro 每月 $1，提供官方网关：不用部署服务器，登录同一账号即可连接。" />
   <meta property="og:url" content="https://liutianjie.github.io/LinkShell/pricing/" />
-  <meta property="og:image" content="https://liutianjie.github.io/LinkShell/assets/adaptive-icon.png" />
-  <meta property="og:image:secure_url" content="https://liutianjie.github.io/LinkShell/assets/adaptive-icon.png" />
-  <meta property="og:image:type" content="image/png" />
-  <meta property="og:image:width" content="1024" />
-  <meta property="og:image:height" content="1024" />
-  <meta property="og:image:alt" content="LinkShell app icon" />
+  <meta property="og:image" content="https://liutianjie.github.io/LinkShell/assets/shots/ios-session.webp" />
+  <meta property="og:image:alt" content="LinkShell 在手机上继续一个 Claude Code 会话" />
   <meta property="og:locale" content="zh_CN" />
   <meta property="og:locale:alternate" content="en_US" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="LinkShell 定价 | Free 与 Pro 官方 Gateway" />
+  <meta name="twitter:title" content="LinkShell 定价 | 免费使用，Pro 提供官方网关" />
   <meta name="twitter:description"
-    content="LinkShell 免费版与 Pro 官方 Gateway 方案对比。" />
-  <meta name="twitter:image" content="https://liutianjie.github.io/LinkShell/assets/adaptive-icon.png" />
-  <meta name="twitter:image:alt" content="LinkShell app icon" />
+    content="Your coding agents keep running on your computer; follow, steer and approve them from your phone." />
+  <meta name="twitter:image" content="https://liutianjie.github.io/LinkShell/assets/shots/ios-session.webp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="dns-prefetch" href="//github.com" />
-  <link rel="dns-prefetch" href="//apps.apple.com" />
-  <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
-  <link rel="dns-prefetch" href="//api.producthunt.com" />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" />
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -62,106 +51,20 @@
           "@id": "https://liutianjie.github.io/LinkShell/#organization",
           "name": "LinkShell",
           "url": "https://liutianjie.github.io/LinkShell/",
-          "logo": {
-            "@type": "ImageObject",
-            "url": "https://liutianjie.github.io/LinkShell/assets/adaptive-icon.png",
-            "width": 1024,
-            "height": 1024
-          },
-          "sameAs": [
-            "https://github.com/LiuTianjie/LinkShell",
-            "https://www.producthunt.com/products/linkshell"
-          ]
-        },
-        {
-          "@type": "WebSite",
-          "@id": "https://liutianjie.github.io/LinkShell/#website",
-          "url": "https://liutianjie.github.io/LinkShell/",
-          "name": "LinkShell",
-          "description": "Remote terminal and Agent Workspace control for Claude Code, OpenAI Codex, Gemini, Copilot, and shell sessions from iOS and Android.",
-          "inLanguage": ["en", "zh-CN"],
-          "publisher": {
-            "@id": "https://liutianjie.github.io/LinkShell/#organization"
-          }
+          "logo": "https://liutianjie.github.io/LinkShell/assets/adaptive-icon.png",
+          "sameAs": ["https://github.com/LiuTianjie/LinkShell", "https://www.producthunt.com/products/linkshell"]
         },
         {
           "@type": "SoftwareApplication",
-          "@id": "https://liutianjie.github.io/LinkShell/#software",
           "name": "LinkShell",
+          "operatingSystem": "iOS, Android, macOS, Linux",
           "applicationCategory": "DeveloperApplication",
-          "operatingSystem": "iOS, Android, macOS, Linux, Windows",
+          "description": "Follow, steer and approve the coding agents running on your computer (Claude Code, Codex, Gemini, Copilot) from your phone, with a terminal and local web previews. End-to-end encrypted.",
           "url": "https://liutianjie.github.io/LinkShell/",
           "downloadUrl": "https://github.com/LiuTianjie/LinkShell/releases/latest",
-          "installUrl": "https://liutianjie.github.io/LinkShell/install.sh",
-          "codeRepository": "https://github.com/LiuTianjie/LinkShell",
-          "license": "https://github.com/LiuTianjie/LinkShell/blob/main/LICENSE",
-          "image": "https://liutianjie.github.io/LinkShell/assets/adaptive-icon.png",
-          "description": "LinkShell bridges local Claude Code, OpenAI Codex, Gemini, Copilot, and shell terminal sessions to iOS and Android with a CLI gateway, Agent Workspace, QR pairing, remote desktop, and port forwarding.",
-          "featureList": [
-            "Remote PTY terminal bridge",
-            "Claude Code, OpenAI Codex, Gemini, and Copilot terminal control",
-            "QR code pairing",
-            "Agent Workspace for Claude Code and Codex",
-            "Built-in and self-hosted WebSocket gateway",
-            "Remote desktop streaming",
-            "Port forwarding for dev server previews"
-          ],
           "offers": [
-            {
-              "@type": "Offer",
-              "name": "Free",
-              "price": "0",
-              "priceCurrency": "USD",
-              "url": "https://liutianjie.github.io/LinkShell/#quickstart"
-            },
-            {
-              "@type": "Offer",
-              "name": "Pro",
-              "price": "1",
-              "priceCurrency": "USD",
-              "url": "https://liutianjie.github.io/LinkShell/pricing/"
-            }
-          ],
-          "publisher": {
-            "@id": "https://liutianjie.github.io/LinkShell/#organization"
-          }
-        },
-        {
-          "@type": "FAQPage",
-          "@id": "https://liutianjie.github.io/LinkShell/#faq",
-          "mainEntity": [
-            {
-              "@type": "Question",
-              "name": "Do I need a public server?",
-              "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "No. LinkShell includes a built-in CLI gateway for local network use. A public server or the official gateway is only needed for cross-network access."
-              }
-            },
-            {
-              "@type": "Question",
-              "name": "Which AI agents does LinkShell support?",
-              "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "LinkShell terminal mode supports Claude Code, OpenAI Codex, Gemini, GitHub Copilot, and custom shell processes. Agent Workspace auto-detects Claude Code and Codex providers."
-              }
-            },
-            {
-              "@type": "Question",
-              "name": "Where can I download the mobile app?",
-              "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "The iOS app is available on the App Store. Android APK builds are available from GitHub Releases."
-              }
-            },
-            {
-              "@type": "Question",
-              "name": "Does LinkShell support remote desktop and port forwarding?",
-              "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "Yes. LinkShell can stream your desktop with the --screen option and can forward development server ports for mobile preview."
-              }
-            }
+            { "@type": "Offer", "price": "0", "priceCurrency": "USD", "name": "Free" },
+            { "@type": "Offer", "price": "1", "priceCurrency": "USD", "name": "Pro (monthly)" }
           ]
         }
       ]
@@ -169,1961 +72,740 @@
   </script>
   <style>
     :root {
-      --bg: #1a1a1e;
-      --surface: #2a2a30;
-      --text: #fdfcfc;
-      --text-sec: #9a9898;
-      --text-muted: #6e6e73;
-      --accent: #007aff;
-      --accent-hover: #0056b3;
-      --success: #30d158;
-      --warning: #ff9f0a;
-      --danger: #ff3b30;
-      --border: rgba(15, 0, 0, 0.12);
-      --border-solid: #5a5a64;
-      --radius: 4px;
-      --font: 'Berkeley Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-      --max-w: 1080px;
+      --bg: #f6f7fb;
+      --surface: #ffffff;
+      --surface-2: #eef0f6;
+      --text: #14161f;
+      --text-sec: #555a6e;
+      --text-muted: #8a8fa3;
+      --border: #e2e5ee;
+      --accent: #4a6cf7;
+      --accent-ink: #ffffff;
+      --accent-soft: #e8edff;
+      --success: #1f9d63;
+      --warn: #c7771a;
+      --danger: #d64545;
+      --code-bg: #14161f;
+      --code-text: #e6e8f2;
+      --bezel: #1b1d24;
+      --shadow: 0 1px 2px rgba(20, 22, 31, .05), 0 12px 32px rgba(20, 22, 31, .08);
+      --radius: 18px;
+      --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+      color-scheme: light;
     }
 
-    *,
-    *::before,
-    *::after {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font);
-      font-size: 16px;
-      font-weight: 400;
-      line-height: 1.50;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    ::selection {
-      background: var(--accent);
-      color: var(--text);
-    }
-
-    .c {
-      max-width: var(--max-w);
-      margin: 0 auto;
-      padding: 0 24px;
-    }
-
-    h1 {
-      font-size: 38px;
-      font-weight: 700;
-      line-height: 1.50;
-    }
-
-    h2 {
-      font-size: 28px;
-      font-weight: 700;
-      line-height: 1.50;
-      margin-bottom: 16px;
-    }
-
-    h3 {
-      font-size: 20px;
-      font-weight: 700;
-      line-height: 1.50;
-      margin-bottom: 12px;
-    }
-
-    a {
-      color: var(--text);
-      text-decoration: underline;
-      text-underline-offset: 3px;
-    }
-
-    a:hover {
-      color: var(--accent);
-    }
-
-    .btn {
-      display: inline-block;
-      font-family: var(--font);
-      font-size: 16px;
-      font-weight: 500;
-      line-height: 2.00;
-      padding: 4px 20px;
-      border-radius: var(--radius);
-      border: 1px solid var(--border-solid);
-      cursor: pointer;
-      text-decoration: none;
-      transition: color .15s, background .15s, border-color .15s;
-    }
-
-    .btn-p {
-      background: var(--text);
-      color: var(--bg);
-      border-color: var(--text);
-    }
-
-    .btn-p:hover {
-      background: var(--text-sec);
-      color: var(--bg);
-      border-color: var(--text-sec);
-    }
-
-    .btn-s {
-      background: transparent;
-      color: var(--text);
-    }
-
-    .btn-s:hover {
-      border-color: var(--text);
-    }
-
-    .term {
-      background: var(--bg);
-      border: 1px solid var(--border-solid);
-      border-radius: var(--radius);
-      padding: 16px 20px;
-      font-size: 14px;
-      line-height: 1.60;
-      overflow-x: auto;
-      white-space: pre;
-    }
-
-    .tp {
-      color: var(--success);
-    }
-
-    .tc {
-      color: var(--text);
-    }
-
-    .tm {
-      color: var(--text-muted);
-    }
-
-    .to {
-      color: var(--text-sec);
-    }
-
-    .qr {
-      display: block;
-      width: 160px;
-      height: 160px;
-      margin: 8px 0;
-    }
-
-    .tabs {
-      display: flex;
-      gap: 0;
-      margin-bottom: 0;
-    }
-
-    .tab {
-      font-family: var(--font);
-      font-size: 14px;
-      font-weight: 500;
-      padding: 8px 20px;
-      background: transparent;
-      color: var(--text-sec);
-      border: 1px solid var(--border-solid);
-      border-bottom: none;
-      border-radius: var(--radius) var(--radius) 0 0;
-      cursor: pointer;
-      transition: color .15s, background .15s;
-    }
-
-    .tab+.tab {
-      margin-left: -1px;
-    }
-
-    .tab.active {
-      background: var(--bg);
-      color: var(--text);
-      border-bottom: 1px solid var(--bg);
-      position: relative;
-      z-index: 1;
-    }
-
-    .tab-body {
-      border: 1px solid var(--border-solid);
-      border-radius: 0 var(--radius) var(--radius) var(--radius);
-      padding: 24px;
-      margin-top: -1px;
-      max-width: 640px;
-    }
-
-    .tab-pane {
-      display: none;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    .ta {
-      color: var(--accent);
-    }
-
-    .ts {
-      color: var(--success);
-    }
-
-    .sec {
-      padding: 80px 0;
-    }
-
-    .nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 50;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border-solid);
-      height: 48px;
-    }
-
-    .nav-in {
-      max-width: var(--max-w);
-      margin: 0 auto;
-      padding: 0 24px;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .nav-b {
-      font-weight: 700;
-      font-size: 16px;
-      text-decoration: none;
-      color: var(--text);
-    }
-
-    .nav-b:hover {
-      color: var(--text);
-    }
-
-    .nav-r {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      font-size: 14px;
-      font-weight: 500;
-    }
-
-    .nav-r a {
-      color: var(--text-sec);
-      text-decoration: none;
-    }
-
-    .nav-r a:hover {
-      color: var(--text);
-      text-decoration: underline;
-    }
-
-    .sep {
-      color: var(--text-muted);
-    }
-
-    .lang {
-      background: none;
-      border: 1px solid var(--border-solid);
-      color: var(--text-sec);
-      font-family: var(--font);
-      font-size: 12px;
-      font-weight: 500;
-      padding: 2px 8px;
-      border-radius: var(--radius);
-      cursor: pointer;
-    }
-
-    .lang:hover {
-      color: var(--text);
-      border-color: var(--text);
-    }
-
-    .li {
-      color: var(--text-sec);
-      padding-left: 16px;
-      position: relative;
-      margin-bottom: 8px;
-    }
-
-    .li::before {
-      content: '*';
-      position: absolute;
-      left: 0;
-    }
-
-    .li.g::before {
-      color: var(--success);
-    }
-
-    .li.b::before {
-      color: var(--accent);
-    }
-
-    .stat-g {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      margin-bottom: 32px;
-    }
-
-    .stat {
-      border: 1px solid var(--border-solid);
-      border-radius: var(--radius);
-      padding: 16px;
-      text-align: center;
-    }
-
-    .stat-v {
-      font-size: 28px;
-      font-weight: 700;
-    }
-
-    .stat-l {
-      font-size: 14px;
-      color: var(--text-sec);
-      margin-top: 4px;
-    }
-
-    .nav-link {
-      color: var(--text-sec);
-      text-decoration: none;
-    }
-
-    .nav-link:hover {
-      color: var(--text);
-      text-decoration: underline;
-    }
-
-    .nav-link.active {
-      color: var(--text);
-    }
-
-    section[data-page] {
-      display: none;
-    }
-
-    section[data-page].visible {
-      display: block;
-    }
-
-    footer {
-      border-top: 1px solid var(--border-solid);
-      padding: 48px 0;
-    }
-
-    .ft {
-      max-width: var(--max-w);
-      margin: 0 auto;
-      padding: 0 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-
-    .ft a {
-      color: var(--text-sec);
-      font-size: 14px;
-    }
-
-    @keyframes blink {
-
-      0%,
-      100% {
-        opacity: 1
-      }
-
-      50% {
-        opacity: 0
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d0e12;
+        --surface: #16181f;
+        --surface-2: #1d2029;
+        --text: #eceef5;
+        --text-sec: #a4a9bb;
+        --text-muted: #6f7488;
+        --border: #262a35;
+        --accent: #7d95ff;
+        --accent-ink: #0d0e12;
+        --accent-soft: #1c2240;
+        --success: #3ecf8e;
+        --warn: #f0a44b;
+        --danger: #ff6b6b;
+        --code-bg: #0a0b0f;
+        --code-text: #e6e8f2;
+        --bezel: #2a2d36;
+        --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 16px 40px rgba(0, 0, 0, .35);
+        color-scheme: dark;
       }
     }
 
-    .cur {
-      display: inline-block;
-      width: 8px;
-      height: 16px;
-      background: var(--text);
-      vertical-align: middle;
-      animation: blink 1s step-end infinite;
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    img { max-width: 100%; height: auto; display: block; }
+    h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; letter-spacing: -.01em; }
+    p { margin: 0; }
+    code, pre, kbd { font-family: var(--mono); }
+    :not(pre)>code { font-size: .88em; background: var(--surface-2); border: 1px solid var(--border); padding: .08em .38em; border-radius: 6px; }
+
+    /* one language at a time */
+    html[data-lang="zh"] [lang="en"], html[data-lang="en"] [lang="zh"] { display: none !important; }
+
+    .c { max-width: 1120px; margin: 0 auto; padding-inline: 20px; }
+    .page { display: none; }
+    .page.visible { display: block; }
+
+    /* nav */
+    header.nav { position: sticky; top: 0; z-index: 20; backdrop-filter: saturate(1.6) blur(16px); -webkit-backdrop-filter: saturate(1.6) blur(16px); background: color-mix(in srgb, var(--bg) 80%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+    .nav .c { display: flex; align-items: center; gap: 20px; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; color: var(--text); font-size: 17px; }
+    .brand:hover { text-decoration: none; }
+    .brand img { width: 26px; height: 26px; border-radius: 7px; }
+    .nav nav { display: flex; gap: 22px; margin-left: auto; align-items: center; }
+    .nav nav a { color: var(--text-sec); font-size: 15px; }
+    .nav nav a.active, .nav nav a:hover { color: var(--text); text-decoration: none; }
+    .lang { border: 1px solid var(--border); background: var(--surface); color: var(--text-sec); border-radius: 999px; padding: 4px 11px; font: 600 12px var(--sans); cursor: pointer; }
+    @media (max-width: 720px) { .nav nav a.opt { display: none; } .nav nav { gap: 16px; } }
+
+    /* buttons */
+    .btns { display: flex; flex-wrap: wrap; gap: 10px; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 12px; font-weight: 600; font-size: 15px; border: 1px solid transparent; cursor: pointer; }
+    .btn:hover { text-decoration: none; filter: brightness(1.05); }
+    .btn-p { background: var(--accent); color: var(--accent-ink); }
+    .btn-s { background: var(--surface); color: var(--text); border-color: var(--border); }
+    .btn svg { width: 17px; height: 17px; }
+
+    /* hero */
+    .hero { padding-block: 72px 40px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
+    .badge { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 5px 12px; border-radius: 999px; margin-bottom: 20px; }
+    .hero h1 { font-size: clamp(38px, 5.6vw, 60px); font-weight: 800; letter-spacing: -.025em; }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .lead { font-size: 18px; color: var(--text-sec); margin: 20px 0 28px; max-width: 34em; }
+    .phones { position: relative; height: 640px; }
+    .phone { position: absolute; width: 250px; border-radius: 38px; border: 7px solid var(--bezel); background: var(--bezel); overflow: hidden; box-shadow: var(--shadow); }
+    .phone img { border-radius: 31px; width: 100%; }
+    .phones .p1 { left: 50%; top: 0; transform: translateX(-50%); z-index: 3; }
+    .phones .p2 { left: 0; top: 60px; transform: rotate(-6deg) scale(.88); z-index: 2; }
+    .phones .p3 { right: 0; top: 60px; transform: rotate(6deg) scale(.88); z-index: 1; }
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: 1fr; padding-top: 48px; }
+      .phones { height: 520px; max-width: 460px; width: 100%; margin: 0 auto; }
+      .phone { width: 210px; }
+    }
+    @media (max-width: 480px) { .phones { height: 450px; } .phone { width: 180px; } .phones .p2 { left: -10px; } .phones .p3 { right: -10px; } }
+
+    .agents-strip { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-muted); font-size: 14px; margin-top: 26px; }
+    .pill { border: 1px solid var(--border); background: var(--surface); color: var(--text-sec); border-radius: 999px; padding: 3px 11px; font-size: 13px; }
+
+    /* install box */
+    .install { margin-top: 26px; max-width: 520px; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+    .tab { border: 0; background: none; color: var(--text-muted); font: 600 13px var(--sans); padding: 5px 10px; border-radius: 8px; cursor: pointer; }
+    .tab.active { background: var(--surface-2); color: var(--text); }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    pre { position: relative; margin: 0; background: var(--code-bg); color: var(--code-text); border-radius: 14px; padding: 14px 16px; font-size: 13.5px; line-height: 1.7; overflow-x: auto; }
+    pre .cm { color: #7c8196; }
+    pre .pr { color: #7d95ff; user-select: none; }
+    .copy { position: absolute; top: 8px; right: 8px; border: 1px solid #2c303c; background: #1d2029; color: #b9bdcc; font: 600 11px var(--sans); padding: 4px 8px; border-radius: 7px; cursor: pointer; opacity: .85; }
+    .copy:hover { opacity: 1; }
+
+    /* sections */
+    .sec { padding-block: 72px; }
+    .eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+    .sec h2 { font-size: clamp(28px, 3.6vw, 40px); font-weight: 800; letter-spacing: -.02em; }
+    .sec .sub { color: var(--text-sec); font-size: 17px; margin-top: 14px; max-width: 40em; }
+
+    .feature { display: grid; grid-template-columns: 1fr 300px; gap: 56px; align-items: center; padding-block: 36px; }
+    .feature.flip { grid-template-columns: 300px 1fr; }
+    .feature.flip .copytext { order: 2; }
+    .feature h3 { font-size: 26px; font-weight: 750; margin-bottom: 12px; }
+    .feature p { color: var(--text-sec); font-size: 16.5px; max-width: 32em; }
+    .feature ul { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; color: var(--text-sec); }
+    .feature li { padding-left: 22px; position: relative; }
+    .feature li::before { content: ""; position: absolute; left: 4px; top: .7em; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+    .feature .phone { position: static; width: 100%; max-width: 280px; margin: 0 auto; }
+    @media (max-width: 820px) {
+      .feature, .feature.flip { grid-template-columns: 1fr; gap: 28px; }
+      .feature.flip .copytext { order: 0; }
+      .feature .phone { max-width: 240px; }
     }
 
-    .donate-qr {
-      display: flex;
-      gap: 32px;
-      justify-content: center;
-      flex-wrap: wrap;
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 36px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; min-width: 0; }
+    .card h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+    .card p { color: var(--text-sec); font-size: 15px; }
+    .card .ic { width: 34px; height: 34px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; margin-bottom: 14px; }
+    .card .ic svg { width: 18px; height: 18px; }
+
+    /* table */
+    .tbl { overflow-x: auto; margin-top: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+    table { border-collapse: collapse; width: 100%; font-size: 15px; }
+    th, td { text-align: left; padding: 14px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: 0; }
+    th { font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
+    td:first-child { font-weight: 650; white-space: nowrap; }
+    td .muted { color: var(--text-muted); font-size: 13.5px; }
+    @media (max-width: 600px) {
+      #agents thead { display: none; }
+      #agents tr { display: grid; gap: 6px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+      #agents tr:last-child { border-bottom: 0; }
+      #agents td { border: 0; padding: 0; white-space: normal; }
     }
+    .tier { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
 
-    .donate-qr figure {
-      text-align: center;
-    }
+    /* steps */
+    .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 36px; }
+    .step { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+    .step .n { font: 600 13px var(--mono); color: var(--accent); }
+    .step h3 { font-size: 18px; font-weight: 700; }
+    .step p { color: var(--text-sec); font-size: 15px; }
+    .step pre { font-size: 12.5px; }
+    @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
 
-    .donate-qr img {
-      width: 180px;
-      height: 180px;
-      border-radius: var(--radius);
-      border: 1px solid var(--border-solid);
-    }
+    /* flow diagram */
+    .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1.3fr; align-items: center; gap: 12px; margin-top: 36px; }
+    .node { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; min-width: 0; }
+    .node b { display: block; font-size: 16px; margin-bottom: 4px; }
+    .node span { color: var(--text-sec); font-size: 14px; }
+    .node.host { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+    .arrow { color: var(--text-muted); font: 500 12px var(--mono); text-align: center; white-space: nowrap; }
+    .arrow::after { content: "⟷"; display: block; font-size: 22px; color: var(--accent); line-height: 1; margin-top: 4px; }
+    @media (max-width: 820px) { .flow { grid-template-columns: 1fr; } .arrow::after { content: "↕"; } }
 
-    .donate-qr figcaption {
-      margin-top: 8px;
-      font-size: 14px;
-      color: var(--text-sec);
-    }
+    /* sponsors / donate */
+    .sponsor { display: inline-block; border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); padding: 16px 32px; color: var(--text); }
+    .sponsor:hover { text-decoration: none; border-color: var(--accent); }
+    .donate-qr { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; margin-top: 24px; }
+    .donate-qr figure { margin: 0; text-align: center; color: var(--text-sec); font-size: 14px; }
+    .donate-qr img { width: 180px; border-radius: 14px; border: 1px solid var(--border); margin-bottom: 8px; }
 
-    /* Pricing */
-    .pricing-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      max-width: 720px;
-    }
+    footer { border-top: 1px solid var(--border); padding-block: 28px; color: var(--text-muted); font-size: 14px; }
+    footer .c { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+    footer nav { display: flex; gap: 18px; }
+    footer a { color: var(--text-sec); }
 
-    .pricing-card {
-      border: 1px solid var(--border-solid);
-      border-radius: var(--radius);
-      padding: 28px 24px;
-      position: relative;
-    }
+    /* docs */
+    .docs { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; padding-block: 48px 80px; }
+    .toc { position: sticky; top: 84px; align-self: start; display: flex; flex-direction: column; gap: 2px; font-size: 14.5px; }
+    .toc a { color: var(--text-sec); padding: 5px 10px; border-radius: 8px; }
+    .toc a:hover { background: var(--surface-2); text-decoration: none; color: var(--text); }
+    .doc h1 { font-size: 36px; font-weight: 800; margin-bottom: 10px; }
+    .doc h2 { font-size: 24px; font-weight: 750; margin: 48px 0 12px; padding-top: 8px; }
+    .doc h3 { font-size: 17px; font-weight: 700; margin: 26px 0 8px; }
+    .doc p, .doc li { color: var(--text-sec); max-width: 44em; }
+    .doc p + p, .doc p + pre, .doc pre + p, .doc ul + p, .doc p + ul, .doc pre + pre, .doc ul + pre { margin-top: 12px; }
+    .doc ul { padding-left: 20px; }
+    .doc li + li { margin-top: 6px; }
+    .note { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; border-radius: 0 12px 12px 0; margin-top: 14px; color: var(--text); font-size: 15px; max-width: 44em; }
+    @media (max-width: 820px) { .docs { grid-template-columns: 1fr; } .toc { position: static; flex-direction: row; flex-wrap: wrap; } }
 
-    .pricing-card.pro {
-      border-color: var(--success);
-      box-shadow: 0 0 20px rgba(48, 209, 88, 0.1);
-    }
-
-    .pricing-card .plan-name {
-      font-size: 20px;
-      font-weight: 700;
-      margin-bottom: 4px;
-    }
-
-    .pricing-card .plan-price {
-      font-size: 28px;
-      font-weight: 700;
-      margin-bottom: 4px;
-    }
-
-    .pricing-card .plan-period {
-      font-size: 13px;
-      color: var(--text-sec);
-      margin-bottom: 20px;
-    }
-
-    .pricing-card .plan-features {
-      list-style: none;
-      margin-bottom: 24px;
-    }
-
-    .pricing-card .plan-features li {
-      color: var(--text-sec);
-      font-size: 14px;
-      padding: 4px 0;
-      padding-left: 20px;
-      position: relative;
-    }
-
-    .pricing-card .plan-features li::before {
-      content: '✓';
-      position: absolute;
-      left: 0;
-      color: var(--success);
-    }
-
-    .pricing-badge {
-      position: absolute;
-      top: -1px;
-      right: 16px;
-      background: var(--success);
-      color: var(--bg);
-      font-size: 11px;
-      font-weight: 700;
-      padding: 2px 10px;
-      border-radius: 0 0 var(--radius) var(--radius);
-    }
-
-    .cycle-toggle {
-      display: flex;
-      gap: 0;
-      margin-bottom: 24px;
-      max-width: 280px;
-    }
-
-    .cycle-btn {
-      flex: 1;
-      font-family: var(--font);
-      font-size: 13px;
-      font-weight: 500;
-      padding: 6px 16px;
-      background: transparent;
-      color: var(--text-sec);
-      border: 1px solid var(--border-solid);
-      cursor: pointer;
-      transition: all .15s;
-    }
-
-    .cycle-btn:first-child {
-      border-radius: var(--radius) 0 0 var(--radius);
-    }
-
-    .cycle-btn:last-child {
-      border-radius: 0 var(--radius) var(--radius) 0;
-      margin-left: -1px;
-    }
-
-    .cycle-btn.active {
-      background: var(--text);
-      color: var(--bg);
-      border-color: var(--text);
-      z-index: 1;
-      position: relative;
-    }
-
-    .pay-tabs {
-      display: flex;
-      gap: 0;
-      margin-bottom: 16px;
-      max-width: 280px;
-    }
-
-    .pay-tab {
-      flex: 1;
-      font-family: var(--font);
-      font-size: 12px;
-      font-weight: 500;
-      padding: 6px 12px;
-      background: transparent;
-      color: var(--text-sec);
-      border: 1px solid var(--border-solid);
-      cursor: pointer;
-      transition: all .15s;
-    }
-
-    .pay-tab:first-child {
-      border-radius: var(--radius) 0 0 var(--radius);
-    }
-
-    .pay-tab:last-child {
-      border-radius: 0 var(--radius) var(--radius) 0;
-      margin-left: -1px;
-    }
-
-    .pay-tab.active {
-      background: var(--accent);
-      color: #fff;
-      border-color: var(--accent);
-      z-index: 1;
-      position: relative;
-    }
-
-    .auth-form input {
-      font-family: var(--font);
-      font-size: 14px;
-      padding: 8px 12px;
-      background: var(--bg);
-      color: var(--text);
-      border: 1px solid var(--border-solid);
-      border-radius: var(--radius);
-      width: 100%;
-      outline: none;
-    }
-
-    .auth-form input:focus {
-      border-color: var(--accent);
-    }
-
-    .auth-form .auth-btn {
-      font-family: var(--font);
-      font-size: 14px;
-      font-weight: 500;
-      padding: 8px 20px;
-      border-radius: var(--radius);
-      border: none;
-      cursor: pointer;
-      width: 100%;
-      transition: opacity .15s;
-    }
-
-    .auth-form .auth-btn:hover {
-      opacity: 0.85;
-    }
-
-    .auth-form .auth-btn-primary {
-      background: var(--accent);
-      color: #fff;
-    }
-
-    .auth-form .auth-btn-afdian {
-      background: linear-gradient(135deg, #00aaff 0%, #0077cc 100%);
-      color: #fff;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      text-decoration: none;
-      text-align: center;
-    }
-
-    #pricing-auth-status {
-      font-size: 14px;
-      margin-bottom: 16px;
-    }
-
-    #paypal-button-container {
-      max-width: 280px;
-    }
-
-    @media (max-width: 640px) {
-      h1 {
-        font-size: 28px;
-      }
-
-      h2 {
-        font-size: 22px;
-      }
-
-      .stat-g {
-        grid-template-columns: repeat(2, 1fr);
-      }
-
-      .nav-r {
-        gap: 10px;
-        font-size: 12px;
-      }
-
-      .ft {
-        flex-direction: column;
-        text-align: center;
-      }
-
-      .sec {
-        padding: 48px 0;
-      }
-
-      .hero-flex {
-        flex-direction: column;
-        text-align: center;
-      }
-
-      .hero-flex img {
-        width: 140px !important;
-        height: 140px !important;
-      }
-
-      .pricing-grid {
-        grid-template-columns: 1fr;
-      }
-    }
+    /* pricing */
+    .pricing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 360px)); gap: 18px; margin-top: 36px; }
+    @media (max-width: 780px) { .pricing-grid { grid-template-columns: 1fr; } }
+    .pricing-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 22px; padding: 28px; min-width: 0; }
+    .pricing-card.pro { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: var(--shadow); }
+    .pricing-badge { position: absolute; top: -11px; right: 22px; background: var(--accent); color: var(--accent-ink); font: 700 11px var(--sans); letter-spacing: .06em; padding: 4px 10px; border-radius: 999px; }
+    .plan-name { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+    .plan-price { font-size: 40px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+    .plan-price small { font-size: 15px; font-weight: 500; color: var(--text-sec); }
+    .plan-period { color: var(--text-sec); font-size: 14px; margin-bottom: 18px; }
+    .plan-features { list-style: none; padding: 0; margin: 0 0 22px; display: grid; gap: 9px; font-size: 15px; }
+    .plan-features li { padding-left: 24px; position: relative; }
+    .plan-features li::before { content: "✓"; position: absolute; left: 0; color: var(--success); font-weight: 700; }
+    .cycle-toggle { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
+    .cycle-btn { border: 0; background: none; color: var(--text-sec); font: 600 13px var(--sans); padding: 5px 14px; border-radius: 8px; cursor: pointer; }
+    .cycle-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+    .auth-form input { width: 100%; font: 15px var(--sans); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; border: 0; border-radius: 10px; padding: 11px; font: 600 15px var(--sans); cursor: pointer; text-decoration: none !important; }
+    .auth-btn-primary { background: var(--accent); color: var(--accent-ink); }
+    .auth-btn-afdian { background: #946ce6; color: #fff; }
+    .pay-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+    .pay-tab { flex: 1; border: 1px solid var(--border); background: var(--bg); color: var(--text-sec); border-radius: 10px; padding: 8px; font: 600 13px var(--sans); cursor: pointer; }
+    .pay-tab.active { border-color: var(--accent); color: var(--text); }
+    #pricing-auth-status { font-size: 14px; margin-bottom: 10px; }
+    .term { background: var(--surface-2); border-radius: 12px; }
+    .ts { color: var(--success); }
+    .to { color: var(--text-muted); }
+    .faq { margin-top: 56px; max-width: 720px; display: grid; gap: 18px; }
+    .faq b { display: block; margin-bottom: 4px; }
+    .faq p { color: var(--text-sec); }
   </style>
 </head>
 
 <body>
-
-  <!-- NAV -->
-  <nav class="nav">
-    <div class="nav-in">
-      <a href="#" class="nav-b"><img src="assets/adaptive-icon.png" alt="LinkShell"
-          style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-right:8px">LinkShell</a>
-      <div class="nav-r">
-        <a href="#how" data-i18n="navHow">工作原理</a><span class="sep">|</span>
-        <a href="docs/" class="nav-link" data-page-link="docs" data-i18n="navDocs">文档</a><span class="sep">|</span>
-        <a href="pricing/" class="nav-link" data-page-link="pricing" data-i18n="navPricing">定价</a><span class="sep">|</span>
-        <a href="https://github.com/LiuTianjie/LinkShell" data-i18n="navGithub">GitHub</a><span class="sep">|</span>
-        <button class="lang" id="lang-toggle">EN</button>
-      </div>
+  <header class="nav">
+    <div class="c">
+      <a class="brand" href="./" aria-label="LinkShell"><img src="assets/adaptive-icon.png" alt="" />LinkShell</a>
+      <nav>
+        <a class="opt" href="#features"><span lang="zh">功能</span><span lang="en">Features</span></a>
+        <a class="opt" href="#agents">Agents</a>
+        <a href="docs/" data-page-link="docs"><span lang="zh">文档</span><span lang="en">Docs</span></a>
+        <a href="pricing/" data-page-link="pricing"><span lang="zh">定价</span><span lang="en">Pricing</span></a>
+        <a class="opt" href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
+        <button class="lang" id="lang-toggle" type="button" aria-label="Switch language">EN</button>
+      </nav>
     </div>
-  </nav>
+  </header>
 
-  <!-- HERO -->
-  <section class="sec" style="padding-top:120px" data-page="home">
-    <div class="c hero-flex" style="display:flex;align-items:center;gap:48px">
-      <div style="flex:1">
-        <img src="assets/adaptive-icon.png" alt="LinkShell"
-          style="width:56px;height:56px;border-radius:12px;margin-bottom:16px" />
-        <p style="color:var(--success);margin-bottom:24px;font-weight:500" data-i18n="heroBadge">&gt; LinkShell v1.0
-          现已发布
+  <!-- ═════════════════════════ HOME ═════════════════════════ -->
+  <main class="page" data-page="home">
+    <div class="c hero">
+      <div>
+        <div class="badge"><span lang="zh">LinkShell 2.0 · 为 Agent 重新设计</span><span lang="en">LinkShell 2.0 · rebuilt around agents</span></div>
+        <h1><span lang="zh">离开电脑，<br /><em>Agent 接着干。</em></span><span lang="en">Leave your desk.<br /><em>Your agents keep going.</em></span></h1>
+        <p class="lead">
+          <span lang="zh">Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑，你在手机上看它实时干活、随时插话、一键审批，回到电脑前再接着用终端。代码不离开你的电脑，连接全程端到端加密。</span>
+          <span lang="en">Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, add a message any time, approve what they ask, and pick the session back up at your desk. Your code never leaves your machine, and the connection is end-to-end encrypted.</span>
         </p>
-        <h1 style="margin-bottom:16px"><span data-i18n="heroTitle1">终端漫游</span><span
-            data-i18n="heroTitleSep">，</span><span data-i18n="heroTitle2">随时随地，自由接管</span></h1>
-        <p style="color:var(--text-sec);margin-bottom:12px;max-width:600px" data-i18n="heroLead">
-          本地终端桥接 + Agent Workspace。长耗时任务留在高性能桌面上，用手机接管 PTY、Claude Code 与 Codex 对话。</p>
-        <p style="color:var(--warning);margin-bottom:12px;font-size:14px" data-i18n="heroGateway">🚀 Pro 订阅用户可直接使用官方
-          Gateway，无需自建服务器。<a href="https://itool.tech" style="color:var(--warning)">了解更多 →</a></p>
-        <p style="color:var(--green);margin-bottom:32px;font-size:14px"><span data-i18n="heroFreeGateway">🎉
-            限时免费网关开放中：</span><code
-            style="background:rgba(0,255,0,0.1);padding:2px 8px;border-radius:4px;font-size:12px;user-select:all"
-            data-i18n="heroFreeGatewayCmd">linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws</code></p>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;white-space:nowrap">
-          <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
-          <a href="https://github.com/LiuTianjie/LinkShell" class="btn btn-s" data-i18n="btnGithub">查看仓库</a>
-          <a href="https://www.producthunt.com/products/linkshell?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-linkshell"
-            target="_blank" rel="noopener noreferrer" style="text-decoration:none"><img
-              alt="LinkShell - Control your AI terminal sessions from your phone. | Product Hunt" width="250"
-              height="54"
-              src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1120419&amp;theme=dark&amp;t=1775998159516"
-              style="vertical-align:middle" /></a>
+        <div class="btns">
+          <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
+            <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span>
+          </a>
+          <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
+            <span lang="zh">Android APK</span><span lang="en">Android APK</span>
+          </a>
+          <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
         </div>
-        <div style="display:flex;gap:12px;align-items:center;white-space:nowrap;margin-top:12px">
-          <a href="https://github.com/LiuTianjie/LinkShell/releases" class="btn btn-s"><svg width="16" height="16"
-              viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;margin-right:6px">
-              <path
-                d="M17.523 2.226l1.392-2.415a.4.4 0 00-.692-.4L16.8 1.85A8.67 8.67 0 0012 .9a8.67 8.67 0 00-4.8.95L5.777-.589a.4.4 0 00-.692.4l1.392 2.415C3.492 3.842 1.5 6.727 1.5 10.134h21c0-3.407-1.992-6.292-4.977-7.908zM7.5 7.134a1 1 0 110-2 1 1 0 010 2zm9 0a1 1 0 110-2 1 1 0 010 2zM1.5 11.134v9a1.5 1.5 0 003 0v-9zm18 0v9a1.5 1.5 0 003 0v-9zm-15 0v10.5a1.5 1.5 0 001.5 1.5h1.5v3a1.5 1.5 0 003 0v-3h3v3a1.5 1.5 0 003 0v-3H18a1.5 1.5 0 001.5-1.5v-10.5z" />
-            </svg><span data-i18n="btnAndroid">Android 下载</span></a>
-          <a href="https://apps.apple.com/cn/app/linkshell/id6761547516" class="btn btn-s"><svg width="16" height="16" viewBox="0 0 24 24"
-              fill="currentColor" style="vertical-align:-2px;margin-right:6px">
-              <path
-                d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
-            </svg><span data-i18n="btnIos">App Store 下载</span></a>
+        <div class="agents-strip">
+          <span lang="zh">支持</span><span lang="en">Works with</span>
+          <span class="pill">Claude Code</span><span class="pill">Codex</span><span class="pill">Gemini CLI</span><span class="pill">GitHub Copilot</span><span class="pill">OpenCode</span><span class="pill">Cursor</span><span class="pill">Grok</span>
         </div>
       </div>
-      <div style="flex-shrink:0;display:flex;gap:12px">
-        <video src="assets/1.mp4" width="160" autoplay loop muted playsinline
-          style="border-radius:16px;border:1px solid var(--border-solid)"></video>
-        <video src="assets/2.mp4" width="160" autoplay loop muted playsinline
-          style="border-radius:16px;border:1px solid var(--border-solid)"></video>
+      <div class="phones" aria-hidden="true">
+        <div class="phone p2"><img src="assets/shots/ios-home.webp" alt="" width="640" height="1391" /></div>
+        <div class="phone p1"><img src="assets/shots/ios-session.webp" alt="" width="640" height="1391" /></div>
+        <div class="phone p3"><img src="assets/shots/android-session-dark.webp" alt="" width="640" height="1422" /></div>
       </div>
     </div>
-  </section>
 
-  <!-- QUICKSTART -->
-  <section class="sec" id="quickstart" data-page="home">
-    <div class="c">
-      <h2 data-i18n="howItWorksTitle">只需三步，建立你的终端链路</h2>
+    <section class="sec" id="features">
+      <div class="c">
+        <div class="eyebrow"><span lang="zh">功能</span><span lang="en">Features</span></div>
+        <h2><span lang="zh">不是远程桌面，是同一个会话换个地方继续</span><span lang="en">Not a remote desktop. The same session, somewhere else.</span></h2>
+        <p class="sub"><span lang="zh">LinkShell 在电脑上托管 Agent 进程，电脑终端和手机都是同一个会话的窗口。手机上看到的是结构化的对话，不是一块缩小的屏幕。</span><span lang="en">LinkShell hosts the agent processes on your computer; your terminal and your phone are both windows onto the same session. The phone shows a real conversation, not a shrunken screen.</span></p>
 
-      <div style="margin-bottom:48px">
-        <h3 data-i18n="step1Title">[1] 安装 CLI</h3>
-        <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step1Desc">一条命令全局安装。内置网关开箱即用，无需额外部署服务器。</p>
-        <div class="term"><span class="tm" data-i18n="tmInstallCli"># 全局安装 CLI</span>
-<span class="tp">$</span> <span class="tc">npm i -g linkshell-cli</span>
-
-<span class="tm" data-i18n="tmInitConfig"># 初始化配置</span>
-<span class="tp">$</span> <span class="tc">linkshell setup</span>
-
-<span class="tm" data-i18n="tmCheckEnv"># 检查环境</span>
-<span class="tp">$</span> <span class="tc">linkshell doctor</span>
-<span class="ts">✓ All checks passed</span>
+        <div class="feature">
+          <div class="copytext">
+            <h3><span lang="zh">电脑与手机之间接力</span><span lang="en">Hand off between desk and phone</span></h3>
+            <p><span lang="zh">在终端里用 <code>linkshell claude</code> 开始工作。出门时在手机上发一条消息就接了过来；回到电脑前按任意键收回。同一个会话 ID，上下文一点不丢。</span><span lang="en">Start in your terminal with <code>linkshell claude</code>. Heading out? Send a message from your phone and the session moves with you; back at your desk, press any key to take it back. Same session ID, full context.</span></p>
+            <ul>
+              <li><span lang="zh">Codex 电脑和手机同时在线，两边同步</span><span lang="en">Codex runs on both at once, in sync</span></li>
+              <li><span lang="zh">手机上选好的模型和思考强度，接管时自动生效</span><span lang="en">Model and effort chosen on the phone apply when it takes over</span></li>
+              <li><span lang="zh">也可以直接在手机上新建会话，回家后在电脑上继续</span><span lang="en">Or start on the phone and continue on the computer later</span></li>
+            </ul>
+          </div>
+          <div class="phone"><img src="assets/shots/ios-session.webp" alt="手机上继续的 Claude 会话：计划、改动与回复" loading="lazy" width="640" height="1391" /></div>
         </div>
-      </div>
 
-      <div style="margin-bottom:48px">
-        <h3 data-i18n="step2Title">[2] 启动桥接</h3>
-        <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step2Desc">一条命令启动内置网关、桥接 AI 终端，并自动开放 Agent Workspace channel。</p>
-
-        <div class="tabs">
-          <button class="tab active" data-tab="qs-lan" data-i18n="tabLan">局域网</button>
-          <button class="tab" data-tab="qs-public" data-i18n="tabPublic">公网</button>
-          <button class="tab" data-tab="qs-official" data-i18n="tabOfficial">官方 Gateway</button>
-          <button class="tab" data-tab="qs-free" data-i18n="tabFree">限时免费</button>
+        <div class="feature flip">
+          <div class="copytext">
+            <h3><span lang="zh">插话、排队、审批，都在手机上</span><span lang="en">Steer, queue and approve from your phone</span></h3>
+            <p><span lang="zh">回复逐字出现，计划和工具调用实时更新。Agent 忙的时候也能发消息：Codex 和 Claude 直接插进当前这一轮，其他 Agent 排队，排队的消息可以撤回。需要权限时一键允许或拒绝，每个文件的改动都能看 diff。</span><span lang="en">Replies stream in word by word; plans and tool calls update live. Send a message while the agent is busy: Codex and Claude take it into the current turn, other agents queue it (and you can pull it back). Approve or deny in one tap, and read the diff of every file it changed.</span></p>
+          </div>
+          <div class="phone"><img src="assets/shots/ios-diff.webp" alt="改动页面里一个 CSS 文件的 diff" loading="lazy" width="640" height="1391" /></div>
         </div>
-        <div class="tab-body">
-          <div class="tab-pane active" id="tab-qs-lan">
-            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsLanDesc">同一局域网内，CLI 内置网关直连，零配置。</p>
-            <div class="term"><span class="tp">$</span> <span class="tc">linkshell start</span>
 
-<span class="to">Built-in gateway started on port 8787</span>
-<span class="to">LAN address: http://192.168.1.10:8787</span>
-
-              <svg class="qr" viewBox="0 0 25 25" shape-rendering="crispEdges">
-                <rect width="25" height="25" fill="none" />
-                <path fill="#9a9898"
-                  d="M0,0h7v1h-7zM9,0h1v1h-1zM11,0h2v1h-2zM14,0h1v1h-1zM16,0h2v1h-2zM18,0h7v1h-7zM0,1h1v1h-1zM6,1h1v1h-1zM8,1h1v1h-1zM10,1h1v1h-1zM12,1h2v1h-2zM15,1h1v1h-1zM17,1h1v1h-1zM18,1h1v1h-1zM24,1h1v1h-1zM0,2h1v1h-1zM2,2h3v1h-3zM6,2h1v1h-1zM9,2h1v1h-1zM11,2h1v1h-1zM13,2h1v1h-1zM15,2h2v1h-2zM18,2h1v1h-1zM20,2h3v1h-3zM24,2h1v1h-1zM0,3h1v1h-1zM2,3h3v1h-3zM6,3h1v1h-1zM8,3h1v1h-1zM10,3h2v1h-2zM14,3h1v1h-1zM16,3h1v1h-1zM18,3h1v1h-1zM20,3h3v1h-3zM24,3h1v1h-1zM0,4h1v1h-1zM2,4h3v1h-3zM6,4h1v1h-1zM9,4h2v1h-2zM12,4h1v1h-1zM15,4h1v1h-1zM18,4h1v1h-1zM20,4h3v1h-3zM24,4h1v1h-1zM0,5h1v1h-1zM6,5h1v1h-1zM8,5h1v1h-1zM10,5h1v1h-1zM13,5h1v1h-1zM15,5h1v1h-1zM17,5h1v1h-1zM18,5h1v1h-1zM24,5h1v1h-1zM0,6h7v1h-7zM8,6h1v1h-1zM10,6h1v1h-1zM12,6h1v1h-1zM14,6h1v1h-1zM16,6h1v1h-1zM18,6h7v1h-7zM9,7h1v1h-1zM11,7h2v1h-2zM14,7h2v1h-2zM0,8h2v1h-2zM3,8h1v1h-1zM5,8h2v1h-2zM8,8h1v1h-1zM10,8h1v1h-1zM12,8h2v1h-2zM15,8h1v1h-1zM17,8h1v1h-1zM19,8h1v1h-1zM21,8h1v1h-1zM23,8h2v1h-2zM1,9h2v1h-2zM4,9h1v1h-1zM7,9h1v1h-1zM9,9h2v1h-2zM12,9h1v1h-1zM14,9h2v1h-2zM17,9h1v1h-1zM19,9h2v1h-2zM22,9h1v1h-1zM24,9h1v1h-1zM0,10h1v1h-1zM2,10h2v1h-2zM5,10h1v1h-1zM8,10h2v1h-2zM11,10h1v1h-1zM13,10h1v1h-1zM15,10h2v1h-2zM18,10h1v1h-1zM20,10h2v1h-2zM23,10h1v1h-1zM1,11h1v1h-1zM3,11h2v1h-2zM6,11h1v1h-1zM8,11h1v1h-1zM10,11h2v1h-2zM13,11h2v1h-2zM16,11h1v1h-1zM19,11h1v1h-1zM21,11h1v1h-1zM23,11h2v1h-2zM0,12h2v1h-2zM3,12h1v1h-1zM5,12h2v1h-2zM9,12h1v1h-1zM11,12h1v1h-1zM14,12h1v1h-1zM16,12h2v1h-2zM20,12h1v1h-1zM22,12h2v1h-2zM1,13h1v1h-1zM4,13h1v1h-1zM6,13h2v1h-2zM10,13h2v1h-2zM13,13h1v1h-1zM15,13h1v1h-1zM17,13h2v1h-2zM21,13h1v1h-1zM24,13h1v1h-1zM0,14h1v1h-1zM2,14h2v1h-2zM5,14h1v1h-1zM7,14h1v1h-1zM9,14h2v1h-2zM12,14h1v1h-1zM14,14h2v1h-2zM18,14h1v1h-1zM20,14h1v1h-1zM22,14h1v1h-1zM24,14h1v1h-1zM1,15h2v1h-2zM4,15h1v1h-1zM8,15h1v1h-1zM10,15h1v1h-1zM13,15h1v1h-1zM16,15h1v1h-1zM19,15h2v1h-2zM23,15h1v1h-1zM0,16h1v1h-1zM3,16h2v1h-2zM6,16h1v1h-1zM9,16h2v1h-2zM12,16h2v1h-2zM15,16h1v1h-1zM17,16h1v1h-1zM20,16h1v1h-1zM22,16h2v1h-2zM8,17h2v1h-2zM11,17h1v1h-1zM13,17h2v1h-2zM16,17h1v1h-1zM19,17h1v1h-1zM21,17h1v1h-1zM24,17h1v1h-1zM0,18h7v1h-7zM8,18h1v1h-1zM10,18h2v1h-2zM13,18h1v1h-1zM15,18h2v1h-2zM18,18h1v1h-1zM20,18h2v1h-2zM23,18h1v1h-1zM0,19h1v1h-1zM6,19h1v1h-1zM9,19h1v1h-1zM11,19h1v1h-1zM14,19h1v1h-1zM17,19h1v1h-1zM18,19h1v1h-1zM24,19h1v1h-1zM0,20h1v1h-1zM2,20h3v1h-3zM6,20h1v1h-1zM8,20h2v1h-2zM11,20h2v1h-2zM14,20h1v1h-1zM16,20h2v1h-2zM18,20h1v1h-1zM20,20h3v1h-3zM24,20h1v1h-1zM0,21h1v1h-1zM2,21h3v1h-3zM6,21h1v1h-1zM10,21h1v1h-1zM12,21h2v1h-2zM15,21h1v1h-1zM18,21h1v1h-1zM20,21h3v1h-3zM24,21h1v1h-1zM0,22h1v1h-1zM2,22h3v1h-3zM6,22h1v1h-1zM9,22h1v1h-1zM11,22h1v1h-1zM14,22h1v1h-1zM16,22h1v1h-1zM18,22h1v1h-1zM20,22h3v1h-3zM24,22h1v1h-1zM0,23h1v1h-1zM6,23h1v1h-1zM8,23h2v1h-2zM12,23h1v1h-1zM15,23h1v1h-1zM17,23h2v1h-2zM18,23h1v1h-1zM24,23h1v1h-1zM0,24h7v1h-7zM9,24h1v1h-1zM11,24h2v1h-2zM14,24h1v1h-1zM16,24h1v1h-1zM18,24h7v1h-7z" />
-              </svg>
-
-<span class="ts">➜ Code:</span> <span class="ta">847293</span>
-            </div>
+        <div class="feature">
+          <div class="copytext">
+            <h3><span lang="zh">电脑上的真终端</span><span lang="en">A real terminal on your computer</span></h3>
+            <p><span lang="zh">开一个终端跑 dev server、看日志、用 git。原生终端渲染，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断，回来接着看。</span><span lang="en">Open a terminal to run a dev server, tail logs or use git. Native terminal rendering with a Ctrl / Esc / Tab / arrow-key bar; it keeps running when you close the app.</span></p>
           </div>
-          <div class="tab-pane" id="tab-qs-public">
-            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsPubDesc">先在公网服务器部署网关，本地 CLI 连接远程网关。</p>
-            <div class="term"><span class="tm" data-i18n="tmServerGateway"># 服务器端：启动网关</span>
-<span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
-<span class="to">Gateway listening on 0.0.0.0:8787</span>
+          <div class="phone"><img src="assets/shots/ios-terminal.webp" alt="手机上运行 npm run dev 的终端" loading="lazy" width="640" height="1391" /></div>
+        </div>
 
-<span class="tm" data-i18n="tmLocalConnect"># 本地：连接远程网关</span>
-<span class="tp">$</span> <span class="tc">linkshell start --gateway wss://gw.example.com</span>
-
-<span class="to">Connected to remote gateway</span>
-<span class="to">Public address: https://gw.example.com</span>
-
-              <svg class="qr" viewBox="0 0 25 25" shape-rendering="crispEdges">
-                <rect width="25" height="25" fill="none" />
-                <path fill="#9a9898"
-                  d="M0,0h7v1h-7zM9,0h2v1h-2zM12,0h1v1h-1zM14,0h2v1h-2zM18,0h7v1h-7zM0,1h1v1h-1zM6,1h1v1h-1zM9,1h1v1h-1zM11,1h1v1h-1zM13,1h2v1h-2zM16,1h1v1h-1zM18,1h1v1h-1zM24,1h1v1h-1zM0,2h1v1h-1zM2,2h3v1h-3zM6,2h1v1h-1zM8,2h1v1h-1zM10,2h2v1h-2zM14,2h1v1h-1zM16,2h1v1h-1zM18,2h1v1h-1zM20,2h3v1h-3zM24,2h1v1h-1zM0,3h1v1h-1zM2,3h3v1h-3zM6,3h1v1h-1zM9,3h2v1h-2zM12,3h1v1h-1zM15,3h2v1h-2zM18,3h1v1h-1zM20,3h3v1h-3zM24,3h1v1h-1zM0,4h1v1h-1zM2,4h3v1h-3zM6,4h1v1h-1zM8,4h2v1h-2zM11,4h1v1h-1zM13,4h1v1h-1zM16,4h1v1h-1zM18,4h1v1h-1zM20,4h3v1h-3zM24,4h1v1h-1zM0,5h1v1h-1zM6,5h1v1h-1zM9,5h1v1h-1zM11,5h2v1h-2zM14,5h1v1h-1zM16,5h1v1h-1zM18,5h1v1h-1zM24,5h1v1h-1zM0,6h7v1h-7zM8,6h1v1h-1zM10,6h1v1h-1zM12,6h1v1h-1zM14,6h1v1h-1zM16,6h1v1h-1zM18,6h7v1h-7zM8,7h1v1h-1zM10,7h3v1h-3zM14,7h1v1h-1zM16,7h1v1h-1zM0,8h1v1h-1zM3,8h2v1h-2zM6,8h1v1h-1zM8,8h1v1h-1zM11,8h1v1h-1zM13,8h2v1h-2zM16,8h1v1h-1zM18,8h2v1h-2zM21,8h1v1h-1zM23,8h1v1h-1zM1,9h1v1h-1zM3,9h1v1h-1zM5,9h2v1h-2zM9,9h1v1h-1zM12,9h2v1h-2zM15,9h1v1h-1zM17,9h2v1h-2zM20,9h1v1h-1zM22,9h2v1h-2zM0,10h2v1h-2zM4,10h1v1h-1zM6,10h1v1h-1zM8,10h2v1h-2zM11,10h1v1h-1zM14,10h1v1h-1zM16,10h2v1h-2zM19,10h1v1h-1zM21,10h2v1h-2zM24,10h1v1h-1zM1,11h2v1h-2zM5,11h1v1h-1zM7,11h2v1h-2zM10,11h1v1h-1zM12,11h2v1h-2zM15,11h1v1h-1zM18,11h1v1h-1zM20,11h1v1h-1zM22,11h1v1h-1zM24,11h1v1h-1zM0,12h1v1h-1zM3,12h1v1h-1zM5,12h2v1h-2zM9,12h2v1h-2zM13,12h1v1h-1zM15,12h2v1h-2zM19,12h1v1h-1zM21,12h1v1h-1zM23,12h1v1h-1zM2,13h1v1h-1zM4,13h2v1h-2zM8,13h1v1h-1zM10,13h1v1h-1zM12,13h1v1h-1zM14,13h2v1h-2zM17,13h1v1h-1zM20,13h2v1h-2zM24,13h1v1h-1zM1,14h1v1h-1zM3,14h2v1h-2zM7,14h1v1h-1zM9,14h1v1h-1zM11,14h2v1h-2zM14,14h1v1h-1zM16,14h1v1h-1zM19,14h2v1h-2zM22,14h1v1h-1zM24,14h1v1h-1zM0,15h2v1h-2zM3,15h1v1h-1zM6,15h1v1h-1zM8,15h2v1h-2zM12,15h1v1h-1zM14,15h1v1h-1zM17,15h1v1h-1zM20,15h1v1h-1zM23,15h2v1h-2zM1,16h1v1h-1zM4,16h2v1h-2zM8,16h1v1h-1zM10,16h2v1h-2zM13,16h1v1h-1zM16,16h2v1h-2zM19,16h1v1h-1zM21,16h2v1h-2zM24,16h1v1h-1zM8,17h1v1h-1zM10,17h1v1h-1zM13,17h2v1h-2zM16,17h1v1h-1zM18,17h1v1h-1zM21,17h1v1h-1zM23,17h1v1h-1zM0,18h7v1h-7zM9,18h2v1h-2zM12,18h1v1h-1zM14,18h1v1h-1zM17,18h1v1h-1zM19,18h2v1h-2zM22,18h1v1h-1zM24,18h1v1h-1zM0,19h1v1h-1zM6,19h1v1h-1zM8,19h1v1h-1zM10,19h1v1h-1zM13,19h2v1h-2zM16,19h1v1h-1zM18,19h1v1h-1zM20,19h1v1h-1zM23,19h1v1h-1zM0,20h1v1h-1zM2,20h3v1h-3zM6,20h1v1h-1zM9,20h1v1h-1zM11,20h2v1h-2zM15,20h1v1h-1zM17,20h2v1h-2zM20,20h1v1h-1zM22,20h2v1h-2zM0,21h1v1h-1zM2,21h3v1h-3zM6,21h1v1h-1zM8,21h2v1h-2zM12,21h1v1h-1zM14,21h1v1h-1zM16,21h1v1h-1zM19,21h1v1h-1zM21,21h1v1h-1zM24,21h1v1h-1zM0,22h1v1h-1zM2,22h3v1h-3zM6,22h1v1h-1zM10,22h1v1h-1zM13,22h1v1h-1zM15,22h2v1h-2zM18,22h2v1h-2zM22,22h1v1h-1zM0,23h1v1h-1zM6,23h1v1h-1zM9,23h1v1h-1zM11,23h1v1h-1zM14,23h1v1h-1zM17,23h1v1h-1zM20,23h2v1h-2zM24,23h1v1h-1zM0,24h7v1h-7zM8,24h2v1h-2zM11,24h1v1h-1zM13,24h2v1h-2zM16,24h1v1h-1zM18,24h7v1h-7z" />
-              </svg>
-
-<span class="ts">➜ Code:</span> <span class="ta">293847</span>
-            </div>
+        <div class="feature flip">
+          <div class="copytext">
+            <h3><span lang="zh">在手机上打开 localhost</span><span lang="en">Open localhost on your phone</span></h3>
+            <p><span lang="zh">电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作，还能全屏看。走同一条加密通道，不需要暴露端口，也不需要同一个 Wi-Fi。</span><span lang="en">Open your computer's <code>localhost:3000</code> right on the phone. Hot reload keeps working and it goes full screen. It travels over the same encrypted channel, so no open ports and no shared Wi-Fi needed.</span></p>
           </div>
-          <div class="tab-pane" id="tab-qs-official">
-            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsOfficialDesc">Pro 订阅用户直接使用官方托管
-              Gateway，一条命令登录即可连接。</p>
-            <div class="term"><span class="tm" data-i18n="tmLoginAccount"># 登录 iTool 账号</span>
-<span class="tp">$</span> <span class="tc">linkshell login</span>
-<span class="to">Opening browser for login...</span>
-<span class="ts">✓ Logged in as user@example.com (Pro)</span>
+          <div class="phone"><img src="assets/shots/ios-preview.webp" alt="在手机上预览电脑本地的天气应用" loading="lazy" width="640" height="1391" /></div>
+        </div>
 
-<span class="to">Available gateways:</span>
-<span class="to"> [1] Official Gateway (Asia) wss://gw.linkshell.app/ws</span>
-<span class="to"> [0] Skip</span>
-
-<span class="to">Connect to gateway [1]: </span><span class="ta">1</span>
-
-<span class="ts">✓ Bridge started in background (PID 12345)</span>
-<span class="to"> Open the LinkShell app on your phone to connect.</span>
-            </div>
+        <div class="grid">
+          <div class="card">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+            <h3><span lang="zh">端到端加密</span><span lang="en">End-to-end encrypted</span></h3>
+            <p><span lang="zh">网关只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</span><span lang="en">Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</span></p>
           </div>
-          <div class="tab-pane" id="tab-qs-free">
-            <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="qsFreeDesc">限时免费公网网关，无需登录、无需自建服务器，直接连接体验。</p>
-            <div class="term"><span class="tm" data-i18n="tmFreeConnect"># 直接连接免费网关</span>
-<span class="tp">$</span> <span class="tc">linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws</span>
-
-<span class="to">Connected to free gateway</span>
-
-              <svg class="qr" viewBox="0 0 25 25" shape-rendering="crispEdges">
-                <rect width="25" height="25" fill="none" />
-                <path fill="#9a9898"
-                  d="M0,0h7v1h-7zM9,0h1v1h-1zM11,0h2v1h-2zM14,0h1v1h-1zM16,0h2v1h-2zM18,0h7v1h-7zM0,1h1v1h-1zM6,1h1v1h-1zM8,1h1v1h-1zM10,1h1v1h-1zM12,1h2v1h-2zM15,1h1v1h-1zM17,1h1v1h-1zM18,1h1v1h-1zM24,1h1v1h-1zM0,2h1v1h-1zM2,2h3v1h-3zM6,2h1v1h-1zM9,2h1v1h-1zM11,2h1v1h-1zM13,2h1v1h-1zM15,2h2v1h-2zM18,2h1v1h-1zM20,2h3v1h-3zM24,2h1v1h-1zM0,3h1v1h-1zM2,3h3v1h-3zM6,3h1v1h-1zM8,3h1v1h-1zM10,3h2v1h-2zM14,3h1v1h-1zM16,3h1v1h-1zM18,3h1v1h-1zM20,3h3v1h-3zM24,3h1v1h-1zM0,4h1v1h-1zM2,4h3v1h-3zM6,4h1v1h-1zM9,4h2v1h-2zM12,4h1v1h-1zM15,4h1v1h-1zM18,4h1v1h-1zM20,4h3v1h-3zM24,4h1v1h-1zM0,5h1v1h-1zM6,5h1v1h-1zM8,5h1v1h-1zM10,5h1v1h-1zM13,5h1v1h-1zM15,5h1v1h-1zM17,5h1v1h-1zM18,5h1v1h-1zM24,5h1v1h-1zM0,6h7v1h-7zM8,6h1v1h-1zM10,6h1v1h-1zM12,6h1v1h-1zM14,6h1v1h-1zM16,6h1v1h-1zM18,6h7v1h-7zM9,7h1v1h-1zM11,7h2v1h-2zM14,7h2v1h-2zM0,8h2v1h-2zM3,8h1v1h-1zM5,8h2v1h-2zM8,8h1v1h-1zM10,8h1v1h-1zM12,8h2v1h-2zM15,8h1v1h-1zM17,8h1v1h-1zM19,8h1v1h-1zM21,8h1v1h-1zM23,8h2v1h-2zM1,9h2v1h-2zM4,9h1v1h-1zM7,9h1v1h-1zM9,9h2v1h-2zM12,9h1v1h-1zM14,9h2v1h-2zM17,9h1v1h-1zM19,9h2v1h-2zM22,9h1v1h-1zM24,9h1v1h-1zM0,10h1v1h-1zM2,10h2v1h-2zM5,10h1v1h-1zM8,10h2v1h-2zM11,10h1v1h-1zM13,10h1v1h-1zM15,10h2v1h-2zM18,10h1v1h-1zM20,10h2v1h-2zM23,10h1v1h-1zM1,11h1v1h-1zM3,11h2v1h-2zM6,11h1v1h-1zM8,11h1v1h-1zM10,11h2v1h-2zM13,11h2v1h-2zM16,11h1v1h-1zM19,11h1v1h-1zM21,11h1v1h-1zM23,11h2v1h-2zM0,12h2v1h-2zM3,12h1v1h-1zM5,12h2v1h-2zM9,12h1v1h-1zM11,12h1v1h-1zM14,12h1v1h-1zM16,12h2v1h-2zM20,12h1v1h-1zM22,12h2v1h-2zM1,13h1v1h-1zM4,13h1v1h-1zM6,13h2v1h-2zM10,13h2v1h-2zM13,13h1v1h-1zM15,13h1v1h-1zM17,13h2v1h-2zM21,13h1v1h-1zM24,13h1v1h-1zM0,14h1v1h-1zM2,14h2v1h-2zM5,14h1v1h-1zM7,14h1v1h-1zM9,14h2v1h-2zM12,14h1v1h-1zM14,14h2v1h-2zM18,14h1v1h-1zM20,14h1v1h-1zM22,14h1v1h-1zM24,14h1v1h-1zM1,15h2v1h-2zM4,15h1v1h-1zM8,15h1v1h-1zM10,15h1v1h-1zM13,15h1v1h-1zM16,15h1v1h-1zM19,15h2v1h-2zM23,15h1v1h-1zM0,16h1v1h-1zM3,16h2v1h-2zM6,16h1v1h-1zM9,16h2v1h-2zM12,16h2v1h-2zM15,16h1v1h-1zM17,16h1v1h-1zM20,16h1v1h-1zM22,16h2v1h-2zM8,17h2v1h-2zM11,17h1v1h-1zM13,17h2v1h-2zM16,17h1v1h-1zM19,17h1v1h-1zM21,17h1v1h-1zM24,17h1v1h-1zM0,18h7v1h-7zM8,18h1v1h-1zM10,18h2v1h-2zM13,18h1v1h-1zM15,18h2v1h-2zM18,18h1v1h-1zM20,18h2v1h-2zM23,18h1v1h-1zM0,19h1v1h-1zM6,19h1v1h-1zM9,19h1v1h-1zM11,19h1v1h-1zM14,19h1v1h-1zM17,19h1v1h-1zM18,19h1v1h-1zM24,19h1v1h-1zM0,20h1v1h-1zM2,20h3v1h-3zM6,20h1v1h-1zM8,20h2v1h-2zM11,20h2v1h-2zM14,20h1v1h-1zM16,20h2v1h-2zM18,20h1v1h-1zM20,20h3v1h-3zM24,20h1v1h-1zM0,21h1v1h-1zM2,21h3v1h-3zM6,21h1v1h-1zM10,21h1v1h-1zM12,21h2v1h-2zM15,21h1v1h-1zM18,21h1v1h-1zM20,21h3v1h-3zM24,21h1v1h-1zM0,22h1v1h-1zM2,22h3v1h-3zM6,22h1v1h-1zM9,22h1v1h-1zM11,22h1v1h-1zM14,22h1v1h-1zM16,22h1v1h-1zM18,22h1v1h-1zM20,22h3v1h-3zM24,22h1v1h-1zM0,23h1v1h-1zM6,23h1v1h-1zM8,23h2v1h-2zM12,23h1v1h-1zM15,23h1v1h-1zM17,23h2v1h-2zM18,23h1v1h-1zM24,23h1v1h-1zM0,24h7v1h-7zM9,24h1v1h-1zM11,24h2v1h-2zM14,24h1v1h-1zM16,24h1v1h-1zM18,24h7v1h-7z" />
-              </svg>
-
-<span class="ts">➜ Code:</span> <span class="ta">519382</span>
-            </div>
+          <div class="card">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg></div>
+            <h3><span lang="zh">会话管理</span><span lang="en">Tidy sessions</span></h3>
+            <p><span lang="zh">重命名、归档、删除。Codex 和 Claude 的会话会同步到它们自己的记录里，<code>claude --resume</code> 也能看到新名字。</span><span lang="en">Rename, archive, delete. Codex and Claude sessions change in their own records too, so <code>claude --resume</code> shows the new name.</span></p>
+          </div>
+          <div class="card">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+            <h3><span lang="zh">看电脑屏幕、传文件</span><span lang="en">Screen and files</span></h3>
+            <p><span lang="zh">随时看一眼电脑屏幕（需要 ffmpeg），把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Glance at the computer's screen (needs ffmpeg), and send photos and files from your phone into the project for the agent.</span></p>
+          </div>
+          <div class="card">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div>
+            <h3><span lang="zh">在哪都能连</span><span lang="en">Reachable anywhere</span></h3>
+            <p><span lang="zh">Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。</span><span lang="en">Pro uses the official gateway: sign in and go. Or run your own with one command or Docker, free.</span></p>
           </div>
         </div>
       </div>
+    </section>
 
-      <div>
-        <h3 data-i18n="step3Title">[3] 手机扫码，即刻接管</h3>
-        <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="step3Desc">打开 LinkShell App（iOS /
-          Android），对准终端二维码扫一扫，立刻接管会话。</p>
-        <div class="term"><span class="to">&gt; scanning QR...</span>
-<span class="to">&gt; pairing code: </span><span class="ta">847293</span>
-<span class="ts">&gt; connected to session #1</span>
-<span class="ts">&gt; control acquired</span>
-<span class="cur"></span>
+    <section class="sec" id="agents">
+      <div class="c">
+        <div class="eyebrow">Agents</div>
+        <h2><span lang="zh">每个 Agent 做到它能做到的最好</span><span lang="en">Each agent, as far as it can go</span></h2>
+        <p class="sub"><span lang="zh">Agent 用你电脑上已经安装、已经登录的那一份。LinkShell 不经手任何 Agent 的账号和密钥。</span><span lang="en">Agents run as the copies already installed and signed in on your computer. LinkShell never touches their accounts or keys.</span></p>
+        <div class="tbl">
+          <table>
+            <thead>
+              <tr><th>Agent</th><th><span lang="zh">方式</span><span lang="en">Mode</span></th><th><span lang="zh">体验</span><span lang="en">What you get</span></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Codex</td>
+                <td><span class="tier"><span lang="zh">多端同步</span><span lang="en">Shared</span></span></td>
+                <td><span lang="zh">用 <code>linkshell codex</code> 打开的终端和手机同时在线，任何一端都能发消息、打断、审批。</span><span lang="en">The terminal opened with <code>linkshell codex</code> and your phone are live at once; either can send, interrupt and approve.</span></td>
+              </tr>
+              <tr>
+                <td>Claude Code</td>
+                <td><span class="tier"><span lang="zh">接力</span><span lang="en">Handoff</span></span></td>
+                <td><span lang="zh">电脑上用原生界面（<code>linkshell claude</code>），手机发消息即接管，电脑按任意键收回。</span><span lang="en">Claude's own UI at your desk (<code>linkshell claude</code>); a message from the phone takes over, any key on the computer takes it back.</span></td>
+              </tr>
+              <tr>
+                <td>Gemini CLI · GitHub Copilot<br /><span class="muted">OpenCode · Cursor · Grok</span></td>
+                <td><span class="tier"><span lang="zh">远程会话</span><span lang="en">Remote</span></span></td>
+                <td><span lang="zh">通过 Agent Client Protocol 在手机上新建、继续会话，实时输出、审批、切换模式和模型。</span><span lang="en">Start and continue sessions from the phone over the Agent Client Protocol: live output, approvals, modes and models.</span></td>
+              </tr>
+              <tr>
+                <td><span lang="zh">任何命令行工具</span><span lang="en">Any CLI</span></td>
+                <td><span class="tier"><span lang="zh">终端</span><span lang="en">Terminal</span></span></td>
+                <td><span lang="zh">在电脑上开一个终端，手机上看和输入。</span><span lang="en">A terminal on the computer, viewed and typed into from the phone.</span></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- FEATURES -->
-  <section class="sec" id="how" data-page="home">
-    <div class="c">
-      <h2 data-i18n="featureSectionTitle">原生的终端体感，去中心化的控制。</h2>
-
-      <div style="margin-bottom:24px">
-        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span data-i18n="f1Title">本地 PTY
-            驱动</span></p>
-        <p style="color:var(--text-sec)" data-i18n="f1Desc">繁重的计算过程完全依赖本地机器。保留颜色、光标、readline 输出及信号等完整终端语义。</p>
-      </div>
-      <div style="margin-bottom:24px">
-        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span
-            data-i18n="f2Title">全平台客户端</span></p>
-        <p style="color:var(--text-sec)" data-i18n="f2Desc">支持 React Native / Expo 移动端与 Web 页面调试端。统一协议同时承载终端、Agent、桌面和 Browser 预览。</p>
-      </div>
-      <div style="margin-bottom:24px">
-        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span
-            data-i18n="f3Title">强一致性同步</span></p>
-        <p style="color:var(--text-sec)" data-i18n="f3Desc">独有的单控制者防冲突模型。避免多端并抢焦点，画面精准对齐不串流。</p>
-      </div>
-      <div>
-        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span data-i18n="f4Title">远程桌面</span>
-        </p>
-        <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="f4Desc">不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC
-          30fps 丝滑体验，自动降级到截图流兜底。</p>
-        <code class="term"
-          style="display:block;padding:8px 16px">linkshell start --daemon --provider claude --screen</code>
-      </div>
-
-      <div style="margin-top:24px">
-        <p style="font-weight:700;margin-bottom:4px"><span class="tp">&gt;</span> <span
-            data-i18n="f5Title">端口转发预览</span></p>
-        <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="f5Desc">远程启动 dev server，手机直接预览页面。支持
-          CSS/JS/图片完整加载、HMR 热更新、PC/手机视图切换和全屏模式。</p>
-        <div class="term" style="padding:8px 16px"><span class="tm" data-i18n="tmStartDevServer"># 远程终端启动 dev
-            server</span>
-<span class="tp">$</span> <span class="tc">npm run dev</span>
-<span class="to"> ➜ Local: http://localhost:3000</span>
-
-<span class="tm" data-i18n="tmAppBrowserTab"># App 切换到 Browser 标签，输入端口 3000，即可预览</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- AGENT WORKSPACE -->
-  <section class="sec" data-page="home">
-    <div class="c">
-      <h2 data-i18n="diSectionTitle">Agent Workspace，让 AI 触手可及</h2>
-      <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="diSectionDesc">Agent 标签结构化展示 Claude Code 与 Codex 对话。模型、权限、推理强度随 CLI capabilities 动态同步。</p>
-
-      <div class="term" style="margin-bottom:24px">┌─ Agent Workspace ───────────────────────┐
-│ <span class="ta">Claude Code</span> · Sonnet · workspace_write │
-├─ timeline ─────────────────────────────┤
-│ tool: npm test <span class="ts">PASS</span> · file: App.tsx +12 │
-├─ permission ───────────────────────────┤
-│ Run <span class="tc">`git push`</span>? <span class="to">[deny]</span> <span class="ts">[approve]</span> │
-└────────────────────────────────────────┘</div>
-
-      <div class="li g" data-i18n="diFeature1">结构化时间线 — 消息、计划、tool call、命令执行和文件变更一屏呈现</div>
-      <div class="li g" data-i18n="diFeature2">权限审批 — 在手机上直接允许、拒绝或回复补充输入</div>
-      <div class="li g" data-i18n="diFeature3">动态能力 — provider 模型、权限模式和推理强度由 CLI 下发</div>
-      <div class="li g" data-i18n="diFeature4">恢复历史 — 本地缓存对话与 timeline，重连后自动同步快照</div>
-    </div>
-  </section>
-
-  <!-- PROJECT WORKSPACES -->
-  <section class="sec" data-page="home">
-    <div class="c">
-      <h2 data-i18n="projSectionTitle">项目空间，并行掌控</h2>
-      <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="projSectionDesc">
-        每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。</p>
-
-      <div class="term" style="margin-bottom:24px"><span class="tp">$</span> <span class="tc">linkshell status</span>
-<span class="to">Session #3 | 2 projects active</span>
-
-<span class="tm">PROJECTS</span>
-<span class="ts">linkshell-app</span> ~/projects/linkshell-app <span class="ts">[████████░░] 85%</span>
-<span class="ta">api-server</span> ~/projects/api-server <span class="ta">[██████░░░░] 60%</span>
-<span style="color:var(--warning)">ml-pipeline</span> ~/projects/ml-pipeline <span
-  style="color:var(--warning)">[████░░░░░░] 40%</span>
-
-<span class="tm">TERMINALS</span>
-<span class="to">[1] linkshell-app</span> <span class="tp">$</span> npm test <span class="ts">PASS 12/12</span>
-<span class="to">[2] api-server</span> <span class="tp">$</span> cargo build <span
-  class="ta">Compiling...</span>
-      </div>
-
-      <div class="li b" data-i18n="projFeature1">多项目并行 — 同一会话内切换不同项目目录</div>
-      <div class="li b" data-i18n="projFeature2">独立终端 — 每个项目拥有独立的命令执行环境</div>
-      <div class="li b" data-i18n="projFeature3">最近项目 — 智能记忆常用项目，一键直达</div>
-      <div class="li b" data-i18n="projFeature4">实时状态 — 并行任务进度一览无余</div>
-    </div>
-  </section>
-
-  <!-- WORKFLOW -->
-  <section class="sec" data-page="home">
-    <div class="c">
-      <h2 data-i18n="lifestyleSectionTitle">LinkShell 工作流</h2>
-      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="lifestyleLead">不仅是远程命令行桥接；更是打破工位束缚的极客探索。</p>
-
-      <div style="margin-bottom:32px">
-        <h3><span class="tm">01.</span> <span data-i18n="l1Title">挂起并离开</span></h3>
-        <p style="color:var(--text-sec)" data-i18n="l1Desc">编译、构建、拉镜像... 常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell 默默守护当前状态。</p>
-      </div>
-      <div style="margin-bottom:32px">
-        <h3><span class="tm">02.</span> <span data-i18n="l2Title">随时审查</span></h3>
-        <p style="color:var(--text-sec)" data-i18n="l2Desc">随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。</p>
-      </div>
-      <div>
-        <h3><span class="tm">03.</span> <span data-i18n="l3Title">直接修正</span></h3>
-        <p style="color:var(--text-sec)" data-i18n="l3Desc">发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- DOCS -->
-  <section class="sec" id="docs" data-page="docs">
-    <div class="c">
-      <h2 data-i18n="docsSectionTitle">文档</h2>
-      <p style="color:var(--text-sec);margin-bottom:48px" data-i18n="docsSectionDesc">从安装到部署，你需要知道的一切。</p>
-
-      <!-- Architecture -->
-      <div style="margin-bottom:64px">
-        <h3><span class="tm">01</span> <span data-i18n="docsArchTitle">架构概览</span></h3>
-        <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsArchDesc">LinkShell 采用三层架构：本地 CLI 捕获 PTY
-          输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。</p>
-        <div class="term">┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
-│ <span class="ts">CLI (Host)</span> │ &lt;─ <span class="tm">WS</span> ─&gt; │ <span class="ta">Gateway</span> │ &lt;─ <span class="tm">WS</span> ─&gt; │ <span style="color:var(--warning)">Mobile App</span> │
-│                  │ │                  │ │                  │
-│ PTY Bridge       │ │ Session Relay    │ │ xterm.js Render  │
-│ Screen Share     │ │ Pairing Service  │ │ QR Pairing       │
-│ Scrollback Buf   │ │ Control Rights   │ │ Multi-Gateway    │
-└──────────────────┘ └──────────────────┘ └──────────────────┘</div>
-      </div>
-
-      <!-- CLI Reference -->
-      <div style="margin-bottom:64px">
-        <h3><span class="tm">02</span> <span data-i18n="docsCliTitle">CLI 命令参考</span></h3>
-
-        <div style="margin-bottom:32px">
-          <p style="font-weight:700;margin-bottom:4px">linkshell start</p>
-          <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdStart">启动桥接会话。自动启动内置网关，桥接 AI 终端，开放 Agent Workspace，并生成配对二维码。</p>
-          <div class="term"><span class="tm">FLAGS</span>
---daemon <span class="to" data-i18n="flagDaemon">后台守护模式运行</span>
---provider <span class="to" data-i18n="flagProvider">指定终端 provider (claude / codex / gemini / copilot / custom)</span>
---agent-ui <span class="to" data-i18n="flagAgentUi">启用 Agent Workspace</span>
---screen <span class="to" data-i18n="flagScreen">启用远程桌面共享</span>
---port <span class="to" data-i18n="flagPort">指定网关端口 (默认 8787)</span></div>
-        </div>
-
-        <div style="margin-bottom:32px">
-          <p style="font-weight:700;margin-bottom:4px">linkshell gateway</p>
-          <p style="color:var(--text-sec);margin-bottom:8px" data-i18n="docsCmdGateway">单独启动网关服务器。适用于独立部署网关到远程服务器的场景。
-          </p>
-          <div class="term"><span class="tm">FLAGS</span>
---port <span class="to" data-i18n="flagGwPort">指定监听端口</span>
---host <span class="to" data-i18n="flagGwHost">指定绑定地址</span>
---daemon <span class="to" data-i18n="flagGwDaemon">后台守护模式运行</span></div>
-        </div>
-
-        <div style="margin-bottom:32px">
-          <p style="font-weight:700;margin-bottom:4px">linkshell setup</p>
-          <p style="color:var(--text-sec)" data-i18n="docsCmdSetup">交互式初始化配置。引导你完成网关地址、AI 提供者等基础设置。</p>
-        </div>
-
-        <div style="margin-bottom:32px">
-          <p style="font-weight:700;margin-bottom:4px">linkshell doctor</p>
-          <p style="color:var(--text-sec)" data-i18n="docsCmdDoctor">环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。</p>
-        </div>
-
-        <div style="margin-bottom:32px">
-          <p style="font-weight:700;margin-bottom:4px">linkshell status</p>
-          <p style="color:var(--text-sec)" data-i18n="docsCmdStatus">查看当前运行状态。显示活跃会话、网关连接状态和守护进程信息。</p>
-        </div>
-
-        <div>
-          <p style="font-weight:700;margin-bottom:4px">linkshell stop</p>
-          <p style="color:var(--text-sec)" data-i18n="docsCmdStop">停止守护进程。优雅关闭桥接会话和内置网关。</p>
-        </div>
-
-        <div style="margin-top:32px">
-          <p style="font-weight:700;margin-bottom:4px">linkshell login</p>
-          <p style="color:var(--text-sec)" data-i18n="docsCmdLogin">登录 iTool 账号。浏览器跳转授权后自动保存凭证，Pro 用户可直接选择官方 Gateway 连接。
-          </p>
-        </div>
-
-        <div style="margin-top:32px">
-          <p style="font-weight:700;margin-bottom:4px">linkshell logout</p>
-          <p style="color:var(--text-sec)" data-i18n="docsCmdLogout">退出登录，清除本地凭证。</p>
-        </div>
-
-        <div style="margin-top:32px">
-          <p style="font-weight:700;margin-bottom:4px">linkshell list</p>
-          <p style="color:var(--text-sec)" data-i18n="docsCmdList">列出官方 Gateway 上你的活跃会话。需要先登录。</p>
-        </div>
-      </div>
-
-      <!-- Deployment -->
-      <div style="margin-bottom:64px">
-        <h3><span class="tm">03</span> <span data-i18n="docsDeployTitle">部署方式</span></h3>
-        <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsDeployDesc">根据你的网络环境选择合适的部署方式。</p>
-
-        <div class="tabs">
-          <button class="tab active" data-tab="lan" data-i18n="tabLan">局域网</button>
-          <button class="tab" data-tab="public" data-i18n="tabPublic">公网</button>
-          <button class="tab" data-tab="official" data-i18n="tabOfficial">官方 Gateway</button>
-          <button class="tab" data-tab="free" data-i18n="tabFree">限时免费</button>
-        </div>
-        <div class="tab-body">
-          <div class="tab-pane active" id="tab-lan">
-            <p style="font-weight:700;margin-bottom:4px" data-i18n="docsDeployLocal">本地直连（最简单）</p>
-            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployLocalDesc">CLI
-              内置网关，同一局域网内手机直连电脑。零配置，开箱即用。</p>
-            <div class="term" style="margin-bottom:16px"><span class="tp">$</span> <span class="tc">npm i -g
-                linkshell-cli</span>
-<span class="tp">$</span> <span class="tc">linkshell start --daemon</span>
-            </div>
-            <div class="li g" data-i18n="lanTip1">手机和电脑需在同一 Wi-Fi 下</div>
-            <div class="li g" data-i18n="lanTip2">无需任何服务器，开箱即用</div>
-            <div class="li g" data-i18n="lanTip3">延迟最低，数据不出局域网</div>
+    <section class="sec" id="install">
+      <div class="c">
+        <div class="eyebrow"><span lang="zh">开始使用</span><span lang="en">Get started</span></div>
+        <h2><span lang="zh">三步连上你的电脑</span><span lang="en">Three steps to your computer</span></h2>
+        <p class="sub"><span lang="zh">电脑需要 macOS 或 Linux，以及 Node.js 22.13 或更新版本。</span><span lang="en">Your computer needs macOS or Linux and Node.js 22.13 or newer.</span></p>
+        <div class="steps">
+          <div class="step">
+            <div class="n">01</div>
+            <h3><span lang="zh">安装并启动</span><span lang="en">Install and start</span></h3>
+            <p><span lang="zh">安装 CLI，在后台启动 LinkShell。它会托管电脑上的 Agent 会话。</span><span lang="en">Install the CLI and start LinkShell in the background. It hosts the agent sessions on this computer.</span></p>
+            <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
+<span class="pr">$ </span>linkshell host --daemon</code></pre>
           </div>
-          <div class="tab-pane" id="tab-public">
-            <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployRemote">远程服务器</span> <span
-                class="ta" data-i18n="docsDeployRemoteTag">[推荐]</span></p>
-            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployRemoteDesc">将网关部署到公网服务器，配合 Nginx
-              反向代理 + HTTPS，跨网络访问。</p>
-            <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmDeployServer"># 服务器端</span>
-<span class="tp">$</span> <span class="tc">linkshell gateway --daemon</span>
-
-<span class="tm" data-i18n="tmDeployLocal"># 本地</span>
-<span class="tp">$</span> <span class="tc">linkshell start --gateway wss://your.server</span>
-            </div>
-            <p style="font-weight:700;margin-bottom:4px;margin-top:20px" data-i18n="docsDeployDocker">Docker 部署</p>
-            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployDockerDesc">使用 Docker Compose
-              一键部署网关。最低要求 1 核 512MB 内存。</p>
-            <div class="term" style="margin-bottom:16px"><span class="tp">$</span> <span class="tc">docker compose up
-                -d</span></div>
-            <div class="li b" data-i18n="pubTip1">支持跨网络、4G/5G 随时接入</div>
-            <div class="li b" data-i18n="pubTip2">推荐 Nginx 反代 + Let's Encrypt HTTPS</div>
-            <div class="li b" data-i18n="pubTip3">数据仅经过你自己的服务器中继</div>
+          <div class="step">
+            <div class="n">02</div>
+            <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span></h3>
+            <p><span lang="zh">Pro：电脑上登录，App 里登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Pro: sign in on the computer and in the app with the same account; the computer just appears. Own gateway: pair once with a QR code.</span></p>
+            <pre><code><span class="cm"># Pro</span>
+<span class="pr">$ </span>linkshell login
+<span class="cm"># <span lang="zh">自建网关</span><span lang="en">your own gateway</span></span>
+<span class="pr">$ </span>linkshell host --gateway wss://gw.you
+<span class="pr">$ </span>linkshell pair</code></pre>
           </div>
-          <div class="tab-pane" id="tab-official">
-            <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployOfficial">官方托管 Gateway</span> <span
-                class="ts" data-i18n="docsDeployOfficialTag">[Pro]</span></p>
-            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployOfficialDesc">订阅 iTool Pro
-              即可使用官方托管的 Gateway，无需自建服务器。登录后自动连接，手机 App 自动发现会话。</p>
-            <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmLogin"># 登录</span>
-<span class="tp">$</span> <span class="tc">linkshell login</span>
-<span class="ts">✓ Logged in as user@example.com (Pro)</span>
-<span class="ts">✓ Bridge started in background</span>
-
-<span class="tm" data-i18n="tmViewSessions"># 查看会话</span>
-<span class="tp">$</span> <span class="tc">linkshell list</span>
-<span class="ts">✓ Official Gateway (Asia)</span>
-<span class="to"> └ ● a1b2c3d4 — claude · my-project · just now</span>
-            </div>
-            <div class="li g" data-i18n="officialTip1">零配置，登录即用，无需部署服务器</div>
-            <div class="li g" data-i18n="officialTip2">手机 App 登录后自动发现会话，无需扫码</div>
-            <div class="li g" data-i18n="officialTip3">订阅到期自动断开，数据不留存</div>
-          </div>
-          <div class="tab-pane" id="tab-free">
-            <p style="font-weight:700;margin-bottom:4px"><span data-i18n="docsDeployFree">限时免费网关</span> <span class="ta"
-                data-i18n="docsDeployFreeTag">[限时]</span></p>
-            <p style="color:var(--text-sec);margin-bottom:12px" data-i18n="docsDeployFreeDesc">
-              限时开放的免费公网网关，无需登录、无需自建服务器，一条命令直接体验跨网络连接。</p>
-            <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmFreeConnect"># 直接连接免费网关</span>
-<span class="tp">$</span> <span class="tc">linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws</span>
-            </div>
-            <div class="li g" data-i18n="freeTip1">无需登录、无需注册，直接使用</div>
-            <div class="li g" data-i18n="freeTip2">支持跨网络访问，体验与 Pro 一致</div>
-            <div class="li b" data-i18n="freeTip3">限时开放，随时可能关闭</div>
+          <div class="step">
+            <div class="n">03</div>
+            <h3><span lang="zh">开始工作</span><span lang="en">Get going</span></h3>
+            <p><span lang="zh">在手机上新建会话；或者在电脑终端里这样启动 Agent，随时交给手机。</span><span lang="en">Start a session on the phone, or launch agents from your terminal like this to hand them over any time.</span></p>
+            <pre><code><span class="pr">$ </span>linkshell claude
+<span class="pr">$ </span>linkshell codex</code></pre>
           </div>
         </div>
-      </div>
-
-      <!-- Remote Desktop -->
-      <div style="margin-bottom:64px">
-        <h3><span class="tm">04</span> <span data-i18n="docsScreenTitle">远程桌面</span></h3>
-        <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsScreenDesc">启动时加上 --screen 参数，App 端会出现
-          Desktop 标签页，实时查看电脑桌面。</p>
-        <div class="term" style="margin-bottom:16px"><span class="tp">$</span> <span class="tc">linkshell start --daemon
---provider claude --screen</span>
-
-<span class="to">Screen sharing enabled</span>
-<span class="to">Mode: WebRTC (30fps) | Fallback: Screenshot stream</span>
-        </div>
-        <div class="li g" data-i18n="docsScreen1">WebRTC 模式 — 默认以 30fps 实时推流桌面画面，延迟极低</div>
-        <div class="li g" data-i18n="docsScreen2">截图流兜底 — 网络条件不佳时自动降级为截图流模式，保证可用性</div>
-        <div class="li g" data-i18n="docsScreen3">自动切换 — 无需手动配置，运行时根据网络质量自动选择最优方案</div>
-        <div class="li g" data-i18n="docsScreen4">App 端切换 — 在 App 内切换 Terminal / Desktop 标签，随时查看桌面</div>
-      </div>
-
-      <!-- Port Forwarding -->
-      <div style="margin-bottom:64px">
-        <h3><span class="tm">05</span> <span data-i18n="docsPortFwdTitle">端口转发</span></h3>
-        <p style="color:var(--text-sec);margin-bottom:16px" data-i18n="docsPortFwdDesc">在远程终端启动 dev server
-          后，直接在手机上预览页面。通过 Gateway 中继 HTTP 请求，支持完整的 Web 应用预览。</p>
-        <div class="term" style="margin-bottom:16px"><span class="tm" data-i18n="tmDocsStartDev"># 远程终端启动 dev
-            server</span>
-<span class="tp">$</span> <span class="tc">npm run dev</span>
-<span class="to"> ➜ Local: http://localhost:3000</span>
-
-<span class="tm" data-i18n="tmDocsAppBrowser"># App 切换到 Browser 标签（globe 图标），输入端口 3000</span>
-<span class="ts">➜ Preview: http://gateway:8787/tunnel/{sessionId}/3000/</span>
-        </div>
-        <div class="li g" data-i18n="docsPortFwd1">完整加载 — HTML、CSS、JS、图片等所有资源通过 tunnel 代理</div>
-        <div class="li g" data-i18n="docsPortFwd2">HMR 支持 — WebSocket 热更新自动转发，Vite / Next.js / webpack 均可</div>
-        <div class="li g" data-i18n="docsPortFwd3">视图切换 — 一键切换 PC / 手机视图，桌面模式以 1024px 宽度渲染</div>
-        <div class="li g" data-i18n="docsPortFwd4">全屏预览 — 隐藏所有 UI，沉浸式查看页面效果</div>
-        <p style="color:var(--warning);font-size:14px;margin-top:12px" data-i18n="docsPortFwdReq">需要 linkshell-cli ≥
-          0.2.53 / gateway ≥ 0.2.17</p>
-      </div>
-
-      <!-- Protocol & Reliability -->
-      <div style="margin-bottom:64px">
-        <h3><span class="tm">06</span> <span data-i18n="docsProtocolTitle">协议与可靠性</span></h3>
-
-        <div class="stat-g">
-          <div class="stat">
-            <div class="stat-v">40+</div>
-            <div class="stat-l" data-i18n="docsProtoMsgTypes">消息类型 (Zod)</div>
-          </div>
-          <div class="stat">
-            <div class="stat-v">ACK</div>
-            <div class="stat-l" data-i18n="docsProtoAck">双层缓冲确认</div>
-          </div>
-          <div class="stat">
-            <div class="stat-v">1000</div>
-            <div class="stat-l" data-i18n="docsProtoScrollback">回滚缓冲区</div>
-          </div>
-          <div class="stat">
-            <div class="stat-v">15s</div>
-            <div class="stat-l" data-i18n="docsProtoHeartbeat">心跳检测</div>
-          </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
-          <div>
-            <p style="font-weight:700;margin-bottom:12px" data-i18n="docsReliabilityTitle">可靠性保障</p>
-            <div class="li g" data-i18n="docsRel1">指数退避自动重连（CLI 和 App 双端）</div>
-            <div class="li g" data-i18n="docsRel2">会话持久化（主机断连后保持 60 秒）</div>
-            <div class="li g" data-i18n="docsRel3">空闲会话 30 分钟自动清理</div>
-            <div class="li g" data-i18n="docsRel4">协议版本协商，向前兼容</div>
+        <div class="install">
+          <p style="color:var(--text-sec);font-size:14px;margin:28px 0 8px"><span lang="zh">其他安装方式</span><span lang="en">Other ways to install</span></p>
+          <div class="tabs">
+            <button class="tab active" data-tab="i-brew" type="button">Homebrew</button>
+            <button class="tab" data-tab="i-curl" type="button">curl</button>
           </div>
           <div>
-            <p style="font-weight:700;margin-bottom:12px" data-i18n="docsControlTitle">控制模型</p>
-            <div class="li b" data-i18n="docsCtrl1">单控制者模型，防止多端输入冲突</div>
-            <div class="li b" data-i18n="docsCtrl2">控制权请求 / 释放 / 转移机制</div>
-            <div class="li b" data-i18n="docsCtrl3">6 位配对码 + QR 码安全配对</div>
-            <div class="li b" data-i18n="docsCtrl4">CORS 和速率限制保护</div>
+            <div class="tab-pane active" id="tab-i-brew"><pre><code><span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell</code></pre></div>
+            <div class="tab-pane" id="tab-i-curl"><pre><code><span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre></div>
           </div>
         </div>
       </div>
+    </section>
 
-      <!-- FAQ -->
-      <div>
-        <h3><span class="tm">07</span> <span data-i18n="docsFaqTitle">常见问题</span></h3>
-
-        <div style="margin-bottom:24px">
-          <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq1Q">Q: 需要公网服务器吗？</p>
-          <p style="color:var(--text-sec)" data-i18n="docsFaq1A">不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。
-          </p>
-        </div>
-        <div style="margin-bottom:24px">
-          <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq2Q">Q: 支持哪些 AI 代理？</p>
-          <p style="color:var(--text-sec)" data-i18n="docsFaq2A">终端模式支持 Claude Code、OpenAI Codex、Gemini、GitHub Copilot 和任意自定义 Shell 进程；Agent Workspace 会自动检测 Claude Code 与 Codex。</p>
-        </div>
-        <div style="margin-bottom:24px">
-          <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq3Q">Q: 手机 App 在哪里下载？</p>
-          <p style="color:var(--text-sec)" data-i18n="docsFaq3A">iOS 版本已上架 <a href="https://apps.apple.com/cn/app/linkshell/id6761547516" target="_blank" rel="noopener">App Store</a>，Android 版本可从 GitHub Releases 下载
-            APK。</p>
-        </div>
-        <div style="margin-bottom:24px">
-          <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq4Q">Q: 数据安全吗？会经过第三方服务器吗？</p>
-          <p style="color:var(--text-sec)" data-i18n="docsFaq4A">本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。</p>
-        </div>
-        <div>
-          <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq5Q">Q: 远程桌面功能如何工作？</p>
-          <p style="color:var(--text-sec)" data-i18n="docsFaq5A">使用 --screen 参数启动后，通过 WebRTC 以 30fps
-            实时传输桌面画面。网络条件不佳时自动降级为截图流模式。</p>
-        </div>
-        <div style="margin-top:24px">
-          <p style="font-weight:700;margin-bottom:4px" data-i18n="docsFaq6Q">Q: 官方 Gateway 是什么？和自建有什么区别？</p>
-          <p style="color:var(--text-sec)" data-i18n="docsFaq6A">官方 Gateway 是 LinkShell 团队托管的公网网关，订阅 iTool Pro
-            即可使用。无需自建服务器，登录后一键连接。手机 App 登录同一账号后自动发现会话，无需扫码。自建网关则完全独立，不依赖任何第三方服务。</p>
+    <section class="sec" id="how">
+      <div class="c">
+        <div class="eyebrow"><span lang="zh">工作原理</span><span lang="en">How it works</span></div>
+        <h2><span lang="zh">Agent 留在你的电脑上</span><span lang="en">The agents stay on your computer</span></h2>
+        <p class="sub"><span lang="zh">电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。手机通过网关连进来，网关只负责把加密后的数据转过去。</span><span lang="en">LinkShell on your computer holds every session, keeps its history and decides who is driving right now. The phone connects through a gateway that only passes encrypted data along.</span></p>
+        <div class="flow">
+          <div class="node"><b><span lang="zh">手机 App</span><span lang="en">Phone app</span></b><span>iOS · Android</span></div>
+          <div class="arrow"><span lang="zh">密文</span><span lang="en">ciphertext</span></div>
+          <div class="node"><b><span lang="zh">网关</span><span lang="en">Gateway</span></b><span><span lang="zh">官方或自建 · 只转发</span><span lang="en">official or yours · relay only</span></span></div>
+          <div class="arrow">WebSocket</div>
+          <div class="node host"><b><span lang="zh">你的电脑</span><span lang="en">Your computer</span></b><span><span lang="zh">LinkShell host → Claude Code、Codex、ACP Agent、终端、本地端口</span><span lang="en">LinkShell host → Claude Code, Codex, ACP agents, terminals, local ports</span></span></div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- PRICING -->
-  <section class="sec" id="pricing" data-page="pricing">
-    <div class="c">
-      <h2 data-i18n="pricingTitle">选择你的方案</h2>
-      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="pricingDesc">免费使用全部核心功能。升级 Pro 解锁官方托管
-        Gateway，随时随地连接。</p>
+    <section class="sec" style="text-align:center">
+      <div class="c">
+        <h2 style="font-size:24px">Sponsors</h2>
+        <p class="sub" style="margin:10px auto 24px"><span lang="zh">感谢以下赞助商对 LinkShell 的支持。</span><span lang="en">Thanks to our sponsors for supporting LinkShell.</span></p>
+        <a class="sponsor" href="https://ai18n.chat/"><b style="font-size:18px">AI18N</b><span style="display:block;color:var(--text-sec);font-size:14px">Unified AI API Gateway</span></a>
+        <h2 style="font-size:24px;margin-top:64px">Buy Me a Coffee</h2>
+        <p class="sub" style="margin:10px auto 0"><span lang="zh">如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。</span><span lang="en">If LinkShell helps you, you can buy the author a coffee.</span></p>
+        <div class="donate-qr">
+          <figure><img src="assets/pay_wechat.jpg" alt="WeChat Pay" loading="lazy" /><figcaption><span lang="zh">微信支付</span><span lang="en">WeChat Pay</span></figcaption></figure>
+          <figure><img src="assets/pay_ali.jpg" alt="Alipay" loading="lazy" /><figcaption><span lang="zh">支付宝</span><span lang="en">Alipay</span></figcaption></figure>
+        </div>
+      </div>
+    </section>
+  </main>
 
-      <div class="pricing-grid">
-        <!-- Free -->
-        <div class="pricing-card">
-          <div class="plan-name" data-i18n="pricingFree">Free</div>
-          <div class="plan-price">$0</div>
-          <div class="plan-period" data-i18n="pricingFreeForever">永久免费</div>
-          <ul class="plan-features">
-            <li data-i18n="pricingF1">内置网关（局域网直连）</li>
-            <li data-i18n="pricingF2">终端桥接 + 二维码配对</li>
-            <li data-i18n="pricingF3">Claude / Codex / Gemini / Copilot / 自定义</li>
-            <li data-i18n="pricingF4">远程桌面（WebRTC）</li>
-            <li data-i18n="pricingF5">端口转发预览</li>
-            <li data-i18n="pricingF6">自建网关部署</li>
-          </ul>
-          <a href="#quickstart" class="btn btn-s" style="width:100%;text-align:center"
-            data-i18n="pricingStartFree">开始使用</a>
+  <!-- ═════════════════════════ DOCS ═════════════════════════ -->
+  <main class="page" data-page="docs">
+    <div class="c docs">
+      <aside class="toc">
+        <a href="#d-install"><span lang="zh">安装</span><span lang="en">Install</span></a>
+        <a href="#d-host"><span lang="zh">启动 LinkShell</span><span lang="en">Start LinkShell</span></a>
+        <a href="#d-connect"><span lang="zh">连接手机</span><span lang="en">Connect a phone</span></a>
+        <a href="#d-gateway"><span lang="zh">自建网关</span><span lang="en">Self-host a gateway</span></a>
+        <a href="#d-terminal"><span lang="zh">在电脑终端里用</span><span lang="en">From your terminal</span></a>
+        <a href="#d-phone"><span lang="zh">在手机上用</span><span lang="en">On your phone</span></a>
+        <a href="#d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></a>
+        <a href="#d-faq"><span lang="zh">常见问题</span><span lang="en">FAQ</span></a>
+      </aside>
+      <article class="doc">
+        <h1><span lang="zh">文档</span><span lang="en">Documentation</span></h1>
+        <p><span lang="zh">LinkShell 分两部分：电脑上的 CLI（托管 Agent 会话），和手机上的 App。下面按顺序走一遍。</span><span lang="en">LinkShell has two parts: the CLI on your computer, which hosts the agent sessions, and the app on your phone. Here it is, in order.</span></p>
+
+        <h2 id="d-install"><span lang="zh">安装</span><span lang="en">Install</span></h2>
+        <p><span lang="zh">电脑需要 macOS 或 Linux，Node.js 22.13 或更新版本（LinkShell 用 Node 自带的 SQLite 保存会话）。</span><span lang="en">You need macOS or Linux and Node.js 22.13 or newer (LinkShell stores sessions in Node's built-in SQLite).</span></p>
+        <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
+<span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
+<span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
+<span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
+<span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre>
+        <p><span lang="zh">要用的 Agent 需要你自己安装并在电脑上登录好（比如 <code>claude</code>、<code>codex login</code>、<code>gemini</code>、<code>copilot login</code>）。手机 App：<a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>。</span><span lang="en">Install and sign in to the agents you want to use on the computer yourself (for example <code>claude</code>, <code>codex login</code>, <code>gemini</code>, <code>copilot login</code>). Phone app: <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>.</span></p>
+
+        <h2 id="d-host"><span lang="zh">启动 LinkShell</span><span lang="en">Start LinkShell</span></h2>
+        <pre><code><span class="pr">$ </span>linkshell host --daemon   <span class="cm"># <span lang="zh">后台运行</span><span lang="en">run in the background</span></span>
+<span class="pr">$ </span>linkshell host status     <span class="cm"># <span lang="zh">Agent、会话、网关状态</span><span lang="en">agents, sessions, gateway</span></span>
+<span class="pr">$ </span>linkshell host stop</code></pre>
+        <p><span lang="zh">host 用你登录 shell 的环境变量启动 Agent，所以 PATH、代理、API key 这些和在终端里一样。会话和历史保存在 <code>~/.linkshell</code>，重启电脑不需要重新配对。</span><span lang="en">The host starts agents with your login shell's environment, so PATH, proxies and API keys match your terminal. Sessions and history live in <code>~/.linkshell</code>; restarting the computer doesn't need a new pairing.</span></p>
+
+        <h2 id="d-connect"><span lang="zh">连接手机</span><span lang="en">Connect a phone</span></h2>
+        <h3><span lang="zh">Pro：官方网关</span><span lang="en">Pro: the official gateway</span></h3>
+        <pre><code><span class="pr">$ </span>linkshell login
+<span class="pr">$ </span>linkshell host stop &amp;&amp; linkshell host --daemon</code></pre>
+        <p><span lang="zh">在 App 里用同一个账号登录，电脑会自动出现在「电脑」页，不需要扫码。<a href="pricing/">了解 Pro</a>。</span><span lang="en">Sign in to the app with the same account and the computer shows up under Computers; no QR code needed. <a href="pricing/">About Pro</a>.</span></p>
+        <h3><span lang="zh">自建网关：配对</span><span lang="en">Your own gateway: pairing</span></h3>
+        <pre><code><span class="pr">$ </span>linkshell host --gateway wss://gw.example.com --daemon
+<span class="pr">$ </span>linkshell pair</code></pre>
+        <p><span lang="zh">终端里会出现二维码和 6 位配对码。在 App 的「电脑 → 添加电脑」里扫码或输入配对码。网关地址会保存下来，之后启动 host 不用再写 <code>--gateway</code>；<code>--gateway off</code> 可以关掉。</span><span lang="en">The terminal shows a QR code and a 6-digit code. In the app, go to Computers → Add computer and scan it or type the code. The gateway is remembered, so later starts don't need <code>--gateway</code>; <code>--gateway off</code> turns it off.</span></p>
+
+        <h2 id="d-gateway"><span lang="zh">自建网关</span><span lang="en">Self-host a gateway</span></h2>
+        <p><span lang="zh">网关只转发加密数据，不需要多少资源。任选一种：</span><span lang="en">A gateway only relays encrypted data and needs very little. Pick one:</span></p>
+        <pre><code><span class="cm"># <span lang="zh">在服务器上用 CLI</span><span lang="en">with the CLI on a server</span></span>
+<span class="pr">$ </span>linkshell gateway --port 8787 --daemon
+<span class="cm"># <span lang="zh">或 Docker</span><span lang="en">or Docker</span></span>
+<span class="pr">$ </span>docker run -d --name linkshell-gateway -p 8787:8787 \
+    -v linkshell-gateway:/data nickname4th/linkshell-gateway</code></pre>
+        <p><span lang="zh">公网上请在前面加一层 HTTPS 反向代理（Caddy、Nginx 都行），然后用 <code>wss://你的域名</code>。只在家里用的话，可以直接把网关跑在这台电脑上，用 <code>ws://局域网IP:8787</code>。</span><span lang="en">On the internet, put an HTTPS reverse proxy in front (Caddy or Nginx) and use <code>wss://your-domain</code>. For home use only, you can run the gateway on the computer itself and use <code>ws://LAN-IP:8787</code>.</span></p>
+
+        <h2 id="d-terminal"><span lang="zh">在电脑终端里用</span><span lang="en">From your terminal</span></h2>
+        <pre><code><span class="pr">$ </span>linkshell claude [<span lang="zh">参数</span><span lang="en">args</span>]   <span class="cm"># <span lang="zh">Claude Code，可交给手机</span><span lang="en">Claude Code, hand-off ready</span></span>
+<span class="pr">$ </span>linkshell codex [<span lang="zh">参数</span><span lang="en">args</span>]    <span class="cm"># <span lang="zh">Codex，和手机同步</span><span lang="en">Codex, shared with the phone</span></span></code></pre>
+        <p><span lang="zh">参数原样传给 Agent（比如 <code>linkshell claude --resume &lt;id&gt;</code>）。Claude 在电脑上运行时，手机能实时看到进度；在手机上发消息就接管，终端会显示「已由手机接管」，按任意键收回。</span><span lang="en">Arguments pass straight through (for example <code>linkshell claude --resume &lt;id&gt;</code>). While Claude runs at your desk the phone follows along live; sending from the phone takes over, the terminal says so, and any key takes it back.</span></p>
+        <div class="note"><span lang="zh">Claude 在收到第一条消息之前不会保存会话，所以一个还没发过消息的会话不能交给手机。</span><span lang="en">Claude doesn't save a session until its first message, so a session with no messages yet can't be handed to the phone.</span></div>
+
+        <h2 id="d-phone"><span lang="zh">在手机上用</span><span lang="en">On your phone</span></h2>
+        <ul>
+          <li><span lang="zh"><b>新建会话</b>：选 Agent 和项目目录，直接开始。</span><span lang="en"><b>New session</b>: pick an agent and a project folder and go.</span></li>
+          <li><span lang="zh"><b>忙的时候发消息</b>：Codex 和 Claude 插进当前这一轮；其他 Agent 排队，输入框上方能看到队列，点 × 撤回；停止时排队的文字会放回输入框。</span><span lang="en"><b>Messages while busy</b>: Codex and Claude take them into the current turn; other agents queue them above the composer (tap × to pull one back); stopping puts queued text back in the composer.</span></li>
+          <li><span lang="zh"><b>设置</b>：输入框下方可以换模型、思考强度、权限模式（取决于 Agent 提供了哪些）。</span><span lang="en"><b>Settings</b>: under the composer, change model, effort and permission mode (whatever the agent offers).</span></li>
+          <li><span lang="zh"><b>整理</b>：长按会话可以重命名、归档、删除；归档的会话在首页底部。</span><span lang="en"><b>Tidying</b>: long-press a session to rename, archive or delete it; archived sessions are at the bottom of Home.</span></li>
+          <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕（电脑需要安装 ffmpeg）。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen (needs ffmpeg on the computer).</span></li>
+        </ul>
+
+        <h2 id="d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></h2>
+        <div class="tbl" style="margin-top:12px">
+          <table>
+            <tbody>
+              <tr><td><code>linkshell host [--daemon] [--gateway &lt;url&gt;]</code></td><td><span lang="zh">启动 LinkShell；<code>status</code>、<code>stop</code></span><span lang="en">Start LinkShell; <code>status</code>, <code>stop</code></span></td></tr>
+              <tr><td><code>linkshell pair</code></td><td><span lang="zh">通过网关配对手机</span><span lang="en">Pair a phone through the gateway</span></td></tr>
+              <tr><td><code>linkshell login</code> / <code>logout</code></td><td><span lang="zh">Pro 账号（官方网关）</span><span lang="en">Pro account (official gateway)</span></td></tr>
+              <tr><td><code>linkshell claude</code> / <code>codex</code></td><td><span lang="zh">在终端里启动 Agent，可与手机共享</span><span lang="en">Start an agent in your terminal, shared with the phone</span></td></tr>
+              <tr><td><code>linkshell gateway [--port] [--daemon]</code></td><td><span lang="zh">运行自己的网关；<code>status</code>、<code>stop</code></span><span lang="en">Run your own gateway; <code>status</code>, <code>stop</code></span></td></tr>
+              <tr><td><code>linkshell doctor</code></td><td><span lang="zh">检查环境和连接</span><span lang="en">Check the environment and connectivity</span></td></tr>
+              <tr><td><code>linkshell upgrade</code></td><td><span lang="zh">升级到最新版</span><span lang="en">Upgrade to the latest version</span></td></tr>
+            </tbody>
+          </table>
         </div>
 
-        <!-- Pro -->
-        <div class="pricing-card pro">
-          <div class="pricing-badge">POPULAR</div>
-          <div class="plan-name">Pro <span style="color:var(--success)">⚡</span></div>
-          <div style="margin-bottom:16px">
+        <h2 id="d-faq"><span lang="zh">常见问题</span><span lang="en">FAQ</span></h2>
+        <h3><span lang="zh">App 显示「电脑暂时连不上」</span><span lang="en">The app says the computer can't be reached</span></h3>
+        <p><span lang="zh">确认电脑没睡眠、<code>linkshell host status</code> 里网关是已连接，然后运行 <code>linkshell doctor</code>。连接恢复后 App 会自动重连。</span><span lang="en">Check the computer is awake and <code>linkshell host status</code> shows the gateway connected, then run <code>linkshell doctor</code>. The app reconnects on its own once it's back.</span></p>
+        <h3><span lang="zh">Agent 显示「未登录」</span><span lang="en">An agent shows "not logged in"</span></h3>
+        <p><span lang="zh">在电脑终端里给那个 Agent 登录一次（<code>claude</code> 里的 <code>/login</code>、<code>codex login</code>、<code>copilot login</code> 等），LinkShell 用的就是那份登录。</span><span lang="en">Sign in to that agent once in a terminal on the computer (<code>/login</code> in <code>claude</code>, <code>codex login</code>, <code>copilot login</code>…); LinkShell uses that sign-in.</span></p>
+        <h3><span lang="zh">从 1.x 升级</span><span lang="en">Upgrading from 1.x</span></h3>
+        <p><span lang="zh">2.0 的 App 和电脑端协议都换了，需要两边一起升级，再重新配对一次。旧版 App 仍可配合 <code>linkshell start</code> 使用。</span><span lang="en">2.0 changes both the app and the computer side, so upgrade both and pair again. The old app still works with <code>linkshell start</code>.</span></p>
+      </article>
+    </div>
+  </main>
+
+  <!-- ═════════════════════════ PRICING ═════════════════════════ -->
+  <main class="page" data-page="pricing">
+    <section class="sec">
+      <div class="c">
+        <div class="eyebrow"><span lang="zh">定价</span><span lang="en">Pricing</span></div>
+        <h2><span lang="zh">所有功能都免费</span><span lang="en">Every feature is free</span></h2>
+        <p class="sub"><span lang="zh">Pro 只多一件事：用官方网关，不用自己部署服务器。</span><span lang="en">Pro adds one thing: the official gateway, so you don't run a server.</span></p>
+
+        <div class="pricing-grid">
+          <div class="pricing-card">
+            <div class="plan-name">Free</div>
+            <div class="plan-price">$0</div>
+            <div class="plan-period"><span lang="zh">永久免费</span><span lang="en">Free forever</span></div>
+            <ul class="plan-features">
+              <li><span lang="zh">全部 Agent、接力、审批、终端、预览</span><span lang="en">All agents, handoff, approvals, terminal, previews</span></li>
+              <li><span lang="zh">端到端加密</span><span lang="en">End-to-end encryption</span></li>
+              <li><span lang="zh">自建网关（一条命令或 Docker）</span><span lang="en">Self-hosted gateway (one command or Docker)</span></li>
+              <li><span lang="zh">扫码配对，长期有效</span><span lang="en">QR pairing that lasts</span></li>
+            </ul>
+            <a href="docs/#d-gateway" class="btn btn-s" style="width:100%;justify-content:center"><span lang="zh">自建网关指南</span><span lang="en">Self-hosting guide</span></a>
+          </div>
+
+          <div class="pricing-card pro">
+            <div class="pricing-badge">PRO</div>
+            <div class="plan-name">Pro</div>
             <div class="cycle-toggle">
-              <button class="cycle-btn active" data-cycle="monthly" onclick="setPricingCycle('monthly')"><span
-                  data-i18n="pricingMonthly">月付</span></button>
-              <button class="cycle-btn" data-cycle="yearly" onclick="setPricingCycle('yearly')"><span
-                  data-i18n="pricingYearly">年付</span></button>
+              <button class="cycle-btn active" data-cycle="monthly" type="button" onclick="setPricingCycle('monthly')"><span lang="zh">月付</span><span lang="en">Monthly</span></button>
+              <button class="cycle-btn" data-cycle="yearly" type="button" onclick="setPricingCycle('yearly')"><span lang="zh">年付</span><span lang="en">Yearly</span></button>
             </div>
-            <div id="price-monthly" class="plan-price">$1<span
-                style="font-size:14px;font-weight:400;color:var(--text-sec)"> /mo</span></div>
-            <div id="price-yearly" class="plan-price" style="display:none">$12<span
-                style="font-size:14px;font-weight:400;color:var(--text-sec)"> /yr</span></div>
-            <div class="plan-period"><span id="price-alt-monthly" data-i18n="pricingAltMonthly">¥9.9/月（爱发电）</span><span
-                id="price-alt-yearly" style="display:none" data-i18n="pricingAltYearly">¥99/年（爱发电）</span></div>
-          </div>
-          <ul class="plan-features">
-            <li data-i18n="pricingP1">Free 全部功能</li>
-            <li data-i18n="pricingP2">官方托管 Gateway</li>
-            <li data-i18n="pricingP3">App 自动发现会话（免扫码）</li>
-            <li data-i18n="pricingP4">多区域节点</li>
-            <li data-i18n="pricingP5">优先技术支持</li>
-          </ul>
+            <div id="price-monthly" class="plan-price">$1<small> /mo</small></div>
+            <div id="price-yearly" class="plan-price" style="display:none">$12<small> /yr</small></div>
+            <div class="plan-period"><span id="price-alt-monthly"><span lang="zh">或 ¥9.9/月（爱发电）</span><span lang="en">or ¥9.9/month (Afdian)</span></span><span id="price-alt-yearly" style="display:none"><span lang="zh">或 ¥99/年（爱发电）</span><span lang="en">or ¥99/year (Afdian)</span></span></div>
+            <ul class="plan-features">
+              <li><span lang="zh">Free 的全部功能</span><span lang="en">Everything in Free</span></li>
+              <li><span lang="zh">官方网关，不用部署服务器</span><span lang="en">The official gateway, no server to run</span></li>
+              <li><span lang="zh">登录同一账号即可连接，免扫码</span><span lang="en">Sign in with one account, no QR codes</span></li>
+              <li><span lang="zh">优先支持</span><span lang="en">Priority support</span></li>
+            </ul>
 
-          <!-- Auth / Payment area -->
-          <div id="pricing-auth-area">
-            <div id="pricing-auth-status"></div>
-
-            <!-- Login form (shown when not logged in) -->
-            <div id="pricing-login-form" class="auth-form" style="display:none">
-              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
-                <input type="email" id="pricing-email" placeholder="Email" autocomplete="email" />
-                <input type="password" id="pricing-password" placeholder="Password" autocomplete="current-password" />
-                <div id="pricing-auth-error" style="color:var(--danger);font-size:12px;display:none"></div>
-                <button class="auth-btn auth-btn-primary" onclick="pricingSignIn()" data-i18n="pricingLogin">登录</button>
-                <button class="auth-btn" style="background:var(--surface);color:var(--text)" onclick="pricingSignUp()"
-                  data-i18n="pricingRegister">注册新账户</button>
+            <div id="pricing-auth-area">
+              <div id="pricing-auth-status"></div>
+              <div id="pricing-login-form" class="auth-form" style="display:none">
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <input type="email" id="pricing-email" placeholder="Email" autocomplete="email" />
+                  <input type="password" id="pricing-password" placeholder="Password" autocomplete="current-password" />
+                  <div id="pricing-auth-error" style="color:var(--danger);font-size:13px;display:none"></div>
+                  <button class="auth-btn auth-btn-primary" type="button" onclick="pricingSignIn()"><span lang="zh">登录</span><span lang="en">Sign in</span></button>
+                  <button class="auth-btn" type="button" style="background:var(--surface-2);color:var(--text)" onclick="pricingSignUp()"><span lang="zh">注册新账户</span><span lang="en">Create an account</span></button>
+                </div>
               </div>
-            </div>
-
-            <!-- Payment area (shown when logged in but not Pro) -->
-            <div id="pricing-payment" style="display:none">
-              <div class="pay-tabs">
-                <button class="pay-tab active" onclick="setPayMethod('paypal')">PayPal</button>
-                <button class="pay-tab" onclick="setPayMethod('afdian')" data-i18n="pricingAfdianTab">爱发电</button>
+              <div id="pricing-payment" style="display:none">
+                <div class="pay-tabs">
+                  <button class="pay-tab active" type="button" onclick="setPayMethod('paypal')">PayPal</button>
+                  <button class="pay-tab" type="button" onclick="setPayMethod('afdian')"><span lang="zh">爱发电</span><span lang="en">Afdian</span></button>
+                </div>
+                <div id="pay-paypal"><div id="paypal-button-container"></div></div>
+                <div id="pay-afdian" style="display:none">
+                  <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian" style="margin-bottom:8px"><span lang="zh">前往爱发电支付 ↗</span><span lang="en">Pay on Afdian ↗</span></a>
+                  <button class="auth-btn" type="button" style="background:var(--surface-2);color:var(--text)" onclick="pricingRefreshPlan()"><span lang="zh">支付完成？点击刷新状态</span><span lang="en">Paid? Click to refresh status</span></button>
+                  <p style="color:var(--text-muted);font-size:12px;margin-top:8px;text-align:center"><span lang="zh">支付后请点击刷新按钮同步订阅状态</span><span lang="en">After paying, refresh to sync your subscription</span></p>
+                </div>
               </div>
-              <div id="pay-paypal">
-                <div id="paypal-button-container"></div>
-              </div>
-              <div id="pay-afdian" style="display:none">
-                <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian"
-                  style="display:flex;margin-bottom:8px" data-i18n="pricingAfdianBtn">前往爱发电支付 ↗</a>
-                <button class="auth-btn" style="background:var(--surface);color:var(--text)"
-                  onclick="pricingRefreshPlan()" data-i18n="pricingAfdianRefresh">支付完成？点击刷新状态</button>
-                <p style="color:var(--text-muted);font-size:11px;margin-top:8px;text-align:center"
-                  data-i18n="pricingAfdianNote">支付后请点击刷新按钮同步订阅状态</p>
-              </div>
-            </div>
-
-            <!-- Already Pro -->
-            <div id="pricing-pro-status" style="display:none">
-              <div class="term" style="text-align:center;padding:16px">
-                <span class="ts">✓</span> <span data-i18n="pricingAlreadyPro">你已是 Pro 用户</span>
-                <br><span style="color:var(--text-sec);font-size:13px" data-i18n="pricingExpires">到期时间：</span><span
-                  id="pricing-expires" style="color:var(--text-sec);font-size:13px"></span>
+              <div id="pricing-pro-status" style="display:none">
+                <div class="term" style="text-align:center;padding:16px">
+                  <span class="ts">✓</span> <span lang="zh">你已是 Pro 用户</span><span lang="en">You're on Pro</span>
+                  <br /><span style="color:var(--text-sec);font-size:13px"><span lang="zh">到期时间：</span><span lang="en">Renews/expires: </span></span><span id="pricing-expires" style="color:var(--text-sec);font-size:13px"></span>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- FAQ -->
-      <div style="margin-top:64px;max-width:720px">
-        <h3 data-i18n="pricingFaqTitle">常见问题</h3>
-        <div style="margin-top:16px;margin-bottom:16px">
-          <p style="font-weight:700;margin-bottom:4px" data-i18n="pricingFaq1Q">Q: 免费版有什么限制？</p>
-          <p style="color:var(--text-sec)" data-i18n="pricingFaq1A">没有功能限制。免费版包含所有核心功能，只是需要自建网关。Pro 提供官方托管网关，省去部署和维护。
-          </p>
-        </div>
-        <div style="margin-bottom:16px">
-          <p style="font-weight:700;margin-bottom:4px" data-i18n="pricingFaq2Q">Q: 可以随时取消吗？</p>
-          <p style="color:var(--text-sec)" data-i18n="pricingFaq2A">可以。PayPal 订阅可随时取消，取消后在当前周期结束前仍可使用。</p>
-        </div>
-        <div>
-          <p style="font-weight:700;margin-bottom:4px" data-i18n="pricingFaq3Q">Q: 支持哪些支付方式？</p>
-          <p style="color:var(--text-sec)" data-i18n="pricingFaq3A">国际用户推荐 PayPal（支持信用卡），国内用户可使用爱发电（支持微信/支付宝）。</p>
+        <div class="faq">
+          <div><b><span lang="zh">免费版有什么限制？</span><span lang="en">What does Free leave out?</span></b><p><span lang="zh">没有功能限制，只是需要自己运行一个网关。Pro 提供官方托管网关，省去部署和维护。</span><span lang="en">No features. You just run a gateway yourself; Pro gives you the hosted one instead.</span></p></div>
+          <div><b><span lang="zh">官方网关能看到我的代码吗？</span><span lang="en">Can the official gateway see my code?</span></b><p><span lang="zh">不能。手机和电脑之间端到端加密，网关只转发密文。</span><span lang="en">No. Phone and computer are encrypted end to end; the gateway only relays ciphertext.</span></p></div>
+          <div><b><span lang="zh">可以随时取消吗？</span><span lang="en">Can I cancel any time?</span></b><p><span lang="zh">可以。PayPal 订阅随时取消，当前周期结束前仍可使用。</span><span lang="en">Yes. Cancel the PayPal subscription any time; Pro lasts until the end of the period.</span></p></div>
+          <div><b><span lang="zh">支持哪些支付方式？</span><span lang="en">How can I pay?</span></b><p><span lang="zh">国际用户推荐 PayPal（支持信用卡），国内用户可使用爱发电（微信 / 支付宝）。</span><span lang="en">PayPal (cards accepted) internationally; Afdian (WeChat / Alipay) in China.</span></p></div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
+  </main>
 
-  <!-- SPONSORS -->
-  <section class="sec" style="text-align:center" data-page="home">
-    <div class="c">
-      <h2 data-i18n="sponsorTitle">Sponsors</h2>
-      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="sponsorDesc">感谢以下赞助商对 LinkShell 的支持。</p>
-      <a href="https://ai18n.chat/"
-        style="display:inline-block;border:1px solid var(--border-solid);border-radius:var(--radius);padding:16px 32px;text-decoration:none;transition:border-color .15s"
-        onmouseover="this.style.borderColor='var(--text)'" onmouseout="this.style.borderColor='var(--border-solid)'">
-        <span style="font-weight:700;font-size:18px" class="ta">AI18N</span>
-        <span style="display:block;color:var(--text-sec);font-size:14px;margin-top:4px"
-          data-i18n="sponsorAi18nDesc">Unified AI API Gateway</span>
-      </a>
-    </div>
-  </section>
-
-  <!-- DONATE -->
-  <section class="sec" style="text-align:center" data-page="home">
-    <div class="c">
-      <h2 data-i18n="donateTitle">Buy Me a Coffee</h2>
-      <p style="color:var(--text-sec);margin-bottom:32px" data-i18n="donateDesc">如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。</p>
-      <div class="donate-qr">
-        <figure>
-          <img src="assets/pay_wechat.jpg" alt="WeChat Pay" />
-          <figcaption data-i18n="donateWechat">微信支付</figcaption>
-        </figure>
-        <figure>
-          <img src="assets/pay_ali.jpg" alt="Alipay" />
-          <figcaption data-i18n="donateAlipay">支付宝</figcaption>
-        </figure>
-      </div>
-    </div>
-  </section>
-
-  <!-- CTA -->
-  <section style="text-align:center;padding:96px 0 48px" data-page="home">
-    <div class="c">
-      <h2 data-i18n="ctaTitle">准备好你的第一次漫游了吗？</h2>
-      <p style="color:var(--text-sec);margin-bottom:24px" data-i18n="ctaDesc">放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。</p>
-      <a href="#quickstart" class="btn btn-p" data-i18n="btnStart">立即部署</a>
-    </div>
-  </section>
-
-  <!-- FOOTER -->
   <footer>
-    <div class="ft">
-      <span style="font-weight:700;font-size:14px"><img src="assets/adaptive-icon.png" alt="LinkShell"
-          style="width:20px;height:20px;border-radius:4px;vertical-align:middle;margin-right:6px">LinkShell</span>
-      <span style="color:var(--text-muted);font-size:14px" data-i18n="footerText">出于对 Vibe Coding 的热爱。© 2026 MIT
-        开源。</span>
-      <div style="display:flex;gap:16px">
+    <div class="c">
+      <span><b style="color:var(--text)">LinkShell</b> · <span lang="zh">出于对 Vibe Coding 的热爱。© 2026，MIT 开源。</span><span lang="en">Made for the love of vibe coding. © 2026, MIT licensed.</span></span>
+      <nav>
         <a href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
-        <a href="#how" data-i18n="navHow">工作原理</a>
-        <a href="docs/" class="nav-link" data-page-link="docs" data-i18n="navDocs">文档</a>
-      </div>
+        <a href="docs/"><span lang="zh">文档</span><span lang="en">Docs</span></a>
+        <a href="pricing/"><span lang="zh">定价</span><span lang="en">Pricing</span></a>
+        <a href="https://www.producthunt.com/products/linkshell">Product Hunt</a>
+      </nav>
     </div>
   </footer>
 
-  <!-- SCRIPT -->
   <script>
-    const translations = {
-      zh: {
-        pageTitle: "LinkShell | 始于桌面，随处接管",
-        navHow: "工作原理",
-        navDocs: "文档",
-        navGithub: "GitHub",
-        heroBadge: "> LinkShell v1.0 现已发布",
-        heroTitle1: "终端漫游",
-        heroTitleSep: "，",
-        heroTitle2: "随时随地，自由接管",
-        heroLead: "本地终端桥接 + Agent Workspace。长耗时任务留在高性能桌面上，用手机接管 PTY、Claude Code 与 Codex 对话。",
-        heroGateway: "🚀 Pro 订阅用户可直接使用官方 Gateway，无需自建服务器。了解更多 →",
-        btnStart: "立即部署",
-        btnGithub: "查看仓库",
-        btnAndroid: "Android 下载",
-        btnIos: "App Store 下载",
-        howItWorksTitle: "只需三步，建立你的终端链路",
-        step1Title: "[1] 安装 CLI",
-        step1Desc: "一条命令全局安装。内置网关开箱即用，无需额外部署服务器。",
-        step2Title: "[2] 启动桥接",
-        step2Desc: "一条命令启动内置网关、桥接 AI 终端，并自动开放 Agent Workspace channel。",
-        qsLanDesc: "同一局域网内，CLI 内置网关直连，零配置。",
-        qsPubDesc: "先在公网服务器部署网关，本地 CLI 连接远程网关。",
-        step3Title: "[3] 手机扫码，即刻接管",
-        step3Desc: "打开 LinkShell App（iOS / Android），对准终端二维码扫一扫，立刻接管会话。",
-        featureSectionTitle: "原生的终端体感，去中心化的控制。",
-        f1Title: "本地 PTY 驱动",
-        f1Desc: "繁重的计算过程完全依赖本地机器。保留颜色、光标、readline 输出及信号等完整终端语义。",
-        f2Title: "全平台客户端",
-        f2Desc: "支持 React Native / Expo 移动端与 Web 页面调试端。统一协议同时承载终端、Agent、桌面和 Browser 预览。",
-        f3Title: "强一致性同步",
-        f3Desc: "独有的单控制者防冲突模型。避免多端并抢焦点，画面精准对齐不串流。",
-        f4Title: "远程桌面",
-        f4Desc: "不只是终端。加上 --screen 参数，在手机上实时查看电脑桌面。WebRTC 30fps 丝滑体验，自动降级到截图流兜底。",
-        f5Title: "端口转发预览",
-        f5Desc: "远程启动 dev server，手机直接预览页面。支持 CSS/JS/图片完整加载、HMR 热更新、PC/手机视图切换和全屏模式。",
-        diSectionTitle: "Agent Workspace，让 AI 触手可及",
-        diSectionDesc: "Agent 标签结构化展示 Claude Code 与 Codex 对话。模型、权限、推理强度随 CLI capabilities 动态同步。",
-        diFeature1: "结构化时间线 — 消息、计划、tool call、命令执行和文件变更一屏呈现",
-        diFeature2: "权限审批 — 在手机上直接允许、拒绝或回复补充输入",
-        diFeature3: "动态能力 — provider 模型、权限模式和推理强度由 CLI 下发",
-        diFeature4: "恢复历史 — 本地缓存对话与 timeline，重连后自动同步快照",
-        projSectionTitle: "项目空间，并行掌控",
-        projSectionDesc: "每个会话支持多项目并行。选择项目文件夹，独立执行命令，像在本地一样自如。",
-        projFeature1: "多项目并行 — 同一会话内切换不同项目目录",
-        projFeature2: "独立终端 — 每个项目拥有独立的命令执行环境",
-        projFeature3: "最近项目 — 智能记忆常用项目，一键直达",
-        projFeature4: "实时状态 — 并行任务进度一览无余",
-        lifestyleSectionTitle: "LinkShell 工作流",
-        lifestyleLead: "不仅是远程命令行桥接；更是打破工位束缚的极客探索。",
-        l1Title: "挂起并离开",
-        l1Desc: "编译、构建、拉镜像... 常驻任务在桌面上飞速运转。你可以去喝杯咖啡，LinkShell 默默守护当前状态。",
-        l2Title: "随时审查",
-        l2Desc: "随时掏出手机接入会话。审查构建进度，翻看彩色日志输出，体验不到任何画面的延迟衰减。",
-        l3Title: "直接修正",
-        l3Desc: "发现报错？内置 xterm.js 拿过焦点，敲下修复命令，然后再次从容地把手机放回口袋。",
-        docsSectionTitle: "文档",
-        docsSectionDesc: "从安装到部署，你需要知道的一切。",
-        docsArchTitle: "架构概览",
-        docsArchDesc: "LinkShell 采用三层架构：本地 CLI 捕获 PTY 输出，通过网关中继转发，最终在移动端渲染完整终端。所有计算留在本地，手机只是一个远程窗口。",
-        docsCliTitle: "CLI 命令参考",
-        docsCmdStart: "启动桥接会话。自动启动内置网关，桥接 AI 终端，开放 Agent Workspace，并生成配对二维码。",
-        docsCmdGateway: "单独启动网关服务器。适用于独立部署网关到远程服务器的场景。",
-        docsCmdSetup: "交互式初始化配置。引导你完成网关地址、AI 提供者等基础设置。",
-        docsCmdDoctor: "环境诊断工具。检查 Node.js 版本、依赖完整性、网络连通性等。",
-        docsCmdStatus: "查看当前运行状态。显示活跃会话、网关连接状态和守护进程信息。",
-        docsCmdStop: "停止守护进程。优雅关闭桥接会话和内置网关。",
-        docsCmdLogin: "登录 iTool 账号。浏览器跳转授权后自动保存凭证，Pro 用户可直接选择官方 Gateway 连接。",
-        docsCmdLogout: "退出登录，清除本地凭证。",
-        docsCmdList: "列出官方 Gateway 上你的活跃会话。需要先登录。",
-        docsDeployTitle: "部署方式",
-        docsDeployDesc: "根据你的网络环境选择合适的部署方式。",
-        tabLan: "局域网",
-        tabPublic: "公网",
-        tabOfficial: "官方 Gateway",
-        docsDeployLocal: "本地直连（最简单）",
-        docsDeployLocalDesc: "CLI 内置网关，同一局域网内手机直连电脑。零配置，开箱即用。",
-        docsDeployRemote: "远程服务器",
-        docsDeployRemoteTag: "[推荐]",
-        docsDeployRemoteDesc: "将网关部署到公网服务器，配合 Nginx 反向代理 + HTTPS，跨网络访问。",
-        docsDeployDocker: "Docker 部署",
-        docsDeployDockerDesc: "使用 Docker Compose 一键部署网关。最低要求 1 核 512MB 内存。",
-        lanTip1: "手机和电脑需在同一 Wi-Fi 下",
-        lanTip2: "无需任何服务器，开箱即用",
-        lanTip3: "延迟最低，数据不出局域网",
-        pubTip1: "支持跨网络、4G/5G 随时接入",
-        pubTip2: "推荐 Nginx 反代 + Let's Encrypt HTTPS",
-        pubTip3: "数据仅经过你自己的服务器中继",
-        docsDeployOfficial: "官方托管 Gateway",
-        docsDeployOfficialTag: "[Pro]",
-        docsDeployOfficialDesc: "订阅 iTool Pro 即可使用官方托管的 Gateway，无需自建服务器。登录后自动连接，手机 App 自动发现会话。",
-        officialTip1: "零配置，登录即用，无需部署服务器",
-        officialTip2: "手机 App 登录后自动发现会话，无需扫码",
-        officialTip3: "订阅到期自动断开，数据不留存",
-        qsOfficialDesc: "Pro 订阅用户直接使用官方托管 Gateway，一条命令登录即可连接。",
-        tabFree: "限时免费",
-        qsFreeDesc: "限时免费公网网关，无需登录、无需自建服务器，直接连接体验。",
-        tmFreeConnect: "# 直接连接免费网关",
-        docsDeployFree: "限时免费网关",
-        docsDeployFreeTag: "[限时]",
-        docsDeployFreeDesc: "限时开放的免费公网网关，无需登录、无需自建服务器，一条命令直接体验跨网络连接。",
-        freeTip1: "无需登录、无需注册，直接使用",
-        freeTip2: "支持跨网络访问，体验与 Pro 一致",
-        freeTip3: "限时开放，随时可能关闭",
-        heroFreeGateway: "🎉 限时免费网关开放中：",
-        heroFreeGatewayCmd: "linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws",
-        docsProtocolTitle: "协议与可靠性",
-        docsProtoMsgTypes: "消息类型 (Zod)",
-        docsProtoAck: "双层缓冲确认",
-        docsProtoScrollback: "回滚缓冲区",
-        docsProtoHeartbeat: "心跳检测",
-        docsReliabilityTitle: "可靠性保障",
-        docsRel1: "指数退避自动重连（CLI 和 App 双端）",
-        docsRel2: "会话持久化（主机断连后保持 60 秒）",
-        docsRel3: "空闲会话 30 分钟自动清理",
-        docsRel4: "协议版本协商，向前兼容",
-        docsControlTitle: "控制模型",
-        docsCtrl1: "单控制者模型，防止多端输入冲突",
-        docsCtrl2: "控制权请求 / 释放 / 转移机制",
-        docsCtrl3: "6 位配对码 + QR 码安全配对",
-        docsCtrl4: "CORS 和速率限制保护",
-        docsFaqTitle: "常见问题",
-        docsScreenTitle: "远程桌面",
-        docsScreenDesc: "启动时加上 --screen 参数，App 端会出现 Desktop 标签页，实时查看电脑桌面。",
-        docsScreen1: "WebRTC 模式 — 默认以 30fps 实时推流桌面画面，延迟极低",
-        docsScreen2: "截图流兜底 — 网络条件不佳时自动降级为截图流模式，保证可用性",
-        docsScreen3: "自动切换 — 无需手动配置，运行时根据网络质量自动选择最优方案",
-        docsScreen4: "App 端切换 — 在 App 内切换 Terminal / Desktop 标签，随时查看桌面",
-        docsPortFwdTitle: "端口转发",
-        docsPortFwdDesc: "在远程终端启动 dev server 后，直接在手机上预览页面。通过 Gateway 中继 HTTP 请求，支持完整的 Web 应用预览。",
-        docsPortFwd1: "完整加载 — HTML、CSS、JS、图片等所有资源通过 tunnel 代理",
-        docsPortFwd2: "HMR 支持 — WebSocket 热更新自动转发，Vite / Next.js / webpack 均可",
-        docsPortFwd3: "视图切换 — 一键切换 PC / 手机视图，桌面模式以 1024px 宽度渲染",
-        docsPortFwd4: "全屏预览 — 隐藏所有 UI，沉浸式查看页面效果",
-        docsPortFwdReq: "需要 linkshell-cli \u2265 0.2.53 / gateway \u2265 0.2.17",
-        docsFaq1Q: "Q: 需要公网服务器吗？",
-        docsFaq1A: "不需要。CLI 内置网关，同一局域网内手机可以直连电脑。如果需要跨网络访问，才需要将网关部署到公网服务器。",
-        docsFaq2Q: "Q: 支持哪些 AI 代理？",
-        docsFaq2A: "终端模式支持 Claude Code、OpenAI Codex、Gemini、GitHub Copilot 和任意自定义 Shell 进程；Agent Workspace 会自动检测 Claude Code 与 Codex。",
-        docsFaq3Q: "Q: 手机 App 在哪里下载？",
-        docsFaq3A: "iOS 版本已上架 <a href=\"https://apps.apple.com/cn/app/linkshell/id6761547516\" target=\"_blank\" rel=\"noopener\">App Store</a>，Android 版本可从 GitHub Releases 下载 APK。",
-        docsFaq4Q: "Q: 数据安全吗？会经过第三方服务器吗？",
-        docsFaq4A: "本地直连模式下数据完全在局域网内传输。远程模式下数据经过你自己部署的网关中继，不经过任何第三方服务器。",
-        docsFaq5Q: "Q: 远程桌面功能如何工作？",
-        docsFaq5A: "使用 --screen 参数启动后，通过 WebRTC 以 30fps 实时传输桌面画面。网络条件不佳时自动降级为截图流模式。",
-        docsFaq6Q: "Q: 官方 Gateway 是什么？和自建有什么区别？",
-        docsFaq6A: "官方 Gateway 是 LinkShell 团队托管的公网网关，订阅 iTool Pro 即可使用。无需自建服务器，登录后一键连接。手机 App 登录同一账号后自动发现会话，无需扫码。自建网关则完全独立，不依赖任何第三方服务。",
-        ctaTitle: "准备好你的第一次漫游了吗？",
-        ctaDesc: "放弃冗长的云端迁移。仅需几十秒进行网关转接，把完整的本地开发环境装进口袋。",
-        footerText: "出于对 Vibe Coding 的热爱。© 2026 MIT 开源。",
-        donateTitle: "Buy Me a Coffee",
-        donateDesc: "如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。",
-        donateWechat: "微信支付",
-        donateAlipay: "支付宝",
-        sponsorTitle: "Sponsors",
-        sponsorDesc: "感谢以下赞助商对 LinkShell 的支持。",
-        sponsorAi18nDesc: "Unified AI API Gateway",
-        navPricing: "定价",
-        pricingTitle: "选择你的方案",
-        pricingDesc: "免费使用全部核心功能。升级 Pro 解锁官方托管 Gateway，随时随地连接。",
-        pricingFree: "Free",
-        pricingFreeForever: "永久免费",
-        pricingF1: "内置网关（局域网直连）",
-        pricingF2: "终端桥接 + 二维码配对",
-        pricingF3: "Claude / Codex / Gemini / Copilot / 自定义",
-        pricingF4: "远程桌面（WebRTC）",
-        pricingF5: "端口转发预览",
-        pricingF6: "自建网关部署",
-        pricingStartFree: "开始使用",
-        pricingMonthly: "月付",
-        pricingYearly: "年付",
-        pricingAltMonthly: "¥9.9/月（爱发电）",
-        pricingAltYearly: "¥99/年（爱发电）",
-        pricingP1: "Free 全部功能",
-        pricingP2: "官方托管 Gateway",
-        pricingP3: "App 自动发现会话（免扫码）",
-        pricingP4: "多区域节点",
-        pricingP5: "优先技术支持",
-        pricingLogin: "登录",
-        pricingRegister: "注册新账户",
-        pricingAfdianTab: "爱发电",
-        pricingAfdianBtn: "前往爱发电支付 ↗",
-        pricingAfdianRefresh: "支付完成？点击刷新状态",
-        pricingAfdianNote: "支付后请点击刷新按钮同步订阅状态",
-        pricingAlreadyPro: "你已是 Pro 用户",
-        pricingExpires: "到期时间：",
-        pricingFaqTitle: "常见问题",
-        pricingFaq1Q: "Q: 免费版有什么限制？",
-        pricingFaq1A: "没有功能限制。免费版包含所有核心功能，只是需要自建网关。Pro 提供官方托管网关，省去部署和维护。",
-        pricingFaq2Q: "Q: 可以随时取消吗？",
-        pricingFaq2A: "可以。PayPal 订阅可随时取消，取消后在当前周期结束前仍可使用。",
-        pricingFaq3Q: "Q: 支持哪些支付方式？",
-        pricingFaq3A: "国际用户推荐 PayPal（支持信用卡），国内用户可使用爱发电（支持微信/支付宝）。",
-        tmInstallCli: "# 全局安装 CLI",
-        tmInitConfig: "# 初始化配置",
-        tmCheckEnv: "# 检查环境",
-        tmServerGateway: "# 服务器端：启动网关",
-        tmLocalConnect: "# 本地：连接远程网关",
-        tmLoginAccount: "# 登录 iTool 账号",
-        tmStartDevServer: "# 远程终端启动 dev server",
-        tmAppBrowserTab: "# App 切换到 Browser 标签，输入端口 3000，即可预览",
-        flagDaemon: "后台守护模式运行",
-        flagProvider: "指定终端 provider (claude / codex / gemini / copilot / custom)",
-        flagAgentUi: "启用 Agent Workspace",
-        flagScreen: "启用远程桌面共享",
-        flagPort: "指定网关端口 (默认 8787)",
-        flagGwPort: "指定监听端口",
-        flagGwHost: "指定绑定地址",
-        flagGwDaemon: "后台守护模式运行",
-        tmDeployServer: "# 服务器端",
-        tmDeployLocal: "# 本地",
-        tmLogin: "# 登录",
-        tmViewSessions: "# 查看会话",
-        tmDocsStartDev: "# 远程终端启动 dev server",
-        tmDocsAppBrowser: "# App 切换到 Browser 标签（globe 图标），输入端口 3000",
-      },
-      en: {
-        pageTitle: "LinkShell | Desktop First, Roam Anywhere",
-        navHow: "How It Works",
-        navDocs: "Docs",
-        navGithub: "GitHub",
-        heroBadge: "> LinkShell v1.0 is Live",
-        heroTitle1: "Terminal Bridge",
-        heroTitleSep: " — ",
-        heroTitle2: "Take over anywhere.",
-        heroLead: "A local terminal bridge plus Agent Workspace. Keep heavy workloads on your desktop, and control PTY, Claude Code, and Codex conversations from your phone.",
-        heroGateway: "🚀 Pro subscribers get instant access to Official Gateway — no server setup needed. Learn more →",
-        btnStart: "Deploy Now",
-        btnGithub: "View Repo",
-        btnAndroid: "Android Download",
-        btnIos: "App Store",
-        howItWorksTitle: "Establish your link in 3 steps",
-        step1Title: "[1] Install CLI",
-        step1Desc: "One command to install globally. Built-in gateway works out of the box — no extra server needed.",
-        step2Title: "[2] Start Bridge",
-        step2Desc: "One command starts the built-in gateway, bridges your AI terminal, and exposes the Agent Workspace channel.",
-        qsLanDesc: "Same LAN, built-in gateway, zero config.",
-        qsPubDesc: "Deploy gateway on a public server first, then connect your local CLI.",
-        step3Title: "[3] Scan & Take Over",
-        step3Desc: "Open the LinkShell App (iOS / Android), scan the terminal QR code, and instantly take over the session.",
-        featureSectionTitle: "Native terminal feel. Decentralized control.",
-        f1Title: "Local PTY Driver",
-        f1Desc: "Everything runs locally. We preserve full terminal semantics: ANSI colors, cursor movements, and raw readline signals.",
-        f2Title: "Universal Connect",
-        f2Desc: "Supports React Native, Expo, and Web clients via one protocol for terminal I/O, Agent Workspace, desktop, and Browser preview.",
-        f3Title: "Strict State Sync",
-        f3Desc: "Features a Single Controller locking model. Prevent multi-device input races and keep screens meticulously synchronized.",
-        f4Title: "Remote Desktop",
-        f4Desc: "Not just terminal. Add --screen to view your desktop in real-time. WebRTC at 30fps with automatic screenshot fallback.",
-        f5Title: "Port Forwarding Preview",
-        f5Desc: "Start a dev server remotely, preview it on your phone. Full CSS/JS/image loading, HMR hot reload, PC/mobile view toggle, and fullscreen mode.",
-        docsPortFwdTitle: "Port Forwarding",
-        docsPortFwdDesc: "After starting a dev server in the remote terminal, preview the page directly on your phone. HTTP requests are relayed through the Gateway for full web app preview.",
-        docsPortFwd1: "Full Loading — HTML, CSS, JS, images all proxied through the tunnel",
-        docsPortFwd2: "HMR Support — WebSocket hot reload forwarded automatically for Vite / Next.js / webpack",
-        docsPortFwd3: "View Toggle — switch between PC / mobile views, desktop mode renders at 1024px width",
-        docsPortFwd4: "Fullscreen — hide all UI for immersive page preview",
-        docsPortFwdReq: "Requires linkshell-cli \u2265 0.2.53 / gateway \u2265 0.2.17",
-        diSectionTitle: "Agent Workspace, AI at Your Fingertips",
-        diSectionDesc: "The Agent tab renders Claude Code and Codex conversations as structured timelines. Models, permissions, and reasoning controls follow CLI capabilities dynamically.",
-        diFeature1: "Structured Timeline — messages, plans, tool calls, commands, and file changes in one view",
-        diFeature2: "Permission Flow — approve, deny, or answer structured prompts from your phone",
-        diFeature3: "Dynamic Capabilities — provider models, permission modes, and reasoning controls come from the CLI",
-        diFeature4: "History Resume — conversations and timelines are cached locally and refreshed from snapshots",
-        projSectionTitle: "Project Spaces, Parallel Control",
-        projSectionDesc: "Multi-project parallel sessions. Pick a project folder, run commands independently, just like working locally.",
-        projFeature1: "Parallel Projects — switch between project directories in one session",
-        projFeature2: "Isolated Terminals — each project gets its own execution environment",
-        projFeature3: "Recent Projects — smart memory of frequently used projects",
-        projFeature4: "Live Status — parallel task progress at a glance",
-        lifestyleSectionTitle: "The LinkShell Workflow",
-        lifestyleLead: "It's not just a remote bridge. It's your declaration of independence from the desk.",
-        l1Title: "Suspend & Walk",
-        l1Desc: "Compiling, training, building... your desktop handles it. Step away for coffee; LinkShell keeps your PTY session perfectly alive.",
-        l2Title: "Review Anytime",
-        l2Desc: "Pull out your phone and jump back in. Check build progress and scroll through colorful logs with zero latency decay.",
-        l3Title: "Quick Hotfix",
-        l3Desc: "Spot an error? The mobile xterm.js instance takes focus. Type the fix, hit enter, and drop your phone back in your pocket.",
-        docsSectionTitle: "Documentation",
-        docsSectionDesc: "Everything you need to know, from installation to deployment.",
-        docsArchTitle: "Architecture Overview",
-        docsArchDesc: "LinkShell uses a three-tier architecture: the local CLI captures PTY output, relays it through a gateway, and renders a full terminal on mobile. All computation stays local — your phone is just a remote window.",
-        docsCliTitle: "CLI Command Reference",
-        docsCmdStart: "Start a bridge session. Auto-starts the built-in gateway, bridges the AI terminal, exposes Agent Workspace, and generates a pairing QR code.",
-        docsCmdGateway: "Start the gateway server standalone. For deploying the gateway on a remote server independently.",
-        docsCmdSetup: "Interactive configuration wizard. Guides you through gateway address, AI provider, and other basic settings.",
-        docsCmdDoctor: "Environment diagnostic tool. Checks Node.js version, dependency integrity, network connectivity, and more.",
-        docsCmdStatus: "View current running status. Shows active sessions, gateway connection state, and daemon info.",
-        docsCmdStop: "Stop the daemon. Gracefully shuts down bridge sessions and the built-in gateway.",
-        docsCmdLogin: "Log in to your iTool account. Opens browser for OAuth, then Pro users can pick an official Gateway to connect.",
-        docsCmdLogout: "Log out and clear local credentials.",
-        docsCmdList: "List your active sessions on official Gateways. Requires login.",
-        docsDeployTitle: "Deployment Options",
-        docsDeployDesc: "Choose the right deployment for your network setup.",
-        tabLan: "LAN",
-        tabPublic: "Public",
-        tabOfficial: "Official Gateway",
-        docsDeployLocal: "Local Direct (Simplest)",
-        docsDeployLocalDesc: "CLI has a built-in gateway. Phone connects directly to your computer on the same LAN. Zero config.",
-        docsDeployRemote: "Remote Server",
-        docsDeployRemoteTag: "[recommended]",
-        docsDeployRemoteDesc: "Deploy the gateway to a public server with Nginx reverse proxy + HTTPS for cross-network access.",
-        docsDeployDocker: "Docker Deploy",
-        docsDeployDockerDesc: "One-command gateway deployment with Docker Compose. Minimum 1 core, 512MB RAM.",
-        lanTip1: "Phone and computer must be on the same Wi-Fi",
-        lanTip2: "No server needed, works out of the box",
-        lanTip3: "Lowest latency, data stays on your LAN",
-        pubTip1: "Cross-network access via 4G/5G anytime",
-        pubTip2: "Recommended: Nginx reverse proxy + Let's Encrypt HTTPS",
-        pubTip3: "Data only passes through your own server relay",
-        docsDeployOfficial: "Official Managed Gateway",
-        docsDeployOfficialTag: "[Pro]",
-        docsDeployOfficialDesc: "Subscribe to iTool Pro to use the officially managed Gateway. No server setup needed. Auto-connect after login, and the mobile App discovers sessions automatically.",
-        officialTip1: "Zero config — log in and go, no server to deploy",
-        officialTip2: "Mobile App auto-discovers sessions after login, no QR scan needed",
-        officialTip3: "Auto-disconnect on subscription expiry, no data retained",
-        qsOfficialDesc: "Pro subscribers connect to the official managed Gateway with a single login command.",
-        tabFree: "Free (Limited)",
-        qsFreeDesc: "Free public gateway for a limited time. No login or server setup needed — just connect and try.",
-        tmFreeConnect: "# Connect to free gateway",
-        docsDeployFree: "Free Gateway (Limited Time)",
-        docsDeployFreeTag: "[Limited]",
-        docsDeployFreeDesc: "A free public gateway open for a limited time. No login or server setup required — one command to experience cross-network access.",
-        freeTip1: "No login or registration required",
-        freeTip2: "Cross-network access, same experience as Pro",
-        freeTip3: "Available for a limited time, may close at any time",
-        heroFreeGateway: "🎉 Free gateway available now:",
-        heroFreeGatewayCmd: "linkshell start --gateway wss://zkiwacrrxzaj.sealosbja.site/ws",
-        docsProtocolTitle: "Protocol & Reliability",
-        docsProtoMsgTypes: "Message Types (Zod)",
-        docsProtoAck: "Dual-layer ACK",
-        docsProtoScrollback: "Scrollback Buffer",
-        docsProtoHeartbeat: "Heartbeat",
-        docsReliabilityTitle: "Reliability Guarantees",
-        docsRel1: "Exponential backoff auto-reconnect (both CLI and App)",
-        docsRel2: "Session persistence (60s after host disconnect)",
-        docsRel3: "Idle session auto-cleanup after 30 minutes",
-        docsRel4: "Protocol version negotiation, forward compatible",
-        docsControlTitle: "Control Model",
-        docsCtrl1: "Single controller model prevents multi-device input conflicts",
-        docsCtrl2: "Control rights request / release / transfer mechanism",
-        docsCtrl3: "6-digit pairing code + QR code secure pairing",
-        docsCtrl4: "CORS and rate limiting protection",
-        docsFaqTitle: "FAQ",
-        docsScreenTitle: "Remote Desktop",
-        docsScreenDesc: "Add the --screen flag when starting, and a Desktop tab appears in the App for real-time desktop viewing.",
-        docsScreen1: "WebRTC Mode — streams your desktop at 30fps by default with minimal latency",
-        docsScreen2: "Screenshot Fallback — automatically degrades to screenshot streaming on poor networks",
-        docsScreen3: "Auto Switch — no manual config needed, picks the best mode based on network quality",
-        docsScreen4: "App Toggle — switch between Terminal / Desktop tabs in the App anytime",
-        docsFaq1Q: "Q: Do I need a public server?",
-        docsFaq1A: "No. The CLI has a built-in gateway — your phone connects directly to your computer on the same LAN. You only need a public server for cross-network access.",
-        docsFaq2Q: "Q: Which AI agents are supported?",
-        docsFaq2A: "Terminal mode supports Claude Code, OpenAI Codex, Gemini, GitHub Copilot, and custom shell processes. Agent Workspace auto-detects Claude Code and Codex.",
-        docsFaq3Q: "Q: Where can I download the mobile app?",
-        docsFaq3A: "iOS version is available on the <a href=\"https://apps.apple.com/cn/app/linkshell/id6761547516\" target=\"_blank\" rel=\"noopener\">App Store</a>, Android APK is available from GitHub Releases.",
-        docsFaq4Q: "Q: Is my data secure? Does it pass through third-party servers?",
-        docsFaq4A: "In local mode, data stays entirely within your LAN. In remote mode, data passes through your own self-hosted gateway relay — never through any third-party server.",
-        docsFaq5Q: "Q: How does the remote desktop feature work?",
-        docsFaq5A: "With the --screen flag, your desktop is streamed at 30fps via WebRTC. On poor network conditions, it automatically falls back to screenshot streaming.",
-        docsFaq6Q: "Q: What is the Official Gateway? How is it different from self-hosted?",
-        docsFaq6A: "The Official Gateway is a managed public relay hosted by the LinkShell team, available to iTool Pro subscribers. No server setup needed — just log in and connect. The mobile App auto-discovers your sessions when logged into the same account. Self-hosted gateways are fully independent with no third-party dependency.",
-        ctaTitle: "Ready for your first roam?",
-        ctaDesc: "Skip the heavy cloud VM migrations. Set up the relay in seconds and put your whole dev environment in your pocket.",
-        footerText: "Crafted for Vibe Coding. © 2026 Open Source / MIT.",
-        donateTitle: "Buy Me a Coffee",
-        donateDesc: "If LinkShell helps you, consider buying the author a coffee.",
-        donateWechat: "WeChat Pay",
-        donateAlipay: "Alipay",
-        sponsorTitle: "Sponsors",
-        sponsorDesc: "Thanks to our sponsors for supporting LinkShell.",
-        sponsorAi18nDesc: "Unified AI API Gateway",
-        navPricing: "Pricing",
-        pricingTitle: "Choose Your Plan",
-        pricingDesc: "All core features are free. Upgrade to Pro for official managed Gateway — connect from anywhere.",
-        pricingFree: "Free",
-        pricingFreeForever: "Free forever",
-        pricingF1: "Built-in gateway (LAN direct)",
-        pricingF2: "Terminal bridge + QR pairing",
-        pricingF3: "Claude / Codex / Gemini / Copilot / custom",
-        pricingF4: "Remote desktop (WebRTC)",
-        pricingF5: "Port forwarding preview",
-        pricingF6: "Self-hosted gateway",
-        pricingStartFree: "Get Started",
-        pricingMonthly: "Monthly",
-        pricingYearly: "Yearly",
-        pricingAltMonthly: "¥9.9/mo (Afdian)",
-        pricingAltYearly: "¥99/yr (Afdian)",
-        pricingP1: "Everything in Free",
-        pricingP2: "Official managed Gateway",
-        pricingP3: "Auto-discover sessions (no QR)",
-        pricingP4: "Multi-region nodes",
-        pricingP5: "Priority support",
-        pricingLogin: "Sign In",
-        pricingRegister: "Create Account",
-        pricingAfdianTab: "Afdian",
-        pricingAfdianBtn: "Pay via Afdian ↗",
-        pricingAfdianRefresh: "Paid? Click to refresh status",
-        pricingAfdianNote: "After payment, click refresh to sync your subscription",
-        pricingAlreadyPro: "You are a Pro user",
-        pricingExpires: "Expires: ",
-        pricingFaqTitle: "FAQ",
-        pricingFaq1Q: "Q: Are there limits on the free plan?",
-        pricingFaq1A: "No feature limits. Free includes all core features — you just need to self-host the gateway. Pro provides an official managed gateway so you don't have to.",
-        pricingFaq2Q: "Q: Can I cancel anytime?",
-        pricingFaq2A: "Yes. PayPal subscriptions can be cancelled anytime. You'll retain access until the end of the current billing period.",
-        pricingFaq3Q: "Q: What payment methods are supported?",
-        pricingFaq3A: "International users: PayPal (credit card supported). Chinese users: Afdian (WeChat Pay / Alipay).",
-        tmInstallCli: "# Install CLI globally",
-        tmInitConfig: "# Initialize config",
-        tmCheckEnv: "# Check environment",
-        tmServerGateway: "# Server: start gateway",
-        tmLocalConnect: "# Local: connect to remote gateway",
-        tmLoginAccount: "# Log in to iTool account",
-        tmStartDevServer: "# Start dev server remotely",
-        tmAppBrowserTab: "# Switch to Browser tab in App, enter port 3000 to preview",
-        flagDaemon: "Run in background daemon mode",
-        flagProvider: "Specify terminal provider (claude / codex / gemini / copilot / custom)",
-        flagAgentUi: "Enable Agent Workspace",
-        flagScreen: "Enable remote desktop sharing",
-        flagPort: "Specify gateway port (default 8787)",
-        flagGwPort: "Specify listen port",
-        flagGwHost: "Specify bind address",
-        flagGwDaemon: "Run in background daemon mode",
-        tmDeployServer: "# Server",
-        tmDeployLocal: "# Local",
-        tmLogin: "# Login",
-        tmViewSessions: "# View sessions",
-        tmDocsStartDev: "# Start dev server in remote terminal",
-        tmDocsAppBrowser: "# Switch to Browser tab (globe icon) in App, enter port 3000",
-      },
-    };
-
-    const textNodes = Array.from(document.querySelectorAll("[data-i18n]"));
-    const langBtn = document.getElementById("lang-toggle");
-    let currentLang = "zh";
-    const seoData = {
-      en: {
-        title: "LinkShell Pricing | Free and Pro Official Gateway",
-        description: "LinkShell Free includes terminal bridging, QR pairing, Claude Code, OpenAI Codex, Gemini, Copilot, Agent Workspace, remote desktop, port forwarding, and self-hosted Gateway. Pro unlocks the official hosted Gateway and automatic app session discovery.",
-        socialDescription: "Use all core LinkShell features for free, or upgrade to Pro for the official hosted Gateway with no server setup.",
-        twitterDescription: "Compare LinkShell Free and Pro official Gateway plans.",
-        locale: "en_US"
-      },
-      zh: {
-        title: "LinkShell 定价 | Free 与 Pro 官方 Gateway",
-        description: "LinkShell 免费版包含终端桥接、二维码配对、Claude Code、OpenAI Codex、Gemini、Copilot 支持、Agent Workspace、远程桌面、端口转发和自建 Gateway；Pro 解锁官方托管 Gateway 和 App 自动发现会话。",
-        socialDescription: "免费使用 LinkShell 全部核心功能。升级 Pro 后可使用官方托管 Gateway，无需自建服务器，App 自动发现会话。",
-        twitterDescription: "LinkShell 免费版与 Pro 官方 Gateway 方案对比。",
-        locale: "zh_CN"
-      }
-    };
-
-    function setMeta(selector, value) {
-      const node = document.querySelector(selector);
-      if (node) node.setAttribute("content", value);
-    }
-
-    function applySeo(lang) {
-      const seo = seoData[lang];
-      document.title = seo.title;
-      setMeta('meta[name="description"]', seo.description);
-      setMeta('meta[property="og:title"]', seo.title);
-      setMeta('meta[property="og:description"]', seo.socialDescription);
-      setMeta('meta[property="og:locale"]', seo.locale);
-      setMeta('meta[name="twitter:title"]', seo.title);
-      setMeta('meta[name="twitter:description"]', seo.twitterDescription);
-    }
-
+    // ── Language ──
+    let currentLang = 'zh';
     function applyLanguage(lang) {
-      const dict = translations[lang];
-      document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
-      textNodes.forEach((node) => {
-        const key = node.getAttribute("data-i18n");
-        if (dict[key]) node.textContent = dict[key];
-      });
-      langBtn.textContent = lang === "zh" ? "EN" : "中文";
-      applySeo(lang);
+      currentLang = lang;
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.getElementById('lang-toggle').textContent = lang === 'zh' ? 'EN' : '中文';
+      try { localStorage.setItem('linkshell-lang', lang); } catch { }
     }
+    (function () {
+      let saved = null;
+      try { saved = localStorage.getItem('linkshell-lang'); } catch { }
+      const fromUrl = new URLSearchParams(location.search).get('lang');
+      applyLanguage(fromUrl === 'en' || fromUrl === 'zh' ? fromUrl : saved || (/^zh/i.test(navigator.language) ? 'zh' : 'en'));
+    })();
+    document.getElementById('lang-toggle').addEventListener('click', () => applyLanguage(currentLang === 'zh' ? 'en' : 'zh'));
 
-    langBtn.addEventListener("click", () => {
-      currentLang = currentLang === "zh" ? "en" : "zh";
-      applyLanguage(currentLang);
-    });
-
-    applyLanguage(currentLang);
-
-    // Deploy tabs
-    document.querySelectorAll('.tab[data-tab]').forEach(btn => {
+    // ── Tabs ──
+    document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const parent = btn.closest('.tabs');
-        const body = parent.nextElementSibling;
-        parent.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-        body.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        const tabs = btn.closest('.tabs');
+        const body = tabs.nextElementSibling;
+        tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+        body.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
         btn.classList.add('active');
         body.querySelector('#tab-' + btn.dataset.tab).classList.add('active');
       });
     });
 
-    // Page routing
-    const navLinks = document.querySelectorAll('.nav-link');
-    const pageSections = document.querySelectorAll('section[data-page]');
-
-    function showPage(page) {
-      pageSections.forEach(s => {
-        s.classList.toggle('visible', s.dataset.page === page);
+    // ── Copy buttons on commands ──
+    document.querySelectorAll('pre').forEach((pre) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'copy';
+      button.textContent = 'Copy';
+      button.addEventListener('click', async () => {
+        const text = [...pre.querySelectorAll('code')].map((code) => {
+          const clone = code.cloneNode(true);
+          clone.querySelectorAll('.pr, .cm, [lang]:not([lang="' + currentLang + '"])').forEach((n) => n.remove());
+          return clone.textContent;
+        }).join('\n').split('\n').map((l) => l.trimEnd()).filter(Boolean).join('\n');
+        try { await navigator.clipboard.writeText(text); button.textContent = '✓'; } catch { button.textContent = '—'; }
+        setTimeout(() => (button.textContent = 'Copy'), 1400);
       });
-      navLinks.forEach(a => {
-        a.classList.toggle('active', a.dataset.pageLink === page);
-      });
-      window.scrollTo(0, 0);
-    }
-
-    function route() {
-      const path = location.pathname.replace(/\/+$/, '');
-      const pathPage = path.endsWith('/docs') ? 'docs' : path.endsWith('/pricing') ? 'pricing' : '';
-      const hash = location.hash.replace('#', '') || pathPage || 'pricing';
-      if (hash === 'docs') {
-        showPage('docs');
-      } else if (hash === 'pricing') {
-        showPage('pricing');
-        initPricing();
-      } else {
-        showPage('home');
-        // scroll to anchor if needed
-        if (hash !== 'home') {
-          const el = document.getElementById(hash);
-          if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 50);
-        }
-      }
-    }
-
-    document.querySelector('.nav-b').addEventListener('click', (e) => {
-      e.preventDefault();
-      location.href = './';
+      pre.appendChild(button);
     });
 
+    // ── Pages: /, /docs/, /pricing/ (and #docs, #pricing) ──
+    const pages = document.querySelectorAll('main.page');
+    const navLinks = document.querySelectorAll('[data-page-link]');
+    let shown = null;
+    function showPage(page) {
+      pages.forEach((p) => p.classList.toggle('visible', p.dataset.page === page));
+      navLinks.forEach((a) => a.classList.toggle('active', a.dataset.pageLink === page));
+      if (shown !== page) window.scrollTo(0, 0);
+      shown = page;
+    }
+    function route() {
+      const path = location.pathname.replace(/\/+$/, '');
+      const pathPage = path.endsWith('/docs') ? 'docs' : path.endsWith('/pricing') ? 'pricing' : 'home';
+      const hash = location.hash.replace('#', '');
+      const page = hash === 'docs' || hash === 'pricing' ? hash : pathPage;
+      showPage(page);
+      if (page === 'pricing') initPricing();
+      if (hash && hash !== page) {
+        const el = document.getElementById(hash);
+        if (el) setTimeout(() => el.scrollIntoView(), 30);
+      }
+    }
     window.addEventListener('hashchange', route);
-    route();
+    // After the pricing script below has loaded.
+    window.addEventListener('DOMContentLoaded', route);
   </script>
 
-  <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
-  <!-- Pricing logic -->
+  <!-- Pricing: Supabase sign-in, PayPal subscriptions, Afdian -->
   <script>
     const SUPABASE_URL = 'https://mkbeusztkzffnzjdwmqk.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rYmV1c3p0a3pmZm56amR3bXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5Nzc0NzgsImV4cCI6MjA4MTU1MzQ3OH0.2wlT6q6687Z5rpEYsdp01IQpNNl_XWv0IAfBgwPyDP0';
@@ -2139,7 +821,6 @@
     let pricingCycle = 'monthly';
     let pricingPayMethod = 'paypal';
     let paypalLoaded = false;
-    let pricingInitialized = false;
 
     function getSupabase() {
       if (!supabaseClient && window.supabase) {
@@ -2150,22 +831,17 @@
 
     function setPricingCycle(cycle) {
       pricingCycle = cycle;
-      document.querySelectorAll('.cycle-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.cycle === cycle);
-      });
+      document.querySelectorAll('.cycle-btn').forEach((b) => b.classList.toggle('active', b.dataset.cycle === cycle));
       document.getElementById('price-monthly').style.display = cycle === 'monthly' ? '' : 'none';
       document.getElementById('price-yearly').style.display = cycle === 'yearly' ? '' : 'none';
       document.getElementById('price-alt-monthly').style.display = cycle === 'monthly' ? '' : 'none';
       document.getElementById('price-alt-yearly').style.display = cycle === 'yearly' ? '' : 'none';
+      updateAfdianLink();
       renderPaypal();
     }
 
     function setPayMethod(method) {
       pricingPayMethod = method;
-      document.querySelectorAll('.pay-tab').forEach(b => {
-        b.classList.toggle('active', b.textContent.toLowerCase().includes(method === 'paypal' ? 'paypal' : (currentLang === 'zh' ? '爱发电' : 'afdian').toLowerCase()));
-      });
-      // Simpler: toggle by index
       const tabs = document.querySelectorAll('.pay-tab');
       tabs[0].classList.toggle('active', method === 'paypal');
       tabs[1].classList.toggle('active', method === 'afdian');
@@ -2179,9 +855,7 @@
       const planId = pricingCycle === 'yearly' ? AFDIAN_YEARLY_PLAN : AFDIAN_MONTHLY_PLAN;
       const userId = pricingUser ? pricingUser.id : '';
       const link = document.getElementById('afdian-link');
-      if (link) {
-        link.href = AFDIAN_URL + '?plan_id=' + planId + '&product_type=0&custom_order_id=' + userId;
-      }
+      if (link) link.href = AFDIAN_URL + '?plan_id=' + planId + '&product_type=0&custom_order_id=' + userId;
     }
 
     function loadPaypalSdk() {
@@ -2218,28 +892,16 @@
               const token = authSession?.access_token ?? '';
               const res = await fetch('https://itool.tech/api/paypal/capture-subscription', {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': 'Bearer ' + token,
-                },
-                body: JSON.stringify({
-                  subscriptionID: data.subscriptionID,
-                  userID: pricingUser.id,
-                  planType: pricingCycle,
-                }),
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ subscriptionID: data.subscriptionID, userID: pricingUser.id, planType: pricingCycle }),
               });
-              if (res.ok) {
-                await checkPricingPlan();
-              } else {
-                showAuthError('Payment capture failed. Please contact support.');
-              }
+              if (res.ok) await checkPricingPlan();
+              else showAuthError('Payment capture failed. Please contact support.');
             } catch (e) {
               showAuthError('Network error. Please try again.');
             }
           },
-          onError: function (err) {
-            console.error('[PayPal]', err);
-          }
+          onError: function (err) { console.error('[PayPal]', err); }
         }).render('#paypal-button-container');
       } catch (e) {
         container.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Failed to load PayPal. Please try again.</p>';
@@ -2256,6 +918,23 @@
       if (el) el.style.display = 'none';
     }
 
+    function signedInLine(label, className) {
+      const line = document.getElementById('pricing-auth-status');
+      line.textContent = '';
+      const dot = document.createElement('span');
+      dot.className = className;
+      dot.textContent = '● ';
+      const who = document.createTextNode((pricingUser.email || pricingUser.id) + ' ');
+      const plan = document.createElement('b');
+      plan.textContent = label;
+      const out = document.createElement('a');
+      out.href = '#pricing';
+      out.style.cssText = 'color:var(--text-muted);font-size:12px;margin-left:8px';
+      out.textContent = currentLang === 'zh' ? '退出' : 'Sign out';
+      out.addEventListener('click', (e) => { e.preventDefault(); pricingSignOut(); });
+      line.append(dot, who, plan, out);
+    }
+
     async function checkPricingPlan() {
       if (!pricingUser) return;
       const sb = getSupabase();
@@ -2263,23 +942,20 @@
       try {
         const { data } = await sb.from('profiles').select('plan,plan_expires_at').eq('id', pricingUser.id).limit(1).single();
         if (data && data.plan === 'pro' && data.plan_expires_at && new Date(data.plan_expires_at) > new Date()) {
-          // Show Pro status
           document.getElementById('pricing-login-form').style.display = 'none';
           document.getElementById('pricing-payment').style.display = 'none';
           document.getElementById('pricing-pro-status').style.display = '';
           document.getElementById('pricing-expires').textContent = new Date(data.plan_expires_at).toLocaleDateString();
-          document.getElementById('pricing-auth-status').innerHTML = '<span class="ts">●</span> ' + (pricingUser.email || pricingUser.id) + ' <span style="color:var(--success);font-weight:600">Pro</span> <a href="javascript:pricingSignOut()" style="color:var(--text-muted);font-size:12px;margin-left:8px">' + (currentLang === 'zh' ? '退出' : 'Sign out') + '</a>';
+          signedInLine('Pro', 'ts');
         } else {
-          // Show payment
           document.getElementById('pricing-login-form').style.display = 'none';
           document.getElementById('pricing-payment').style.display = '';
           document.getElementById('pricing-pro-status').style.display = 'none';
-          document.getElementById('pricing-auth-status').innerHTML = '<span class="to">●</span> ' + (pricingUser.email || pricingUser.id) + ' <span style="color:var(--text-sec)">Free</span> <a href="javascript:pricingSignOut()" style="color:var(--text-muted);font-size:12px;margin-left:8px">' + (currentLang === 'zh' ? '退出' : 'Sign out') + '</a>';
+          signedInLine('Free', 'to');
           updateAfdianLink();
           if (pricingPayMethod === 'paypal') renderPaypal();
         }
       } catch {
-        // Default to payment view
         document.getElementById('pricing-login-form').style.display = 'none';
         document.getElementById('pricing-payment').style.display = '';
         document.getElementById('pricing-pro-status').style.display = 'none';
@@ -2299,7 +975,7 @@
           document.getElementById('pricing-login-form').style.display = '';
           document.getElementById('pricing-payment').style.display = 'none';
           document.getElementById('pricing-pro-status').style.display = 'none';
-          document.getElementById('pricing-auth-status').innerHTML = '';
+          document.getElementById('pricing-auth-status').textContent = '';
         }
       } catch {
         document.getElementById('pricing-login-form').style.display = '';
@@ -2343,21 +1019,20 @@
       document.getElementById('pricing-login-form').style.display = '';
       document.getElementById('pricing-payment').style.display = 'none';
       document.getElementById('pricing-pro-status').style.display = 'none';
-      document.getElementById('pricing-auth-status').innerHTML = '';
+      document.getElementById('pricing-auth-status').textContent = '';
       document.getElementById('paypal-button-container').innerHTML = '';
     }
 
     async function pricingRefreshPlan() {
       if (!pricingUser) return;
-      const btn = event.target;
-      btn.textContent = currentLang === 'zh' ? '刷新中...' : 'Refreshing...';
+      const btn = event.currentTarget;
       btn.disabled = true;
+      btn.style.opacity = '.6';
       await checkPricingPlan();
-      btn.textContent = currentLang === 'zh' ? '支付完成？点击刷新状态' : 'Paid? Click to refresh status';
       btn.disabled = false;
+      btn.style.opacity = '';
     }
   </script>
-
 </body>
 
 </html>

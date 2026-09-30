@@ -5,242 +5,177 @@
 <h1 align="center">LinkShell</h1>
 
 <p align="center">
-  <strong>离开电脑，继续工作。</strong><br />
-  在手机或浏览器中，连接本机终端、编程 Agent 与开发预览。
+  <strong>离开电脑，Agent 接着干。</strong><br />
+  在手机上看电脑里的编程 Agent 干活、随时插话、一键审批。
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/linkshell-cli"><img src="https://img.shields.io/npm/v/linkshell-cli?style=flat-square&amp;color=818cf8" alt="npm CLI 版本" /></a>
+  <a href="https://www.npmjs.com/package/linkshell-cli"><img src="https://img.shields.io/npm/v/linkshell-cli?style=flat-square&amp;color=4a6cf7" alt="npm 上的 CLI 版本" /></a>
   <a href="https://github.com/LiuTianjie/LinkShell/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/LiuTianjie/LinkShell/test.yml?style=flat-square&amp;label=tests" alt="测试状态" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-64748b?style=flat-square" alt="MIT 许可证" /></a>
 </p>
 
 <p align="center">
   <a href="https://liutianjie.github.io/LinkShell/">官网</a> ·
-  <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iOS App</a> ·
+  <a href="https://liutianjie.github.io/LinkShell/docs/">文档</a> ·
+  <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> ·
   <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a> ·
-  <a href="docs/deploy.md">自托管</a> ·
   <a href="README.md">English</a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/2.png" alt="在 LinkShell 手机终端中使用 Claude Code" width="245" />
-  <img src="docs/assets/3.png" alt="在 LinkShell 手机终端中使用 Gemini CLI" width="245" />
-  <img src="docs/assets/4.png" alt="在 LinkShell 中切换多个终端会话" width="245" />
+  <img src="docs/site/assets/shots/ios-session.webp" alt="在手机上继续的 Claude Code 会话：计划、改动与回复" width="230" />
+  <img src="docs/site/assets/shots/ios-home.webp" alt="首页：各个项目的会话，最上面是正在运行的终端" width="230" />
+  <img src="docs/site/assets/shots/ios-preview.webp" alt="在手机上打开电脑本地的开发服务器" width="230" />
 </p>
 
-LinkShell 让你继续操作自己电脑上正在进行的工作：接着使用终端、查看编程 Agent 的进展、响应受支持的审批请求，或在手机上打开本地开发服务。
+Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手机上看它实时干活，随时发消息，一键审批它要的权限，回到电脑前再把会话交还给终端。代码和 Agent 进程都不离开你的电脑，连接全程端到端加密。
 
-CLI 在主机上启动终端桥接与内置网关，客户端配对后即可通过网络连接。跨网络访问时，可使用自托管网关或可选的托管服务。代码与 Agent 进程始终在主机上运行。
+## 开始使用
 
-## 开始连接
-
-先在主机安装 Node.js，以及准备使用的编程 CLI。然后进入项目目录：
+电脑需要 macOS 或 Linux，以及 **Node.js 22.13 或更新版本**。
 
 ```bash
-npm install -g linkshell-cli
-linkshell start --daemon
+npm i -g linkshell-cli
+linkshell host --daemon
 ```
 
-1. 在同一网络下打开 [iOS App](https://apps.apple.com/cn/app/linkshell/id6761547516) 或 [Android App](https://github.com/LiuTianjie/LinkShell/releases/latest)。
-2. 扫描 CLI 输出的二维码，或输入网关地址与配对码。
-3. 使用终端，或在 **Agent Workspace** 中选择可用的 Provider。
+然后用下面任一方式连接手机（[iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)）：
 
-偏好浏览器？直接打开 CLI 显示的网关地址并配对。Web 控制台随 CLI 分发，由网关直接提供。
+- **Pro：官方网关。** 运行 `linkshell login`（如果 host 已经在运行，重启一下），然后在 App 里登录同一个账号，电脑会自动出现，不用扫码。
+- **免费：自建网关。** 先运行一个网关（见[下文](#自建网关)），让 host 连上它，配对一次：
 
-终端默认启动当前用户的 shell，可在其中运行已安装的 `claude`、`codex`、`gemini`、`copilot` 或其他命令。Agent Workspace 默认启用，并检测受支持的 Claude Code 与 Codex 安装。
+  ```bash
+  linkshell host --gateway wss://gw.example.com --daemon
+  linkshell pair    # 在 App 的「电脑 → 添加电脑」里扫码
+  ```
 
-> 从旧版指南升级？`--provider claude` 等命名终端 Provider 已弃用。请直接使用默认 shell，或通过 `--command <executable>` 启动指定程序。`--agent-provider` 则用于选择结构化 Agent Workspace 的 Provider，两者相互独立。
+可以直接在手机上新建会话；也可以在电脑终端里这样启动 Agent，随时交给手机：
+
+```bash
+linkshell claude    # Claude Code：手机上发消息即接管，终端里按任意键收回
+linkshell codex     # Codex：终端和手机同时在线
+```
 
 <details>
 <summary>其他安装方式</summary>
 
-macOS Homebrew：
-
 ```bash
 brew install LiuTianjie/linkshell/linkshell
-```
-
-Shell 安装器：
-
-```bash
 curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 ```
 
 </details>
 
-## 一次连接，四种视图
+## 能做什么
 
-| 视图 | 可以完成的工作 |
-| --- | --- |
-| **Terminal** | 通过 xterm.js 操作主机上的真实 PTY，切换终端，运行已有 CLI 工具 |
-| **Agent Workspace** | 阅读结构化对话、工具活动、计划与文件变更，响应 Provider 支持的补充输入和审批请求 |
-| **Browser** | 通过 HTTP / WebSocket 转发预览主机开发服务，包括 HMR |
-| **Desktop** | 启用共享后查看主机屏幕，优先使用 WebRTC，必要时回退到截图流 |
+- **电脑与手机接力。** 同一个会话 ID，上下文不丢。在手机上选好的模型和思考强度，接管时自动生效。
+- **实时跟进。** 回复逐字出现；计划、工具调用和文件改动实时更新，每个文件都能看 diff。
+- **干活时也能说话。** Codex 和 Claude 把新消息直接插进当前这一轮；其他 Agent 在输入框上方排队，排队的消息可以撤回；停止时，排队的文字会放回输入框。
+- **随时审批。** 权限请求推到手机上，一键允许或拒绝。
+- **调整设置。** 模型、思考强度、权限模式、快速模式，取决于 Agent 提供了哪些。
+- **整理会话。** 重命名、归档、删除；Codex 和 Claude 会同步到它们自己的记录里。
+- **真终端。** 电脑上的终端，带 Ctrl、Esc、Tab、方向键工具栏；关掉 App 也不会中断。
+- **在手机上打开 localhost。** 电脑上开发服务器的端口，走同一条加密通道，热更新照常，可以全屏。不需要开放端口，也不需要同一个 Wi-Fi。
+- **屏幕和文件。** 看一眼电脑屏幕（需要 `ffmpeg`），把手机里的图片和文件传到项目里。
 
-客户端断开和重连时，CLI 可以继续在后台运行。macOS 默认在桥接运行期间阻止**系统闲置睡眠**，不会强制保持屏幕点亮。主机仍需保持运行，并能够通过网络访问。
+## 支持的 Agent
 
-### Agent Workspace
+LinkShell 用的是你电脑上已经安装、已经登录的 Agent，不经手它们的账号和 API key。
 
-受支持的 Provider 会向客户端报告可用能力，包括模型、推理强度、权限模式、图文输入、工具事件和会话历史。具体能力取决于当前 Provider 及其安装版本。
-
-| Agent | 终端方式 | 结构化工作区 |
+| Agent | 方式 | 体验 |
 | --- | --- | --- |
-| Claude Code | 在 shell 中运行 `claude` | Claude Agent SDK；可用时回退到 stream-json |
-| Codex | 在 shell 中运行 `codex` | Codex app-server |
-| Gemini CLI、GitHub Copilot CLI 等工具 | 在 shell 中运行对应命令 | 不承诺具备同等结构化适配 |
+| **Codex** | 多端同步 | `linkshell codex` 打开的终端和手机同时在线，任何一端都能发消息、打断、审批 |
+| **Claude Code** | 接力 | 电脑上用 Claude 自己的界面；手机发消息即接管，电脑按任意键收回 |
+| **Gemini CLI、GitHub Copilot、OpenCode、Cursor、Grok** | 远程会话 | 通过 [Agent Client Protocol](https://agentclientprotocol.com) 在手机上新建、继续会话：实时输出、审批、模式和模型 |
+| **任何命令行工具** | 终端 | 在电脑上开终端，手机上看和输入 |
+
+## 自建网关
+
+网关只转发加密数据并负责配对，占用资源很少。任选一种：
 
 ```bash
-# 自动检测受支持的 Agent
-linkshell start --daemon
+# 在服务器上用 CLI
+linkshell gateway --port 8787 --daemon
 
-# 明确选择 Codex 工作区
-linkshell start --daemon --agent-provider codex
-
-# 以前台方式启动终端桥接，关闭 Agent Workspace
-linkshell start --no-agent-ui
+# 或者 Docker
+docker run -d --name linkshell-gateway -p 8787:8787 \
+  -v linkshell-gateway:/data nickname4th/linkshell-gateway
 ```
 
-其他被发现的本地 Agent 也可能出现在会话树中，但进程发现不会把它们的终端会话转换成结构化对话。没有受支持的 Provider 时，仍可使用终端。
+公网上请在前面加一层 HTTPS 反向代理（Caddy、Nginx），然后用 `wss://你的域名`。只在家里用的话，网关可以直接跑在这台电脑上：`linkshell host --gateway ws://局域网IP:8787`。更多见[部署指南](docs/deploy.md)。
 
-Claude 的 stream-json 回退路径不提供交互式工具审批。需要逐项审批时，应使用 SDK 路径；界面可用的控制项以当前适配器报告的能力为准。
+## 安全
 
-### 预览开发服务
+- **端到端加密。** 手机和电脑之间的数据全部加密，官方网关和自建网关都只能看到密文。
+- **配对即授权。** 配对的手机能做你在这台电脑终端里能做的事。只配对你信任的设备，配对码不要外传。
+- **Agent 用的是你的账号。** Agent 以你的用户身份运行，使用你登录 shell 的环境变量和它们自己的登录。Pro 订阅只包含网关服务。
+- **数据在本地。** 会话和历史保存在电脑上的 `~/.linkshell`，重启后配对依然有效。
 
-在主机终端中启动开发服务，例如 `npm run dev`，然后在 App 的 **Browser** 视图输入端口号，如 `3000`。
+## 命令
 
-LinkShell 同时转发 HTTP 资源和 WebSocket 流量，受支持的开发服务可以保留热更新。App 提供手机 / 桌面视口切换与全屏预览。详见[网关部署与代理配置](docs/deploy.md)。
-
-### 查看电脑桌面
-
-在主机安装 `ffmpeg`，然后启用屏幕共享：
-
-```bash
-linkshell start --daemon --screen
-```
-
-按系统要求授予屏幕录制权限。CLI 在可用时通过可选依赖 `werift` 使用 WebRTC，否则回退到截图流。Desktop 用于查看主机画面，终端和 Agent 交互通过各自的通道完成。
-
-## 选择连接方式
-
-| 模式 | 网关运行位置 | 账号要求 | 适用场景 |
-| --- | --- | --- | --- |
-| **局域网** | CLI 内置网关 | 无需托管账号，客户端分别配对 | 手机与电脑位于可以互访的同一网络 |
-| **自托管** | 自己的服务器 | 默认无需托管账号 | 通过自己的中继跨网络访问 |
-| **托管服务** | 官方网关 | 登录并具有 Pro 权益 | 使用托管中继和账号所属会话 |
-
-```mermaid
-flowchart LR
-    subgraph Host[你的电脑]
-        Shell[Shell / 编程 CLI] <--> Bridge[LinkShell 桥接]
-        Agents[结构化 Agent 适配器] <--> Bridge
-        Dev[本地开发服务] <--> Bridge
-    end
-    Bridge <-->|WebSocket| Gateway[网关]
-    Gateway <-->|WebSocket / HTTP| Phone[iOS / Android App]
-    Gateway <-->|WebSocket / HTTP| Browser[Web 控制台]
-```
-
-局域网模式下，网关和桥接运行在同一台电脑；远程模式下，主机与客户端分别连接到可访问的网关。网关同时同源提供 Web 控制台。
-
-### 运行自己的网关
-
-在服务器上：
-
-```bash
-npm install -g linkshell-cli
-linkshell gateway --daemon --port 8787
-```
-
-为网关配置支持 WebSocket 的 HTTPS 反向代理，然后在运行项目的电脑上执行：
-
-```bash
-linkshell start --daemon --gateway wss://relay.example.com/ws
-```
-
-App 或浏览器连接 `https://relay.example.com` 并配对。Docker 部署、反向代理示例、防火墙要求与可选认证配置见[部署指南](docs/deploy.md)。
-
-## 安全与会话行为
-
-- **配对即授予访问权。** 客户端配对后使用与会话绑定的设备令牌；请保护配对码、二维码与已存储凭据。
-- **网关属于受信任基础设施。** 跨网络部署应使用 HTTPS / WSS。当前不提供端到端加密，中继运营方处于信任边界内。
-- **操作沿用主机权限。** 终端命令和 Agent 操作使用主机进程的访问权限执行，请只与可信客户端配对。
-- **重连能力有边界。** ACK、输出缓冲重放、心跳和退避重连支持短暂断线，不保证恢复主机重启、会话过期或进程丢失前的状态。
-- **模型服务独立配置。** 模型请求由已安装 Agent 的账号与 Provider 配置决定；可选的官方网关订阅是独立服务。
-
-移动端在本地保存对话历史以便恢复。网关的会话与重放状态不等于终端或项目备份。协议和网关细节见 [shared-protocol](packages/shared-protocol/README.md) 与 [gateway](packages/gateway/README.md)。
-
-## 常用命令
-
-| 任务 | 命令 |
+| 做什么 | 命令 |
 | --- | --- |
-| 后台启动 | `linkshell start --daemon` |
-| 前台启动 | `linkshell start` |
-| 运行指定程序 | `linkshell start --command bash` |
-| 允许 macOS 闲置睡眠 | `linkshell start --daemon --no-keep-awake` |
-| 查看桥接与网关状态 | `linkshell status` |
-| 停止后台进程 | `linkshell stop` |
-| 检查运行环境 | `linkshell doctor` |
-| 读取桥接日志 | `tail -f ~/.linkshell/bridge.log` |
-| 交互式配置 | `linkshell setup` |
-| 升级 CLI | `linkshell upgrade` |
-| 登录托管服务 | `linkshell login` |
+| 后台启动 LinkShell | `linkshell host --daemon` |
+| 查看 Agent、会话和网关 | `linkshell host status` |
+| 停止 | `linkshell host stop` |
+| 配对手机（自建网关） | `linkshell pair` |
+| 使用官方网关（Pro） | `linkshell login` / `linkshell logout` |
+| 可交给手机的 Claude Code / Codex | `linkshell claude` / `linkshell codex`（参数原样传递） |
+| 运行网关 | `linkshell gateway [--port 8787] [--daemon]` |
+| 检查环境 | `linkshell doctor` |
+| 升级 | `linkshell upgrade` |
 
-已有后台进程运行时，先停止，再使用新的参数启动。完整命令以已安装版本的 `linkshell --help` 和 `linkshell start --help` 为准。
+> **从 1.x 升级？** 2.0 的 App 和电脑端都换了，需要两边一起升级，再重新配对一次。1.x 的 App 仍然可以配合 `linkshell start` 使用。
 
 ## 开发
 
-仓库使用 pnpm workspace，当前 CI 使用 Node.js 20，包管理器版本固定在 `package.json` 中。
+pnpm workspace，Node.js 22（CI 使用 22）。
 
 ```bash
 git clone https://github.com/LiuTianjie/LinkShell.git
 cd LinkShell
 pnpm install
-pnpm -r --filter './packages/*' build
+pnpm build
 pnpm test
 ```
 
-按需在不同终端启动各部分：
+| 目录 | 内容 |
+| --- | --- |
+| `packages/wire` | 会话模型、JSON-RPC 方法、端到端加密、中继客户端 |
+| `packages/host` | 电脑端守护进程：Agent 驱动（Codex app-server、Claude 接力、ACP）、终端、端口、屏幕 |
+| `packages/gateway-v2` | 中继：转发加密帧，负责配对 |
+| `packages/gateway` | 可部署的网关（官方与自建），包含 1.x 支持 |
+| `packages/cli` | `linkshell`：host、配对、Agent 启动器、网关、登录 |
+| `packages/client-core` | App 共用的客户端状态与时间线 |
+| `apps/client` | 2.0 App：Expo / React Native，iOS 与 Android |
+| `apps/mobile`、`apps/web-dashboard`、`packages/shared-protocol` | 1.x 的 App、网页控制台和协议 |
+| `docs/site` | 官网与安装脚本（修改后运行 `python3 scripts/build-site-pages.py`） |
+
+开发 App 时，在 Metro 旁边跑一个带本地 API 的 host：
 
 ```bash
-pnpm dev:gateway
-pnpm --filter @linkshell/web-dashboard dev
-pnpm dev:app
-
-# 本地 CLI 开发
-pnpm --filter linkshell-cli dev start --command bash
+cd packages/cli && npx tsx src/index.ts host --dev-port 7878
+pnpm --filter @linkshell/client start
 ```
 
-| 目录 | 职责 |
-| --- | --- |
-| `packages/cli` | PTY、后台进程、Agent 适配器、屏幕共享与内置网关 |
-| `packages/gateway` | 配对、会话转发、设备令牌、访问控制与 HTTP / WebSocket 隧道 |
-| `packages/shared-protocol` | Zod Schema、消息信封与协议协商 |
-| `apps/mobile` | Expo / React Native 应用，使用 xterm.js 显示终端 |
-| `apps/web-dashboard` | React Web 控制台，打包后随网关提供 |
-| `docs/site` | 官网与安装器 |
-
-欢迎提交聚焦的 Bug 报告和 Pull Request。请提供 CLI / 网关版本、主机系统、客户端类型、连接模式与最小复现，并从日志中移除配对码、设备令牌和敏感终端内容。代码改动请运行 `pnpm typecheck` 及相关测试。
-
-移动端开发见[应用指南](apps/mobile/README.md)，仓库结构和发布流程见[维护说明](docs/ai-handoff.md)与[发布 SOP](docs/release-sop.md)。[用户指南](docs/user-guide.md)还包含其他工作流；当前默认启动 shell 的行为以本 README 和 CLI 帮助为准。
+欢迎提交聚焦的问题反馈和 PR。请附上 CLI 版本、系统、Agent 和最小复现步骤，并去掉配对码和 token。发版流程见 [release SOP](docs/release-sop.md)。
 
 ## 支持项目
 
-感谢 [AI18N](https://ai18n.chat/) 赞助：提供面向 Claude 模型的 OpenAI / Anthropic 兼容 API 网关。
+由 [AI18N](https://ai18n.chat/) 赞助：提供兼容 OpenAI 与 Anthropic 接口的 AI API 网关。
 
 <details>
 <summary>请作者喝杯咖啡</summary>
 
-如果 LinkShell 帮你更方便地继续工作，可以支持项目的持续开发：
-
 <p>
-  <img src="docs/assets/pay_wechat.jpg" alt="微信赞助码" width="160" />
-  <img src="docs/assets/pay_ali.jpg" alt="支付宝赞助码" width="160" />
+  <img src="docs/assets/pay_wechat.jpg" alt="微信支付收款码" width="160" />
+  <img src="docs/assets/pay_ali.jpg" alt="支付宝收款码" width="160" />
 </p>
 
 </details>
 
-[演示视频 1](https://github.com/user-attachments/assets/cc09d3a7-239c-4d5c-a2a7-76f64d4af070) · [演示视频 2](https://github.com/user-attachments/assets/d24a1699-fb8e-4a27-a51d-27a290f7ec73) · [Product Hunt](https://www.producthunt.com/products/linkshell)
+[Product Hunt](https://www.producthunt.com/products/linkshell)
 
 ## 许可证
 
