@@ -71,15 +71,16 @@ describe("terminals", () => {
     const a = await connect();
     const { terminal } = await a.client.call("terminals.create", {});
     await a.client.call("terminals.attach", { terminalId: terminal.id });
-    await a.client.call("terminals.input", { terminalId: terminal.id, data: "echo first\n" });
-    // The command's output line, not just its echo.
-    await until(() => /\nfirst/.test(a.output()));
+    // Octal escapes: the output ("first") never appears in the typed command, so
+    // matching it can't be fooled by the echo, however the prompt interleaves.
+    await a.client.call("terminals.input", { terminalId: terminal.id, data: "printf 'f\\151rst\\n'\n" });
+    await until(() => a.output().includes("first"));
     const seen = a.lastSeq();
     a.client.close();
 
     // The phone is away; the shell keeps working.
     const b = await connect();
-    await b.client.call("terminals.input", { terminalId: terminal.id, data: "echo while-away\n" });
+    await b.client.call("terminals.input", { terminalId: terminal.id, data: "printf 'wh\\151le-away\\n'\n" });
 
     // Back with what it had: only the missed output, no redraw.
     let caughtUp = await b.client.call("terminals.attach", { terminalId: terminal.id, fromSeq: seen });
@@ -90,7 +91,7 @@ describe("terminals", () => {
     }
     expect(caughtUp.reset).toBe(false);
     expect(caughtUp.replay).toContain("while-away");
-    expect(caughtUp.replay).not.toContain("echo first");
+    expect(caughtUp.replay).not.toContain("f\\151rst");
 
     // A new device gets the whole screen history.
     const c = await connect();
@@ -106,18 +107,21 @@ describe("terminals", () => {
     const { terminal } = await a.client.call("terminals.create", { cols: 80, rows: 24 });
     await a.client.call("terminals.attach", { terminalId: terminal.id });
     // A progress line redrawn in place, the way prompts and spinners redraw.
-    await a.client.call("terminals.input", { terminalId: terminal.id, data: "printf 'loading 10%%\\rloading 99%%\\rdone-%s-now      \\n' ok\n" });
+    // Octal escapes keep "loading" out of the typed command, so only the output can contain it.
+    await a.client.call("terminals.input", {
+      terminalId: terminal.id,
+      data: "printf 'l\\157ading 10%%\\rl\\157ading 99%%\\rdone-%s-now      \\n' ok\n",
+    });
     await until(() => a.output().includes("done-ok-now"));
     // The raw stream drew every frame…
-    expect(a.output()).toMatch(/\nloading 10%\r/);
+    expect(a.output()).toContain("loading 10%\r");
 
     const b = await connect();
     const fresh = await b.client.call("terminals.attach", { terminalId: terminal.id });
     expect(fresh.reset).toBe(true);
     expect(fresh.replay).toContain("done-ok-now");
-    // …the snapshot has only what's left on screen (the typed command line aside).
-    expect(fresh.replay).not.toMatch(/(^|\n)loading/);
-    expect(fresh.replay).not.toMatch(/\rloading/);
+    // …the snapshot has only what's left on screen.
+    expect(fresh.replay).not.toContain("loading");
   });
 
   it("reports when the shell exits", async () => {
@@ -142,9 +146,9 @@ describe("terminals", () => {
     let output = "";
     c1.on("terminal.output", ({ data }) => (output += data));
     const { terminal: done } = await c1.call("terminals.create", { cwd: home, command: "echo from-command-$((2+3)); exit 0" });
-    const { terminal: running } = await c1.call("terminals.create", { cwd: home, command: "echo still-running" });
+    const { terminal: running } = await c1.call("terminals.create", { cwd: home, command: "printf 'st\\151ll-running\\n'" });
     await c1.call("terminals.attach", { terminalId: running.id });
-    await until(() => /\nstill-running/.test(output));
+    await until(() => output.includes("still-running"));
     await until(async () => (await c1.call("terminals.list", {})).terminals.find((t) => t.id === done.id)?.exitCode === 0);
     const history = await c1.call("terminals.attach", { terminalId: done.id });
     expect(history.replay).toContain("from-command-5");
