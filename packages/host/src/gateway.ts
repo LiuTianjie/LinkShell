@@ -94,7 +94,7 @@ export class GatewayLink {
     this.identity = loadIdentity(options.home);
     this.devicesPath = join(options.home, "paired-devices.json");
     this.devices = this.loadDevices();
-    this.name = options.name ?? hostname().replace(/\.local$/, "");
+    this.name = options.name ?? (process.env.LINKSHELL_MACHINE_NAME || hostname()).replace(/\.local$/, "");
     this.relay = new RelayClient({
       url: relayUrl(options.url),
       identity: this.identity,

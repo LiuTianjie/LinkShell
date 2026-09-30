@@ -123,7 +123,8 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
 
   const machineInfo = (): MachineInfo => ({
     machineId,
-    hostname: hostname(),
+    // LINKSHELL_MACHINE_NAME: how this computer is named in the apps (default: its hostname).
+    hostname: process.env.LINKSHELL_MACHINE_NAME || hostname(),
     platform: platform(),
     hostVersion: options.version,
     agents: hub.agents(),

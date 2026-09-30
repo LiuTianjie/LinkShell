@@ -270,7 +270,7 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
         title: update.title ?? base.title,
         detail: update.detail ?? base.detail,
         status,
-        content: update.content ?? base.content,
+        content: update.content ? keepDiffs(base.content, update.content) : base.content,
         output: update.appendOutput ? base.output + update.appendOutput : base.output,
         rawOutput: update.rawOutput ?? base.rawOutput,
         endedTs: done ? (base.endedTs ?? ts) : base.endedTs,
@@ -401,4 +401,15 @@ export function removeItem(view: SessionView, id: string): SessionView {
     index[item.id] = i;
   });
   return { ...view, items, index };
+}
+
+/**
+ * An update's content replaces the call's, except that a result without diffs
+ * (Claude's "The file has been updated.") keeps the diffs the call carried:
+ * the change itself is what the reader wants to see.
+ */
+function keepDiffs<T extends { type: string }>(previous: T[], next: T[]): T[] {
+  if (next.some((entry) => entry.type === "diff")) return next;
+  const diffs = previous.filter((entry) => entry.type === "diff");
+  return diffs.length ? [...diffs, ...next] : next;
 }

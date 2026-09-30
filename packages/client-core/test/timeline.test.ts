@@ -86,6 +86,21 @@ describe("timeline reducer", () => {
     });
   });
 
+  it("keeps an edit's diff when the result is only a status line", () => {
+    seq = 0;
+    const diff = { type: "diff" as const, path: "/p/a.css", oldText: "a {}", newText: "a { color: red }" };
+    const note = { type: "content" as const, content: text("The file has been updated.") };
+    const v = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "tool_call", toolCallId: "e1", title: "Edit a.css", kind: "edit", status: "in_progress", content: [diff] }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "e1", status: "completed", content: [note] }),
+    ]);
+    expect(v.items[0]).toMatchObject({ content: [diff, note] });
+    // A result that brings its own diff replaces the old one.
+    const newer = { ...diff, newText: "a { color: blue }" };
+    const w = applyEvents(v, [ev({ sessionUpdate: "tool_call_update", toolCallId: "e1", content: [newer] })]);
+    expect(w.items[0]).toMatchObject({ content: [newer] });
+  });
+
   it("stops streaming text when a tool starts", () => {
     seq = 0;
     const v = applyEvents(emptyView("s"), [
