@@ -63,6 +63,8 @@ export class CodexDriver implements AgentDriver {
   private readonly followRetries = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly startsInFlight = new Set<Promise<unknown>>();
   private readonly approvals = new Map<string, PendingApproval>();
+  /** Recent tool titles by item, so a file-change approval can name its files. */
+  private readonly toolTitles = new Map<string, string>();
   private readonly settings = new Map<string, CodexSettings>();
   private readonly overrides = new Map<string, CodexOverrides>();
   /** Sub-agent thread → the parent thread and the spawnAgent call its work nests under. */
@@ -439,6 +441,7 @@ export class CodexDriver implements AgentDriver {
     }
     this.noteSpawns(params);
     for (const mapped of mapNotification(method, params, (threadId) => this.stateOf(threadId))) {
+      if (mapped.update.sessionUpdate === "tool_call") this.rememberTitle(mapped.update.toolCallId, mapped.update.title);
       if (mapped.update.sessionUpdate === "ls_permission_resolved") {
         const pending = this.approvals.get(mapped.update.requestId);
         if (pending) {
@@ -478,6 +481,9 @@ export class CodexDriver implements AgentDriver {
     // A sub-agent asking for permission asks in its parent session.
     const request = mapped && this.children.has(mapped.threadId) ? { ...mapped, threadId: this.children.get(mapped.threadId)!.threadId } : mapped;
     if (!request || !this.attached.has(request.threadId)) return ABANDON;
+    // "Edit app.ts" says more than "Apply file changes".
+    const toolTitle = method === "item/fileChange/requestApproval" && request.update.toolCallId && this.toolTitles.get(request.update.toolCallId);
+    if (toolTitle) request.update = { ...request.update, title: toolTitle };
     return new Promise((resolve) => {
       this.approvals.set(requestId, {
         threadId: request.threadId,
@@ -487,6 +493,12 @@ export class CodexDriver implements AgentDriver {
       });
       this.host?.update(this.id, request.threadId, request.update);
     });
+  }
+
+  private rememberTitle(toolCallId: string, title: string): void {
+    this.toolTitles.delete(toolCallId);
+    this.toolTitles.set(toolCallId, title);
+    if (this.toolTitles.size > 200) this.toolTitles.delete(this.toolTitles.keys().next().value!);
   }
 
   private rpc<T = unknown>(method: string, params: unknown): Promise<T> {

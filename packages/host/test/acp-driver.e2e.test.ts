@@ -298,4 +298,12 @@ describe("generic ACP driver (fake agent)", () => {
     await waitFor(() => t.ended(session.id)[0]);
     expect(t.host.hub.getSession(session.id).state).toBe("error");
   });
+
+  it("says how to log in when the agent refuses a session without one (Grok)", async () => {
+    const t = await setup({ FAKE_ACP_SIGNED_OUT: "1" });
+    const failure = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ message: expect.stringContaining("Fake 未登录：在电脑终端运行"), data: { code: "not_logged_in" } });
+    const agents = t.host.hub.agents().find((agent) => agent.id === "fake");
+    expect(agents?.auth).toMatchObject({ state: "missing", hint: expect.stringContaining("未登录") });
+  });
 });

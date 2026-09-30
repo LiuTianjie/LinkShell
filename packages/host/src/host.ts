@@ -10,6 +10,7 @@ import { connectHost } from "./rpc/client.js";
 import { HostRpcServer } from "./rpc/server.js";
 import { GatewayLink } from "./gateway.js";
 import { HostStore } from "./store.js";
+import { removeLegacyCopilotHooks } from "./legacy.js";
 import { TerminalManager } from "./terminals.js";
 
 /** macOS sun_path is 104 bytes including the terminator. */
@@ -107,6 +108,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   }
 
   const machineId = loadMachineId(paths.home);
+  if (!options.drivers) removeLegacyCopilotHooks(join(homedir(), ".copilot", "hooks"), log);
   const drivers = options.drivers
     ? options.drivers(paths)
     : defaultDrivers({

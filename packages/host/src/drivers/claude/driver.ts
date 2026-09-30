@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, existsSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { delimiter, isAbsolute, join } from "node:path";
@@ -163,11 +163,6 @@ export class ClaudeDriver extends AcpDriver {
     return history;
   }
 
-  protected override emitConfig(nativeId: string, state: Parameters<AcpDriver["emitConfig"]>[1]): void {
-    if (state.config.length > 0) this.template = state.config;
-    super.emitConfig(nativeId, state);
-  }
-
   /**
    * Claude's settings list without a session to ask: a throwaway session that
    * never gets a message (Claude writes no transcript for it), closed at once.
@@ -218,6 +213,10 @@ export class ClaudeDriver extends AcpDriver {
 
   override async createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession> {
     const created = await super.createSession(options);
+    // A new session's settings are Claude's defaults: the freshest template.
+    // (Not a resumed or changed one's: those are that session's own.)
+    const config = this.sessions.get(created.nativeId)?.config;
+    if (config?.length) this.template = config;
     // Born on a device: this host is the writer from the start.
     this.modes.set(created.nativeId, "remote");
     this.setWriter(created.nativeId, "remote");
@@ -250,9 +249,11 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   override async delete(nativeId: string): Promise<void> {
+    const transcript = findTranscript(this.configDir, nativeId);
     await super.delete(nativeId);
     this.modes.delete(nativeId);
     this.hiddenTools.delete(nativeId);
+    if (transcript) sweepTranscript(transcript);
   }
 
   override async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
@@ -470,6 +471,23 @@ export class ClaudeDriver extends AcpDriver {
  * "default" when that's what default resolves to, else the entry with that
  * name ("Opus 5.5").
  */
+/**
+ * A closing Claude process writes its exit record (last prompt, title, cost)
+ * after the adapter has deleted the transcript, bringing the file back. Removes
+ * it again for a while after a delete.
+ */
+function sweepTranscript(path: string, forMs = 15_000): void {
+  const sessionDir = path.replace(/\.jsonl$/, "");
+  const until = Date.now() + forMs;
+  const sweep = () => {
+    for (const target of [path, sessionDir]) {
+      if (existsSync(target)) rmSync(target, { recursive: true, force: true });
+    }
+    if (Date.now() < until) setTimeout(sweep, 250).unref();
+  };
+  sweep();
+}
+
 export function matchModel(option: SessionConfigOption, modelId: string): string | undefined {
   if (option.values.some((value) => value.value === modelId)) return modelId;
   const parts = modelId.replace(/^claude-/, "").replace(/-\d{8}$/, "").split("-");

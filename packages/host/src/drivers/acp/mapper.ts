@@ -136,7 +136,11 @@ export function toConfigOptions(response: unknown): SourcedConfigOption[] {
       options.push({ id: "model", name: "Model", category: "model", current: str(models.currentModelId) ?? values[0]!.value, values, source: "models" });
     }
   }
-  return options;
+  // Copilot lists "auto" three times; a menu shows each choice once.
+  return options.map((option) => ({
+    ...option,
+    values: option.values.filter((value, index, all) => all.findIndex((other) => other.value === value.value) === index),
+  }));
 }
 
 /**

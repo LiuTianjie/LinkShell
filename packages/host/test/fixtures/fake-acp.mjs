@@ -193,6 +193,8 @@ const handlers = {
   }),
   "session/new": (params) => {
     requireOpenArgs(params);
+    // Grok: no login, no session.
+    if (process.env.FAKE_ACP_SIGNED_OUT === "1") throw { code: -32000, message: "Authentication required", data: "no auth method id provided" };
     const sessionId = randomUUID();
     sessions[sessionId] = { cwd: params.cwd, title: null, updatedAt: new Date().toISOString(), mode: "default", model: "fast", history: [] };
     loaded.add(sessionId);

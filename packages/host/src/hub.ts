@@ -254,7 +254,11 @@ export class SessionHub {
     clientMessageId?: string;
   }): Promise<SessionSummary> {
     const driver = this.requireDriver(input.agent);
-    const discovered = await driver.createSession({ cwd: input.cwd, model: input.model });
+    const discovered = await driver.createSession({ cwd: input.cwd, model: input.model }).catch(async (error: unknown) => {
+      // The app shows "not logged in" from the agent list; make it current.
+      if (error instanceof RpcError && error.appCode === "not_logged_in") await this.refreshAuth(driver);
+      throw error;
+    });
     this.recordDiscovered(driver.id, discovered);
     const sessionId = sessionIdFor(driver.id, discovered.nativeId);
     await this.ensureAttached(sessionId);

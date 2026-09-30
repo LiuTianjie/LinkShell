@@ -97,6 +97,8 @@ export class AcpDriver implements AgentDriver {
   };
 
   protected host?: DriverHost;
+  /** Set when the agent refused a session for want of a login (ACP auth_required). */
+  private signedOut?: AgentAuth;
   protected connection?: AcpConnection;
   protected current: DriverStatus = { installed: false };
   protected readonly sessions = new Map<string, AcpSessionState>();
@@ -123,7 +125,8 @@ export class AcpDriver implements AgentDriver {
   }
 
   async authStatus(): Promise<AgentAuth> {
-    return this.spec.authStatus ? this.spec.authStatus(this.env) : { state: "unknown" };
+    if (this.spec.authStatus) return this.spec.authStatus(this.env);
+    return this.signedOut ?? { state: "unknown" };
   }
 
   async start(host: DriverHost): Promise<DriverStatus> {
@@ -167,10 +170,16 @@ export class AcpDriver implements AgentDriver {
   }
 
   async createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession> {
-    const response = await this.rpc<{ sessionId: string } & Record<string, unknown>>("session/new", {
-      cwd: options.cwd,
-      mcpServers: [],
-    });
+    let response: { sessionId: string } & Record<string, unknown>;
+    try {
+      response = await this.rpc<{ sessionId: string } & Record<string, unknown>>("session/new", {
+        cwd: options.cwd,
+        mcpServers: [],
+      });
+    } catch (error) {
+      throw this.signInError(error);
+    }
+    this.signedOut = undefined;
     const state = this.stateFor(response.sessionId, options.cwd);
     state.loaded = true;
     state.config = toConfigOptions(response);
@@ -493,6 +502,17 @@ export class AcpDriver implements AgentDriver {
     if (!this.connection?.alive) await this.ensureStarted();
     if (this.connection?.capabilities.sessionCapabilities?.delete) await this.rpc("session/delete", { sessionId: nativeId });
     this.sessions.delete(nativeId);
+  }
+
+  /** ACP's auth_required, said the way the app says it for Claude and Codex. */
+  private signInError(error: unknown): unknown {
+    // -32000 is also LinkShell's own application error (which carries an app code).
+    const agentAuth = error instanceof RpcError && error.code === -32000 && !error.appCode;
+    const message = error instanceof Error ? error.message : String(error);
+    if (!agentAuth && !/auth(entication)? required|not (logged|signed) in/i.test(message)) return error;
+    const hint = `${this.label} 未登录：在电脑终端运行 ${this.spec.command} 并登录`;
+    this.signedOut = { state: "missing", hint };
+    return RpcError.app("not_logged_in", `${hint}，然后再试。`);
   }
 
   unqueue(nativeId: string, clientMessageId: string): boolean {
