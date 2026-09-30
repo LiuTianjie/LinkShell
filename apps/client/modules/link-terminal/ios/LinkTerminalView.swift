@@ -12,6 +12,10 @@ final class LinkTerminalView: ExpoView, TerminalViewDelegate {
   private var fontSize: CGFloat = 13
   private var theme: [String: String] = [:]
   private var lastSize = ""
+  /// Output that arrived before the first layout: SwiftTerm sizes itself from
+  /// its frame, so text fed at zero width wraps every couple of columns.
+  private var pending: [String] = []
+  private var laidOut = false
 
   required init(appContext: AppContext? = nil) {
     terminal = TerminalView(frame: .zero, font: LinkTerminalView.terminalFont(size: 13))
@@ -49,15 +53,26 @@ final class LinkTerminalView: ExpoView, TerminalViewDelegate {
     super.layoutSubviews()
     // Same breathing room as the Android view; the container shares the theme's background.
     terminal.frame = bounds.insetBy(dx: 8, dy: 0)
+    if !laidOut && terminal.frame.width > 0 && terminal.frame.height > 0 {
+      laidOut = true
+      let held = pending
+      pending.removeAll()
+      for data in held { terminal.feed(text: data) }
+    }
   }
 
   // MARK: JS API
 
   func write(_ data: String) {
+    guard laidOut else {
+      pending.append(data)
+      return
+    }
     terminal.feed(text: data)
   }
 
   func reset() {
+    pending.removeAll()
     terminal.getTerminal().resetToInitialState()
     applyTheme()
   }

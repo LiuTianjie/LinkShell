@@ -124,6 +124,16 @@ describe("terminals", () => {
     expect(fresh.replay).not.toContain("loading");
   });
 
+  it("types a start command once the shell is ready, so it shows once", async () => {
+    const { connect, home } = await setup();
+    const a = await connect();
+    const { terminal } = await a.client.call("terminals.create", { cwd: home, command: "printf 'st\\141rted\\n'", cols: 80, rows: 24 });
+    await a.client.call("terminals.attach", { terminalId: terminal.id });
+    await until(() => a.output().includes("started"));
+    const screen = (await a.client.call("terminals.attach", { terminalId: terminal.id })).replay;
+    expect(screen.split("printf 'st\\141rted").length - 1).toBe(1);
+  });
+
   it("reports when the shell exits", async () => {
     const { connect } = await setup();
     const a = await connect();

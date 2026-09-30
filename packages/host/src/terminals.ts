@@ -309,7 +309,21 @@ export class TerminalManager {
     });
     this.terminals.set(terminal.id, terminal);
     // Typed into the shell (not `-c`), so the shell stays for whatever comes next.
-    if (command) pty.write(`${command}\r`);
+    // Once the shell has drawn its prompt: typed any earlier, the tty echoes the
+    // command above the prompt and it shows twice.
+    if (command) {
+      let typed = false;
+      const type = () => {
+        if (typed || !terminal.running) return;
+        typed = true;
+        first.dispose();
+        clearTimeout(fallback);
+        pty.write(`${command}\r`);
+      };
+      // A little after the first output, so a prompt drawn in pieces is complete.
+      const first = pty.onData(() => setTimeout(type, 60));
+      const fallback = setTimeout(type, 3000);
+    }
     this.save(terminal);
     this.emit(terminal.info());
     return terminal.info();

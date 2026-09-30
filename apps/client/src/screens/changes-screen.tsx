@@ -39,7 +39,13 @@ function useItems(id: string) {
   return useClient((state) => state.views[id]?.items) ?? [];
 }
 
-function FileRow({ entry, first }: { entry: FileEntry; first: boolean }) {
+/** Inside the project: relative to it ("src/app.ts"); elsewhere: from the home directory. */
+function relativePath(path: string, cwd?: string): string {
+  if (cwd && path.startsWith(`${cwd}/`)) return path.slice(cwd.length + 1);
+  return shortPath(path);
+}
+
+function FileRow({ entry, first, cwd }: { entry: FileEntry; first: boolean; cwd?: string }) {
   const [open, setOpen] = useState(false);
   const label = entry.kind === "add" ? "新建" : entry.kind === "delete" ? "删除" : null;
   return (
@@ -64,7 +70,7 @@ function FileRow({ entry, first }: { entry: FileEntry; first: boolean }) {
             ) : null}
           </View>
           <Text numberOfLines={1} style={[type.caption, { color: colors.tertiaryLabel }]}>
-            {shortPath(entry.path)}
+            {relativePath(entry.path, cwd)}
           </Text>
         </View>
         <Text style={[type.footnote, { fontVariant: ["tabular-nums"], fontWeight: "600" }]}>
@@ -91,6 +97,7 @@ function FileRow({ entry, first }: { entry: FileEntry; first: boolean }) {
 export function ChangesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const items = useItems(id);
+  const cwd = useClient((state) => state.sessions[id]?.cwd);
   const files = useMemo(() => collect(items), [items]);
   const added = files.reduce((sum, file) => sum + file.added, 0);
   const removed = files.reduce((sum, file) => sum + file.removed, 0);
@@ -111,7 +118,7 @@ export function ChangesScreen() {
           </Text>
           <View style={{ backgroundColor: colors.card, borderRadius: 22, borderCurve: "continuous", overflow: "hidden" }}>
             {files.map((entry, index) => (
-              <FileRow key={entry.path} entry={entry} first={index === 0} />
+              <FileRow key={entry.path} entry={entry} first={index === 0} cwd={cwd} />
             ))}
           </View>
         </>
