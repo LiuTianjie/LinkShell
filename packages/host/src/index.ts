@@ -4,7 +4,7 @@ export { SessionHub, type Subscriber } from "./hub.js";
 export { HostStore } from "./store.js";
 export { CodexDriver } from "./drivers/codex/driver.js";
 export type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, HistoryItem, LaunchSpec } from "./drivers/types.js";
-export { resolveLoginShellEnv } from "./shell-env.js";
+export { resolveLoginShellEnv, withoutClaudeSession } from "./shell-env.js";
 export { AcpDriver, type AcpAgentSpec } from "./drivers/acp/driver.js";
 export { ClaudeDriver } from "./drivers/claude/driver.js";
 export { ACP_AGENTS, defaultDrivers } from "./drivers/registry.js";

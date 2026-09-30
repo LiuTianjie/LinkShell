@@ -34,3 +34,51 @@ export async function resolveLoginShellEnv(timeoutMs = 10_000): Promise<NodeJS.P
     return process.env;
   }
 }
+
+// What a running Claude Code session puts in its children's environment: who
+// the parent is, how to reach it, and how it tuned itself. Inherited by an
+// agent LinkShell starts, they make that agent a child of the other session
+// (Claude then keeps no transcript, so no handoff) and override the phone's
+// choices (CLAUDE_EFFORT). The user's own settings (API keys, CLAUDE_CONFIG_DIR,
+// ANTHROPIC_BASE_URL…) are not in the list.
+const CLAUDE_SESSION_VARIABLES = [
+  "CLAUDECODE",
+  "CLAUDE_PID",
+  "CLAUDE_EFFORT",
+  "CLAUDE_AGENT_SDK_VERSION",
+  "CLAUDE_PREVIEW_CLASSIFIER_FLOOR",
+  "CLAUDE_CODE_ENTRYPOINT",
+  "CLAUDE_CODE_EXECPATH",
+  "CLAUDE_CODE_SESSION_ID",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_HOST_SESSION_ID",
+  "CLAUDE_CODE_SESSION_ATTENDED",
+  "CLAUDE_CODE_SSE_PORT",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
+  "CLAUDE_CODE_DESKTOP_APP_VERSION",
+  "CLAUDE_CODE_OAUTH_SCOPES",
+  "CLAUDE_CODE_ORGANIZATION_UUID",
+  "CLAUDE_CODE_ACCOUNT_UUID",
+  "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH",
+  "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
+  "CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL",
+  "CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES",
+  "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",
+  "CLAUDE_CODE_DISABLE_CRON",
+  "CLAUDE_CODE_TERMINAL_MCP_TOOLS",
+  "CLAUDE_CODE_EAGER_FLUSH",
+  "CLAUDE_CODE_REPORT_FINDINGS",
+];
+
+/**
+ * The environment without what a surrounding Claude Code session added —
+ * LinkShell started from inside one (its terminal, a command it ran). Only
+ * then: `CLAUDECODE` marks it.
+ */
+export function withoutClaudeSession(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (!env.CLAUDECODE) return env;
+  const clean = { ...env };
+  for (const name of CLAUDE_SESSION_VARIABLES) delete clean[name];
+  return clean;
+}

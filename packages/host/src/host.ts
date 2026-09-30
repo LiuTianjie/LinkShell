@@ -11,6 +11,7 @@ import { HostRpcServer } from "./rpc/server.js";
 import { GatewayLink } from "./gateway.js";
 import { HostStore } from "./store.js";
 import { removeLegacyCopilotHooks } from "./legacy.js";
+import { withoutClaudeSession } from "./shell-env.js";
 import { TerminalManager } from "./terminals.js";
 
 /** macOS sun_path is 104 bytes including the terminator. */
@@ -108,11 +109,13 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   }
 
   const machineId = loadMachineId(paths.home);
+  // Agents and terminals start clean even when LinkShell ran inside a Claude Code session.
+  const env = withoutClaudeSession(options.env ?? process.env);
   if (!options.drivers) removeLegacyCopilotHooks(join(homedir(), ".copilot", "hooks"), log);
   const drivers = options.drivers
     ? options.drivers(paths)
     : defaultDrivers({
-        env: options.env,
+        env,
         hostVersion: options.version,
         codexSocket: paths.codexSocket,
         codexCommand: options.codexCommand,
@@ -132,7 +135,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     home: homedir(),
     agents: hub.agents(),
   });
-  const terminals = new TerminalManager(options.env, store);
+  const terminals = new TerminalManager(env, store);
   const server = new HostRpcServer({
     hub,
     terminals,

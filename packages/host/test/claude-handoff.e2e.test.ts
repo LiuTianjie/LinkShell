@@ -190,6 +190,27 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     expect(p2.agentTexts(desk.id)).toEqual(["echo: hello from desk", "echo: from phone", "echo: back at desk"]);
   }, 30_000);
 
+  it("leaves a never-messaged terminal session alone when the phone tries to take it, and deletes it cleanly", async () => {
+    const e = makeEnv();
+    const host = await boot(e);
+    const p = await phone(host);
+    const desk = await terminal(host, e);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+
+    // Nothing to resume yet: refused before the terminal is asked to step aside.
+    const failure = await p.client.call("sessions.takeover", { sessionId: desk.id }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ data: { code: "not_ready" } });
+    expect(desk.yields).toEqual([]);
+    expect(host.hub.getSession(desk.id).driver).toBe("desktop");
+
+    // Once the terminal has quit, deleting it needs nothing from Claude.
+    await desk.quit();
+    await waitFor(() => host.hub.getSession(desk.id).driver !== "desktop");
+    await p.client.call("sessions.delete", { sessionId: desk.id });
+    const { sessions } = await p.client.call("sessions.list", { includeArchived: true });
+    expect(sessions.some((session) => session.id === desk.id)).toBe(false);
+  }, 20_000);
+
   it("shows the settings of a desktop-driven session; a choice waits for the takeover instead of forcing it", async () => {
     const e = makeEnv();
     const host = await boot(e);

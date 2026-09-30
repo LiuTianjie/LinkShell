@@ -250,7 +250,9 @@ export class ClaudeDriver extends AcpDriver {
 
   override async delete(nativeId: string): Promise<void> {
     const transcript = findTranscript(this.configDir, nativeId);
-    await super.delete(nativeId);
+    // No transcript (never messaged): Claude has nothing to delete.
+    if (transcript) await super.delete(nativeId);
+    else this.sessions.delete(nativeId);
     this.modes.delete(nativeId);
     this.hiddenTools.delete(nativeId);
     if (transcript) sweepTranscript(transcript);
@@ -376,6 +378,11 @@ export class ClaudeDriver extends AcpDriver {
     const state = this.sessions.get(nativeId);
     if (this.modes.get(nativeId) === "remote" && state?.loaded) return;
     const cwd = state?.cwd ?? "";
+    // Claude writes nothing until the first message, and there is nothing to
+    // resume without it: say so before the terminal gives the session up.
+    if (!state?.loaded && !findTranscript(this.configDir, nativeId, cwd)) {
+      throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息：先在电脑上发一条");
+    }
     const desktop = this.host?.desktop(this.id, nativeId);
     if (desktop) {
       await desktop.yield();

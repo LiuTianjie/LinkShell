@@ -174,10 +174,14 @@ interface LaunchSpec {
   env?: Record<string, string>;
 }
 
-function runChild(launch: LaunchSpec, onSpawn?: (child: import("node:child_process").ChildProcess) => void): Promise<number> {
+function runChild(
+  launch: LaunchSpec,
+  baseEnv: NodeJS.ProcessEnv,
+  onSpawn?: (child: import("node:child_process").ChildProcess) => void,
+): Promise<number> {
   const child = spawn(launch.command, launch.args, {
     stdio: "inherit",
-    env: { ...process.env, ...launch.env },
+    env: { ...baseEnv, ...launch.env },
   });
   onSpawn?.(child);
   // The terminal delivers Ctrl-C to the whole foreground group; the agent handles it.
@@ -231,6 +235,8 @@ export async function runAgentShim(agent: string, args: string[]): Promise<void>
   const host = await loadHost();
   const socket = await ensureHostRunning();
   const client = await host.connectHost(socket);
+  // Run from inside a Claude Code session, the agent must not become its child.
+  const env = host.withoutClaudeSession(process.env);
   let launch: LaunchSpec & { sessionId?: string };
   try {
     launch = await client.call("desktop.launch", { agent, args, cwd: process.cwd() });
@@ -242,7 +248,7 @@ export async function runAgentShim(agent: string, args: string[]): Promise<void>
   if (!launch.sessionId) {
     // Multi-client agents (Codex): the TUI simply joins the shared server.
     client.close();
-    process.exit(await runChild(launch));
+    process.exit(await runChild(launch, env));
   }
 
   const sessionId = launch.sessionId;
@@ -260,7 +266,7 @@ export async function runAgentShim(agent: string, args: string[]): Promise<void>
 
   for (;;) {
     yielded = false;
-    const code = await runChild(launch, (spawned) => (child = spawned));
+    const code = await runChild(launch, env, (spawned) => (child = spawned));
     if (!yielded) {
       // The user quit the TUI: the session stays available on every device.
       client.close();
