@@ -24,6 +24,11 @@ function metadataFile(service: ServiceName): string {
   return join(LINKSHELL_DIR, `${service}.json`);
 }
 
+/** ~/.linkshell, or LINKSHELL_HOME. */
+export function linkshellDir(): string {
+  return LINKSHELL_DIR;
+}
+
 export function savePid(service: ServiceName, pid: number): void {
   mkdirSync(LINKSHELL_DIR, { recursive: true });
   writeFileSync(pidFile(service), String(pid), "utf8");

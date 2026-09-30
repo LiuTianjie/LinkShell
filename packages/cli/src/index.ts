@@ -411,20 +411,25 @@ const gatewayCmd = program
     const { startEmbeddedGateway } =
       await import("@linkshell/gateway/embedded");
     const port = Number(options.port);
+    const { join } = await import("node:path");
+    (await import("./commands/host.js")).silenceSqliteWarning();
     const gw = await startEmbeddedGateway({
       port,
       logLevel: options.logLevel,
       silent: false,
+      // v2 pairings live here; keep this file to keep phones paired.
+      relayDataPath: join(daemon.linkshellDir(), "relay.db"),
     });
 
     daemon.savePid("gateway", process.pid);
 
-    process.stderr.write(`\n  LinkShell Gateway v0.1.8\n`);
+    process.stderr.write(`\n  LinkShell Gateway ${pkg.version}\n`);
     process.stderr.write(`  Listening on http://0.0.0.0:${gw.port}\n`);
     process.stderr.write(`  PID: ${process.pid}\n`);
     process.stderr.write(`  Log level: ${options.logLevel}\n\n`);
+    process.stderr.write(`  Computers (v2):  linkshell host --gateway ws://this-server:${gw.port}\n`);
     process.stderr.write(
-      `  Clients connect via: ws://your-server:${gw.port}/ws\n`,
+      `  v1 clients:      ws://this-server:${gw.port}/ws\n`,
     );
     process.stderr.write(
       `  Health check: curl http://your-server:${gw.port}/healthz\n\n`,

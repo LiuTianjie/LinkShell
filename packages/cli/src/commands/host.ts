@@ -6,7 +6,7 @@ import * as daemon from "../utils/daemon.js";
 
 // node:sqlite prints an ExperimentalWarning on load; it is expected here and
 // only confuses users. Must run before the host (and node:sqlite) is imported.
-function silenceSqliteWarning(): void {
+export function silenceSqliteWarning(): void {
   const emit = process.emitWarning.bind(process);
   process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
     const message = typeof warning === "string" ? warning : warning.message;

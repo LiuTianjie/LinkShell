@@ -28,6 +28,11 @@ export interface EmbeddedGatewayOptions {
   port?: number;
   logLevel?: "debug" | "info" | "warn" | "error";
   silent?: boolean;
+  /**
+   * Also serve the v2 relay (end-to-end encrypted, at /v2/connect), keeping its
+   * pairings in SQLite here. Needs Node.js 22.13+ (node:sqlite).
+   */
+  relayDataPath?: string;
 }
 
 export interface EmbeddedGateway {
@@ -91,7 +96,7 @@ function extractBearerToken(req: IncomingMessage): string | null {
  * Start an embedded gateway. Returns a handle to get URLs and close it.
  * Used by CLI when no external --gateway is provided.
  */
-export function startEmbeddedGateway(
+export async function startEmbeddedGateway(
   options: EmbeddedGatewayOptions = {},
 ): Promise<EmbeddedGateway> {
   const targetPort = options.port ?? 0; // 0 = random available port
@@ -272,8 +277,16 @@ export function startEmbeddedGateway(
     maxPayload: MAX_WS_MESSAGE_SIZE,
   });
 
+  // Loaded on demand: v1 users on older Node never touch node:sqlite.
+  const relay = options.relayDataPath ? await startRelay(options.relayDataPath, log) : undefined;
+
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+
+    if (relay && url.pathname === relay.path) {
+      relay.gateway.handleUpgrade(request, socket, head);
+      return;
+    }
 
     // Tunnel WebSocket upgrade (for HMR etc.)
     const tunnelParsed = parseTunnelPath(url.pathname);
@@ -488,9 +501,26 @@ export function startEmbeddedGateway(
             sessionManager.destroy();
             pairingManager.destroy();
             tokenManager.destroy();
+            void relay?.gateway.stop();
             server.close(() => res());
           }),
       });
     });
   });
+}
+
+async function startRelay(databasePath: string, log: (level: "debug" | "info" | "warn" | "error", message: string) => void) {
+  const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
+  if (major < 22 || (major === 22 && minor < 13)) {
+    log("warn", `v2 relay needs Node.js 22.13+ (this is ${process.version}); serving v1 only`);
+    return undefined;
+  }
+  const { mkdirSync } = await import("node:fs");
+  const { dirname } = await import("node:path");
+  const [{ Gateway }, { RELAY_PATH }] = await Promise.all([import("@linkshell/gateway-v2"), import("@linkshell/wire")]);
+  mkdirSync(dirname(databasePath), { recursive: true });
+  const gateway = new Gateway({ port: 0, databasePath, log: (message) => log("info", `[relay] ${message}`) });
+  gateway.attach();
+  log("info", `v2 relay on ${RELAY_PATH}`);
+  return { gateway, path: RELAY_PATH };
 }
