@@ -1,9 +1,11 @@
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { StatusBar } from "expo-status-bar";
+import { ActivityIndicator, BackHandler, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewNavigation } from "react-native-webview";
 import { Button } from "@/components/button";
+import { Glass } from "@/components/glass";
 import { HeaderActions } from "@/components/header-actions";
 import { Icon, type IconProps } from "@/components/icon";
 import { useConnection } from "@/lib/client";
@@ -50,6 +52,8 @@ export function PreviewScreen() {
   const [progress, setProgress] = useState(0);
   const [nav, setNav] = useState<Pick<WebViewNavigation, "title" | "url" | "canGoBack" | "canGoForward"> | null>(null);
   const [desktop, setDesktop] = useState(false);
+  // The page alone: no header, toolbar or status bar.
+  const [fullscreen, setFullscreen] = useState(false);
   // Remounts the WebView (a retry, or a new user agent).
   const [generation, setGeneration] = useState(0);
 
@@ -84,6 +88,15 @@ export function PreviewScreen() {
     return !!origin && (origin[1] === "127.0.0.1" || origin[1] === "localhost") && Number(origin[2]) === forward.localPort;
   };
 
+  useEffect(() => {
+    if (!fullscreen) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      setFullscreen(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [fullscreen]);
+
   const retry = () => {
     setFailure(null);
     setProgress(0);
@@ -91,9 +104,11 @@ export function PreviewScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.plain }}>
+    <View style={{ flex: 1, backgroundColor: colors.plain, paddingTop: fullscreen ? insets.top : 0 }}>
+      <StatusBar hidden={fullscreen} animated />
       <Stack.Screen
         options={{
+          headerShown: !fullscreen,
           title,
           headerTitle: () => (
             <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start", maxWidth: 240 }}>
@@ -113,6 +128,7 @@ export function PreviewScreen() {
           headerStyle: { backgroundColor: colors.plain as string },
         }}
       />
+      {fullscreen ? null : (
       <HeaderActions
         actions={[
           {
@@ -135,6 +151,7 @@ export function PreviewScreen() {
           },
         ]}
       />
+      )}
 
       <View style={{ flex: 1 }}>
         {forward && !failure ? (
@@ -180,6 +197,22 @@ export function PreviewScreen() {
         ) : null}
       </View>
 
+      {fullscreen ? (
+        <Pressable
+          onPress={() => {
+            haptics.selection();
+            setFullscreen(false);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="退出全屏"
+          hitSlop={10}
+          style={{ position: "absolute", right: 14, bottom: Math.max(insets.bottom, 12) + 6, opacity: 0.9 }}
+        >
+          <Glass interactive style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+            <Icon sf="arrow.down.right.and.arrow.up.left" md="fullscreen_exit" size={16} color={colors.label} weight="semibold" />
+          </Glass>
+        </Pressable>
+      ) : (
       <View
         style={{
           flexDirection: "row",
@@ -199,15 +232,9 @@ export function PreviewScreen() {
           label={progress > 0 && progress < 1 ? "停止" : "刷新"}
           onPress={() => (progress > 0 && progress < 1 ? web.current?.stopLoading() : failure ? retry() : web.current?.reload())}
         />
-        <ToolbarButton
-          icon={desktop ? { sf: "iphone", md: "smartphone" } : { sf: "desktopcomputer", md: "desktop_windows" }}
-          label={desktop ? "手机版网页" : "电脑版网页"}
-          onPress={() => {
-            setDesktop((value) => !value);
-            setGeneration((value) => value + 1);
-          }}
-        />
+        <ToolbarButton icon={{ sf: "arrow.up.left.and.arrow.down.right", md: "fullscreen" }} label="全屏" onPress={() => setFullscreen(true)} />
       </View>
+      )}
     </View>
   );
 }

@@ -5,7 +5,7 @@ import { ScrollView, View } from "react-native";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { Icon } from "@/components/icon";
 import { ListRow, positionOf, type RowPosition } from "@/components/session-row";
-import { EmptyState, LoadingState } from "@/components/state-views";
+import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
 import { useClient } from "@/lib/client";
 import { relativeTime, shortPath } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
@@ -32,6 +32,7 @@ export function ProjectsScreen() {
   const tabInset = useFloatingTabInset();
   const projects = useClient((state) => state.projects);
   const loaded = useClient((state) => state.sessionsLoaded);
+  const offline = useClient((state) => unreachable(state.status));
   const [query, setQuery] = useState("");
   const now = useNow();
 
@@ -56,7 +57,7 @@ export function ProjectsScreen() {
         </PageHeader>
         <ConnectionBanner />
         {!loaded ? (
-          <LoadingState label="正在读取项目…" />
+          offline ? <WaitingForComputer what="电脑上的项目" /> : <LoadingState label="正在读取项目…" />
         ) : shown.length === 0 ? (
           query ? (
             <EmptyState icon={{ sf: "magnifyingglass", md: "search" }} title={`没有匹配“${query}”的项目`} />

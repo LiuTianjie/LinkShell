@@ -50,3 +50,16 @@ export function EmptyState({
     </View>
   );
 }
+
+/**
+ * Nothing loaded and the computer out of reach: say what will appear, without
+ * a spinner that can't finish (the connection banner says why).
+ */
+export function WaitingForComputer({ what }: { what: string }) {
+  return <EmptyState icon={{ sf: "laptopcomputer", md: "laptop_mac" }} title="等电脑连上" message={`连上之后，这里会显示${what}。`} />;
+}
+
+/** True while there is no way to load anything: the link is retrying or stopped. */
+export function unreachable(status: string): boolean {
+  return status === "reconnecting" || status === "stopped";
+}

@@ -10,7 +10,7 @@ import { SectionHeader } from "@/components/section-header";
 import { SessionRow, positionOf, type RowPosition } from "@/components/session-row";
 import { TerminalRow } from "@/components/terminal-row";
 import { terminalState, useTerminals } from "@/lib/terminals";
-import { EmptyState, LoadingState } from "@/components/state-views";
+import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
 import { useActions, useClient } from "@/lib/client";
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
@@ -113,6 +113,7 @@ export function HomeScreen() {
   const sessionsById = useClient((state) => state.sessions);
   const loaded = useClient((state) => state.sessionsLoaded);
   const error = useClient((state) => state.sessionsError);
+  const offline = useClient((state) => unreachable(state.status));
   const { refresh } = useActions();
   const now = useNow();
   const [refreshing, setRefreshing] = useState(false);
@@ -200,6 +201,8 @@ export function HomeScreen() {
                 message={error}
                 action={{ title: "重试", onPress: () => void refresh() }}
               />
+            ) : offline ? (
+              <WaitingForComputer what="电脑上的会话" />
             ) : (
               <LoadingState label="正在读取会话…" />
             )

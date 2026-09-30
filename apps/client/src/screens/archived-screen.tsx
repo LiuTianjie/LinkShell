@@ -3,7 +3,7 @@ import type { SessionSummary } from "@linkshell/wire";
 import { useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { SessionRow, positionOf } from "@/components/session-row";
-import { EmptyState, LoadingState } from "@/components/state-views";
+import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
 import { useActions, useClient } from "@/lib/client";
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
@@ -13,15 +13,20 @@ export function ArchivedScreen() {
   const sessionsById = useClient((state) => state.sessions);
   const { loadArchived } = useActions();
   const [loaded, setLoaded] = useState(false);
+  const offline = useClient((state) => unreachable(state.status));
   const [error, setError] = useState<string | null>(null);
   const now = useNow();
 
+  const online = useClient((state) => state.status === "online");
+  // (Again) whenever the computer comes back.
   useEffect(() => {
+    if (!online) return;
+    setError(null);
     loadArchived().then(
       () => setLoaded(true),
       (reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)),
     );
-  }, [loadArchived]);
+  }, [loadArchived, online]);
 
   const archived = useMemo(
     () =>
@@ -44,7 +49,7 @@ export function ArchivedScreen() {
         error ? (
           <EmptyState icon={{ sf: "exclamationmark.triangle", md: "warning" }} title="读取失败" message={error} />
         ) : !loaded ? (
-          <LoadingState label="正在读取…" />
+          offline ? <WaitingForComputer what="归档的会话" /> : <LoadingState label="正在读取…" />
         ) : (
           <View style={{ paddingTop: 40 }}>
             <EmptyState icon={{ sf: "archivebox", md: "archive" }} title="没有归档的会话" message="长按会话可以归档，归档后不会出现在首页。" />
