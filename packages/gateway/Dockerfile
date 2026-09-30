@@ -4,6 +4,8 @@ RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
 
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+# pnpm checks every patched dependency in the lockfile against its patch file.
+COPY patches/ patches/
 COPY packages/shared-protocol/package.json packages/shared-protocol/
 COPY packages/wire/package.json packages/wire/
 COPY packages/gateway-v2/package.json packages/gateway-v2/
@@ -26,8 +28,8 @@ RUN pnpm --filter @linkshell/protocol build \
   && pnpm --filter @linkshell/gateway build \
   && pnpm --filter @linkshell/web-dashboard build
 
-# Prune to production deps only
-RUN pnpm --filter @linkshell/gateway deploy --legacy --prod /app/pruned
+# Prune to production deps only (the app's patches don't apply to the gateway).
+RUN pnpm --filter @linkshell/gateway deploy --legacy --prod --config.allow-unused-patches=true /app/pruned
 
 # ── Runtime ──────────────────────────────────────────────────────────
 
