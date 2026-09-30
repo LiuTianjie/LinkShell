@@ -12,7 +12,12 @@ export async function runPair(): Promise<void> {
   try {
     const status = await client.call("gateway.status", {});
     if (status.status === "off") {
-      process.stderr.write("\n  No gateway configured. Choose one first:\n\n    linkshell host --gateway wss://your-gateway\n\n");
+      const { isLoggedIn } = await import("../auth.js");
+      process.stderr.write(
+        isLoggedIn()
+          ? "\n  The running host started before you logged in. Restart it to use the official gateway:\n\n    linkshell host stop && linkshell host --daemon\n\n"
+          : "\n  Pairing goes through a gateway. Either log in with a Pro account (official gateway):\n\n    linkshell login\n\n  or use your own:\n\n    linkshell host --gateway wss://your-gateway\n\n",
+      );
       process.exitCode = 1;
       return;
     }

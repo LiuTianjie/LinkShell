@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getValidToken } from "../auth.js";
+import { getValidToken, isLoggedIn } from "../auth.js";
 import * as daemon from "../utils/daemon.js";
 
 // node:sqlite prints an ExperimentalWarning on load; it is expected here and
@@ -16,8 +16,22 @@ function silenceSqliteWarning(): void {
 }
 
 interface HostConfig {
-  /** v2 gateway base URL (ws:// or wss://). */
+  /** v2 gateway base URL (ws:// or wss://), or "off". Unset: the official gateway once logged in. */
   gateway?: string;
+}
+
+/** LinkShell's own gateway: a Pro account's computers are reachable there. */
+export const OFFICIAL_GATEWAY = "wss://gateway.itool.tech";
+
+/**
+ * Where devices reach this computer from outside the LAN: LINKSHELL_GATEWAY,
+ * else the saved choice, else the official gateway when logged in.
+ */
+export function resolveGateway(home: string): string | undefined {
+  const chosen = process.env.LINKSHELL_GATEWAY || readHostConfig(home).gateway;
+  if (chosen === "off") return undefined;
+  if (chosen) return chosen;
+  return isLoggedIn() ? OFFICIAL_GATEWAY : undefined;
 }
 
 function configPath(home: string): string {
@@ -69,7 +83,7 @@ export async function runHostForeground(version: string): Promise<void> {
   const devPort = process.env.LINKSHELL_DEV_PORT ? Number(process.env.LINKSHELL_DEV_PORT) : undefined;
   // Where devices reach this machine from outside the LAN. The account from
   // `linkshell login`, if any, lets that account's devices in without pairing.
-  const gatewayUrl = process.env.LINKSHELL_GATEWAY || readHostConfig(host.defaultHome()).gateway;
+  const gatewayUrl = resolveGateway(host.defaultHome());
   const running = await host.startHost({
     version,
     env,
@@ -140,7 +154,7 @@ export async function printHostStatus(): Promise<void> {
     process.stdout.write(`  Sessions: ${sessions.length} known, ${active.length} active\n`);
     const gateway = await client.call("gateway.status", {});
     if (gateway.status === "off") {
-      process.stdout.write("  Gateway:  off (linkshell host --gateway <url>)\n");
+      process.stdout.write("  Gateway:  off (linkshell login for the official one, or linkshell host --gateway <url>)\n");
     } else {
       const account = gateway.account ? `, account ${gateway.account.email ?? gateway.account.userId}` : "";
       const problem = gateway.error ? `  ⚠ ${gateway.error.message}` : "";

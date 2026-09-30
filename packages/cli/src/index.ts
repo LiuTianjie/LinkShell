@@ -62,7 +62,7 @@ const hostCmd = program
   .description("Run the LinkShell host that owns agent sessions (v2)")
   .option("--daemon", "Run in background (detached)")
   .option("--dev-port <port>", "Also serve the host API on 127.0.0.1:<port> (local development clients only)")
-  .option("--gateway <url>", "Reach this computer through a v2 gateway (saved; 'off' to disable)")
+  .option("--gateway <url>", "Reach this computer through a v2 gateway (saved; 'off' to disable, 'default' for the official one when logged in)")
   .option("--_foreground-host", undefined) // internal
   .action(async (options) => {
     const { runHostForeground, ensureHostRunning, readHostConfig, writeHostConfig, assertHostRuntime } = await import("./commands/host.js");
@@ -71,7 +71,8 @@ const hostCmd = program
     if (options.gateway) {
       const { defaultHome } = await import("@linkshell/host");
       const home = defaultHome();
-      writeHostConfig(home, { ...readHostConfig(home), gateway: options.gateway === "off" ? undefined : options.gateway });
+      // "off" is remembered, so being logged in doesn't turn the official gateway back on.
+      writeHostConfig(home, { ...readHostConfig(home), gateway: options.gateway === "default" ? undefined : options.gateway });
     }
     if (options.daemon && !options._foregroundHost) {
       const socket = await ensureHostRunning();
