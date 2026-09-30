@@ -216,6 +216,34 @@ describe("host + Codex driver (fake app-server)", () => {
     tui.close();
   }, 15_000);
 
+  it("archives, renames and deletes natively; a delete from another Codex client reaches the phone", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: "/w/house", prompt: text("keep") });
+    await waitFor(() => host.hub.getSession(session.id).state === "idle" && host.hub.getSession(session.id).lastSeq > 2);
+    const tui = await rawCodexClient(host.paths.codexSocket);
+    const listed = async () => (await tui.peer.request<{ data: { id: string; name: string | null }[] }>("thread/list", {})).data;
+
+    await phone.client.call("sessions.rename", { sessionId: session.id, title: "House chores" });
+    expect((await listed()).find((t) => t.id === session.nativeId)?.name).toBe("House chores");
+    await phone.client.call("sessions.archive", { sessionId: session.id, archived: true });
+    expect((await listed()).map((t) => t.id)).not.toContain(session.nativeId);
+    await phone.client.call("sessions.archive", { sessionId: session.id, archived: false });
+    expect((await listed()).map((t) => t.id)).toContain(session.nativeId);
+
+    const removed: string[] = [];
+    phone.client.on("session.removed", ({ sessionId }) => removed.push(sessionId));
+    await phone.client.call("sessions.delete", { sessionId: session.id });
+    await waitFor(() => removed.includes(session.id));
+    expect((await listed()).map((t) => t.id)).not.toContain(session.nativeId);
+
+    // Deleted in the TUI (another client): LinkShell forgets it too.
+    const other = await phone.client.call("sessions.create", { agent: "codex", cwd: "/w/house", prompt: text("other") });
+    await waitFor(() => host.hub.getSession(other.session.id).state === "idle" && host.hub.getSession(other.session.id).lastSeq > 2);
+    await tui.peer.request("thread/delete", { threadId: other.session.nativeId });
+    await waitFor(() => removed.includes(other.session.id));
+    expect(() => host.hub.getSession(other.session.id)).toThrow(/not found/);
+    tui.close();
+  }, 15_000);
+
   it("tells a desktop shim how to attach the Codex TUI to the shared server", async () => {
     const launch = await phone.client.call("desktop.launch", { agent: "codex", sessionId, args: ["--no-alt-screen"] });
     expect(launch).toEqual({

@@ -106,6 +106,13 @@ export class HostRpcServer {
         await hub.respondPermission(params.sessionId, params.requestId, params.optionId);
         return {};
       },
+      "sessions.unqueue": (params: P<"sessions.unqueue">) => ({ removed: hub.unqueue(params.sessionId, params.clientMessageId) }),
+      "sessions.archive": async (params: P<"sessions.archive">) => ({ session: await hub.archive(params.sessionId, params.archived) }),
+      "sessions.rename": async (params: P<"sessions.rename">) => ({ session: await hub.rename(params.sessionId, params.title) }),
+      "sessions.delete": async (params: P<"sessions.delete">) => {
+        await hub.delete(params.sessionId);
+        return {};
+      },
       "sessions.setConfig": async (params: P<"sessions.setConfig">) => {
         await hub.setConfig(params.sessionId, params.optionId, params.value);
         return {};
@@ -293,6 +300,10 @@ export class HostRpcServer {
     };
     this.connections.add(context.peer);
     const stopSummaries = this.options.hub.onSummary((session) => context.peer.notify("session.summary", { session }));
+    const stopRemoved = this.options.hub.onRemoved((sessionId) => {
+      context.subscriptions.delete(sessionId);
+      context.peer.notify("session.removed", { sessionId });
+    });
     const stopTerminals = this.options.terminals.onChange((terminal, closed) =>
       context.peer.notify("terminal.changed", closed ? { terminal, closed } : { terminal }),
     );
@@ -300,6 +311,7 @@ export class HostRpcServer {
     transport.onClose(() => {
       this.connections.delete(context.peer);
       stopSummaries();
+      stopRemoved();
       stopTerminals();
       for (const [terminalId, listener] of context.terminals) this.options.terminals.detach(terminalId, listener);
       context.terminals.clear();

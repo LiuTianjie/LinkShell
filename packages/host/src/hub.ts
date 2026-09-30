@@ -8,6 +8,7 @@ import {
   type SessionEvent,
   type SessionSummary,
   type SessionUpdate,
+  type QueuedMessage,
 } from "@linkshell/wire";
 import type {
   AgentDriver,
@@ -37,6 +38,8 @@ interface LiveSession {
   turnActive: boolean;
   /** What the running turn is doing, for list rows (never persisted). */
   activity?: SessionActivity;
+  /** Messages the driver holds until the turn ends (never persisted). */
+  queue?: QueuedMessage[];
   /** True while native history is imported: no live activity, one summary at the end. */
   importing?: boolean;
   importChanged?: boolean;
@@ -70,6 +73,7 @@ export class SessionHub {
   private readonly drivers = new Map<string, AgentDriver>();
   private readonly live = new Map<string, LiveSession>();
   private readonly summaryListeners = new Set<(summary: SessionSummary) => void>();
+  private readonly removedListeners = new Set<(sessionId: string) => void>();
   private readonly auth = new Map<string, { value: AgentAuth; checkedAt: number }>();
   /** Terminals (`linkshell <agent>`) currently driving handoff sessions. */
   private readonly desktops = new Map<string, DesktopController>();
@@ -88,6 +92,14 @@ export class SessionHub {
       const live = this.live.get(sessionIdFor(agent, nativeId));
       if (live) live.attached = false;
     },
+    queue: (agent, nativeId, items) => {
+      const sessionId = sessionIdFor(agent, nativeId);
+      const stored = this.store.getSession(sessionId);
+      if (!stored) return;
+      this.liveFor(sessionId).queue = items.length ? items : undefined;
+      this.emitSummary(stored);
+    },
+    removed: (agent, nativeId) => this.forget(sessionIdFor(agent, nativeId)),
     desktop: (agent, nativeId) => this.desktops.get(sessionIdFor(agent, nativeId)),
     state: (agent, nativeId) => {
       const sessionId = sessionIdFor(agent, nativeId);
@@ -218,8 +230,9 @@ export class SessionHub {
     if (!live) return summary;
     const activity = live.turnActive ? live.activity : undefined;
     const first = live.permissions.values().next().value as PermissionUpdate | undefined;
-    if (!activity && !first) return summary;
+    if (!activity && !first && !live.queue) return summary;
     const decorated: SessionSummary = { ...summary };
+    if (live.queue) decorated.queue = live.queue;
     if (activity) decorated.activity = activity;
     if (first) {
       decorated.permission = {
@@ -323,6 +336,73 @@ export class SessionHub {
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 100 + attempt * 50));
+      }
+    }
+  }
+
+  unqueue(sessionId: string, clientMessageId: string): boolean {
+    const summary = this.getSession(sessionId);
+    const driver = this.requireDriver(summary.agent);
+    const removed = driver.unqueue?.(summary.nativeId, clientMessageId) ?? false;
+    // Sent again later, it should go through.
+    if (removed) this.store.releaseClientMessage(sessionId, clientMessageId);
+    return removed;
+  }
+
+  onRemoved(listener: (sessionId: string) => void): () => void {
+    this.removedListeners.add(listener);
+    return () => this.removedListeners.delete(listener);
+  }
+
+  async archive(sessionId: string, archived: boolean): Promise<SessionSummary> {
+    const summary = this.getSession(sessionId);
+    const driver = this.drivers.get(summary.agent);
+    if (driver?.archive) await driver.archive(summary.nativeId, archived);
+    const updated = this.store.patchSession(sessionId, { archived });
+    this.emitSummary(updated);
+    return this.decorate(updated);
+  }
+
+  async rename(sessionId: string, title: string): Promise<SessionSummary> {
+    const summary = this.getSession(sessionId);
+    const name = compact(title, TITLE_LENGTH);
+    const driver = this.drivers.get(summary.agent);
+    if (name && driver?.rename) {
+      try {
+        await driver.rename(summary.nativeId, name);
+      } catch (error) {
+        // The name still holds in LinkShell.
+        this.log(`[hub] ${summary.agent} rename failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const updated = this.store.patchSession(sessionId, { customTitle: name || null });
+    this.emitSummary(updated);
+    return this.decorate(updated);
+  }
+
+  async delete(sessionId: string): Promise<void> {
+    const summary = this.getSession(sessionId);
+    const live = this.live.get(sessionId);
+    if (live?.turnActive || summary.state === "running") throw RpcError.app("busy", "这个会话正在运行：先停止，再删除");
+    if (this.desktops.has(sessionId)) throw RpcError.app("busy", "这个会话正在电脑终端里使用：先在电脑上退出，再删除");
+    const driver = this.drivers.get(summary.agent);
+    if (driver) {
+      await driver.detach(summary.nativeId).catch(() => {});
+      if (driver.delete) await driver.delete(summary.nativeId);
+    }
+    this.forget(sessionId);
+  }
+
+  /** Drops a session from LinkShell and tells every client. */
+  private forget(sessionId: string): void {
+    if (!this.store.getSession(sessionId)) return;
+    this.live.delete(sessionId);
+    this.store.removeSession(sessionId);
+    for (const listener of this.removedListeners) {
+      try {
+        listener(sessionId);
+      } catch (error) {
+        this.log(`[hub] removal listener failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -482,6 +562,8 @@ export class SessionHub {
   }
 
   private recordDiscovered(agent: string, session: DiscoveredSession): void {
+    // Deleted in LinkShell: an agent without native delete keeps listing it.
+    if (this.store.isRemoved(sessionIdFor(agent, session.nativeId))) return;
     const before = this.store.getSession(sessionIdFor(agent, session.nativeId));
     const { summary, created } = this.store.upsertSession({
       id: sessionIdFor(agent, session.nativeId),

@@ -278,6 +278,18 @@ export class CodexDriver implements AgentDriver {
     if (options.length > 0) this.host?.update(this.id, nativeId, { sessionUpdate: "ls_config", options });
   }
 
+  async archive(nativeId: string, archived: boolean): Promise<void> {
+    await this.rpc(archived ? "thread/archive" : "thread/unarchive", { threadId: nativeId });
+  }
+
+  async rename(nativeId: string, title: string): Promise<void> {
+    await this.rpc("thread/name/set", { threadId: nativeId, name: title });
+  }
+
+  async delete(nativeId: string): Promise<void> {
+    await this.rpc("thread/delete", { threadId: nativeId });
+  }
+
   async cancel(nativeId: string): Promise<void> {
     const turnId = this.stateOf(nativeId).activeTurnId;
     if (!turnId) return;
@@ -403,6 +415,12 @@ export class CodexDriver implements AgentDriver {
   }
 
   private onNotification(method: string, params: unknown): void {
+    if (method === "thread/deleted") {
+      // Deleted in the TUI or another client.
+      const threadId = (params as { threadId?: string } | undefined)?.threadId;
+      if (threadId && !this.subThreads.has(threadId)) this.host?.removed(this.id, threadId);
+      return;
+    }
     if (method === "thread/started") {
       const thread = (params as { thread?: CodexThread } | undefined)?.thread;
       if (!thread?.id) return;

@@ -8,7 +8,10 @@
       "esbuild",
       "node-pty",
       "react-native-enriched-markdown"
-    ]
+    ],
+    "patchedDependencies": {
+      "react-native-enriched-markdown@1.0.2": "patches/react-native-enriched-markdown@1.0.2.patch"
+    }
   },
   "scripts": {
     "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",

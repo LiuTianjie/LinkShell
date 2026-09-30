@@ -171,6 +171,26 @@ export class ClaudeDriver extends AcpDriver {
     await super.detach(nativeId);
   }
 
+  /** Claude's own title record (what /rename writes), so `claude --resume` shows it too. */
+  async rename(nativeId: string, title: string): Promise<void> {
+    const { renameSession } = await import("@anthropic-ai/claude-agent-sdk");
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    // The SDK finds transcripts through CLAUDE_CONFIG_DIR, as Claude does.
+    process.env.CLAUDE_CONFIG_DIR = this.configDir;
+    try {
+      await renameSession(nativeId, title);
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previous;
+    }
+  }
+
+  override async delete(nativeId: string): Promise<void> {
+    await super.delete(nativeId);
+    this.modes.delete(nativeId);
+    this.hiddenTools.delete(nativeId);
+  }
+
   override async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
     // Sending from a device is taking the session over.
     await this.ensureRemote(nativeId);

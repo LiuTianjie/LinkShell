@@ -128,6 +128,50 @@ describe("generic ACP driver (fake agent)", () => {
     expect(t.text(session.id)).toContain("echo: second");
   });
 
+  it("shows the queue on the summary, lets a queued message be dropped, and stopping clears it", async () => {
+    const t = await setup();
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "a", content: prompt("SLOW one") });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "b", content: prompt("second") });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "c", content: prompt("third") });
+    const queued = await waitFor(() => t.summaries.findLast((s) => s.id === session.id)?.queue?.length === 2 && t.summaries.findLast((s) => s.id === session.id));
+    expect(queued.queue).toEqual([
+      { clientMessageId: "b", text: "second", images: 0 },
+      { clientMessageId: "c", text: "third", images: 0 },
+    ]);
+    expect(await t.client.call("sessions.unqueue", { sessionId: session.id, clientMessageId: "b" })).toEqual({ removed: true });
+    expect(await t.client.call("sessions.unqueue", { sessionId: session.id, clientMessageId: "b" })).toEqual({ removed: false });
+    await waitFor(() => t.summaries.findLast((s) => s.id === session.id)?.queue?.length === 1);
+    await t.client.call("sessions.cancel", { sessionId: session.id });
+    await waitFor(() => !t.summaries.findLast((s) => s.id === session.id)?.queue);
+    await waitFor(() => t.ended(session.id).length >= 1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(t.text(session.id)).not.toContain("echo: third");
+    expect(t.text(session.id)).not.toContain("echo: second");
+  });
+
+  it("renames, archives and deletes a session; a deleted one isn't rediscovered", async () => {
+    const t = await setup();
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "a", content: prompt("hello") });
+    await waitFor(() => t.ended(session.id).length === 1);
+    expect((await t.client.call("sessions.rename", { sessionId: session.id, title: "  My   task " })).session.title).toBe("My task");
+    expect((await t.client.call("sessions.archive", { sessionId: session.id, archived: true })).session.archived).toBe(true);
+    expect((await t.client.call("sessions.list", {})).sessions.map((s) => s.id)).not.toContain(session.id);
+    expect((await t.client.call("sessions.list", { includeArchived: true })).sessions.map((s) => s.id)).toContain(session.id);
+    let removed: string | undefined;
+    t.client.on("session.removed", ({ sessionId }) => (removed = sessionId));
+    await t.client.call("sessions.delete", { sessionId: session.id });
+    await waitFor(() => removed === session.id);
+    // Gone from the agent too (session/delete), and not brought back by discovery.
+    const store = JSON.parse((await import("node:fs")).readFileSync(t.storePath, "utf8")) as { sessions?: Record<string, unknown> };
+    expect(Object.keys(store.sessions ?? store)).not.toContain(session.nativeId);
+    await t.host.hub.refreshDiscovery();
+    expect((await t.client.call("sessions.list", { includeArchived: true })).sessions.map((s) => s.id)).not.toContain(session.id);
+  });
+
   it("steers into a running turn when the agent supports prompt queueing", async () => {
     const t = await setup({ FAKE_ACP_STEERING: "1" });
     const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });

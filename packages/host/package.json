@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.84.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.284",
     "@linkshell/wire": "workspace:*",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",

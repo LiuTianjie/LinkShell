@@ -136,6 +136,29 @@ export const methods = {
     }),
     result: empty,
   },
+  /** Drops a message still waiting in the host's queue (see SessionSummary.queue). */
+  "sessions.unqueue": {
+    params: z.object({ sessionId: z.string().min(1), clientMessageId: z.string().min(1) }),
+    result: z.object({ removed: z.boolean() }),
+  },
+  /** Archives (or restores) a session: hidden from lists, kept on disk; natively where the agent supports it. */
+  "sessions.archive": {
+    params: z.object({ sessionId: z.string().min(1), archived: z.boolean() }),
+    result: z.object({ session: sessionSummarySchema }),
+  },
+  /** Names a session; an empty title goes back to the agent's own. */
+  "sessions.rename": {
+    params: z.object({ sessionId: z.string().min(1), title: z.string().max(200) }),
+    result: z.object({ session: sessionSummarySchema }),
+  },
+  /**
+   * Deletes a session: the agent's own record where it has one (Codex thread,
+   * Claude transcript), and LinkShell's copy either way. Not while it runs.
+   */
+  "sessions.delete": {
+    params: z.object({ sessionId: z.string().min(1) }),
+    result: empty,
+  },
   "sessions.takeover": {
     params: z.object({ sessionId: z.string().min(1) }),
     result: z.object({ driver: sessionDriverSchema.optional() }),
@@ -344,6 +367,8 @@ export function isMethodName(name: string): name is MethodName {
 export const notifications = {
   "session.event": sessionEventSchema,
   "session.summary": z.object({ session: sessionSummarySchema }),
+  /** A session was deleted (from any device, or natively by the agent). */
+  "session.removed": z.object({ sessionId: z.string() }),
   /** To a desktop shim: a device is taking over; exit the native UI, then call desktop.yielded. */
   "desktop.yield": z.object({ sessionId: z.string() }),
   /** To a desktop shim: progress from the remote driver, to show in the terminal. */

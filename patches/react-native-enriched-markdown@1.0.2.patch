@@ -1,0 +1,40 @@
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/renderer/ListItemRenderer.kt b/android/src/main/java/com/swmansion/enriched/markdown/renderer/ListItemRenderer.kt
+index afbf68f737ebaf7d3b9ff876c76212728247217f..610b9e7b6311688f5f290589ad8a97d216751d05 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/renderer/ListItemRenderer.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/renderer/ListItemRenderer.kt
+@@ -1,6 +1,7 @@
+ package com.swmansion.enriched.markdown.renderer
+ 
+ import android.text.SpannableStringBuilder
++import android.text.Spanned
+ import android.text.style.ForegroundColorSpan
+ import android.text.style.StrikethroughSpan
+ import com.swmansion.enriched.markdown.parser.MarkdownASTNode
+@@ -109,7 +110,7 @@ class ListItemRenderer(
+           if (isFirstSegment && plainAnchor) markerSpan else makeSpan(drawsMarker = false),
+           pos,
+           cbStart,
+-          SPAN_FLAGS_EXCLUSIVE_EXCLUSIVE,
++          LIST_SPAN_FLAGS,
+         )
+         isFirstSegment = false
+       }
+@@ -120,7 +121,7 @@ class ListItemRenderer(
+         if (isFirstSegment && plainAnchor) markerSpan else makeSpan(drawsMarker = false),
+         pos,
+         itemEnd,
+-        SPAN_FLAGS_EXCLUSIVE_EXCLUSIVE,
++        LIST_SPAN_FLAGS,
+       )
+     }
+ 
+@@ -181,3 +182,9 @@ class ListItemRenderer(
+     }
+   }
+ }
++
++// The list span sets the item's block font; spans are applied in priority
++// order, so giving it a higher priority applies it first and lets inline styles
++// inside the item (code, strong, …) override it. Set later at equal priority,
++// it replaced them: inline code in a list lost its monospace font.
++private const val LIST_SPAN_FLAGS = SPAN_FLAGS_EXCLUSIVE_EXCLUSIVE or (1 shl Spanned.SPAN_PRIORITY_SHIFT)

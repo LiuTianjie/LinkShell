@@ -238,6 +238,7 @@ export class AcpDriver implements AgentDriver {
         return "steered";
       }
       state.queue.push({ content, clientMessageId });
+      this.reportQueue(nativeId, state);
       return "queued";
     }
     this.startTurn(nativeId, state, content, clientMessageId);
@@ -247,7 +248,9 @@ export class AcpDriver implements AgentDriver {
   async cancel(nativeId: string): Promise<void> {
     const state = this.sessions.get(nativeId);
     if (!state) return;
+    // Stopping stops what's waiting too; the apps put queued text back in the composer.
     state.queue = [];
+    this.reportQueue(nativeId, state);
     this.cancelPermissions(state);
     this.connection?.notify("session/cancel", { sessionId: nativeId });
   }
@@ -481,7 +484,36 @@ export class AcpDriver implements AgentDriver {
     this.cancelPermissions(state);
     this.emit(nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason });
     const next = state.queue.shift();
+    if (next) this.reportQueue(nativeId, state);
     if (next && state.loaded) this.startTurn(nativeId, state, next.content, next.clientMessageId);
+  }
+
+  /** The agent's own delete, when it has one (ACP session/delete). */
+  async delete(nativeId: string): Promise<void> {
+    if (!this.connection?.alive) await this.ensureStarted();
+    if (this.connection?.capabilities.sessionCapabilities?.delete) await this.rpc("session/delete", { sessionId: nativeId });
+    this.sessions.delete(nativeId);
+  }
+
+  unqueue(nativeId: string, clientMessageId: string): boolean {
+    const state = this.sessions.get(nativeId);
+    const index = state?.queue.findIndex((entry) => entry.clientMessageId === clientMessageId) ?? -1;
+    if (!state || index < 0) return false;
+    state.queue.splice(index, 1);
+    this.reportQueue(nativeId, state);
+    return true;
+  }
+
+  private reportQueue(nativeId: string, state: { queue: PendingPrompt[] }): void {
+    this.host?.queue(
+      this.id,
+      nativeId,
+      state.queue.map((entry) => ({
+        clientMessageId: entry.clientMessageId,
+        text: entry.content.map((block) => (block.type === "text" ? block.text : "")).join("").trim(),
+        images: entry.content.filter((block) => block.type === "image").length,
+      })),
+    );
   }
 
   protected async rpc<T = unknown>(method: string, params: unknown, timeoutMs?: number): Promise<T> {

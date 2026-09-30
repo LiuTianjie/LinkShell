@@ -100,6 +100,14 @@ export const pendingPermissionSchema = z.object({
 });
 export type PendingPermissionSummary = z.infer<typeof pendingPermissionSchema>;
 
+export const queuedMessageSchema = z.object({
+  clientMessageId: z.string(),
+  /** The message's text (images are counted, not sent). */
+  text: z.string(),
+  images: z.number().int().nonnegative(),
+});
+export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
+
 export const sessionSummarySchema = z.object({
   /** `${agent}:${nativeId}` — stable across daemon restarts and rediscovery. */
   id: z.string().min(1),
@@ -118,6 +126,11 @@ export const sessionSummarySchema = z.object({
   archived: z.boolean(),
   activity: sessionActivitySchema.optional(),
   permission: pendingPermissionSchema.optional(),
+  /**
+   * Live only: messages waiting for the current turn to end, when the host
+   * holds them (agents that can't take input mid-turn). Oldest first.
+   */
+  queue: z.array(queuedMessageSchema).optional(),
 });
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 

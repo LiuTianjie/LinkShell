@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS client_messages (
   ts INTEGER NOT NULL,
   PRIMARY KEY (session_id, client_message_id)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS removed_sessions (
+  id TEXT PRIMARY KEY,
+  ts INTEGER NOT NULL
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS terminals (
   id TEXT PRIMARY KEY,
   cwd TEXT NOT NULL,
@@ -97,6 +101,7 @@ interface SessionRow {
   updated_at: number;
   last_seq: number;
   archived: number;
+  custom_title: string | null;
 }
 
 export interface SessionInsert {
@@ -122,6 +127,7 @@ export type SessionPatch = Partial<{
   model: string | null;
   updatedAt: number;
   archived: boolean;
+  customTitle: string | null;
 }>;
 
 const PATCH_COLUMNS: Record<keyof SessionPatch, string> = {
@@ -134,6 +140,7 @@ const PATCH_COLUMNS: Record<keyof SessionPatch, string> = {
   model: "model",
   updatedAt: "updated_at",
   archived: "archived",
+  customTitle: "custom_title",
 };
 
 function toSummary(row: SessionRow): SessionSummary {
@@ -141,7 +148,8 @@ function toSummary(row: SessionRow): SessionSummary {
     id: row.id,
     agent: row.agent,
     nativeId: row.native_id,
-    title: row.title ?? undefined,
+    // A name given in LinkShell wins over the agent's own.
+    title: row.custom_title ?? row.title ?? undefined,
     preview: row.preview ?? undefined,
     cwd: row.cwd,
     state: row.state as SessionState,
@@ -166,6 +174,35 @@ export class HostStore {
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** Columns added after the first release. */
+  private migrate(): void {
+    const columns = new Set((this.db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map((c) => c.name));
+    if (!columns.has("custom_title")) this.db.exec("ALTER TABLE sessions ADD COLUMN custom_title TEXT");
+  }
+
+  // ── removal ───────────────────────────────────────────────────────
+
+  /** Deleted by the user: forgotten, and kept out of rediscovery. */
+  removeSession(id: string): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const table of ["sessions", "events", "logged_items", "driver_state", "client_messages"]) {
+        const column = table === "sessions" ? "id" : "session_id";
+        this.db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`).run(id);
+      }
+      this.db.prepare("INSERT OR REPLACE INTO removed_sessions (id, ts) VALUES (?, ?)").run(id, Date.now());
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  isRemoved(id: string): boolean {
+    return this.db.prepare("SELECT 1 FROM removed_sessions WHERE id = ?").get(id) !== undefined;
   }
 
   close(): void {

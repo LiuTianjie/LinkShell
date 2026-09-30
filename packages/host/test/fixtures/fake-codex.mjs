@@ -166,7 +166,7 @@ const handlers = {
   "thread/list": () => ({
     // Like Codex: a thread is only persisted (and listed) once it has a turn.
     data: [...threads.values()]
-      .filter((t) => t.turns.length > 0)
+      .filter((t) => t.turns.length > 0 && !t.archived)
       .sort((a, b) => b.meta.updatedAt - a.meta.updatedAt)
       .map((t) => view(t, false)),
     nextCursor: null,
@@ -220,6 +220,31 @@ const handlers = {
       turn.interrupted = true;
       thread.pendingApproval?.("interrupted");
     }
+    return {};
+  },
+  "thread/archive": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: "unknown thread" };
+    thread.archived = true;
+    broadcast("thread/archived", { threadId: params.threadId });
+    return {};
+  },
+  "thread/unarchive": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: "unknown thread" };
+    thread.archived = false;
+    return {};
+  },
+  "thread/name/set": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: "unknown thread" };
+    thread.meta.name = params.name;
+    broadcast("thread/name/updated", { threadId: params.threadId, threadName: params.name });
+    return {};
+  },
+  "thread/delete": (params) => {
+    if (!threads.delete(params.threadId)) throw { code: -32600, message: "unknown thread" };
+    broadcast("thread/deleted", { threadId: params.threadId });
     return {};
   },
   "fake/crash": () => {

@@ -186,7 +186,7 @@ const handlers = {
     agentCapabilities: {
       loadSession: true,
       promptCapabilities: { image: true, embeddedContext: true },
-      sessionCapabilities: { list: {}, resume: {}, close: {} },
+      sessionCapabilities: { list: {}, resume: {}, close: {}, delete: {} },
       _meta: steering ? { claudeCode: { promptQueueing: true } } : {},
     },
     agentInfo: { name: "fake-acp", version: "1.2.3" },
@@ -227,6 +227,13 @@ const handlers = {
     }
     loaded.add(params.sessionId);
     return config(requireSession(params));
+  },
+  "session/delete": (params) => {
+    requireSession(params);
+    delete sessions[params.sessionId];
+    loaded.delete(params.sessionId);
+    persist();
+    return {};
   },
   "session/close": (params) => {
     loaded.delete(params.sessionId);

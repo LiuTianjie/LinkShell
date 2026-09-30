@@ -3,6 +3,7 @@ import type {
   AgentCapabilities,
   AgentTier,
   ContentBlock,
+  QueuedMessage,
   SessionState,
   SessionUpdate,
 } from "@linkshell/wire";
@@ -41,6 +42,10 @@ export interface DriverHost {
   follow(agent: string, nativeId: string): Promise<void>;
   /** The driver lost its live connection to a session; the host re-attaches on next use. */
   detached(agent: string, nativeId: string): void;
+  /** The messages the driver is holding for after the current turn (empty: none). */
+  queue(agent: string, nativeId: string, items: QueuedMessage[]): void;
+  /** The agent deleted a session itself (e.g. from its own UI). */
+  removed(agent: string, nativeId: string): void;
   /** The terminal currently driving a handoff session, if any. */
   desktop(agent: string, nativeId: string): DesktopController | undefined;
   /** Durable per-session values for the driver (survive host restarts). */
@@ -108,6 +113,15 @@ export interface AgentDriver {
   cancel(nativeId: string): Promise<void>;
   respondPermission(nativeId: string, requestId: string, optionId: string): Promise<void>;
   setConfig?(nativeId: string, optionId: string, value: string): Promise<void>;
+  /** Drops a message the driver holds in its queue; whether it was there. */
+  unqueue?(nativeId: string, clientMessageId: string): boolean;
+
+  // Housekeeping, where the agent keeps its own record. Without these the host
+  // archives, names and forgets sessions on its side only.
+  archive?(nativeId: string, archived: boolean): Promise<void>;
+  rename?(nativeId: string, title: string): Promise<void>;
+  /** Deletes the agent's own record of the session. */
+  delete?(nativeId: string): Promise<void>;
 
   /** How a desktop terminal launches this agent's native UI attached to the host. */
   desktopLaunch?(args: string[], nativeId: string | undefined, context: DesktopLaunchContext): DesktopLaunch | Promise<DesktopLaunch>;
