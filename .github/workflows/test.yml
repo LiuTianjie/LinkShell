@@ -16,7 +16,7 @@ jobs:
           version: 10.18.3
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: pnpm
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm -r --filter "./packages/*" build
