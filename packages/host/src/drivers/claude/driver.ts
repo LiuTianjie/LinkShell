@@ -76,6 +76,8 @@ export interface ClaudeDriverOptions {
 export class ClaudeDriver extends AcpDriver {
   private readonly modes = new Map<string, Mode>();
   private readonly tails = new Map<string, TranscriptTail>();
+  /** Per session: TodoWrite calls shown as the plan, whose results the tail skips. */
+  private readonly hiddenTools = new Map<string, Set<string>>();
   private readonly claudeCommand: string;
   private readonly configDir: string;
   private readonly busyWindowMs: number;
@@ -269,7 +271,9 @@ export class ClaudeDriver extends AcpDriver {
 
   /** Desktop activity: what the TUI (or a plain `claude`) writes to the transcript. */
   private onTranscriptLine(nativeId: string, line: string): void {
-    const result = transcriptLine(line);
+    let hidden = this.hiddenTools.get(nativeId);
+    if (!hidden) this.hiddenTools.set(nativeId, (hidden = new Set()));
+    const result = transcriptLine(line, { hidden });
     if (result.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: result.title });
     for (const update of result.updates) this.emit(nativeId, update);
   }

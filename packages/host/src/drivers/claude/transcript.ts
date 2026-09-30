@@ -235,8 +235,12 @@ export interface TranscriptLineResult {
   title?: string;
 }
 
-/** Converts one transcript line to wire updates. Sub-agent files pass `sidechain`. */
-export function transcriptLine(raw: string, options: { sidechain?: boolean } = {}): TranscriptLineResult {
+/**
+ * Converts one transcript line to wire updates. Sub-agent files pass
+ * `sidechain`; a reader keeps one `hidden` set per transcript, so a tool that
+ * only feeds another view (TodoWrite → the plan) doesn't also show as a call.
+ */
+export function transcriptLine(raw: string, options: { sidechain?: boolean; hidden?: Set<string> } = {}): TranscriptLineResult {
   let line: Json;
   try {
     line = JSON.parse(raw) as Json;
@@ -293,6 +297,7 @@ export function transcriptLine(raw: string, options: { sidechain?: boolean } = {
         updates.push({ sessionUpdate: "user_message_chunk", messageId: uuid, content });
         userText = true;
       } else if (block.type === "tool_result" && str(block.tool_use_id)) {
+        if (options.hidden?.delete(str(block.tool_use_id)!)) continue;
         const text = resultText(block.content);
         const content: ToolCallContent[] = [...(text ? [{ type: "content" as const, content: { type: "text" as const, text } }] : []), ...resultImages(block.content)];
         updates.push({
@@ -321,7 +326,12 @@ export function transcriptLine(raw: string, options: { sidechain?: boolean } = {
       if (block.name === "TodoWrite") {
         const entries = todoPlan(input);
         if (entries) updates.push({ sessionUpdate: "plan", entries });
-        // Keep the id so the tool_result that follows closes cleanly.
+        // The plan card is the view; its result line is skipped by id. Without a
+        // reader's set (a single line) the call still shows, and closes cleanly.
+        if (entries && options.hidden) {
+          options.hidden.add(str(block.id)!);
+          continue;
+        }
       }
       const { title, kind, detail } = describeClaudeTool(str(block.name)!, input);
       updates.push({
@@ -364,9 +374,10 @@ export function readSubagents(transcriptPath: string): SessionUpdate[] {
     }
     const transcript = join(dir, file.replace(/\.meta\.json$/, ".jsonl"));
     if (!parent || !existsSync(transcript)) continue;
+    const hidden = new Set<string>();
     for (const raw of readFileSync(transcript, "utf8").split("\n")) {
       if (!raw.trim()) continue;
-      const result = transcriptLine(raw, { sidechain: true });
+      const result = transcriptLine(raw, { sidechain: true, hidden });
       for (const update of result.updates) {
         const nested = nestUnder(update, parent);
         if (!nested) continue;
@@ -401,9 +412,10 @@ export function readTranscript(path: string): { updates: SessionUpdate[]; title?
   const complete = text.slice(0, text.lastIndexOf("\n") + 1);
   let title: string | undefined;
   const updates: SessionUpdate[] = [];
+  const hidden = new Set<string>();
   for (const raw of complete.split("\n")) {
     if (!raw.trim()) continue;
-    const result = transcriptLine(raw);
+    const result = transcriptLine(raw, { hidden });
     if (result.ts !== undefined) for (const update of result.updates) transcriptTimes.set(update, result.ts);
     updates.push(...result.updates);
     if (result.title) title = result.title;

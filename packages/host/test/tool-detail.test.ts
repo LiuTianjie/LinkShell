@@ -88,6 +88,17 @@ describe("tool detail", () => {
     expect(result.updates[0]).toMatchObject({ sessionUpdate: "tool_call_update", content: [{ type: "content", content: { type: "image", data: PNG } }] });
   });
 
+  it("Claude: TodoWrite shows as the plan, not as a tool call too", () => {
+    const line = (message: unknown, type = "assistant") => JSON.stringify({ type, uuid: "u", timestamp: "2026-09-30T00:00:00Z", message });
+    const hidden = new Set<string>();
+    const todos = { todos: [{ content: "跑测试", status: "completed", activeForm: "跑测试" }] };
+    const call = transcriptLine(line({ id: "msg", content: [{ type: "tool_use", id: "todo1", name: "TodoWrite", input: todos }] }), { hidden });
+    expect(call.updates.map((u) => u.sessionUpdate)).toEqual(["plan"]);
+    const result = transcriptLine(line({ role: "user", content: [{ type: "tool_result", tool_use_id: "todo1", content: "Todos updated" }] }, "user"), { hidden });
+    expect(result.updates).toEqual([]);
+    expect(hidden.size).toBe(0);
+  });
+
   it("Claude: imports sub-agent transcripts nested under their Task call", () => {
     const dir = mkdtempSync(join(tmpdir(), "ls-sub-"));
     const main = join(dir, "s.jsonl");
