@@ -72,675 +72,482 @@
     }
   </script>
   <script>
-    // Theme before first paint: ?theme=, then the saved choice; dark otherwise.
+    // Before first paint: the theme (?theme=, then the saved choice; dark otherwise),
+    // the language (?lang=, the saved choice, then the browser's), and that scripts run.
     (function () {
-      var theme = new URLSearchParams(location.search).get('theme');
-      try { if (theme !== 'light' && theme !== 'dark') theme = localStorage.getItem('linkshell-theme'); } catch (e) { }
-      document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+      var root = document.documentElement, query = new URLSearchParams(location.search);
+      var theme = query.get('theme'), lang = query.get('lang');
+      try {
+        if (theme !== 'light' && theme !== 'dark') theme = localStorage.getItem('linkshell-theme');
+        if (lang !== 'en' && lang !== 'zh') lang = localStorage.getItem('linkshell-lang');
+      } catch (e) { }
+      if (lang !== 'en' && lang !== 'zh') lang = /^zh/i.test(navigator.language) ? 'zh' : 'en';
+      root.dataset.theme = theme === 'light' ? 'light' : 'dark';
+      root.dataset.lang = lang;
+      root.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      root.classList.add('js');
     })();
   </script>
   <style>
     :root {
       --bg: #050607;
-      --surface: #0a0b0d;
-      --surface-2: #121417;
-      --border: rgba(255, 255, 255, .08);
-      --line-2: rgba(255, 255, 255, .16);
-      --text: #f3f4f6;
-      --text-sec: #a3a7b0;
-      --text-muted: #747982;
+      --surface: #0c0d10;
+      --surface-2: #16181c;
+      --border: rgba(255, 255, 255, .1);
+      --border-strong: rgba(255, 255, 255, .22);
+      --text: #f0f1f3;
+      --text-sec: #a9adb5;
+      --text-muted: #a9adb5;
       --accent: #3de0c0;
-      --accent-ink: #03110d;
-      --accent-soft: rgba(61, 224, 192, .1);
-      --blue: #74a7ff;
-      --violet: #b19cff;
       --ink: #f3f4f6;
       --ink-fg: #050607;
       --success: #3ecf8e;
-      --danger: #ff6b6b;
-      --code-bg: #08090b;
-      --grid: rgba(255, 255, 255, .05);
-      --spot: rgba(255, 255, 255, .07);
-      --shadow-lg: 0 40px 80px -30px rgba(0, 0, 0, .9);
+      --danger: #ff7b7b;
+      --code-bg: #0b0c0f;
       --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
       --sans: "Geist", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
-      --ease: cubic-bezier(.2, .7, .2, 1);
-      --pad: 40px;
+      --gutter: 32px;
+      --measure: 680px;
       color-scheme: dark;
     }
 
     :root[data-theme="light"] {
       --bg: #fafafa;
       --surface: #ffffff;
-      --surface-2: #f0f1f2;
-      --border: rgba(8, 10, 14, .1);
-      --line-2: rgba(8, 10, 14, .2);
+      --surface-2: #ecedef;
+      --border: rgba(8, 10, 14, .12);
+      --border-strong: rgba(8, 10, 14, .28);
       --text: #0a0b0d;
-      --text-sec: #4d5158;
-      --text-muted: #6c7078;
+      --text-sec: #51555d;
+      --text-muted: #51555d;
       --accent: #078570;
-      --accent-ink: #ffffff;
-      --accent-soft: rgba(7, 133, 112, .09);
-      --blue: #2f6fe0;
-      --violet: #6d4fd8;
       --ink: #0a0b0d;
       --ink-fg: #ffffff;
       --success: #17915a;
-      --danger: #d64545;
-      --grid: rgba(8, 10, 14, .055);
-      --spot: rgba(7, 133, 112, .07);
-      --shadow-lg: 0 40px 80px -34px rgba(8, 10, 14, .45);
+      --danger: #c93a3a;
+      --code-bg: #f0f1f2;
       color-scheme: light;
     }
 
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; scroll-padding-top: 76px; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 var(--sans); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+    html { scroll-behavior: smooth; scroll-padding-top: 88px; -webkit-text-size-adjust: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.75 var(--sans); -webkit-font-smoothing: antialiased; }
     a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    a:hover { text-decoration: underline; text-underline-offset: 3px; }
     img { max-width: 100%; height: auto; display: block; }
-    h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; font-weight: 600; letter-spacing: -.025em; }
-    html[lang^="zh"] :is(h1, h2, h3) { letter-spacing: -.005em; }
+    h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; letter-spacing: -.025em; text-wrap: balance; }
+    html[lang^="zh"] :is(h1, h2, h3) { letter-spacing: 0; line-height: 1.35; }
     p { margin: 0; }
-    code, pre, kbd { font-family: var(--mono); }
-    :not(pre)>code { font-size: .86em; background: var(--surface-2); border: 1px solid var(--border); padding: .1em .4em; border-radius: 5px; }
+    code, pre { font-family: var(--mono); }
+    :not(pre) > code { font-size: .9em; background: var(--surface-2); padding: .12em .38em; border-radius: 5px; white-space: nowrap; }
     :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
     ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+    button { font: inherit; color: inherit; }
 
     /* one language at a time */
     html[data-lang="zh"] [lang="en"], html[data-lang="en"] [lang="zh"] { display: none !important; }
-    :root[data-theme="light"] .only-dark, :root:not([data-theme="light"]) .only-light { display: none !important; }
 
-    /* the frame: two hairlines run the whole page, sections rule across them */
-    .c { max-width: 1200px; margin: 0 auto; padding-inline: var(--pad); border-inline: 1px solid var(--border); }
-    .page { display: none; }
-    .page.visible { display: block; }
-    .sec > .c { position: relative; padding-block: 96px; border-top: 1px solid var(--border); }
-    .sec.flush > .c { padding-bottom: 0; }
-    .sec.strip > .c { padding-block: 0; }
-    .sec > .c::before, .sec > .c::after { content: ""; position: absolute; top: -6px; width: 11px; height: 11px; z-index: 2;
-      background: linear-gradient(var(--line-2), var(--line-2)) center / 100% 1px no-repeat, linear-gradient(var(--line-2), var(--line-2)) center / 1px 100% no-repeat; }
-    .sec > .c::before { left: -6px; }
-    .sec > .c::after { right: -6px; }
-    main > .sec:first-child > .c { border-top: 0; }
-    main > .sec:first-child > .c::before, main > .sec:first-child > .c::after { display: none; }
-    @media (max-width: 760px) { :root { --pad: 20px; } .c { border-inline: 0; } .sec > .c { padding-block: 64px; } .sec > .c::before, .sec > .c::after { display: none; } }
+    /* one page at a time (all three when scripts don't run) */
+    .js .page:not(.visible) { display: none; }
+
+    /* one column: text keeps a reading measure, pictures use the full width */
+    .wrap { max-width: calc(1080px + var(--gutter) * 2); margin-inline: auto; padding-inline: var(--gutter); }
+    .text { max-width: var(--measure); }
+    .text p { color: var(--text-sec); }
+    .text p + p { margin-top: 16px; }
+    .nb { display: inline-block; }
+    @media (max-width: 700px) { :root { --gutter: 20px; } }
 
     /* nav */
-    header.nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); background: color-mix(in srgb, var(--bg) 78%, transparent); border-bottom: 1px solid var(--border); }
-    .nav .c { display: flex; align-items: center; gap: 18px; height: 60px; }
-    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); font-size: 16px; letter-spacing: -.01em; }
+    header.nav { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--border); }
+    .nav .wrap { display: flex; align-items: center; gap: 6px; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; font-weight: 600; color: var(--text); }
     .brand:hover { text-decoration: none; }
-    .brand img { width: 26px; height: 26px; border-radius: 7px; }
-    .nav nav { display: flex; gap: 2px; margin-left: auto; align-items: center; }
-    .nav nav a { color: var(--text-sec); font-size: 14px; padding: 6px 12px; border-radius: 7px; transition: color .15s, background-color .15s; }
-    .nav nav a.active, .nav nav a:hover { color: var(--text); text-decoration: none; background: var(--surface-2); }
-    .nav-tools { display: flex; align-items: center; gap: 4px; padding-left: 14px; border-left: 1px solid var(--border); }
-    .icon-btn { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; border: 0; background: none; color: var(--text-sec); cursor: pointer; transition: color .15s, background-color .15s; }
-    .icon-btn:hover { color: var(--text); background: var(--surface-2); }
-    .icon-btn svg { width: 17px; height: 17px; }
+    .brand img { width: 28px; height: 28px; border-radius: 7px; }
+    .nav nav { display: flex; }
+    .nav nav a { color: var(--text-sec); font-size: 15px; padding: 8px 12px; transition: color .15s; }
+    .nav nav a.active, .nav nav a:hover { color: var(--text); text-decoration: none; }
+    .nav button { display: grid; place-items: center; height: 36px; min-width: 36px; padding: 0 8px; border: 0; border-radius: 7px; background: none; color: var(--text-sec); font-size: 15px; cursor: pointer; transition: color .15s; }
+    .nav button:hover { color: var(--text); }
+    .nav button svg { width: 18px; height: 18px; }
     .theme .moon, :root[data-theme="light"] .theme .sun { display: none; }
     :root[data-theme="light"] .theme .moon { display: block; }
-    .lang { border: 1px solid var(--line-2); background: none; color: var(--text-sec); border-radius: 6px; padding: 5px 9px; margin-left: 4px; font: 500 11.5px var(--mono); letter-spacing: .04em; cursor: pointer; transition: color .15s, border-color .15s; }
-    .lang:hover { color: var(--text); border-color: var(--text-muted); }
-    @media (max-width: 760px) { .nav nav a.opt { display: none; } .nav .c { gap: 8px; } .nav nav a { padding: 6px 9px; } .nav-tools { padding-left: 8px; } }
-    @media (max-width: 400px) { .nav-tools .gh { display: none; } }
+    @media (max-width: 460px) { .nav nav a.wide { display: none; } .nav nav a { padding-inline: 9px; } }
+    @media (max-width: 480px) { .btns .btn { flex: 1 1 auto; justify-content: center; } }
 
     /* buttons */
-    .btns { display: flex; flex-wrap: wrap; gap: 10px; }
-    .btn { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 18px; border-radius: 8px; font-weight: 600; font-size: 14.5px; border: 1px solid transparent; cursor: pointer; transition: background-color .15s, border-color .15s, opacity .15s; }
+    .btns { display: flex; flex-wrap: wrap; gap: 12px; }
+    .btn { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 20px; border-radius: 8px; border: 1px solid transparent; font-weight: 500; font-size: 16px; cursor: pointer; transition: background-color .15s, border-color .15s, opacity .15s; }
     .btn:hover { text-decoration: none; }
     .btn-p { background: var(--ink); color: var(--ink-fg); }
-    .btn-p:hover { opacity: .88; }
-    .btn-s { background: transparent; color: var(--text); border-color: var(--line-2); }
-    .btn-s:hover { background: var(--surface-2); border-color: var(--text-muted); }
-    .btn svg { width: 16px; height: 16px; flex: none; }
-    .tag { display: inline-flex; align-items: center; gap: 7px; font: 500 11.5px/1.5 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--text-sec); border: 1px solid var(--line-2); border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
-    .tag::before { content: ""; width: 5px; height: 5px; background: var(--tint, var(--accent)); }
+    .btn-p:hover { opacity: .86; }
+    .btn-s { color: var(--text); border-color: var(--border-strong); }
+    .btn-s:hover { background: var(--surface-2); }
+    .btn svg { width: 18px; height: 18px; flex: none; }
 
-    /* hero */
-    .hero-wrap { position: relative; isolation: isolate; overflow: hidden; }
-    .hero-wrap::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-      background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-      background-size: 60px 60px; background-position: center top;
-      -webkit-mask-image: radial-gradient(ellipse 70% 90% at 50% 0%, #000 20%, transparent 80%); mask-image: radial-gradient(ellipse 70% 90% at 50% 0%, #000 20%, transparent 80%); }
-    .hero-wrap::after { content: ""; position: absolute; z-index: -1; inset: 0 0 auto 0; height: 560px; pointer-events: none; background: radial-gradient(60% 100% at 50% 0%, var(--spot), transparent 70%); }
-    .hero { padding-block: 84px 92px; display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 64px; align-items: center; }
-    .hero .tag { margin-bottom: 26px; }
-    .hero h1 { font-size: clamp(40px, 5.3vw, 66px); letter-spacing: -.045em; line-height: 1.06; background: linear-gradient(180deg, #fff 35%, #9aa0ab); -webkit-background-clip: text; background-clip: text; color: transparent; }
-    :root[data-theme="light"] .hero h1 { background: none; color: var(--text); }
-    html[lang^="zh"] .hero h1 { letter-spacing: -.01em; line-height: 1.16; }
-    .caret { display: inline-block; width: .42em; height: .82em; margin-left: .12em; vertical-align: -.06em; background: var(--accent); animation: blink 1.1s steps(1) infinite; }
-    @keyframes blink { 50% { opacity: 0; } }
-    .lead { font-size: 17px; color: var(--text-sec); margin: 24px 0 32px; max-width: 32em; }
-    .cmd { display: inline-flex; align-items: center; gap: 10px; margin-top: 14px; height: 42px; padding: 0 6px 0 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font: 13.5px var(--mono); color: var(--text); max-width: 100%; }
-    .cmd i { color: var(--accent); font-style: normal; }
-    .cmd code { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: none; border: 0; padding: 0; font-size: 1em; }
-    .cmd .copy { position: static; flex: none; border: 0; background: none; }
-    .works { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 34px; font: 500 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
-    /* agent avatars: the app's marks and colours, as an overlapping stack */
-    .avs { display: flex; padding-left: calc(var(--s, 38px) * .2); }
-    .av { --s: 38px; position: relative; flex: none; display: grid; place-items: center; width: var(--s); height: var(--s); margin-left: calc(var(--s) * -.2); border-radius: 50%; background: var(--bd, var(--surface-2)); color: var(--fd, var(--text-sec)); box-shadow: 0 0 0 2.5px var(--bg); transition: transform .18s var(--ease); }
+    /* commands */
+    pre { margin: 0; background: var(--code-bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; font-size: 14.5px; line-height: 1.8; overflow-x: auto; }
+    pre .cm { color: var(--text-sec); }
+    pre .pr { color: var(--accent); user-select: none; }
+    .code { position: relative; }
+    .code pre { padding-right: 56px; }
+    .copy { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 6px; background: none; color: var(--text-sec); cursor: pointer; transition: color .15s, background-color .15s; }
+    .copy:hover { color: var(--text); background: var(--surface-2); }
+    .copy.ok { color: var(--accent); }
+    .copy svg { width: 16px; height: 16px; }
+    .code .copy { position: absolute; top: 9px; right: 9px; background: var(--code-bg); }
+    .code .copy:hover { background: var(--surface-2); }
+    .cmd { display: inline-flex; align-items: center; gap: 12px; max-width: 100%; height: 48px; padding: 0 7px 0 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--code-bg); font: 15px var(--mono); }
+    .cmd i { color: var(--accent); font-style: normal; user-select: none; }
+    .cmd code { background: none; padding: 0; font-size: 1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    html:not(.js) .copy { display: none; }
+    @media (max-width: 480px) { .cmd { display: flex; } .cmd code { flex: 1; } }
+
+    /* a still with its clip over it; both are the same shape, so nothing is ever cropped */
+    .media { position: relative; margin: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #07080d; }
+    .media img { width: 100%; aspect-ratio: 16 / 9; }
+    .media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    @media (max-width: 700px) { .media img { aspect-ratio: 9 / 16; } }
+
+    /* home */
+    .hero { padding-block: 88px 0; }
+    .hero h1 { font-size: clamp(40px, 6.4vw, 68px); letter-spacing: -.04em; line-height: 1.1; }
+    html[lang^="zh"] .hero h1 { letter-spacing: -.01em; line-height: 1.22; }
+    .lead { max-width: var(--measure); margin-top: 28px; font-size: 19px; color: var(--text-sec); }
+    .hero .btns { margin-top: 36px; }
+    .hero .cmd { margin-top: 14px; }
+    .hero .media { margin-top: 56px; }
+
+    .sec { padding-block: 128px 0; }
+    .sec h2 { font-size: clamp(27px, 3.3vw, 34px); margin-bottom: 20px; }
+    .sec h3 { font-size: clamp(21px, 2.4vw, 24px); margin-bottom: 12px; }
+    .sec .media { margin-top: 36px; }
+    .feature { margin-top: 104px; }
+
+    .more { margin: 0; }
+    .more dt { font-weight: 600; margin-top: 22px; }
+    .more dd { margin: 4px 0 0; color: var(--text-sec); }
+
+    .agent { margin-top: 28px; padding-top: 28px; border-top: 1px solid var(--border); }
+    .agent-name { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 10px; }
+    .agent-name h3 { margin: 0; font-size: 20px; }
+    .marks { display: flex; gap: 6px; }
+    .av { position: relative; flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--bd, var(--surface-2)); color: var(--fd, var(--text-sec)); }
     :root[data-theme="light"] .av { background: var(--bl, var(--surface-2)); color: var(--fl, var(--text-sec)); }
-    .av::before { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12); pointer-events: none; }
-    :root[data-theme="light"] .av::before { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .1); }
+    .av::before { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); }
+    :root[data-theme="light"] .av::before { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
     .av svg { width: 54%; height: 54%; }
     .av.full svg { width: 100%; height: 100%; border-radius: 50%; }
-    .av[data-name]:hover { transform: translateY(-4px); z-index: 3; }
-    .av[data-name]::after { content: attr(data-name); position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translate(-50%, 4px); z-index: 5; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--text); font: 500 11px var(--mono); letter-spacing: 0; text-transform: none; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; }
-    .av[data-name]:hover::after { opacity: 1; transform: translate(-50%, 0); }
-    @media (max-width: 520px) { .works .av { --s: 34px; } }
 
-    /* hero stage: the desk terminal, handed over to the phone */
-    .stage { position: relative; width: 100%; }
-    .phone { position: relative; border-radius: 38px; padding: 5px; background: #000; border: 1px solid rgba(255, 255, 255, .2); box-shadow: var(--shadow-lg); }
-    :root[data-theme="light"] .phone { border-color: #000; }
-    .phone img { border-radius: 32px; width: 100%; }
-    .stage .phone { width: 46%; margin-left: auto; z-index: 3; }
-    .win { background: #08090b; color: #d5d8df; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .16); box-shadow: var(--shadow-lg); overflow: hidden; font: 12.5px/1.85 var(--mono); }
-    .stage .win { position: absolute; left: 0; top: 13%; width: 88%; z-index: 1; }
-    .win-bar { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-bottom: 1px solid rgba(255, 255, 255, .09); }
-    .win-bar i { width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .28); }
-    .win-bar span { color: #747982; font-size: 11.5px; margin-left: 10px; }
-    .win-body { padding: 14px 18px 18px; white-space: nowrap; overflow: hidden; }
-    .win .k { color: #3de0c0; }
-    .win .ok { color: #3de0c0; }
-    .win .dim { color: #747982; }
-    .win .add { color: #3ecf8e; }
-    .win .del { color: #ff7b72; }
-    .takeover { display: inline-flex; align-items: center; gap: 11px; margin-top: 14px; padding: 8px 14px 8px 12px; border-left: 2px solid #3de0c0; background: rgba(61, 224, 192, .07); line-height: 1.5; }
-    .takeover svg { width: 17px; height: 17px; color: #3de0c0; flex: none; }
-    .takeover b { display: block; color: #fff; font-weight: 500; font-family: var(--sans); }
-    .takeover div > span { color: #8b9099; font-size: .92em; font-family: var(--sans); }
-    .hud { position: absolute; z-index: 4; left: 16%; top: 67%; width: 232px; padding: 12px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow-lg); }
-    .hud-top { display: flex; gap: 10px; align-items: center; }
-    .hud-ic { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; border: 1px solid var(--line-2); color: var(--accent); flex: none; }
-    .hud-ic svg { width: 16px; height: 16px; }
-    .hud-top b { display: block; font-size: 13px; font-weight: 600; line-height: 1.35; }
-    .hud-top code { font-size: 11.5px; color: var(--text-muted); background: none; border: 0; padding: 0; }
-    .hud-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 11px; }
-    .hud-btns > span { text-align: center; font-size: 12.5px; font-weight: 600; padding: 5px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--text-sec); }
-    .hud-btns .yes { background: var(--ink); border-color: var(--ink); color: var(--ink-fg); }
-    @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
-    .hero > div:first-child > * { animation: rise .7s var(--ease) both; }
-    .hero > div:first-child > :nth-child(2) { animation-delay: .05s; }
-    .hero > div:first-child > :nth-child(3) { animation-delay: .1s; }
-    .hero > div:first-child > :nth-child(4) { animation-delay: .15s; }
-    .hero > div:first-child > :nth-child(5) { animation-delay: .2s; }
-    .hero > div:first-child > :nth-child(6) { animation-delay: .25s; }
-    .stage .win { animation: rise .8s var(--ease) .15s both; }
-    .stage .phone { animation: rise .8s var(--ease) .28s both; }
-    .stage .hud { animation: rise .8s var(--ease) .45s both; }
-    @media (max-width: 1160px) { .win { font-size: 11.5px; } }
-    @media (max-width: 1000px) {
-      .hero { grid-template-columns: 1fr; padding-block: 52px 64px; gap: 52px; }
-      .stage { max-width: 540px; margin: 0 auto; }
-      .win { font-size: clamp(9px, 2.5vw, 12.5px); }
-    }
-    @media (max-width: 520px) {
-      .phone { border-radius: 28px; padding: 4px; }
-      .phone img { border-radius: 24px; }
-      .win-bar { padding: 8px 10px; }
-      .win-bar i { width: 7px; height: 7px; }
-      .win-bar span { display: none; }
-      .win-body { padding: 10px 12px 12px; }
-      .takeover { padding: 6px 10px 6px 8px; gap: 8px; }
-      .takeover svg { width: 14px; height: 14px; }
-      .hud { width: 176px; padding: 10px; left: 8%; top: 70%; }
-      .hud-ic { width: 26px; height: 26px; }
-      .hud-top b { font-size: 12px; }
-      .hud-btns > span { font-size: 11.5px; padding: 3px; }
-    }
+    .step { margin-top: 44px; }
+    .step .code, .step > pre { margin-top: 16px; }
+    .step .code + p { margin-top: 20px; }
 
-    /* code blocks */
-    .code { position: relative; }
-    pre { margin: 0; background: var(--code-bg); color: #e3e5ea; border: 1px solid rgba(255, 255, 255, .1); border-radius: 8px; padding: 14px 16px; font-size: 13px; line-height: 1.8; overflow-x: auto; }
-    .code pre { padding-right: 46px; }
-    pre .cm { color: #747982; }
-    pre .pr { color: #3de0c0; user-select: none; }
-    .copy { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid rgba(255, 255, 255, .14); background: #0e1013; color: #a3a7b0; border-radius: 6px; cursor: pointer; transition: color .15s, border-color .15s; }
-    .copy:hover { color: #fff; border-color: rgba(255, 255, 255, .34); }
-    .cmd .copy { color: var(--text-muted); }
-    .cmd .copy:hover { color: var(--text); }
-    .copy.ok, .cmd .copy.ok { color: var(--accent); }
-    .copy svg { width: 14px; height: 14px; }
-    .tabs { display: flex; gap: 2px; margin-bottom: 10px; flex-wrap: wrap; }
-    .tab { border: 0; background: none; color: var(--text-muted); font: 500 12px var(--mono); letter-spacing: .04em; padding: 5px 10px; border-radius: 6px; cursor: pointer; transition: color .15s, background-color .15s; }
-    .tab:hover { color: var(--text); }
-    .tab.active { background: var(--surface-2); color: var(--text); }
-    .tab-pane { display: none; }
-    .tab-pane.active { display: block; }
+    .support + .support { margin-top: 56px; }
+    .sec .support h2 { font-size: clamp(21px, 2.4vw, 24px); margin-bottom: 12px; }
+    .sponsor { margin-top: 12px; font-size: 19px; }
+    .sponsor a { font-weight: 600; }
+    .qr { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; }
+    .qr figure { margin: 0; width: 148px; color: var(--text-sec); font-size: 15px; text-align: center; }
+    .qr img { width: 100%; border-radius: 8px; margin-bottom: 8px; }
 
-    /* section heads */
-    .eyebrow { display: flex; align-items: center; gap: 10px; font: 500 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 18px; }
-    .eyebrow b { font-weight: 500; color: var(--accent); }
-    .eyebrow::before { content: ""; width: 6px; height: 6px; background: var(--accent); }
-    .sec h2 { font-size: clamp(28px, 3.5vw, 42px); letter-spacing: -.035em; max-width: 20em; }
-    html[lang^="zh"] .sec h2 { letter-spacing: -.01em; }
-    .sec .sub { color: var(--text-sec); font-size: 17px; margin-top: 16px; max-width: 38em; }
+    .close { padding-block: 128px; }
+    .close .btns { margin-top: 32px; }
 
-    /* cells: grids that share hairlines with the frame */
-    .cells { display: grid; gap: 1px; background: var(--border); border-top: 1px solid var(--border); margin: 56px calc(var(--pad) * -1) 0; }
-    .strip .cells { margin-top: 0; border-top: 0; }
-    .cells > * { background: var(--bg); padding: var(--pad); min-width: 0; }
-    .cells.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .cells.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .cells.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .cells + .cells { margin-top: 0; }
-    .cells .span { grid-column: 1 / -1; }
-    @media (max-width: 980px) { .cells.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cells.three { grid-template-columns: 1fr; } }
-    @media (max-width: 760px) { .cells.two { grid-template-columns: 1fr; } }
-    @media (max-width: 520px) { .cells.four { grid-template-columns: 1fr; } }
-
-    .ix { display: block; font: 500 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 18px; }
-    .ix b { font-weight: 500; color: var(--accent); margin-right: 8px; }
-    .feat { display: flex; flex-direction: column; padding-bottom: 0 !important; overflow: hidden; }
-    .feat h3 { font-size: 23px; margin-bottom: 12px; }
-    .feat p { color: var(--text-sec); font-size: 15.5px; max-width: 30em; }
-    .feat ul { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; color: var(--text-sec); font-size: 14.5px; }
-    .feat li { padding-left: 18px; position: relative; }
-    .feat li::before { content: ""; position: absolute; left: 0; top: .72em; width: 5px; height: 5px; background: var(--accent); }
-    .shot { margin-top: auto; padding-top: 44px; height: 470px; display: flex; justify-content: center; overflow: hidden;
-      -webkit-mask-image: linear-gradient(#000 72%, transparent 99%); mask-image: linear-gradient(#000 72%, transparent 99%); }
-    .shot .phone { width: 264px; flex: none; align-self: flex-start; box-shadow: none; }
-    @media (max-width: 520px) { .shot { height: 380px; } .shot .phone { width: 220px; } }
-
-    /* the film (hero) and the feature clips */
-    .film { position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); background: #07080d; aspect-ratio: 16 / 9; animation: rise .8s var(--ease) .15s both; }
-    .film video { display: block; width: 100%; height: 100%; object-fit: cover; }
-    @media (max-width: 760px) { .film { aspect-ratio: 9 / 16; max-width: 340px; margin: 0 auto; border-radius: 22px; } }
-    .clip { margin: auto calc(var(--pad) * -1) 0; padding-top: 40px; }
-    .clip video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #07080d; border-top: 1px solid var(--border); }
-
-    .mini h3 { font-size: 16px; margin: 18px 0 8px; }
-    .mini p { color: var(--text-sec); font-size: 14.5px; }
-    .mini svg { width: 20px; height: 20px; color: var(--accent); }
-
-    /* agents: a spec table */
-    .spec { margin: 56px calc(var(--pad) * -1) 0; border-top: 1px solid var(--border); }
-    .spec > div { display: grid; grid-template-columns: 250px 150px minmax(0, 1fr); gap: 24px; align-items: start; padding: 24px var(--pad); border-bottom: 1px solid var(--border); transition: background-color .15s; }
-    .spec > div:last-child { border-bottom: 0; }
-    .spec > div:not(.spec-h):hover { background: var(--surface); }
-    .spec-h { font: 500 11.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); padding-block: 14px !important; }
-    .spec .who { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
-    .spec .av { --s: 32px; }
-    .spec .avs { --s: 32px; }
-    .spec h3 { font-size: 17px; line-height: 1.45; }
-    .spec h3 small { display: block; font-size: 14px; font-weight: 400; color: var(--text-muted); letter-spacing: 0; }
-    .spec p { color: var(--text-sec); font-size: 15px; }
-    .spec .tag { justify-self: start; margin-top: 4px; }
-    @media (max-width: 820px) { .spec-h { display: none !important; } .spec > div { grid-template-columns: 1fr; gap: 10px; } }
-
-    /* table (docs) */
-    .tbl { overflow-x: auto; margin-top: 32px; border: 1px solid var(--border); border-radius: 10px; }
-    table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
-    th, td { text-align: left; padding: 13px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    tr:last-child td { border-bottom: 0; }
-    td:first-child { font-weight: 600; white-space: nowrap; }
-
-    /* steps */
-    .step { display: flex; flex-direction: column; gap: 12px; }
-    .step h3 { font-size: 19px; }
-    .step p { color: var(--text-sec); font-size: 15px; }
-    .step .ix { margin-bottom: 6px; }
-    .step .code, .step > pre { margin-top: auto; }
-    .step pre { font-size: 12px; padding: 14px; }
-    .step .code .copy { opacity: 0; }
-    .step .code:hover .copy, .step .copy:focus-visible { opacity: 1; }
-    @media (hover: none) { .step .code .copy { opacity: 1; } .step .code pre { padding-right: 46px; } }
-    .install { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; padding-block: 22px !important; }
-    .install > p { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
-    .install .tabs { margin: 0; }
-    .install > div:last-child { flex: 1 1 420px; min-width: 0; }
-
-    /* flow diagram */
-    .diagram { position: relative; padding-block: 56px !important; }
-    .diagram::before { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: radial-gradient(var(--grid) 1.2px, transparent 1.2px); background-size: 20px 20px; }
-    .flow { position: relative; display: grid; grid-template-columns: 1fr 140px 1fr 140px 1.5fr; align-items: center; }
-    .node { background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; padding: 20px; min-width: 0; }
-    .node svg { width: 20px; height: 20px; color: var(--accent); margin-bottom: 14px; }
-    .node small { display: block; font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
-    .node b { display: block; font-size: 16px; font-weight: 600; margin-bottom: 2px; }
-    .node > span { color: var(--text-sec); font-size: 14px; }
-    .node.host { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
-    .chips > span { font: 500 11.5px var(--mono); color: var(--text-sec); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; }
-    .wire { position: relative; height: 44px; display: grid; place-items: center; }
-    .wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-2); }
-    .wire::after { content: ""; position: absolute; top: 50%; left: 0; width: 5px; height: 5px; margin-top: -2.5px; background: var(--accent); animation: packet 2.4s linear infinite; }
-    .wire:nth-of-type(4)::after { animation-delay: -1.2s; }
-    @keyframes packet { from { left: 0; opacity: 0; } 10%, 90% { opacity: 1; } to { left: calc(100% - 5px); opacity: 0; } }
-    .wire > span { position: relative; top: -15px; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
-    @media (max-width: 900px) {
-      .flow { grid-template-columns: 1fr; }
-      .wire { height: 56px; }
-      .wire::before { left: 50%; right: auto; top: 0; bottom: 0; width: 1px; height: auto; }
-      .wire::after { left: 50%; margin: 0 0 0 -2.5px; animation-name: packet-y; }
-      .wire > span { top: 0; background: var(--bg); padding: 2px 8px; }
-    }
-    @keyframes packet-y { from { top: 0; opacity: 0; } 10%, 90% { opacity: 1; } to { top: calc(100% - 5px); opacity: 0; } }
-
-    /* sponsors / coffee */
-    .support h2 { font-size: 20px; letter-spacing: -.02em; }
-    .support p { color: var(--text-sec); font-size: 15px; margin-top: 8px; }
-    .sponsor { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; border: 1px solid var(--line-2); border-radius: 10px; padding: 16px 20px; color: var(--text); transition: border-color .15s, background-color .15s; }
-    .sponsor:hover { text-decoration: none; border-color: var(--accent); background: var(--surface); }
-    .sponsor b { font-size: 17px; font-weight: 600; }
-    .sponsor span { display: block; color: var(--text-sec); font-size: 14px; }
-    .sponsor svg { width: 18px; height: 18px; color: var(--text-muted); flex: none; }
-    .donate-qr { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 24px; }
-    .donate-qr figure { margin: 0; text-align: center; color: var(--text-muted); font: 500 11.5px var(--mono); letter-spacing: .05em; }
-    .donate-qr img { width: 124px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 8px; }
-
-    /* closing call to action */
-    .cta > .c { text-align: center; isolation: isolate; }
-    .cta > .c > i { position: absolute; inset: 0; z-index: -1; pointer-events: none;
-      background: radial-gradient(50% 90% at 50% 100%, var(--spot), transparent 70%), linear-gradient(var(--grid) 1px, transparent 1px) center / 60px 60px, linear-gradient(90deg, var(--grid) 1px, transparent 1px) center / 60px 60px;
-      -webkit-mask-image: radial-gradient(ellipse 60% 90% at 50% 100%, #000 20%, transparent 80%); mask-image: radial-gradient(ellipse 60% 90% at 50% 100%, #000 20%, transparent 80%); }
-    .cta img { width: 60px; height: 60px; border-radius: 15px; margin: 0 auto 26px; border: 1px solid var(--line-2); }
-    .cta h2 { max-width: 18em; margin-inline: auto; }
-    .cta p { color: var(--text-sec); font-size: 17px; margin: 16px auto 32px; max-width: 34em; }
-    .cta .btns { justify-content: center; }
-
-    footer > .c { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; padding-block: 28px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13.5px; }
-    footer .brand { font-size: 14.5px; }
-    footer .brand img { width: 20px; height: 20px; border-radius: 5px; }
-    footer .who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-    footer nav { display: flex; gap: 22px; }
-    footer nav a { color: var(--text-sec); transition: color .15s; }
+    footer { border-top: 1px solid var(--border); }
+    footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: center; justify-content: space-between; padding-block: 32px; color: var(--text-sec); font-size: 15px; }
+    footer .brand { margin: 0; }
+    footer .brand img { width: 22px; height: 22px; border-radius: 5px; }
+    footer .who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+    footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+    footer nav a { color: var(--text-sec); }
     footer nav a:hover { color: var(--text); text-decoration: none; }
 
+    @media (max-width: 700px) {
+      .hero { padding-top: 56px; }
+      .hero .media { margin-top: 40px; }
+      .lead { font-size: 18px; margin-top: 20px; }
+      .sec { padding-top: 88px; }
+      .feature { margin-top: 72px; }
+      .sec .media { margin-top: 28px; }
+      .close { padding-block: 88px; }
+    }
+
     /* docs */
-    .docs { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 64px; padding-block: 64px 104px; }
-    .toc { position: sticky; top: 88px; align-self: start; display: flex; flex-direction: column; font-size: 14px; border-left: 1px solid var(--border); }
-    .toc a { color: var(--text-sec); padding: 6px 14px; margin-left: -1px; border-left: 1px solid transparent; transition: color .15s, border-color .15s; }
-    .toc a:hover { text-decoration: none; color: var(--text); }
-    .toc a.on { color: var(--text); border-left-color: var(--accent); }
-    .doc h1 { font-size: clamp(32px, 4vw, 44px); margin-bottom: 14px; letter-spacing: -.035em; }
-    .doc > p:first-of-type { font-size: 17px; }
-    .doc h2 { font-size: 24px; margin: 52px 0 14px; padding-top: 40px; border-top: 1px solid var(--border); }
-    .doc h3 { font-size: 16.5px; margin: 28px 0 8px; }
-    .doc p, .doc li { color: var(--text-sec); max-width: 44em; }
+    .docs { display: grid; grid-template-columns: 190px minmax(0, 720px); gap: 80px; padding-block: 72px 128px; }
+    .toc { position: sticky; top: 104px; align-self: start; display: flex; flex-direction: column; gap: 2px; font-size: 15px; }
+    .toc a { color: var(--text-sec); padding: 5px 0; transition: color .15s; }
+    .toc a:hover { color: var(--text); text-decoration: none; }
+    .toc a.on { color: var(--accent); }
+    .doc h1 { font-size: clamp(34px, 4.6vw, 44px); margin-bottom: 16px; }
+    .doc h2 { font-size: 27px; margin: 64px 0 18px; padding-top: 48px; border-top: 1px solid var(--border); }
+    .doc h3 { font-size: 20px; margin: 36px 0 12px; }
+    .doc p, .doc li, .doc dd { color: var(--text-sec); }
     .doc b { color: var(--text); font-weight: 600; }
-    .doc p + p, .doc p + .code, .doc .code + p, .doc ul + p, .doc p + ul, .doc .code + .code, .doc ul + .code,
-    .doc p + pre, .doc pre + p, .doc pre + pre, .doc ul + pre { margin-top: 14px; }
-    .doc .code, .doc > pre, .doc .tbl, .note { max-width: 760px; }
-    .doc ul { padding-left: 20px; }
-    .doc li + li { margin-top: 8px; }
-    .note { border-left: 2px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; margin-top: 16px; color: var(--text); font-size: 15px; }
-    @media (max-width: 820px) {
-      .docs { grid-template-columns: 1fr; gap: 28px; padding-top: 32px; }
-      .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; border: 0; }
-      .toc a { border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 10px; margin: 0; font-size: 13px; }
-      .toc a.on { border-color: var(--accent); }
+    .doc :is(p, ul, pre, .code, .note) + :is(p, ul, pre, .code, .note) { margin-top: 18px; }
+    .doc ul { margin-block: 0; padding-left: 22px; }
+    .doc li + li { margin-top: 12px; }
+    .doc dl { margin: 0; }
+    .doc dt { margin-top: 20px; }
+    .doc dt code { white-space: normal; background: none; padding: 0; color: var(--text); }
+    .doc dt:first-child { margin-top: 0; }
+    .doc dd { margin: 4px 0 0; }
+    .note { border-left: 2px solid var(--accent); padding: 2px 0 2px 18px; color: var(--text); }
+    @media (max-width: 860px) {
+      .docs { grid-template-columns: minmax(0, 1fr); gap: 36px; padding-block: 44px 88px; }
+      .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 2px 20px; padding-bottom: 28px; border-bottom: 1px solid var(--border); }
+      .toc a.on { color: var(--text-sec); }
+      .doc h2 { margin-top: 48px; padding-top: 40px; }
     }
 
     /* pricing */
-    [data-page="pricing"] .sec > .c { display: flex; flex-direction: column; align-items: center; isolation: isolate; overflow: hidden; }
-    [data-page="pricing"] .sec > .c > i { position: absolute; inset: 0 0 auto 0; height: 520px; z-index: -1; pointer-events: none;
-      background: radial-gradient(50% 100% at 50% 0%, var(--spot), transparent 70%), linear-gradient(var(--grid) 1px, transparent 1px) center top / 60px 60px, linear-gradient(90deg, var(--grid) 1px, transparent 1px) center top / 60px 60px;
-      -webkit-mask-image: radial-gradient(ellipse 60% 100% at 50% 0%, #000 20%, transparent 80%); mask-image: radial-gradient(ellipse 60% 100% at 50% 0%, #000 20%, transparent 80%); }
-    [data-page="pricing"] h2, [data-page="pricing"] .sub { text-align: center; }
-    .pricing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 380px)); gap: 16px; margin-top: 52px; width: 100%; justify-content: center; align-items: start; }
-    @media (max-width: 780px) { .pricing-grid { grid-template-columns: minmax(0, 420px); } }
-    .pricing-card { position: relative; background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; padding: 28px; min-width: 0; }
-    .pricing-card.pro { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
-    .pricing-badge { position: absolute; top: -10px; right: 20px; background: var(--accent); color: var(--accent-ink); font: 600 10.5px var(--mono); letter-spacing: .1em; padding: 3px 8px; border-radius: 4px; }
-    .plan-name { font: 500 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 14px; }
-    .plan-price { font-size: 46px; font-weight: 600; letter-spacing: -.04em; line-height: 1.15; font-variant-numeric: tabular-nums; }
-    .plan-price small { font-size: 15px; font-weight: 400; color: var(--text-sec); letter-spacing: 0; }
-    .plan-period { color: var(--text-sec); font-size: 14px; margin-bottom: 22px; }
-    .plan-features { list-style: none; padding: 22px 0 0; margin: 0 0 24px; display: grid; gap: 10px; font-size: 14.5px; border-top: 1px solid var(--border); }
-    .plan-features li { padding-left: 18px; position: relative; color: var(--text-sec); }
-    .plan-features li::before { content: ""; position: absolute; left: 0; top: .72em; width: 5px; height: 5px; background: var(--accent); }
-    .cycle-toggle { display: inline-flex; border: 1px solid var(--line-2); border-radius: 7px; padding: 2px; margin-bottom: 16px; }
-    .cycle-btn { border: 0; background: none; color: var(--text-sec); font: 500 12.5px var(--sans); padding: 4px 14px; border-radius: 5px; cursor: pointer; transition: color .15s, background-color .15s; }
+    .pricing { padding-block: 104px 128px; }
+    .pricing h1 { font-size: clamp(34px, 5vw, 52px); }
+    .plan { margin-top: 64px; padding-top: 48px; border-top: 1px solid var(--border); }
+    .plan h2 { font-size: 22px; }
+    .price { margin-top: 10px; font-size: 52px; font-weight: 600; letter-spacing: -.03em; line-height: 1.2; font-variant-numeric: tabular-nums; }
+    .price small { margin-left: 6px; font-size: 18px; font-weight: 400; letter-spacing: 0; color: var(--text-sec); }
+    .per { color: var(--text-sec); }
+    .cycle { display: inline-flex; gap: 4px; margin-top: 18px; padding: 4px; border: 1px solid var(--border); border-radius: 9px; }
+    .cycle-btn { height: 36px; padding: 0 18px; border: 0; border-radius: 6px; background: none; color: var(--text-sec); font-size: 15px; cursor: pointer; transition: color .15s, background-color .15s; }
     .cycle-btn.active { background: var(--surface-2); color: var(--text); }
-    .auth-form input { width: 100%; height: 42px; font: 14.5px var(--sans); padding: 0 13px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--bg); color: var(--text); transition: border-color .15s, box-shadow .15s; }
-    .auth-form input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 42px; border: 0; border-radius: 8px; font: 600 14.5px var(--sans); cursor: pointer; text-decoration: none !important; transition: opacity .15s; }
-    .auth-btn:hover { opacity: .88; }
+    .plan ul { margin: 24px 0 28px; padding-left: 22px; color: var(--text-sec); }
+    .plan li + li { margin-top: 6px; }
+    #pricing-auth-area { max-width: 400px; }
+    #pricing-auth-status { font-size: 16px; }
+    #pricing-auth-status:not(:empty) { margin-bottom: 14px; }
+    #pricing-auth-status a { font-size: 15px !important; color: var(--text-sec) !important; text-decoration: underline; text-underline-offset: 3px; }
+    .auth-form { display: flex; flex-direction: column; gap: 10px; }
+    .auth-form[style*="none"] { display: none; }
+    .auth-form input { width: 100%; height: 48px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: 16px var(--sans); transition: border-color .15s; }
+    .auth-form input:focus { outline: 0; border-color: var(--accent); }
+    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 48px; border: 0; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 500 16px var(--sans); cursor: pointer; text-decoration: none !important; transition: opacity .15s; }
+    .auth-btn:hover { opacity: .86; }
     .auth-btn-primary { background: var(--ink); color: var(--ink-fg); }
-    .auth-btn-afdian { background: #946ce6; color: #fff; }
-    .pricing-card .btn { width: 100%; justify-content: center; }
-    #pricing-auth-status { font-size: 14px; margin-bottom: 10px; }
-    .term { background: var(--surface-2); border-radius: 8px; }
+    .auth-btn-afdian { background: #946ce6; color: #fff; margin-bottom: 10px; }
+    #pricing-auth-error { color: var(--danger); font-size: 15px; }
+    #pricing-payment p { margin-top: 12px; font-size: 15px; color: var(--text-sec); }
+    #pricing-pro-status { font-size: 17px; }
+    #pricing-pro-status p { font-size: 15px; color: var(--text-sec); }
     .ts { color: var(--success); }
-    .to { color: var(--text-muted); }
-    .faq { margin-top: 80px; width: 100%; max-width: 880px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); }
-    @media (max-width: 720px) { .faq { grid-template-columns: 1fr; } }
-    .faq > div { background: var(--bg); padding: 24px; }
-    .faq b { display: block; margin-bottom: 6px; font-weight: 600; }
-    .faq p { color: var(--text-sec); font-size: 14.5px; }
-
-    /* scroll reveal */
-    .js .rv { opacity: 0; transform: translateY(12px); transition: opacity .7s var(--ease) var(--d, 0ms), transform .7s var(--ease) var(--d, 0ms); }
-    .js .rv.in { opacity: 1; transform: none; }
-    @media (prefers-reduced-motion: reduce) {
-      html { scroll-behavior: auto; }
-      *, *::before, *::after { animation: none !important; }
-      .js .rv { opacity: 1; transform: none; transition: none; }
+    .to { color: var(--text-sec); }
+    .faq h2 { font-size: 27px; }
+    .faq h3 { font-size: 19px; margin: 32px 0 8px; }
+    @media (max-width: 700px) {
+      .pricing { padding-block: 56px 88px; }
+      .plan { margin-top: 48px; padding-top: 40px; }
+      .price { font-size: 44px; }
     }
+
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   </style>
 </head>
 
 <body>
   <header class="nav">
-    <div class="c">
-      <a class="brand" href="./" aria-label="LinkShell"><img src="assets/adaptive-icon.png" alt="" width="26" height="26" />LinkShell</a>
+    <div class="wrap">
+      <a class="brand" href="./" aria-label="LinkShell"><img src="assets/adaptive-icon.png" alt="" width="28" height="28" />LinkShell</a>
       <nav>
-        <a class="opt" href="#features"><span lang="zh">功能</span><span lang="en">Features</span></a>
-        <a class="opt" href="#agents">Agents</a>
         <a href="docs/" data-page-link="docs"><span lang="zh">文档</span><span lang="en">Docs</span></a>
         <a href="pricing/" data-page-link="pricing"><span lang="zh">定价</span><span lang="en">Pricing</span></a>
+        <a class="wide" href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
       </nav>
-      <div class="nav-tools">
-        <a class="icon-btn gh" href="https://github.com/LiuTianjie/LinkShell" aria-label="GitHub">
-          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-        </a>
-        <button class="icon-btn theme" id="theme-toggle" type="button" aria-label="Toggle light / dark">
-          <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77"/></svg>
-        </button>
-        <button class="lang" id="lang-toggle" type="button" aria-label="Switch language">EN</button>
-      </div>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Toggle light / dark">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77"/></svg>
+      </button>
+      <button id="lang-toggle" type="button" aria-label="Switch language">EN</button>
     </div>
   </header>
 
   <!-- ═════════════════════════ HOME ═════════════════════════ -->
   <main class="page" data-page="home">
-    <div class="hero-wrap">
-      <div class="c hero">
-        <div>
-          <div class="tag"><span lang="zh">v2.0 · 为 Agent 重新设计</span><span lang="en">v2.0 · rebuilt around agents</span></div>
-          <h1><span lang="zh">离开电脑，<br />Agent 接着干。</span><span lang="en">Leave your desk.<br />Your agents<br />keep going.</span><i class="caret" aria-hidden="true"></i></h1>
-          <p class="lead">
-            <span lang="zh">Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑，你在手机上看它实时干活、随时插话、一键审批，回到电脑前再接着用终端。代码不离开你的电脑，连接全程端到端加密。</span>
-            <span lang="en">Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, add a message any time, approve what they ask, and pick the session back up at your desk. Your code never leaves your machine, and the connection is end-to-end encrypted.</span>
-          </p>
-          <div class="btns">
-            <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
-              <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span>
-            </a>
-            <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
-              Android APK
-            </a>
-            <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
-          </div>
-          <div class="cmd"><i>$</i><code>npm i -g linkshell-cli</code><button class="copy" type="button" data-copy="npm i -g linkshell-cli" aria-label="Copy"></button></div>
-          <div class="works">
-            <span><span lang="zh">支持</span><span lang="en">Works with</span></span>
-            <div class="avs">
-              <span class="av" role="img" aria-label="Claude Code" data-name="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span>
-              <span class="av full" role="img" aria-label="Codex" data-name="Codex"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_-h)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_-h" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span>
-              <span class="av full" role="img" aria-label="Gemini CLI" data-name="Gemini CLI"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M0 4.391A4.391 4.391 0 014.391 0h15.217A4.391 4.391 0 0124 4.391v15.217A4.391 4.391 0 0119.608 24H4.391A4.391 4.391 0 010 19.608V4.391z" fill="url(#lobe-icons-gemini-cli-_R_0_-h)"/><path clip-rule="evenodd" d="M19.74 1.444a2.816 2.816 0 012.816 2.816v15.48a2.816 2.816 0 01-2.816 2.816H4.26a2.816 2.816 0 01-2.816-2.816V4.26A2.816 2.816 0 014.26 1.444h15.48zM7.236 8.564l7.752 3.728-7.752 3.727v2.802l9.557-4.596v-3.866L7.236 5.763v2.801z" fill="#1E1E2E" fill-rule="evenodd"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-cli-_R_0_-h" x1="24" x2="0" y1="6.587" y2="16.494"><stop stop-color="#EE4D5D"></stop><stop offset=".328" stop-color="#B381DD"></stop><stop offset=".476" stop-color="#207CFE"></stop></linearGradient></defs></svg></span>
-              <span class="av" role="img" aria-label="GitHub Copilot" data-name="GitHub Copilot" style="--bl:#0D1117;--bd:#F0F3F6;--fl:#FFFFFF;--fd:#0D1117"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M19.245 5.364c1.322 1.36 1.877 3.216 2.11 5.817.622 0 1.2.135 1.592.654l.73.964c.21.278.323.61.323.955v2.62c0 .339-.173.669-.453.868C20.239 19.602 16.157 21.5 12 21.5c-4.6 0-9.205-2.583-11.547-4.258-.28-.2-.452-.53-.453-.868v-2.62c0-.345.113-.679.321-.956l.73-.963c.392-.517.974-.654 1.593-.654l.029-.297c.25-2.446.81-4.213 2.082-5.52 2.461-2.54 5.71-2.851 7.146-2.864h.198c1.436.013 4.685.323 7.146 2.864zm-7.244 4.328c-.284 0-.613.016-.962.05-.123.447-.305.85-.57 1.108-1.05 1.023-2.316 1.18-2.994 1.18-.638 0-1.306-.13-1.851-.464-.516.165-1.012.403-1.044.996a65.882 65.882 0 00-.063 2.884l-.002.48c-.002.563-.005 1.126-.013 1.69.002.326.204.63.51.765 2.482 1.102 4.83 1.657 6.99 1.657 2.156 0 4.504-.555 6.985-1.657a.854.854 0 00.51-.766c.03-1.682.006-3.372-.076-5.053-.031-.596-.528-.83-1.046-.996-.546.333-1.212.464-1.85.464-.677 0-1.942-.157-2.993-1.18-.266-.258-.447-.661-.57-1.108-.32-.032-.64-.049-.96-.05zm-2.525 4.013c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zm5 0c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zM7.635 5.087c-1.05.102-1.935.438-2.385.906-.975 1.037-.765 3.668-.21 4.224.405.394 1.17.657 1.995.657h.09c.649-.013 1.785-.176 2.73-1.11.435-.41.705-1.433.675-2.47-.03-.834-.27-1.52-.63-1.813-.39-.336-1.275-.482-2.265-.394zm6.465.394c-.36.292-.6.98-.63 1.813-.03 1.037.24 2.06.675 2.47.968.957 2.136 1.104 2.776 1.11h.044c.825 0 1.59-.263 1.995-.657.555-.556.765-3.187-.21-4.224-.45-.468-1.335-.804-2.385-.906-.99-.088-1.875.058-2.265.394zM12 7.615c-.24 0-.525.015-.84.044.03.16.045.336.06.526l-.001.159a2.94 2.94 0 01-.014.25c.225-.022.425-.027.612-.028h.366c.187 0 .387.006.612.028-.015-.146-.015-.277-.015-.409.015-.19.03-.365.06-.526a9.29 9.29 0 00-.84-.044z"/></svg></span>
-              <span class="av" role="img" aria-label="OpenCode" data-name="OpenCode" style="--bl:#131010;--bd:#F1ECEC;--fl:#F1ECEC;--fd:#131010"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span>
-              <span class="av" role="img" aria-label="Cursor" data-name="Cursor" style="--bl:#14120B;--bd:#EDECEC;--fl:#EDECEC;--fd:#14120B"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg></span>
-              <span class="av" role="img" aria-label="Grok" data-name="Grok" style="--bl:#000000;--bd:#FFFFFF;--fl:#FFFFFF;--fd:#000000"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg></span>
-            </div>
-          </div>
+    <section class="hero">
+      <div class="wrap">
+        <h1><span lang="zh"><span class="nb">离开电脑，</span><span class="nb">Agent 接着干。</span></span><span lang="en">Leave your desk. <span class="nb">Your agents keep going.</span></span></h1>
+        <p class="lead">
+          <span lang="zh">Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑，你在手机上看它实时干活、随时插话、一键审批，回到电脑前再接着用终端。代码不离开你的电脑，连接全程端到端加密。</span>
+          <span lang="en">Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, add a message any time, approve what they ask, and pick the session back up at your desk. Your code never leaves your machine, and the connection is end-to-end encrypted.</span>
+        </p>
+        <div class="btns">
+          <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
+            <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span>
+          </a>
+          <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
+            Android APK
+          </a>
+          <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
         </div>
+        <div class="cmd"><i>$</i><code>npm i -g linkshell-cli</code><button class="copy" type="button" data-copy="npm i -g linkshell-cli" aria-label="Copy"></button></div>
 
-        <div class="film">
-          <video id="film" muted loop playsinline controls preload="none" poster="assets/promo/poster.jpg" aria-label="LinkShell 2.0">
-            <source src="assets/promo/linkshell-2.0-vertical.mp4" type="video/mp4" media="(max-width: 760px)" />
-            <source src="assets/promo/linkshell-2.0.mp4" type="video/mp4" />
-          </video>
-        </div>
+        <figure class="media">
+          <picture>
+            <source media="(max-width: 700px)" srcset="assets/promo/film-vertical.jpg" width="720" height="1280" />
+            <img src="assets/promo/film.jpg" width="1600" height="900" alt="LinkShell 2.0 一分钟介绍片：终端里的 Claude 会话被手机接管" />
+          </picture>
+          <video id="film" muted loop playsinline preload="none" data-wide="assets/promo/linkshell-2.0.mp4" data-tall="assets/promo/linkshell-2.0-vertical.mp4" data-start="5.5" aria-label="LinkShell 2.0"></video>
+        </figure>
+        <noscript><p class="lead"><a href="assets/promo/linkshell-2.0.mp4">看一分钟介绍片</a></p></noscript>
       </div>
-    </div>
+    </section>
 
-    <section class="sec flush" id="features">
-      <div class="c">
-        <div class="eyebrow"><b>01</b><span lang="zh">功能</span><span lang="en">Features</span></div>
-        <h2><span lang="zh">不是远程桌面，是同一个会话换个地方继续</span><span lang="en">Not a remote desktop. The same session, somewhere else.</span></h2>
-        <p class="sub"><span lang="zh">LinkShell 在电脑上托管 Agent 进程，电脑终端和手机都是同一个会话的窗口。手机上看到的是结构化的对话，不是一块缩小的屏幕。</span><span lang="en">LinkShell hosts the agent processes on your computer; your terminal and your phone are both windows onto the same session. The phone shows a real conversation, not a shrunken screen.</span></p>
+    <section class="sec" id="features">
+      <div class="wrap">
+        <div class="text">
+          <h2><span lang="zh"><span class="nb">不是远程桌面，</span><span class="nb">是同一个会话换个地方继续</span></span><span lang="en">Not a remote desktop. <span class="nb">The same session, somewhere else.</span></span></h2>
+          <p><span lang="zh">LinkShell 在电脑上托管 Agent 进程，电脑终端和手机都是同一个会话的窗口。手机上看到的是结构化的对话，不是一块缩小的屏幕。</span><span lang="en">LinkShell hosts the agent processes on your computer; your terminal and your phone are both windows onto the same session. The phone shows a real conversation, not a shrunken screen.</span></p>
+        </div>
 
-        <div class="cells two">
-          <article class="feat">
-            <span class="ix"><b>A</b><span lang="zh">接力</span><span lang="en">Handoff</span></span>
-            <h3><span lang="zh">电脑与手机之间接力</span><span lang="en">Hand off between desk and phone</span></h3>
-            <p><span lang="zh">在终端里用 <code>linkshell claude</code> 开始工作。出门时在手机上接管，发一条消息接着做；回到电脑前按任意键收回。同一个会话，上下文一点不丢。</span><span lang="en">Start in your terminal with <code>linkshell claude</code>. Heading out? Take the session over on your phone and send a message; back at your desk, press any key to take it back. The same session, with all of its context.</span></p>
-            <ul>
-              <li><span lang="zh">Codex 电脑和手机同时在线，两边同步</span><span lang="en">Codex runs on both at once, in sync</span></li>
-              <li><span lang="zh">Claude 桌面 App 或普通 <code>claude</code> 里开着的会话，手机上也能接着做</span><span lang="en">A session open in the Claude desktop app or a plain <code>claude</code> can be continued too</span></li>
-              <li><span lang="zh">模型、思考强度、权限模式跟着会话走</span><span lang="en">Model, effort and permission mode travel with the session</span></li>
-            </ul>
-            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/handoff.jpg" data-src="assets/promo/handoff.mp4" aria-label="手机接管终端里的 Claude 会话，回到电脑按任意键收回"></video></div>
-          </article>
-
-          <article class="feat">
-            <span class="ix"><b>B</b><span lang="zh">跟进与审批</span><span lang="en">Follow</span></span>
-            <h3><span lang="zh">看进度、回消息、批准操作</span><span lang="en">Watch it work, answer, approve</span></h3>
+        <article class="feature">
+          <div class="text">
+            <h3><span lang="zh"><span class="nb">进度、提问和权限请求，</span><span class="nb">都到手机上</span></span><span lang="en">Progress, questions and permission requests come to your phone</span></h3>
             <p><span lang="zh">回复逐字出现，计划和工具调用实时更新。Agent 需要权限时请求会推到手机上，一键允许或拒绝；它让你做选择或填内容时，问题连同选项一起推过来。每个文件的改动都能看 diff。</span><span lang="en">Replies stream in word by word; plans and tool calls update live. When the agent needs permission the request comes to your phone: allow or deny in one tap. When it asks you to choose or to type something, the question arrives with its options. Read the diff of every file it changed.</span></p>
-            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/follow.jpg" data-src="assets/promo/follow.mp4" aria-label="手机上的会话：计划、工具调用和一条权限请求"></video></div>
-          </article>
+          </div>
+          <figure class="media">
+            <picture>
+              <source media="(max-width: 700px)" srcset="assets/promo/card-follow.jpg" width="720" height="1280" />
+              <img src="assets/promo/follow.jpg" width="1600" height="900" loading="lazy" alt="手机上的会话：计划、工具调用和一条权限请求" />
+            </picture>
+            <video muted loop playsinline preload="none" data-wide="assets/promo/follow.mp4" data-tall="assets/promo/follow-vertical.mp4"></video>
+          </figure>
+        </article>
 
-          <article class="feat">
-            <span class="ix"><b>C</b><span lang="zh">插话</span><span lang="en">Steer</span></span>
-            <h3><span lang="zh">运行中也能说话</span><span lang="en">Talk while it works</span></h3>
+        <article class="feature">
+          <div class="text">
+            <h3><span lang="zh"><span class="nb">在终端里开始，</span><span class="nb">在手机上接着做</span></span><span lang="en">Start in your terminal, carry on from your phone</span></h3>
+            <p><span lang="zh">在终端里用 <code>linkshell claude</code> 开始工作。出门时在手机上接管，发一条消息接着做；回到电脑前按任意键收回。同一个会话，上下文一点不丢。</span><span lang="en">Start in your terminal with <code>linkshell claude</code>. Heading out? Take the session over on your phone and send a message; back at your desk, press any key to take it back. The same session, with all of its context.</span></p>
+            <p><span lang="zh">Codex 在电脑和手机上同时在线，两边同步。Claude 桌面 App 或普通 <code>claude</code> 里开着的会话，手机上也能接着做。模型、思考强度和权限模式跟着会话走。</span><span lang="en">Codex runs on both at once, in sync. A session open in the Claude desktop app or a plain <code>claude</code> can be continued from the phone too. Model, effort and permission mode travel with the session.</span></p>
+          </div>
+          <figure class="media">
+            <picture>
+              <source media="(max-width: 700px)" srcset="assets/promo/card-handoff.jpg" width="720" height="1280" />
+              <img src="assets/promo/handoff.jpg" width="1600" height="900" loading="lazy" alt="手机接管终端里的 Claude 会话，回到电脑按任意键收回" />
+            </picture>
+            <video muted loop playsinline preload="none" data-wide="assets/promo/handoff.mp4" data-tall="assets/promo/handoff-vertical.mp4"></video>
+          </figure>
+        </article>
+
+        <article class="feature">
+          <div class="text">
+            <h3><span lang="zh"><span class="nb">Agent 还在忙，</span><span class="nb">你照样可以发消息</span></span><span lang="en">Send a message while the agent is still busy</span></h3>
             <p><span lang="zh">Agent 忙的时候发的消息在输入框上方排队：调整顺序、取回重新编辑，或者立即发送——Codex 和 Claude 直接插进当前这一轮，其他 Agent 先停下当前这一轮。电脑上正在跑的那一轮，手机上也能停。</span><span lang="en">A message sent mid-turn waits in a queue above the composer: reorder it, take it back to edit, or send it now — into the running turn for Codex and Claude, by stopping the turn for other agents. A turn running on the computer can be stopped from the phone too.</span></p>
-            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/queue.jpg" data-src="assets/promo/queue.mp4" aria-label="排队的消息：调整顺序后立即发送"></video></div>
-          </article>
+          </div>
+          <figure class="media">
+            <picture>
+              <source media="(max-width: 700px)" srcset="assets/promo/card-queue.jpg" width="720" height="1280" />
+              <img src="assets/promo/queue.jpg" width="1600" height="900" loading="lazy" alt="排队的消息：调整顺序后立即发送" />
+            </picture>
+            <video muted loop playsinline preload="none" data-wide="assets/promo/queue.mp4" data-tall="assets/promo/queue-vertical.mp4"></video>
+          </figure>
+        </article>
 
-          <article class="feat">
-            <span class="ix"><b>D</b><span lang="zh">随手可查</span><span lang="en">At hand</span></span>
-            <h3><span lang="zh">子 Agent、长会话、项目文件</span><span lang="en">Sub-agents, long sessions, project files</span></h3>
+        <article class="feature">
+          <div class="text">
+            <h3><span lang="zh">子 Agent、长会话和项目文件</span><span lang="en">Sub-agents, long sessions and project files</span></h3>
             <p><span lang="zh">会话启动过的每个子 Agent 都在标题旁的按钮里，各有自己的对话。几个月的长会话先显示最近几轮，往上翻再加载；图片看到时才加载。项目里的文件可以直接浏览和查看。</span><span lang="en">Every sub-agent a session started is behind a button in its header, each with its own conversation. A session with months of history opens at its latest turns and loads earlier ones as you scroll; pictures load when you look at them. Browse and read the project&#39;s files right there.</span></p>
-            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/agents.jpg" data-src="assets/promo/agents.mp4" aria-label="子 Agent 列表从会话标题旁打开"></video></div>
-          </article>
+          </div>
+          <figure class="media">
+            <picture>
+              <source media="(max-width: 700px)" srcset="assets/promo/card-agents.jpg" width="720" height="1280" />
+              <img src="assets/promo/agents.jpg" width="1600" height="900" loading="lazy" alt="子 Agent 列表从会话标题旁打开" />
+            </picture>
+            <video muted loop playsinline preload="none" data-wide="assets/promo/agents.mp4" data-tall="assets/promo/agents-vertical.mp4"></video>
+          </figure>
+        </article>
 
-          <article class="feat">
-            <span class="ix"><b>E</b><span lang="zh">分叉</span><span lang="en">Fork</span></span>
-            <h3><span lang="zh">从任意一条回复分出新方向</span><span lang="en">Fork from any reply</span></h3>
+        <article class="feature">
+          <div class="text">
+            <h3><span lang="zh"><span class="nb">想换个思路，</span><span class="nb">就从那条回复分叉</span></span><span lang="en">Try another direction from any reply</span></h3>
             <p><span lang="zh">想换个思路试试，就从那条回复分叉出一个新会话，原会话不受影响。新会话可以留在当前目录，也可以放进新的 git worktree——独立的目录和分支，不碰你手头的工作区。</span><span lang="en">Want to try another direction? Fork a new session from that reply; the original is untouched. Keep it in the same directory, or put it in a new git worktree — its own directory and branch, away from what you are working on.</span></p>
-            <ul>
-              <li><span lang="zh">新会话也可以直接开在 worktree 里</span><span lang="en">A new session can start in a worktree too</span></li>
-              <li><span lang="zh">所有 Agent 都能分叉：Claude 和 Codex 原生，其他由 LinkShell 把对话交给它</span><span lang="en">Every agent forks: Claude and Codex natively, the others get the conversation handed over</span></li>
-              <li><span lang="zh">项目和会话上显示当前的 git 分支</span><span lang="en">Projects and sessions show the current git branch</span></li>
-            </ul>
-            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/fork.jpg" data-src="assets/promo/fork.mp4" aria-label="从一条回复分叉到新的 git worktree"></video></div>
-          </article>
+            <p><span lang="zh">新会话也可以直接开在 worktree 里。所有 Agent 都能分叉：Claude 和 Codex 原生支持，其他 Agent 由 LinkShell 把对话交给它。项目和会话上会显示当前的 git 分支。</span><span lang="en">A new session can start in a worktree too. Every agent forks: Claude and Codex natively, the others get the conversation handed over by LinkShell. Projects and sessions show the current git branch.</span></p>
+          </div>
+          <figure class="media">
+            <picture>
+              <source media="(max-width: 700px)" srcset="assets/promo/card-fork.jpg" width="720" height="1280" />
+              <img src="assets/promo/fork.jpg" width="1600" height="900" loading="lazy" alt="从一条回复分叉到新的 git worktree" />
+            </picture>
+            <video muted loop playsinline preload="none" data-wide="assets/promo/fork.mp4" data-tall="assets/promo/fork-vertical.mp4"></video>
+          </figure>
+        </article>
 
-          <article class="feat">
-            <span class="ix"><b>F</b><span lang="zh">命令</span><span lang="en">Commands</span></span>
-            <h3><span lang="zh">斜杠命令，手机上直接用</span><span lang="en">Slash commands, on the phone</span></h3>
+        <article class="feature">
+          <div class="text">
+            <h3><span lang="zh">斜杠命令和 skills</span><span lang="en">Slash commands and skills</span></h3>
             <p><span lang="zh">输入 <code>/</code> 列出 Agent 提供的命令和你的 skills，可以搜索。<code>/compact</code> 压缩上下文、<code>/review</code> 审查改动，对 Codex 同样可用。</span><span lang="en">Type <code>/</code> for the agent&#39;s commands and your skills, with search. <code>/compact</code> to free up context and <code>/review</code> to review changes work for Codex too.</span></p>
-            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/slash.jpg" data-src="assets/promo/slash.mp4" aria-label="在输入框里输入斜杠，选择 /compact"></video></div>
-          </article>
-        </div>
+          </div>
+          <figure class="media">
+            <picture>
+              <source media="(max-width: 700px)" srcset="assets/promo/card-slash.jpg" width="720" height="1280" />
+              <img src="assets/promo/slash.jpg" width="1600" height="900" loading="lazy" alt="在输入框里输入斜杠，选择 /compact" />
+            </picture>
+            <video muted loop playsinline preload="none" data-wide="assets/promo/slash.mp4" data-tall="assets/promo/slash-vertical.mp4"></video>
+          </figure>
+        </article>
 
-        <div class="cells three">
-          <div class="mini">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-5-6-5"/><path d="M12 19h8"/></svg>
-            <h3><span lang="zh">电脑上的真终端</span><span lang="en">A real terminal on your computer</span></h3>
-            <p><span lang="zh">开一个终端跑 dev server、看日志、用 git。带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。</span><span lang="en">Open a terminal to run a dev server, tail logs or use git, with a Ctrl / Esc / Tab / arrow-key bar. It keeps running when you close the app.</span></p>
+        <article class="feature">
+          <div class="text">
+            <h3><span lang="zh">还有这些</span><span lang="en">And the rest</span></h3>
+            <dl class="more">
+              <dt><span lang="zh">电脑上的真终端</span><span lang="en">A real terminal on your computer</span></dt>
+              <dd><span lang="zh">开一个终端跑 dev server、看日志、用 git。带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。</span><span lang="en">Open a terminal to run a dev server, tail logs or use git, with a Ctrl / Esc / Tab / arrow-key bar. It keeps running when you close the app.</span></dd>
+              <dt><span lang="zh">在手机上打开 localhost</span><span lang="en">Open localhost on your phone</span></dt>
+              <dd><span lang="zh">电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作。走同一条加密通道，不用暴露端口，也不用同一个 Wi-Fi。</span><span lang="en">Open your computer&#39;s <code>localhost:3000</code> right on the phone, hot reload included. It travels over the same encrypted channel: no open ports, no shared Wi-Fi.</span></dd>
+              <dt><span lang="zh">会话管理</span><span lang="en">Tidy sessions</span></dt>
+              <dd><span lang="zh">重命名、归档、删除。Codex 和 Claude 的会话会同步到它们自己的记录里，<code>claude --resume</code> 也能看到新名字。</span><span lang="en">Rename, archive, delete. Codex and Claude sessions change in their own records too, so <code>claude --resume</code> shows the new name.</span></dd>
+              <dt><span lang="zh">看电脑屏幕、传文件</span><span lang="en">Screen and files</span></dt>
+              <dd><span lang="zh">随时看一眼电脑屏幕（需要 ffmpeg），把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Glance at the computer&#39;s screen (needs ffmpeg), and send photos and files from your phone into the project for the agent.</span></dd>
+            </dl>
           </div>
-          <div class="mini">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M6 6.5h.01M9 6.5h.01"/></svg>
-            <h3><span lang="zh">在手机上打开 localhost</span><span lang="en">Open localhost on your phone</span></h3>
-            <p><span lang="zh">电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作。走同一条加密通道，不用暴露端口，也不用同一个 Wi-Fi。</span><span lang="en">Open your computer&#39;s <code>localhost:3000</code> right on the phone, hot reload included. It travels over the same encrypted channel: no open ports, no shared Wi-Fi.</span></p>
+        </article>
+      </div>
+    </section>
+
+    <section class="sec" id="agents">
+      <div class="wrap">
+        <div class="text">
+          <h2><span lang="zh"><span class="nb">每个 Agent</span> <span class="nb">做到它能做到的最好</span></span><span lang="en">Each agent, as far as it can go</span></h2>
+          <p><span lang="zh">Agent 用你电脑上已经安装、已经登录的那一份。LinkShell 不经手任何 Agent 的账号和密钥。</span><span lang="en">Agents run as the copies already installed and signed in on your computer. LinkShell never touches their accounts or keys.</span></p>
+
+          <div class="agent">
+            <div class="agent-name"><div class="marks"><span class="av full" role="img" aria-label="Codex"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_-t)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_-t" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span></div><h3>Codex</h3></div>
+            <p><span lang="zh">多端同步：用 <code>linkshell codex</code> 打开的终端和手机同时在线，任何一端都能发消息、打断、审批。</span><span lang="en">Shared: the terminal opened with <code>linkshell codex</code> and your phone are live at once; either can send, interrupt and approve.</span></p>
           </div>
-          <div class="mini">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-            <h3><span lang="zh">端到端加密</span><span lang="en">End-to-end encrypted</span></h3>
-            <p><span lang="zh">网关只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</span><span lang="en">Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</span></p>
+          <div class="agent">
+            <div class="agent-name"><div class="marks"><span class="av" role="img" aria-label="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span></div><h3>Claude Code</h3></div>
+            <p><span lang="zh">接力：电脑上用原生界面（<code>linkshell claude</code>），手机发消息即接管，电脑按任意键收回。</span><span lang="en">Handoff: Claude&#39;s own UI at your desk (<code>linkshell claude</code>); a message from the phone takes over, any key on the computer takes it back.</span></p>
           </div>
-          <div class="mini">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
-            <h3><span lang="zh">会话管理</span><span lang="en">Tidy sessions</span></h3>
-            <p><span lang="zh">重命名、归档、删除。Codex 和 Claude 的会话会同步到它们自己的记录里，<code>claude --resume</code> 也能看到新名字。</span><span lang="en">Rename, archive, delete. Codex and Claude sessions change in their own records too, so <code>claude --resume</code> shows the new name.</span></p>
+          <div class="agent">
+            <div class="agent-name"><div class="marks"><span class="av full" role="img" aria-label="Gemini CLI"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M0 4.391A4.391 4.391 0 014.391 0h15.217A4.391 4.391 0 0124 4.391v15.217A4.391 4.391 0 0119.608 24H4.391A4.391 4.391 0 010 19.608V4.391z" fill="url(#lobe-icons-gemini-cli-_R_0_-t)"/><path clip-rule="evenodd" d="M19.74 1.444a2.816 2.816 0 012.816 2.816v15.48a2.816 2.816 0 01-2.816 2.816H4.26a2.816 2.816 0 01-2.816-2.816V4.26A2.816 2.816 0 014.26 1.444h15.48zM7.236 8.564l7.752 3.728-7.752 3.727v2.802l9.557-4.596v-3.866L7.236 5.763v2.801z" fill="#1E1E2E" fill-rule="evenodd"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-cli-_R_0_-t" x1="24" x2="0" y1="6.587" y2="16.494"><stop stop-color="#EE4D5D"></stop><stop offset=".328" stop-color="#B381DD"></stop><stop offset=".476" stop-color="#207CFE"></stop></linearGradient></defs></svg></span><span class="av" role="img" aria-label="GitHub Copilot" style="--bl:#0D1117;--bd:#F0F3F6;--fl:#FFFFFF;--fd:#0D1117"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M19.245 5.364c1.322 1.36 1.877 3.216 2.11 5.817.622 0 1.2.135 1.592.654l.73.964c.21.278.323.61.323.955v2.62c0 .339-.173.669-.453.868C20.239 19.602 16.157 21.5 12 21.5c-4.6 0-9.205-2.583-11.547-4.258-.28-.2-.452-.53-.453-.868v-2.62c0-.345.113-.679.321-.956l.73-.963c.392-.517.974-.654 1.593-.654l.029-.297c.25-2.446.81-4.213 2.082-5.52 2.461-2.54 5.71-2.851 7.146-2.864h.198c1.436.013 4.685.323 7.146 2.864zm-7.244 4.328c-.284 0-.613.016-.962.05-.123.447-.305.85-.57 1.108-1.05 1.023-2.316 1.18-2.994 1.18-.638 0-1.306-.13-1.851-.464-.516.165-1.012.403-1.044.996a65.882 65.882 0 00-.063 2.884l-.002.48c-.002.563-.005 1.126-.013 1.69.002.326.204.63.51.765 2.482 1.102 4.83 1.657 6.99 1.657 2.156 0 4.504-.555 6.985-1.657a.854.854 0 00.51-.766c.03-1.682.006-3.372-.076-5.053-.031-.596-.528-.83-1.046-.996-.546.333-1.212.464-1.85.464-.677 0-1.942-.157-2.993-1.18-.266-.258-.447-.661-.57-1.108-.32-.032-.64-.049-.96-.05zm-2.525 4.013c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zm5 0c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zM7.635 5.087c-1.05.102-1.935.438-2.385.906-.975 1.037-.765 3.668-.21 4.224.405.394 1.17.657 1.995.657h.09c.649-.013 1.785-.176 2.73-1.11.435-.41.705-1.433.675-2.47-.03-.834-.27-1.52-.63-1.813-.39-.336-1.275-.482-2.265-.394zm6.465.394c-.36.292-.6.98-.63 1.813-.03 1.037.24 2.06.675 2.47.968.957 2.136 1.104 2.776 1.11h.044c.825 0 1.59-.263 1.995-.657.555-.556.765-3.187-.21-4.224-.45-.468-1.335-.804-2.385-.906-.99-.088-1.875.058-2.265.394zM12 7.615c-.24 0-.525.015-.84.044.03.16.045.336.06.526l-.001.159a2.94 2.94 0 01-.014.25c.225-.022.425-.027.612-.028h.366c.187 0 .387.006.612.028-.015-.146-.015-.277-.015-.409.015-.19.03-.365.06-.526a9.29 9.29 0 00-.84-.044z"/></svg></span><span class="av" role="img" aria-label="OpenCode" style="--bl:#131010;--bd:#F1ECEC;--fl:#F1ECEC;--fd:#131010"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span><span class="av" role="img" aria-label="Cursor" style="--bl:#14120B;--bd:#EDECEC;--fl:#EDECEC;--fd:#14120B"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg></span><span class="av" role="img" aria-label="Grok" style="--bl:#000000;--bd:#FFFFFF;--fl:#FFFFFF;--fd:#000000"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg></span></div><h3><span lang="zh">Gemini CLI、GitHub Copilot、OpenCode、Cursor、Grok</span><span lang="en">Gemini CLI, GitHub Copilot, OpenCode, Cursor, Grok</span></h3></div>
+            <p><span lang="zh">远程会话：通过 Agent Client Protocol 在手机上新建、继续会话，实时输出、审批、切换模式和模型。</span><span lang="en">Remote sessions: start and continue sessions from the phone over the Agent Client Protocol, with live output, approvals, modes and models.</span></p>
           </div>
-          <div class="mini">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-            <h3><span lang="zh">看电脑屏幕、传文件</span><span lang="en">Screen and files</span></h3>
-            <p><span lang="zh">随时看一眼电脑屏幕（需要 ffmpeg），把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Glance at the computer&#39;s screen (needs ffmpeg), and send photos and files from your phone into the project for the agent.</span></p>
-          </div>
-          <div class="mini">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
-            <h3><span lang="zh">在哪都能连</span><span lang="en">Reachable anywhere</span></h3>
-            <p><span lang="zh">Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。屏幕和预览在能直连时点对点传输，网关只负责牵线。</span><span lang="en">Pro uses the official gateway: sign in and go. Or run your own with one command or Docker, free. The screen and previews go peer to peer when they can; the gateway only introduces the two sides.</span></p>
+          <div class="agent">
+            <div class="agent-name"><div class="marks"><span class="av plain" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 16 5-4-5-4M13 17h6"/></svg></span></div><h3><span lang="zh">任何命令行工具</span><span lang="en">Any CLI</span></h3></div>
+            <p><span lang="zh">终端：在电脑上开一个终端，手机上看和输入。</span><span lang="en">Terminal: a terminal on the computer, viewed and typed into from the phone.</span></p>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="sec flush" id="agents">
-      <div class="c">
-        <div class="eyebrow"><b>02</b>Agents</div>
-        <h2><span lang="zh">每个 Agent 做到它能做到的最好</span><span lang="en">Each agent, as far as it can go</span></h2>
-        <p class="sub"><span lang="zh">Agent 用你电脑上已经安装、已经登录的那一份。LinkShell 不经手任何 Agent 的账号和密钥。</span><span lang="en">Agents run as the copies already installed and signed in on your computer. LinkShell never touches their accounts or keys.</span></p>
-        <div class="spec">
-          <div class="spec-h"><span>Agent</span><span><span lang="zh">方式</span><span lang="en">Mode</span></span><span><span lang="zh">体验</span><span lang="en">What you get</span></span></div>
-          <div>
-            <div class="who"><div class="avs"><span class="av full" role="img" aria-label="Codex" data-name="Codex"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_-t)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_-t" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span></div><h3>Codex</h3></div>
-            <span class="tag"><span lang="zh">多端同步</span><span lang="en">Shared</span></span>
-            <p><span lang="zh">用 <code>linkshell codex</code> 打开的终端和手机同时在线，任何一端都能发消息、打断、审批。</span><span lang="en">The terminal opened with <code>linkshell codex</code> and your phone are live at once; either can send, interrupt and approve.</span></p>
-          </div>
-          <div>
-            <div class="who"><div class="avs"><span class="av" role="img" aria-label="Claude Code" data-name="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span></div><h3>Claude Code</h3></div>
-            <span class="tag" style="--tint:var(--blue)"><span lang="zh">接力</span><span lang="en">Handoff</span></span>
-            <p><span lang="zh">电脑上用原生界面（<code>linkshell claude</code>），手机发消息即接管，电脑按任意键收回。</span><span lang="en">Claude's own UI at your desk (<code>linkshell claude</code>); a message from the phone takes over, any key on the computer takes it back.</span></p>
-          </div>
-          <div>
-            <div class="who"><div class="avs">
-              <span class="av full" role="img" aria-label="Gemini CLI" data-name="Gemini CLI"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M0 4.391A4.391 4.391 0 014.391 0h15.217A4.391 4.391 0 0124 4.391v15.217A4.391 4.391 0 0119.608 24H4.391A4.391 4.391 0 010 19.608V4.391z" fill="url(#lobe-icons-gemini-cli-_R_0_-t)"/><path clip-rule="evenodd" d="M19.74 1.444a2.816 2.816 0 012.816 2.816v15.48a2.816 2.816 0 01-2.816 2.816H4.26a2.816 2.816 0 01-2.816-2.816V4.26A2.816 2.816 0 014.26 1.444h15.48zM7.236 8.564l7.752 3.728-7.752 3.727v2.802l9.557-4.596v-3.866L7.236 5.763v2.801z" fill="#1E1E2E" fill-rule="evenodd"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-cli-_R_0_-t" x1="24" x2="0" y1="6.587" y2="16.494"><stop stop-color="#EE4D5D"></stop><stop offset=".328" stop-color="#B381DD"></stop><stop offset=".476" stop-color="#207CFE"></stop></linearGradient></defs></svg></span>
-              <span class="av" role="img" aria-label="GitHub Copilot" data-name="GitHub Copilot" style="--bl:#0D1117;--bd:#F0F3F6;--fl:#FFFFFF;--fd:#0D1117"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M19.245 5.364c1.322 1.36 1.877 3.216 2.11 5.817.622 0 1.2.135 1.592.654l.73.964c.21.278.323.61.323.955v2.62c0 .339-.173.669-.453.868C20.239 19.602 16.157 21.5 12 21.5c-4.6 0-9.205-2.583-11.547-4.258-.28-.2-.452-.53-.453-.868v-2.62c0-.345.113-.679.321-.956l.73-.963c.392-.517.974-.654 1.593-.654l.029-.297c.25-2.446.81-4.213 2.082-5.52 2.461-2.54 5.71-2.851 7.146-2.864h.198c1.436.013 4.685.323 7.146 2.864zm-7.244 4.328c-.284 0-.613.016-.962.05-.123.447-.305.85-.57 1.108-1.05 1.023-2.316 1.18-2.994 1.18-.638 0-1.306-.13-1.851-.464-.516.165-1.012.403-1.044.996a65.882 65.882 0 00-.063 2.884l-.002.48c-.002.563-.005 1.126-.013 1.69.002.326.204.63.51.765 2.482 1.102 4.83 1.657 6.99 1.657 2.156 0 4.504-.555 6.985-1.657a.854.854 0 00.51-.766c.03-1.682.006-3.372-.076-5.053-.031-.596-.528-.83-1.046-.996-.546.333-1.212.464-1.85.464-.677 0-1.942-.157-2.993-1.18-.266-.258-.447-.661-.57-1.108-.32-.032-.64-.049-.96-.05zm-2.525 4.013c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zm5 0c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zM7.635 5.087c-1.05.102-1.935.438-2.385.906-.975 1.037-.765 3.668-.21 4.224.405.394 1.17.657 1.995.657h.09c.649-.013 1.785-.176 2.73-1.11.435-.41.705-1.433.675-2.47-.03-.834-.27-1.52-.63-1.813-.39-.336-1.275-.482-2.265-.394zm6.465.394c-.36.292-.6.98-.63 1.813-.03 1.037.24 2.06.675 2.47.968.957 2.136 1.104 2.776 1.11h.044c.825 0 1.59-.263 1.995-.657.555-.556.765-3.187-.21-4.224-.45-.468-1.335-.804-2.385-.906-.99-.088-1.875.058-2.265.394zM12 7.615c-.24 0-.525.015-.84.044.03.16.045.336.06.526l-.001.159a2.94 2.94 0 01-.014.25c.225-.022.425-.027.612-.028h.366c.187 0 .387.006.612.028-.015-.146-.015-.277-.015-.409.015-.19.03-.365.06-.526a9.29 9.29 0 00-.84-.044z"/></svg></span>
-              <span class="av" role="img" aria-label="OpenCode" data-name="OpenCode" style="--bl:#131010;--bd:#F1ECEC;--fl:#F1ECEC;--fd:#131010"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span>
-              <span class="av" role="img" aria-label="Cursor" data-name="Cursor" style="--bl:#14120B;--bd:#EDECEC;--fl:#EDECEC;--fd:#14120B"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg></span>
-              <span class="av" role="img" aria-label="Grok" data-name="Grok" style="--bl:#000000;--bd:#FFFFFF;--fl:#FFFFFF;--fd:#000000"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg></span>
-            </div><h3>Gemini CLI · GitHub Copilot<small>OpenCode · Cursor · Grok</small></h3></div>
-            <span class="tag" style="--tint:var(--violet)"><span lang="zh">远程会话</span><span lang="en">Remote</span></span>
-            <p><span lang="zh">通过 Agent Client Protocol 在手机上新建、继续会话，实时输出、审批、切换模式和模型。</span><span lang="en">Start and continue sessions from the phone over the Agent Client Protocol: live output, approvals, modes and models.</span></p>
-          </div>
-          <div>
-            <div class="who"><div class="avs"><span class="av plain" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 16 5-4-5-4M13 17h6"/></svg></span></div><h3><span lang="zh">任何命令行工具</span><span lang="en">Any CLI</span></h3></div>
-            <span class="tag" style="--tint:var(--text-muted)"><span lang="zh">终端</span><span lang="en">Terminal</span></span>
-            <p><span lang="zh">在电脑上开一个终端，手机上看和输入。</span><span lang="en">A terminal on the computer, viewed and typed into from the phone.</span></p>
-          </div>
-        </div>
-      </div>
-    </section>
+    <section class="sec" id="install">
+      <div class="wrap">
+        <div class="text">
+          <h2><span lang="zh">三步连上你的电脑</span><span lang="en">Three steps to your computer</span></h2>
+          <p><span lang="zh">电脑需要 macOS 或 Linux，以及 Node.js 22.13 或更新版本。</span><span lang="en">Your computer needs macOS or Linux and Node.js 22.13 or newer.</span></p>
 
-    <section class="sec flush" id="install">
-      <div class="c">
-        <div class="eyebrow"><b>03</b><span lang="zh">开始使用</span><span lang="en">Get started</span></div>
-        <h2><span lang="zh">三步连上你的电脑</span><span lang="en">Three steps to your computer</span></h2>
-        <p class="sub"><span lang="zh">电脑需要 macOS 或 Linux，以及 Node.js 22.13 或更新版本。</span><span lang="en">Your computer needs macOS or Linux and Node.js 22.13 or newer.</span></p>
-        <div class="cells three">
           <div class="step">
-            <span class="ix"><b>01</b></span>
-            <h3><span lang="zh">安装并启动</span><span lang="en">Install and start</span></h3>
+            <h3><span lang="zh">1. 安装并启动</span><span lang="en">1. Install and start</span></h3>
             <p><span lang="zh">安装 CLI，在后台启动 LinkShell。它会托管电脑上的 Agent 会话。</span><span lang="en">Install the CLI and start LinkShell in the background. It hosts the agent sessions on this computer.</span></p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
 <span class="pr">$ </span>linkshell host --daemon</code></pre>
+            <p><span lang="zh">不用 npm 的话，也可以用 Homebrew 或安装脚本：</span><span lang="en">Without npm, install it with Homebrew or the install script:</span></p>
+            <pre><code><span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
+<span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
+<span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre>
           </div>
           <div class="step">
-            <span class="ix"><b>02</b></span>
-            <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span></h3>
+            <h3><span lang="zh">2. 连接手机</span><span lang="en">2. Connect your phone</span></h3>
             <p><span lang="zh">Pro：电脑上登录，App 里登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Pro: sign in on the computer and in the app with the same account; the computer just appears. Own gateway: pair once with a QR code.</span></p>
             <pre><code><span class="cm"># Pro</span>
 <span class="pr">$ </span>linkshell login
@@ -749,92 +556,62 @@
 <span class="pr">$ </span>linkshell pair</code></pre>
           </div>
           <div class="step">
-            <span class="ix"><b>03</b></span>
-            <h3><span lang="zh">开始工作</span><span lang="en">Get going</span></h3>
+            <h3><span lang="zh">3. 开始工作</span><span lang="en">3. Get going</span></h3>
             <p><span lang="zh">在手机上新建会话；或者在电脑终端里这样启动 Agent，随时交给手机。</span><span lang="en">Start a session on the phone, or launch agents from your terminal like this to hand them over any time.</span></p>
             <pre><code><span class="pr">$ </span>linkshell claude
 <span class="pr">$ </span>linkshell codex</code></pre>
-          </div>
-          <div class="install span">
-            <p><span lang="zh">其他安装方式</span><span lang="en">Other ways to install</span></p>
-            <div class="tabs">
-              <button class="tab active" data-tab="i-brew" type="button">Homebrew</button>
-              <button class="tab" data-tab="i-curl" type="button">curl</button>
-            </div>
-            <div>
-              <div class="tab-pane active" id="tab-i-brew"><pre><code><span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell</code></pre></div>
-              <div class="tab-pane" id="tab-i-curl"><pre><code><span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre></div>
-            </div>
+            <p><span lang="zh">更多细节在<a href="docs/">文档</a>里。</span><span lang="en">The <a href="docs/">docs</a> have the details.</span></p>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="sec flush" id="how">
-      <div class="c">
-        <div class="eyebrow"><b>04</b><span lang="zh">工作原理</span><span lang="en">How it works</span></div>
-        <h2><span lang="zh">Agent 留在你的电脑上</span><span lang="en">The agents stay on your computer</span></h2>
-        <p class="sub"><span lang="zh">电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。手机通过网关连进来，网关只负责把加密后的数据转过去。</span><span lang="en">LinkShell on your computer holds every session, keeps its history and decides who is driving right now. The phone connects through a gateway that only passes encrypted data along.</span></p>
-        <div class="cells">
-          <div class="diagram">
-            <div class="flow">
-              <div class="node">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>
-                <small>Client</small>
-                <b><span lang="zh">手机 App</span><span lang="en">Phone app</span></b><span>iOS · Android</span>
-              </div>
-              <div class="wire"><span><span lang="zh">密文</span><span lang="en">ciphertext</span></span></div>
-              <div class="node">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
-                <small>Relay</small>
-                <b><span lang="zh">网关</span><span lang="en">Gateway</span></b><span><span lang="zh">官方或自建 · 只转发</span><span lang="en">official or yours · relay only</span></span>
-              </div>
-              <div class="wire"><span>WebSocket</span></div>
-              <div class="node host">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-                <small>Host</small>
-                <b><span lang="zh">你的电脑</span><span lang="en">Your computer</span></b><span>LinkShell host</span>
-                <div class="chips"><span>Claude Code</span><span>Codex</span><span><span lang="zh">ACP Agent</span><span lang="en">ACP agents</span></span><span><span lang="zh">终端</span><span lang="en">Terminals</span></span><span><span lang="zh">本地端口</span><span lang="en">Local ports</span></span></div>
-              </div>
-            </div>
+    <section class="sec" id="how">
+      <div class="wrap">
+        <div class="text">
+          <h2><span lang="zh">Agent 留在你的电脑上</span><span lang="en">The agents stay on your computer</span></h2>
+          <p><span lang="zh">电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。手机通过网关连进来，网关只负责把加密后的数据转过去。</span><span lang="en">LinkShell on your computer holds every session, keeps its history and decides who is driving right now. The phone connects through a gateway that only passes encrypted data along.</span></p>
+          <p><span lang="zh">网关只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</span><span lang="en">Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</span></p>
+          <p><span lang="zh">Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。屏幕和预览在能直连时点对点传输，网关只负责牵线。</span><span lang="en">Pro uses the official gateway: sign in and go. Or run your own with one command or Docker, free. The screen and previews go peer to peer when they can; the gateway only introduces the two sides.</span></p>
+        </div>
+        <figure class="media">
+          <picture>
+            <source media="(max-width: 700px)" srcset="assets/promo/card-e2e.jpg" width="720" height="1280" />
+            <img src="assets/promo/e2e.jpg" width="1600" height="900" loading="lazy" alt="消息从手机经过网关到你的电脑，网关只看得到密文" />
+          </picture>
+          <video muted loop playsinline preload="none" data-wide="assets/promo/e2e.mp4" data-tall="assets/promo/e2e-vertical.mp4"></video>
+        </figure>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+        <div class="text support">
+          <h2><span lang="zh">赞助商</span><span lang="en">Sponsors</span></h2>
+          <p><span lang="zh">感谢以下赞助商对 LinkShell 的支持。</span><span lang="en">Thanks to our sponsors for supporting LinkShell.</span></p>
+          <p class="sponsor"><a href="https://ai18n.chat/">AI18N</a> · Unified AI API Gateway</p>
+        </div>
+        <div class="text support">
+          <h2><span lang="zh">请作者喝杯咖啡</span><span lang="en">Buy me a coffee</span></h2>
+          <p><span lang="zh">如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。</span><span lang="en">If LinkShell helps you, you can buy the author a coffee.</span></p>
+          <div class="qr">
+            <figure><img src="assets/pay_wechat.jpg" alt="WeChat Pay" width="148" height="148" loading="lazy" /><figcaption><span lang="zh">微信支付</span><span lang="en">WeChat Pay</span></figcaption></figure>
+            <figure><img src="assets/pay_ali.jpg" alt="Alipay" width="148" height="148" loading="lazy" /><figcaption><span lang="zh">支付宝</span><span lang="en">Alipay</span></figcaption></figure>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="sec strip">
-      <div class="c">
-        <div class="cells two support">
-          <div>
-            <h2>Sponsors</h2>
-            <p><span lang="zh">感谢以下赞助商对 LinkShell 的支持。</span><span lang="en">Thanks to our sponsors for supporting LinkShell.</span></p>
-            <a class="sponsor" href="https://ai18n.chat/">
-              <div><b>AI18N</b><span>Unified AI API Gateway</span></div>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>
-            </a>
+    <section class="sec close">
+      <div class="wrap">
+        <div class="text">
+          <h2><span lang="zh"><span class="nb">下次离开电脑，</span><span class="nb">把会话带上</span></span><span lang="en">Next time you leave your desk, take the session along</span></h2>
+          <p><span lang="zh">全部功能免费，自建网关一条命令就能跑起来。</span><span lang="en">Every feature is free, and your own gateway is one command away.</span></p>
+          <div class="btns">
+            <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516"><span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span></a>
+            <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
+            <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
           </div>
-          <div>
-            <h2>Buy Me a Coffee</h2>
-            <p><span lang="zh">如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。</span><span lang="en">If LinkShell helps you, you can buy the author a coffee.</span></p>
-            <div class="donate-qr">
-              <figure><img src="assets/pay_wechat.jpg" alt="WeChat Pay" loading="lazy" /><figcaption><span lang="zh">微信支付</span><span lang="en">WeChat Pay</span></figcaption></figure>
-              <figure><img src="assets/pay_ali.jpg" alt="Alipay" loading="lazy" /><figcaption><span lang="zh">支付宝</span><span lang="en">Alipay</span></figcaption></figure>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="sec cta">
-      <div class="c">
-        <i aria-hidden="true"></i>
-        <img src="assets/adaptive-icon.png" alt="" width="60" height="60" loading="lazy" />
-        <h2><span lang="zh">下次离开电脑，把会话带上</span><span lang="en">Next time you leave your desk, take the session along</span></h2>
-        <p><span lang="zh">全部功能免费，自建网关一条命令就能跑起来。</span><span lang="en">Every feature is free, and your own gateway is one command away.</span></p>
-        <div class="btns">
-          <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516"><span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span></a>
-          <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
-          <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
         </div>
       </div>
     </section>
@@ -842,7 +619,7 @@
 
   <!-- ═════════════════════════ DOCS ═════════════════════════ -->
   <main class="page" data-page="docs">
-    <div class="c docs">
+    <div class="wrap docs">
       <aside class="toc">
         <a href="#d-install"><span lang="zh">安装</span><span lang="en">Install</span></a>
         <a href="#d-host"><span lang="zh">启动 LinkShell</span><span lang="en">Start LinkShell</span></a>
@@ -895,7 +672,7 @@
         <pre><code><span class="pr">$ </span>linkshell claude [<span lang="zh">参数</span><span lang="en">args</span>]   <span class="cm"># <span lang="zh">Claude Code，可交给手机</span><span lang="en">Claude Code, hand-off ready</span></span>
 <span class="pr">$ </span>linkshell codex [<span lang="zh">参数</span><span lang="en">args</span>]    <span class="cm"># <span lang="zh">Codex，和手机同步</span><span lang="en">Codex, shared with the phone</span></span></code></pre>
         <p><span lang="zh">参数原样传给 Agent（比如 <code>linkshell claude --resume &lt;id&gt;</code>）。Claude 在电脑上运行时，手机能实时看到进度；在手机上发消息就接管，终端会显示「已由手机接管」，按任意键收回。</span><span lang="en">Arguments pass straight through (for example <code>linkshell claude --resume &lt;id&gt;</code>). While Claude runs at your desk the phone follows along live; sending from the phone takes over, the terminal says so, and any key takes it back.</span></p>
-        <div class="note"><span lang="zh">Claude 在收到第一条消息之前不会保存会话，所以一个还没发过消息的会话不能交给手机。</span><span lang="en">Claude doesn't save a session until its first message, so a session with no messages yet can't be handed to the phone.</span></div>
+        <p class="note"><span lang="zh">Claude 在收到第一条消息之前不会保存会话，所以一个还没发过消息的会话不能交给手机。</span><span lang="en">Claude doesn't save a session until its first message, so a session with no messages yet can't be handed to the phone.</span></p>
 
         <h2 id="d-phone"><span lang="zh">在手机上用</span><span lang="en">On your phone</span></h2>
         <ul>
@@ -910,19 +687,22 @@
         </ul>
 
         <h2 id="d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></h2>
-        <div class="tbl" style="margin-top:12px">
-          <table>
-            <tbody>
-              <tr><td><code>linkshell host [--daemon] [--gateway &lt;url&gt;]</code></td><td><span lang="zh">启动 LinkShell；<code>status</code>、<code>stop</code></span><span lang="en">Start LinkShell; <code>status</code>, <code>stop</code></span></td></tr>
-              <tr><td><code>linkshell pair</code></td><td><span lang="zh">通过网关配对手机</span><span lang="en">Pair a phone through the gateway</span></td></tr>
-              <tr><td><code>linkshell login</code> / <code>logout</code></td><td><span lang="zh">Pro 账号（官方网关）</span><span lang="en">Pro account (official gateway)</span></td></tr>
-              <tr><td><code>linkshell claude</code> / <code>codex</code></td><td><span lang="zh">在终端里启动 Agent，可与手机共享</span><span lang="en">Start an agent in your terminal, shared with the phone</span></td></tr>
-              <tr><td><code>linkshell gateway [--port] [--daemon]</code></td><td><span lang="zh">运行自己的网关；<code>status</code>、<code>stop</code></span><span lang="en">Run your own gateway; <code>status</code>, <code>stop</code></span></td></tr>
-              <tr><td><code>linkshell doctor</code></td><td><span lang="zh">检查环境和连接</span><span lang="en">Check the environment and connectivity</span></td></tr>
-              <tr><td><code>linkshell upgrade</code></td><td><span lang="zh">升级到最新版</span><span lang="en">Upgrade to the latest version</span></td></tr>
-            </tbody>
-          </table>
-        </div>
+        <dl>
+          <dt><code>linkshell host <span class="nb">[--daemon]</span> <span class="nb">[--gateway &lt;url&gt;]</span></code></dt>
+          <dd><span lang="zh">启动 LinkShell；<code>status</code>、<code>stop</code></span><span lang="en">Start LinkShell; <code>status</code>, <code>stop</code></span></dd>
+          <dt><code>linkshell pair</code></dt>
+          <dd><span lang="zh">通过网关配对手机</span><span lang="en">Pair a phone through the gateway</span></dd>
+          <dt><code>linkshell login</code> / <code>logout</code></dt>
+          <dd><span lang="zh">Pro 账号（官方网关）</span><span lang="en">Pro account (official gateway)</span></dd>
+          <dt><code>linkshell claude</code> / <code>codex</code></dt>
+          <dd><span lang="zh">在终端里启动 Agent，可与手机共享</span><span lang="en">Start an agent in your terminal, shared with the phone</span></dd>
+          <dt><code>linkshell gateway <span class="nb">[--port]</span> <span class="nb">[--daemon]</span></code></dt>
+          <dd><span lang="zh">运行自己的网关；<code>status</code>、<code>stop</code></span><span lang="en">Run your own gateway; <code>status</code>, <code>stop</code></span></dd>
+          <dt><code>linkshell doctor</code></dt>
+          <dd><span lang="zh">检查环境和连接</span><span lang="en">Check the environment and connectivity</span></dd>
+          <dt><code>linkshell upgrade</code></dt>
+          <dd><span lang="zh">升级到最新版</span><span lang="en">Upgrade to the latest version</span></dd>
+        </dl>
 
         <h2 id="d-faq"><span lang="zh">常见问题</span><span lang="en">FAQ</span></h2>
         <h3><span lang="zh">App 显示「电脑暂时连不上」</span><span lang="en">The app says the computer can't be reached</span></h3>
@@ -937,84 +717,78 @@
 
   <!-- ═════════════════════════ PRICING ═════════════════════════ -->
   <main class="page" data-page="pricing">
-    <section class="sec">
-      <div class="c">
-        <i aria-hidden="true"></i>
-        <div class="eyebrow"><span lang="zh">定价</span><span lang="en">Pricing</span></div>
-        <h2><span lang="zh">所有功能都免费</span><span lang="en">Every feature is free</span></h2>
-        <p class="sub"><span lang="zh">Pro 只多一件事：用官方网关，不用自己部署服务器。</span><span lang="en">Pro adds one thing: the official gateway, so you don't run a server.</span></p>
-
-        <div class="pricing-grid">
-          <div class="pricing-card">
-            <div class="plan-name">Free</div>
-            <div class="plan-price">¥0</div>
-            <div class="plan-period"><span lang="zh">永久免费</span><span lang="en">Free forever</span></div>
-            <ul class="plan-features">
-              <li><span lang="zh">全部 Agent、接力、审批、终端、预览</span><span lang="en">All agents, handoff, approvals, terminal, previews</span></li>
-              <li><span lang="zh">端到端加密</span><span lang="en">End-to-end encryption</span></li>
-              <li><span lang="zh">自建网关（一条命令或 Docker）</span><span lang="en">Self-hosted gateway (one command or Docker)</span></li>
-              <li><span lang="zh">扫码配对，长期有效</span><span lang="en">QR pairing that lasts</span></li>
-            </ul>
-            <a href="docs/#d-gateway" class="btn btn-s" style="width:100%;justify-content:center"><span lang="zh">自建网关指南</span><span lang="en">Self-hosting guide</span></a>
-          </div>
-
-          <div class="pricing-card pro">
-            <div class="pricing-badge">PRO</div>
-            <div class="plan-name">Pro</div>
-            <div class="cycle-toggle">
-              <button class="cycle-btn active" data-cycle="monthly" type="button" onclick="setPricingCycle('monthly')"><span lang="zh">月付</span><span lang="en">Monthly</span></button>
-              <button class="cycle-btn" data-cycle="yearly" type="button" onclick="setPricingCycle('yearly')"><span lang="zh">年付</span><span lang="en">Yearly</span></button>
-            </div>
-            <div id="price-monthly" class="plan-price">¥9.9<small> <span lang="zh">/月</span><span lang="en">/mo</span></small></div>
-            <div id="price-yearly" class="plan-price" style="display:none">¥99<small> <span lang="zh">/年</span><span lang="en">/yr</span></small></div>
-            <div class="plan-period"><span id="price-alt-monthly"><span lang="zh">或年付 ¥99</span><span lang="en">or ¥99 billed yearly</span></span><span id="price-alt-yearly" style="display:none"><span lang="zh">相当于 ¥8.25/月</span><span lang="en">works out to ¥8.25/month</span></span></div>
-            <ul class="plan-features">
-              <li><span lang="zh">Free 的全部功能</span><span lang="en">Everything in Free</span></li>
-              <li><span lang="zh">官方网关，不用部署服务器</span><span lang="en">The official gateway, no server to run</span></li>
-              <li><span lang="zh">登录同一账号即可连接，免扫码</span><span lang="en">Sign in with one account, no QR codes</span></li>
-              <li><span lang="zh">优先支持</span><span lang="en">Priority support</span></li>
-            </ul>
-
-            <div id="pricing-auth-area">
-              <div id="pricing-auth-status"></div>
-              <div id="pricing-login-form" class="auth-form" style="display:none">
-                <div style="display:flex;flex-direction:column;gap:8px">
-                  <input type="email" id="pricing-email" placeholder="Email" autocomplete="email" />
-                  <input type="password" id="pricing-password" placeholder="Password" autocomplete="current-password" />
-                  <div id="pricing-auth-error" style="color:var(--danger);font-size:13px;display:none"></div>
-                  <button class="auth-btn auth-btn-primary" type="button" onclick="pricingSignIn()"><span lang="zh">登录</span><span lang="en">Sign in</span></button>
-                  <button class="auth-btn" type="button" style="background:var(--surface-2);color:var(--text)" onclick="pricingSignUp()"><span lang="zh">注册新账户</span><span lang="en">Create an account</span></button>
-                </div>
-              </div>
-              <div id="pricing-payment" style="display:none">
-                <div id="pay-afdian">
-                  <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian" style="margin-bottom:8px"><span lang="zh">前往爱发电支付 ↗</span><span lang="en">Pay on Afdian ↗</span></a>
-                  <button class="auth-btn" type="button" style="background:var(--surface-2);color:var(--text)" onclick="pricingRefreshPlan()"><span lang="zh">支付完成？点击刷新状态</span><span lang="en">Paid? Click to refresh status</span></button>
-                  <p style="color:var(--text-muted);font-size:12px;margin-top:8px;text-align:center"><span lang="zh">支付后请点击刷新按钮同步订阅状态</span><span lang="en">After paying, refresh to sync your subscription</span></p>
-                </div>
-              </div>
-              <div id="pricing-pro-status" style="display:none">
-                <div class="term" style="text-align:center;padding:16px">
-                  <span class="ts">✓</span> <span lang="zh">你已是 Pro 用户</span><span lang="en">You're on Pro</span>
-                  <br /><span style="color:var(--text-sec);font-size:13px"><span lang="zh">到期时间：</span><span lang="en">Renews/expires: </span></span><span id="pricing-expires" style="color:var(--text-sec);font-size:13px"></span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="faq">
-          <div><b><span lang="zh">免费版有什么限制？</span><span lang="en">What does Free leave out?</span></b><p><span lang="zh">没有功能限制，只是需要自己运行一个网关。Pro 提供官方托管网关，省去部署和维护。</span><span lang="en">No features. You just run a gateway yourself; Pro gives you the hosted one instead.</span></p></div>
-          <div><b><span lang="zh">官方网关能看到我的代码吗？</span><span lang="en">Can the official gateway see my code?</span></b><p><span lang="zh">不能。手机和电脑之间端到端加密，网关只转发密文。</span><span lang="en">No. Phone and computer are encrypted end to end; the gateway only relays ciphertext.</span></p></div>
-          <div><b><span lang="zh">Pro 到期后会怎样？</span><span lang="en">What happens when Pro ends?</span></b><p><span lang="zh">回到 Free：功能一个不少，改用自建网关就能继续连接。</span><span lang="en">You are back on Free: every feature stays, and you connect through your own gateway.</span></p></div>
-          <div><b><span lang="zh">支持哪些支付方式？</span><span lang="en">How can I pay?</span></b><p><span lang="zh">通过爱发电支付，支持微信和支付宝。</span><span lang="en">Through Afdian, with WeChat Pay or Alipay.</span></p></div>
-        </div>
+    <div class="wrap pricing">
+      <div class="text">
+        <h1><span lang="zh">所有功能都免费</span><span lang="en">Every feature is free</span></h1>
+        <p class="lead"><span lang="zh">Pro 只多一件事：用官方网关，不用自己部署服务器。</span><span lang="en">Pro adds one thing: the official gateway, so you don't run a server.</span></p>
       </div>
-    </section>
+
+      <section class="plan text">
+        <h2>Free</h2>
+        <div class="price">¥0</div>
+        <p class="per"><span lang="zh">永久免费</span><span lang="en">Free forever</span></p>
+        <ul>
+          <li><span lang="zh">全部 Agent、接力、审批、终端、预览</span><span lang="en">All agents, handoff, approvals, terminal, previews</span></li>
+          <li><span lang="zh">端到端加密</span><span lang="en">End-to-end encryption</span></li>
+          <li><span lang="zh">自建网关（一条命令或 Docker）</span><span lang="en">Self-hosted gateway (one command or Docker)</span></li>
+          <li><span lang="zh">扫码配对，长期有效</span><span lang="en">QR pairing that lasts</span></li>
+        </ul>
+        <a href="docs/#d-gateway" class="btn btn-s"><span lang="zh">自建网关指南</span><span lang="en">Self-hosting guide</span></a>
+      </section>
+
+      <section class="plan text">
+        <h2>Pro</h2>
+        <div id="price-monthly" class="price">¥9.9<small><span lang="zh">/月</span><span lang="en">/mo</span></small></div>
+        <div id="price-yearly" class="price" style="display:none">¥99<small><span lang="zh">/年</span><span lang="en">/yr</span></small></div>
+        <p class="per"><span id="price-alt-monthly"><span lang="zh">或年付 ¥99</span><span lang="en">or ¥99 billed yearly</span></span><span id="price-alt-yearly" style="display:none"><span lang="zh">相当于 ¥8.25/月</span><span lang="en">works out to ¥8.25/month</span></span></p>
+        <div class="cycle">
+          <button class="cycle-btn active" data-cycle="monthly" type="button" onclick="setPricingCycle('monthly')"><span lang="zh">月付</span><span lang="en">Monthly</span></button>
+          <button class="cycle-btn" data-cycle="yearly" type="button" onclick="setPricingCycle('yearly')"><span lang="zh">年付</span><span lang="en">Yearly</span></button>
+        </div>
+        <ul>
+          <li><span lang="zh">Free 的全部功能</span><span lang="en">Everything in Free</span></li>
+          <li><span lang="zh">官方网关，不用部署服务器</span><span lang="en">The official gateway, no server to run</span></li>
+          <li><span lang="zh">登录同一账号即可连接，免扫码</span><span lang="en">Sign in with one account, no QR codes</span></li>
+          <li><span lang="zh">优先支持</span><span lang="en">Priority support</span></li>
+        </ul>
+
+        <div id="pricing-auth-area">
+          <div id="pricing-auth-status"></div>
+          <div id="pricing-login-form" class="auth-form" style="display:none">
+            <input type="email" id="pricing-email" placeholder="Email" autocomplete="email" />
+            <input type="password" id="pricing-password" placeholder="Password" autocomplete="current-password" />
+            <div id="pricing-auth-error" style="display:none"></div>
+            <button class="auth-btn auth-btn-primary" type="button" onclick="pricingSignIn()"><span lang="zh">登录</span><span lang="en">Sign in</span></button>
+            <button class="auth-btn" type="button" onclick="pricingSignUp()"><span lang="zh">注册新账户</span><span lang="en">Create an account</span></button>
+          </div>
+          <div id="pricing-payment" style="display:none">
+            <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian"><span lang="zh">前往爱发电支付 ↗</span><span lang="en">Pay on Afdian ↗</span></a>
+            <button class="auth-btn" type="button" onclick="pricingRefreshPlan()"><span lang="zh">支付完成？点击刷新状态</span><span lang="en">Paid? Click to refresh status</span></button>
+            <p><span lang="zh">支付后请点击刷新按钮同步订阅状态</span><span lang="en">After paying, refresh to sync your subscription</span></p>
+          </div>
+          <div id="pricing-pro-status" style="display:none">
+            <span class="ts">✓</span> <span lang="zh">你已是 Pro 用户</span><span lang="en">You're on Pro</span>
+            <p><span lang="zh">到期时间：</span><span lang="en">Renews/expires: </span><span id="pricing-expires"></span></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="plan faq text">
+        <h2><span lang="zh">常见问题</span><span lang="en">Questions</span></h2>
+        <h3><span lang="zh">免费版有什么限制？</span><span lang="en">What does Free leave out?</span></h3>
+        <p><span lang="zh">没有功能限制，只是需要自己运行一个网关。Pro 提供官方托管网关，省去部署和维护。</span><span lang="en">No features. You just run a gateway yourself; Pro gives you the hosted one instead.</span></p>
+        <h3><span lang="zh">官方网关能看到我的代码吗？</span><span lang="en">Can the official gateway see my code?</span></h3>
+        <p><span lang="zh">不能。手机和电脑之间端到端加密，网关只转发密文。</span><span lang="en">No. Phone and computer are encrypted end to end; the gateway only relays ciphertext.</span></p>
+        <h3><span lang="zh">Pro 到期后会怎样？</span><span lang="en">What happens when Pro ends?</span></h3>
+        <p><span lang="zh">回到 Free：功能一个不少，改用自建网关就能继续连接。</span><span lang="en">You are back on Free: every feature stays, and you connect through your own gateway.</span></p>
+        <h3><span lang="zh">支持哪些支付方式？</span><span lang="en">How can I pay?</span></h3>
+        <p><span lang="zh">通过爱发电支付，支持微信和支付宝。</span><span lang="en">Through Afdian, with WeChat Pay or Alipay.</span></p>
+      </section>
+    </div>
   </main>
 
   <footer>
-    <div class="c">
+    <div class="wrap">
       <div class="who">
         <a class="brand" href="./"><img src="assets/adaptive-icon.png" alt="" width="22" height="22" loading="lazy" />LinkShell</a>
         <span><span lang="zh">出于对 Vibe Coding 的热爱。© 2026，MIT 开源。</span><span lang="en">Made for the love of vibe coding. © 2026, MIT licensed.</span></span>
@@ -1038,12 +812,7 @@
       document.getElementById('lang-toggle').textContent = lang === 'zh' ? 'EN' : '中文';
       try { localStorage.setItem('linkshell-lang', lang); } catch { }
     }
-    (function () {
-      let saved = null;
-      try { saved = localStorage.getItem('linkshell-lang'); } catch { }
-      const fromUrl = new URLSearchParams(location.search).get('lang');
-      applyLanguage(fromUrl === 'en' || fromUrl === 'zh' ? fromUrl : saved || (/^zh/i.test(navigator.language) ? 'zh' : 'en'));
-    })();
+    applyLanguage(document.documentElement.dataset.lang === 'en' ? 'en' : 'zh');
     document.getElementById('lang-toggle').addEventListener('click', () => applyLanguage(currentLang === 'zh' ? 'en' : 'zh'));
 
     // ── Theme ──
@@ -1053,21 +822,16 @@
       try { localStorage.setItem('linkshell-theme', next); } catch { }
     });
 
-    // ── Tabs ──
-    document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const tabs = btn.closest('.tabs');
-        const body = tabs.nextElementSibling;
-        tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
-        body.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
-        btn.classList.add('active');
-        body.querySelector('#tab-' + btn.dataset.tab).classList.add('active');
-      });
-    });
-
     // ── Copy buttons on commands ──
     const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
     const ICON_DONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+    function copyButton(button, text) {
+      button.innerHTML = ICON_COPY;
+      button.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(text()); button.innerHTML = ICON_DONE; button.classList.add('ok'); } catch { }
+        setTimeout(() => { button.innerHTML = ICON_COPY; button.classList.remove('ok'); }, 1400);
+      });
+    }
     document.querySelectorAll('pre').forEach((pre) => {
       const wrap = document.createElement('div');
       wrap.className = 'code';
@@ -1077,64 +841,67 @@
       button.type = 'button';
       button.className = 'copy';
       button.setAttribute('aria-label', 'Copy');
-      button.innerHTML = ICON_COPY;
-      button.addEventListener('click', async () => {
-        const text = [...pre.querySelectorAll('code')].map((code) => {
-          const clone = code.cloneNode(true);
-          clone.querySelectorAll('.pr, .cm, [lang]:not([lang="' + currentLang + '"])').forEach((n) => n.remove());
-          return clone.textContent;
-        }).join('\n').split('\n').map((l) => l.trimEnd()).filter(Boolean).join('\n');
-        try { await navigator.clipboard.writeText(text); button.innerHTML = ICON_DONE; button.classList.add('ok'); } catch { }
-        setTimeout(() => { button.innerHTML = ICON_COPY; button.classList.remove('ok'); }, 1400);
-      });
+      // The commands only: no prompts, no comments, no other language.
+      copyButton(button, () => [...pre.querySelectorAll('code')].map((code) => {
+        const clone = code.cloneNode(true);
+        clone.querySelectorAll('.pr, .cm, [lang]:not([lang="' + currentLang + '"])').forEach((n) => n.remove());
+        return clone.textContent;
+      }).join('\n').split('\n').map((l) => l.trimEnd()).filter(Boolean).join('\n'));
       wrap.appendChild(button);
     });
-    document.querySelectorAll('.copy[data-copy]').forEach((button) => {
-      button.innerHTML = ICON_COPY;
-      button.addEventListener('click', async () => {
-        try { await navigator.clipboard.writeText(button.dataset.copy); button.innerHTML = ICON_DONE; button.classList.add('ok'); } catch { }
-        setTimeout(() => { button.innerHTML = ICON_COPY; button.classList.remove('ok'); }, 1400);
-      });
-    });
+    document.querySelectorAll('.copy[data-copy]').forEach((button) => copyButton(button, () => button.dataset.copy));
 
-    // ── Film and feature clips: play while they are on screen ──
+    // ── The film and the clips ──
+    // Each sits over its still. The still is chosen by <picture>, the clip here,
+    // by the same rule, so the two always have the same shape. A clip loads when
+    // it comes on screen and plays only while it is there.
     (() => {
-      const film = document.getElementById('film');
-      if (film && matchMedia('(max-width: 760px)').matches) film.poster = 'assets/promo/poster-vertical.jpg';
+      const tall = matchMedia('(max-width: 700px)');
       const calm = matchMedia('(prefers-reduced-motion: reduce)').matches || (navigator.connection && navigator.connection.saveData);
-      const clips = [...document.querySelectorAll('.clip video')];
-      if (calm || !('IntersectionObserver' in window)) {
-        clips.forEach((video) => { video.src = video.dataset.src; video.controls = true; });
+      const videos = [...document.querySelectorAll('.media video')];
+      function load(video) {
+        const src = tall.matches ? video.dataset.tall : video.dataset.wide;
+        if (video.dataset.shown === src) return;
+        // Both shapes share one timeline: carry on from the same moment. The film
+        // starts after its hook, which repeats the headline above it.
+        const at = video.dataset.shown ? video.currentTime : Number(video.dataset.start || 0);
+        const still = video.parentElement.querySelector(tall.matches ? 'source' : 'img');
+        video.dataset.shown = src;
+        video.poster = still.getAttribute(tall.matches ? 'srcset' : 'src'); // until its first frame is there
+        video.src = src;
+        if (at) video.addEventListener('loadedmetadata', () => { video.currentTime = at; }, { once: true });
+      }
+      tall.addEventListener('change', () => videos.forEach((video) => {
+        if (!video.dataset.shown) return;
+        const playing = !video.paused;
+        if (playing) video.dataset.away = '1';
+        load(video);
+        if (playing) video.play().catch(() => { });
+      }));
+      if (!('IntersectionObserver' in window)) {
+        videos.forEach((video) => { load(video); video.controls = true; });
         return;
       }
       const watch = new IntersectionObserver((entries) => {
         entries.forEach(({ target: video, isIntersecting }) => {
-          if (!isIntersecting) return video.pause();
-          if (video.dataset.src && !video.getAttribute('src')) video.src = video.dataset.src;
-          video.play().catch(() => {});
+          if (!isIntersecting) {
+            if (!video.paused) { video.dataset.away = '1'; video.pause(); }
+            return;
+          }
+          load(video);
+          if (calm || video.id === 'film') video.controls = true;
+          if (calm || video.dataset.held) return;
+          video.play().catch(() => { video.controls = true; });
         });
-      }, { threshold: 0.4 });
-      clips.forEach((video) => watch.observe(video));
-      if (film) watch.observe(film);
-    })();
-
-    // ── Reveal on scroll ──
-    if ('IntersectionObserver' in window) {
-      const reveal = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          entry.target.classList.add('in');
-          reveal.unobserve(entry.target);
-        });
-      }, { rootMargin: '0px 0px -8% 0px' });
-      document.querySelectorAll('[data-page="home"] .sec > .c > :is(.eyebrow, h2, .sub, p, img, .btns)').forEach((el) => {
-        const order = [...el.parentElement.children].filter((n) => n.className === el.className).indexOf(el);
-        el.style.setProperty('--d', Math.min(order, 3) * 70 + 'ms');
-        el.classList.add('rv');
-        reveal.observe(el);
+      }, { threshold: 0.25 });
+      videos.forEach((video) => {
+        // A pause the visitor asked for stays a pause.
+        video.addEventListener('pause', () => { if (!video.dataset.away) video.dataset.held = '1'; });
+        video.addEventListener('play', () => { delete video.dataset.held; delete video.dataset.away; });
+        if (!calm && video.id !== 'film') video.addEventListener('click', () => { if (!video.controls) video.paused ? video.play().catch(() => { }) : video.pause(); });
+        watch.observe(video);
       });
-      document.documentElement.classList.add('js');
-    }
+    })();
 
     // ── Docs: highlight the section being read ──
     const tocLinks = [...document.querySelectorAll('.toc a')];
@@ -1164,15 +931,17 @@
       const hash = location.hash.replace('#', '');
       const page = hash === 'docs' || hash === 'pricing' ? hash : pathPage;
       showPage(page);
-      if (page === 'pricing') initPricing();
+      // The pricing script below defines initPricing; it isn't there yet on the first call.
+      if (page === 'pricing' && typeof initPricing === 'function') initPricing();
       if (hash && hash !== page) {
         const el = document.getElementById(hash);
         if (el) setTimeout(() => el.scrollIntoView(), 30);
       }
     }
     window.addEventListener('hashchange', route);
-    // After the pricing script below has loaded.
-    window.addEventListener('DOMContentLoaded', route);
+    // Show the page now, without waiting for the scripts below to download.
+    route();
+    window.addEventListener('DOMContentLoaded', () => { if (shown === 'pricing') initPricing(); });
   </script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
