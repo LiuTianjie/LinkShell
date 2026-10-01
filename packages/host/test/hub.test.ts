@@ -396,6 +396,19 @@ describe("SessionHub discovery refresh", () => {
     expect(hub.listSessions({}).sessions).toEqual([]);
   });
 
+  it("keeps a session where it was in the list when it is only opened", async () => {
+    const before = hub.getSession("fake:s1").updatedAt;
+    await hub.subscribe("fake:s1", 0, collector().subscriber);
+    // What an agent says about a session whenever one is opened: its state, who drives it, its settings.
+    driver.emit({ sessionUpdate: "ls_status", state: "idle" });
+    driver.emit({ sessionUpdate: "ls_driver", driver: "none" });
+    driver.emit({ sessionUpdate: "ls_config", options: [] });
+    expect(hub.getSession("fake:s1")).toMatchObject({ updatedAt: before, state: "idle" });
+    // A turn starting is activity.
+    driver.emit({ sessionUpdate: "ls_turn", state: "started" });
+    expect(hub.getSession("fake:s1").updatedAt).toBeGreaterThan(before);
+  });
+
   it("keeps a renamed session where it was in the list", async () => {
     const before = hub.getSession("fake:s1").updatedAt;
     expect((await hub.rename("fake:s1", "A better name")).title).toBe("A better name");

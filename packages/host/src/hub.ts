@@ -47,6 +47,10 @@ function isActivity(update: SessionUpdate): boolean {
     case "ls_config":
     case "available_commands_update":
     case "usage_update":
+    // What state a session is in and who drives it are said again whenever it
+    // is opened; a turn starting or ending is what counts.
+    case "ls_status":
+    case "ls_driver":
       return false;
     default:
       return true;
