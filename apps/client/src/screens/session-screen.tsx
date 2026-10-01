@@ -4,7 +4,7 @@ import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, Text, View } from "react-native";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useHeaderHeight } from "expo-router/react-navigation";
@@ -18,19 +18,41 @@ import { LiveDot } from "@/components/status";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
 import { Timeline } from "@/components/timeline/timeline";
-import { TimelineSession } from "@/components/timeline/context";
+import { TimelineFork, TimelineSession } from "@/components/timeline/context";
 import { LinkBase } from "@/lib/links";
 import { useActions, useClient } from "@/lib/client";
 import { fileChanges, sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { BranchTag } from "@/components/branch-tag";
+import { branchOf, useGitInfo } from "@/lib/worktree";
 import { agentLook, tierCopy } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
-import { HeaderActions } from "@/components/header-actions";
+import { HeaderActions, useHeaderTitleWidth } from "@/components/header-actions";
 
 /** iOS 26-style title capsule: agent icon, title and where it runs, on glass. */
-function HeaderTitle({ agent, title, subtitle, live }: { agent: string; title: string; subtitle: string; live: boolean }) {
+function HeaderTitle({
+  agent,
+  title,
+  subtitle,
+  branch,
+  ownBranch,
+  live,
+  actions,
+}: {
+  agent: string;
+  title: string;
+  subtitle: string;
+  /** The git branch the session works on, shown after the subtitle. */
+  branch?: string;
+  /** The branch is the session's own (it works in a worktree): marked as in the lists. */
+  ownBranch?: boolean;
+  live: boolean;
+  actions: number;
+}) {
+  // Long titles end in an ellipsis inside the capsule, clear of the buttons.
+  const maxWidth = useHeaderTitleWidth(actions);
   const content = (
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <AgentTile agent={agent} size={28} />
@@ -40,16 +62,22 @@ function HeaderTitle({ agent, title, subtitle, live }: { agent: string; title: s
           </Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             {live ? <LiveDot size={5} /> : null}
-            <Text numberOfLines={1} style={{ fontSize: 12, lineHeight: 15, fontWeight: "500", color: colors.secondaryLabel }}>
+            {/* Tight: the branch (what the agent is working on) stays whole, the project name gives way. */}
+            <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, lineHeight: 15, fontWeight: "500", color: colors.secondaryLabel }}>
               {subtitle}
             </Text>
+            {branch ? (
+              <View style={{ flexShrink: 0 }}>
+                <BranchTag branch={branch} max={18} own={ownBranch} />
+              </View>
+            ) : null}
           </View>
         </View>
       </View>
   );
   // iOS: a glass capsule floating over the content. Android: plain title in a solid app bar.
-  if (Platform.OS !== "ios") return <View style={{ maxWidth: 260 }}>{content}</View>;
-  return <Glass style={{ borderRadius: 22, paddingLeft: 6, paddingRight: 14, paddingVertical: 5, maxWidth: 250 }}>{content}</Glass>;
+  if (Platform.OS !== "ios") return <View style={{ maxWidth }}>{content}</View>;
+  return <Glass style={{ borderRadius: 22, paddingLeft: 6, paddingRight: 14, paddingVertical: 5, maxWidth }}>{content}</Glass>;
 }
 
 function countChanges(items: TimelineItem[]): number {
@@ -68,6 +96,11 @@ export function SessionScreen() {
   const loaded = useClient((state) => state.sessionsLoaded);
   const ready = useClient((state) => !!state.ready[id]);
   const online = useClient((state) => state.status === "online");
+  const loadingEarlier = useClient((state) => !!state.loadingEarlier[id]);
+  const subagentsListed = useClient((state) => state.subagents[id]?.length ?? 0);
+  const subagentsTotal = summary?.subagents?.total ?? 0;
+  const subagentsRunning = summary?.subagents?.running ?? 0;
+  const hasSubagents = subagentsTotal > 0 || subagentsListed > 0;
   const agentInfo = useClient((state) => state.machine?.agents.find((agent) => agent.id === summary?.agent));
   const actions = useActions();
   const insets = useSafeAreaInsets();
@@ -82,8 +115,19 @@ export function SessionScreen() {
     actions.openSession(id);
     return () => actions.closeSession(id);
   }, [actions, id]);
+  // The sub-agents' own records (running, failed, when they ended): asked for once the
+  // session is open, and again whenever one starts or finishes.
+  useEffect(() => {
+    if (ready) void actions.loadSubagents(id).catch(() => {});
+  }, [actions, id, ready, subagentsTotal, subagentsRunning]);
 
   const items = view?.items ?? [];
+  // The session opens at its latest turns; what came before loads a page at a time.
+  const hasEarlier = (view?.startSeq ?? 0) > 0;
+  const earlier = useMemo(
+    () => (hasEarlier ? { loading: loadingEarlier, load: () => actions.loadEarlier(id) } : undefined),
+    [hasEarlier, loadingEarlier, actions, id],
+  );
   // Reopened sessions show what we already have straight away.
   const [cachedAtOpen] = useState(() => items.length > 0);
 
@@ -118,6 +162,46 @@ export function SessionScreen() {
     void listRef.current?.scrollToEnd({ animated: true });
   };
 
+  // A fork: the conversation so far (through one reply, or all of it) in a new
+  // session, here or in a new worktree of the project's repository.
+  // The branch the agent is working on: asked when the screen opens, when a
+  // turn ends (the agent may have switched or made one) and when the app comes back.
+  const [gitRefresh, setGitRefresh] = useState(0);
+  const turnRunning = summary ? summary.state === "running" || summary.state === "waiting" : false;
+  useEffect(() => {
+    if (!turnRunning) setGitRefresh((value) => value + 1);
+  }, [turnRunning]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") setGitRefresh((value) => value + 1);
+    });
+    return () => subscription.remove();
+  }, []);
+  const git = useGitInfo(summary?.cwd, gitRefresh);
+  const [forking, setForking] = useState(false);
+  const fork = (itemId: string | undefined, worktree: boolean) => {
+    if (forking) return;
+    setForking(true);
+    actions
+      .forkSession(id, { itemId, worktree })
+      .then((session) => {
+        haptics.success();
+        router.push({ pathname: "/session/[id]", params: { id: session.id } });
+      })
+      .catch((reason: unknown) => {
+        haptics.error();
+        Alert.alert("分叉失败", reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => setForking(false));
+  };
+  const askFork = (itemId?: string) => {
+    Alert.alert(itemId ? "从这里分叉" : "分叉会话", itemId ? "新会话带着到这条回复为止的对话，这个会话不受影响。" : "新会话带着到现在为止的对话，这个会话不受影响。", [
+      { text: "取消", style: "cancel" },
+      { text: "在当前目录继续", onPress: () => fork(itemId, false) },
+      ...(git ? [{ text: "在新的 worktree 里继续", onPress: () => fork(itemId, true) }] : []),
+    ]);
+  };
+
   const guard = async (work: () => Promise<unknown>, failure: string) => {
     try {
       await work();
@@ -146,7 +230,13 @@ export function SessionScreen() {
   }
 
   const tier = agentInfo?.tier;
-  const subtitle = [baseName(summary.cwd), look.short, tier ? tierCopy[tier].label : null].filter(Boolean).join(" · ");
+  // In a git repository: the project and the branch, which there's no room to share with more.
+  // (A session in a worktree belongs to the project the worktree was made from.)
+  const branch = branchOf(git) ?? summary.worktree?.branch;
+  const subtitle = branch
+    ? baseName(summary.worktree?.source ?? summary.cwd)
+    : [baseName(summary.cwd), look.short, tier ? tierCopy[tier].label : null].filter(Boolean).join(" · ");
+  const canFork = tier !== "terminal" && online;
 
   // A session with a title or preview has history, even before its first import.
   const hasHistory = summary.lastSeq > 0 || !!summary.preview || !!summary.title;
@@ -154,7 +244,8 @@ export function SessionScreen() {
   // An empty session: the intro sits centred above the composer, outside the
   // list (which aligns its content to the bottom, as a chat should).
   // Notices ("the terminal quit") don't start a conversation; messages and tools do.
-  const started = items.some((item) => item.kind === "user" || item.kind === "agent" || item.kind === "tool" || item.kind === "thought" || item.kind === "plan");
+  // Nor is it the start while earlier history is still to load.
+  const started = hasEarlier || items.some((item) => item.kind === "user" || item.kind === "agent" || item.kind === "tool" || item.kind === "thought" || item.kind === "plan");
   const intro =
     loading || started ? null : (
       <View style={{ alignItems: "center", gap: 10, paddingHorizontal: 32 }}>
@@ -179,21 +270,26 @@ export function SessionScreen() {
               agent={summary.agent}
               title={sessionTitle(view?.title ? { title: view.title } : summary)}
               subtitle={subtitle}
+              branch={branch}
+              ownBranch={!!summary.worktree}
               live={turnActive}
+              actions={hasSubagents ? 2 : 1}
             />
           ),
         }}
       />
       <HeaderActions
         actions={[
-          ...(changeCount > 0
+          // Every sub-agent the session started, a tap away: the ones still working (counted on the button) and the finished ones.
+          ...(hasSubagents
             ? [
                 {
                   kind: "button" as const,
-                  key: "changes",
-                  icon: { sf: "plus.forwardslash.minus", md: "difference" } as const,
-                  label: `改动 ${changeCount} 个文件`,
-                  onPress: () => router.push({ pathname: "/session/[id]/changes", params: { id } }),
+                  key: "subagents",
+                  icon: { sf: "square.stack.3d.up", md: "layers" } as const,
+                  label: subagentsRunning ? `子 Agent，${subagentsRunning} 个运行中` : "子 Agent",
+                  live: subagentsRunning > 0,
+                  onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
                 },
               ]
             : []),
@@ -209,10 +305,27 @@ export function SessionScreen() {
               ...(tier === "handoff" && driver === "remote"
                 ? [{ title: "交还电脑", icon: { sf: "laptopcomputer", md: "laptop_mac" } as const, onPress: () => void guard(() => actions.release(id), "交还失败") }]
                 : []),
+              ...(changeCount > 0
+                ? [
+                    {
+                      title: `查看改动（${changeCount} 个文件）`,
+                      icon: { sf: "plus.forwardslash.minus", md: "difference" } as const,
+                      onPress: () => router.push({ pathname: "/session/[id]/changes", params: { id } }),
+                    },
+                  ]
+                : []),
+              ...(canFork
+                ? [{ title: "分叉会话", icon: { sf: "arrow.triangle.branch", md: "fork_right" } as const, onPress: () => askFork() }]
+                : []),
               {
                 title: "预览网页",
                 icon: { sf: "globe", md: "language" },
                 onPress: () => router.push({ pathname: "/ports", params: { cwd: summary.cwd } }),
+              },
+              {
+                title: "项目文件",
+                icon: { sf: "folder", md: "folder_open" },
+                onPress: () => router.push({ pathname: "/files", params: { path: summary.cwd } }),
               },
               { title: "重命名", icon: { sf: "pencil", md: "edit" }, onPress: () => renameSession(summary) },
               {
@@ -255,6 +368,7 @@ export function SessionScreen() {
       {loading ? null : (
       <LinkBase value={summary.cwd}>
       <TimelineSession.Provider value={id}>
+      <TimelineFork.Provider value={canFork ? askFork : undefined}>
       <Timeline
         ref={listRef}
         items={items}
@@ -264,7 +378,9 @@ export function SessionScreen() {
         keyboardOffset={0}
         onFailedMessage={onFailedMessage}
         onScroll={onScroll}
+        earlier={earlier}
       />
+      </TimelineFork.Provider>
       </TimelineSession.Provider>
       </LinkBase>
       )}
@@ -275,6 +391,15 @@ export function SessionScreen() {
         </Animated.View>
       ) : null}
       {loading ? <TimelineSkeleton label="正在载入对话…" /> : null}
+      {/* A fork takes a few seconds (a worktree to make, an agent to start): nothing else can be tapped meanwhile. */}
+      {forking ? (
+        <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center" }} accessibilityViewIsModal>
+          <Glass style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingVertical: 13, borderRadius: 22 }}>
+            <ActivityIndicator color={colors.secondaryLabel} />
+            <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>正在分叉…</Text>
+          </Glass>
+        </View>
+      ) : null}
       {Platform.OS === "ios" ? <TopFade height={insets.top + 60} /> : null}
 
 
@@ -298,6 +423,7 @@ export function SessionScreen() {
           </Animated.View>
         ) : null}
         <Composer
+          sessionId={id}
           agent={summary.agent}
           agentInfo={agentInfo}
           online={online}
@@ -314,6 +440,10 @@ export function SessionScreen() {
           onStop={() => guard(() => actions.cancel(id), "停止失败")}
           queue={summary.queue}
           onUnqueue={(clientMessageId) => void guard(() => actions.unqueue(id, clientMessageId).then(() => {}), "取消失败")}
+          onTakeQueued={(clientMessageId) => actions.takeQueued(id, clientMessageId)}
+          onSendQueuedNow={(clientMessageId) => guard(() => actions.sendQueuedNow(id, clientMessageId), "发送失败")}
+          onReorderQueue={(clientMessageIds) => void guard(() => actions.reorderQueue(id, clientMessageIds), "调整顺序失败")}
+          onCommands={() => router.push({ pathname: "/session/[id]/commands", params: { id } })}
           onRespond={(requestId, optionId) => actions.respond(id, requestId, optionId)}
           onTakeover={() => actions.takeover(id)}
           onConfig={(optionId, value) => void guard(() => actions.setConfig(id, optionId, value), "切换失败")}

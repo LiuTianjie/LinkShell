@@ -49,6 +49,32 @@ export default function RootLayout() {
                   }}
                 />
                 <Stack.Screen
+                  name="session/[id]/agents"
+                  options={{
+                    presentation: "formSheet",
+                    sheetGrabberVisible: true,
+                    sheetAllowedDetents: [0.62, 1],
+                    sheetInitialDetentIndex: 0,
+                    sheetCornerRadius: 28,
+                    sheetExpandsWhenScrolledToEdge: true,
+                    contentStyle: sheetContent,
+                    headerShown: false,
+                  }}
+                />
+                <Stack.Screen
+                  name="session/[id]/commands"
+                  options={{
+                    presentation: "formSheet",
+                    sheetGrabberVisible: true,
+                    sheetAllowedDetents: [0.92],
+                    // The list scrolls inside the sheet; the search field stays put.
+                    sheetExpandsWhenScrolledToEdge: false,
+                    sheetCornerRadius: 28,
+                    contentStyle: sheetContent,
+                    headerShown: false,
+                  }}
+                />
+                <Stack.Screen
                   name="new"
                   options={{
                     presentation: "formSheet",

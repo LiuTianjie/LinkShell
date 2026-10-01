@@ -222,7 +222,7 @@ function describeDetail(detail: ToolDetail, changes: FileChange[]): ToolDescript
     case "mcp":
       return { verb: detail.server.replace(/[_-]/g, " "), subject: detail.tool.replace(/_/g, " "), code: false, glyph: { sf: "puzzlepiece.extension", md: "extension" }, changes };
     case "subagent":
-      return { verb: subagentVerb[detail.action], subject: detail.task ?? "", code: false, glyph: { sf: "person.2", md: "group" }, changes };
+      return { verb: subagentVerb[detail.action], subject: detail.task ?? "", code: false, glyph: { sf: "square.stack.3d.up", md: "layers" }, changes };
     case "skill":
       return { verb: "使用技能", subject: detail.name, code: false, glyph: { sf: "wand.and.stars", md: "auto_fix_high" }, changes };
     case "web_search":

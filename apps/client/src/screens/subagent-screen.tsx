@@ -1,14 +1,14 @@
-import type { SessionView, TimelineItem } from "@linkshell/client-core";
+import { subagentKey, type SessionView, type TimelineItem } from "@linkshell/client-core";
 import { useLocalSearchParams } from "expo-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { EmptyState } from "@/components/state-views";
+import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSession } from "@/components/timeline/context";
 import { StatusMark, SubagentGlyph, useSubagentProgress } from "@/components/timeline/subagent";
 import { Timeline } from "@/components/timeline/timeline";
-import { useClient } from "@/lib/client";
+import { useActions, useClient } from "@/lib/client";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
@@ -28,15 +28,41 @@ function findCall(items: TimelineItem[] | undefined, id: string): ToolItem | und
 // The dev gallery's fixtures stand in for a session there; stripped from release builds.
 const galleryItems: TimelineItem[] = __DEV__ ? require("@/dev/fixtures").galleryItems : [];
 
-/** A sheet with one sub-agent's whole run, live: the same timeline as a session. */
+/**
+ * A sheet with one sub-agent's whole run, live: the same timeline as a session.
+ * Its conversation is loaded on its own, so it opens from the list of
+ * sub-agents too, when the call that started it is far back in a history that
+ * isn't loaded; until that arrives it shows what the session's timeline has.
+ */
 export function SubagentScreen() {
   const { id, call } = useLocalSearchParams<{ id: string; call: string }>();
-  const items = useClient((state) => (id === "gallery" ? undefined : (state.views[id] as SessionView | undefined)?.items));
-  const item = useMemo(() => findCall(id === "gallery" ? galleryItems : items, call), [id, items, call]);
+  const gallery = id === "gallery";
+  const { openSubagent, closeSubagent } = useActions();
+  const items = useClient((state) => (gallery ? undefined : (state.views[id] as SessionView | undefined)?.items));
+  const own = useClient((state) => (gallery ? undefined : (state.subagentViews[subagentKey(id, call)] as SessionView | undefined)?.items));
+  const [missing, setMissing] = useState(false);
+
+  useEffect(() => {
+    if (gallery) return;
+    let closed = false;
+    void openSubagent(id, call).then((opened) => {
+      if (!closed && !opened) setMissing(true);
+    });
+    return () => {
+      closed = true;
+      closeSubagent(id, call);
+    };
+  }, [gallery, openSubagent, closeSubagent, id, call]);
+
+  const item = useMemo(() => findCall(own, call) ?? findCall(gallery ? galleryItems : items, call), [gallery, own, items, call]);
   if (!item) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.plain }}>
-        <EmptyState icon={{ sf: "person.2", md: "group" }} title="找不到这个子 Agent" message="它可能属于一个已经关闭的会话。" />
+      <View style={{ flex: 1, backgroundColor: colors.plain, justifyContent: "center" }}>
+        {gallery || missing ? (
+          <EmptyState icon={{ sf: "square.stack.3d.up", md: "layers" }} title="找不到这个子 Agent" message="它可能属于一个已经关闭的会话。" />
+        ) : (
+          <LoadingState label="正在载入…" />
+        )}
       </View>
     );
   }

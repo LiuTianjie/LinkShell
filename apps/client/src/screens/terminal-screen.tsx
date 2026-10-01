@@ -5,6 +5,7 @@ import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-k
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/components/button";
+import { BranchTag } from "@/components/branch-tag";
 import { HeaderActions } from "@/components/header-actions";
 import { Icon } from "@/components/icon";
 import { KeyBar, withCtrl } from "@/components/terminal/key-bar";
@@ -13,6 +14,7 @@ import { NativeTerminal, type NativeTerminalHandle } from "../../modules/link-te
 import { useConnection } from "@/lib/client";
 import { shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { branchOf, useGitInfo } from "@/lib/worktree";
 import { terminalState, useTerminals } from "@/lib/terminals";
 import { pickFile, pickPhoto, shellQuote, upload, type Picked } from "@/lib/upload";
 import { colors } from "@/theme/colors";
@@ -29,6 +31,8 @@ export function TerminalScreen() {
   const { link } = useConnection();
   const { terminals, loaded } = useTerminals();
   const info = terminals.find((terminal) => terminal.id === id);
+  // Where the terminal started: its branch, when that's a git repository.
+  const branch = branchOf(useGitInfo(info?.cwd));
   const insets = useSafeAreaInsets();
   const keyboardOpen = useKeyboardState((state) => state.isVisible);
   // Follow the keyboard frame by frame: the terminal shrinks with it, so the
@@ -158,9 +162,17 @@ export function TerminalScreen() {
                 {state?.title ?? "终端"}
               </Text>
               {info ? (
-                <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>
-                  {shortPath(info.cwd)} · {ended ? state?.detail : state?.busy ? state.detail : `${info.cols}×${info.rows}`}
-                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, maxWidth: 240 }}>
+                  <Text numberOfLines={1} style={[type.caption, { flexShrink: 1, color: colors.secondaryLabel }]}>
+                    {shortPath(info.cwd)}
+                    {branch ? "" : ` · ${ended ? state?.detail : state?.busy ? state.detail : `${info.cols}×${info.rows}`}`}
+                  </Text>
+                  {branch ? (
+                    <View style={{ flexShrink: 0 }}>
+                      <BranchTag branch={branch} max={16} />
+                    </View>
+                  ) : null}
+                </View>
               ) : null}
             </View>
           ),
@@ -194,6 +206,12 @@ export function TerminalScreen() {
                   ]
                 : []),
               ...(info ? [{ title: "预览网页", icon: { sf: "globe", md: "language" } as const, onPress: () => router.push({ pathname: "/ports", params: { cwd: info.cwd } }) }] : []),
+              // Where the terminal started (the host doesn't follow its `cd`s); the home directory if it's gone.
+              {
+                title: "项目文件",
+                icon: { sf: "folder", md: "folder_open" },
+                onPress: () => router.push({ pathname: "/files", params: info ? { path: info.cwd } : {} }),
+              },
               ...(info && !ended ? [{ title: "重新运行", icon: { sf: "arrow.clockwise", md: "refresh" } as const, onPress: rerun }] : []),
               { title: ended ? "删除记录" : "关闭终端", icon: { sf: ended ? "trash" : "xmark.circle", md: ended ? "delete" : "close" }, destructive: true, onPress: close },
             ],

@@ -149,7 +149,8 @@ function FloatingMenu({
                         <Icon sf="chevron.left" md="arrow_back" size={16} color={colors.secondaryLabel} />
                       </Pressable>
                     ) : null}
-                    <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel, fontWeight: "600" }]}>
+                    {/* Two lines: a title can carry a short note on what the choice does. */}
+                    <Text numberOfLines={2} style={[type.footnote, { flex: 1, color: colors.secondaryLabel, fontWeight: "600" }]}>
                       {level.title}
                     </Text>
                   </View>

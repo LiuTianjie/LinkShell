@@ -2,9 +2,11 @@ import type { PendingPermission } from "@linkshell/client-core";
 import type { AgentInfo, ContentBlock, QueuedMessage, SessionConfigOption, SessionDriver } from "@linkshell/wire";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
+import { onCommandPicked } from "@/lib/command-pick";
+import { commandDetail, matchCommands, offeredCommands } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
@@ -15,6 +17,7 @@ import { Glass } from "./glass";
 import { Icon } from "./icon";
 import { PermissionActions } from "./permission-actions";
 import { PlusMenu } from "./plus-menu";
+import { QueuePanel } from "./queue-panel";
 import { UsageRing } from "./usage-ring";
 
 interface Attachment {
@@ -26,6 +29,7 @@ interface Attachment {
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 export interface ComposerProps {
+  sessionId: string;
   agent: string;
   agentInfo?: AgentInfo;
   online: boolean;
@@ -46,6 +50,12 @@ export interface ComposerProps {
   /** Messages the computer holds until the current turn ends. */
   queue?: QueuedMessage[];
   onUnqueue: (clientMessageId: string) => void;
+  /** Takes a queued message out of the queue; what it said goes back into the input. */
+  onTakeQueued: (clientMessageId: string) => Promise<ContentBlock[] | undefined>;
+  onSendQueuedNow: (clientMessageId: string) => Promise<void>;
+  onReorderQueue: (clientMessageIds: string[]) => void;
+  /** Opens the sheet with all of the agent's commands (what it picks comes back through `onCommandPicked`). */
+  onCommands: () => void;
 }
 
 type Blocked = { title: string; detail?: string } | null;
@@ -70,15 +80,26 @@ export function Composer(props: ComposerProps) {
   const blocked = blockedReason(props);
   const tier = props.agentInfo?.tier;
   const desktopDriving = tier === "handoff" && driver === "desktop";
-  const canSteer = props.agentInfo?.capabilities.steer ?? false;
   const trimmed = text.trim();
   const canAttachImages = props.agentInfo?.capabilities.images ?? false;
   const hasContent = trimmed.length > 0 || attachments.length > 0;
+  const input = useRef<TextInput>(null);
   const slashQuery = /^\/(\S*)$/.exec(text)?.[1];
-  const suggestions =
-    slashQuery === undefined
-      ? []
-      : props.commands.filter((command) => command.name.toLowerCase().startsWith(slashQuery.toLowerCase())).slice(0, 6);
+  // Names that start with what's typed, then names that contain it; the common built-ins lead.
+  const suggestions = useMemo(() => (slashQuery === undefined ? [] : matchCommands(props.commands, slashQuery)), [props.commands, slashQuery]);
+  const hasCommands = useMemo(() => offeredCommands(props.commands).length > 0, [props.commands]);
+
+  // A command picked in the sheet: into the input, ready for its arguments.
+  useEffect(
+    () =>
+      onCommandPicked((sessionId, command) => {
+        if (sessionId !== props.sessionId) return;
+        setText(`/${command} `);
+        // The sheet is still on its way out; focus once the input can take it.
+        setTimeout(() => input.current?.focus(), 350);
+      }),
+    [props.sessionId],
+  );
 
   const addImage = async (camera: boolean) => {
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], base64: true, quality: 0.8, allowsMultipleSelection: !camera, selectionLimit: 4 };
@@ -119,9 +140,22 @@ export function Composer(props: ComposerProps) {
     setText("");
     setAttachments([]);
     const delivery = await props.onSend(content);
-    if (delivery === "queued") showFlash(`排队中：${name} 忙完这一轮就发`);
-    else if (delivery === "steered") showFlash("已插话，正在调整方向");
+    if (delivery === "steered") showFlash("已插话，正在调整方向");
     else if (delivery === "failed") haptics.error();
+  };
+
+  // A queued message comes back to be edited: its text ahead of what's being typed, its pictures beside the others.
+  const editQueued = async (clientMessageId: string) => {
+    const content = await props.onTakeQueued(clientMessageId).catch(() => undefined);
+    if (!content) return;
+    const words = content.map((block) => (block.type === "text" ? block.text : "")).join("").trim();
+    const images = content.flatMap((block) =>
+      block.type === "image" && block.data
+        ? [{ uri: `data:${block.mimeType};base64,${block.data}`, mimeType: block.mimeType, data: block.data }]
+        : [],
+    );
+    if (words) setText((current) => [words, current.trim()].filter(Boolean).join("\n\n"));
+    if (images.length) setAttachments((current) => [...images, ...current].slice(0, 4));
   };
 
   const stop = async () => {
@@ -140,9 +174,7 @@ export function Composer(props: ComposerProps) {
   const placeholder = permission
     ? "或者直接告诉它该怎么做…"
     : turnActive
-      ? canSteer
-        ? `插话：${name} 会立刻调整…`
-        : `排队一条消息，${name} 忙完后处理`
+      ? `排队一条消息，${name} 忙完这一轮就发`
       : `给 ${name} 发消息`;
 
   const order = { model: 0, effort: 1, mode: 2, other: 3 } as const;
@@ -198,9 +230,22 @@ export function Composer(props: ComposerProps) {
         </Animated.View>
       ) : null}
 
+      {props.queue?.length ? (
+        <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(220)}>
+          <QueuePanel
+            queue={props.queue}
+            disabled={inputDisabled}
+            onSendNow={props.onSendQueuedNow}
+            onEdit={(clientMessageId) => void editQueued(clientMessageId)}
+            onRemove={props.onUnqueue}
+            onReorder={props.onReorderQueue}
+          />
+        </Animated.View>
+      ) : null}
+
       {desktopDriving && !blocked ? (
         <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)}>
-          <TakeoverPanel onTakeover={props.onTakeover} />
+          <TakeoverPanel onTakeover={props.onTakeover} onStop={turnActive ? stop : undefined} stopping={stopping} />
         </Animated.View>
       ) : (
         <Glass style={{ borderRadius: 26, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 }}>
@@ -212,14 +257,16 @@ export function Composer(props: ComposerProps) {
             >
               {flash}
             </Animated.Text>
-          ) : tier === "handoff" && driver === "remote" ? (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, paddingTop: 6 }}>
-              <Icon sf="iphone" md="smartphone" size={11} color={colors.accent} />
-              <Text style={[type.caption, { color: colors.secondaryLabel }]}>你在操作 · 电脑终端按任意键可收回</Text>
-            </View>
           ) : null}
           {suggestions.length ? (
-            <View style={{ paddingTop: 6, paddingHorizontal: 4, gap: 2 }}>
+            // Five rows in view; the rest scroll.
+            <ScrollView
+              style={{ maxHeight: 34 * 5, marginTop: 6 }}
+              contentContainerStyle={{ paddingHorizontal: 4 }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={suggestions.length > 5}
+            >
               {suggestions.map((command) => (
                 <Pressable
                   key={command.name}
@@ -229,60 +276,21 @@ export function Composer(props: ComposerProps) {
                   }}
                   style={({ pressed }) => ({
                     flexDirection: "row",
-                    alignItems: "baseline",
+                    alignItems: "center",
                     gap: 8,
+                    height: 34,
                     paddingHorizontal: 8,
-                    paddingVertical: 7,
                     borderRadius: 10,
                     backgroundColor: pressed ? colors.fill : "transparent",
                   })}
                 >
                   <Text style={{ fontFamily: mono, fontSize: 14, color: colors.accent, fontWeight: "600" }}>/{command.name}</Text>
                   <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
-                    {command.description}
+                    {commandDetail(command)}
                   </Text>
                 </Pressable>
               ))}
-            </View>
-          ) : null}
-          {props.queue?.length ? (
-            <View style={{ paddingHorizontal: 6, paddingTop: 8, gap: 4 }}>
-              {props.queue.map((entry, index) => (
-                <View
-                  key={entry.clientMessageId}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
-                    minHeight: 34,
-                    paddingLeft: 10,
-                    paddingRight: 4,
-                    borderRadius: 12,
-                    borderCurve: "continuous",
-                    backgroundColor: colors.fill,
-                  }}
-                >
-                  <Icon sf="clock" md="schedule" size={12} color={colors.secondaryLabel} />
-                  <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.label }]}>
-                    {entry.text || (entry.images ? `${entry.images} 张图片` : "")}
-                    {entry.text && entry.images ? <Text style={{ color: colors.secondaryLabel }}> · {entry.images} 张图片</Text> : null}
-                  </Text>
-                  <Text style={[type.caption, { color: colors.tertiaryLabel }]}>{index === 0 ? "下一条" : "排队中"}</Text>
-                  <Pressable
-                    onPress={() => {
-                      haptics.selection();
-                      props.onUnqueue(entry.clientMessageId);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel="取消这条排队消息"
-                    hitSlop={6}
-                    style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center" }}
-                  >
-                    <Icon sf="xmark.circle.fill" md="cancel" size={16} color={colors.tertiaryLabel} />
-                  </Pressable>
-                </View>
-              ))}
-            </View>
+            </ScrollView>
           ) : null}
           {attachments.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 6, paddingTop: 8 }}>
@@ -312,6 +320,7 @@ export function Composer(props: ComposerProps) {
             </ScrollView>
           ) : null}
           <TextInput
+            ref={input}
             value={text}
             onChangeText={setText}
             editable={!inputDisabled}
@@ -331,11 +340,11 @@ export function Composer(props: ComposerProps) {
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 36, paddingLeft: 2 }}>
             <PlusMenu
               canAttachImages={canAttachImages}
-              commands={props.commands}
-              disabled={inputDisabled || (!canAttachImages && props.commands.length === 0)}
+              hasCommands={hasCommands}
+              disabled={inputDisabled || (!canAttachImages && !hasCommands)}
               onPickPhoto={() => void addImage(false)}
               onTakePhoto={() => void addImage(true)}
-              onCommand={(name) => setText(`/${name} `)}
+              onCommands={props.onCommands}
             />
             <ScrollView
               horizontal
@@ -346,16 +355,10 @@ export function Composer(props: ComposerProps) {
               <ConfigMenus options={configShown} disabled={!props.online || !!blocked} onChange={props.onConfig} />
             </ScrollView>
             <UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} />
-            {turnActive && !hasContent ? (
-              <RoundButton label="停止" onPress={() => void stop()} busy={stopping} tone="stop" />
-            ) : (
-              <RoundButton
-                label={turnActive ? (canSteer ? "插话" : "排队") : "发送"}
-                wide={turnActive}
-                onPress={() => void send()}
-                disabled={!hasContent || inputDisabled}
-                tone="send"
-              />
+            {/* Stop stays within reach for as long as a turn runs, whoever drives it. */}
+            {turnActive ? <RoundButton label="停止" onPress={() => void stop()} busy={stopping} tone="stop" /> : null}
+            {turnActive && !hasContent ? null : (
+              <RoundButton label={turnActive ? "排队" : "发送"} wide={turnActive} onPress={() => void send()} disabled={!hasContent || inputDisabled} tone="send" />
             )}
           </View>
         </Glass>
@@ -413,7 +416,7 @@ function RoundButton({
   );
 }
 
-function TakeoverPanel({ onTakeover }: { onTakeover: () => Promise<void> }) {
+function TakeoverPanel({ onTakeover, onStop, stopping = false }: { onTakeover: () => Promise<void>; onStop?: () => Promise<void>; stopping?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const takeover = async () => {
@@ -450,6 +453,8 @@ function TakeoverPanel({ onTakeover }: { onTakeover: () => Promise<void> }) {
           <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>电脑正在操作这个会话</Text>
           <Text style={[type.footnote, { color: colors.secondaryLabel }]}>接管后在手机上继续，电脑随时能收回</Text>
         </View>
+        {/* The turn running on the computer can be stopped from here without taking over. */}
+        {onStop ? <RoundButton label="停止" onPress={() => void onStop()} busy={stopping} tone="stop" /> : null}
         <Button title="接管" variant="primary" busy={busy} onPress={() => void takeover()} icon={{ sf: "iphone", md: "smartphone" }} />
       </View>
       {error ? (

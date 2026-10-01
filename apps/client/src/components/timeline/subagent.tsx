@@ -2,6 +2,7 @@ import type { TimelineItem } from "@linkshell/client-core";
 import { router } from "expo-router";
 import { memo } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
+import { useClient } from "@/lib/client";
 import { describeTool } from "@/lib/describe";
 import { duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -48,14 +49,18 @@ export function finalReport(children: TimelineItem[]): Extract<TimelineItem, { k
 
 /** Running state, step count and elapsed time of a sub-agent call. */
 export function useSubagentProgress(item: ToolItem) {
+  const sessionId = useTimelineSession();
+  // The computer's own record of it, once listed: it knows a background
+  // sub-agent is still at work after its call returned, and one that was killed.
+  const record = useClient((state) => (sessionId ? state.subagents[sessionId]?.find((entry) => entry.toolCallId === item.id) : undefined));
   const children = item.sub?.items ?? [];
-  const running = item.status === "in_progress" || item.status === "pending" || item.sub?.turnActive === true;
-  const failed = item.status === "failed";
+  const running = record ? record.running : item.status === "in_progress" || item.status === "pending" || item.sub?.turnActive === true;
+  const failed = record ? record.failed === true : item.status === "failed";
   const now = useNow(running ? 1000 : null);
   const steps = children.filter((child) => child.kind === "tool").length;
   // Background sub-agents' calls return at launch; the work ends with their last event.
   const lastChild = children.reduce((latest, child) => Math.max(latest, child.kind === "tool" ? (child.endedTs ?? child.ts) : child.ts), 0);
-  const elapsed = (running ? now : Math.max(item.endedTs ?? item.ts, lastChild)) - item.ts;
+  const elapsed = (running ? now : (record?.endedAt ?? Math.max(item.endedTs ?? item.ts, lastChild))) - (record?.startedAt ?? item.ts);
   const detail = item.detail?.type === "subagent" ? item.detail : undefined;
   return {
     children,
@@ -153,7 +158,7 @@ export function SubagentGlyph({ failed, size }: { failed: boolean; size: number 
         justifyContent: "center",
       }}
     >
-      <Icon sf="person.2.fill" md="group" size={size * 0.47} color={failed ? colors.danger : colors.accent} />
+      <Icon sf="square.stack.3d.up.fill" md="layers" size={size * 0.5} color={failed ? colors.danger : colors.accent} />
     </View>
   );
 }

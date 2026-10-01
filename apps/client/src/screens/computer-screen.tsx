@@ -1,8 +1,8 @@
-import type { AgentInfo } from "@linkshell/wire";
+import type { AgentInfo, GatewayStatus } from "@linkshell/wire";
 import * as Clipboard from "expo-clipboard";
 import { router } from "expo-router";
-import { useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AgentTile } from "@/components/agent-tile";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
@@ -11,7 +11,9 @@ import { useAccount } from "@/lib/account";
 import { useActions, useClient, useConnection, useHasComputer } from "@/lib/client";
 import { Welcome } from "@/components/welcome";
 import { listComputers, useComputers } from "@/lib/computers";
+import { relativeTime } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { deviceIdentity } from "@/lib/identity";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
@@ -164,6 +166,157 @@ function PreviewSection() {
         </Pressable>
       </View>
     </View>
+  );
+}
+
+type PairedDevice = GatewayStatus["devices"][number];
+
+function DeviceRow({ device, own, first, onRemove }: { device: PairedDevice; own: boolean; first: boolean; onRemove: () => void }) {
+  return (
+    <View>
+      {first ? null : <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: 44 }} />}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11 }}>
+        <View
+          style={{ width: 32, height: 32, borderRadius: 10, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
+        >
+          <Icon sf="iphone" md="smartphone" size={16} color={colors.label} />
+        </View>
+        <View style={{ flex: 1, gap: 1 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 16, lineHeight: 21, fontWeight: "500", color: colors.label }}>
+              {device.name || "手机"}
+            </Text>
+            {own ? (
+              <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, borderCurve: "continuous", backgroundColor: colors.accentSoft }}>
+                <Text style={[type.caption2, { color: colors.accent, fontWeight: "600" }]}>本机</Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+            <LiveDot size={6} color={device.online ? colors.ok : colors.tertiaryLabel} live={device.online} />
+            <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+              {device.online ? "在线" : "不在线"} · {relativeTime(device.pairedAt)}配对
+            </Text>
+          </View>
+        </View>
+        <Pressable
+          onPress={onRemove}
+          accessibilityRole="button"
+          accessibilityLabel={`移除 ${device.name || "手机"}`}
+          hitSlop={10}
+          style={({ pressed }) => ({ paddingHorizontal: 6, paddingVertical: 6, opacity: pressed ? 0.5 : 1 })}
+        >
+          <Text style={[type.subhead, { color: colors.danger }]}>移除</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * How the computer is reached from outside its network (its gateway), and the
+ * phones paired with it. Any of them can be removed here: it then can't
+ * connect to this computer any more.
+ */
+function DevicesSection() {
+  const { link } = useConnection();
+  const online = useClient((state) => state.status === "online");
+  const [gateway, setGateway] = useState<GatewayStatus | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!online) return;
+    let cancelled = false;
+    link
+      .call("gateway.status", {})
+      .then((status) => !cancelled && setGateway(status))
+      .catch(() => {});
+    const off = link.on("gateway.changed", setGateway);
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [link, online]);
+
+  if (!gateway) return null;
+  const off = gateway.status === "off";
+  const up = gateway.status === "online";
+  const own = deviceIdentity().id;
+  const account = gateway.account ? (gateway.account.email ?? "已登录账号") : null;
+  const state = up ? "已连接" : gateway.status === "connecting" ? "正在连接…" : `连不上${gateway.error ? ` · ${gateway.error.message}` : ""}`;
+
+  const remove = (device: PairedDevice) => {
+    Alert.alert(`移除「${device.name || "手机"}」？`, "移除后这台手机将无法再连接这台电脑。", [
+      { text: "取消", style: "cancel" },
+      {
+        text: "移除",
+        style: "destructive",
+        onPress: () => {
+          setRemoving(device.id);
+          link
+            .call("devices.revoke", { deviceId: device.id })
+            // The host says so too (gateway.changed); this covers a host that doesn't.
+            .then(() => link.call("gateway.status", {}).then(setGateway))
+            .then(() => haptics.success())
+            .catch((reason: unknown) => {
+              haptics.error();
+              Alert.alert("移除失败", reason instanceof Error ? reason.message : String(reason));
+            })
+            .finally(() => setRemoving(null));
+        },
+      },
+    ]);
+  };
+
+  const heading = { fontSize: 15, lineHeight: 20, fontWeight: "600", color: colors.secondaryLabel, paddingHorizontal: 6 } as const;
+  const card = { backgroundColor: colors.card, borderRadius: 24, borderCurve: "continuous", paddingHorizontal: 16, paddingVertical: 2 } as const;
+  return (
+    <>
+      <View style={{ gap: 8 }}>
+        <Text style={heading}>网关</Text>
+        <View style={card}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11 }}>
+            <View
+              style={{ width: 32, height: 32, borderRadius: 10, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
+            >
+              <Icon sf="antenna.radiowaves.left.and.right" md="cell_tower" size={16} color={off ? colors.tertiaryLabel : colors.label} />
+            </View>
+            <View style={{ flex: 1, gap: 1 }}>
+              <Text numberOfLines={1} style={{ fontSize: 16, lineHeight: 21, fontWeight: "500", color: colors.label }}>
+                {off ? "未使用网关" : hostOf(gateway.url ?? "")}
+              </Text>
+              {off ? (
+                <Text style={[type.footnote, { color: colors.secondaryLabel }]}>只能在同一网络里直连这台电脑</Text>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                  <LiveDot size={6} color={up ? colors.ok : colors.tertiaryLabel} live={up} />
+                  <Text numberOfLines={2} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+                    {state}
+                    {account ? ` · ${account}` : ""}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+      </View>
+      <View style={{ gap: 8 }}>
+        <Text style={heading}>已配对的设备</Text>
+        <View style={card}>
+          {gateway.devices.length === 0 ? (
+            <Text style={[type.subhead, { color: colors.secondaryLabel, paddingVertical: 14 }]}>
+              {off ? "没有使用网关，所以没有配对的设备" : "还没有配对的设备"}
+            </Text>
+          ) : (
+            gateway.devices.map((device, index) => (
+              <View key={device.id} style={{ opacity: removing === device.id ? 0.4 : 1 }}>
+                <DeviceRow device={device} own={device.id === own} first={index === 0} onRemove={() => remove(device)} />
+              </View>
+            ))
+          )}
+        </View>
+      </View>
+    </>
   );
 }
 
@@ -324,6 +477,8 @@ export function ComputerScreen() {
             </Text>
           ) : null}
         </View>
+
+        {online ? <DevicesSection /> : null}
         </>
         ) : (
           <Welcome />

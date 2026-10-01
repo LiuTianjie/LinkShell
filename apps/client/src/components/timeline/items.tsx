@@ -1,4 +1,5 @@
 import type { TimelineItem } from "@linkshell/client-core";
+import * as Clipboard from "expo-clipboard";
 import { memo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { cubicBezier } from "react-native-reanimated";
@@ -9,6 +10,7 @@ import { type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
+import { useTimelineFork } from "./context";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
 
@@ -86,16 +88,55 @@ export const UserMessage = memo(function UserMessage({
   );
 });
 
-export const AgentMessage = memo(function AgentMessage({ item }: { item: Of<"agent"> }) {
+export const AgentMessage = memo(function AgentMessage({ item, last = false }: { item: Of<"agent">; last?: boolean }) {
   const hasText = item.text.trim().length > 0;
   if (!hasText && !item.attachments?.length) return null;
   return (
     <View style={{ gap: 8 }}>
       {hasText ? <Markdown text={item.text} streaming={item.streaming} /> : null}
       {item.attachments?.length ? <Attachments blocks={item.attachments} /> : null}
+      {last && hasText && !item.streaming ? <ReplyActions item={item} /> : null}
     </View>
   );
 });
+
+/** Under the reply that ends a turn: copy it, or fork the session from here. */
+function ReplyActions({ item }: { item: Of<"agent"> }) {
+  const fork = useTimelineFork();
+  const [copied, setCopied] = useState(false);
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: -7, marginTop: -4 }}>
+      <Pressable
+        onPress={() => {
+          void Clipboard.setStringAsync(item.text.trim());
+          haptics.success();
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1600);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="复制这条回复"
+        hitSlop={4}
+        style={({ pressed }) => ({ width: 32, height: 30, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
+      >
+        <Icon sf={copied ? "checkmark" : "doc.on.doc"} md={copied ? "check" : "content_copy"} size={14} color={copied ? colors.ok : colors.tertiaryLabel} />
+      </Pressable>
+      {fork ? (
+        <Pressable
+          onPress={() => {
+            haptics.selection();
+            fork(item.id);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="从这里分叉"
+          hitSlop={4}
+          style={({ pressed }) => ({ width: 32, height: 30, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
+        >
+          <Icon sf="arrow.triangle.branch" md="fork_right" size={14} color={colors.tertiaryLabel} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
 
 export const Thought = memo(function Thought({ item }: { item: Of<"thought"> }) {
   const [open, setOpen] = useState(false);

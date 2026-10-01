@@ -2,7 +2,7 @@ import type { AgentInfo } from "@linkshell/wire";
 import { router, useLocalSearchParams } from "expo-router";
 import Storage from "expo-sqlite/kv-store";
 import { useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AgentTile } from "@/components/agent-tile";
@@ -15,6 +15,8 @@ import { openTerminal, TerminalTile } from "@/components/terminal-row";
 import { AppMenu } from "@/components/app-menu";
 import { onDirectoryPicked } from "@/lib/directory-pick";
 import { haptics } from "@/lib/haptics";
+import { BranchTag } from "@/components/branch-tag";
+import { branchLabel, branchOf, useGitInfo } from "@/lib/worktree";
 import { agentLook, tierCopy } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
@@ -124,6 +126,11 @@ export function NewSessionScreen() {
       }),
     [],
   );
+  // A git repository can give the session a worktree of its own. Off each time; nothing is remembered.
+  const git = useGitInfo(cwd || undefined);
+  const branch = branchOf(git);
+  const [worktree, setWorktree] = useState(false);
+  useEffect(() => setWorktree(false), [cwd]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -159,7 +166,7 @@ export function NewSessionScreen() {
     }
     if (!selectedAgent) return;
     try {
-      const session = await createSession({ agent: selectedAgent.id, cwd: targetCwd });
+      const session = await createSession({ agent: selectedAgent.id, cwd: targetCwd, worktree: (worktree && !!git) || undefined });
       remember(selectedAgent.id);
       router.dismiss();
       openSession(session.id);
@@ -275,9 +282,12 @@ export function NewSessionScreen() {
             >
               <Icon sf="folder.fill" md="folder" size={20} color={colors.accent} />
               <View style={{ flex: 1, gap: 1 }}>
-                <Text numberOfLines={1} style={[type.body, { fontSize: 16, color: cwd ? colors.label : colors.tertiaryLabel, fontWeight: "600" }]}>
-                  {cwd ? baseName(cwd) : "选择项目"}
-                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Text numberOfLines={1} style={[type.body, { flexShrink: 1, fontSize: 16, color: cwd ? colors.label : colors.tertiaryLabel, fontWeight: "600" }]}>
+                    {cwd ? baseName(cwd) : "选择项目"}
+                  </Text>
+                  {branch ? <BranchTag branch={branch} size={13} max={20} /> : null}
+                </View>
                 {cwd ? (
                   <Text numberOfLines={1} style={[type.caption, { color: colors.tertiaryLabel }]}>
                     {shortPath(cwd)}
@@ -287,6 +297,39 @@ export function NewSessionScreen() {
               <Icon sf="chevron.up.chevron.down" md="unfold_more" size={13} color={colors.tertiaryLabel} weight="semibold" />
             </View>
           </AppMenu>
+          {git && !terminal ? (
+            <Pressable
+              onPress={() => {
+                haptics.selection();
+                setWorktree((value) => !value);
+              }}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: worktree }}
+              accessibilityLabel="在新的 worktree 里开始"
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                borderRadius: 18,
+                borderCurve: "continuous",
+                backgroundColor: colors.sheetCard,
+              }}
+            >
+              <Icon sf="arrow.triangle.branch" md="fork_right" size={18} color={worktree ? colors.accent : colors.secondaryLabel} />
+              <View style={{ flex: 1, gap: 1 }}>
+                <Text style={[type.subhead, { color: colors.label, fontWeight: "500" }]}>在新的 worktree 里开始</Text>
+                <Text style={[type.caption, { color: colors.secondaryLabel }]}>
+                  {branch ? `从 ${branchLabel(branch, 24)} 分出独立的目录和分支` : "独立的目录和分支，不影响当前工作区"}
+                  {git.dirty ? "；未提交的改动不会带过去" : ""}
+                </Text>
+              </View>
+              <View pointerEvents="none">
+                <Switch value={worktree} trackColor={{ true: colors.accent as string }} />
+              </View>
+            </Pressable>
+          ) : null}
         </View>
 
         <View style={{ gap: 10 }}>

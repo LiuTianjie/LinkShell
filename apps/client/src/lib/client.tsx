@@ -48,14 +48,16 @@ function fallbackComputer(): Computer {
 function createConnection(computer: Computer): Connection {
   const link =
     computer.kind === "direct"
-      ? new HostLink({ url: computer.url, createSocket })
+      ? new HostLink({ url: computer.url, createSocket, lazyImages: true })
       : // Through a gateway: an end-to-end encrypted channel that behaves like a WebSocket.
         new HostLink({
           url: `${computer.gateway}#${computer.machine.id}`,
           createSocket: () => new TunnelSocket(relayFor(computer.gateway), deviceIdentity(), computer.machine),
+          lazyImages: true,
         });
   const url = computer.kind === "direct" ? computer.url : computer.gateway;
-  const store = createClientStore(link, { newId: randomUUID });
+  // Pictures in history come as references and load when shown (`useImage`).
+  const store = createClientStore(link, { newId: randomUUID, lazyImages: true });
   // Paths render as ~/… with this computer's home, set before anything renders them.
   setHostHome(undefined);
   store.subscribe((state, previous) => {

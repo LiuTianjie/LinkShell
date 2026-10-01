@@ -1,10 +1,11 @@
 import type { ContentBlock } from "@linkshell/wire";
 import { Image } from "expo-image";
-import { memo, useState } from "react";
-import { Modal, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { memo, useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Modal, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useActions } from "@/lib/client";
 import { baseName } from "@/lib/format";
 import { openLink } from "@/lib/links";
 import { haptics } from "@/lib/haptics";
@@ -12,6 +13,7 @@ import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "../icon";
 import { PressableScale } from "../pressable-scale";
+import { useTimelineSession } from "./context";
 
 type ImageBlock = Extract<ContentBlock, { type: "image" }>;
 type LinkBlock = Extract<ContentBlock, { type: "resource_link" }>;
@@ -20,9 +22,81 @@ export function imageSource(block: ImageBlock): { uri: string } {
   return { uri: block.uri && !block.data ? block.uri : `data:${block.mimeType};base64,${block.data ?? ""}` };
 }
 
+/** A picture the host kept back: fetched from it when shown (`loadImage`). */
+const REFERENCE = /^linkshell-event:/;
+
+/** A row flung past unmounts before this long, and never asks the computer for its picture. */
+const FETCH_DELAY = 180;
+
+/** Pictures already asked for: a row that comes back shows its picture without that wait. */
+const requested = new Set<string>();
+
+/** Width ÷ height of pictures seen, so a row keeps its height when it comes back. */
+const ratios = new Map<string, number>();
+
+export interface LoadedImage {
+  /** Ready to draw; undefined while loading or after a failure. */
+  uri?: string;
+  failed: boolean;
+  retry: () => void;
+}
+
+/**
+ * What to draw for an image block. Pictures in history arrive as a reference
+ * and are fetched when the row mounts: the list is virtualized, so that is
+ * when they are about to be seen. Nothing loads a session's pictures up front.
+ */
+export function useImage(block: ImageBlock): LoadedImage {
+  const sessionId = useTimelineSession();
+  const { loadImage } = useActions();
+  const reference = sessionId && !block.data && block.uri && REFERENCE.test(block.uri) ? block.uri : undefined;
+  const key = reference ? `${sessionId} ${reference}` : undefined;
+  const [loaded, setLoaded] = useState<{ key: string; uri: string } | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!sessionId || !reference || !key) return;
+    let cancelled = false;
+    const load = () => {
+      requested.add(key);
+      loadImage(sessionId, reference).then(
+        (uri) => {
+          if (!cancelled) setLoaded({ key, uri });
+        },
+        () => {
+          requested.delete(key);
+          if (!cancelled) setFailed(key);
+        },
+      );
+    };
+    if (requested.has(key)) {
+      load();
+      return () => {
+        cancelled = true;
+      };
+    }
+    const timer = setTimeout(load, FETCH_DELAY);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [sessionId, reference, key, loadImage, attempt]);
+
+  const retry = useCallback(() => {
+    setFailed(null);
+    setAttempt((value) => value + 1);
+  }, []);
+
+  if (!key) return { uri: imageSource(block).uri, failed: false, retry };
+  // State from another picture (a recycled row) doesn't count.
+  return { uri: loaded?.key === key ? loaded.uri : undefined, failed: failed === key, retry };
+}
+
 /** Pinch, pan and double-tap zoom; a downward swipe at 1× dismisses. */
 function ZoomableImage({ block, onClose }: { block: ImageBlock; onClose: () => void }) {
   const { width, height } = useWindowDimensions();
+  const image = useImage(block);
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const x = useSharedValue(0);
@@ -84,10 +158,13 @@ function ZoomableImage({ block, onClose }: { block: ImageBlock; onClose: () => v
       savedY.value = toY;
     });
 
+  // Only these two cross into the gesture worklet, not the picture itself.
+  const { failed, retry } = image;
   const singleTap = Gesture.Tap()
     .requireExternalGestureToFail(doubleTap)
     .onEnd(() => {
-      if (savedScale.value <= 1) runOnJS(onClose)();
+      if (failed) runOnJS(retry)();
+      else if (savedScale.value <= 1) runOnJS(onClose)();
     });
 
   const imageStyle = useAnimatedStyle(() => ({
@@ -101,8 +178,17 @@ function ZoomableImage({ block, onClose }: { block: ImageBlock; onClose: () => v
     <GestureDetector gesture={Gesture.Simultaneous(pinch, pan, Gesture.Exclusive(doubleTap, singleTap))}>
       <View style={{ flex: 1 }}>
         <Animated.View style={[{ ...StyleSheet.absoluteFill, backgroundColor: "#000000" }, backdropStyle]} />
-        <Animated.View style={[{ width, height }, imageStyle]}>
-          <Image source={imageSource(block)} style={{ width, height }} contentFit="contain" transition={180} />
+        <Animated.View style={[{ width, height, alignItems: "center", justifyContent: "center" }, imageStyle]}>
+          {image.uri ? (
+            <Image source={{ uri: image.uri }} style={{ width, height }} contentFit="contain" transition={180} />
+          ) : image.failed ? (
+            <View style={{ alignItems: "center", gap: 10 }}>
+              <Icon sf="arrow.clockwise" md="refresh" size={22} color="#ffffff" />
+              <Text style={[type.subhead, { color: "#ffffff" }]}>加载失败，点按重试</Text>
+            </View>
+          ) : (
+            <ActivityIndicator color="#ffffff" />
+          )}
         </Animated.View>
       </View>
     </GestureDetector>
@@ -154,22 +240,66 @@ function Viewer({ block, onClose }: { block: ImageBlock; onClose: () => void }) 
   );
 }
 
-/** A tappable thumbnail that opens the full-screen viewer. */
-export const ImageThumb = memo(function ImageThumb({ block, size }: { block: ImageBlock; size: number | { width: number; height: number } }) {
+/** A tappable thumbnail that opens the full-screen viewer. Its frame is the placeholder while the picture loads. */
+export const ImageThumb = memo(function ImageThumb({
+  block,
+  size,
+  onRatio,
+}: {
+  block: ImageBlock;
+  size: number | { width: number; height: number };
+  /** Reports the picture's width ÷ height once it has loaded. */
+  onRatio?: (ratio: number) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const image = useImage(block);
   const frame = typeof size === "number" ? { width: size, height: size } : size;
   return (
     <>
       <PressableScale
         onPress={() => {
           haptics.selection();
-          setOpen(true);
+          // The viewer loads the picture itself, so it opens on one that isn't here yet.
+          if (image.failed) image.retry();
+          else setOpen(true);
         }}
         accessibilityRole="imagebutton"
-        accessibilityLabel="查看图片"
+        accessibilityLabel={image.failed ? "图片加载失败，点按重试" : "查看图片"}
       >
-        <View style={{ ...frame, borderRadius: 14, borderCurve: "continuous", overflow: "hidden", backgroundColor: colors.fill }}>
-          <Image source={imageSource(block)} style={frame} contentFit="cover" transition={160} />
+        <View
+          style={{
+            ...frame,
+            borderRadius: 14,
+            borderCurve: "continuous",
+            overflow: "hidden",
+            backgroundColor: colors.fill,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {image.uri ? (
+            <Image
+              source={{ uri: image.uri }}
+              style={frame}
+              contentFit="cover"
+              transition={160}
+              onLoad={
+                onRatio
+                  ? (event) => {
+                      const { width: w, height: h } = event.source;
+                      if (w > 0 && h > 0) onRatio(w / h);
+                    }
+                  : undefined
+              }
+            />
+          ) : image.failed ? (
+            <View style={{ alignItems: "center", gap: 4, paddingHorizontal: 6 }}>
+              <Icon sf="arrow.clockwise" md="refresh" size={15} color={colors.secondaryLabel} />
+              <Text style={[type.caption, { color: colors.secondaryLabel, textAlign: "center" }]}>加载失败，点按重试</Text>
+            </View>
+          ) : (
+            <ActivityIndicator size="small" color={colors.tertiaryLabel} />
+          )}
         </View>
       </PressableScale>
       {open ? <Viewer block={block} onClose={() => setOpen(false)} /> : null}
@@ -197,7 +327,7 @@ export const LinkChip = memo(function LinkChip({ block, onBubble = false }: { bl
   const icon = skill
     ? ({ sf: "wand.and.stars", md: "auto_fix_high" } as const)
     : block.kind === "agent"
-      ? ({ sf: "person.2", md: "group" } as const)
+      ? ({ sf: "square.stack.3d.up", md: "layers" } as const)
       : linkIcon(block.uri);
   const tint = skill ? colors.accent : colors.secondaryLabel;
   return (
@@ -253,7 +383,16 @@ export function Attachments({ blocks, align = "start", thumb = 120 }: { blocks: 
 
 /** One image keeps its own aspect ratio, bounded to a comfortable size. */
 function SingleImage({ block, maxWidth: widest, maxHeight }: { block: ImageBlock; maxWidth: number; maxHeight: number }) {
-  const [ratio, setRatio] = useState(4 / 3);
+  const sessionId = useTimelineSession();
+  const known = sessionId && !block.data && block.uri ? `${sessionId} ${block.uri}` : undefined;
+  const [ratio, setRatio] = useState(() => (known ? ratios.get(known) : undefined) ?? 4 / 3);
+  const onRatio = useCallback(
+    (value: number) => {
+      if (known) ratios.set(known, value);
+      setRatio(value);
+    },
+    [known],
+  );
   const { width: screen } = useWindowDimensions();
   const maxWidth = Math.min(screen * 0.66, widest);
   // Fit inside maxWidth × maxHeight, but never narrower than a comfortable tap target.
@@ -261,15 +400,7 @@ function SingleImage({ block, maxWidth: widest, maxHeight }: { block: ImageBlock
   const height = Math.min(width / ratio, maxHeight);
   return (
     <View>
-      <ImageThumb block={block} size={{ width, height }} />
-      <Image
-        source={imageSource(block)}
-        style={{ width: 1, height: 1, position: "absolute", opacity: 0 }}
-        onLoad={(event) => {
-          const { width: w, height: h } = event.source;
-          if (w > 0 && h > 0) setRatio(w / h);
-        }}
-      />
+      <ImageThumb block={block} size={{ width, height }} onRatio={onRatio} />
     </View>
   );
 }

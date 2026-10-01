@@ -4,6 +4,7 @@ import { memo, useRef } from "react";
 import { Platform, StyleSheet, Text, View, type ColorValue } from "react-native";
 import { activityText, plainPreview, sessionTitle } from "@/lib/describe";
 import { baseName, relativeTime } from "@/lib/format";
+import { BranchTag } from "./branch-tag";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
@@ -80,8 +81,10 @@ export function ListRow({
   title,
   titleMono = false,
   time,
+  titleTag,
   accessory,
   project,
+  branch,
   detail,
   detailColor = colors.secondaryLabel,
   warn = false,
@@ -95,8 +98,12 @@ export function ListRow({
   title: string;
   titleMono?: boolean;
   time: string;
+  /** Sits right after the title (a project's branch). */
+  titleTag?: React.ReactNode;
   accessory?: React.ReactNode;
   project?: string;
+  /** The worktree branch the session works in, after the project. */
+  branch?: string;
   detail?: string;
   detailColor?: ColorValue;
   warn?: boolean;
@@ -139,7 +146,7 @@ export function ListRow({
             <Text
               numberOfLines={1}
               style={{
-                flex: 1,
+                ...(titleTag ? { flexShrink: 1 } : { flex: 1 }),
                 fontSize: titleMono ? 14.5 : 16,
                 lineHeight: 21,
                 fontWeight: titleMono ? "400" : "600",
@@ -149,16 +156,29 @@ export function ListRow({
             >
               {title}
             </Text>
+            {titleTag ? <View style={{ flex: 1, flexDirection: "row", minWidth: 48 }}>{titleTag}</View> : null}
             {accessory}
             <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{time}</Text>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingLeft: ICON + 8 }}>
             {warn ? <Icon sf="exclamationmark.triangle.fill" md="warning" size={12} color={colors.danger} /> : null}
-            <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, lineHeight: 19, color: detailColor }}>
-              {project ? <Text style={{ color: colors.secondaryLabel, fontWeight: "500" }}>{project}</Text> : null}
-              {project && detail ? <Text style={{ color: colors.tertiaryLabel }}>{" · "}</Text> : null}
-              {detail}
-            </Text>
+            {branch ? (
+              // Project, then the branch as a chip: on the line the project already has.
+              <>
+                {project ? <Text style={{ fontSize: 14, lineHeight: 19, color: colors.secondaryLabel, fontWeight: "500" }}>{project}</Text> : null}
+                <BranchTag branch={branch} size={12} own />
+                <Text numberOfLines={1} style={{ flex: 1, minWidth: 40, fontSize: 14, lineHeight: 19, color: detailColor }}>
+                  {detail ? <Text style={{ color: colors.tertiaryLabel }}>{"· "}</Text> : null}
+                  {detail}
+                </Text>
+              </>
+            ) : (
+              <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, lineHeight: 19, color: detailColor }}>
+                {project ? <Text style={{ color: colors.secondaryLabel, fontWeight: "500" }}>{project}</Text> : null}
+                {project && detail ? <Text style={{ color: colors.tertiaryLabel }}>{" · "}</Text> : null}
+                {detail}
+              </Text>
+            )}
           </View>
         </View>
         {bottom ? null : (
@@ -223,7 +243,9 @@ export const SessionRow = memo(function SessionRow({
   const look = agentLook(session.agent);
   const running = session.state === "running";
   const failed = session.state === "error";
-  const project = showProject ? baseName(session.cwd) : undefined;
+  // A session in a worktree belongs to the project the worktree was made from.
+  const project = showProject ? baseName(session.worktree?.source ?? session.cwd) : undefined;
+  const branch = session.worktree?.branch;
   const title = sessionTitle(session);
   const actions = useActions();
   const menu: RowMenuItem[] = [
@@ -251,7 +273,8 @@ export const SessionRow = memo(function SessionRow({
       time={relativeTime(session.updatedAt, now)}
       accessory={<DriverGlyph session={session} />}
       project={project}
-      detail={detail ?? (project ? undefined : look.name)}
+      branch={branch}
+      detail={detail ?? (project || branch ? undefined : look.name)}
       detailColor={running ? colors.running : failed ? colors.danger : colors.secondaryLabel}
       warn={failed}
       position={position}

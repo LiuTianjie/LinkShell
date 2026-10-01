@@ -1,14 +1,15 @@
+import { RpcError } from "@linkshell/wire";
 import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, ScrollView, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, FlatList, Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HeaderActions } from "@/components/header-actions";
-import { Icon } from "@/components/icon";
 import { Markdown } from "@/components/markdown";
+import { EmptyState, LoadingState } from "@/components/state-views";
 import { useConnection } from "@/lib/client";
-import { baseName, relativeTime, shortPath } from "@/lib/format";
+import { baseName, fileSize, relativeTime, shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { LinkBase } from "@/lib/links";
 import { colors } from "@/theme/colors";
@@ -22,29 +23,74 @@ type Loaded = {
   text?: string;
   data?: string;
   mimeType?: string;
+  /** Text: more of the file follows what is loaded. */
   truncated: boolean;
+  nextOffset?: number;
 };
 
 const MARKDOWN = /\.(md|mdx|markdown)$/i;
 const LINE_HEIGHT = 19;
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+/** Text comes a part at a time, and no more of it than this is ever on screen (or in memory). */
+const PART = 262_144;
+const MAX_TEXT = 2 * 1024 * 1024;
+
+/** Whether the viewer has taken all it will of a file that goes on. */
+function atLimit(file: Loaded): boolean {
+  // A part can end a few bytes early, on a whole character.
+  return file.truncated && MAX_TEXT - (file.nextOffset ?? MAX_TEXT) < 1024;
+}
+
+/** The end of a file that goes on: load the next part, or say why there is no more. */
+function MoreRow({ file, state, onPress }: { file: Loaded; state: "idle" | "loading" | "failed"; onPress: () => void }) {
+  const { width } = useWindowDimensions();
+  if (!file.truncated) return null;
+  const note = { color: colors.secondaryLabel, textAlign: "center" } as const;
+  if (atLimit(file)) {
+    return (
+      // As wide as the screen, so it stays in view beside lines that run past it.
+      <View style={{ width, paddingHorizontal: 16, paddingVertical: 14 }}>
+        <Text style={[type.footnote, note]}>文件较大，只显示前 2 MB（共 {fileSize(file.size)}）</Text>
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      disabled={state === "loading"}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="继续加载"
+      style={{ width, alignItems: "center", gap: 3, paddingHorizontal: 16, paddingVertical: 14 }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 7, minHeight: 20 }}>
+        {state === "loading" ? <ActivityIndicator size="small" color={colors.secondaryLabel} /> : null}
+        <Text style={[type.subhead, { color: state === "failed" ? colors.danger : colors.accent, fontWeight: "600" }]}>
+          {state === "loading" ? "正在加载…" : state === "failed" ? "加载失败，点按重试" : "继续加载"}
+        </Text>
+      </View>
+      <Text style={[type.caption, note, { fontVariant: ["tabular-nums"] }]}>
+        已显示 {fileSize(file.nextOffset ?? 0)}，共 {fileSize(file.size)}
+      </Text>
+    </Pressable>
+  );
 }
 
 /** Code and logs: line numbers, no wrapping, the linked line highlighted and scrolled to. */
-function CodeView({ text, line, wrap }: { text: string; line?: number; wrap: boolean }) {
+function CodeView({ text, line, wrap, footer }: { text: string; line?: number; wrap: boolean; footer?: React.ReactElement }) {
   const insets = useSafeAreaInsets();
   const lines = useMemo(() => text.replace(/\n$/, "").split("\n"), [text]);
   const gutter = String(lines.length).length * 8 + 18;
   const list = useRef<FlatList<string>>(null);
   const longest = useMemo(() => lines.reduce((max, l) => Math.max(max, l.length), 0), [lines]);
 
+  // Once: a part loaded later mustn't pull the reader back to the linked line.
+  const shown = useRef(false);
   useEffect(() => {
-    if (!line || line > lines.length) return;
-    const timer = setTimeout(() => list.current?.scrollToIndex({ index: Math.max(line - 6, 0), animated: false }), 60);
+    if (!line || line > lines.length || shown.current) return;
+    const timer = setTimeout(() => {
+      shown.current = true;
+      list.current?.scrollToIndex({ index: Math.max(line - 6, 0), animated: false });
+    }, 60);
     return () => clearTimeout(timer);
   }, [line, lines.length]);
 
@@ -59,6 +105,7 @@ function CodeView({ text, line, wrap }: { text: string; line?: number; wrap: boo
         windowSize={15}
         contentContainerStyle={{ paddingVertical: 10, paddingBottom: insets.bottom + 24 }}
         style={{ minWidth: "100%" }}
+        ListFooterComponent={footer}
         renderItem={({ item, index }) => {
           const current = index + 1 === line;
           return (
@@ -105,30 +152,66 @@ function CodeView({ text, line, wrap }: { text: string; line?: number; wrap: boo
 /** Prose-like files wrap; code keeps its lines. */
 const WRAPS = /\.(log|txt|out|err|csv|tsv|rst|adoc|org)$|^[^.]+$/i;
 
-/** A file on the computer, opened from a link in a message. */
+/** A file on the computer, opened from a link in a message or from the project's files. */
 export function FileScreen() {
   const { path, line } = useLocalSearchParams<{ path: string; line?: string }>();
   const { link } = useConnection();
   const insets = useSafeAreaInsets();
   const [file, setFile] = useState<Loaded | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; tooLarge: boolean } | null>(null);
+  const [more, setMore] = useState<"idle" | "loading" | "failed">("idle");
   const target = line ? Number(line) : undefined;
   const [wrap, setWrap] = useState(() => WRAPS.test(baseName(path)));
+  const open = useRef(true);
 
   useEffect(() => {
-    let cancelled = false;
+    open.current = true;
+    // (The screen can be pointed at another file without being left.)
+    setFile(null);
+    setError(null);
+    setMore("idle");
     link
-      .call("fs.read", { path }, 20_000)
-      .then((result) => !cancelled && setFile(result))
-      .catch((reason: unknown) => !cancelled && setError(reason instanceof Error ? reason.message : String(reason)));
+      .call("fs.read", { path, maxBytes: PART }, 20_000)
+      .then((result) => open.current && setFile(result))
+      .catch((reason: unknown) => {
+        if (!open.current) return;
+        // Too big for a phone: the computer says so, with the size.
+        const tooLarge = reason instanceof RpcError && reason.appCode === "too_large";
+        setError({ message: reason instanceof Error ? reason.message : String(reason), tooLarge });
+      });
     return () => {
-      cancelled = true;
+      open.current = false;
     };
   }, [link, path]);
+
+  const loadMore = useCallback(() => {
+    if (!file || file.kind !== "text" || !file.truncated || file.nextOffset === undefined || atLimit(file) || more === "loading") return;
+    const offset = file.nextOffset;
+    setMore("loading");
+    link.call("fs.read", { path, offset, maxBytes: Math.min(PART, MAX_TEXT - offset) }, 20_000).then(
+      (part) => {
+        if (!open.current) return;
+        setFile((current) =>
+          current && current.nextOffset === offset
+            ? { ...current, text: (current.text ?? "") + (part.text ?? ""), truncated: part.truncated, nextOffset: part.nextOffset }
+            : current,
+        );
+        setMore("idle");
+      },
+      () => open.current && setMore("failed"),
+    );
+  }, [file, link, more, path]);
+
+  // A link to a line further down than the first part reaches: keep loading up to it.
+  const lineCount = useMemo(() => (target && file?.text ? file.text.split("\n").length : 0), [target, file?.text]);
+  useEffect(() => {
+    if (target && more === "idle" && lineCount > 0 && lineCount <= target) loadMore();
+  }, [target, more, lineCount, loadMore]);
 
   const name = baseName(path);
   const markdown = MARKDOWN.test(path);
   const directory = path.slice(0, path.length - name.length).replace(/\/$/, "");
+  const footer = file ? <MoreRow file={file} state={more} onPress={loadMore} /> : undefined;
 
   return (
     <View style={{ flex: 1, backgroundColor: markdown ? colors.plain : colors.code }}>
@@ -141,7 +224,7 @@ export function FileScreen() {
                 {name}
               </Text>
               <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>
-                {file ? `${formatSize(file.size)} · ${relativeTime(file.modifiedAt)}` : shortPath(directory)}
+                {file ? `${fileSize(file.size)} · ${relativeTime(file.modifiedAt)}` : shortPath(directory)}
               </Text>
             </View>
           ),
@@ -186,39 +269,32 @@ export function FileScreen() {
         ]}
       />
       {error ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 10 }}>
-          <Icon sf="doc.questionmark" md="draft" size={36} color={colors.tertiaryLabel} />
-          <Text style={[type.headline, { color: colors.label }]}>打不开这个文件</Text>
-          <Text selectable style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>
-            {error}
-          </Text>
+        <View style={{ flex: 1, justifyContent: "center" }}>
+          {error.tooLarge ? (
+            <EmptyState icon={{ sf: "doc.badge.ellipsis", md: "draft" }} title={error.message} message="可以在电脑上打开它。" />
+          ) : (
+            <EmptyState icon={{ sf: "doc.questionmark", md: "draft" }} title="打不开这个文件" message={error.message} />
+          )}
         </View>
       ) : !file ? (
-        <ActivityIndicator style={{ marginTop: 48 }} color={colors.secondaryLabel} />
+        <LoadingState />
       ) : file.kind === "image" ? (
         <Image source={{ uri: `data:${file.mimeType};base64,${file.data}` }} style={{ flex: 1, margin: 16 }} contentFit="contain" />
       ) : file.kind === "binary" ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 10 }}>
-          <Icon sf="doc" md="description" size={36} color={colors.tertiaryLabel} />
-          <Text style={[type.subhead, { color: colors.secondaryLabel }]}>这种文件没法在手机上预览</Text>
+        <View style={{ flex: 1, justifyContent: "center" }}>
+          <EmptyState icon={{ sf: "doc", md: "description" }} title="这是二进制文件，无法预览" message={fileSize(file.size)} />
         </View>
+      ) : markdown ? (
+        <LinkBase value={directory}>
+          <ScrollView contentContainerStyle={{ paddingVertical: 18, paddingBottom: insets.bottom + 32 }}>
+            <View style={{ paddingHorizontal: 18 }}>
+              <Markdown text={file.text ?? ""} />
+            </View>
+            {footer}
+          </ScrollView>
+        </LinkBase>
       ) : (
-        <View style={{ flex: 1 }}>
-          {file.truncated ? (
-            <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: colors.fill }]}>
-              文件较大，只显示了前 {formatSize(file.text?.length ?? 0)}
-            </Text>
-          ) : null}
-          {markdown ? (
-            <LinkBase value={directory}>
-              <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 32 }}>
-                <Markdown text={file.text ?? ""} />
-              </ScrollView>
-            </LinkBase>
-          ) : (
-            <CodeView text={file.text ?? ""} line={target} wrap={wrap} />
-          )}
-        </View>
+        <CodeView text={file.text ?? ""} line={target} wrap={wrap} footer={footer} />
       )}
     </View>
   );

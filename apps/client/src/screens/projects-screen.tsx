@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import { useMemo, useState } from "react";
 import { ScrollView, View } from "react-native";
 import { ConnectionBanner } from "@/components/connection-banner";
+import { BranchTag } from "@/components/branch-tag";
 import { Icon } from "@/components/icon";
 import { ListRow, positionOf, type RowPosition } from "@/components/session-row";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
@@ -20,6 +21,7 @@ function ProjectRow({ project, position, now }: { project: ProjectSummary; posit
     <ListRow
       leading={<Icon sf="folder.fill" md="folder" size={20} color={colors.accent} />}
       title={project.name}
+      titleTag={project.branch ? <BranchTag branch={project.branch} size={13} max={20} /> : undefined}
       time={relativeTime(project.lastActiveAt, now)}
       detail={`${shortPath(project.cwd)} · ${project.sessionCount} 个会话`}
       position={position}
