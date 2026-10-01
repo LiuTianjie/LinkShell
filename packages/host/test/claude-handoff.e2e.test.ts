@@ -429,6 +429,39 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     expect(p.agentTexts(desk.id)).toEqual(["echo: first", "app done", "echo: from phone", "app again"]);
   }, 20_000);
 
+  it("opened in the middle of the computer's turn: what is under way keeps its own time, and what Claude writes again after compacting isn't shown again", async () => {
+    const e = makeEnv();
+    const nativeId = randomUUID();
+    const dir = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"));
+    mkdirSync(dir, { recursive: true });
+    const transcript = join(dir, `${nativeId}.jsonl`);
+    const began = Date.now() - 10 * 60_000;
+    const entry = (type: string, uuid: string, at: number, rest: Record<string, unknown>) =>
+      JSON.stringify({ type, uuid, isSidechain: false, sessionId: nativeId, cwd: e.workDir, entrypoint: "cli", timestamp: new Date(at).toISOString(), ...rest }) + "\n";
+    const ask = entry("user", "u1", began, { message: { role: "user", content: "run the long build" } });
+    const call = entry("assistant", "a1", began + 60_000, {
+      message: { id: "msg_1", role: "assistant", stop_reason: "tool_use", content: [{ type: "tool_use", id: "toolu_build", name: "Bash", input: { command: "make all" } }] },
+    });
+    writeFileSync(transcript, ask + call);
+    const host = await boot(e, 60_000, 100);
+    const p = await phone(host);
+    await host.hub.refreshDiscovery();
+    const id = `claude:${nativeId}`;
+    await p.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+    const calls = () => p.of(id).filter((ev) => ev.update.sessionUpdate === "tool_call");
+    await waitFor(() => calls().length === 1);
+    // The command has been running for nine minutes, not since the phone looked.
+    expect(Math.abs(calls()[0]!.ts - (began + 60_000))).toBeLessThan(1000);
+    expect(host.hub.getSession(id).state).toBe("running");
+
+    // Claude compacts and writes what it kept again, then goes on.
+    appendFileSync(transcript, entry("system", "b1", Date.now(), { subtype: "compact_boundary", compactMetadata: { trigger: "auto", preTokens: 9, postTokens: 1 } }) + ask + call);
+    appendFileSync(transcript, entry("user", "r1", Date.now(), { message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_build", content: "built" }] } }));
+    await waitFor(() => p.of(id).some((ev) => ev.update.sessionUpdate === "tool_call_update" && ev.update.status === "completed"));
+    expect(calls().map((ev) => (ev.update as { toolCallId: string }).toolCallId)).toEqual(["toolu_build", expect.stringMatching(/^compact:/)]);
+    expect(p.userTexts(id)).toEqual(["run the long build"]);
+  }, 20_000);
+
   it("starts a Claude session from the phone and hands it to the desktop", async () => {
     const e = makeEnv();
     const host = await boot(e);

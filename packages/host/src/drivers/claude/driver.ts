@@ -229,7 +229,7 @@ export class ClaudeDriver extends AcpDriver {
       const working = turnInProgress(path, this.busyWindowMs);
       for (const update of underway) {
         const call = (update as { parentToolCallId?: string; toolCallId?: string }).parentToolCallId ?? (update as { toolCallId?: string }).toolCallId;
-        if (working || (call && transcript.agents.has(call))) this.host?.update(this.id, nativeId, update);
+        if (working || (call && transcript.agents.has(call))) this.host?.update(this.id, nativeId, update, undefined, transcriptTimes.get(update));
       }
       offset = transcript.size;
       this.backgroundAgents.set(nativeId, transcript.agents);

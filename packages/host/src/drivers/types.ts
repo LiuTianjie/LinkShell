@@ -50,8 +50,12 @@ export interface ForkOptions {
 export interface DriverHost {
   /** A session was created or changed outside of any client request (e.g. in the desktop TUI). */
   sessionSeen(agent: string, session: DiscoveredSession): void;
-  /** A live update for an attached session. `itemId` marks the native item it completes, if any. */
-  update(agent: string, nativeId: string, update: SessionUpdate, itemId?: string): void;
+  /**
+   * A live update for an attached session. `itemId` marks the native item it
+   * completes, if any; `ts` is when it happened, when that isn't now (what was
+   * already under way when the session was opened).
+   */
+  update(agent: string, nativeId: string, update: SessionUpdate, itemId?: string, ts?: number): void;
   /** Asks the host to attach (import history, then follow live) — e.g. a thread the TUI just opened. */
   follow(agent: string, nativeId: string): Promise<void>;
   /** The driver lost its live connection to a session; the host re-attaches on next use. */

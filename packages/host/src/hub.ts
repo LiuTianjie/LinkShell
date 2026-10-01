@@ -105,7 +105,7 @@ interface LiveSession {
   attached: boolean;
   attaching?: Promise<void>;
   /** Live updates that arrive while native history is being imported. */
-  buffer?: { update: SessionUpdate; itemId?: string }[];
+  buffer?: { update: SessionUpdate; itemId?: string; ts?: number }[];
   subscribers: Set<Subscriber>;
   /** Streaming agent text per message, for the list preview. */
   messageText: Map<string, string>;
@@ -164,7 +164,7 @@ export class SessionHub {
 
   readonly driverHost: DriverHost = {
     sessionSeen: (agent, session) => this.recordDiscovered(agent, session),
-    update: (agent, nativeId, update, itemId) => this.ingest(sessionIdFor(agent, nativeId), update, itemId),
+    update: (agent, nativeId, update, itemId, ts) => this.ingest(sessionIdFor(agent, nativeId), update, itemId, ts),
     follow: (agent, nativeId) => {
       const sessionId = sessionIdFor(agent, nativeId);
       if (!this.store.getSession(sessionId)) return Promise.reject(new Error(`unknown session ${sessionId}`));
@@ -1055,10 +1055,10 @@ export class SessionHub {
       } finally {
         const buffered = live.buffer ?? [];
         live.buffer = undefined;
-        for (const { update, itemId } of buffered) {
+        for (const { update, itemId, ts } of buffered) {
           // History already covered this item; skip its completion to avoid a duplicate.
           if (itemId && this.store.isItemLogged(sessionId, itemId)) continue;
-          this.commit(sessionId, update, itemId);
+          this.commit(sessionId, update, itemId, ts);
         }
         live.attaching = undefined;
       }
@@ -1100,17 +1100,17 @@ export class SessionHub {
     if (created || changed) this.emitSummary(summary);
   }
 
-  private ingest(sessionId: string, update: SessionUpdate, itemId?: string): void {
+  private ingest(sessionId: string, update: SessionUpdate, itemId?: string, ts?: number): void {
     if (!this.store.getSession(sessionId)) {
       this.log(`[hub] dropping update for unknown session ${sessionId}`);
       return;
     }
     const live = this.liveFor(sessionId);
     if (live.buffer) {
-      live.buffer.push({ update, itemId });
+      live.buffer.push({ update, itemId, ts });
       return;
     }
-    this.commit(sessionId, update, itemId);
+    this.commit(sessionId, update, itemId, ts);
   }
 
   private commit(sessionId: string, update: SessionUpdate, itemId?: string, ts?: number): void {
