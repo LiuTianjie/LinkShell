@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError } from "@linkshell/wire";
 import { closeInputApp, hostAccess, inputApp, InputControl } from "./input.js";
+import { LADDER, Pacer, RELAY_LEVEL } from "./screen-pacer.js";
 import { viewerPage } from "./screen-viewer.js";
 
 // Viewing the computer's screen from the phone. The host serves a small
@@ -26,16 +27,6 @@ export interface Display {
   index: number;
   name: string;
 }
-
-/**
- * How the picture is sent. `full` when it goes straight to the device; `low`
- * when it is relayed by a gateway, which should carry messages rather than video.
- */
-const PROFILES = {
-  full: { fps: 20, width: 1600, bitrate: "3M", ceiling: "4M" },
-  low: { fps: 12, width: 1280, bitrate: "900k", ceiling: "1300k" },
-} as const;
-export type ScreenProfile = keyof typeof PROFILES;
 
 async function hasFfmpeg(): Promise<boolean> {
   return run("ffmpeg", ["-hide_banner", "-version"], { timeout: 5000 }).then(
@@ -67,8 +58,16 @@ export interface ScreenAccess {
 
 interface CaptureEvents {
   data(chunk: Buffer): void;
-  /** Over; with words for the viewer when it ended for a reason they can do something about. */
+  /** Over, and not because it was ended here; with words for the viewer when they can do something about it. */
   exit(message?: string): void;
+}
+
+/** A capture under way: how to end it, and when it has gone. */
+interface Running {
+  end(): void;
+  gone: Promise<void>;
+  /** Whose it is. */
+  on: CaptureEvents;
 }
 
 /** A display to capture, and which of the system's displays it is (ffmpeg's "Capture screen N" is the Nth active one). */
@@ -90,8 +89,9 @@ async function listDisplays(): Promise<Capturable[]> {
   return displays;
 }
 
-export function captureArgs(display: number, quality: ScreenProfile = "full"): string[] {
-  const profile = PROFILES[quality];
+/** The capture for one rung of the ladder (see `screen-pacer.ts`): 0 is the best picture. */
+export function captureArgs(display: number, level = 0): string[] {
+  const profile = LADDER[Math.min(Math.max(level, 0), LADDER.length - 1)]!;
   const input =
     process.platform === "darwin"
       ? ["-f", "avfoundation", "-capture_cursor", "1", "-framerate", String(profile.fps), "-i", `${display}:none`]
@@ -113,8 +113,9 @@ export function captureArgs(display: number, quality: ScreenProfile = "full"): s
     // ProMotion display): the frames are dropped here, before the encoder and the network pay for them.
     `fps=${profile.fps},scale='min(${profile.width},iw)':-2,format=yuv420p`,
     ...encode,
+    // A keyframe a second: a viewer that fell behind is back on the live picture within one.
     "-g",
-    String(profile.fps * 2),
+    String(profile.fps),
     "-bf",
     "0",
     // An access-unit delimiter before every frame, so the stream splits into frames cleanly.
@@ -215,8 +216,13 @@ export class ScreenShare {
   private token = "";
   private displays: Capturable[] = [];
   private readonly captures = new Set<ChildProcess>();
-  /** Captures the app runs for this host: each one's way to end it. */
-  private readonly stops = new Set<() => void>();
+  /**
+   * The capture that has the screen. The system gives it to one at a time, and
+   * one started while another still holds it never gets a frame, even after
+   * the other has gone: the next starts once this one has.
+   */
+  private holder?: Running;
+  private turn: Promise<unknown> = Promise.resolve();
   private readonly controls = new Set<InputControl>();
 
   constructor(private readonly log: (message: string) => void) {
@@ -251,8 +257,9 @@ export class ScreenShare {
         socket.destroy();
         return;
       }
-      const quality: ScreenProfile = url.searchParams.get("q") === "low" ? "low" : "full";
-      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), quality));
+      // "low": the viewer is reached through a gateway, which should carry messages rather than video.
+      const relayed = url.searchParams.get("q") === "low";
+      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed));
     });
     this.server = server;
     return new Promise((resolve, reject) => {
@@ -288,10 +295,18 @@ export class ScreenShare {
     }
   }
 
-  /** Starts a capture where it may record; resolves to the way to end it. */
-  private async capture(index: number, quality: ScreenProfile, on: CaptureEvents): Promise<() => void> {
-    const args = captureArgs(index, quality);
+  /** Starts a capture where it may record. Undefined when it may not: the viewer has been told why. */
+  private async capture(index: number, level: number, on: CaptureEvents): Promise<Running | undefined> {
+    const args = captureArgs(index, level);
+    let ended = false;
+    let leave = () => {};
+    const gone = new Promise<void>((resolve) => (leave = resolve));
+    const data = (chunk: Buffer) => {
+      if (!ended) on.data(chunk);
+    };
     const finished = (code: number, errors: string) => {
+      leave();
+      if (ended) return;
       if (code) this.log(`[screen] capture exited ${code}: ${errors.trim()}`);
       on.exit(!code ? undefined : /permission|not authorized|denied/i.test(errors) ? notAllowed("") : "屏幕捕获失败");
     };
@@ -302,13 +317,16 @@ export class ScreenShare {
         // Someone may be at the computer: the system's question, and its settings, come up there.
         void app.ask("recording").catch(() => {});
         on.exit(notAllowed(status.app));
-        return () => {};
+        return undefined;
       }
-      const stop = await app.capture(await ffmpegPath(), args, { data: on.data, exit: finished });
-      this.stops.add(stop);
-      return () => {
-        this.stops.delete(stop);
-        stop();
+      const stop = await app.capture(await ffmpegPath(), args, { data, exit: finished });
+      return {
+        on,
+        gone,
+        end: () => {
+          ended = true;
+          stop();
+        },
       };
     }
     if (process.platform === "darwin") {
@@ -317,23 +335,50 @@ export class ScreenShare {
       if (status && !status.recording) {
         void hostAccess(this.log, "recording").catch(() => {});
         on.exit(notAllowed(status.app));
-        return () => {};
+        return undefined;
       }
     }
     const capture = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
     this.captures.add(capture);
     let errors = "";
-    capture.stdout!.on("data", on.data);
+    capture.stdout!.on("data", data);
     capture.stderr!.on("data", (chunk: Buffer) => (errors = (errors + chunk.toString()).slice(-2000)));
     capture.on("error", (error) => finished(-1, error.message));
     capture.on("exit", (code) => {
       this.captures.delete(capture);
       finished(code ?? 0, errors);
     });
-    return () => endCapture(capture);
+    return {
+      on,
+      gone,
+      end: () => {
+        ended = true;
+        endCapture(capture);
+      },
+    };
   }
 
-  private stream(ws: WebSocket, display: number, quality: ScreenProfile): void {
+  /** Takes the screen for a new capture: whatever holds it is ended, and has left, before the new one starts. */
+  private take(index: number, level: number, on: CaptureEvents, wanted: () => boolean): Promise<Running | undefined> {
+    const mine = this.turn.then(async () => {
+      const previous = this.holder;
+      if (previous) {
+        this.holder = undefined;
+        previous.end();
+        // Another device's picture ends here; a viewer changing its own just carries on.
+        if (previous.on !== on) previous.on.exit("屏幕画面被另一台设备接手了");
+        await Promise.race([previous.gone, new Promise((resolve) => setTimeout(resolve, 3000))]);
+      }
+      if (!wanted()) return undefined;
+      const running = await this.capture(index, level, on);
+      this.holder = running;
+      return running;
+    });
+    this.turn = mine.catch(() => {});
+    return mine;
+  }
+
+  private stream(ws: WebSocket, display: number, relayed: boolean): void {
     const shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
     const tell = (message: object) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(message));
     // The viewer's hands: started when it first asks to control, for the display it is watching.
@@ -346,6 +391,59 @@ export class ScreenShare {
       this.log,
     );
     this.controls.add(control);
+
+    // The picture: as good as the path carries without falling behind (see `screen-pacer.ts`).
+    const best = relayed ? RELAY_LEVEL : 0;
+    const pacer = new Pacer(Date.now());
+    let level = best;
+    let splitter = new AccessUnitSplitter();
+    let closed = false;
+    let changing = false;
+    let running: Running | undefined;
+    const events: CaptureEvents = {
+      data: (chunk) =>
+        splitter.push(chunk, (unit, key) => {
+          if (ws.readyState !== ws.OPEN) return;
+          const now = Date.now();
+          const seq = pacer.next(key, now);
+          if (seq !== undefined) {
+            const head = Buffer.allocUnsafe(5);
+            head[0] = key ? 1 : 0;
+            head.writeUInt32BE(seq >>> 0, 1);
+            ws.send(Buffer.concat([head, unit]));
+          }
+          const advice = changing ? undefined : pacer.advice(now, level > best, level < LADDER.length - 1);
+          if (advice) void change(level + (advice === "down" ? 1 : -1));
+        }),
+      exit: (message) => {
+        if (message) tell({ error: message });
+        ws.close();
+      },
+    };
+    const begin = async () => {
+      const started = await this.take(shown?.index ?? 0, level, events, () => !closed);
+      if (closed) started?.end();
+      else running = started;
+    };
+    const failed = (error: Error) => {
+      this.log(`[screen] the capture did not start: ${error.message}`);
+      tell({ error: "屏幕捕获失败" });
+      ws.close();
+    };
+    const change = async (next: number) => {
+      changing = true;
+      this.log(`[screen] picture ${next > level ? "lighter" : "better"}: ${LADDER[next]!.width} wide, ${LADDER[next]!.fps} a second, ${LADDER[next]!.bitrate}`);
+      // Nothing more of the old stream goes out; the page starts its decoder afresh for the new one.
+      running?.end();
+      tell({ restart: true, level: next, lighter: next > level });
+      level = next;
+      splitter = new AccessUnitSplitter();
+      await begin().catch(failed);
+      pacer.restarted(Date.now());
+      changing = false;
+    };
+    void begin().catch(failed);
+
     ws.on("message", (data, binary) => {
       if (binary) return;
       let message: unknown;
@@ -354,38 +452,15 @@ export class ScreenShare {
       } catch {
         return;
       }
-      if ((message as { t?: unknown } | null)?.t === "control") void control.start(shown?.screen ?? 0);
+      const kind = (message as { t?: unknown } | null)?.t;
+      if (kind === "ack") pacer.ack(Number((message as { n?: unknown }).n), Date.now());
+      else if (kind === "control") void control.start(shown?.screen ?? 0);
       else control.send(message);
     });
-    const splitter = new AccessUnitSplitter();
-    let closed = false;
-    let stop: (() => void) | undefined;
-    void this.capture(shown?.index ?? 0, quality, {
-      data: (chunk) =>
-        splitter.push(chunk, (unit, key) => {
-          if (ws.readyState !== ws.OPEN) return;
-          // Behind (a slow link): skip frames until the next keyframe rather than queue up delay.
-          if (!key && ws.bufferedAmount > 2_000_000) return;
-          ws.send(Buffer.concat([Buffer.from([key ? 1 : 0]), unit]));
-        }),
-      exit: (message) => {
-        if (message) tell({ error: message });
-        ws.close();
-      },
-    }).then(
-      (end) => {
-        if (closed) end();
-        else stop = end;
-      },
-      (error: Error) => {
-        this.log(`[screen] the capture did not start: ${error.message}`);
-        tell({ error: "屏幕捕获失败" });
-        ws.close();
-      },
-    );
     ws.on("close", () => {
       closed = true;
-      stop?.();
+      if (running && this.holder === running) this.holder = undefined;
+      running?.end();
       control.stop();
       this.controls.delete(control);
     });
@@ -393,10 +468,10 @@ export class ScreenShare {
 
   stop(): void {
     // The host is going: there is no later to insist in.
+    this.holder?.end();
+    this.holder = undefined;
     for (const capture of this.captures) endCapture(capture, true);
     this.captures.clear();
-    for (const stop of this.stops) stop();
-    this.stops.clear();
     for (const control of this.controls) control.stop();
     this.controls.clear();
     closeInputApp();

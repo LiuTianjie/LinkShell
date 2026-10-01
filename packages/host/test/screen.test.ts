@@ -22,16 +22,18 @@ describe("ending a capture", () => {
 });
 
 describe("what is captured", () => {
-  it("is capped at the profile's frame rate, and lighter when a gateway relays it", () => {
+  it("is capped at its level's frame rate, and lighter the further down the ladder", () => {
     const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
-    const full = captureArgs(1);
-    const low = captureArgs(1, "low");
+    const best = captureArgs(1);
+    const relayed = captureArgs(1, 2);
+    const lightest = captureArgs(1, 99);
     // The frame rate is enforced by a filter: the capture device doesn't honour the one it is asked for.
-    expect(value(full, "-vf")).toMatch(/^fps=20,scale='min\(1600,iw\)'/);
-    expect(value(low, "-vf")).toMatch(/^fps=12,scale='min\(1280,iw\)'/);
-    expect([value(full, "-b:v"), value(low, "-b:v")]).toEqual(["3M", "900k"]);
-    // A keyframe every two seconds either way, so a viewer that fell behind can catch up.
-    expect([value(full, "-g"), value(low, "-g")]).toEqual(["40", "24"]);
+    expect(value(best, "-vf")).toMatch(/^fps=20,scale='min\(1600,iw\)'/);
+    expect(value(relayed, "-vf")).toMatch(/^fps=12,scale='min\(1280,iw\)'/);
+    expect(value(lightest, "-vf")).toMatch(/^fps=8,scale='min\(854,iw\)'/);
+    expect([value(best, "-b:v"), value(relayed, "-b:v"), value(lightest, "-b:v")]).toEqual(["3M", "900k", "260k"]);
+    // A keyframe every second, so a viewer that fell behind is back on the live picture within one.
+    expect([value(best, "-g"), value(relayed, "-g")]).toEqual(["20", "12"]);
   });
 });
 

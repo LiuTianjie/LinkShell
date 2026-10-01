@@ -112,7 +112,18 @@ function sps(unit) {
     if (unit[i] === 0 && unit[i + 1] === 0 && unit[i + 2] === 1 && (unit[i + 3] & 0x1f) === 7) return unit.subarray(i + 3);
 }
 if (!("VideoDecoder" in window)) say("这个系统版本的浏览器内核不支持视频解码，请升级系统后再试。");
-let decoder;
+let decoder, skipping = false, arrived = 0;
+// The host is told which frame is on screen: that is how it knows when this end has fallen behind,
+// and stops sending rather than let the picture drift into the past.
+let lastShown = 0, telling = 0;
+// For trying a slow path out without one: ?lag=2500&lagFor=12 answers 2.5 s late for the first 12 s.
+const lag = Number(query.get("lag")) || 0, lagUntil = performance.now() + (Number(query.get("lagFor")) || 0) * 1000;
+function shownUpTo(seq) {
+  if (seq > lastShown) lastShown = seq;
+  if (lag && performance.now() < lagUntil) { const late = lastShown; setTimeout(() => send({ t: "ack", n: late }), lag); return; }
+  if (!telling) telling = setTimeout(() => { telling = 0; send({ t: "ack", n: lastShown }); }, 40);
+}
+let lighterAt = -Infinity;
 const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream" + location.search);
 ws.binaryType = "arraybuffer";
 const send = (message) => { if (ws.readyState === 1) ws.send(JSON.stringify(message)); };
@@ -120,9 +131,15 @@ ws.onopen = () => { if (mode !== "view") askControl(); };
 ws.onmessage = (event) => {
   if (typeof event.data === "string") return heard(JSON.parse(event.data));
   if (!("VideoDecoder" in window)) return;
-  const bytes = new Uint8Array(event.data);
-  const key = bytes[0] === 1;
-  const unit = bytes.subarray(1);
+  // A frame: whether it is a keyframe, its number, the picture.
+  const head = new DataView(event.data);
+  const key = head.getUint8(0) === 1;
+  const seq = head.getUint32(1);
+  const unit = new Uint8Array(event.data, 5);
+  arrived = seq;
+  // A decoder that can't keep up skips to the next keyframe; what it skips has still arrived.
+  if (decoder && !key && (skipping || decoder.decodeQueueSize > 8)) { skipping = true; return shownUpTo(seq); }
+  skipping = false;
   if (!decoder) {
     const params = key && sps(unit);
     if (!params) return;
@@ -134,6 +151,7 @@ ws.onmessage = (event) => {
           layout();
         }
         ctx.drawImage(frame, 0, 0);
+        shownUpTo(frame.timestamp);
         frame.close();
         say("");
       },
@@ -141,12 +159,24 @@ ws.onmessage = (event) => {
     });
     decoder.configure({ codec: "avc1." + hex(params[1]) + hex(params[2]) + hex(params[3]), optimizeForLatency: true });
   }
-  decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: performance.now() * 1000, data: unit }));
+  decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: seq, data: unit }));
 };
 ws.onclose = () => { if (note.classList.contains("gone") || note.textContent.startsWith("正在")) say("屏幕连接已断开"); };
 
 function heard(message) {
   if (message.error) return say(message.error);
+  if (message.restart) {
+    // The host starts the stream again at another quality: a new decoder for it.
+    try { if (decoder) decoder.close(); } catch {}
+    decoder = undefined;
+    skipping = false;
+    // What the old decoder still held will never be shown: it has arrived, and that is said.
+    shownUpTo(arrived);
+    if (message.lighter && performance.now() - lighterAt > 30000) {
+      lighterAt = performance.now();
+      hint("网络较慢：已降低画质，优先保证跟得上", 3000);
+    }
+  }
   if (message.control) {
     const was = controlling();
     Object.assign(control, { known: true, reason: "" }, message.control);
