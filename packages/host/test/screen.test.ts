@@ -1,9 +1,25 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { AccessUnitSplitter, ScreenShare } from "../src/screen.js";
+import { AccessUnitSplitter, ScreenShare, endCapture } from "../src/screen.js";
 
 const nal = (type: number, ...body: number[]) => [0, 0, 0, 1, type, ...body];
 const aud = () => nal(9, 0xf0);
+
+describe("ending a capture", () => {
+  it("insists when the process sits through being asked (ffmpeg holding a screen does)", async () => {
+    const stubborn = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); console.log('up')"], { stdio: ["ignore", "pipe", "ignore"] });
+    await new Promise((resolve) => stubborn.stdout!.once("data", resolve));
+    const exited = new Promise<NodeJS.Signals | null>((resolve) => stubborn.once("exit", (_code, signal) => resolve(signal)));
+    endCapture(stubborn);
+    expect(await exited).toBe("SIGKILL");
+    // Ending it again, or one that left by itself, is nothing.
+    endCapture(stubborn);
+    const polite = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    const gone = new Promise<NodeJS.Signals | null>((resolve) => polite.once("exit", (_code, signal) => resolve(signal)));
+    endCapture(polite);
+    expect(await gone).toBe("SIGTERM");
+  });
+});
 
 describe("AccessUnitSplitter", () => {
   it("splits an Annex-B stream into whole frames at delimiters, across chunk boundaries", () => {

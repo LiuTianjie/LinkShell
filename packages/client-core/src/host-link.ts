@@ -69,6 +69,7 @@ export class HostLink {
   private readonly eventListeners = new Set<(event: SessionEvent) => void>();
   private readonly summaryListeners = new Set<(summary: SessionSummary) => void>();
   private readonly onlineListeners = new Set<() => void>();
+  private readonly restoredListeners = new Set<(summary: SessionSummary) => void>();
   private readonly notificationListeners = new Map<string, Set<(params: unknown) => void>>();
   lastError?: string;
 
@@ -143,7 +144,17 @@ export class HostLink {
     return this.peer.request<MethodResult<M>>(method, params, Math.max(1000, deadline - Date.now()));
   }
 
-  /** Streams a session's events from `cursor()` on, now and after every reconnect. */
+  /** A session's subscription was restored after a (re)connect: its backlog has been delivered. */
+  onRestored(listener: (summary: SessionSummary) => void): () => void {
+    this.restoredListeners.add(listener);
+    return () => this.restoredListeners.delete(listener);
+  }
+
+  /**
+   * Streams a session's events from `cursor()` on, now and after every
+   * reconnect. Resolves undefined when the link is down: the subscription is
+   * made when it comes back, and `onRestored` says so.
+   */
   subscribe(sessionId: string, cursor: () => number): Promise<SessionSummary | undefined> {
     this.subscriptions.set(sessionId, { cursor });
     if (this.statusValue !== "online") return Promise.resolve(undefined);
@@ -221,7 +232,14 @@ export class HostLink {
     // Restore every open session before announcing we're online, so nothing
     // rendered in between is missing the events that happened while offline.
     this.setStatus("online", "");
-    await Promise.all([...this.subscriptions.keys()].map((sessionId) => this.sendSubscribe(sessionId)));
+    await Promise.all(
+      [...this.subscriptions.keys()].map((sessionId) =>
+        this.sendSubscribe(sessionId).then((result) => {
+          // Its backlog has arrived — also for a session opened while the link was down, which nothing else answers.
+          if (result?.session) for (const listener of this.restoredListeners) listener(result.session);
+        }),
+      ),
+    );
     for (const wake of [...this.waiters]) wake();
     for (const listener of this.onlineListeners) listener();
     const heartbeat = this.options.heartbeatMs ?? 25_000;

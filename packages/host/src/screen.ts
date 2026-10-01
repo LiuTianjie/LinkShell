@@ -111,6 +111,52 @@ export class AccessUnitSplitter {
   }
 }
 
+/**
+ * Ends a capture. ffmpeg holding a screen through avfoundation can sit through
+ * SIGTERM — and through its output going away — so it is asked, then made to.
+ */
+export function endCapture(capture: ChildProcess, now = false): void {
+  if (capture.exitCode !== null || capture.signalCode !== null) return;
+  if (now) {
+    capture.kill("SIGKILL");
+    return;
+  }
+  capture.kill("SIGTERM");
+  setTimeout(() => {
+    if (capture.exitCode === null && capture.signalCode === null) capture.kill("SIGKILL");
+  }, 800).unref();
+}
+
+/** What marks a process as one of our captures: the stream options no other use of ffmpeg combines. */
+const CAPTURE_MARK = "-bsf:v h264_metadata=aud=insert -f h264 -";
+
+/**
+ * Captures a host left behind when it was killed (nothing reads them, and they
+ * keep the screen recorder busy): ours by their arguments, orphaned by their parent.
+ */
+export async function reapOrphanCaptures(log: (message: string) => void): Promise<number> {
+  try {
+    const { stdout } = await run("ps", ["-axo", "pid=,ppid=,command="], { maxBuffer: 8 * 1024 * 1024 });
+    let reaped = 0;
+    for (const line of stdout.split("\n")) {
+      const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+      if (!match || match[2] !== "1") continue;
+      const command = match[3]!;
+      if (!/(^|\/)ffmpeg /.test(command) || !command.trimEnd().endsWith(CAPTURE_MARK)) continue;
+      try {
+        process.kill(Number(match[1]), "SIGKILL");
+        reaped += 1;
+      } catch {
+        // Gone already, or not ours to end.
+      }
+    }
+    if (reaped > 0) log(`[screen] ended ${reaped} screen capture${reaped === 1 ? "" : "s"} left by an earlier host`);
+    return reaped;
+  } catch {
+    return 0;
+  }
+}
+
 function viewerPage(): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8">
@@ -169,7 +215,9 @@ export class ScreenShare {
   private token = "";
   private readonly captures = new Set<ChildProcess>();
 
-  constructor(private readonly log: (message: string) => void) {}
+  constructor(private readonly log: (message: string) => void) {
+    void reapOrphanCaptures(log);
+  }
 
   async start(): Promise<{ port: number; token: string; displays: Display[] }> {
     if (process.platform !== "darwin" && process.platform !== "linux") throw RpcError.app("not_supported", "这台电脑的系统暂不支持查看屏幕");
@@ -240,11 +288,12 @@ export class ScreenShare {
       }
       ws.close();
     });
-    ws.on("close", () => capture.kill("SIGTERM"));
+    ws.on("close", () => endCapture(capture));
   }
 
   stop(): void {
-    for (const capture of this.captures) capture.kill("SIGTERM");
+    // The host is going: there is no later to insist in.
+    for (const capture of this.captures) endCapture(capture, true);
     this.captures.clear();
     this.server?.close();
     this.server = undefined;

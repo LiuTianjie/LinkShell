@@ -100,6 +100,23 @@ describe("client core against a real host", () => {
     expect(other.getState().ready[session.id]).toBeUndefined();
   });
 
+  it("shows a session opened before the connection is up, once it is", async () => {
+    const { store, host } = await setup();
+    await waitFor(() => store.getState().status === "online");
+    const session = await store.getState().createSession({ agent: "fake", cwd: "/w", prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => store.getState().views[session.id]?.turnActive === false && store.getState().views[session.id]!.items.length >= 2);
+
+    // The app opening straight into a session: the screen asks for it before the link is online.
+    const late = createClientStore(new HostLink({ url: `ws://127.0.0.1:${host.server.tcpAddress()}`, heartbeatMs: 0 }));
+    cleanups.push(() => late.getState().disconnect());
+    late.getState().connect();
+    expect(late.getState().status).not.toBe("online");
+    late.getState().openSession(session.id);
+    await waitFor(() => late.getState().ready[session.id]);
+    expect(late.getState().views[session.id]!.items.length).toBeGreaterThanOrEqual(2);
+    expect(late.getState().sessions[session.id]).toMatchObject({ id: session.id });
+  });
+
   it("catches up exactly once after the connection drops while another device sends", async () => {
     const { host, store, sockets, link } = await setup();
     const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });

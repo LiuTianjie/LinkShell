@@ -559,6 +559,12 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     pending.push(event);
     flushTimer ??= setTimeout(flushEvents, 16);
   });
+  link.onRestored((summary) => {
+    // Opened while the link was down, or back after a break: the backlog is in, the session can show.
+    if (!store.getState().open[summary.id]) return;
+    flushEvents();
+    store.setState((state) => ({ sessions: { ...state.sessions, [summary.id]: summary }, ready: { ...state.ready, [summary.id]: true } }));
+  });
   // Refresh the list after every (re)connect; retry unsent messages too.
   link.onOnline(() => {
     void store.getState().refresh();
