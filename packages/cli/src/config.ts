@@ -14,7 +14,7 @@ export interface LinkShellConfig {
   rows?: number;
 }
 
-const CONFIG_DIR = join(homedir(), ".linkshell");
+const CONFIG_DIR = process.env.LINKSHELL_HOME || join(homedir(), ".linkshell");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 export function loadConfig(): LinkShellConfig {

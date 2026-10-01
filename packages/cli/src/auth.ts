@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const AUTH_DIR = join(homedir(), ".linkshell");
+const AUTH_DIR = process.env.LINKSHELL_HOME || join(homedir(), ".linkshell");
 const AUTH_FILE = join(AUTH_DIR, "auth.json");
 
 export interface AuthTokens {

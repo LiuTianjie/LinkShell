@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { withRunningHost } from "./host.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../../../package.json") as { version: string };
@@ -31,6 +32,14 @@ async function fetchLatestVersion(): Promise<string | null> {
   }
 }
 
+/** The background host keeps running the version it was started with. */
+async function noteRunningHost(latest: string): Promise<void> {
+  const running = await withRunningHost((client) => client.call("machine.info", {})).catch(() => undefined);
+  if (!running || running.hostVersion === latest) return;
+  process.stderr.write(`  The running host is still ${running.hostVersion}. Restart it to use ${latest} (stops running agent turns):\n`);
+  process.stderr.write("    linkshell host stop && linkshell host --daemon\n\n");
+}
+
 export async function runUpgrade(): Promise<void> {
   const current = pkg.version;
   process.stderr.write(`\n  Current version: ${current}\n`);
@@ -55,6 +64,7 @@ export async function runUpgrade(): Promise<void> {
     try {
       execSync("brew upgrade linkshell", { stdio: "inherit", timeout: 120_000 });
       process.stderr.write("\n  \x1b[32m✓\x1b[0m Upgraded successfully.\n\n");
+      await noteRunningHost(latest);
     } catch {
       process.stderr.write("\n  \x1b[31m✗\x1b[0m Homebrew upgrade failed. Try manually:\n");
       process.stderr.write("    brew upgrade linkshell\n\n");
@@ -65,6 +75,7 @@ export async function runUpgrade(): Promise<void> {
     try {
       execSync("npm install -g linkshell-cli@latest", { stdio: "inherit", timeout: 120_000 });
       process.stderr.write("\n  \x1b[32m✓\x1b[0m Upgraded successfully.\n\n");
+      await noteRunningHost(latest);
     } catch {
       process.stderr.write("\n  \x1b[31m✗\x1b[0m npm upgrade failed. Try manually:\n");
       process.stderr.write("    npm install -g linkshell-cli@latest\n\n");

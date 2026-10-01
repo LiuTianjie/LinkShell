@@ -1,8 +1,8 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
-import type { MachineInfo } from "@linkshell/wire";
+import { createHash, randomUUID } from "node:crypto";
+import type { GatewayStatus, MachineInfo } from "@linkshell/wire";
 import { defaultDrivers } from "./drivers/registry.js";
 import type { AgentDriver } from "./drivers/types.js";
 import { SessionHub } from "./hub.js";
@@ -33,8 +33,9 @@ export function defaultHome(): string {
 export function hostPaths(home = defaultHome()): HostPaths {
   let runDir = join(home, "run");
   if (join(runDir, "codex.sock").length > MAX_SOCKET_PATH) {
-    // Very long home directories: fall back to a short per-user directory.
-    runDir = join("/tmp", `linkshell-${process.getuid?.() ?? "user"}`);
+    // Very long home directories: fall back to a short directory of this user's, one per home.
+    const tag = createHash("sha256").update(home).digest("hex").slice(0, 8);
+    runDir = join("/tmp", `linkshell-${process.getuid?.() ?? "user"}-${tag}`);
   }
   return {
     home,
@@ -71,8 +72,15 @@ export interface HostOptions {
   drivers?: (paths: HostPaths) => AgentDriver[];
   tcpPort?: number;
   log?: (message: string) => void;
-  /** A v2 gateway to reach this machine through, from anywhere. */
-  gateway?: { url: string; token?: () => Promise<string | undefined> | string | undefined; name?: string };
+  /**
+   * A v2 gateway to reach this machine through, from anywhere. A function is
+   * asked again on `gateway.refresh`, so the choice can change while running.
+   */
+  gateway?: {
+    url: string | (() => string | undefined);
+    token?: () => Promise<string | undefined> | string | undefined;
+    name?: string;
+  };
   /** How often to re-list sessions started outside LinkShell; 0 disables. */
   discoveryIntervalMs?: number;
 }
@@ -81,7 +89,8 @@ export interface RunningHost {
   paths: HostPaths;
   hub: SessionHub;
   server: HostRpcServer;
-  gateway?: GatewayLink;
+  /** The current gateway connection; it can change on `gateway.refresh`. */
+  readonly gateway?: GatewayLink;
   machineInfo(): MachineInfo;
   stop(): Promise<void>;
 }
@@ -147,27 +156,48 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   await server.start();
 
   let gateway: GatewayLink | undefined;
-  if (options.gateway) {
-    gateway = new GatewayLink({
-      url: options.gateway.url,
-      home: paths.home,
-      token: options.gateway.token,
-      name: options.gateway.name,
-      serve: (transport) => server.connect(transport),
-      onChange: (status) => server.broadcast("gateway.changed", status),
-      onPaired: (device) => server.broadcast("pairing.done", { device }),
-      log,
-    });
+  const chosen = options.gateway;
+  /** Follows the gateway choice: connects, moves or disconnects; an unchanged one signs in again. */
+  const syncGateway = (): GatewayStatus => {
+    const url = typeof chosen?.url === "function" ? chosen.url() : chosen?.url;
+    if (gateway && gateway.url === url) {
+      gateway.reauthenticate();
+      return gateway.status();
+    }
+    const previous = gateway;
+    gateway = url
+      ? new GatewayLink({
+          url,
+          home: paths.home,
+          token: chosen?.token,
+          name: chosen?.name,
+          serve: (transport) => server.connect(transport),
+          // A link that was replaced has nothing more to say.
+          onChange: (status) => {
+            if (gateway?.url === url) server.broadcast("gateway.changed", status);
+          },
+          onPaired: (device) => server.broadcast("pairing.done", { device }),
+          log,
+        })
+      : undefined;
+    previous?.stop();
     server.setGateway(gateway);
-    gateway.start();
-  }
+    gateway?.start();
+    const status = gateway?.status() ?? { status: "off" as const, devices: [] };
+    if (previous) server.broadcast("gateway.changed", status);
+    return status;
+  };
+  server.onGatewayRefresh(syncGateway);
+  syncGateway();
 
   let stopping: Promise<void> | undefined;
   return {
     paths,
     hub,
     server,
-    gateway,
+    get gateway() {
+      return gateway;
+    },
     machineInfo,
     stop() {
       stopping ??= (async () => {

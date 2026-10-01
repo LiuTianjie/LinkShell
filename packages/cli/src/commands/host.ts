@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { GatewayStatus } from "@linkshell/wire";
 import { getValidToken, isLoggedIn } from "../auth.js";
 import * as daemon from "../utils/daemon.js";
 
@@ -30,7 +31,8 @@ export const OFFICIAL_GATEWAY = "wss://gateway.itool.tech";
 export function resolveGateway(home: string): string | undefined {
   const chosen = process.env.LINKSHELL_GATEWAY || readHostConfig(home).gateway;
   if (chosen === "off") return undefined;
-  if (chosen) return chosen;
+  // config.json is shared with the v1 bridge, whose gateway URLs end in /ws.
+  if (chosen) return chosen.replace(/\/ws\/?$/, "");
   return isLoggedIn() ? OFFICIAL_GATEWAY : undefined;
 }
 
@@ -52,9 +54,13 @@ export function writeHostConfig(home: string, config: HostConfig): void {
 }
 
 /** The host keeps its state in node:sqlite, unflagged from Node 22.13. */
-export function assertHostRuntime(): void {
+export function hostRuntimeOk(): boolean {
   const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
-  if (major > 22 || (major === 22 && minor >= 13)) return;
+  return major > 22 || (major === 22 && minor >= 13);
+}
+
+export function assertHostRuntime(): void {
+  if (hostRuntimeOk()) return;
   process.stderr.write(
     `\n  LinkShell's host needs Node.js 22.13 or newer (this is ${process.version}).\n` +
       "  Upgrade Node (for example: nvm install 22, or brew upgrade node), then try again.\n\n",
@@ -83,12 +89,13 @@ export async function runHostForeground(version: string): Promise<void> {
   const devPort = process.env.LINKSHELL_DEV_PORT ? Number(process.env.LINKSHELL_DEV_PORT) : undefined;
   // Where devices reach this machine from outside the LAN. The account from
   // `linkshell login`, if any, lets that account's devices in without pairing.
-  const gatewayUrl = resolveGateway(host.defaultHome());
+  // Asked again on `gateway.refresh`, so login, logout and `--gateway` apply to a running host.
+  const home = host.defaultHome();
   const running = await host.startHost({
     version,
     env,
     log,
-    gateway: gatewayUrl ? { url: gatewayUrl, token: async () => (await getValidToken()) ?? undefined } : undefined,
+    gateway: { url: () => resolveGateway(home), token: async () => (await getValidToken()) ?? undefined },
     tcpPort: devPort,
     claudeCommand: process.env.LINKSHELL_CLAUDE_COMMAND || undefined,
     claudeAdapter: adapter ? { command: adapter, args: [] } : undefined,
@@ -127,6 +134,89 @@ export async function ensureHostRunning(): Promise<string> {
   throw new Error(`LinkShell host did not start; see ${daemon.getLogFile("host")}`);
 }
 
+type HostClient = Awaited<ReturnType<Awaited<ReturnType<typeof loadHost>>["connectHost"]>>;
+
+/** Runs `use` against the running host; undefined when there is none. */
+export async function withRunningHost<T>(use: (client: HostClient) => Promise<T>): Promise<T | undefined> {
+  if (!hostRuntimeOk()) return undefined;
+  const host = await loadHost();
+  const { hostSocket } = host.hostPaths();
+  if (!(await host.isHostRunning(hostSocket))) return undefined;
+  const client = await host.connectHost(hostSocket);
+  try {
+    return await use(client);
+  } finally {
+    client.close();
+  }
+}
+
+/**
+ * Has the running host apply the current gateway choice and account, then
+ * waits (up to `waitMs`) for it to come online or be refused.
+ */
+export async function refreshGateway(waitMs: number): Promise<GatewayStatus | undefined> {
+  return withRunningHost(async (client) => {
+    let status: GatewayStatus;
+    try {
+      status = await client.call("gateway.refresh", {});
+    } catch {
+      // A host from before 0.6.3 (still running after an upgrade) only reads its gateway at start.
+      process.stderr.write("  The running host is older than this CLI. Restart it to apply this (stops running agent turns):\n");
+      process.stderr.write("    linkshell host stop && linkshell host --daemon\n");
+      return client.call("gateway.status", {});
+    }
+    const deadline = Date.now() + waitMs;
+    while (status.status === "connecting" && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      status = await client.call("gateway.status", {});
+    }
+    return status;
+  });
+}
+
+export function describeGateway(gateway: GatewayStatus): string {
+  if (gateway.status === "off") return "off (linkshell login for the official one, or linkshell host --gateway <url>)";
+  const account = gateway.account ? `, account ${gateway.account.email ?? gateway.account.userId}` : "";
+  const problem = gateway.error ? `  ⚠ ${gateway.error.message}` : "";
+  return `${gateway.status} ${gateway.url}${account}${problem}`;
+}
+
+/** After `linkshell login`: this computer joins the gateway its account is for. */
+export async function joinGatewayAfterLogin(plan: "pro" | "free"): Promise<void> {
+  const out = (line: string) => process.stderr.write(`  ${line}\n`);
+  if (!hostRuntimeOk()) {
+    out(`The LinkShell host needs Node.js 22.13 or newer (this is ${process.version}); upgrade Node, then: linkshell host --daemon\n`);
+    return;
+  }
+  const host = await loadHost();
+  const chosen = process.env.LINKSHELL_GATEWAY || readHostConfig(host.defaultHome()).gateway;
+  if (chosen === "off") {
+    out("The gateway is turned off on this computer. To use the official one: linkshell host --gateway default\n");
+    return;
+  }
+  if (!chosen && plan !== "pro") {
+    // A running host now gets the gateway's own answer, instead of an old login's.
+    await refreshGateway(0);
+    out("The official gateway needs a Pro subscription: https://itool.tech");
+    out("Or use your own gateway: linkshell host --gateway <url>, then linkshell pair\n");
+    return;
+  }
+  await ensureHostRunning();
+  const gateway = await refreshGateway(15_000);
+  const where = chosen ? (gateway?.url ?? chosen) : "the official gateway";
+  if (gateway?.status === "online") {
+    out(`\x1b[32m✓\x1b[0m This computer is online on ${where}.`);
+    out(
+      gateway.account
+        ? "  Open LinkShell on your phone and sign in with the same account: it shows up there, no pairing needed.\n"
+        : "  Pair your phone with: linkshell pair\n",
+    );
+  } else {
+    out(`\x1b[31m✗\x1b[0m Not connected to ${where}${gateway?.error ? `: ${gateway.error.message}` : " yet"}`);
+    out("  Check again with: linkshell host status\n");
+  }
+}
+
 export async function printHostStatus(): Promise<void> {
   const host = await loadHost();
   const { hostSocket } = host.hostPaths();
@@ -153,15 +243,9 @@ export async function printHostStatus(): Promise<void> {
     const active = sessions.filter((s) => s.state === "running" || s.state === "waiting");
     process.stdout.write(`  Sessions: ${sessions.length} known, ${active.length} active\n`);
     const gateway = await client.call("gateway.status", {});
-    if (gateway.status === "off") {
-      process.stdout.write("  Gateway:  off (linkshell login for the official one, or linkshell host --gateway <url>)\n");
-    } else {
-      const account = gateway.account ? `, account ${gateway.account.email ?? gateway.account.userId}` : "";
-      const problem = gateway.error ? `  ⚠ ${gateway.error.message}` : "";
-      process.stdout.write(`  Gateway:  ${gateway.status} ${gateway.url}${account}${problem}\n`);
-      for (const device of gateway.devices) {
-        process.stdout.write(`    ${device.online ? "●" : "○"} ${device.name}  paired ${new Date(device.pairedAt).toLocaleDateString()}\n`);
-      }
+    process.stdout.write(`  Gateway:  ${describeGateway(gateway)}\n`);
+    for (const device of gateway.devices) {
+      process.stdout.write(`    ${device.online ? "●" : "○"} ${device.name}  paired ${new Date(device.pairedAt).toLocaleDateString()}\n`);
     }
   } finally {
     client.close();

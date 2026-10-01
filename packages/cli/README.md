@@ -1,165 +1,79 @@
 # linkshell-cli
 
-在手机上远程查看和控制本地 Claude Code / Codex / Gemini / Copilot 终端会话，并提供 Agent Workspace 结构化对话界面。
+Follow, steer and approve the coding agents running on your computer — from your phone. This is the computer side of [LinkShell](https://github.com/LiuTianjie/LinkShell): it runs Claude Code, Codex and other agents you already have installed, and keeps them reachable from the LinkShell app ([iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)) over an end-to-end encrypted channel.
 
-## 安装
+[Website](https://liutianjie.github.io/LinkShell/) · [Docs](https://liutianjie.github.io/LinkShell/docs/) · [简体中文](https://github.com/LiuTianjie/LinkShell/blob/main/README_CN.md)
 
-```bash
-npm install -g linkshell-cli
-```
+## Install
 
-## 一条命令开始
+macOS or Linux, **Node.js 22.13 or newer**.
 
 ```bash
-linkshell start --daemon --provider claude
+npm i -g linkshell-cli
+linkshell host --daemon
 ```
 
-CLI 会在后台：
-1. 启动内置 Gateway（端口 8787）
-2. 检测局域网 IP
-3. 创建配对并打印 QR 码
-4. 手机扫码即连
+Then connect your phone one of two ways:
 
-App 断开不影响后台进程，重新扫码即可恢复。
+- **Pro — the official gateway.** `linkshell login`, then sign in to the app with the same account. The computer shows up by itself.
+- **Your own gateway.** Run one (below), then:
 
-## 命令一览
+  ```bash
+  linkshell host --gateway wss://gw.example.com --daemon
+  linkshell pair    # scan the QR code in the app
+  ```
 
-| 命令 | 说明 |
-|------|------|
-| `linkshell start` | 启动桥接会话（支持 `--daemon` 后台运行） |
-| `linkshell stop` | 停止所有后台进程 |
-| `linkshell status` | 查看运行状态 |
-| `linkshell gateway` | 启动独立 Gateway（支持 `--daemon`） |
-| `linkshell gateway stop` | 停止后台 Gateway |
-| `linkshell gateway status` | 查看 Gateway 状态 |
-| `linkshell setup` | 交互式配置向导 |
-| `linkshell doctor` | 环境检查和连通性诊断 |
-
-## 使用示例
+Start sessions from the phone, or launch agents from your terminal so they can be handed over at any time:
 
 ```bash
-# 后台启动（推荐）
-linkshell start --daemon --provider claude
-
-# 启用远程桌面查看
-linkshell start --daemon --provider claude --screen
-
-# 前台启动
-linkshell start --provider claude
-
-# 桥接 Codex
-linkshell start --daemon --provider codex
-
-# 桥接 Gemini / GitHub Copilot
-linkshell start --daemon --provider gemini
-linkshell start --daemon --provider copilot
-
-# Agent Workspace（自动检测 Claude Code / Codex）
-linkshell start --daemon --agent-ui
-
-# 桥接任意命令
-linkshell start --daemon --provider custom --command bash
-
-# 指定端口
-linkshell start --daemon --provider claude --port 9000
-
-# 连接远程 Gateway（不启动内置 Gateway）
-linkshell start --daemon --gateway wss://your-server.com:8787/ws --provider claude
-
-# 查看状态和日志
-linkshell status
-tail -f ~/.linkshell/bridge.log
-
-# 停止
-linkshell stop
+linkshell claude    # Claude Code; a message from the phone takes over, any key here takes it back
+linkshell codex     # Codex; the terminal and the phone are live at the same time
 ```
 
-## 服务器部署 Gateway
+## Commands
+
+| | |
+| --- | --- |
+| `linkshell host --daemon` | Start LinkShell in the background |
+| `linkshell status` | The host, its agents, sessions and gateway connection |
+| `linkshell host stop` | Stop the host (`linkshell stop` stops everything LinkShell runs here) |
+| `linkshell host --gateway <url>` | Choose the gateway (`off` to disconnect, `default` for the official one); applies to a running host |
+| `linkshell pair` | Pair a phone through your own gateway |
+| `linkshell devices` | Paired phones; `linkshell devices remove <name>` unpairs one |
+| `linkshell login` / `logout` | Pro account: join or leave the official gateway, without restarting the host |
+| `linkshell claude` / `linkshell codex` | The agent's own UI, shareable with the phone (arguments pass through) |
+| `linkshell gateway [--port 8787] [--daemon]` | Run a gateway |
+| `linkshell doctor` | Check Node, agents, the host and its gateway |
+| `linkshell upgrade` | Upgrade the CLI (restart the host afterwards to run the new version) |
+
+## Run your own gateway
+
+A gateway only relays encrypted frames and brokers pairing.
 
 ```bash
-# 后台启动独立 Gateway
-linkshell gateway --daemon --port 8787
-
-# 查看状态
-linkshell gateway status
-
-# 查看日志
-tail -f ~/.linkshell/gateway.log
-
-# 停止
-linkshell gateway stop
+linkshell gateway --port 8787 --daemon
 ```
 
-## start 选项
+or with Docker: `nickname4th/linkshell-gateway` (see the [self-hosting guide](https://github.com/LiuTianjie/LinkShell/blob/main/docs/deploy.md)). Put it behind HTTPS and point hosts at `wss://your-domain`.
 
-```
---gateway <url>           远程 Gateway 地址（省略则启动内置 Gateway）
---port <port>             内置 Gateway 端口（默认 8787）
---pairing-gateway <url>   QR 码中给手机使用的地址
---provider <name>         claude | codex | gemini | copilot | custom（默认 claude）
---command <cmd>           自定义命令（custom provider 必填）
---daemon                  后台运行
---session-id <id>         手动指定 session ID
---client-name <name>      显示名称（默认 local-cli）
---cols <n>                终端列数（默认 120）
---rows <n>                终端行数（默认 36）
---screen                  启用远程桌面共享
---no-keep-awake           macOS 上允许闲置睡眠
---agent-ui / --no-agent-ui 启用或关闭 Agent Workspace channel
---agent-provider <name>   Agent provider：codex | claude | custom
---agent-command <cmd>     自定义 ACP/Agent 命令
---verbose                 详细日志
-```
-
-## Agent Workspace
-
-`--agent-ui` 默认开启，CLI 会检测本机是否安装了 Claude Code 与 Codex CLI，并把可用 provider、模型、权限模式、推理强度和功能能力同步给 App。手机端可以在 Agent 标签里选择 provider 和项目目录，继续历史对话，查看 tool call、命令执行、文件变更、计划、权限请求、结构化补充输入和子 Agent 活动。
-
-- Codex：默认命令为 `codex app-server --listen stdio://`
-- Claude：优先使用 `@anthropic-ai/claude-agent-sdk`，否则回退到 `claude --print --output-format stream-json --input-format stream-json`
-- Custom：需要传入 `--agent-provider custom --agent-command "<command>"`
-
-如果 Agent provider 不可用，终端桥接仍会正常运行。
-
-## 配置持久化
-
-```bash
-linkshell setup
-```
-
-配置保存在 `~/.linkshell/config.json`。
-
-## doctor 检查项
-
-```bash
-linkshell doctor
-```
-
-- Node.js 版本 >= 18
-- node-pty 原生模块
-- Claude / Codex / Gemini / Copilot CLI 是否安装
-- 配置文件状态
-- Gateway 连通性和延迟
-
-## 文件位置
+## Files
 
 ```
 ~/.linkshell/
-├── config.json      # 配置文件
-├── bridge.pid       # 桥接进程 PID
-├── bridge.log       # 桥接进程日志
-├── gateway.pid      # Gateway 进程 PID
-└── gateway.log      # Gateway 进程日志
+├── state.db              sessions and their history
+├── identity.json         this computer's keys
+├── paired-devices.json   phones paired with it
+├── auth.json             the Pro login, if any
+├── config.json           the chosen gateway
+├── host.log              the host's log
+└── relay.db              pairings, when this computer runs a gateway
 ```
 
-## 代码入口
+`LINKSHELL_HOME` moves this directory. LinkShell never handles your agents' accounts or API keys: agents run as you, with your login shell's environment.
 
-1. src/index.ts — CLI 命令定义
-2. src/providers.ts — 终端 Provider 适配
-3. src/runtime/bridge-session.ts — 核心会话
-4. src/runtime/acp/agent-workspace.ts — Agent Workspace v2
-5. src/runtime/acp/provider-resolver.ts — Agent provider 自动检测
-6. src/utils/daemon.ts — 后台进程管理
+## Coming from 1.x
+
+2.0 changes both the app and the computer side: upgrade both and connect again. `linkshell start`, `setup` and `list` still serve the 1.x app.
 
 ## License
 

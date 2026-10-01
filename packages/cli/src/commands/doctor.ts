@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { loadConfig, getConfigPath } from "../config.js";
+import { loadAuth } from "../auth.js";
+import { hostRuntimeOk, resolveGateway, withRunningHost } from "./host.js";
 
 const requireFromCli = createRequire(import.meta.url);
 
@@ -26,32 +27,32 @@ function which(bin: string): string | undefined {
   }
 }
 
-async function checkGateway(url: string): Promise<CheckResult> {
+async function checkGateway(name: string, url: string): Promise<CheckResult> {
   try {
-    const httpUrl = url.replace(/\/ws\/?$/, "").replace(/^wss:/, "https:").replace(/^ws:/, "http:");
+    const httpUrl = url.replace(/\/(ws|v2\/connect)\/?$/, "").replace(/\/$/, "").replace(/^wss:/, "https:").replace(/^ws:/, "http:");
     const start = Date.now();
     const res = await fetch(`${httpUrl}/healthz`, { signal: AbortSignal.timeout(5000) });
     const latency = Date.now() - start;
-    if (!res.ok) return { name: "Gateway", ok: false, detail: `HTTP ${res.status}` };
-    return { name: "Gateway", ok: true, detail: `reachable (${latency}ms)` };
+    if (!res.ok) return { name, ok: false, detail: `${url}: HTTP ${res.status}` };
+    return { name, ok: true, detail: `${url} answers (${latency}ms)` };
   } catch (e) {
-    return { name: "Gateway", ok: false, detail: e instanceof Error ? e.message : "unreachable" };
+    return { name, ok: false, detail: `${url}: ${e instanceof Error ? e.message : "unreachable"}` };
   }
 }
 
-export async function runDoctor(gatewayUrl?: string): Promise<void> {
-  const config = loadConfig();
-  const gateway = gatewayUrl ?? config.gateway;
+const AGENT_INSTALL: Record<string, string> = {
+  claude: "npm i -g @anthropic-ai/claude-code",
+  codex: "npm i -g @openai/codex",
+};
 
+export async function runDoctor(version: string, gatewayUrl?: string): Promise<void> {
   process.stdout.write("\n  LinkShell Doctor\n\n");
 
   const results: CheckResult[] = [];
 
   results.push(check("Node.js", () => {
-    const ver = process.versions.node;
-    const major = Number(ver.split(".")[0]);
-    if (major < 18) throw new Error(`v${ver} (need >= 18)`);
-    return `v${ver}`;
+    if (!hostRuntimeOk()) throw new Error(`v${process.versions.node} (the host needs 22.13 or newer)`);
+    return `v${process.versions.node}`;
   }));
 
   results.push(check("node-pty", () => {
@@ -69,32 +70,73 @@ export async function runDoctor(gatewayUrl?: string): Promise<void> {
     }
   }));
 
-  // Optional CLI hints — not required, since LinkShell now bridges a plain shell.
-  for (const [label, bin, hint] of [
-    ["Claude CLI (optional)", "claude", "npm i -g @anthropic-ai/claude-code"],
-    ["Codex CLI (optional)", "codex", "npm i -g @openai/codex"],
-  ] as const) {
-    const path = which(bin);
-    if (path) {
-      results.push({ name: label, ok: true, detail: `found (${path})` });
-    } else {
-      results.push({ name: label, ok: true, detail: `not installed — ${hint}` });
+  const host = await withRunningHost(async (client) => ({
+    info: await client.call("machine.info", {}),
+    gateway: await client.call("gateway.status", {}),
+  })).catch(() => undefined);
+
+  if (!host) {
+    results.push({ name: "Host", ok: false, detail: "not running — start it with: linkshell host --daemon" });
+    // Without the host, at least say whether the two main agents are on the PATH.
+    for (const [bin, hint] of Object.entries(AGENT_INSTALL)) {
+      const path = which(bin);
+      results.push({ name: `${bin} (optional)`, ok: true, detail: path ? `found (${path})` : `not installed — ${hint}` });
+    }
+  } else {
+    results.push(
+      host.info.hostVersion === version
+        ? { name: "Host", ok: true, detail: `running, ${version}` }
+        : {
+            name: "Host",
+            ok: false,
+            detail: `running ${host.info.hostVersion}, but this CLI is ${version} — update it with: linkshell host stop && linkshell host --daemon`,
+          },
+    );
+    // Agents as the host sees them: what the phone can actually start.
+    for (const agent of host.info.agents) {
+      if (!agent.installed) {
+        const hint = AGENT_INSTALL[agent.id];
+        if (hint) results.push({ name: `${agent.label} (optional)`, ok: true, detail: `not installed — ${hint}` });
+        continue;
+      }
+      const signedOut = agent.auth?.state === "missing";
+      const problem = agent.problem ?? (signedOut ? (agent.auth?.hint ?? "not logged in") : undefined);
+      results.push({ name: agent.label, ok: !problem, detail: `v${agent.version ?? "?"}${problem ? ` — ${problem}` : ""}` });
     }
   }
 
-  results.push(check("Config", () => {
-    const path = getConfigPath();
-    const cfg = loadConfig();
-    const keys = Object.keys(cfg).filter((k) => cfg[k as keyof typeof cfg] !== undefined);
-    if (keys.length === 0) return `${path} (empty — run: linkshell setup)`;
-    return `${path} (${keys.join(", ")})`;
-  }));
+  const auth = loadAuth();
+  results.push({
+    name: "Account",
+    ok: true,
+    detail: auth?.accessToken ? `logged in as ${auth.email || auth.userId}` : "not logged in (only the official gateway needs it: linkshell login)",
+  });
 
-  if (gateway) {
-    results.push(await checkGateway(gateway));
-  } else {
-    results.push({ name: "Gateway", ok: false, detail: "no gateway configured — run: linkshell setup" });
+  if (host) {
+    const gateway = host.gateway;
+    if (gateway.status === "online") {
+      const account = gateway.account ? `, account ${gateway.account.email ?? gateway.account.userId}` : "";
+      const paired = gateway.devices.length ? `, ${gateway.devices.length} paired device(s)` : "";
+      results.push({ name: "Gateway", ok: true, detail: `online ${gateway.url}${account}${paired}` });
+    } else if (gateway.status === "off") {
+      results.push({
+        name: "Gateway",
+        ok: false,
+        detail: "off, so a phone can't reach this computer — linkshell login (official gateway), or linkshell host --gateway <url>",
+      });
+    } else {
+      results.push({ name: "Gateway", ok: false, detail: `${gateway.status} ${gateway.url}${gateway.error ? ` — ${gateway.error.message}` : ""}` });
+    }
+  } else if (!gatewayUrl && hostRuntimeOk()) {
+    const { defaultHome } = await import("@linkshell/host");
+    const chosen = resolveGateway(defaultHome());
+    results.push(
+      chosen
+        ? await checkGateway("Gateway", chosen)
+        : { name: "Gateway", ok: false, detail: "none chosen — linkshell login (official gateway), or linkshell host --gateway <url>" },
+    );
   }
+  if (gatewayUrl) results.push(await checkGateway(host ? "Gateway (--gateway)" : "Gateway", gatewayUrl));
 
   for (const r of results) {
     const icon = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
