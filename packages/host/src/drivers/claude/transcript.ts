@@ -202,6 +202,19 @@ function taskNotification(text: string, agents?: Set<string>): SessionUpdate[] |
 }
 
 /** Slash-command plumbing and interruption markers that aren't real user messages. */
+/**
+ * After compacting, Claude writes messages it keeps a second time under the
+ * ids they already had — the ones just before, and what earlier compactions
+ * kept, from anywhere in the transcript. A reader keeps the ids of the lines it
+ * has read (`seen`) so those don't count as said or done again.
+ */
+function repeated(seen: Set<string>, uuid: string | undefined): boolean {
+  if (!uuid) return false;
+  if (seen.has(uuid)) return true;
+  seen.add(uuid);
+  return false;
+}
+
 /** The context was compacted (`/compact`, or by itself when it ran out): a card saying so, with how much it freed. */
 function compaction(line: Json): SessionUpdate[] {
   const uuid = str(line.uuid);
@@ -282,13 +295,17 @@ export interface TranscriptLineResult {
  * and one `agents` set: the calls that started an agent in the background and
  * haven't heard back from it.
  */
-export function transcriptLine(raw: string, options: { sidechain?: boolean; hidden?: Set<string>; agents?: Set<string> } = {}): TranscriptLineResult {
+export function transcriptLine(
+  raw: string,
+  options: { sidechain?: boolean; hidden?: Set<string>; agents?: Set<string>; seen?: Set<string> } = {},
+): TranscriptLineResult {
   let line: Json;
   try {
     line = JSON.parse(raw) as Json;
   } catch {
     return { updates: [] };
   }
+  if (options.seen && repeated(options.seen, str(line.uuid))) return { updates: [] };
   switch (line.type) {
     case "custom-title":
       return { updates: [], title: str(line.customTitle) };
@@ -436,9 +453,10 @@ export function readSubagents(transcriptPath: string): SessionUpdate[] {
     const transcript = join(dir, file.replace(/\.meta\.json$/, ".jsonl"));
     if (!parent || !existsSync(transcript)) continue;
     const hidden = new Set<string>();
+    const seen = new Set<string>();
     for (const raw of readFileSync(transcript, "utf8").split("\n")) {
       if (!raw.trim()) continue;
-      const result = transcriptLine(raw, { sidechain: true, hidden });
+      const result = transcriptLine(raw, { sidechain: true, hidden, seen });
       for (const update of result.updates) {
         const nested = nestUnder(update, parent);
         if (!nested) continue;
@@ -502,22 +520,31 @@ export function mergeSettings(current: ObservedSettings, next: ObservedSettings 
   return merged;
 }
 
-export function readTranscript(path: string): { updates: SessionUpdate[]; title?: string; size: number; settings: ObservedSettings; agents: Set<string> } {
+export function readTranscript(path: string): {
+  updates: SessionUpdate[];
+  title?: string;
+  size: number;
+  settings: ObservedSettings;
+  agents: Set<string>;
+  /** The ids of its lines, for whoever reads on from `size`. */
+  seen: Set<string>;
+} {
   let title: string | undefined;
   let settings: ObservedSettings = {};
   const updates: SessionUpdate[] = [];
   const hidden = new Set<string>();
   const agents = new Set<string>();
+  const seen = new Set<string>();
   const size = eachLine(path, (raw) => {
     if (!raw.trim()) return;
-    const result = transcriptLine(raw, { hidden, agents });
+    const result = transcriptLine(raw, { hidden, agents, seen });
     // The latest reply and prompt say what the session is using.
     settings = mergeSettings(settings, settingsOf(raw)) ?? settings;
     if (result.ts !== undefined) for (const update of result.updates) transcriptTimes.set(update, result.ts);
     updates.push(...result.updates);
     if (result.title) title = result.title;
   });
-  return { updates: mergeByTime(updates, readSubagents(path)), title, settings, size, agents };
+  return { updates: mergeByTime(updates, readSubagents(path)), title, settings, size, agents, seen };
 }
 
 /**

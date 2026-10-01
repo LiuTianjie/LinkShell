@@ -134,6 +134,21 @@ describe("SessionHub", () => {
     expect(names(again.events)).toEqual([["compact", "app-skill"], ["compact", "mine"]]);
   });
 
+  it("keeps the times of imported history when the agent only says when the session last changed", async () => {
+    // Discovered with one time for both (ACP agents, Claude): created "now", but its messages are from before.
+    driver.sessions = [{ nativeId: "s1", cwd: "/w/app", createdAt: 5000, updatedAt: 5000 }];
+    await hub.refreshDiscovery();
+    driver.history = [
+      { itemId: "m0", ts: 1000, updates: [chunk("m0", "first")] },
+      { itemId: "m1", updates: [chunk("m1", "no time of its own")] },
+      { itemId: "m2", ts: 3000, updates: [chunk("m2", "later")] },
+      { itemId: "m3", ts: 9000, updates: [chunk("m3", "never after its last change")] },
+    ];
+    const got = collector();
+    await hub.subscribe("fake:s1", 0, got.subscriber);
+    expect(got.events.map((e) => e.ts)).toEqual([1000, 1000, 3000, 5000]);
+  });
+
   it("imports history on first subscribe, then streams live events with no gap", async () => {
     driver.history = [{ itemId: "m0", updates: [chunk("m0", "old"), { sessionUpdate: "ls_message_done", messageId: "m0", role: "agent" }] }];
     const first = collector();

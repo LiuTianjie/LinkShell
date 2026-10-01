@@ -146,6 +146,8 @@ export class ClaudeDriver extends AcpDriver {
   private readonly hiddenTools = new Map<string, Set<string>>();
   /** Per session: calls that started an agent in the background and haven't heard back (see transcriptLine). */
   private readonly backgroundAgents = new Map<string, Set<string>>();
+  /** Ids of the transcript lines read lately: Claude writes some again after compacting. */
+  private readonly seenLines = new Map<string, Set<string>>();
   private readonly claudeCommand: string;
   private readonly configDir: string;
   private readonly busyWindowMs: number;
@@ -231,6 +233,7 @@ export class ClaudeDriver extends AcpDriver {
       }
       offset = transcript.size;
       this.backgroundAgents.set(nativeId, transcript.agents);
+      this.seenLines.set(nativeId, transcript.seen);
       this.observed.set(nativeId, transcript.settings);
       if (transcript.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: transcript.title });
     }
@@ -574,7 +577,9 @@ export class ClaudeDriver extends AcpDriver {
     if (!hidden) this.hiddenTools.set(nativeId, (hidden = new Set()));
     let agents = this.backgroundAgents.get(nativeId);
     if (!agents) this.backgroundAgents.set(nativeId, (agents = new Set()));
-    const result = transcriptLine(line, { hidden, agents });
+    let seen = this.seenLines.get(nativeId);
+    if (!seen) this.seenLines.set(nativeId, (seen = new Set()));
+    const result = transcriptLine(line, { hidden, agents, seen });
     if (result.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: result.title });
     for (const update of result.updates) this.emit(nativeId, update);
     // Changed on the computer (another model, effort, permission mode): the phone shows it.

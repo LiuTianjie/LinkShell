@@ -1036,8 +1036,9 @@ export class SessionHub {
         live.importing = true;
         live.importChanged = false;
         try {
-          // Items without a recorded time get the session's last activity, never "now".
-          let ts = summary.createdAt;
+          // Items without a recorded time get the time of the one before, never "now".
+          // (An agent that only says when a session last changed gives that as its creation too.)
+          let ts = Math.min(summary.createdAt, history.find((item) => item.ts !== undefined)?.ts ?? summary.createdAt);
           for (const item of history) {
             ts = Math.min(Math.max(item.ts ?? ts, ts), summary.updatedAt);
             if (this.store.isItemLogged(sessionId, item.itemId)) continue;

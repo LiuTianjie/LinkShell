@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAcpUpdate, toConfigOptions, withContext } from "../src/drivers/acp/mapper.js";
+import { normalizeAcpUpdate, toConfigOptions, toHistory, withContext } from "../src/drivers/acp/mapper.js";
 
 describe("toConfigOptions", () => {
   it("lists a repeated value once (Copilot sends auto three times)", () => {
@@ -61,5 +61,30 @@ describe("context carried with a prompt", () => {
     const joined = { type: "text", text: `${(context as { text: string }).text}\n\ngo on` };
     expect(normalizeAcpUpdate({ sessionUpdate: "user_message_chunk", messageId: "u1", content: joined })).toMatchObject({ content: { type: "text", text: "go on" } });
     expect(withContext([{ type: "text", text: "hi" }], undefined)).toEqual([{ type: "text", text: "hi" }]);
+  });
+});
+
+describe("history from a replay", () => {
+  it("keeps more about a call that already ended as history, not as something under way", () => {
+    const unfinished: unknown[] = [];
+    const history = toHistory(
+      [
+        { sessionUpdate: "tool_call", toolCallId: "t1", title: "Run the build in the background", kind: "execute", status: "in_progress" },
+        { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" },
+        { sessionUpdate: "tool_call", toolCallId: "t2", title: "Still running", kind: "execute", status: "in_progress" },
+        // The background task reports back long after its call returned.
+        { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "failed" },
+        { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "failed" },
+      ],
+      undefined,
+      undefined,
+      unfinished as never,
+    );
+    expect(history.map((item) => [item.itemId, item.updates.length])).toEqual([
+      ["tool:t1", 2],
+      ["tool:t1+1", 1],
+      ["tool:t1+2", 1],
+    ]);
+    expect(unfinished).toEqual([{ sessionUpdate: "tool_call", toolCallId: "t2", title: "Still running", kind: "execute", status: "in_progress" }]);
   });
 });

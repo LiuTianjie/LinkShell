@@ -376,9 +376,18 @@ export function toHistory(
   let group: SessionUpdate[] = [];
   let groupTs: number | undefined;
   const toolGroups = new Map<string, { updates: SessionUpdate[]; ts?: number }>();
+  // Calls whose item is already in the history, and how many later words on each there have been.
+  const closed = new Map<string, number>();
   const position = new Map<SessionUpdate, number>(tracked.map((entry, index) => [entry.update, index]));
   for (const { update, itemId, ts } of tracked) {
     if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      const late = closed.get(update.toolCallId);
+      if (late !== undefined && update.sessionUpdate === "tool_call_update") {
+        // More about a call that already ended (a background task reporting back): history too, not something under way.
+        closed.set(update.toolCallId, late + 1);
+        history.push({ itemId: `tool:${update.toolCallId}+${late + 1}`, updates: [update], ts });
+        continue;
+      }
       const entry = toolGroups.get(update.toolCallId) ?? { updates: [], ts };
       entry.updates.push(update);
       entry.ts ??= ts;
@@ -386,6 +395,7 @@ export function toHistory(
       if (itemId) {
         history.push({ itemId, updates: entry.updates, ts: entry.ts });
         toolGroups.delete(update.toolCallId);
+        closed.set(update.toolCallId, 0);
       }
       continue;
     }

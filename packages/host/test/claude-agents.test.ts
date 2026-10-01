@@ -96,3 +96,40 @@ describe("Claude session settings, as the transcript shows them", () => {
   });
 });
 
+describe("What Claude writes again after compacting", () => {
+  it("isn't said or done a second time, however far back it was first written", () => {
+    const ask = line({ type: "user", uuid: "u1", message: { role: "user", content: "run the tests" } });
+    const call = line({ type: "assistant", uuid: "a1", message: { id: "m1", role: "assistant", stop_reason: "tool_use", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "pnpm test" } }] } });
+    const result = line({ type: "user", uuid: "r1", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } });
+    const boundary = (uuid: string) => line({ type: "system", subtype: "compact_boundary", uuid, compactMetadata: { trigger: "auto", preTokens: 900000, postTokens: 30000 } });
+    const summary = (uuid: string) => line({ type: "user", uuid, isCompactSummary: true, message: { role: "user", content: "This session is being continued…" } });
+    const later = line({ type: "user", uuid: "u2", message: { role: "user", content: "and lint" } });
+    const { updates, seen } = transcript([
+      ask,
+      call,
+      result,
+      // First compaction: the summary, then the messages it kept, as they were.
+      boundary("b1"),
+      summary("s1"),
+      call,
+      result,
+      later,
+      // A later compaction writes what the first one kept once more.
+      boundary("b2"),
+      summary("s2"),
+      summary("s1"),
+      call,
+      result,
+      later,
+    ]);
+    const kinds = updates.map((update) => {
+      const u = update as { sessionUpdate: string; toolCallId?: string; status?: string; content?: { text?: string } };
+      return [u.sessionUpdate, u.toolCallId, u.status, u.content?.text].filter(Boolean).join(" ");
+    });
+    expect(kinds.filter((kind) => kind.startsWith("tool_call t1") || kind.startsWith("tool_call_update t1"))).toEqual(["tool_call t1 in_progress", "tool_call_update t1 completed"]);
+    expect(kinds.filter((kind) => kind.startsWith("user_message_chunk"))).toEqual(["user_message_chunk run the tests", "user_message_chunk and lint"]);
+    expect(kinds.filter((kind) => kind.startsWith("tool_call compact:"))).toHaveLength(2);
+    // Whoever reads on from here knows these lines too.
+    expect(seen.has("a1") && seen.has("u2")).toBe(true);
+  });
+});
