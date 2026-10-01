@@ -26,7 +26,7 @@ fi
 # Update formula
 cat > Formula/linkshell.rb << RUBY
 class Linkshell < Formula
-  desc "Remote terminal bridge — control local CLI sessions from your phone"
+  desc "Follow, steer and approve the coding agents on your computer from your phone"
   homepage "https://github.com/LiuTianjie/LinkShell"
   url "https://registry.npmjs.org/linkshell-cli/-/linkshell-cli-${VERSION}.tgz"
   sha256 "${SHA}"
