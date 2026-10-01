@@ -394,6 +394,35 @@ describe("host + Codex driver (fake app-server)", () => {
     expect(host.hub.getSession(session.id).lastSeq).toBe(phone.of(session.id).at(-1)!.seq);
   });
 
+  it("starts a Codex that doesn't have the features it would turn on", async () => {
+    const older = mkdtempSync(join(tmpdir(), "lsh-e2e-old-"));
+    const second = await startHost({
+      home: older,
+      version: "test",
+      drivers: (paths) => [
+        new CodexDriver({
+          socketPath: paths.codexSocket,
+          command: FAKE_CODEX,
+          env: { ...process.env, FAKE_CODEX_FEATURES: "apps    stable    true\n" },
+          hostVersion: "test",
+        }),
+      ],
+      log: () => {},
+    });
+    try {
+      const client = await connectHost(second.paths.hostSocket);
+      const info = await client.call("machine.info", {});
+      expect(info.agents[0]).toMatchObject({ id: "codex", installed: true });
+      expect(info.agents[0]!.problem).toBeUndefined();
+      const { session } = await client.call("sessions.create", { agent: "codex", cwd: older });
+      expect(session.agent).toBe("codex");
+      client.close();
+    } finally {
+      await second.stop();
+      rmSync(older, { recursive: true, force: true });
+    }
+  });
+
   it("rejects bad params and unknown methods with typed errors", async () => {
     await expect(phone.client.call("sessions.prompt", { sessionId, clientMessageId: "x", content: [] })).rejects.toMatchObject({
       data: { code: "invalid_params" },

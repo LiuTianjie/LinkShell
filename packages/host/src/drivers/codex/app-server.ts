@@ -47,6 +47,35 @@ export async function detectCodex(command = "codex", env?: NodeJS.ProcessEnv): P
 }
 
 /**
+ * Features of the installed Codex that LinkShell turns on when they exist:
+ * asking the user questions outside plan mode (the phone and the TUI can both
+ * answer them). A Codex that doesn't have a feature — or has retired it —
+ * refuses to start when asked to enable it, so only what it lists is asked for.
+ */
+const WANTED_FEATURES = ["default_mode_request_user_input"];
+
+/** The `--enable` arguments for the wanted features this Codex knows and hasn't removed. */
+export async function featureArgs(command = "codex", env?: NodeJS.ProcessEnv): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync(command, ["features", "list"], { env, timeout: 10_000 });
+    return enableArgs(stdout);
+  } catch {
+    return [];
+  }
+}
+
+/** From `codex features list` (name, stage, on or off per line). */
+export function enableArgs(listing: string): string[] {
+  const stages = new Map(
+    listing.split("\n").flatMap((line): [string, string][] => {
+      const match = /^(\S+)\s+(.*?)\s+(true|false)\s*$/.exec(line.trim());
+      return match ? [[match[1]!, match[2]!.trim()]] : [];
+    }),
+  );
+  return WANTED_FEATURES.filter((name) => stages.has(name) && stages.get(name) !== "removed").flatMap((name) => ["--enable", name]);
+}
+
+/**
  * Owns one `codex app-server --listen unix://…` process and a client connection
  * to it. The same socket is what `codex --remote` attaches the desktop TUI to,
  * so the TUI and LinkShell are peers on the same threads.
@@ -70,9 +99,7 @@ export class CodexAppServer {
     if (existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
     const child = spawn(
       this.options.command ?? "codex",
-      // Codex asks the user questions outside plan mode only with this (still off by default in the
-      // CLI): the phone and the TUI can both answer them now. A Codex without the feature ignores it.
-      ["app-server", "--enable", "default_mode_request_user_input", "--listen", `unix://${this.options.socketPath}`],
+      ["app-server", ...(await featureArgs(this.options.command, this.options.env)), "--listen", `unix://${this.options.socketPath}`],
       { env: this.options.env, stdio: ["ignore", "pipe", "pipe"] },
     );
     this.child = child;

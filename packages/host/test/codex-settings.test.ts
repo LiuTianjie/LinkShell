@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { enableArgs } from "../src/drivers/codex/app-server.js";
 import { configOptions, effective, presetOf, turnOverrides, type CodexModel } from "../src/drivers/codex/settings.js";
 
 const models: CodexModel[] = [
@@ -53,5 +54,17 @@ describe("Codex settings", () => {
     expect(turnOverrides({ plan: false }, current)).toMatchObject({ collaborationMode: { mode: "default" } });
     // Never touched: nothing is sent.
     expect(turnOverrides({}, current)).toEqual({});
+  });
+});
+
+describe("Codex features", () => {
+  it("are turned on only when the installed Codex lists them, and hasn't removed them", () => {
+    const listing = (line: string) => `apps                              stable             true\n${line}\nweb_search_request                deprecated         false\n`;
+    expect(enableArgs(listing("default_mode_request_user_input   under development  false"))).toEqual(["--enable", "default_mode_request_user_input"]);
+    expect(enableArgs(listing("default_mode_request_user_input   stable             true"))).toEqual(["--enable", "default_mode_request_user_input"]);
+    // A Codex that retired it, or never had it, would refuse to start if asked.
+    expect(enableArgs(listing("default_mode_request_user_input   removed            true"))).toEqual([]);
+    expect(enableArgs(listing("something_else                    stable             true"))).toEqual([]);
+    expect(enableArgs("")).toEqual([]);
   });
 });

@@ -16,12 +16,23 @@ if (args[0] === "--version") {
   process.stdout.write("codex-cli 0.0.0-fake\n");
   process.exit(0);
 }
+if (args[0] === "features" && args[1] === "list") {
+  // FAKE_CODEX_FEATURES: what this "version" lists (default: the question feature, in development).
+  process.stdout.write(process.env.FAKE_CODEX_FEATURES ?? "apps                                     stable             true\ndefault_mode_request_user_input          under development  false\n");
+  process.exit(0);
+}
 if (args[0] === "login" && args[1] === "status") {
   process.stderr.write(process.env.FAKE_CODEX_LOGGED_OUT === "1" ? "Not logged in\n" : "Logged in using ChatGPT\n");
   process.exit(process.env.FAKE_CODEX_LOGGED_OUT === "1" ? 1 : 0);
 }
-// Like Codex: features can be switched on before --listen.
+// Like Codex: features can be switched on before --listen, and one it doesn't know is an error.
 const listenAt = args.indexOf("--listen");
+for (let index = 1; index < listenAt; index += 2) {
+  if (args[index] !== "--enable" || args[index + 1] !== "default_mode_request_user_input") {
+    process.stderr.write(`Error: Unknown feature flag: ${args[index + 1]}\n`);
+    process.exit(1);
+  }
+}
 if (args[0] !== "app-server" || listenAt < 1 || !args[listenAt + 1]?.startsWith("unix://")) {
   process.stderr.write(`fake-codex: unsupported args ${args.join(" ")}\n`);
   process.exit(2);
