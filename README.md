@@ -107,6 +107,8 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 
 And the rest:
 
+- **Answer its questions.** When an agent asks you to choose or to type something — Claude's questions, Codex's, an MCP server's form — the question arrives with its options: pick, write your own answer, or skip.
+- **Straight to your computer.** The screen and port previews travel peer to peer whenever a direct path exists (the same network, or through NAT); the gateway then only helps the two sides find each other. Without one they are relayed, with a lighter picture.
 - **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app.
 - **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
 - **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
@@ -134,6 +136,8 @@ What each agent supports from the phone:
 | Fork a session, or from a reply | native | native | made by LinkShell: the conversation is handed over as text |
 | Sessions in git worktrees | yes | yes | yes |
 | Slash commands | `/compact`, `/review`, `/init`, your skills | Claude's own list and your skills | whatever the agent offers |
+| Questions for you (choices, free text) | yes, in plan mode and outside it | yes | when the agent asks through ACP forms |
+| Plan mode | a setting on the phone | a permission mode | whatever modes the agent offers |
 
 ## Run your own gateway
 
@@ -152,7 +156,7 @@ On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss
 
 ## Security
 
-- **End-to-end encryption.** Phone and computer encrypt everything between them; the official gateway and yours only see ciphertext.
+- **End-to-end encryption.** Phone and computer encrypt everything between them; the official gateway and yours only see ciphertext. A direct connection between the two is set up over that encrypted channel and encrypted itself.
 - **Pairing grants access.** A paired phone can do what you can do in a terminal on that computer. Pair only devices you trust, and keep pairing codes to yourself.
 - **Your agents, your accounts.** Agents run as your user, with your login shell's environment and their own sign-in. The Pro subscription only covers the gateway.
 - **Local state.** Sessions and history are kept in `~/.linkshell` on the computer; pairings survive restarts.
