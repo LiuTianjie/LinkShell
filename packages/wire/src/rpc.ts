@@ -7,6 +7,7 @@ import {
   terminalInfoSchema,
   sessionDriverSchema,
   sessionSummarySchema,
+  subagentInfoSchema,
 } from "./model.js";
 import { contentBlockSchema, sessionEventSchema } from "./updates.js";
 
@@ -60,6 +61,9 @@ export const directoryEntrySchema = z.object({
   path: z.string(),
   /** Looks like a code project (has .git, package.json, …). */
   project: z.boolean().optional(),
+  /** A file (only listed when asked for); everything else is a directory. */
+  file: z.boolean().optional(),
+  size: z.number().int().optional(),
 });
 export type DirectoryEntry = z.infer<typeof directoryEntrySchema>;
 
@@ -99,8 +103,47 @@ export const methods = {
       sessionId: z.string().min(1),
       /** Last seq the client already has; 0 for a fresh subscription. */
       fromSeq: z.number().int().nonnegative(),
+      /**
+       * The client loads pictures when it shows them (`sessions.image`): they
+       * arrive as image blocks with a `linkshell-event:` uri and no data.
+       * Without it, large pictures are replaced by a text note.
+       */
+      lazyImages: z.boolean().optional(),
     }),
-    result: z.object({ session: sessionSummarySchema }),
+    /**
+     * A fresh subscription starts at the session's latest turns, not at its
+     * beginning: `startSeq` is the seq before the first event sent (0 when the
+     * whole log was). `sessions.history` pages back from there.
+     */
+    result: z.object({ session: sessionSummarySchema, startSeq: z.number().int().nonnegative().optional() }),
+  },
+  /** The page of events before `beforeSeq` (whole turns), oldest first; `startSeq` 0 means that was the beginning. */
+  "sessions.history": {
+    params: z.object({
+      sessionId: z.string().min(1),
+      beforeSeq: z.number().int().positive(),
+      lazyImages: z.boolean().optional(),
+    }),
+    result: z.object({ events: z.array(sessionEventSchema), startSeq: z.number().int().nonnegative() }),
+  },
+  /** The sub-agents this session started, newest first, wherever in its history they are. */
+  "sessions.subagents": {
+    params: z.object({ sessionId: z.string().min(1) }),
+    result: z.object({ subagents: z.array(subagentInfoSchema) }),
+  },
+  /**
+   * One sub-agent's conversation: the call that started it and the events
+   * under it (the latest 2000), oldest first. Later ones arrive on the
+   * session's own subscription, with this call as `parentToolCallId`.
+   */
+  "sessions.subagent": {
+    params: z.object({ sessionId: z.string().min(1), toolCallId: z.string().min(1), lazyImages: z.boolean().optional() }),
+    result: z.object({ events: z.array(sessionEventSchema) }),
+  },
+  /** The picture behind a `linkshell-event:` uri. */
+  "sessions.image": {
+    params: z.object({ sessionId: z.string().min(1), uri: z.string().min(1) }),
+    result: z.object({ mimeType: z.string(), data: z.string() }),
   },
   "sessions.unsubscribe": {
     params: z.object({ sessionId: z.string().min(1) }),
@@ -112,8 +155,15 @@ export const methods = {
       /** Client-generated idempotency key; a retried send is not delivered twice. */
       clientMessageId: z.string().min(1),
       content: z.array(contentBlockSchema).min(1),
+      /**
+       * What to do while a turn is running. "queue": hold the message (it
+       * shows in SessionSummary.queue, where it can be reordered, taken back
+       * or sent at once) and send it when the turn ends. Unset: the agent's
+       * own way — taken into the running turn where it can be, queued where not.
+       */
+      whenBusy: z.enum(["queue"]).optional(),
     }),
-    /** queued: the agent can't take input mid-turn; it is sent when the turn ends. */
+    /** queued: held until the running turn ends (see `whenBusy`, `sessions.sendQueued`). */
     result: z.object({ delivery: z.enum(["started", "steered", "queued", "duplicate"]) }),
   },
   "sessions.cancel": {
@@ -134,6 +184,20 @@ export const methods = {
       optionId: z.string().min(1),
       value: z.string().min(1),
     }),
+    result: empty,
+  },
+  /**
+   * Sends a queued message (the first, or `clientMessageId`) now instead of
+   * when the running turn ends: taken into that turn where the agent allows
+   * it, otherwise the turn is stopped first, wherever it runs.
+   */
+  "sessions.sendQueued": {
+    params: z.object({ sessionId: z.string().min(1), clientMessageId: z.string().min(1).optional() }),
+    result: empty,
+  },
+  /** Puts the queued messages in this order (ids not named keep theirs, after the named ones). */
+  "sessions.reorderQueue": {
+    params: z.object({ sessionId: z.string().min(1), clientMessageIds: z.array(z.string().min(1)) }),
     result: empty,
   },
   /** Drops a message still waiting in the host's queue (see SessionSummary.queue). */
@@ -207,6 +271,12 @@ export const methods = {
   // ── Gateway: reach this computer from anywhere ──
   "gateway.status": { params: empty, result: gatewayStatusSchema },
   /**
+   * Applies the computer's current gateway choice and account (local only):
+   * after `linkshell login` / `logout` or `linkshell host --gateway`, a running
+   * host connects, moves or disconnects without a restart.
+   */
+  "gateway.refresh": { params: empty, result: gatewayStatusSchema },
+  /**
    * Opens a pairing window (local only). `link` is what the QR encodes; the
    * code can be typed instead. `pairing.done` follows when a device pairs.
    */
@@ -218,17 +288,34 @@ export const methods = {
   // ── Directories: pick where a new session runs ──
   /** Subdirectories of `path` (default: the home directory). */
   "fs.list": {
-    params: z.object({ path: z.string().optional(), hidden: z.boolean().default(false) }),
+    params: z.object({
+      path: z.string().optional(),
+      hidden: z.boolean().default(false),
+      /** Also list the directory's files (after its subdirectories), to browse a project. */
+      files: z.boolean().default(false),
+    }),
     result: z.object({
       path: z.string(),
       parent: z.string().optional(),
       home: z.string(),
       entries: z.array(directoryEntrySchema),
+      /** The directory holds more than a listing carries (1000 entries). */
+      truncated: z.boolean().optional(),
     }),
   },
-  /** A file's contents, for viewing: text as-is, images as base64, anything else refused. */
+  /**
+   * A file's contents, for viewing. Text comes a part at a time: up to
+   * `maxBytes` from `offset`, with `nextOffset` when more follows. A picture
+   * comes whole, as base64. A binary file is only described, and a file too
+   * big to look at on a phone (text over 20 MB, a picture over 10 MB) is
+   * refused with `too_large`.
+   */
   "fs.read": {
-    params: z.object({ path: z.string().min(1), maxBytes: z.number().int().min(1).max(8_000_000).default(2_000_000) }),
+    params: z.object({
+      path: z.string().min(1),
+      offset: z.number().int().nonnegative().default(0),
+      maxBytes: z.number().int().min(1).max(2_000_000).default(512_000),
+    }),
     result: z.object({
       path: z.string(),
       size: z.number().int(),
@@ -237,7 +324,10 @@ export const methods = {
       text: z.string().optional(),
       data: z.string().optional(),
       mimeType: z.string().optional(),
+      /** Text: more of the file follows this part. */
       truncated: z.boolean(),
+      /** Where the next part starts (pass it as `offset`). */
+      nextOffset: z.number().int().optional(),
     }),
   },
   /**
@@ -366,6 +456,12 @@ export function isMethodName(name: string): name is MethodName {
 
 export const notifications = {
   "session.event": sessionEventSchema,
+  /**
+   * Sent before a subscription's backlog when it doesn't continue from the
+   * client's `fromSeq`: the events that follow start after `startSeq`, so a
+   * client holding older events of this session drops them first.
+   */
+  "session.window": z.object({ sessionId: z.string(), startSeq: z.number().int().nonnegative() }),
   "session.summary": z.object({ session: sessionSummarySchema }),
   /** A session was deleted (from any device, or natively by the agent). */
   "session.removed": z.object({ sessionId: z.string() }),

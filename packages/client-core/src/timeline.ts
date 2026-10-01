@@ -75,6 +75,11 @@ export interface PendingPermission {
 export interface SessionView {
   sessionId: string;
   lastSeq: number;
+  /**
+   * Events up to this seq aren't loaded: the session opens at its latest
+   * turns, and earlier ones are added a page at a time. 0: from the beginning.
+   */
+  startSeq: number;
   items: TimelineItem[];
   /** id → index into items. */
   index: Record<string, number>;
@@ -95,6 +100,7 @@ export function emptyView(sessionId: string): SessionView {
   return {
     sessionId,
     lastSeq: 0,
+    startSeq: 0,
     items: [],
     index: {},
     permissions: [],
@@ -380,6 +386,84 @@ export function applyEvent(view: SessionView, event: SessionEvent): SessionView 
 
 export function applyEvents(view: SessionView, events: SessionEvent[]): SessionView {
   return events.reduce(applyEvent, view);
+}
+
+/**
+ * The host's backlog starts after `startSeq`. A view that holds nothing yet
+ * just notes it; one that holds older events can't be continued from there
+ * (events in between are missing) and starts over, keeping unsent messages.
+ */
+export function startWindow(view: SessionView, startSeq: number): SessionView {
+  if (view.lastSeq === 0 || view.lastSeq >= startSeq) return view.lastSeq === 0 ? { ...view, startSeq } : view;
+  const unsent = view.items.filter((item) => item.kind === "user" && (item.pending || item.failed));
+  const index: Record<string, number> = {};
+  unsent.forEach((item, i) => {
+    index[item.id] = i;
+  });
+  return { ...emptyView(view.sessionId), startSeq, items: unsent, index };
+}
+
+/** Titles the reducer gives a tool call it only saw the end of. */
+const STUB_TITLES = new Set(["Tool", "Sub-agent"]);
+
+/** One item seen in two pages: `earlier` has how it began, `later` how it went on. */
+function joinItem(earlier: TimelineItem, later: TimelineItem): TimelineItem {
+  if (earlier.kind === "agent" && later.kind === "agent") {
+    const attachments = [...(earlier.attachments ?? []), ...(later.attachments ?? [])];
+    return { ...later, text: earlier.text + later.text, attachments: attachments.length ? attachments : undefined, ts: earlier.ts };
+  }
+  if (earlier.kind === "thought" && later.kind === "thought") return { ...later, text: earlier.text + later.text, ts: earlier.ts };
+  if (earlier.kind === "user" && later.kind === "user") return { ...later, blocks: mergeText([...earlier.blocks, ...later.blocks]), ts: earlier.ts };
+  if (earlier.kind === "tool" && later.kind === "tool") {
+    return {
+      ...later,
+      title: STUB_TITLES.has(later.title) ? earlier.title : later.title,
+      toolKind: earlier.toolKind,
+      rawInput: later.rawInput ?? earlier.rawInput,
+      rawOutput: later.rawOutput ?? earlier.rawOutput,
+      locations: later.locations ?? earlier.locations,
+      detail: later.detail ?? earlier.detail,
+      content: later.content.length ? keepDiffs(earlier.content, later.content) : earlier.content,
+      output: earlier.output + later.output,
+      sub: earlier.sub && later.sub ? joinViews(earlier.sub, later.sub) : (later.sub ?? earlier.sub),
+      ts: earlier.ts,
+      endedTs: later.endedTs ?? earlier.endedTs,
+    };
+  }
+  return later;
+}
+
+/** Puts an earlier stretch of a timeline in front of a later one. */
+function joinViews(earlier: SessionView, later: SessionView): SessionView {
+  const items: TimelineItem[] = [];
+  const joined = new Set<string>();
+  for (const item of earlier.items) {
+    const at = later.index[item.id];
+    if (at === undefined) items.push(item);
+    else {
+      items.push(joinItem(item, later.items[at]!));
+      joined.add(item.id);
+    }
+  }
+  for (const item of later.items) if (!joined.has(item.id)) items.push(item);
+  const index: Record<string, number> = {};
+  items.forEach((item, i) => {
+    index[item.id] = i;
+  });
+  return { ...later, items, index };
+}
+
+/**
+ * Adds a page of earlier history (`sessions.history`) in front of what the
+ * view shows. An item that straddles the page boundary (a long turn was cut)
+ * becomes one item again.
+ */
+export function prependEvents(view: SessionView, events: SessionEvent[], startSeq: number): SessionView {
+  let earlier = emptyView(view.sessionId);
+  for (const event of events) earlier = applyUpdate(earlier, event.update, event.ts, String(event.seq));
+  // Whatever was still streaming where the page ends is continued by the later items, or was cut off.
+  earlier = settleAll(earlier, events[events.length - 1]?.ts ?? 0);
+  return { ...joinViews(earlier, view), startSeq };
 }
 
 /** Shows a message the user just sent, before the host confirms it. */

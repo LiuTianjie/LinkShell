@@ -1,6 +1,7 @@
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { ContentBlock, PlanEntry, SessionUpdate, ToolCallContent, ToolDetail, ToolKind } from "@linkshell/wire";
 import { inlineImage } from "../images.js";
 import { nestUnder } from "../nesting.js";
@@ -176,12 +177,28 @@ function slashCommand(text: string): string | undefined {
  * finished by injecting `<task-notification>` as a user message. It's the
  * task's status, not something the user said.
  */
-function taskNotification(text: string): SessionUpdate | undefined {
+/**
+ * A background task finished: its call gets its final status. For an agent
+ * started in the background (one of `agents`) that is also the end of its
+ * turn, and its report is what the call returned.
+ */
+function taskNotification(text: string, agents?: Set<string>): SessionUpdate[] | undefined {
   if (!text.trimStart().startsWith("<task-notification>")) return undefined;
   const toolCallId = /<tool-use-id>\s*([^<\s]+)\s*<\/tool-use-id>/.exec(text)?.[1];
   if (!toolCallId) return undefined;
   const status = /<status>\s*([^<\s]+)\s*<\/status>/.exec(text)?.[1];
-  return { sessionUpdate: "tool_call_update", toolCallId, status: status === "completed" ? "completed" : "failed" };
+  const done = status === "completed";
+  if (!agents?.delete(toolCallId)) return [{ sessionUpdate: "tool_call_update", toolCallId, status: done ? "completed" : "failed" }];
+  const report = /<result>([\s\S]*?)<\/result>/.exec(text)?.[1]?.trim();
+  return [
+    {
+      sessionUpdate: "tool_call_update",
+      toolCallId,
+      status: done ? "completed" : "failed",
+      content: report ? [{ type: "content", content: { type: "text", text: report } }] : undefined,
+    },
+    { sessionUpdate: "ls_turn", state: "ended", parentToolCallId: toolCallId, stopReason: done ? "end_turn" : status === "killed" || status === "stopped" ? "cancelled" : "error" },
+  ];
 }
 
 /** Slash-command plumbing and interruption markers that aren't real user messages. */
@@ -201,13 +218,18 @@ function isNoise(text: string): boolean {
  * running turn and records it as a `queued_command` attachment rather than a
  * user line; it's still something the user said.
  */
-function queuedPrompt(line: Json): TranscriptLineResult {
+function queuedPrompt(line: Json, agents?: Set<string>): TranscriptLineResult {
   const attachment = obj(line.attachment);
   if (attachment?.type !== "queued_command" || line.isSidechain === true) return { updates: [] };
-  if (attachment.commandMode !== undefined && attachment.commandMode !== "prompt") return { updates: [] };
-  if (obj(attachment.origin)?.kind !== undefined && obj(attachment.origin)?.kind !== "human") return { updates: [] };
   const stamp = str(line.timestamp) ? Date.parse(str(line.timestamp)!) : Number.NaN;
   const ts = Number.isFinite(stamp) ? stamp : undefined;
+  if (attachment.commandMode === "task-notification" && typeof attachment.prompt === "string") {
+    // A background task reporting back; Claude answers it in a turn of its own.
+    const notification = taskNotification(attachment.prompt, agents);
+    return notification ? { updates: [...notification, { sessionUpdate: "ls_turn", state: "started" }], ts } : { updates: [] };
+  }
+  if (attachment.commandMode !== undefined && attachment.commandMode !== "prompt") return { updates: [] };
+  if (obj(attachment.origin)?.kind !== undefined && obj(attachment.origin)?.kind !== "human") return { updates: [] };
   const messageId = str(attachment.source_uuid) ?? str(line.uuid);
   const prompt = attachment.prompt;
   const blocks: ContentBlock[] = [];
@@ -238,9 +260,11 @@ export interface TranscriptLineResult {
 /**
  * Converts one transcript line to wire updates. Sub-agent files pass
  * `sidechain`; a reader keeps one `hidden` set per transcript, so a tool that
- * only feeds another view (TodoWrite → the plan) doesn't also show as a call.
+ * only feeds another view (TodoWrite → the plan) doesn't also show as a call,
+ * and one `agents` set: the calls that started an agent in the background and
+ * haven't heard back from it.
  */
-export function transcriptLine(raw: string, options: { sidechain?: boolean; hidden?: Set<string> } = {}): TranscriptLineResult {
+export function transcriptLine(raw: string, options: { sidechain?: boolean; hidden?: Set<string>; agents?: Set<string> } = {}): TranscriptLineResult {
   let line: Json;
   try {
     line = JSON.parse(raw) as Json;
@@ -256,7 +280,7 @@ export function transcriptLine(raw: string, options: { sidechain?: boolean; hidd
     case "assistant":
       break;
     case "attachment":
-      return queuedPrompt(line);
+      return queuedPrompt(line, options.agents);
     default:
       return { updates: [] };
   }
@@ -275,9 +299,9 @@ export function transcriptLine(raw: string, options: { sidechain?: boolean; hidd
       const block = obj(rawBlock);
       if (!block) continue;
       if (block.type === "text" && typeof block.text === "string") {
-        const notification = taskNotification(block.text);
+        const notification = taskNotification(block.text, options.agents);
         if (notification) {
-          updates.push(notification);
+          updates.push(...notification);
           // Claude answers the notification in a turn of its own.
           userText = true;
           continue;
@@ -286,6 +310,11 @@ export function transcriptLine(raw: string, options: { sidechain?: boolean; hidd
         if (command) {
           updates.push({ sessionUpdate: "user_message_chunk", messageId: uuid, content: { type: "text", text: command } });
           userText = true;
+          continue;
+        }
+        if (block.text.trimStart().startsWith("[Request interrupted by user")) {
+          // Esc at the desk (or a stop from a device): the turn is over.
+          updates.push({ sessionUpdate: "ls_turn", state: "ended", stopReason: "cancelled" });
           continue;
         }
         if (isNoise(block.text)) continue;
@@ -298,6 +327,14 @@ export function transcriptLine(raw: string, options: { sidechain?: boolean; hidd
         userText = true;
       } else if (block.type === "tool_result" && str(block.tool_use_id)) {
         if (options.hidden?.delete(str(block.tool_use_id)!)) continue;
+        const launched = obj(line.toolUseResult);
+        if (launched?.isAsync === true && str(launched.agentId) && !options.sidechain) {
+          // An agent started in the background: the call returns at once (with
+          // nothing to show) while the agent works on. Its end is a task notification.
+          options.agents?.add(str(block.tool_use_id)!);
+          updates.push({ sessionUpdate: "ls_turn", state: "started", parentToolCallId: str(block.tool_use_id)! });
+          continue;
+        }
         const text = resultText(block.content);
         const content: ToolCallContent[] = [...(text ? [{ type: "content" as const, content: { type: "text" as const, text } }] : []), ...resultImages(block.content)];
         updates.push({
@@ -346,7 +383,10 @@ export function transcriptLine(raw: string, options: { sidechain?: boolean; hidd
       });
     }
   }
-  if (message.stop_reason === "end_turn") updates.push({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
+  // Anything but a tool call (or a reply still being written) is the turn's last word.
+  const stop = message.stop_reason;
+  if (stop === "end_turn" || stop === "stop_sequence") updates.push({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
+  else if (stop === "max_tokens" || stop === "refusal") updates.push({ sessionUpdate: "ls_turn", state: "ended", stopReason: stop });
   return { updates, ts };
 }
 
@@ -406,25 +446,61 @@ export function mergeByTime(main: SessionUpdate[], nested: SessionUpdate[]): Ses
   return out;
 }
 
-export function readTranscript(path: string): { updates: SessionUpdate[]; title?: string; size: number; model?: string } {
-  const size = statSync(path).size;
-  const text = readRange(path, 0, size);
-  const complete = text.slice(0, text.lastIndexOf("\n") + 1);
+export function readTranscript(path: string): { updates: SessionUpdate[]; title?: string; size: number; model?: string; agents: Set<string> } {
   let title: string | undefined;
   let model: string | undefined;
   const updates: SessionUpdate[] = [];
   const hidden = new Set<string>();
-  for (const raw of complete.split("\n")) {
-    if (!raw.trim()) continue;
-    const result = transcriptLine(raw, { hidden });
+  const agents = new Set<string>();
+  const size = eachLine(path, (raw) => {
+    if (!raw.trim()) return;
+    const result = transcriptLine(raw, { hidden, agents });
     // The model of the latest reply: what the session is using.
     const reply = raw.includes('"type":"assistant"') ? /"model":"([^"]+)"/.exec(raw)?.[1] : undefined;
     if (reply && reply !== "<synthetic>") model = reply;
     if (result.ts !== undefined) for (const update of result.updates) transcriptTimes.set(update, result.ts);
     updates.push(...result.updates);
     if (result.title) title = result.title;
+  });
+  return { updates: mergeByTime(updates, readSubagents(path)), title, model, size, agents };
+}
+
+/**
+ * Calls `onLine` for every complete line of a file, reading it a piece at a
+ * time (a long session's transcript runs to hundreds of MB). Returns how many
+ * bytes those lines take: where a tail picks up.
+ */
+function eachLine(path: string, onLine: (line: string) => void): number {
+  const fd = openSync(path, "r");
+  const buffer = Buffer.alloc(4 * 1024 * 1024);
+  const decoder = new StringDecoder("utf8");
+  let carry = "";
+  let consumed = 0;
+  try {
+    for (;;) {
+      const read = readSync(fd, buffer, 0, buffer.length, null);
+      if (read === 0) break;
+      const text = carry + decoder.write(buffer.subarray(0, read));
+      const end = text.lastIndexOf("\n");
+      if (end < 0) {
+        carry = text;
+        continue;
+      }
+      carry = text.slice(end + 1);
+      const lines = text.slice(0, end + 1);
+      consumed += Buffer.byteLength(lines);
+      for (const line of lines.split("\n")) onLine(line);
+    }
+  } finally {
+    closeSync(fd);
   }
-  return { updates: mergeByTime(updates, readSubagents(path)), title, model, size: Buffer.byteLength(complete) };
+  return consumed;
+}
+
+/** The last `bytes` of a file, as text (the first line may be partial). */
+export function readTail(path: string, bytes: number): string {
+  const size = statSync(path).size;
+  return readRange(path, Math.max(0, size - bytes), size);
 }
 
 function readRange(path: string, start: number, end: number): string {
@@ -454,6 +530,10 @@ export class TranscriptTail {
   private timer?: ReturnType<typeof setInterval>;
   private paused = false;
   private path?: string;
+  /** While catching up after a pause: lines not to emit. */
+  private skip?: (line: string) => boolean;
+  /** While paused: how far `writtenMeanwhile` has looked. */
+  private looked = 0;
 
   constructor(
     private readonly options: {
@@ -477,10 +557,43 @@ export class TranscriptTail {
     this.timer = undefined;
   }
 
-  /** Stops emitting (the remote driver is writing); `resumeAtEnd` skips what was written meanwhile. */
+  /** Stops emitting (the remote driver is writing); see `resumeSkipping` and `resumeAtEnd`. */
   pause(): void {
     this.poll();
     this.paused = true;
+    this.looked = this.offset;
+  }
+
+  /** While paused: whether a line `match` recognises was written since the pause (or since the last look). */
+  writtenMeanwhile(match: (line: string) => boolean): boolean {
+    if (!this.paused) return false;
+    const path = this.resolve();
+    if (!path) return false;
+    let size: number;
+    try {
+      size = statSync(path).size;
+    } catch {
+      return false;
+    }
+    if (size <= this.looked) return false;
+    const chunk = readRange(path, this.looked, size);
+    const end = chunk.lastIndexOf("\n");
+    if (end < 0) return false;
+    this.looked += Buffer.byteLength(chunk.slice(0, end + 1));
+    return chunk.slice(0, end).split("\n").some(match);
+  }
+
+  /**
+   * Resumes after `pause`: what was written meanwhile is emitted, except the
+   * lines `skip` recognises (the remote driver's own, already shown live).
+   */
+  resumeSkipping(skip: (line: string) => boolean): void {
+    if (!this.paused) return;
+    this.paused = false;
+    this.skip = skip;
+    this.poll();
+    // A line still being written when we looked gets the same check once it's whole.
+    this.skip = this.carry ? skip : undefined;
   }
 
   resumeAtEnd(): void {
@@ -515,8 +628,10 @@ export class TranscriptTail {
       return;
     }
     this.carry = chunk.slice(end + 1);
+    const skip = this.skip;
+    this.skip = undefined;
     for (const line of chunk.slice(0, end).split("\n")) {
-      if (line.trim()) this.options.onLine(line);
+      if (line.trim() && !skip?.(line)) this.options.onLine(line);
     }
   }
 

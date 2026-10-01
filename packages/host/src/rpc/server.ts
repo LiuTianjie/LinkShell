@@ -8,6 +8,7 @@ import {
   RpcPeer,
   isMethodName,
   methods,
+  type GatewayStatus,
   type MachineInfo,
   type MethodName,
   type MethodResult,
@@ -19,6 +20,7 @@ import type { SessionHub, Subscriber } from "../hub.js";
 import { listDirectory, makeDirectory, readFile, searchDirectories, uploadFile } from "../fs.js";
 import { listPorts, ProxyStreams } from "../ports.js";
 import { ScreenShare } from "../screen.js";
+import { imageOf, parseImageUri, slimEvent } from "../slim.js";
 import type { OutputListener, TerminalManager } from "../terminals.js";
 
 export interface HostRpcServerOptions {
@@ -66,6 +68,7 @@ export class HostRpcServer {
   private readonly sockets = new Set<WebSocket>();
   private readonly connections = new Set<RpcPeer>();
   private gateway?: GatewayLink;
+  private refreshGateway?: () => GatewayStatus;
   private readonly screen: ScreenShare;
   private readonly handlers: { [M in MethodName]: (params: never, context: ConnectionContext) => Promise<MethodResult<M>> | MethodResult<M> };
 
@@ -85,9 +88,28 @@ export class HostRpcServer {
       "sessions.subscribe": async (params: P<"sessions.subscribe">, context) => {
         const previous = context.subscriptions.get(params.sessionId);
         if (previous) hub.unsubscribe(params.sessionId, previous);
-        const subscriber: Subscriber = { event: (event) => context.peer.notify("session.event", event) };
+        const slim = { lazyImages: params.lazyImages };
+        const subscriber: Subscriber = {
+          event: (event) => context.peer.notify("session.event", slimEvent(event, slim)),
+          window: (startSeq) => context.peer.notify("session.window", { sessionId: params.sessionId, startSeq }),
+        };
         context.subscriptions.set(params.sessionId, subscriber);
-        return { session: await hub.subscribe(params.sessionId, params.fromSeq, subscriber) };
+        return hub.subscribe(params.sessionId, params.fromSeq, subscriber);
+      },
+      "sessions.history": (params: P<"sessions.history">) => {
+        const page = hub.history(params.sessionId, params.beforeSeq);
+        return { startSeq: page.startSeq, events: page.events.map((event) => slimEvent(event, { lazyImages: params.lazyImages })) };
+      },
+      "sessions.subagents": (params: P<"sessions.subagents">) => ({ subagents: hub.subagents(params.sessionId) }),
+      "sessions.subagent": (params: P<"sessions.subagent">) => ({
+        events: hub.subagent(params.sessionId, params.toolCallId).map((event) => slimEvent(event, { lazyImages: params.lazyImages })),
+      }),
+      "sessions.image": (params: P<"sessions.image">) => {
+        const ref = parseImageUri(params.uri);
+        const event = ref && hub.readEvent(params.sessionId, ref.seq);
+        const image = event && imageOf(event, ref.index);
+        if (!image) throw RpcError.app("not_found", "这张图片已经不在会话记录里");
+        return image;
       },
       "sessions.unsubscribe": (params: P<"sessions.unsubscribe">, context) => {
         const subscriber = context.subscriptions.get(params.sessionId);
@@ -96,7 +118,7 @@ export class HostRpcServer {
         return {};
       },
       "sessions.prompt": async (params: P<"sessions.prompt">) => ({
-        delivery: await hub.prompt(params.sessionId, params.clientMessageId, params.content),
+        delivery: await hub.prompt(params.sessionId, params.clientMessageId, params.content, params.whenBusy),
       }),
       "sessions.cancel": async (params: P<"sessions.cancel">) => {
         await hub.cancel(params.sessionId);
@@ -104,6 +126,14 @@ export class HostRpcServer {
       },
       "sessions.permission": async (params: P<"sessions.permission">) => {
         await hub.respondPermission(params.sessionId, params.requestId, params.optionId);
+        return {};
+      },
+      "sessions.sendQueued": async (params: P<"sessions.sendQueued">) => {
+        await hub.sendQueuedNow(params.sessionId, params.clientMessageId);
+        return {};
+      },
+      "sessions.reorderQueue": (params: P<"sessions.reorderQueue">) => {
+        hub.reorderQueue(params.sessionId, params.clientMessageIds);
         return {};
       },
       "sessions.unqueue": (params: P<"sessions.unqueue">) => ({ removed: hub.unqueue(params.sessionId, params.clientMessageId) }),
@@ -131,9 +161,13 @@ export class HostRpcServer {
         return {};
       },
       "gateway.status": () => this.gateway?.status() ?? { status: "off" as const, devices: [] },
+      "gateway.refresh": (_params: P<"gateway.refresh">, context) => {
+        if (!context.local) throw RpcError.app("forbidden", "the gateway is chosen on the computer itself");
+        return this.refreshGateway?.() ?? this.gateway?.status() ?? { status: "off" as const, devices: [] };
+      },
       "pairing.start": (_params: P<"pairing.start">, context) => {
         if (!context.local) throw RpcError.app("forbidden", "pairing starts on the computer itself");
-        if (!this.gateway) throw RpcError.app("not_supported", "no gateway configured: start the host with --gateway <url>");
+        if (!this.gateway) throw RpcError.app("not_supported", "no gateway: run linkshell login for the official one, or linkshell host --gateway <url>");
         return this.gateway.startPairing();
       },
       "devices.revoke": async (params: P<"devices.revoke">) => {
@@ -272,8 +306,12 @@ export class HostRpcServer {
     });
   }
 
-  setGateway(gateway: GatewayLink): void {
+  setGateway(gateway: GatewayLink | undefined): void {
     this.gateway = gateway;
+  }
+
+  onGatewayRefresh(refresh: () => GatewayStatus): void {
+    this.refreshGateway = refresh;
   }
 
   /** A notification to every connected client. */

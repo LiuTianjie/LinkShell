@@ -6,7 +6,8 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { AcpDriver, connectHost, startHost, type RunningHost } from "@linkshell/host";
 import { HostLink, type SocketLike } from "../src/host-link.js";
-import { createClientStore, type ClientStore } from "../src/store.js";
+import { createClientStore, subagentKey, type ClientStore } from "../src/store.js";
+import type { TimelineItem } from "../src/timeline.js";
 
 const FAKE_ACP = fileURLToPath(new URL("../../host/test/fixtures/fake-acp.mjs", import.meta.url));
 chmodSync(FAKE_ACP, 0o755);
@@ -144,5 +145,126 @@ describe("client core against a real host", () => {
     store.getState().discard(failed!.id.slice("local-".length));
     expect(store.getState().views[session.id]!.items.some((i) => i.id === failed!.id)).toBe(false);
     void host;
+  });
+
+  it("queues what is sent while a turn runs; a queued message can be edited, reordered and sent at once", async () => {
+    const { store } = await setup();
+    const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });
+    const queue = () => store.getState().sessions[session.id]?.queue?.map((entry) => entry.text) ?? [];
+    expect(await store.getState().send(session.id, text("SLOW first"))).toBe("started");
+    await waitFor(() => store.getState().views[session.id]?.turnActive);
+    expect(await store.getState().send(session.id, text("second"))).toBe("queued");
+    expect(await store.getState().send(session.id, text("third"))).toBe("queued");
+    await waitFor(() => queue().length === 2);
+    // Waiting messages aren't in the conversation yet.
+    expect(store.getState().views[session.id]!.items.filter((item) => item.kind === "user")).toHaveLength(1);
+
+    const ids = store.getState().sessions[session.id]!.queue!.map((entry) => entry.clientMessageId);
+    await store.getState().reorderQueue(session.id, [ids[1]!, ids[0]!]);
+    await waitFor(() => queue().join() === "third,second");
+    // Taken back to reword, then queued again.
+    expect(await store.getState().takeQueued(session.id, ids[0]!)).toEqual(text("second"));
+    await waitFor(() => queue().join() === "third");
+    expect(await store.getState().send(session.id, text("second, reworded"))).toBe("queued");
+
+    // "Send now": the slow turn is stopped and the first in line goes out; the rest follows turn by turn.
+    await store.getState().sendQueuedNow(session.id);
+    await waitFor(() => agentText(store, session.id).includes("echo: third"));
+    await waitFor(() => agentText(store, session.id).includes("echo: second, reworded"));
+    expect(queue()).toEqual([]);
+    expect(agentText(store, session.id)).not.toContain("w39");
+  });
+
+  it("opens a long session at its latest turns, pages back to the start, and loads pictures when asked", async () => {
+    const { host, store } = await setup();
+    const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });
+    const nativeId = session.id.slice("fake:".length);
+    const picture = "A".repeat(120_000);
+    const log = (update: Parameters<typeof host.hub.driverHost.update>[2]) => host.hub.driverHost.update("fake", nativeId, update);
+    // A sub-agent started early on, still working in the background.
+    log({ sessionUpdate: "tool_call", toolCallId: "task-1", title: "Agent: survey", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", task: "survey the code", agentType: "Explore" } });
+    log({ sessionUpdate: "ls_turn", state: "started", parentToolCallId: "task-1" });
+    log({ sessionUpdate: "agent_message_chunk", messageId: "s1", content: { type: "text", text: "looking" }, parentToolCallId: "task-1" });
+    // 60 turns as an agent would log them, each with ten tool calls that returned a screenshot.
+    for (let n = 1; n <= 60; n++) {
+      log({ sessionUpdate: "user_message_chunk", messageId: `u${n}`, content: { type: "text", text: `question ${n}` } });
+      log({ sessionUpdate: "ls_turn", state: "started" });
+      for (let i = 0; i < 10; i++) {
+        log({ sessionUpdate: "tool_call", toolCallId: `t${n}-${i}`, title: "Screenshot", kind: "other", status: "in_progress" });
+        log({
+          sessionUpdate: "tool_call_update",
+          toolCallId: `t${n}-${i}`,
+          status: "completed",
+          content: [{ type: "content", content: { type: "image", mimeType: "image/png", data: picture } }],
+        });
+      }
+      log({ sessionUpdate: "agent_message_chunk", messageId: `a${n}`, content: { type: "text", text: `answer ${n}` } });
+      log({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
+    }
+
+    // Another device opens it: 72 MB of pictures are in the log, a small page arrives.
+    let received = 0;
+    const link = new HostLink({
+      url: `ws://127.0.0.1:${host.server.tcpAddress()}`,
+      heartbeatMs: 0,
+      lazyImages: true,
+      createSocket: (url) => {
+        const socket = new WebSocket(url);
+        socket.on("message", (data) => (received += (data as Buffer).length));
+        return socket as unknown as SocketLike;
+      },
+    });
+    const phone = createClientStore(link, { lazyImages: true });
+    cleanups.push(() => phone.getState().disconnect());
+    phone.getState().connect();
+    await waitFor(() => phone.getState().sessionsLoaded);
+    phone.getState().openSession(session.id);
+    await waitFor(() => phone.getState().ready[session.id]);
+    const view = () => phone.getState().views[session.id]!;
+    const questions = () => view().items.flatMap((item) => (item.kind === "user" && item.blocks[0]?.type === "text" ? [item.blocks[0].text] : []));
+    expect(view().startSeq).toBeGreaterThan(0);
+    expect(questions().at(-1)).toBe("question 60");
+    expect(questions().length).toBeLessThan(15);
+    expect(questions()[0]).not.toBe("question 1");
+    expect(received).toBeLessThan(400_000);
+
+    // The sub-agent is far above what is loaded; it is listed and opens on its own all the same, and stays live.
+    expect(phone.getState().sessions[session.id]?.subagents).toEqual({ total: 1, running: 1 });
+    expect(await phone.getState().loadSubagents(session.id)).toMatchObject([{ toolCallId: "task-1", task: "survey the code", running: true }]);
+    // (Still working, its card comes with the window; its conversation so far does not.)
+    expect(view().items[0]).toMatchObject({ kind: "tool", id: "task-1" });
+    expect((view().items[0] as Extract<TimelineItem, { kind: "tool" }>).sub).toBeUndefined();
+    expect(await phone.getState().openSubagent(session.id, "task-1")).toBe(true);
+    const sub = () => {
+      const item = phone.getState().subagentViews[subagentKey(session.id, "task-1")]?.items[0];
+      return item?.kind === "tool" ? item.sub?.items.flatMap((entry) => (entry.kind === "agent" ? [entry.text] : [])) : undefined;
+    };
+    expect(sub()).toEqual(["looking"]);
+    log({ sessionUpdate: "agent_message_chunk", messageId: "s1", content: { type: "text", text: " further" }, parentToolCallId: "task-1" });
+    await waitFor(() => sub()?.[0] === "looking further");
+    phone.getState().closeSubagent(session.id, "task-1");
+    expect(sub()).toBeUndefined();
+
+    // Pulling down adds earlier pages until the beginning.
+    let pages = 0;
+    while (view().startSeq > 0) {
+      expect(await phone.getState().loadEarlier(session.id)).toBe(true);
+      pages += 1;
+    }
+    expect(pages).toBeGreaterThan(3);
+    expect(questions()).toEqual(Array.from({ length: 60 }, (_, i) => `question ${i + 1}`));
+    expect(await phone.getState().loadEarlier(session.id)).toBe(false);
+    expect(received).toBeLessThan(2_000_000);
+
+    // A picture is fetched when it is looked at, once.
+    const tool = view().items.find((item) => item.kind === "tool" && item.id === "t60-9") as Extract<TimelineItem, { kind: "tool" }>;
+    const block = tool.content[0]!;
+    if (block.type !== "content" || block.content.type !== "image") throw new Error("expected a picture reference");
+    expect(block.content.data).toBeUndefined();
+    const dataUri = await phone.getState().loadImage(session.id, block.content.uri!);
+    expect(dataUri).toBe(`data:image/png;base64,${picture}`);
+    const before = received;
+    await phone.getState().loadImage(session.id, block.content.uri!);
+    expect(received).toBe(before);
   });
 });

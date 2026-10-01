@@ -35,7 +35,7 @@ let titled = args[idFlag] === "--resume";
 
 function write(entry) {
   mkdirSync(dir, { recursive: true });
-  const line = { parentUuid: parent, isSidechain: false, sessionId, cwd, version: "9.9.9", timestamp: new Date().toISOString(), ...entry };
+  const line = { parentUuid: parent, isSidechain: false, sessionId, cwd, entrypoint: "cli", version: "9.9.9", timestamp: new Date().toISOString(), ...entry };
   if (line.uuid) parent = line.uuid;
   appendFileSync(path, JSON.stringify(line) + "\n");
 }

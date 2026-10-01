@@ -41,7 +41,7 @@ function transcriptPath(sessionId, cwd) {
 function appendTranscript(sessionId, cwd, entry) {
   const path = transcriptPath(sessionId, cwd);
   mkdirSync(join(path, ".."), { recursive: true });
-  appendFileSync(path, JSON.stringify({ isSidechain: false, sessionId, cwd, timestamp: new Date().toISOString(), ...entry }) + "\n");
+  appendFileSync(path, JSON.stringify({ isSidechain: false, sessionId, cwd, entrypoint: "sdk-ts", timestamp: new Date().toISOString(), ...entry }) + "\n");
 }
 function claudeSessions() {
   const projects = join(claudeDir, "projects");

@@ -7,9 +7,19 @@ import {
   type ProjectSummary,
   type SessionEvent,
   type SessionSummary,
+  type SubagentInfo,
 } from "@linkshell/wire";
 import type { HostLink, LinkStatus } from "./host-link.js";
-import { addOptimisticMessage, applyEvents, emptyView, markMessageFailed, removeItem, type SessionView } from "./timeline.js";
+import {
+  addOptimisticMessage,
+  applyEvents,
+  emptyView,
+  markMessageFailed,
+  prependEvents,
+  removeItem,
+  startWindow,
+  type SessionView,
+} from "./timeline.js";
 
 export interface ClientState {
   status: LinkStatus;
@@ -26,6 +36,16 @@ export interface ClientState {
   open: Record<string, true>;
   /** Sessions whose history backlog has fully arrived since they were opened. */
   ready: Record<string, true>;
+  /** Sessions fetching a page of earlier history right now. */
+  loadingEarlier: Record<string, true>;
+  /** The sub-agents each session started, newest first, as last fetched (`loadSubagents`). */
+  subagents: Record<string, SubagentInfo[]>;
+  /**
+   * Sub-agent conversations opened on their own (`openSubagent`), by
+   * `subagentKey`: a view holding the call that started it, whose `sub` is the
+   * conversation. They don't depend on what part of the session is loaded.
+   */
+  subagentViews: Record<string, SessionView>;
   /** Unsent or failed messages, by client message id. */
   outbox: Record<string, { sessionId: string; content: ContentBlock[] }>;
 }
@@ -36,7 +56,12 @@ export interface ClientActions {
   refresh(): Promise<void>;
   openSession(sessionId: string): void;
   closeSession(sessionId: string): void;
-  send(sessionId: string, content: ContentBlock[]): Promise<MethodResult<"sessions.prompt">["delivery"] | "failed">;
+  /**
+   * Sends a message. While a turn is running it waits in the session's queue
+   * (`summary.queue`) and goes out when the turn ends; `now` sends it at once
+   * instead, the agent's own way (into the running turn where it can be).
+   */
+  send(sessionId: string, content: ContentBlock[], options?: { now?: boolean }): Promise<MethodResult<"sessions.prompt">["delivery"] | "failed">;
   retry(clientMessageId: string): Promise<void>;
   discard(clientMessageId: string): void;
   respond(sessionId: string, requestId: string, optionId: string): Promise<void>;
@@ -48,18 +73,51 @@ export interface ClientActions {
   createSession(input: { agent: string; cwd: string; prompt?: ContentBlock[] }): Promise<SessionSummary>;
   /** Drops a message still waiting in the host's queue. */
   unqueue(sessionId: string, clientMessageId: string): Promise<boolean>;
+  /** Takes a queued message back to edit it: removes it from the queue and returns what it said. */
+  takeQueued(sessionId: string, clientMessageId: string): Promise<ContentBlock[] | undefined>;
+  /** Sends a queued message (the first, or the one named) now, stopping the running turn if it has to. */
+  sendQueuedNow(sessionId: string, clientMessageId?: string): Promise<void>;
+  /** Puts the queue in this order. */
+  reorderQueue(sessionId: string, clientMessageIds: string[]): Promise<void>;
   archive(sessionId: string, archived: boolean): Promise<void>;
   rename(sessionId: string, title: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
   /** Adds archived sessions to `sessions` (the regular list leaves them out). */
   loadArchived(): Promise<void>;
+  /**
+   * Adds the page of history before what the session shows (its view's
+   * `startSeq` says whether there is any). Resolves false when it couldn't.
+   */
+  loadEarlier(sessionId: string): Promise<boolean>;
+  /** Fetches the session's sub-agents (also kept in `subagents`). */
+  loadSubagents(sessionId: string): Promise<SubagentInfo[]>;
+  /** Loads a sub-agent's conversation into `subagentViews` and keeps it live while the session is open. */
+  openSubagent(sessionId: string, toolCallId: string): Promise<boolean>;
+  closeSubagent(sessionId: string, toolCallId: string): void;
+  /** The picture behind an image block that came as a `linkshell-event:` uri, as a data: URI. */
+  loadImage(sessionId: string, uri: string): Promise<string>;
 }
 
 export type ClientStore = StoreApi<ClientState & ClientActions>;
 
+/** Where a sub-agent's conversation is kept in `subagentViews`. */
+export function subagentKey(sessionId: string, toolCallId: string): string {
+  return `${sessionId}\n${toolCallId}`;
+}
+
+/** The tool call an event belongs to, when it is a sub-agent's or about one. */
+function subagentOf(event: SessionEvent): string | undefined {
+  const update = event.update as { parentToolCallId?: string; toolCallId?: string };
+  return update.parentToolCallId ?? update.toolCallId;
+}
+
 export interface ClientStoreOptions {
   /** Generates client message ids; defaults to crypto.randomUUID when available. */
   newId?: () => string;
+  /** The link was created with `lazyImages`: ask for history the same way. */
+  lazyImages?: boolean;
+  /** How many characters of pictures to keep in memory (default 24 MB). */
+  imageCacheChars?: number;
 }
 
 function defaultId(): string {
@@ -87,11 +145,21 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     pending = [];
     store.setState((state) => {
       let views = state.views;
+      let subagentViews = state.subagentViews;
       const bySession = new Map<string, SessionEvent[]>();
       for (const event of batch) {
         const list = bySession.get(event.sessionId) ?? [];
         list.push(event);
         bySession.set(event.sessionId, list);
+        // A sub-agent opened on its own follows along too.
+        const toolCallId = subagentOf(event);
+        if (!toolCallId) continue;
+        const key = subagentKey(event.sessionId, toolCallId);
+        loadingSubagents.get(key)?.push(event);
+        const current = subagentViews[key];
+        if (!current) continue;
+        const next = applyEvents(current, [event]);
+        if (next !== current) subagentViews = { ...subagentViews, [key]: next };
       }
       for (const [sessionId, events] of bySession) {
         const current = views[sessionId];
@@ -99,8 +167,28 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         const next = applyEvents(current, events);
         if (next !== current) views = { ...views, [sessionId]: next };
       }
-      return views === state.views ? state : { views };
+      return views === state.views && subagentViews === state.subagentViews ? state : { views, subagentViews };
     });
+  };
+
+  // Sub-agent conversations being fetched: live events that arrive meanwhile are applied after.
+  const loadingSubagents = new Map<string, SessionEvent[]>();
+
+  // What this device's queued messages said, to edit one (the host's queue only lists text).
+  const queuedContent = new Map<string, ContentBlock[]>();
+  const rememberQueued = (clientMessageId: string, content: ContentBlock[]) => {
+    queuedContent.set(clientMessageId, content);
+    if (queuedContent.size > 50) queuedContent.delete(queuedContent.keys().next().value as string);
+  };
+
+  // Pictures already fetched, most recently used last.
+  const images = new Map<string, Promise<string>>();
+  const imageSizes = new Map<string, number>();
+  let imageChars = 0;
+  const forgetImage = (key: string) => {
+    images.delete(key);
+    imageChars -= imageSizes.get(key) ?? 0;
+    imageSizes.delete(key);
   };
 
   /** A deleted session: gone from every list and view. */
@@ -112,7 +200,15 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         delete next[sessionId];
         return next;
       };
-      return { sessions: without(state.sessions), views: without(state.views), open: without(state.open), ready: without(state.ready) };
+      return {
+        sessions: without(state.sessions),
+        views: without(state.views),
+        open: without(state.open),
+        ready: without(state.ready),
+        loadingEarlier: without(state.loadingEarlier),
+        subagents: without(state.subagents),
+        subagentViews: Object.fromEntries(Object.entries(state.subagentViews).filter(([key]) => !key.startsWith(`${sessionId}\n`))),
+      };
     });
   }
 
@@ -124,7 +220,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         return next === current ? state : { views: { ...state.views, [sessionId]: next } };
       });
 
-    const deliver = async (clientMessageId: string) => {
+    const deliver = async (clientMessageId: string, now = false) => {
       const pending = get().outbox[clientMessageId];
       if (!pending) return "failed" as const;
       try {
@@ -132,7 +228,9 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
           sessionId: pending.sessionId,
           clientMessageId,
           content: pending.content,
+          whenBusy: now ? undefined : "queue",
         });
+        if (result.delivery === "queued") rememberQueued(clientMessageId, pending.content);
         set((state) => {
           const outbox = { ...state.outbox };
           delete outbox[clientMessageId];
@@ -153,6 +251,9 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       views: {},
       open: {},
       ready: {},
+      loadingEarlier: {},
+      subagents: {},
+      subagentViews: {},
       outbox: {},
 
       connect() {
@@ -213,11 +314,11 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         });
       },
 
-      async send(sessionId, content) {
+      async send(sessionId, content, sendOptions) {
         const clientMessageId = newId();
         set((state) => ({ outbox: { ...state.outbox, [clientMessageId]: { sessionId, content } } }));
         updateView(sessionId, (view) => addOptimisticMessage(view, clientMessageId, content));
-        const delivery = await deliver(clientMessageId);
+        const delivery = await deliver(clientMessageId, sendOptions?.now);
         // Waiting in the host's queue: it shows there (summary.queue) until its
         // turn starts, when the agent's echo puts it in the timeline.
         if (delivery === "queued") updateView(sessionId, (view) => removeItem(view, `local-${clientMessageId}`));
@@ -264,7 +365,26 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
       async unqueue(sessionId, clientMessageId) {
         const { removed } = await link.call("sessions.unqueue", { sessionId, clientMessageId });
+        if (removed) queuedContent.delete(clientMessageId);
         return removed;
+      },
+
+      async takeQueued(sessionId, clientMessageId) {
+        const entry = get().sessions[sessionId]?.queue?.find((queued) => queued.clientMessageId === clientMessageId);
+        const { removed } = await link.call("sessions.unqueue", { sessionId, clientMessageId });
+        if (!removed) return undefined;
+        // Queued from this device: everything it carried. From another one: its text.
+        const content = queuedContent.get(clientMessageId) ?? (entry?.text ? [{ type: "text" as const, text: entry.text }] : []);
+        queuedContent.delete(clientMessageId);
+        return content;
+      },
+
+      async sendQueuedNow(sessionId, clientMessageId) {
+        await link.call("sessions.sendQueued", { sessionId, clientMessageId }, 30_000);
+      },
+
+      async reorderQueue(sessionId, clientMessageIds) {
+        await link.call("sessions.reorderQueue", { sessionId, clientMessageIds });
       },
 
       async archive(sessionId, archived) {
@@ -291,6 +411,91 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         });
       },
 
+      async loadEarlier(sessionId) {
+        const from = get().views[sessionId]?.startSeq ?? 0;
+        if (from === 0 || get().loadingEarlier[sessionId]) return false;
+        set((state) => ({ loadingEarlier: { ...state.loadingEarlier, [sessionId]: true } }));
+        try {
+          const page = await link.call("sessions.history", { sessionId, beforeSeq: from + 1, lazyImages: options.lazyImages });
+          flushEvents();
+          // The view may have started over meanwhile (a reconnect after a long absence).
+          if (get().views[sessionId]?.startSeq !== from) return false;
+          updateView(sessionId, (view) => prependEvents(view, page.events, page.startSeq));
+          return true;
+        } catch {
+          return false;
+        } finally {
+          set((state) => {
+            const loadingEarlier = { ...state.loadingEarlier };
+            delete loadingEarlier[sessionId];
+            return { loadingEarlier };
+          });
+        }
+      },
+
+      async loadSubagents(sessionId) {
+        const { subagents } = await link.call("sessions.subagents", { sessionId });
+        set((state) => ({ subagents: { ...state.subagents, [sessionId]: subagents } }));
+        return subagents;
+      },
+
+      async openSubagent(sessionId, toolCallId) {
+        const key = subagentKey(sessionId, toolCallId);
+        if (loadingSubagents.has(key)) return false;
+        const meanwhile: SessionEvent[] = [];
+        loadingSubagents.set(key, meanwhile);
+        try {
+          const { events } = await link.call("sessions.subagent", { sessionId, toolCallId, lazyImages: options.lazyImages }, 30_000);
+          flushEvents();
+          const view = applyEvents(applyEvents(emptyView(sessionId), events), meanwhile);
+          set((state) => ({ subagentViews: { ...state.subagentViews, [key]: view } }));
+          return true;
+        } catch {
+          return false;
+        } finally {
+          loadingSubagents.delete(key);
+        }
+      },
+
+      closeSubagent(sessionId, toolCallId) {
+        const key = subagentKey(sessionId, toolCallId);
+        if (!(key in get().subagentViews)) return;
+        set((state) => {
+          const subagentViews = { ...state.subagentViews };
+          delete subagentViews[key];
+          return { subagentViews };
+        });
+      },
+
+      loadImage(sessionId, uri) {
+        const key = `${sessionId} ${uri}`;
+        const cached = images.get(key);
+        if (cached) {
+          images.delete(key);
+          images.set(key, cached);
+          return cached;
+        }
+        const loading = link.call("sessions.image", { sessionId, uri }).then(
+          (image) => {
+            const dataUri = `data:${image.mimeType};base64,${image.data}`;
+            imageSizes.set(key, dataUri.length);
+            imageChars += dataUri.length;
+            const limit = options.imageCacheChars ?? 24 * 1024 * 1024;
+            for (const oldest of images.keys()) {
+              if (imageChars <= limit || oldest === key) break;
+              forgetImage(oldest);
+            }
+            return dataUri;
+          },
+          (error: unknown) => {
+            forgetImage(key);
+            throw error;
+          },
+        );
+        images.set(key, loading);
+        return loading;
+      },
+
       async createSession(input) {
         const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd }, 60_000);
         set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
@@ -303,6 +508,16 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
   link.onStatus((status, detail) => store.setState({ status, statusDetail: detail || undefined }));
   link.on("session.removed", ({ sessionId }) => forget(sessionId));
+  // What the host sends next for this session starts after `startSeq`.
+  link.on("session.window", ({ sessionId, startSeq }) => {
+    flushEvents();
+    store.setState((state) => {
+      const view = state.views[sessionId];
+      if (!view) return state;
+      const next = startWindow(view, startSeq);
+      return next === view ? state : { views: { ...state.views, [sessionId]: next } };
+    });
+  });
   link.onSummary((summary) => store.setState((state) => ({ sessions: { ...state.sessions, [summary.id]: summary } })));
   // Events arrive one per socket message; a history backlog is hundreds of
   // them. Apply them in batches, at most one store update per frame.

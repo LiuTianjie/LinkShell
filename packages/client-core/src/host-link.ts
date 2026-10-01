@@ -31,6 +31,11 @@ export interface HostLinkOptions {
   requestTimeoutMs?: number;
   /** How often to check the connection is alive; 0 disables. */
   heartbeatMs?: number;
+  /**
+   * This client loads pictures in a session when it shows them
+   * (`sessions.image`), so the host sends references instead of the data.
+   */
+  lazyImages?: boolean;
 }
 
 const OPEN = 1;
@@ -236,7 +241,11 @@ export class HostLink {
     const subscription = this.subscriptions.get(sessionId);
     if (!subscription || !this.peer) return Promise.resolve(undefined);
     return this.peer
-      .request<MethodResult<"sessions.subscribe">>("sessions.subscribe", { sessionId, fromSeq: subscription.cursor() })
+      .request<MethodResult<"sessions.subscribe">>("sessions.subscribe", {
+        sessionId,
+        fromSeq: subscription.cursor(),
+        lazyImages: this.options.lazyImages,
+      })
       .catch(() => undefined);
   }
 

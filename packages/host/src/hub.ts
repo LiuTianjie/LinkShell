@@ -8,6 +8,7 @@ import {
   type SessionEvent,
   type SessionSummary,
   type SessionUpdate,
+  type SubagentInfo,
   type QueuedMessage,
 } from "@linkshell/wire";
 import type {
@@ -18,11 +19,64 @@ import type {
   DriverHost,
   LaunchSpec,
 } from "./drivers/types.js";
-import type { HostStore, SessionPatch } from "./store.js";
+import { inOrder } from "./drivers/acp/driver.js";
+import { PAGE, type HostStore, type SessionPatch } from "./store.js";
 
 export interface Subscriber {
   event(event: SessionEvent): void;
+  /** The backlog that follows starts after `startSeq`, not where the subscriber left off. */
+  window?(startSeq: number): void;
 }
+
+/**
+ * Whether an update is something happening in the session. Names, settings
+ * and usage figures arrive when a session is merely opened or renamed, and
+ * must not move it to the top of the list.
+ */
+function isActivity(update: SessionUpdate): boolean {
+  switch (update.sessionUpdate) {
+    case "session_info_update":
+    case "ls_config":
+    case "available_commands_update":
+    case "usage_update":
+      return false;
+    default:
+      return true;
+  }
+}
+
+interface SubagentState {
+  callDone: boolean;
+  turnActive?: boolean;
+  /** When the sub-agent last did anything. */
+  lastChildTs?: number;
+}
+
+/**
+ * Whether a sub-agent is working. Its call says so while it is open; an agent
+ * that outlives its call (it reports turns of its own) counts while it keeps
+ * doing things — a turn left open by an agent that was killed doesn't run forever.
+ */
+function subagentRunning(state: SubagentState, now = Date.now()): boolean {
+  if (!state.callDone) return state.turnActive ?? true;
+  return state.turnActive === true && now - (state.lastChildTs ?? 0) < 15 * 60_000;
+}
+
+/** Driver-state key: when a session was renamed, and when it was last active before that. */
+const RENAMED = "renamed";
+
+/** A returning client catches up from where it was, unless it missed more than this. */
+const CATCH_UP = { events: 800, bytes: 4 * 1024 * 1024 };
+
+/** State a client needs from before its window: the latest of each applies. */
+const STANDING: SessionUpdate["sessionUpdate"][] = [
+  "ls_config",
+  "available_commands_update",
+  "current_mode_update",
+  "usage_update",
+  "session_info_update",
+  "ls_driver",
+];
 
 type PermissionUpdate = Extract<SessionUpdate, { sessionUpdate: "ls_permission" }>;
 
@@ -40,6 +94,11 @@ interface LiveSession {
   activity?: SessionActivity;
   /** Messages the driver holds until the turn ends (never persisted). */
   queue?: QueuedMessage[];
+  /** Messages a client asked to hold while a turn runs: sent one per turn end, in this order. */
+  held: { clientMessageId: string; content: ContentBlock[] }[];
+  sendingHeld?: boolean;
+  /** Sub-agents the session started, and whether each is working; read from the log when first needed. */
+  subagents?: Map<string, SubagentState>;
   /** True while native history is imported: no live activity, one summary at the end. */
   importing?: boolean;
   importChanged?: boolean;
@@ -230,9 +289,24 @@ export class SessionHub {
     if (!live) return summary;
     const activity = live.turnActive ? live.activity : undefined;
     const first = live.permissions.values().next().value as PermissionUpdate | undefined;
-    if (!activity && !first && !live.queue) return summary;
+    const subagents = live.attached ? this.subagentsOf(summary.id, live) : undefined;
+    if (!activity && !first && !live.queue && live.held.length === 0 && !subagents?.size) return summary;
     const decorated: SessionSummary = { ...summary };
-    if (live.queue) decorated.queue = live.queue;
+    if (subagents?.size) {
+      let running = 0;
+      for (const state of subagents.values()) if (subagentRunning(state)) running += 1;
+      decorated.subagents = { total: subagents.size, running };
+    }
+    if (live.queue || live.held.length > 0) {
+      decorated.queue = [
+        ...(live.queue ?? []),
+        ...live.held.map((entry) => ({
+          clientMessageId: entry.clientMessageId,
+          text: textOf(entry.content),
+          images: entry.content.filter((block) => block.type === "image").length,
+        })),
+      ];
+    }
     if (activity) decorated.activity = activity;
     if (first) {
       decorated.permission = {
@@ -269,11 +343,13 @@ export class SessionHub {
   }
 
   /**
-   * Sends everything after `fromSeq`, then streams live events. The backlog read
-   * and the subscriber registration happen in one synchronous step, so no event
-   * can fall between them.
+   * Sends the backlog, then streams live events. A fresh subscriber (or one too
+   * far behind to catch up) gets the latest turns only, after the standing
+   * state from before them; earlier history is read in pages (`history`).
+   * The backlog read and the subscriber registration happen in one synchronous
+   * step, so no event can fall between them.
    */
-  async subscribe(sessionId: string, fromSeq: number, subscriber: Subscriber): Promise<SessionSummary> {
+  async subscribe(sessionId: string, fromSeq: number, subscriber: Subscriber): Promise<{ session: SessionSummary; startSeq: number }> {
     const summary = this.getSession(sessionId);
     const driver = this.drivers.get(summary.agent);
     if (driver && driver.status().installed) {
@@ -286,15 +362,132 @@ export class SessionHub {
         }
       }
     }
-    let cursor = fromSeq;
+    const live = this.liveFor(sessionId);
+    const lastSeq = this.store.getSession(sessionId)?.lastSeq ?? 0;
+    let startSeq = fromSeq;
+    const missed = fromSeq > 0 && fromSeq <= lastSeq ? this.store.sizeAfter(sessionId, fromSeq) : undefined;
+    if (!missed || missed.events > CATCH_UP.events || missed.bytes > CATCH_UP.bytes) {
+      startSeq = this.store.pageStart(sessionId, lastSeq);
+      if (startSeq !== fromSeq) subscriber.window?.(startSeq);
+      for (const event of this.standingBefore(sessionId, startSeq, live)) subscriber.event(event);
+    }
+    let cursor = startSeq;
     for (;;) {
-      const batch = this.store.readEvents(sessionId, cursor);
+      const batch = this.store.readEvents(sessionId, cursor, 200);
       for (const event of batch) subscriber.event(event);
       if (batch.length === 0) break;
       cursor = batch[batch.length - 1]!.seq;
     }
-    this.liveFor(sessionId).subscribers.add(subscriber);
-    return this.getSession(sessionId);
+    live.subscribers.add(subscriber);
+    return { session: this.getSession(sessionId), startSeq };
+  }
+
+  /** The page of history before `beforeSeq`, oldest first. */
+  history(sessionId: string, beforeSeq: number): { events: SessionEvent[]; startSeq: number } {
+    this.getSession(sessionId);
+    const upTo = beforeSeq - 1;
+    if (upTo < 1) return { events: [], startSeq: 0 };
+    const startSeq = this.store.pageStart(sessionId, upTo);
+    return { events: this.store.readEvents(sessionId, startSeq, PAGE.maxEvents + 1, upTo), startSeq };
+  }
+
+  /** The sub-agents the session started, newest first. */
+  subagents(sessionId: string): SubagentInfo[] {
+    this.getSession(sessionId);
+    const agents = new Map<string, SubagentInfo>();
+    for (const event of this.store.subagentCalls(sessionId)) {
+      const call = event.update as Extract<SessionUpdate, { sessionUpdate: "tool_call" }>;
+      // (A call still open when the session was opened again is logged again.)
+      if (agents.has(call.toolCallId)) continue;
+      const detail = call.detail?.type === "subagent" ? call.detail : undefined;
+      const state = this.store.toolState(sessionId, call.toolCallId);
+      const callDone = state.status === "completed" || state.status === "failed";
+      const running = subagentRunning({ callDone, turnActive: state.turnActive, lastChildTs: state.lastChildTs });
+      agents.set(call.toolCallId, {
+        toolCallId: call.toolCallId,
+        task: detail?.task ?? call.title,
+        agentType: detail?.agentType,
+        running,
+        failed: state.status === "failed" || undefined,
+        startedAt: event.ts,
+        endedAt: running ? undefined : callDone ? state.ts : state.lastChildTs,
+      });
+    }
+    return [...agents.values()].reverse();
+  }
+
+  private subagentsOf(sessionId: string, live: LiveSession): NonNullable<LiveSession["subagents"]> {
+    if (!live.subagents) {
+      live.subagents = new Map();
+      for (const event of this.store.subagentCalls(sessionId)) {
+        const { toolCallId } = event.update as { toolCallId: string };
+        const state = this.store.toolState(sessionId, toolCallId);
+        live.subagents.set(toolCallId, {
+          callDone: state.status === "completed" || state.status === "failed",
+          turnActive: state.turnActive,
+          lastChildTs: state.lastChildTs,
+        });
+      }
+    }
+    return live.subagents;
+  }
+
+  /** Keeps the sub-agent tally current; true when it changed. */
+  private trackSubagent(live: LiveSession, update: SessionUpdate): boolean {
+    const known = live.subagents;
+    if (!known) return false;
+    if (update.sessionUpdate === "tool_call" && update.detail?.type === "subagent" && (update.detail.action ?? "spawn") === "spawn") {
+      if (known.has(update.toolCallId)) return false;
+      known.set(update.toolCallId, { callDone: update.status === "completed" || update.status === "failed" });
+      return true;
+    }
+    if (update.sessionUpdate === "tool_call_update" && !update.parentToolCallId) {
+      const state = known.get(update.toolCallId);
+      if (!state || state.callDone || (update.status !== "completed" && update.status !== "failed")) return false;
+      state.callDone = true;
+      return true;
+    }
+    const parent = (update as { parentToolCallId?: string }).parentToolCallId;
+    const state = parent ? known.get(parent) : undefined;
+    if (!state) return false;
+    const was = subagentRunning(state);
+    state.lastChildTs = Date.now();
+    if (update.sessionUpdate === "ls_turn") state.turnActive = update.state === "started";
+    return subagentRunning(state) !== was;
+  }
+
+  /** A sub-agent's conversation: its call, then what happened under it. */
+  subagent(sessionId: string, toolCallId: string): SessionEvent[] {
+    this.getSession(sessionId);
+    const own = this.store.toolEvents(sessionId, toolCallId);
+    if (own.length === 0) throw RpcError.app("not_found", "这个子 Agent 已经不在会话记录里");
+    return [...own, ...this.store.eventsUnder(sessionId, toolCallId, 2000)].sort((a, b) => a.seq - b.seq);
+  }
+
+  readEvent(sessionId: string, seq: number): SessionEvent | undefined {
+    this.getSession(sessionId);
+    return this.store.readEvent(sessionId, seq);
+  }
+
+  /** What still holds at `seq` from the events before it: settings, an open turn, unanswered approvals. */
+  private standingBefore(sessionId: string, seq: number, live: LiveSession): SessionEvent[] {
+    if (seq < 1) return [];
+    const events = STANDING.flatMap((kind) => this.store.latestOfKind(sessionId, kind, seq));
+    const [turn] = this.store.latestOfKind(sessionId, "ls_turn", seq);
+    if (turn?.update.sessionUpdate === "ls_turn" && turn.update.state === "started") events.push(turn);
+    if (live.permissions.size > 0) {
+      for (const event of this.store.latestOfKind(sessionId, "ls_permission", seq, 50)) {
+        if (event.update.sessionUpdate === "ls_permission" && live.permissions.has(event.update.requestId)) events.push(event);
+      }
+    }
+    // Sub-agents still working were started before the window: their calls, so
+    // what they do next has its card to go under.
+    for (const [toolCallId, state] of this.subagentsOf(sessionId, live)) {
+      if (!subagentRunning(state)) continue;
+      const call = this.store.toolEvents(sessionId, toolCallId)[0];
+      if (call && call.seq <= seq) events.push(call);
+    }
+    return events.sort((a, b) => a.seq - b.seq);
   }
 
   unsubscribe(sessionId: string, subscriber: Subscriber): void {
@@ -305,6 +498,7 @@ export class SessionHub {
     sessionId: string,
     clientMessageId: string,
     content: ContentBlock[],
+    whenBusy?: "queue",
   ): Promise<"started" | "steered" | "queued" | "duplicate"> {
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
@@ -317,6 +511,12 @@ export class SessionHub {
       joinAfterSend = true;
     }
     if (!this.store.claimClientMessage(sessionId, clientMessageId)) return "duplicate";
+    const live = this.liveFor(sessionId);
+    if (whenBusy === "queue" && (live.turnActive || live.held.length > 0)) {
+      live.held.push({ clientMessageId, content });
+      this.announce(sessionId);
+      return "queued";
+    }
     let delivery: "started" | "steered" | "queued";
     try {
       delivery = await driver.prompt(summary.nativeId, content, clientMessageId);
@@ -347,10 +547,82 @@ export class SessionHub {
   unqueue(sessionId: string, clientMessageId: string): boolean {
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
-    const removed = driver.unqueue?.(summary.nativeId, clientMessageId) ?? false;
+    const live = this.liveFor(sessionId);
+    const held = live.held.findIndex((entry) => entry.clientMessageId === clientMessageId);
+    if (held >= 0) {
+      live.held.splice(held, 1);
+      this.announce(sessionId);
+    }
+    const removed = held >= 0 || (driver.unqueue?.(summary.nativeId, clientMessageId) ?? false);
     // Sent again later, it should go through.
     if (removed) this.store.releaseClientMessage(sessionId, clientMessageId);
     return removed;
+  }
+
+  reorderQueue(sessionId: string, clientMessageIds: string[]): void {
+    const summary = this.getSession(sessionId);
+    const live = this.liveFor(sessionId);
+    live.held = inOrder(live.held, clientMessageIds);
+    this.requireDriver(summary.agent).reorderQueue?.(summary.nativeId, clientMessageIds);
+    this.announce(sessionId);
+  }
+
+  /**
+   * Sends a queued message without waiting for the running turn to end: into
+   * that turn if the agent takes input mid-turn, otherwise by stopping it.
+   */
+  async sendQueuedNow(sessionId: string, clientMessageId?: string): Promise<void> {
+    const summary = this.getSession(sessionId);
+    const driver = this.requireDriver(summary.agent);
+    const live = this.liveFor(sessionId);
+    const index = clientMessageId ? live.held.findIndex((entry) => entry.clientMessageId === clientMessageId) : 0;
+    const item = live.held[index];
+    if (!item) {
+      // Held by the driver (another Claude is mid-turn in the session), or already gone.
+      await driver.sendQueuedNow?.(summary.nativeId);
+      return;
+    }
+    live.held.splice(index, 1);
+    if (live.turnActive && !driver.capabilities.steer) {
+      // The turn has to end first: stop it, and this message is next.
+      live.held.unshift(item);
+      this.announce(sessionId);
+      await driver.cancel(summary.nativeId);
+      return;
+    }
+    this.announce(sessionId);
+    try {
+      const delivery = await driver.prompt(summary.nativeId, item.content, item.clientMessageId);
+      if (delivery === "queued") await driver.sendQueuedNow?.(summary.nativeId);
+    } catch (error) {
+      live.held.unshift(item);
+      this.announce(sessionId);
+      throw error;
+    }
+  }
+
+  /** A turn ended: the next held message starts the following one. */
+  private async sendHeld(sessionId: string): Promise<void> {
+    const live = this.live.get(sessionId);
+    const summary = this.store.getSession(sessionId);
+    if (!live || !summary || live.held.length === 0 || live.turnActive || live.sendingHeld) return;
+    const driver = this.drivers.get(summary.agent);
+    if (!driver) return;
+    const next = live.held.shift()!;
+    live.sendingHeld = true;
+    this.announce(sessionId);
+    try {
+      await driver.prompt(summary.nativeId, next.content, next.clientMessageId);
+    } catch (error) {
+      this.store.releaseClientMessage(sessionId, next.clientMessageId);
+      this.commit(sessionId, {
+        sessionUpdate: "ls_error",
+        code: error instanceof RpcError ? (error.appCode ?? "send_failed") : "send_failed",
+        message: `排队的消息没能发出：${error instanceof Error ? error.message : String(error)}`,
+      });
+    } finally {
+      live.sendingHeld = false;
+    }
   }
 
   onRemoved(listener: (sessionId: string) => void): () => void {
@@ -379,6 +651,9 @@ export class SessionHub {
         this.log(`[hub] ${summary.agent} rename failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    // The agent writing its own title record touches the session: for the next
+    // few seconds a newer "last updated" from it is the rename, not activity.
+    this.store.setDriverState(sessionId, RENAMED, JSON.stringify({ updatedAt: summary.updatedAt, until: Date.now() + 5000 }));
     const updated = this.store.patchSession(sessionId, { customTitle: name || null });
     this.emitSummary(updated);
     return this.decorate(updated);
@@ -413,6 +688,13 @@ export class SessionHub {
 
   async cancel(sessionId: string): Promise<void> {
     const summary = this.getSession(sessionId);
+    // Stopping stops what's waiting too; the apps put queued text back in the composer.
+    const live = this.liveFor(sessionId);
+    if (live.held.length > 0) {
+      for (const entry of live.held) this.store.releaseClientMessage(sessionId, entry.clientMessageId);
+      live.held = [];
+      this.announce(sessionId);
+    }
     await this.requireDriver(summary.agent).cancel(summary.nativeId);
   }
 
@@ -508,6 +790,7 @@ export class SessionHub {
         messageText: new Map(),
         permissions: new Map(),
         turnActive: false,
+        held: [],
       };
       this.live.set(sessionId, live);
     }
@@ -569,6 +852,14 @@ export class SessionHub {
     // Deleted in LinkShell: an agent without native delete keeps listing it.
     if (this.store.isRemoved(sessionIdFor(agent, session.nativeId))) return;
     const before = this.store.getSession(sessionIdFor(agent, session.nativeId));
+    if (before && session.updatedAt > before.updatedAt) {
+      // Renamed just now: the session keeps its place in the list.
+      const renamed = this.store.getDriverState(before.id, RENAMED);
+      if (renamed) {
+        const hold = JSON.parse(renamed) as { updatedAt: number; until: number };
+        if (session.updatedAt <= hold.until) session = { ...session, updatedAt: before.updatedAt };
+      }
+    }
     const { summary, created } = this.store.upsertSession({
       id: sessionIdFor(agent, session.nativeId),
       agent,
@@ -607,7 +898,7 @@ export class SessionHub {
   private commit(sessionId: string, update: SessionUpdate, itemId?: string, ts?: number): void {
     const live = this.liveFor(sessionId);
     if (update.sessionUpdate === "ls_permission_resolved" && !live.permissions.has(update.requestId)) return;
-    const event = this.store.appendEvent(sessionId, update, ts);
+    const event = this.store.appendEvent(sessionId, update, ts, isActivity(update));
     if (itemId) this.store.markItemLogged(sessionId, itemId);
     this.applyToSummary(sessionId, live, update);
     for (const subscriber of live.subscribers) {
@@ -618,10 +909,11 @@ export class SessionHub {
       }
     }
     // A finished turn can't still be waiting on approvals; clear stale cards.
-    if (update.sessionUpdate === "ls_turn" && update.state === "ended") {
+    if (update.sessionUpdate === "ls_turn" && update.state === "ended" && !update.parentToolCallId) {
       for (const requestId of [...live.permissions.keys()]) {
         this.commit(sessionId, { sessionUpdate: "ls_permission_resolved", requestId });
       }
+      if (!live.importing) void this.sendHeld(sessionId);
     }
   }
 
@@ -629,7 +921,7 @@ export class SessionHub {
     const before = this.store.getSession(sessionId);
     if (!before) return;
     const patch: SessionPatch = {};
-    let activityChanged = false;
+    let activityChanged = this.trackSubagent(live, update) && !live.importing;
     const setActivity = (next: SessionActivity | undefined) => {
       if (live.importing || sameActivity(live.activity, next)) return;
       live.activity = next;
@@ -661,6 +953,8 @@ export class SessionHub {
         break;
       }
       case "ls_turn":
+        // A sub-agent's turn is its own; the session's is the one without a parent.
+        if (update.parentToolCallId) break;
         live.turnActive = update.state === "started";
         setActivity(live.turnActive ? { kind: "thinking" } : undefined);
         // Leftover permissions are cleared right after a turn ends (see commit).
@@ -703,8 +997,14 @@ export class SessionHub {
       live.importChanged = true;
       return;
     }
-    patch.updatedAt = Date.now();
+    if (isActivity(update)) patch.updatedAt = Date.now();
     this.emitSummary(this.store.patchSession(sessionId, patch));
+  }
+
+  /** Sends the session's current summary to every client (its queue or activity changed). */
+  private announce(sessionId: string): void {
+    const stored = this.store.getSession(sessionId);
+    if (stored) this.emitSummary(stored);
   }
 
   private emitSummary(stored: SessionSummary): void {

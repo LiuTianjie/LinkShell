@@ -352,6 +352,8 @@ export function toHistory(
   updates: SessionUpdate[],
   tracker = new AcpItemTracker(),
   timeOf?: (update: SessionUpdate) => number | undefined,
+  /** Receives what isn't a finished item yet (a turn under way: its start, tool calls still running), in order. */
+  unfinished?: SessionUpdate[],
 ): HistoryItem[] {
   const tracked = [
     ...updates.flatMap((update) => {
@@ -364,6 +366,7 @@ export function toHistory(
   let group: SessionUpdate[] = [];
   let groupTs: number | undefined;
   const toolGroups = new Map<string, { updates: SessionUpdate[]; ts?: number }>();
+  const position = new Map<SessionUpdate, number>(tracked.map((entry, index) => [entry.update, index]));
   for (const { update, itemId, ts } of tracked) {
     if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
       const entry = toolGroups.get(update.toolCallId) ?? { updates: [], ts };
@@ -383,6 +386,10 @@ export function toHistory(
       group = [];
       groupTs = undefined;
     }
+  }
+  if (unfinished) {
+    const rest = [...group, ...[...toolGroups.values()].flatMap((entry) => entry.updates)];
+    unfinished.push(...rest.sort((a, b) => (position.get(a) ?? 0) - (position.get(b) ?? 0)));
   }
   return history;
 }

@@ -5,13 +5,54 @@ import { createRequire } from "node:module";
 import { delimiter, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { RpcError, type ContentBlock, type SessionConfigOption, type SessionUpdate } from "@linkshell/wire";
-import { AcpDriver } from "../acp/driver.js";
+import { AcpDriver, inOrder } from "../acp/driver.js";
 import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
 import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, HistoryItem, LaunchSpec } from "../types.js";
-import { claudeConfigDir, findTranscript, readTranscript, transcriptLine, transcriptTimes, TranscriptTail } from "./transcript.js";
+import { descendsFrom, sessionHolders, type SessionHolder } from "./holders.js";
+import { claudeConfigDir, findTranscript, readTail, readTranscript, transcriptLine, transcriptTimes, TranscriptTail } from "./transcript.js";
 
 const execFileAsync = promisify(execFile);
+
+/** How the adapter's Claude marks the transcript lines it writes. */
+const REMOTE_ENTRYPOINT = '"entrypoint":"sdk-ts"';
+
+/** A message in the transcript that some other Claude (the desktop app, a terminal) wrote. */
+function writtenByAnotherClaude(line: string): boolean {
+  return line.includes('"entrypoint":"') && !line.includes(REMOTE_ENTRYPOINT) && /"type":"(user|assistant)"/.test(line);
+}
+
+/**
+ * Whether another Claude is in the middle of a turn, going by the transcript's
+ * last message: a prompt or a tool result with no final reply after it. A turn
+ * that has written nothing for `stalledMs` no longer counts (it waits on its
+ * own approval prompt, or that Claude is gone).
+ */
+function turnInProgress(path: string, stalledMs: number): boolean {
+  const { size, mtimeMs } = statSync(path);
+  if (Date.now() - mtimeMs > stalledMs) return false;
+  // Lines can be megabytes (a screenshot in a tool result): widen the look until one is whole.
+  for (const bytes of [512 * 1024, 8 * 1024 * 1024, size]) {
+    const tail = readTail(path, Math.min(size, bytes));
+    const lines = (bytes >= size ? tail : tail.slice(tail.indexOf("\n") + 1)).split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!;
+      if (!/"type":"(user|assistant)"/.test(line)) continue;
+      let entry: { type?: string; isSidechain?: boolean; message?: { stop_reason?: string | null; content?: unknown } };
+      try {
+        entry = JSON.parse(line) as typeof entry;
+      } catch {
+        continue;
+      }
+      if (entry.isSidechain || (entry.type !== "user" && entry.type !== "assistant")) continue;
+      if (line.includes(REMOTE_ENTRYPOINT)) return false;
+      if (entry.type === "assistant") return entry.message?.stop_reason == null || entry.message.stop_reason === "tool_use";
+      return !JSON.stringify(entry.message?.content ?? "").includes("[Request interrupted");
+    }
+    if (bytes >= size) break;
+  }
+  return false;
+}
 
 /** Finds an executable on the given PATH (the adapter needs an absolute path). */
 export function resolveExecutable(name: string, env: NodeJS.ProcessEnv): string | undefined {
@@ -60,8 +101,10 @@ export interface ClaudeDriverOptions {
   claudeCommand?: string;
   /** How to start the ACP adapter; defaults to the bundled claude-agent-acp. */
   adapter?: { command: string; args: string[] };
-  /** A transcript written within this window counts as "in use" by an unmanaged TUI. */
+  /** Another Claude's turn that has written nothing for this long no longer counts as running. */
   busyWindowMs?: number;
+  /** How often to check that a session driven from a device wasn't reopened on the computer. */
+  holderCheckMs?: number;
 }
 
 /**
@@ -87,9 +130,12 @@ export class ClaudeDriver extends AcpDriver {
   private readonly lastModels = new Map<string, string>();
   /** Per session: TodoWrite calls shown as the plan, whose results the tail skips. */
   private readonly hiddenTools = new Map<string, Set<string>>();
+  /** Per session: calls that started an agent in the background and haven't heard back (see transcriptLine). */
+  private readonly backgroundAgents = new Map<string, Set<string>>();
   private readonly claudeCommand: string;
   private readonly configDir: string;
   private readonly busyWindowMs: number;
+  private readonly holderCheckMs: number;
   private claudePath?: string;
 
   constructor(options: ClaudeDriverOptions) {
@@ -118,12 +164,17 @@ export class ClaudeDriver extends AcpDriver {
     this.claudeCommand = claudeCommand;
     this.claudePath = claudePath;
     this.configDir = claudeConfigDir(env);
-    this.busyWindowMs = options.busyWindowMs ?? 60_000;
+    this.busyWindowMs = options.busyWindowMs ?? 10 * 60_000;
+    this.holderCheckMs = options.holderCheckMs ?? 3000;
     this.adapterMissing = adapterMissing;
     this.capabilities = { ...this.capabilities, models: true, modes: true };
   }
 
   private readonly adapterMissing: boolean;
+  /** Sent from a device while another Claude was mid-turn in the session; goes out when that turn ends. */
+  private readonly waiting = new Map<string, { content: ContentBlock[]; clientMessageId: string }[]>();
+  /** Checks that sessions driven from a device haven't been reopened on the computer. */
+  private remoteWatch?: ReturnType<typeof setInterval>;
 
   override async start(host: import("../types.js").DriverHost) {
     if (!this.adapterMissing) return super.start(host);
@@ -137,6 +188,8 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   override async stop(): Promise<void> {
+    clearInterval(this.remoteWatch);
+    this.remoteWatch = undefined;
     for (const tail of this.tails.values()) tail.stop();
     this.tails.clear();
     await super.stop();
@@ -150,8 +203,20 @@ export class ClaudeDriver extends AcpDriver {
     if (path) {
       const transcript = readTranscript(path);
       state.tracker = new AcpItemTracker();
-      history = toHistory(transcript.updates, state.tracker, (update) => transcriptTimes.get(update));
+      // What is under way on the computer isn't history yet: a turn's start and
+      // the tool calls still running, and agents working in the background
+      // (which outlive the turn that started them). They go out as what is
+      // happening now (after the history; the hub holds them until then), so
+      // the session shows as working and results have a card to land on.
+      const underway: SessionUpdate[] = [];
+      history = toHistory(transcript.updates, state.tracker, (update) => transcriptTimes.get(update), underway);
+      const working = turnInProgress(path, this.busyWindowMs);
+      for (const update of underway) {
+        const call = (update as { parentToolCallId?: string; toolCallId?: string }).parentToolCallId ?? (update as { toolCallId?: string }).toolCallId;
+        if (working || (call && transcript.agents.has(call))) this.host?.update(this.id, nativeId, update);
+      }
       offset = transcript.size;
+      this.backgroundAgents.set(nativeId, transcript.agents);
       if (transcript.model) this.lastModels.set(nativeId, transcript.model);
       if (transcript.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: transcript.title });
     }
@@ -255,20 +320,116 @@ export class ClaudeDriver extends AcpDriver {
     else this.sessions.delete(nativeId);
     this.modes.delete(nativeId);
     this.hiddenTools.delete(nativeId);
+    this.backgroundAgents.delete(nativeId);
     if (transcript) sweepTranscript(transcript);
   }
 
   override async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
+    // Another Claude is in the middle of a turn here: the message waits for it to finish.
+    if (this.waiting.get(nativeId)?.length || (await this.elsewhere(nativeId))?.working) {
+      const waiting = this.waiting.get(nativeId) ?? [];
+      waiting.push({ content, clientMessageId });
+      this.waiting.set(nativeId, waiting);
+      this.reportWaiting(nativeId);
+      this.startWatch();
+      return "queued";
+    }
     // Sending from a device is taking the session over.
     await this.ensureRemote(nativeId);
     return super.prompt(nativeId, content, clientMessageId);
   }
 
-  override async cancel(nativeId: string): Promise<void> {
-    if (this.modes.get(nativeId) !== "remote") {
-      throw RpcError.app("not_supported", "Claude 正在电脑上运行：先接管，再停止");
+  override unqueue(nativeId: string, clientMessageId: string): boolean {
+    const waiting = this.waiting.get(nativeId);
+    const index = waiting?.findIndex((entry) => entry.clientMessageId === clientMessageId) ?? -1;
+    if (!waiting || index < 0) return super.unqueue(nativeId, clientMessageId);
+    waiting.splice(index, 1);
+    if (waiting.length === 0) this.waiting.delete(nativeId);
+    this.reportWaiting(nativeId);
+    return true;
+  }
+
+  override reorderQueue(nativeId: string, clientMessageIds: string[]): void {
+    const waiting = this.waiting.get(nativeId);
+    if (!waiting) return super.reorderQueue(nativeId, clientMessageIds);
+    this.waiting.set(nativeId, inOrder(waiting, clientMessageIds));
+    this.reportWaiting(nativeId);
+  }
+
+  private reportWaiting(nativeId: string): void {
+    this.host?.queue(
+      this.id,
+      nativeId,
+      (this.waiting.get(nativeId) ?? []).map((entry) => ({
+        clientMessageId: entry.clientMessageId,
+        text: entry.content.map((block) => (block.type === "text" ? block.text : "")).join("").trim(),
+        images: entry.content.filter((block) => block.type === "image").length,
+      })),
+    );
+  }
+
+  /** Sends what waited for another Claude's turn, now that it has ended. */
+  private async sendWaiting(nativeId: string): Promise<void> {
+    const waiting = this.waiting.get(nativeId);
+    if (!waiting?.length || (await this.elsewhere(nativeId))?.working) return;
+    this.waiting.delete(nativeId);
+    this.reportWaiting(nativeId);
+    try {
+      await this.ensureRemote(nativeId);
+      for (const entry of waiting) await super.prompt(nativeId, entry.content, entry.clientMessageId);
+    } catch (error) {
+      this.emit(nativeId, {
+        sessionUpdate: "ls_error",
+        code: error instanceof RpcError ? (error.appCode ?? "send_failed") : "send_failed",
+        message: `排队的消息没能发出：${error instanceof Error ? error.message : String(error)}`,
+      });
     }
-    await super.cancel(nativeId);
+  }
+
+  override async cancel(nativeId: string): Promise<void> {
+    if (this.modes.get(nativeId) === "remote") return super.cancel(nativeId);
+    // Stopping stops what's waiting too; the apps put queued text back in the composer.
+    if (this.waiting.delete(nativeId)) this.reportWaiting(nativeId);
+    // The turn runs in a Claude on the computer. A `linkshell claude` terminal
+    // steps aside (which ends its turn); any other Claude is interrupted.
+    if (this.host?.desktop(this.id, nativeId)) await this.ensureRemote(nativeId);
+    else await this.interruptElsewhere(nativeId);
+  }
+
+  override async sendQueuedNow(nativeId: string): Promise<void> {
+    if (!this.waiting.get(nativeId)?.length) return super.sendQueuedNow(nativeId);
+    await this.interruptElsewhere(nativeId);
+    await this.sendWaiting(nativeId);
+  }
+
+  /**
+   * Stops the turn another Claude (the desktop app, a `claude` in a terminal)
+   * is running in this session, the way Ctrl-C would: asked to stop first,
+   * told to quit if it doesn't. Only ever the processes that have this session open.
+   */
+  private async interruptElsewhere(nativeId: string): Promise<void> {
+    if (!(await this.elsewhere(nativeId))?.working) return;
+    const recorded = (await this.foreignHolders(nativeId)).map((holder) => holder.pid);
+    const pids = recorded.length > 0 || this.hasHolderRecords() ? recorded : await this.commandLineHolders(nativeId);
+    const stopped = async (ms: number) => {
+      const deadline = Date.now() + ms;
+      while (Date.now() < deadline) {
+        if (!(await this.elsewhere(nativeId))?.working) return true;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      return false;
+    };
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      for (const pid of new Set(pids)) {
+        try {
+          process.kill(pid, signal);
+        } catch {
+          // Already gone.
+        }
+      }
+      if (await stopped(signal === "SIGINT" ? 6000 : 4000)) return;
+    }
+    throw RpcError.app("busy", "没能停下电脑上的这一轮：请在电脑上按 Esc 停止它");
   }
 
   override async setConfig(nativeId: string, optionId: string, value: string): Promise<void> {
@@ -368,7 +529,9 @@ export class ClaudeDriver extends AcpDriver {
   private onTranscriptLine(nativeId: string, line: string): void {
     let hidden = this.hiddenTools.get(nativeId);
     if (!hidden) this.hiddenTools.set(nativeId, (hidden = new Set()));
-    const result = transcriptLine(line, { hidden });
+    let agents = this.backgroundAgents.get(nativeId);
+    if (!agents) this.backgroundAgents.set(nativeId, (agents = new Set()));
+    const result = transcriptLine(line, { hidden, agents });
     if (result.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: result.title });
     for (const update of result.updates) this.emit(nativeId, update);
   }
@@ -384,10 +547,14 @@ export class ClaudeDriver extends AcpDriver {
       throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息：先在电脑上发一条");
     }
     const desktop = this.host?.desktop(this.id, nativeId);
+    let alsoOpenIn: "app" | "terminal" | undefined;
     if (desktop) {
       await desktop.yield();
     } else if (this.modes.get(nativeId) !== "remote") {
-      await this.refuseIfTuiMayBeActive(nativeId, cwd);
+      const other = await this.elsewhere(nativeId);
+      // Two Claudes writing one turn at once would garble it; a message sent now waits instead (see prompt).
+      if (other?.working) throw RpcError.app("busy", "电脑上的 Claude 正在跑这一轮。直接发消息即可：会排队，等它结束后发出。");
+      alsoOpenIn = other?.where;
     }
     // Take in the TUI's last lines, then stop following: ACP streams from here on.
     const tail = this.tails.get(nativeId);
@@ -415,6 +582,61 @@ export class ClaudeDriver extends AcpDriver {
     this.setWriter(nativeId, "remote");
     this.setMode(nativeId, "remote");
     this.emitConfig(nativeId, target);
+    if (alsoOpenIn) {
+      // That Claude keeps its own copy of the conversation and can't be told about this one.
+      this.emit(
+        nativeId,
+        alsoOpenIn === "app"
+          ? {
+              sessionUpdate: "ls_notice",
+              level: "info",
+              title: "已在手机上接着做",
+              detail: "这个会话在 Claude 桌面 App 里也开着：App 要重启后才会显示手机上的消息。",
+            }
+          : {
+              sessionUpdate: "ls_notice",
+              level: "info",
+              title: "已在手机上接着做",
+              detail: `这个会话在电脑终端里也开着：那边要重新打开才会显示手机上的消息（用 linkshell claude --resume ${nativeId} 打开，之后可以随时接力）。`,
+            },
+      );
+    }
+    this.startWatch();
+  }
+
+  private startWatch(): void {
+    this.remoteWatch ??= setInterval(() => void this.watchRemoteSessions(), this.holderCheckMs);
+    this.remoteWatch.unref?.();
+  }
+
+  /**
+   * A session driven from a device that another Claude wrote to (the desktop
+   * app, or a `claude` in a terminal, continued it): that process has the
+   * conversation now, so stop writing to it and follow what it does instead.
+   */
+  private async watchRemoteSessions(): Promise<void> {
+    for (const nativeId of [...this.waiting.keys()]) await this.sendWaiting(nativeId).catch(() => {});
+    for (const [nativeId, mode] of this.modes) {
+      if (mode !== "remote" || this.host?.desktop(this.id, nativeId)) continue;
+      if (!this.tails.get(nativeId)?.writtenMeanwhile(writtenByAnotherClaude)) continue;
+      await this.leaveRemote(nativeId).catch(() => {});
+      this.emit(nativeId, {
+        sessionUpdate: "ls_notice",
+        level: "info",
+        title: "电脑上继续了这个会话",
+        detail: "这里转为实时显示电脑上的进展；再发消息会重新接管。",
+      });
+    }
+  }
+
+  /** Running Claude processes on this session that this host didn't start. */
+  private async foreignHolders(nativeId: string): Promise<SessionHolder[]> {
+    const foreign: SessionHolder[] = [];
+    for (const holder of sessionHolders(this.configDir, nativeId)) {
+      // The adapter's own Claude process is a child of this host.
+      if (!(await descendsFrom(holder.pid, process.pid))) foreign.push(holder);
+    }
+    return foreign;
   }
 
   /** Hands the session back: stop remote driving and resume following the transcript. */
@@ -428,35 +650,58 @@ export class ClaudeDriver extends AcpDriver {
     }
     await super.detach(nativeId);
     this.setMode(nativeId, "idle");
-    // Skip what the remote turns wrote; those were already streamed live.
-    this.tails.get(nativeId)?.resumeAtEnd();
+    // What the remote turns wrote was already streamed live; anything another
+    // Claude wrote in between (it was reopened on the computer) is new.
+    this.tails.get(nativeId)?.resumeSkipping((line) => line.includes(REMOTE_ENTRYPOINT));
   }
 
   /**
-   * With no `linkshell claude` terminal to ask, make sure no other `claude` is
-   * writing the session before becoming a second writer. If this host or a
-   * managed terminal wrote it last, only a live process counts; otherwise a
-   * transcript written moments ago does too (a plain `claude` may be mid-turn).
+   * With no `linkshell claude` terminal to ask: another Claude (the desktop
+   * app, a `claude` in some terminal) that has the session open, and whether
+   * it is in the middle of a turn. It can't be made to step aside, and it won't
+   * show what a device does until it is reopened; a device continues the
+   * session all the same, once that turn is over.
    */
-  private async refuseIfTuiMayBeActive(nativeId: string, cwd: string): Promise<void> {
-    const path = findTranscript(this.configDir, nativeId, cwd);
-    if (!path) return;
-    const known = this.writer(nativeId) !== undefined;
-    const recentlyWritten = !known && Date.now() - statSync(path).mtimeMs < this.busyWindowMs;
-    if (!recentlyWritten && !(await this.tuiProcessHolds(nativeId))) return;
-    throw RpcError.app(
-      "busy",
-      `这个会话正在电脑上用 claude 直接运行，无法安全接管。在电脑终端用 linkshell claude --resume ${nativeId} 打开后即可接力。`,
-    );
+  private async elsewhere(nativeId: string): Promise<{ where: "app" | "terminal"; working: boolean } | undefined> {
+    if (this.modes.get(nativeId) === "remote" || this.host?.desktop(this.id, nativeId)) return undefined;
+    const path = findTranscript(this.configDir, nativeId, this.sessions.get(nativeId)?.cwd ?? "");
+    if (!path) return undefined;
+    // Claude's own record of who has the session open.
+    const holders = await this.foreignHolders(nativeId);
+    if (holders.length > 0) {
+      const where = holders.some((holder) => holder.entrypoint !== "claude-desktop") ? "terminal" : "app";
+      return { where, working: turnInProgress(path, this.busyWindowMs) };
+    }
+    if (this.hasHolderRecords()) return undefined;
+    // An older Claude keeps no such record: its command line, or a transcript it wrote moments ago, is the sign.
+    if (await this.tuiProcessHolds(nativeId)) return { where: "terminal", working: turnInProgress(path, this.busyWindowMs) };
+    const justWritten = Date.now() - statSync(path).mtimeMs < Math.min(this.busyWindowMs, 60_000);
+    return justWritten && this.writer(nativeId) === undefined && turnInProgress(path, this.busyWindowMs) ? { where: "terminal", working: true } : undefined;
   }
 
   private async tuiProcessHolds(nativeId: string): Promise<boolean> {
+    return (await this.commandLineHolders(nativeId)).length > 0;
+  }
+
+  /** Whether this Claude records who has which session open (see holders.ts). */
+  private hasHolderRecords(): boolean {
+    return existsSync(join(this.configDir, "sessions"));
+  }
+
+  /** Processes with the session on their command line (`claude --resume <id>`): how an older Claude shows it. */
+  private async commandLineHolders(nativeId: string): Promise<number[]> {
     try {
       // -ww: never truncate; the session id is at the end of long command lines.
-      const { stdout } = await execFileAsync("/bin/ps", ["-Aww", "-o", "command="], { timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
-      return stdout.split("\n").some((command) => command.includes(nativeId) && !command.includes("claude-agent-acp"));
+      const { stdout } = await execFileAsync("/bin/ps", ["-Aww", "-o", "pid=,command="], { timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
+      const pids: number[] = [];
+      for (const line of stdout.split("\n")) {
+        if (!line.includes(nativeId) || line.includes("claude-agent-acp")) continue;
+        const pid = Number(line.trim().split(/\s+/, 1)[0]);
+        if (Number.isInteger(pid) && pid !== process.pid) pids.push(pid);
+      }
+      return pids;
     } catch {
-      return false;
+      return [];
     }
   }
 

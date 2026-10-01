@@ -132,6 +132,8 @@ describe("host + Codex driver (fake app-server)", () => {
 
   it("gives a second client the identical log, and a retried send is not delivered twice", async () => {
     await laptop.client.call("sessions.subscribe", { sessionId, fromSeq: 0 });
+    // (The last live event may still be on its way to the phone's own connection.)
+    await waitFor(() => phone.of(sessionId).length === laptop.of(sessionId).length);
     expect(laptop.of(sessionId).map((e) => e.seq)).toEqual(phone.of(sessionId).map((e) => e.seq));
     expect(await phone.client.call("sessions.prompt", { sessionId, clientMessageId: "c1", content: text("hello world") })).toEqual({
       delivery: "duplicate",

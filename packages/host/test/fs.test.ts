@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -32,6 +32,60 @@ describe("fs.list", () => {
     expect(await readFile({ path: join(root, "blob.bin"), maxBytes: 1000 })).toMatchObject({ kind: "binary" });
     expect(await readFile({ path: join(root, "big.txt"), maxBytes: 10 })).toMatchObject({ truncated: true, text: "x".repeat(10) });
     await expect(readFile({ path: root, maxBytes: 10 })).rejects.toThrow();
+  });
+
+  it("lists a project's files after its directories, when asked", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-files-"));
+    mkdirSync(join(root, "src"));
+    mkdirSync(join(root, "docs"));
+    writeFileSync(join(root, "README.md"), "hello");
+    writeFileSync(join(root, "a.ts"), "x");
+    writeFileSync(join(root, ".env"), "SECRET=1");
+    expect((await listDirectory({ path: root, hidden: false })).entries.map((e) => e.name)).toEqual(["docs", "src"]);
+    const listing = await listDirectory({ path: root, hidden: false, files: true });
+    expect(listing.entries.map((e) => e.name)).toEqual(["docs", "src", "a.ts", "README.md"]);
+    expect(listing.entries[3]).toMatchObject({ file: true, size: 5, path: join(root, "README.md") });
+    expect(listing.truncated).toBeUndefined();
+    expect((await listDirectory({ path: root, hidden: true, files: true })).entries.map((e) => e.name)).toContain(".env");
+  });
+
+  it("reads text a part at a time, never splitting a character", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-parts-"));
+    const content = "日志".repeat(500) + "end";
+    writeFileSync(join(root, "log.txt"), content);
+    let text = "";
+    let offset = 0;
+    let parts = 0;
+    for (;;) {
+      const part = await readFile({ path: join(root, "log.txt"), offset, maxBytes: 100 });
+      expect(part.text).not.toContain("\uFFFD");
+      text += part.text;
+      parts += 1;
+      if (!part.truncated) {
+        expect(part.nextOffset).toBeUndefined();
+        break;
+      }
+      offset = part.nextOffset!;
+    }
+    expect(text).toBe(content);
+    expect(parts).toBeGreaterThan(20);
+    // A binary file stays binary wherever the part starts.
+    writeFileSync(join(root, "blob.bin"), Buffer.concat([Buffer.from([1, 0, 2, 0]), Buffer.from("text after".repeat(100))]));
+    expect(await readFile({ path: join(root, "blob.bin"), offset: 500, maxBytes: 100 })).toMatchObject({ kind: "binary" });
+  });
+
+  it("refuses files too big to look at on a phone", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-big-"));
+    writeFileSync(join(root, "huge.log"), "");
+    truncateSync(join(root, "huge.log"), 21 * 1024 * 1024);
+    writeFileSync(join(root, "huge.png"), "");
+    truncateSync(join(root, "huge.png"), 11 * 1024 * 1024);
+    writeFileSync(join(root, "ok.log"), "");
+    truncateSync(join(root, "ok.log"), 3 * 1024 * 1024);
+    await expect(readFile({ path: join(root, "huge.log"), maxBytes: 1000 })).rejects.toMatchObject({ appCode: "too_large", message: expect.stringContaining("21 MB") });
+    await expect(readFile({ path: join(root, "huge.png"), maxBytes: 1000 })).rejects.toMatchObject({ appCode: "too_large" });
+    // Within the limit: the listing shows its size, reading it returns one part.
+    expect(await readFile({ path: join(root, "ok.log"), maxBytes: 1000 })).toMatchObject({ kind: "binary", size: 3 * 1024 * 1024 });
   });
 
   it("saves uploads without overwriting, and makes folders", async () => {

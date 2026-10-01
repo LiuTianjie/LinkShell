@@ -108,6 +108,20 @@ export const queuedMessageSchema = z.object({
 });
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 
+/** A sub-agent a session started: the tool call it runs under, and how it is doing. */
+export const subagentInfoSchema = z.object({
+  toolCallId: z.string(),
+  /** What it was asked to do. */
+  task: z.string(),
+  /** Its role or type, e.g. "Explore". */
+  agentType: z.string().optional(),
+  running: z.boolean(),
+  failed: z.boolean().optional(),
+  startedAt: z.number(),
+  endedAt: z.number().optional(),
+});
+export type SubagentInfo = z.infer<typeof subagentInfoSchema>;
+
 export const sessionSummarySchema = z.object({
   /** `${agent}:${nativeId}` — stable across daemon restarts and rediscovery. */
   id: z.string().min(1),
@@ -131,6 +145,8 @@ export const sessionSummarySchema = z.object({
    * holds them (agents that can't take input mid-turn). Oldest first.
    */
   queue: z.array(queuedMessageSchema).optional(),
+  /** Live only, for sessions that started sub-agents: how many, and how many are working now (`sessions.subagents` lists them). */
+  subagents: z.object({ total: z.number().int(), running: z.number().int() }).optional(),
 });
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 

@@ -48,14 +48,43 @@ async function subdirectories(path: string, hidden: boolean): Promise<{ entries:
   };
 }
 
-export async function listDirectory(input: { path?: string; hidden: boolean }) {
+/** A listing carries at most this many entries. */
+const MAX_ENTRIES = 1000;
+
+/** The directory's files, by name. */
+async function filesIn(path: string, hidden: boolean, limit: number): Promise<{ entries: DirectoryEntry[]; truncated: boolean }> {
+  const dirents = (await readdir(path, { withFileTypes: true }))
+    .filter((d) => !d.isDirectory() && (hidden || !d.name.startsWith(".")))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  const entries: DirectoryEntry[] = [];
+  let truncated = false;
+  for (const d of dirents) {
+    const full = join(path, d.name);
+    // A link is listed as what it points to; one to a directory is already among the subdirectories.
+    const info = await stat(full).catch(() => undefined);
+    if (!info?.isFile()) continue;
+    if (entries.length >= limit) {
+      truncated = true;
+      break;
+    }
+    entries.push({ name: d.name, path: full, file: true, size: info.size });
+  }
+  return { entries, truncated };
+}
+
+export async function listDirectory(input: { path?: string; hidden: boolean; files?: boolean }) {
   const path = expand(input.path);
   if (!existsSync(path) || !(await stat(path)).isDirectory()) throw RpcError.app("not_found", `no such directory: ${path}`);
   const { entries } = await subdirectories(path, input.hidden).catch(() => {
     throw RpcError.app("not_found", `can't read ${path}`);
   });
   const parent = dirname(path);
-  return { path, parent: parent === path ? undefined : parent, home: homedir(), entries };
+  const base = { path, parent: parent === path ? undefined : parent, home: homedir() };
+  if (!input.files) return { ...base, entries };
+  // Browsing a project: directories by name (not projects first), then files.
+  const dirs = entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).slice(0, MAX_ENTRIES);
+  const files = await filesIn(path, input.hidden, MAX_ENTRIES - dirs.length);
+  return { ...base, entries: [...dirs, ...files.entries], truncated: files.truncated || entries.length > MAX_ENTRIES || undefined };
 }
 
 /**
@@ -115,8 +144,28 @@ const IMAGE_TYPES: Record<string, string> = {
   heic: "image/heic",
 };
 
-/** Reads a file for the phone's viewer. Text is detected by content, not extension. */
-export async function readFile(input: { path: string; maxBytes: number }) {
+/** Beyond these a phone has no use for the file, and reading it would only load the computer and the relay. */
+const MAX_TEXT_FILE = 20 * 1024 * 1024;
+const MAX_IMAGE_FILE = 10 * 1024 * 1024;
+
+const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+
+/** How many bytes at the end of `buffer` belong to a UTF-8 character that continues past it. */
+function incompleteTail(buffer: Buffer): number {
+  for (let back = 1; back <= Math.min(3, buffer.length); back++) {
+    const byte = buffer[buffer.length - back]!;
+    if ((byte & 0xc0) === 0x80) continue; // a continuation byte: keep looking for its lead
+    const needs = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+    return needs > back ? back : 0;
+  }
+  return 0;
+}
+
+/**
+ * Reads a file for the phone's viewer. Text is detected by content, not
+ * extension, and comes in parts (`offset`, `maxBytes`); a picture comes whole.
+ */
+export async function readFile(input: { path: string; offset?: number; maxBytes: number }) {
   const path = expand(input.path);
   let info;
   try {
@@ -127,23 +176,29 @@ export async function readFile(input: { path: string; maxBytes: number }) {
   if (!info.isFile()) throw RpcError.app("invalid_params", `not a file: ${path}`);
   const extension = path.split(".").pop()?.toLowerCase() ?? "";
   const image = IMAGE_TYPES[extension];
-  const limit = image ? Math.min(input.maxBytes * 3, 8_000_000) : input.maxBytes;
-  const length = Math.min(info.size, limit);
+  const base = { path, size: info.size, modifiedAt: info.mtimeMs };
+  if (info.size > (image ? MAX_IMAGE_FILE : MAX_TEXT_FILE)) {
+    throw RpcError.app("too_large", `${image ? "图片" : "文件"}太大（${megabytes(info.size)}），不在手机上打开`);
+  }
+  const offset = image ? 0 : Math.min(input.offset ?? 0, info.size);
+  const length = image ? info.size : Math.min(info.size - offset, input.maxBytes);
   const handle = await open(path, "r");
-  const buffer = Buffer.alloc(length);
+  let buffer = Buffer.alloc(length);
   try {
-    await handle.read(buffer, 0, length, 0);
+    // Text or not: no NUL bytes in the file's first 8 KB, wherever this part starts.
+    const head = offset === 0 ? undefined : Buffer.alloc(Math.min(8192, info.size));
+    if (head) await handle.read(head, 0, head.length, 0);
+    const { bytesRead } = await handle.read(buffer, 0, length, offset);
+    buffer = buffer.subarray(0, bytesRead);
+    if (image) return { ...base, kind: "image" as const, data: buffer.toString("base64"), mimeType: image, truncated: false };
+    if ((head ?? buffer.subarray(0, 8192)).includes(0)) return { ...base, kind: "binary" as const, truncated: false };
   } finally {
     await handle.close();
   }
-  const base = { path, size: info.size, modifiedAt: info.mtimeMs, truncated: info.size > length };
-  if (image && !base.truncated) return { ...base, kind: "image" as const, data: buffer.toString("base64"), mimeType: image };
-  // Text: no NUL bytes in the first 8KB.
-  if (buffer.subarray(0, 8192).includes(0)) return { ...base, kind: "binary" as const };
-  let text = buffer.toString("utf8");
-  // Don't end on half a multi-byte character.
-  if (base.truncated) text = text.replace(/\uFFFD+$/, "");
-  return { ...base, kind: "text" as const, text };
+  // Don't end on half a multi-byte character: the next part starts with it.
+  const more = offset + buffer.length < info.size;
+  if (more) buffer = buffer.subarray(0, buffer.length - incompleteTail(buffer));
+  return { ...base, kind: "text" as const, text: buffer.toString("utf8"), truncated: more, nextOffset: more ? offset + buffer.length : undefined };
 }
 
 /** A single path component: no separators, no `.`/`..`, nothing a shell or filesystem would choke on. */

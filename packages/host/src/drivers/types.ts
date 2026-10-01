@@ -115,6 +115,10 @@ export interface AgentDriver {
   setConfig?(nativeId: string, optionId: string, value: string): Promise<void>;
   /** Drops a message the driver holds in its queue; whether it was there. */
   unqueue?(nativeId: string, clientMessageId: string): boolean;
+  /** Stops the running turn and sends what the driver's queue holds, without waiting for the turn to end. */
+  sendQueuedNow?(nativeId: string): Promise<void>;
+  /** Puts the driver's queue in the order of `clientMessageIds`. */
+  reorderQueue?(nativeId: string, clientMessageIds: string[]): void;
 
   // Housekeeping, where the agent keeps its own record. Without these the host
   // archives, names and forgets sessions on its side only.

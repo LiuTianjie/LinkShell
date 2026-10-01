@@ -1,5 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { execSync, spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,12 +48,12 @@ function makeEnv(): Env {
   return { home, configDir, workDir, env };
 }
 
-async function boot(e: Env, busyWindowMs = 60_000) {
+async function boot(e: Env, busyWindowMs = 60_000, holderCheckMs = 3000) {
   const host = await startHost({
     home: e.home,
     version: "test",
     drivers: () => [
-      new ClaudeDriver({ env: e.env, hostVersion: "test", claudeCommand: FAKE_CLAUDE, adapter: { command: FAKE_ACP, args: [] }, busyWindowMs }),
+      new ClaudeDriver({ env: e.env, hostVersion: "test", claudeCommand: FAKE_CLAUDE, adapter: { command: FAKE_ACP, args: [] }, busyWindowMs, holderCheckMs }),
     ],
     log: process.env.DEBUG_HOST ? (m) => console.log("[host]", m) : () => {},
   });
@@ -256,9 +257,9 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     expect(p.of(desk.id).some((ev) => ev.update.sessionUpdate === "agent_thought_chunk")).toBe(true);
   }, 15_000);
 
-  it("won't become a second writer next to a claude started without linkshell", async () => {
+  it("continues a session a plain claude has open: at once when it is idle, after its turn when it is working", async () => {
     const e = makeEnv();
-    const host = await boot(e, 400);
+    const host = await boot(e, 60_000, 100);
     const p = await phone(host);
     // A session made on the desktop earlier, then reopened with plain `claude --resume`.
     const desk = await terminal(host, e);
@@ -268,22 +269,152 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     // The host notices the terminal left: nobody drives the session now.
     await waitFor(() => host.hub.getSession(desk.id).driver === "none");
     const nativeId = desk.id.slice("claude:".length);
+    const transcript = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"), `${nativeId}.jsonl`);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
     const plain = spawn(FAKE_CLAUDE, ["--resume", nativeId], { cwd: e.workDir, env: e.env, stdio: ["pipe", "ignore", "ignore"] });
     cleanups.push(() => void plain.kill("SIGKILL"));
-    // The process holds the session: taking over must be refused, with a way forward.
-    await expect(
-      p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "x", content: text("hi") }),
-    ).rejects.toMatchObject({ appCode: "busy", message: expect.stringContaining("linkshell claude --resume") });
-    await new Promise<void>((resolve) => {
-      plain.once("exit", () => resolve());
-      plain.kill("SIGTERM");
-    });
-    // Once it's gone, the phone can continue.
-    expect(await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "y", content: text("now me") })).toEqual({
-      delivery: "started",
-    });
-    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    const notices = () => p.of(desk.id).flatMap((ev) => (ev.update.sessionUpdate === "ls_notice" ? [ev.update.title] : []));
+    const queued = () => host.hub.getSession(desk.id).queue?.map((entry) => entry.text) ?? [];
+
+    // In the middle of a turn there (a prompt with no reply yet): the message waits, where the phone can see it.
+    appendFileSync(
+      transcript,
+      JSON.stringify({ type: "user", uuid: randomUUID(), isSidechain: false, sessionId: nativeId, cwd: e.workDir, entrypoint: "cli", timestamp: new Date().toISOString(), message: { role: "user", content: "typed in the terminal" } }) + "\n",
+    );
+    expect(await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "x", content: text("after that") })).toEqual({ delivery: "queued" });
+    expect(queued()).toEqual(["after that"]);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(host.hub.getSession(desk.id).driver).toBe("none");
+    // Its turn ends: the message goes out, and the phone is told the terminal won't show it.
+    appendFileSync(
+      transcript,
+      JSON.stringify({ type: "assistant", uuid: randomUUID(), isSidechain: false, sessionId: nativeId, cwd: e.workDir, entrypoint: "cli", timestamp: new Date().toISOString(), message: { id: "msg_done", role: "assistant", content: [{ type: "text", text: "terminal done" }], stop_reason: "end_turn" } }) + "\n",
+    );
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: after that"));
+    expect(queued()).toEqual([]);
+    expect(notices()).toEqual(["已在手机上接着做"]);
+    // Idle from here on: the next message is simply sent.
+    expect(await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "y", content: text("now me") })).toEqual({ delivery: "started" });
     await waitFor(() => p.agentTexts(desk.id).includes("echo: now me"));
+    // The terminal goes on: the phone steps back and follows it.
+    plain.stdin!.write("back at the desk\n");
+    await waitFor(() => host.hub.getSession(desk.id).driver === "none");
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: back at the desk"));
+    expect(notices()).toEqual(["已在手机上接着做", "电脑上继续了这个会话"]);
+    expect(p.userTexts(desk.id)).toEqual(["first", "typed in the terminal", "after that", "now me", "back at the desk"]);
+  }, 20_000);
+
+  it("sends a waiting message at once, or stops the turn, by interrupting the claude that runs it", async () => {
+    const e = makeEnv();
+    const host = await boot(e, 60_000, 100);
+    const p = await phone(host);
+    const desk = await terminal(host, e);
+    desk.type("first");
+    await waitFor(() => host.hub.getSession(desk.id).title === "Task: first", 8000);
+    await desk.quit();
+    await waitFor(() => host.hub.getSession(desk.id).driver === "none");
+    const nativeId = desk.id.slice("claude:".length);
+    const transcript = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"), `${nativeId}.jsonl`);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    const working = async () => {
+      const plain = spawn(FAKE_CLAUDE, ["--resume", nativeId], { cwd: e.workDir, env: e.env, stdio: ["pipe", "ignore", "ignore"] });
+      cleanups.push(() => void plain.kill("SIGKILL"));
+      // (Up and running, with its own command line, before anyone looks for it.)
+      await waitFor(() => execSync(`ps -ww -o command= -p ${plain.pid}`).toString().includes(nativeId));
+      appendFileSync(
+        transcript,
+        JSON.stringify({ type: "user", uuid: randomUUID(), isSidechain: false, sessionId: nativeId, cwd: e.workDir, entrypoint: "cli", timestamp: new Date().toISOString(), message: { role: "user", content: "a long job" } }) + "\n",
+      );
+      return { gone: new Promise<NodeJS.Signals | null>((resolve) => plain.once("exit", (_code, signal) => resolve(signal))) };
+    };
+
+    // "Send now": the terminal's turn is interrupted, and the message goes out.
+    let { gone } = await working();
+    expect(await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "x", content: text("urgent") })).toEqual({ delivery: "queued" });
+    await p.client.call("sessions.sendQueued", { sessionId: desk.id });
+    expect(await gone).toBe("SIGINT");
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: urgent"));
+    expect(host.hub.getSession(desk.id).queue ?? []).toEqual([]);
+
+    // Stop: the turn on the computer is interrupted, and what was waiting is dropped.
+    // (The terminal is opened again and starts a turn: the phone has stepped back.)
+    ({ gone } = await working());
+    await waitFor(() => host.hub.getSession(desk.id).driver === "none");
+    expect(await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "y", content: text("never mind") })).toEqual({ delivery: "queued" });
+    await p.client.call("sessions.cancel", { sessionId: desk.id });
+    expect(await gone).toBe("SIGINT");
+    expect(host.hub.getSession(desk.id).queue ?? []).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(p.userTexts(desk.id)).not.toContain("never mind");
+  }, 25_000);
+
+  it("continues a session the Claude desktop app has open, after its turn, and follows the app when it writes again", async () => {
+    const e = makeEnv();
+    const host = await boot(e, 60_000, 100);
+    const p = await phone(host);
+    const desk = await terminal(host, e);
+    desk.type("first");
+    await waitFor(() => host.hub.getSession(desk.id).title === "Task: first", 8000);
+    await desk.quit();
+    await waitFor(() => host.hub.getSession(desk.id).driver === "none");
+    const nativeId = desk.id.slice("claude:".length);
+    const transcript = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"), `${nativeId}.jsonl`);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+
+    // Another Claude has the session open, as Claude itself records it. Its
+    // command line doesn't name the session (it was created in that process).
+    const holder = (entrypoint: string) => {
+      const pid = Number(execSync("sleep 60 >/dev/null 2>&1 & echo $!", { shell: "/bin/sh" }).toString().trim());
+      cleanups.push(() => {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {}
+      });
+      mkdirSync(join(e.configDir, "sessions"), { recursive: true });
+      writeFileSync(join(e.configDir, "sessions", `${pid}.json`), JSON.stringify({ pid, sessionId: nativeId, entrypoint, kind: "interactive" }));
+      return pid;
+    };
+    const say = (role: "user" | "assistant", textValue: string) =>
+      appendFileSync(
+        transcript,
+        JSON.stringify({
+          type: role,
+          uuid: randomUUID(),
+          isSidechain: false,
+          sessionId: nativeId,
+          cwd: e.workDir,
+          entrypoint: "claude-desktop",
+          timestamp: new Date().toISOString(),
+          message:
+            role === "user"
+              ? { role, content: textValue }
+              : { id: `msg_${randomUUID().slice(0, 8)}`, role, content: [{ type: "text", text: textValue }], stop_reason: "end_turn" },
+        }) + "\n",
+      );
+
+    // The desktop app, in the middle of a turn: the message waits for it.
+    holder("claude-desktop");
+    say("user", "app working");
+    expect(await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "y", content: text("from phone") })).toEqual({ delivery: "queued" });
+    expect(host.hub.getSession(desk.id).queue?.map((entry) => entry.text)).toEqual(["from phone"]);
+    // An explicit takeover would mean two Claudes writing one turn: refused, with what to do instead.
+    await expect(p.client.call("sessions.takeover", { sessionId: desk.id })).rejects.toMatchObject({ appCode: "busy", message: expect.stringContaining("排队") });
+    say("assistant", "app done");
+    // The app's turn is over: the phone continues, and is told the app won't show it.
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: from phone"));
+    expect(host.hub.getSession(desk.id).driver).toBe("remote");
+    const notices = () => p.of(desk.id).flatMap((ev) => (ev.update.sessionUpdate === "ls_notice" ? [ev.update.title] : []));
+    expect(notices()).toEqual(["已在手机上接着做"]);
+
+    // The app continues the session: the phone steps back and shows what the app does.
+    say("user", "back in the app");
+    say("assistant", "app again");
+    await waitFor(() => host.hub.getSession(desk.id).driver === "none");
+    await waitFor(() => p.agentTexts(desk.id).includes("app again"));
+    expect(notices()).toEqual(["已在手机上接着做", "电脑上继续了这个会话"]);
+    // Everything once, in the order it happened.
+    expect(p.userTexts(desk.id)).toEqual(["first", "app working", "from phone", "back in the app"]);
+    expect(p.agentTexts(desk.id)).toEqual(["echo: first", "app done", "echo: from phone", "app again"]);
   }, 20_000);
 
   it("starts a Claude session from the phone and hands it to the desktop", async () => {
@@ -307,15 +438,14 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     expect(p.userTexts(session.id)).toEqual(["phone first", "desk second"]);
   }, 20_000);
 
-  it("cancel needs a takeover while the desktop drives", async () => {
+  it("stop from the phone ends the turn a linkshell claude terminal runs, by taking over", async () => {
     const e = makeEnv();
     const host = await boot(e);
     const p = await phone(host);
     const desk = await terminal(host, e);
     desk.type("x");
     await waitFor(() => host.hub.getSession(desk.id).title === "Task: x");
-    await expect(p.client.call("sessions.cancel", { sessionId: desk.id })).rejects.toMatchObject({ appCode: "not_supported" });
-    await p.client.call("sessions.takeover", { sessionId: desk.id });
+    await p.client.call("sessions.cancel", { sessionId: desk.id });
     expect(desk.yields).toEqual([desk.id]);
     expect(host.hub.getSession(desk.id).driver).toBe("remote");
   }, 15_000);

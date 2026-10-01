@@ -44,7 +44,10 @@ class FakeDriver implements AgentDriver {
     this.prompts.push({ nativeId, content, clientMessageId });
     return "started" as const;
   }
-  async cancel() {}
+  cancels = 0;
+  async cancel() {
+    this.cancels += 1;
+  }
   async respondPermission(_nativeId: string, requestId: string, optionId: string) {
     this.answers.push({ requestId, optionId });
   }
@@ -220,6 +223,103 @@ describe("SessionHub", () => {
     expect(session.updatedAt).toBe(1);
   });
 
+  describe("messages sent while a turn runs", () => {
+    const queued = () => hub.getSession("fake:s1").queue?.map((entry) => entry.text) ?? [];
+    const sent = () => driver.prompts.map((prompt) => (prompt.content[0] as { text: string }).text);
+    const turn = (state: "started" | "ended") =>
+      driver.emit(state === "started" ? { sessionUpdate: "ls_turn", state } : { sessionUpdate: "ls_turn", state, stopReason: "end_turn" });
+    const send = (id: string, message: string) => hub.prompt("fake:s1", id, [text(message)], "queue");
+
+    beforeEach(async () => {
+      await hub.subscribe("fake:s1", 0, collector().subscriber);
+    });
+
+    it("wait in a queue everyone sees, and go out one per turn, in order", async () => {
+      expect(await send("a", "first")).toBe("started");
+      turn("started");
+      expect(await send("b", "second")).toBe("queued");
+      expect(await send("c", "third")).toBe("queued");
+      expect(queued()).toEqual(["second", "third"]);
+      expect(summaries.at(-1)?.queue?.map((entry) => entry.clientMessageId)).toEqual(["b", "c"]);
+      expect(sent()).toEqual(["first"]);
+      // A sub-agent finishing is not the turn ending.
+      driver.emit({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn", parentToolCallId: "task" });
+      expect(sent()).toEqual(["first"]);
+
+      turn("ended");
+      await Promise.resolve();
+      expect(sent()).toEqual(["first", "second"]);
+      expect(queued()).toEqual(["third"]);
+      // While anything waits, a new message joins the queue rather than jumping it.
+      turn("started");
+      expect(await send("d", "fourth")).toBe("queued");
+      turn("ended");
+      await Promise.resolve();
+      turn("started");
+      turn("ended");
+      await Promise.resolve();
+      expect(sent()).toEqual(["first", "second", "third", "fourth"]);
+      expect(queued()).toEqual([]);
+      expect(summaries.at(-1)?.queue).toBeUndefined();
+    });
+
+    it("can be reordered and taken back", async () => {
+      turn("started");
+      await send("a", "one");
+      await send("b", "two");
+      await send("c", "three");
+      hub.reorderQueue("fake:s1", ["c", "a"]);
+      expect(queued()).toEqual(["three", "one", "two"]);
+      expect(hub.unqueue("fake:s1", "a")).toBe(true);
+      expect(hub.unqueue("fake:s1", "a")).toBe(false);
+      expect(queued()).toEqual(["three", "two"]);
+      // Taken back, it can be sent again (edited) under the same id.
+      expect(await send("a", "one, reworded")).toBe("queued");
+      expect(queued()).toEqual(["three", "two", "one, reworded"]);
+    });
+
+    it("can be sent at once: the running turn is stopped and the chosen message is next", async () => {
+      turn("started");
+      await send("a", "one");
+      await send("b", "two");
+      await hub.sendQueuedNow("fake:s1", "b");
+      expect(driver.cancels).toBe(1);
+      expect(queued()).toEqual(["two", "one"]);
+      expect(sent()).toEqual([]);
+      driver.emit({ sessionUpdate: "ls_turn", state: "ended", stopReason: "cancelled" });
+      await Promise.resolve();
+      expect(sent()).toEqual(["two"]);
+      expect(queued()).toEqual(["one"]);
+    });
+
+    it("goes straight into the running turn when the agent takes input mid-turn", async () => {
+      (driver.capabilities as { steer: boolean }).steer = true;
+      turn("started");
+      await send("a", "one");
+      await send("b", "two");
+      await hub.sendQueuedNow("fake:s1");
+      expect(driver.cancels).toBe(0);
+      expect(sent()).toEqual(["one"]);
+      expect(queued()).toEqual(["two"]);
+    });
+
+    it("are dropped by stop", async () => {
+      turn("started");
+      await send("a", "one");
+      await hub.cancel("fake:s1");
+      expect(queued()).toEqual([]);
+      turn("ended");
+      await Promise.resolve();
+      expect(sent()).toEqual([]);
+    });
+
+    it("go out as before when the client doesn't ask to queue", async () => {
+      turn("started");
+      expect(await hub.prompt("fake:s1", "a", [text("now")])).toBe("started");
+      expect(sent()).toEqual(["now"]);
+    });
+  });
+
   it("creates a session, attaches it and sends the first prompt", async () => {
     const summary = await hub.createSession({ agent: "fake", cwd: "/w/other", prompt: [text("start")], clientMessageId: "c-9" });
     expect(summary).toMatchObject({ id: "fake:new", cwd: "/w/other" });
@@ -229,6 +329,20 @@ describe("SessionHub", () => {
 });
 
 describe("SessionHub discovery refresh", () => {
+  it("keeps a renamed session where it was in the list", async () => {
+    const before = hub.getSession("fake:s1").updatedAt;
+    expect((await hub.rename("fake:s1", "A better name")).title).toBe("A better name");
+    // The agent recording the name touches its own files, and may report the new title itself.
+    driver.sessions = [{ nativeId: "s1", cwd: "/w/app", createdAt: 1, updatedAt: Date.now(), title: "A better name" }];
+    await hub.refreshDiscovery();
+    await hub.subscribe("fake:s1", 0, collector().subscriber);
+    driver.emit({ sessionUpdate: "session_info_update", title: "A better name" });
+    expect(hub.getSession("fake:s1").updatedAt).toBe(before);
+    // Real activity afterwards moves it as usual.
+    driver.emit(chunk("m9", "working"));
+    expect(hub.getSession("fake:s1").updatedAt).toBeGreaterThan(before);
+  });
+
   it("picks up sessions started outside LinkShell and only announces real changes", async () => {
     const before = summaries.length;
     await hub.refreshDiscovery();

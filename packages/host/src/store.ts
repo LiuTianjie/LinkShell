@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS events (
   body TEXT NOT NULL,
   PRIMARY KEY (session_id, seq)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS event_meta (
+  session_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  opens_turn INTEGER NOT NULL DEFAULT 0,
+  tool TEXT,
+  parent TEXT,
+  spawns INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, seq)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS event_meta_by_kind ON event_meta (session_id, kind, seq);
 CREATE TABLE IF NOT EXISTS logged_items (
   session_id TEXT NOT NULL,
   item_id TEXT NOT NULL,
@@ -163,6 +175,20 @@ function toSummary(row: SessionRow): SessionSummary {
   };
 }
 
+/** How much history one page carries (see `pageStart`). */
+export interface PageBudget {
+  /** A page goes back whole turns until it has this many events or bytes… */
+  minEvents: number;
+  minBytes: number;
+  /** …and never more than this, even inside one turn. */
+  maxEvents: number;
+  maxBytes: number;
+  /** What one event counts for at most: its size as sent, not as stored. */
+  eventBytes: number;
+}
+
+export const PAGE: PageBudget = { minEvents: 120, minBytes: 384 * 1024, maxEvents: 600, maxBytes: 2 * 1024 * 1024, eventBytes: 40 * 1024 };
+
 /**
  * Durable host state: session summaries plus one append-only event log per
  * session. Every update a client sees gets a per-session `seq`, so a client
@@ -181,6 +207,34 @@ export class HostStore {
   private migrate(): void {
     const columns = new Set((this.db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map((c) => c.name));
     if (!columns.has("custom_title")) this.db.exec("ALTER TABLE sessions ADD COLUMN custom_title TEXT");
+    // event_meta came later (and its sub-agent columns later still): describe
+    // the events logged before it, once.
+    const meta = new Set((this.db.prepare("PRAGMA table_info(event_meta)").all() as { name: string }[]).map((c) => c.name));
+    if (!meta.has("tool")) {
+      this.db.exec("ALTER TABLE event_meta ADD COLUMN tool TEXT; ALTER TABLE event_meta ADD COLUMN parent TEXT; ALTER TABLE event_meta ADD COLUMN spawns INTEGER NOT NULL DEFAULT 0;");
+    }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS event_meta_by_tool ON event_meta (session_id, tool, seq) WHERE tool IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS event_meta_by_parent ON event_meta (session_id, parent, seq) WHERE parent IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS event_meta_spawns ON event_meta (session_id, seq) WHERE spawns = 1;
+    `);
+    const { user_version: version } = this.db.prepare("PRAGMA user_version").get() as { user_version: number };
+    if (version < 2) {
+      this.db.exec(`
+        INSERT OR REPLACE INTO event_meta (session_id, seq, kind, bytes, opens_turn, tool, parent, spawns)
+        SELECT session_id, seq, COALESCE(json_extract(body, '$.sessionUpdate'), ''), length(CAST(body AS BLOB)),
+          CASE json_extract(body, '$.sessionUpdate')
+            WHEN 'user_message_chunk' THEN 1
+            WHEN 'ls_turn' THEN COALESCE(json_extract(body, '$.state') = 'started' AND json_extract(body, '$.parentToolCallId') IS NULL, 0)
+            ELSE 0 END,
+          json_extract(body, '$.toolCallId'),
+          json_extract(body, '$.parentToolCallId'),
+          COALESCE(json_extract(body, '$.sessionUpdate') = 'tool_call' AND json_extract(body, '$.detail.type') = 'subagent'
+            AND COALESCE(json_extract(body, '$.detail.action'), 'spawn') = 'spawn', 0)
+        FROM events;
+        PRAGMA user_version = 2;
+      `);
+    }
   }
 
   // ── removal ───────────────────────────────────────────────────────
@@ -189,7 +243,7 @@ export class HostStore {
   removeSession(id: string): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      for (const table of ["sessions", "events", "logged_items", "driver_state", "client_messages"]) {
+      for (const table of ["sessions", "events", "event_meta", "logged_items", "driver_state", "client_messages"]) {
         const column = table === "sessions" ? "id" : "session_id";
         this.db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`).run(id);
       }
@@ -327,8 +381,12 @@ export class HostStore {
     }));
   }
 
-  /** Appends one update to the session's log and returns it with its seq. */
-  appendEvent(sessionId: string, update: SessionUpdate, ts = Date.now()): SessionEvent {
+  /**
+   * Appends one update to the session's log and returns it with its seq.
+   * `activity` false: the session's "last updated" stays (a setting or a name
+   * is not something happening in the session).
+   */
+  appendEvent(sessionId: string, update: SessionUpdate, ts = Date.now(), activity = true): SessionEvent {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const row = this.db.prepare("SELECT last_seq FROM sessions WHERE id = ?").get(sessionId) as
@@ -336,10 +394,16 @@ export class HostStore {
         | undefined;
       if (!row) throw new Error(`unknown session ${sessionId}`);
       const seq = row.last_seq + 1;
+      const body = JSON.stringify(update);
+      this.db.prepare("INSERT INTO events (session_id, seq, ts, body) VALUES (?, ?, ?, ?)").run(sessionId, seq, ts, body);
+      const fields = update as { toolCallId?: string; parentToolCallId?: string };
+      const opensTurn =
+        update.sessionUpdate === "user_message_chunk" || (update.sessionUpdate === "ls_turn" && update.state === "started" && !fields.parentToolCallId);
+      const spawns = update.sessionUpdate === "tool_call" && update.detail?.type === "subagent" && (update.detail.action ?? "spawn") === "spawn";
       this.db
-        .prepare("INSERT INTO events (session_id, seq, ts, body) VALUES (?, ?, ?, ?)")
-        .run(sessionId, seq, ts, JSON.stringify(update));
-      this.db.prepare("UPDATE sessions SET last_seq = ?, updated_at = MAX(updated_at, ?) WHERE id = ?").run(seq, ts, sessionId);
+        .prepare("INSERT INTO event_meta (session_id, seq, kind, bytes, opens_turn, tool, parent, spawns) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(sessionId, seq, update.sessionUpdate, Buffer.byteLength(body), opensTurn ? 1 : 0, fields.toolCallId ?? null, fields.parentToolCallId ?? null, spawns ? 1 : 0);
+      this.db.prepare("UPDATE sessions SET last_seq = ?, updated_at = MAX(updated_at, ?) WHERE id = ?").run(seq, activity ? ts : 0, sessionId);
       this.db.exec("COMMIT");
       return { sessionId, seq, ts, update };
     } catch (error) {
@@ -348,10 +412,105 @@ export class HostStore {
     }
   }
 
-  readEvents(sessionId: string, afterSeq: number, limit = 5000): SessionEvent[] {
+  /** Events after `afterSeq`, up to and including `upToSeq` when given. */
+  readEvents(sessionId: string, afterSeq: number, limit = 5000, upToSeq = Number.MAX_SAFE_INTEGER): SessionEvent[] {
     const rows = this.db
-      .prepare("SELECT seq, ts, body FROM events WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?")
-      .all(sessionId, afterSeq, limit) as { seq: number; ts: number; body: string }[];
+      .prepare("SELECT seq, ts, body FROM events WHERE session_id = ? AND seq > ? AND seq <= ? ORDER BY seq ASC LIMIT ?")
+      .all(sessionId, afterSeq, upToSeq, limit) as { seq: number; ts: number; body: string }[];
+    return rows.map((row) => ({ sessionId, seq: row.seq, ts: row.ts, update: JSON.parse(row.body) as SessionUpdate }));
+  }
+
+  readEvent(sessionId: string, seq: number): SessionEvent | undefined {
+    return this.readEvents(sessionId, seq - 1, 1, seq)[0];
+  }
+
+  /** How much was logged after `afterSeq`. */
+  sizeAfter(sessionId: string, afterSeq: number): { events: number; bytes: number } {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS events, COALESCE(SUM(bytes), 0) AS bytes FROM event_meta WHERE session_id = ? AND seq > ?")
+      .get(sessionId, afterSeq) as { events: number; bytes: number };
+    return row;
+  }
+
+  /**
+   * Where a page of history ending at `beforeSeq` starts: the seq before its
+   * first event (0: the beginning of the log). Pages are whole turns, going
+   * back until one is worth showing; a single turn too big for a page is cut.
+   */
+  pageStart(sessionId: string, beforeSeq: number, page: PageBudget = PAGE): number {
+    const rows = this.db
+      .prepare("SELECT seq, bytes, opens_turn FROM event_meta WHERE session_id = ? AND seq <= ? ORDER BY seq DESC LIMIT ?")
+      .all(sessionId, beforeSeq, page.maxEvents + 1) as { seq: number; bytes: number; opens_turn: number }[];
+    let events = 0;
+    let bytes = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!;
+      const previous = rows[i + 1];
+      events += 1;
+      // What a client receives: pictures are left out and long text is cut.
+      bytes += Math.min(row.bytes, page.eventBytes);
+      if (!previous) return 0;
+      const turnStarts = row.opens_turn === 1 && previous.opens_turn === 0;
+      if (turnStarts && (events >= page.minEvents || bytes >= page.minBytes)) return previous.seq;
+      if (events >= page.maxEvents || bytes >= page.maxBytes) return previous.seq;
+    }
+    return 0;
+  }
+
+  /** The calls that started a sub-agent, oldest first. */
+  subagentCalls(sessionId: string): SessionEvent[] {
+    return this.joined("m.session_id = ? AND m.spawns = 1 ORDER BY m.seq ASC", [sessionId]);
+  }
+
+  /** A tool call's own events (the call and its updates), oldest first. */
+  toolEvents(sessionId: string, toolCallId: string): SessionEvent[] {
+    return this.joined("m.session_id = ? AND m.tool = ? AND m.parent IS NULL ORDER BY m.seq ASC", [sessionId, toolCallId]);
+  }
+
+  /** The latest `limit` events of the sub-agent under a tool call, oldest first. */
+  eventsUnder(sessionId: string, toolCallId: string, limit: number): SessionEvent[] {
+    return this.joined("m.session_id = ? AND m.parent = ? ORDER BY m.seq DESC LIMIT ?", [sessionId, toolCallId, limit]).reverse();
+  }
+
+  /** A tool call's latest status, whether the sub-agent under it is in a turn, and when that sub-agent last did anything. */
+  toolState(sessionId: string, toolCallId: string): { status?: string; ts?: number; turnActive?: boolean; lastChildTs?: number } {
+    const last = this.db
+      .prepare(
+        `SELECT e.ts, json_extract(e.body, '$.status') AS status FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+         WHERE m.session_id = ? AND m.tool = ? AND m.parent IS NULL AND json_extract(e.body, '$.status') IS NOT NULL ORDER BY m.seq DESC LIMIT 1`,
+      )
+      .get(sessionId, toolCallId) as { ts: number; status: string } | undefined;
+    const turn = this.db
+      .prepare(
+        `SELECT json_extract(e.body, '$.state') AS state FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+         WHERE m.session_id = ? AND m.parent = ? AND m.kind = 'ls_turn' ORDER BY m.seq DESC LIMIT 1`,
+      )
+      .get(sessionId, toolCallId) as { state: string } | undefined;
+    const child = this.db
+      .prepare(
+        `SELECT e.ts FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+         WHERE m.session_id = ? AND m.parent = ? ORDER BY m.seq DESC LIMIT 1`,
+      )
+      .get(sessionId, toolCallId) as { ts: number } | undefined;
+    return { status: last?.status, ts: last?.ts, turnActive: turn ? turn.state === "started" : undefined, lastChildTs: child?.ts };
+  }
+
+  private joined(where: string, values: (string | number)[]): SessionEvent[] {
+    const rows = this.db
+      .prepare(`SELECT e.seq, e.ts, e.body FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq WHERE ${where}`)
+      .all(...values) as { seq: number; ts: number; body: string }[];
+    const sessionId = String(values[0]);
+    return rows.map((row) => ({ sessionId, seq: row.seq, ts: row.ts, update: JSON.parse(row.body) as SessionUpdate }));
+  }
+
+  /** The latest event of `kind` at or before `seq`. */
+  latestOfKind(sessionId: string, kind: SessionUpdate["sessionUpdate"], seq: number, limit = 1): SessionEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT e.seq, e.ts, e.body FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+         WHERE m.session_id = ? AND m.kind = ? AND m.seq <= ? ORDER BY m.seq DESC LIMIT ?`,
+      )
+      .all(sessionId, kind, seq, limit) as { seq: number; ts: number; body: string }[];
     return rows.map((row) => ({ sessionId, seq: row.seq, ts: row.ts, update: JSON.parse(row.body) as SessionUpdate }));
   }
 

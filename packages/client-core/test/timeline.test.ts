@@ -6,6 +6,8 @@ import {
   applyEvents,
   emptyView,
   markMessageFailed,
+  prependEvents,
+  startWindow,
   type TimelineItem,
 } from "../src/timeline.js";
 
@@ -243,3 +245,76 @@ describe("timeline reducer", () => {
     expect((v.items[0] as Extract<TimelineItem, { kind: "tool" }>).sub!.items.map((i) => i.id)).toEqual(["c"]);
   });
 });
+
+describe("history in pages", () => {
+  function session(): SessionEvent[] {
+    seq = 0;
+    return [
+      ev({ sessionUpdate: "ls_config", options: [] }),
+      ev({ sessionUpdate: "user_message_chunk", messageId: "u1", content: text("first") }),
+      ev({ sessionUpdate: "ls_turn", state: "started" }),
+      ev({ sessionUpdate: "agent_thought_chunk", messageId: "t1", content: text("hm") }),
+      ev({ sessionUpdate: "agent_thought_chunk", messageId: "t1", content: text("m") }),
+      ev({ sessionUpdate: "ls_message_done", messageId: "t1", role: "thought" }),
+      ev({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Read a.ts", kind: "read", status: "in_progress", rawInput: { path: "a.ts" } }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "c1", appendOutput: "line 1\n" }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "c1", appendOutput: "line 2\n" }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "completed", content: [{ type: "content", content: text("ok") }] }),
+      ev({ sessionUpdate: "tool_call", toolCallId: "task", title: "Explore", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn" } }),
+      ev({ sessionUpdate: "agent_message_chunk", messageId: "sub1", content: text("looking"), parentToolCallId: "task" }),
+      ev({ sessionUpdate: "tool_call", toolCallId: "sub-c", title: "Grep", kind: "search", status: "in_progress", parentToolCallId: "task" }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "sub-c", status: "completed", parentToolCallId: "task" }),
+      ev({ sessionUpdate: "agent_message_chunk", messageId: "sub1", content: text(" done"), parentToolCallId: "task" }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "task", status: "completed" }),
+      ev({ sessionUpdate: "agent_message_chunk", messageId: "m1", content: text("All ") }),
+      ev({ sessionUpdate: "agent_message_chunk", messageId: "m1", content: text("good") }),
+      ev({ sessionUpdate: "ls_message_done", messageId: "m1", role: "agent" }),
+      ev({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" }),
+      ev({ sessionUpdate: "user_message_chunk", messageId: "u2", content: text("second") }),
+      ev({ sessionUpdate: "user_message_chunk", messageId: "u2", content: text(" part") }),
+      ev({ sessionUpdate: "ls_turn", state: "started" }),
+      ev({ sessionUpdate: "agent_message_chunk", messageId: "m2", content: text("Sure") }),
+      ev({ sessionUpdate: "ls_turn", state: "ended", stopReason: "cancelled" }),
+    ];
+  }
+
+  /** What the host sends for a window starting after `cut`: the later events only. */
+  const from = (events: SessionEvent[], cut: number) => applyEvents(startWindow(emptyView("s"), cut), events.slice(cut));
+
+  it("shows the same timeline wherever the page boundary falls", () => {
+    const events = session();
+    const whole = applyEvents(emptyView("s"), events);
+    for (let cut = 1; cut < events.length; cut++) {
+      const windowed = from(events, cut);
+      expect(windowed.startSeq).toBe(cut);
+      const joined = prependEvents(windowed, events.slice(0, cut), 0);
+      // (A thought cut off by the boundary ends at the boundary: its duration is the one approximation.)
+      const comparable = (items: TimelineItem[]) => items.map((item) => (item.kind === "thought" ? { ...item, endedTs: undefined } : item));
+      expect(comparable(joined.items), `cut after event ${cut}`).toEqual(comparable(whole.items));
+      expect(joined.index).toEqual(whole.index);
+      expect(joined).toMatchObject({ startSeq: 0, lastSeq: whole.lastSeq, turnActive: false });
+    }
+  });
+
+  it("adds pages one after another", () => {
+    const events = session();
+    const whole = applyEvents(emptyView("s"), events);
+    let view = from(events, 20);
+    view = prependEvents(view, events.slice(9, 20), 9);
+    expect(view.startSeq).toBe(9);
+    view = prependEvents(view, events.slice(0, 9), 0);
+    expect(view.items).toEqual(whole.items);
+  });
+
+  it("starts over when the host's backlog skips ahead, keeping unsent messages", () => {
+    const events = session();
+    let view = applyEvents(emptyView("s"), events.slice(0, 6));
+    view = addOptimisticMessage(view, "c9", [text("not sent yet")]);
+    const skipped = startWindow(view, 20);
+    expect(skipped).toMatchObject({ lastSeq: 0, startSeq: 20 });
+    expect(skipped.items).toMatchObject([{ id: "local-c9", pending: true }]);
+    // A backlog that continues from what the view has changes nothing.
+    expect(startWindow(view, 3)).toBe(view);
+  });
+});
+

@@ -43,6 +43,15 @@ export interface AcpAgentSpec {
   discover?: boolean;
 }
 
+/** `items` with the ones named in `ids` first, in that order; the rest keep theirs. */
+export function inOrder<T extends { clientMessageId: string }>(items: T[], ids: string[]): T[] {
+  const rank = new Map(ids.map((id, index) => [id, index]));
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => (rank.get(a.item.clientMessageId) ?? ids.length) - (rank.get(b.item.clientMessageId) ?? ids.length) || a.index - b.index)
+    .map((entry) => entry.item);
+}
+
 interface PendingPrompt {
   content: ContentBlock[];
   clientMessageId: string;
@@ -260,6 +269,14 @@ export class AcpDriver implements AgentDriver {
     // Stopping stops what's waiting too; the apps put queued text back in the composer.
     state.queue = [];
     this.reportQueue(nativeId, state);
+    this.cancelPermissions(state);
+    this.connection?.notify("session/cancel", { sessionId: nativeId });
+  }
+
+  /** Stops the running turn only: the first queued message starts as soon as it has ended. */
+  async sendQueuedNow(nativeId: string): Promise<void> {
+    const state = this.sessions.get(nativeId);
+    if (!state?.turnActive || state.queue.length === 0) return;
     this.cancelPermissions(state);
     this.connection?.notify("session/cancel", { sessionId: nativeId });
   }
@@ -522,6 +539,13 @@ export class AcpDriver implements AgentDriver {
     state.queue.splice(index, 1);
     this.reportQueue(nativeId, state);
     return true;
+  }
+
+  reorderQueue(nativeId: string, clientMessageIds: string[]): void {
+    const state = this.sessions.get(nativeId);
+    if (!state) return;
+    state.queue = inOrder(state.queue, clientMessageIds);
+    this.reportQueue(nativeId, state);
   }
 
   private reportQueue(nativeId: string, state: { queue: PendingPrompt[] }): void {
