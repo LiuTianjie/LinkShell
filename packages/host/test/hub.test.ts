@@ -329,6 +329,14 @@ describe("SessionHub", () => {
 });
 
 describe("SessionHub discovery refresh", () => {
+  it("deletes a session the agent no longer has", async () => {
+    (driver as unknown as { delete: () => Promise<void> }).delete = async () => {
+      throw new Error("no rollout found for thread id s1");
+    };
+    await hub.delete("fake:s1");
+    expect(hub.listSessions({}).sessions).toEqual([]);
+  });
+
   it("keeps a renamed session where it was in the list", async () => {
     const before = hub.getSession("fake:s1").updatedAt;
     expect((await hub.rename("fake:s1", "A better name")).title).toBe("A better name");

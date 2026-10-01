@@ -667,7 +667,12 @@ export class SessionHub {
     const driver = this.drivers.get(summary.agent);
     if (driver) {
       await driver.detach(summary.nativeId).catch(() => {});
-      if (driver.delete) await driver.delete(summary.nativeId);
+      if (driver.delete) {
+        await driver.delete(summary.nativeId).catch((error: unknown) => {
+          // Already gone on the agent's side (deleted there): only our record is left to remove.
+          if (!/no rollout|not found|unknown (thread|session)|no conversation found/i.test(error instanceof Error ? error.message : String(error))) throw error;
+        });
+      }
     }
     this.forget(sessionId);
   }
