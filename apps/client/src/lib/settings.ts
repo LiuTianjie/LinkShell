@@ -38,3 +38,22 @@ export function normalizeHostUrl(input: string): string | null {
     return null;
   }
 }
+
+const SCREEN_MODE_KEY = "screen.mode";
+
+/** How the screen viewer treats touches: watching only, or moving the computer's pointer. */
+export type ScreenMode = "view" | "trackpad" | "touch";
+
+/** The mode last chosen in the screen viewer; watching only until one is. */
+export function loadScreenMode(): ScreenMode {
+  const stored = read(SCREEN_MODE_KEY);
+  return stored === "trackpad" || stored === "touch" ? stored : "view";
+}
+
+export function saveScreenMode(mode: ScreenMode): void {
+  try {
+    Storage.setItemSync(SCREEN_MODE_KEY, mode);
+  } catch {
+    // As above: the viewer starts watching only.
+  }
+}

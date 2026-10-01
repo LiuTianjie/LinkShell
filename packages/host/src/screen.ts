@@ -5,13 +5,16 @@ import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError } from "@linkshell/wire";
+import { InputControl } from "./input.js";
+import { viewerPage } from "./screen-viewer.js";
 
 // Viewing the computer's screen from the phone. The host serves a small
 // viewer page and an H.264 stream on a loopback port; the phone opens it
 // through the same encrypted forwarder as port previews, so the video never
 // leaves the end-to-end channel and needs no NAT traversal. A random token
 // gates the port: other programs on this machine can't watch the screen
-// without having Screen Recording permission themselves.
+// without having Screen Recording permission themselves. The same socket
+// carries the viewer's pointer and key events back (see `input.ts`).
 
 const run = promisify(execFile);
 
@@ -37,16 +40,21 @@ async function hasFfmpeg(): Promise<boolean> {
   );
 }
 
+/** A display to capture, and which of the system's displays it is (ffmpeg's "Capture screen N" is the Nth active one). */
+interface Capturable extends Display {
+  screen: number;
+}
+
 /** macOS: AVFoundation's "Capture screen N" devices. */
-async function listDisplays(): Promise<Display[]> {
-  if (process.platform !== "darwin") return [{ index: 0, name: "屏幕" }];
+async function listDisplays(): Promise<Capturable[]> {
+  if (process.platform !== "darwin") return [{ index: 0, name: "屏幕", screen: 0 }];
   const output = await run("ffmpeg", ["-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""], { timeout: 8000 }).then(
     ({ stderr }) => stderr,
     (error: { stderr?: string }) => error.stderr ?? "",
   );
-  const displays: Display[] = [];
+  const displays: Capturable[] = [];
   for (const match of output.matchAll(/\[(\d+)\] Capture screen (\d+)/g)) {
-    displays.push({ index: Number(match[1]), name: `屏幕 ${Number(match[2]) + 1}` });
+    displays.push({ index: Number(match[1]), name: `屏幕 ${Number(match[2]) + 1}`, screen: Number(match[2]) });
   }
   return displays;
 }
@@ -170,63 +178,13 @@ export async function reapOrphanCaptures(log: (message: string) => void): Promis
   }
 }
 
-function viewerPage(): string {
-  return `<!doctype html>
-<html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=6, user-scalable=yes">
-<title>屏幕</title>
-<style>
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  body { display: flex; align-items: center; justify-content: center; }
-  canvas { max-width: 100vw; max-height: 100vh; object-fit: contain; }
-  #note { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 32px;
-    color: rgba(255,255,255,0.72); font: 15px/1.5 -apple-system, system-ui, sans-serif; text-align: center; }
-</style></head>
-<body><canvas></canvas><div id="note">正在连接电脑屏幕…</div>
-<script>
-const note = document.getElementById("note");
-const canvas = document.querySelector("canvas");
-const ctx = canvas.getContext("2d");
-const say = (text) => { note.textContent = text; note.style.display = text ? "flex" : "none"; };
-if (!("VideoDecoder" in window)) say("这个系统版本的浏览器内核不支持视频解码，请升级系统后再试。");
-const hex = (n) => n.toString(16).padStart(2, "0");
-function sps(unit) {
-  for (let i = 0; i + 3 < unit.length; i++)
-    if (unit[i] === 0 && unit[i + 1] === 0 && unit[i + 2] === 1 && (unit[i + 3] & 0x1f) === 7) return unit.subarray(i + 3);
-}
-let decoder;
-const ws = new WebSocket("ws://" + location.host + "/stream" + location.search);
-ws.binaryType = "arraybuffer";
-ws.onmessage = (event) => {
-  if (typeof event.data === "string") { const message = JSON.parse(event.data); if (message.error) say(message.error); return; }
-  const bytes = new Uint8Array(event.data);
-  const key = bytes[0] === 1;
-  const unit = bytes.subarray(1);
-  if (!decoder) {
-    const params = key && sps(unit);
-    if (!params) return;
-    decoder = new VideoDecoder({
-      output: (frame) => {
-        if (canvas.width !== frame.displayWidth) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
-        ctx.drawImage(frame, 0, 0);
-        frame.close();
-        say("");
-      },
-      error: (error) => say("解码失败：" + error.message),
-    });
-    decoder.configure({ codec: "avc1." + hex(params[1]) + hex(params[2]) + hex(params[3]), optimizeForLatency: true });
-  }
-  decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: performance.now() * 1000, data: unit }));
-};
-ws.onclose = () => { if (note.style.display === "none" || note.textContent.startsWith("正在")) say("屏幕连接已断开"); };
-</script></body></html>`;
-}
-
 /** The loopback viewer server; started on first use, one capture per watching device. */
 export class ScreenShare {
   private server?: Server;
   private token = "";
+  private displays: Capturable[] = [];
   private readonly captures = new Set<ChildProcess>();
+  private readonly controls = new Set<InputControl>();
 
   constructor(private readonly log: (message: string) => void) {
     void reapOrphanCaptures(log);
@@ -235,12 +193,12 @@ export class ScreenShare {
   async start(): Promise<{ port: number; token: string; displays: Display[] }> {
     if (process.platform !== "darwin" && process.platform !== "linux") throw RpcError.app("not_supported", "这台电脑的系统暂不支持查看屏幕");
     if (!(await hasFfmpeg())) throw RpcError.app("not_supported", "查看屏幕需要电脑上装有 ffmpeg（brew install ffmpeg）");
-    const displays = await listDisplays();
+    const displays = (this.displays = await listDisplays());
     if (!displays.length) throw RpcError.app("not_supported", "没有找到可以捕获的屏幕");
     // A fresh token per start: an old viewer URL stops working.
     this.token = randomBytes(24).toString("base64url");
     const port = await this.listen();
-    return { port, token: this.token, displays };
+    return { port, token: this.token, displays: displays.map(({ index, name }) => ({ index, name })) };
   }
 
   private listen(): Promise<number> {
@@ -277,8 +235,31 @@ export class ScreenShare {
   }
 
   private stream(ws: WebSocket, display: number, quality: ScreenProfile): void {
-    const capture = spawn("ffmpeg", captureArgs(Number.isFinite(display) ? display : 0, quality), { stdio: ["ignore", "pipe", "pipe"] });
+    const shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
+    const capture = spawn("ffmpeg", captureArgs(shown?.index ?? 0, quality), { stdio: ["ignore", "pipe", "pipe"] });
     this.captures.add(capture);
+    const tell = (message: object) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(message));
+    // The viewer's hands: started when it first asks to control, for the display it is watching.
+    const control = new InputControl(
+      {
+        state: (state) => tell({ control: state }),
+        cursor: (x, y) => tell({ cursor: { x, y } }),
+        posted: (event) => this.log(`[screen] dry run: ${JSON.stringify(event)}`),
+      },
+      this.log,
+    );
+    this.controls.add(control);
+    ws.on("message", (data, binary) => {
+      if (binary) return;
+      let message: unknown;
+      try {
+        message = JSON.parse(String(data));
+      } catch {
+        return;
+      }
+      if ((message as { t?: unknown } | null)?.t === "control") void control.start(shown?.screen ?? 0);
+      else control.send(message);
+    });
     const splitter = new AccessUnitSplitter();
     let errors = "";
     capture.stdout!.on("data", (chunk: Buffer) =>
@@ -302,13 +283,19 @@ export class ScreenShare {
       }
       ws.close();
     });
-    ws.on("close", () => endCapture(capture));
+    ws.on("close", () => {
+      endCapture(capture);
+      control.stop();
+      this.controls.delete(control);
+    });
   }
 
   stop(): void {
     // The host is going: there is no later to insist in.
     for (const capture of this.captures) endCapture(capture, true);
     this.captures.clear();
+    for (const control of this.controls) control.stop();
+    this.controls.clear();
     this.server?.close();
     this.server = undefined;
   }

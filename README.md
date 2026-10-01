@@ -113,7 +113,7 @@ And the rest:
 - **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
 - **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
 - **Tidy sessions.** Rename, archive and delete; for Codex and Claude this also updates their own records. Projects and sessions show the current git branch.
-- **Screen and files.** Glance at the computer's screen (needs `ffmpeg`), and send photos or files from the phone into the project.
+- **Screen and files.** Watch the computer's screen (needs `ffmpeg`), full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag, shortcuts (macOS). Send photos or files from the phone into the project.
 
 ## Agents
 
