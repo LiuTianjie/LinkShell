@@ -59,7 +59,9 @@ function captureArgs(display: number): string[] {
     "error",
     ...input,
     "-vf",
-    `scale='min(${MAX_WIDTH},iw)':-2,format=yuv420p`,
+    // AVFoundation captures a screen at its refresh rate whatever -framerate asks (120 a second on a
+    // ProMotion display): the frames are dropped here, before the encoder and the network pay for them.
+    `fps=${FPS},scale='min(${MAX_WIDTH},iw)':-2,format=yuv420p`,
     ...encode,
     "-g",
     String(FPS * 2),
