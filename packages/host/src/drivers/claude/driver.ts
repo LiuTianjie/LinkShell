@@ -10,7 +10,18 @@ import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } 
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
 import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, HistoryItem, LaunchSpec } from "../types.js";
 import { descendsFrom, sessionHolders, type SessionHolder } from "./holders.js";
-import { claudeConfigDir, findTranscript, readTail, readTranscript, transcriptLine, transcriptTimes, TranscriptTail } from "./transcript.js";
+import {
+  claudeConfigDir,
+  findTranscript,
+  mergeSettings,
+  readTail,
+  readTranscript,
+  settingsOf,
+  transcriptLine,
+  transcriptTimes,
+  TranscriptTail,
+  type ObservedSettings,
+} from "./transcript.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -127,7 +138,8 @@ export class ClaudeDriver extends AcpDriver {
   private template?: SourcedConfigOption[];
   private templateLoading?: Promise<SourcedConfigOption[] | undefined>;
   /** Desktop-driven sessions: the model of the latest reply, from the transcript. */
-  private readonly lastModels = new Map<string, string>();
+  /** Per session: the settings its transcript shows it running with (what the Claude on the computer is set to). */
+  private readonly observed = new Map<string, ObservedSettings>();
   /** Per session: TodoWrite calls shown as the plan, whose results the tail skips. */
   private readonly hiddenTools = new Map<string, Set<string>>();
   /** Per session: calls that started an agent in the background and haven't heard back (see transcriptLine). */
@@ -217,7 +229,7 @@ export class ClaudeDriver extends AcpDriver {
       }
       offset = transcript.size;
       this.backgroundAgents.set(nativeId, transcript.agents);
-      if (transcript.model) this.lastModels.set(nativeId, transcript.model);
+      this.observed.set(nativeId, transcript.settings);
       if (transcript.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: transcript.title });
     }
     this.startTail(nativeId, context.cwd, offset);
@@ -265,13 +277,10 @@ export class ClaudeDriver extends AcpDriver {
   private emitDesktopConfig(nativeId: string): void {
     if (!this.template || this.modes.get(nativeId) === "remote") return;
     const pending = this.pendingConfig(nativeId);
-    const model = this.lastModels.get(nativeId);
+    const observed = this.observed.get(nativeId) ?? {};
     const options: SessionConfigOption[] = this.template.map(({ source: _source, ...option }) => {
-      let current = option.current;
-      if (option.category === "model" && model) current = matchModel(option, model) ?? current;
-      const chosen = pending[option.id];
-      if (chosen && option.values.some((value) => value.value === chosen)) current = chosen;
-      return { ...option, current };
+      const current = pending[option.id] ?? observedValue(option, observed);
+      return { ...option, current: current !== undefined && option.values.some((value) => value.value === current) ? current : option.current };
     });
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_config", options });
   }
@@ -534,6 +543,12 @@ export class ClaudeDriver extends AcpDriver {
     const result = transcriptLine(line, { hidden, agents });
     if (result.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: result.title });
     for (const update of result.updates) this.emit(nativeId, update);
+    // Changed on the computer (another model, effort, permission mode): the phone shows it.
+    const settings = mergeSettings(this.observed.get(nativeId) ?? {}, settingsOf(line));
+    if (settings) {
+      this.observed.set(nativeId, settings);
+      this.emitDesktopConfig(nativeId);
+    }
   }
 
   /** Makes this host the session's only writer, taking it from the desktop if needed. */
@@ -570,9 +585,12 @@ export class ClaudeDriver extends AcpDriver {
       target.config = toConfigOptions(response);
       target.loaded = true;
     }
-    // Settings chosen while the desktop had the session.
+    // The session keeps the settings it ran with on the computer, except where
+    // the phone chose otherwise while the desktop had it.
+    const observed = this.observed.get(nativeId) ?? {};
+    const kept = Object.fromEntries(target.config.flatMap((option) => [[option.id, observedValue(option, observed)]]).filter(([, value]) => value !== undefined));
     const pending = this.pendingConfig(nativeId);
-    for (const [optionId, value] of Object.entries(pending)) {
+    for (const [optionId, value] of Object.entries({ ...kept, ...pending } as Record<string, string>)) {
       const option = target.config.find((entry) => entry.id === optionId);
       if (option && option.current !== value && option.values.some((entry) => entry.value === value)) {
         await super.setConfig(nativeId, optionId, value).catch((error: unknown) => this.host?.log(`[claude] couldn't apply ${optionId}: ${String(error)}`));
@@ -738,6 +756,15 @@ function sweepTranscript(path: string, forMs = 15_000): void {
     if (Date.now() < until) setTimeout(sweep, 250).unref();
   };
   sweep();
+}
+
+/** The value of a setting that matches what the session was seen running with, if it says. */
+function observedValue(option: SessionConfigOption, observed: ObservedSettings): string | undefined {
+  if (option.category === "model") return observed.model ? matchModel(option, observed.model) : undefined;
+  if (option.category === "mode") return observed.mode;
+  if (option.id === "effort" || option.category === "effort") return observed.effort;
+  if (option.id === "fast") return observed.fast === undefined ? undefined : observed.fast ? "on" : "off";
+  return undefined;
 }
 
 export function matchModel(option: SessionConfigOption, modelId: string): string | undefined {

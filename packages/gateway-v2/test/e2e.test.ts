@@ -131,7 +131,8 @@ describe("gateway v2 end to end", () => {
     expect(routed.length).toBeGreaterThan(5);
     const everything = routed.join("\n");
     for (const secret of ["machine.info", "terminals.create", "SECRET", info.hostname, "echo"]) expect(everything).not.toContain(secret);
-  });
+    // (The first test also pays for the cold start: loading the host and its first shell.)
+  }, 20_000);
 
   it("pairs by typed code, and refuses a wrong code", async () => {
     const { url, local } = await world();

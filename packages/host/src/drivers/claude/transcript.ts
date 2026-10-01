@@ -446,23 +446,57 @@ export function mergeByTime(main: SessionUpdate[], nested: SessionUpdate[]): Ses
   return out;
 }
 
-export function readTranscript(path: string): { updates: SessionUpdate[]; title?: string; size: number; model?: string; agents: Set<string> } {
+/** What a session is set to, as its transcript shows: each reply records the model and effort it ran with, each prompt the permission mode. */
+export interface ObservedSettings {
+  model?: string;
+  effort?: string;
+  /** Claude's permission mode id ("default", "acceptEdits", "plan", "bypassPermissions", …). */
+  mode?: string;
+  fast?: boolean;
+}
+
+/** The settings one transcript line shows, if any (matched on the raw line: quotes inside message text are escaped there). */
+export function settingsOf(raw: string): ObservedSettings | undefined {
+  if (raw.includes('"isSidechain":true')) return undefined;
+  if (raw.includes('"type":"assistant"')) {
+    const model = /"model":"([^"]+)"/.exec(raw)?.[1];
+    if (!model || model === "<synthetic>") return undefined;
+    const speed = /"speed":"([a-z]+)"/.exec(raw)?.[1];
+    return { model, effort: /"effort":"([a-z]+)"/.exec(raw)?.[1], fast: speed ? speed === "fast" : undefined };
+  }
+  if (raw.includes('"type":"user"')) {
+    const mode = /"permissionMode":"([A-Za-z]+)"/.exec(raw)?.[1];
+    return mode ? { mode } : undefined;
+  }
+  return undefined;
+}
+
+/** `next` laid over `current`, leaving out what `next` doesn't say; undefined when nothing changed. */
+export function mergeSettings(current: ObservedSettings, next: ObservedSettings | undefined): ObservedSettings | undefined {
+  if (!next) return undefined;
+  let merged: ObservedSettings | undefined;
+  for (const key of ["model", "effort", "mode", "fast"] as const) {
+    if (next[key] !== undefined && next[key] !== current[key]) merged = { ...(merged ?? current), [key]: next[key] };
+  }
+  return merged;
+}
+
+export function readTranscript(path: string): { updates: SessionUpdate[]; title?: string; size: number; settings: ObservedSettings; agents: Set<string> } {
   let title: string | undefined;
-  let model: string | undefined;
+  let settings: ObservedSettings = {};
   const updates: SessionUpdate[] = [];
   const hidden = new Set<string>();
   const agents = new Set<string>();
   const size = eachLine(path, (raw) => {
     if (!raw.trim()) return;
     const result = transcriptLine(raw, { hidden, agents });
-    // The model of the latest reply: what the session is using.
-    const reply = raw.includes('"type":"assistant"') ? /"model":"([^"]+)"/.exec(raw)?.[1] : undefined;
-    if (reply && reply !== "<synthetic>") model = reply;
+    // The latest reply and prompt say what the session is using.
+    settings = mergeSettings(settings, settingsOf(raw)) ?? settings;
     if (result.ts !== undefined) for (const update of result.updates) transcriptTimes.set(update, result.ts);
     updates.push(...result.updates);
     if (result.title) title = result.title;
   });
-  return { updates: mergeByTime(updates, readSubagents(path)), title, model, size, agents };
+  return { updates: mergeByTime(updates, readSubagents(path)), title, settings, size, agents };
 }
 
 /**

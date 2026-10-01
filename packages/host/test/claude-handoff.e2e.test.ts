@@ -226,6 +226,16 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
         | undefined;
     await waitFor(() => lastConfig()?.options.some((option) => option.id === "model"));
 
+    // What the session runs with on the computer is what the phone shows: here its permission mode, changed at the desk.
+    const mode = () => lastConfig()?.options.find((option) => option.id === "mode")?.current;
+    expect(mode()).toBe("default");
+    const nativeId = desk.id.slice("claude:".length);
+    appendFileSync(
+      join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"), `${nativeId}.jsonl`),
+      JSON.stringify({ type: "user", uuid: randomUUID(), isSidechain: false, sessionId: nativeId, cwd: e.workDir, entrypoint: "cli", permissionMode: "plan", timestamp: new Date().toISOString(), message: { role: "user", content: "plan it first" } }) + "\n",
+    );
+    await waitFor(() => mode() === "plan");
+
     // Chosen while the desktop drives: remembered, no takeover.
     await p.client.call("sessions.setConfig", { sessionId: desk.id, optionId: "model", value: "smart" });
     expect(desk.yields).toEqual([]);
@@ -237,6 +247,8 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     await waitFor(() => p.agentTexts(desk.id).includes("echo: from phone"));
     expect(host.hub.getSession(desk.id).driver).toBe("remote");
     await waitFor(() => lastConfig()?.options.find((option) => option.id === "model")?.current === "smart");
+    // …and it keeps the mode it had at the desk.
+    expect(mode()).toBe("plan");
     // No throwaway session from reading the settings shows up.
     await host.hub.refreshDiscovery();
     expect((await p.client.call("sessions.list", {})).sessions.map((session) => session.id)).toEqual([desk.id]);

@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readTranscript } from "../src/drivers/claude/transcript.js";
+import { readTranscript, settingsOf } from "../src/drivers/claude/transcript.js";
 
 // An agent Claude starts in the background outlives the call that started it:
 // it is working from the launch until its task notification, whatever the
@@ -80,3 +80,19 @@ describe("Claude background agents", () => {
     expect(about(updates, "toolu_S")).toEqual(["tool_call in_progress", "tool_call_update completed", "tool_call_update completed"]);
   });
 });
+
+describe("Claude session settings, as the transcript shows them", () => {
+  it("come from the latest reply and prompt", () => {
+    const { settings } = transcript([
+      line({ type: "user", uuid: "u1", permissionMode: "default", message: { role: "user", content: "hi" } }),
+      line({ type: "assistant", uuid: "a1", effort: "medium", message: { id: "m1", role: "assistant", model: "claude-sonnet-5-5", stop_reason: "end_turn", usage: { speed: "standard" }, content: [{ type: "text", text: "hello" }] } }),
+      line({ type: "user", uuid: "u2", permissionMode: "bypassPermissions", message: { role: "user", content: 'say "effort":"low" and "permissionMode":"plan"' } }),
+      line({ type: "assistant", uuid: "a2", effort: "high", message: { id: "m2", role: "assistant", model: "claude-opus-5-5", stop_reason: "end_turn", usage: { speed: "fast" }, content: [{ type: "text", text: "done" }] } }),
+      // A sub-agent's own model is not the session's.
+      line({ type: "assistant", uuid: "a3", isSidechain: true, effort: "low", message: { id: "m3", role: "assistant", model: "claude-haiku-4-5", content: [] } }),
+    ]);
+    expect(settings).toEqual({ model: "claude-opus-5-5", effort: "high", mode: "bypassPermissions", fast: true });
+    expect(settingsOf(line({ type: "system", subtype: "turn_duration" }))).toBeUndefined();
+  });
+});
+
