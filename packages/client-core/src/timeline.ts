@@ -389,12 +389,16 @@ export function applyEvents(view: SessionView, events: SessionEvent[]): SessionV
 }
 
 /**
- * The host's backlog starts after `startSeq`. A view that holds nothing yet
- * just notes it; one that holds older events can't be continued from there
- * (events in between are missing) and starts over, keeping unsent messages.
+ * The host's backlog starts after `startSeq` instead of where the view left
+ * off. A view that holds nothing yet just notes it. One that holds events
+ * can't be continued and starts over, keeping unsent messages: either events
+ * in between are missing (it was away too long), or the backlog starts before
+ * what the view has — the host's log is behind the view (its state was reset),
+ * and nothing it sends would get past what the view holds.
  */
 export function startWindow(view: SessionView, startSeq: number): SessionView {
-  if (view.lastSeq === 0 || view.lastSeq >= startSeq) return view.lastSeq === 0 ? { ...view, startSeq } : view;
+  if (view.lastSeq === 0) return { ...view, startSeq };
+  if (view.lastSeq === startSeq) return view;
   const unsent = view.items.filter((item) => item.kind === "user" && (item.pending || item.failed));
   const index: Record<string, number> = {};
   unsent.forEach((item, i) => {

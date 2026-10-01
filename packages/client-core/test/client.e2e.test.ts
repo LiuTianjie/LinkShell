@@ -117,6 +117,20 @@ describe("client core against a real host", () => {
     expect(late.getState().sessions[session.id]).toMatchObject({ id: session.id });
   });
 
+  it("starts a view over when the host's log is shorter than what the view holds (the host's state was reset)", async () => {
+    const { store } = await setup();
+    await waitFor(() => store.getState().status === "online");
+    const session = await store.getState().createSession({ agent: "fake", cwd: "/w", prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => agentText(store, session.id) === "echo: hello");
+    store.getState().closeSession(session.id);
+    // What the app would still hold from before the reset: a view far ahead of the host's log.
+    store.setState((state) => ({ views: { ...state.views, [session.id]: { ...state.views[session.id]!, lastSeq: 9999, items: [], index: {} } }, ready: {} }));
+    store.getState().openSession(session.id);
+    await waitFor(() => store.getState().ready[session.id]);
+    expect(agentText(store, session.id)).toBe("echo: hello");
+    expect(store.getState().views[session.id]!.lastSeq).toBeLessThan(9999);
+  });
+
   it("catches up exactly once after the connection drops while another device sends", async () => {
     const { host, store, sockets, link } = await setup();
     const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });

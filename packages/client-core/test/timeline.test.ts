@@ -314,7 +314,9 @@ describe("history in pages", () => {
     expect(skipped).toMatchObject({ lastSeq: 0, startSeq: 20 });
     expect(skipped.items).toMatchObject([{ id: "local-c9", pending: true }]);
     // A backlog that continues from what the view has changes nothing.
-    expect(startWindow(view, 3)).toBe(view);
+    expect(startWindow(view, view.lastSeq)).toBe(view);
+    // One that starts before it: the host's log is behind the view (its state was reset), so the view starts over too.
+    expect(startWindow(view, 3)).toMatchObject({ lastSeq: 0, startSeq: 3 });
   });
 });
 

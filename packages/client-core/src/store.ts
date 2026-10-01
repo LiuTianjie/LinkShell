@@ -186,6 +186,17 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     });
   };
 
+  /**
+   * A session's subscription was answered: the host sends the whole backlog
+   * first, so apply it, then the session can show.
+   */
+  const subscribed = (summary: SessionSummary) => {
+    const sessionId = summary.id;
+    if (!store.getState().open[sessionId]) return;
+    flushEvents();
+    store.setState((state) => ({ sessions: { ...state.sessions, [sessionId]: summary }, ready: { ...state.ready, [sessionId]: true } }));
+  };
+
   // Sub-agent conversations being fetched: live events that arrive meanwhile are applied after.
   const loadingSubagents = new Map<string, SessionEvent[]>();
 
@@ -308,12 +319,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
           views: state.views[sessionId] ? state.views : { ...state.views, [sessionId]: emptyView(sessionId) },
         }));
         void link.subscribe(sessionId, () => get().views[sessionId]?.lastSeq ?? 0).then((summary) => {
-          // The host sends the whole backlog before it answers: apply it, then mark ready.
-          flushEvents();
-          set((state) => ({
-            sessions: summary ? { ...state.sessions, [summary.id]: summary } : state.sessions,
-            ready: summary ? { ...state.ready, [sessionId]: true } : state.ready,
-          }));
+          if (summary) subscribed(summary);
         });
       },
 
@@ -559,12 +565,8 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     pending.push(event);
     flushTimer ??= setTimeout(flushEvents, 16);
   });
-  link.onRestored((summary) => {
-    // Opened while the link was down, or back after a break: the backlog is in, the session can show.
-    if (!store.getState().open[summary.id]) return;
-    flushEvents();
-    store.setState((state) => ({ sessions: { ...state.sessions, [summary.id]: summary }, ready: { ...state.ready, [summary.id]: true } }));
-  });
+  // Opened while the link was down, or back after a break: the backlog is in, the session can show.
+  link.onRestored((summary) => subscribed(summary));
   // Refresh the list after every (re)connect; retry unsent messages too.
   link.onOnline(() => {
     void store.getState().refresh();
