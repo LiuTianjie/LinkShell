@@ -179,6 +179,8 @@ export const gitInfoSchema = z.object({
   root: z.string(),
   /** The branch checked out; absent on a detached HEAD. */
   branch: z.string().optional(),
+  /** The commit checked out, abbreviated; absent before the first commit. */
+  head: z.string().optional(),
   /** Uncommitted changes in the working directory (a new worktree starts from the last commit, without them). */
   dirty: z.boolean(),
 });
@@ -206,6 +208,8 @@ export const projectSummarySchema = z.object({
   name: z.string(),
   lastActiveAt: z.number(),
   sessionCount: z.number().int().nonnegative(),
+  /** For a git repository: the branch checked out there now (or the abbreviated commit, on a detached HEAD). */
+  branch: z.string().optional(),
 });
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;
 

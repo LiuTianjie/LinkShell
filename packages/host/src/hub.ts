@@ -11,6 +11,7 @@ import {
   type SubagentInfo,
   type QueuedMessage,
   type GitInfo,
+  type ProjectSummary,
   type WorktreeEntry,
 } from "@linkshell/wire";
 import type {
@@ -25,7 +26,7 @@ import { inOrder } from "./drivers/acp/driver.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PAGE, worktreeOf, type HostStore, type SessionPatch, type WorktreeRecord } from "./store.js";
-import { createWorktree, gitInfo, removeWorktree, worktreeState, type CreatedWorktree } from "./worktrees.js";
+import { createWorktree, gitBranch, gitInfo, removeWorktree, worktreeState, type CreatedWorktree } from "./worktrees.js";
 import { conversationDigest, isConversation, settled } from "./carry.js";
 import { slimEvent } from "./slim.js";
 
@@ -157,6 +158,7 @@ export class SessionHub {
   /** Terminals (`linkshell <agent>`) currently driving handoff sessions. */
   private readonly desktops = new Map<string, DesktopController>();
   private discoveryTimer?: ReturnType<typeof setInterval>;
+  private readonly branches = new Map<string, { at: number; branch: Promise<string | undefined> }>();
   private worktreeCache?: WorktreeRecord[];
   private authRefreshing?: Promise<void>;
 
@@ -296,8 +298,21 @@ export class SessionHub {
     return { sessions, nextBefore: sessions.length === limit && last ? last.updatedAt : undefined };
   }
 
-  listProjects(limit?: number) {
-    return this.store.listProjects(limit);
+  /** Projects, each with the branch checked out there now. */
+  async listProjects(limit?: number): Promise<ProjectSummary[]> {
+    const projects = this.store.listProjects(limit);
+    const branches = await Promise.all(projects.map((project) => this.branchOf(project.cwd)));
+    return projects.map((project, index) => (branches[index] ? { ...project, branch: branches[index] } : project));
+  }
+
+  /** Asked for every project each time the list is: remembered for a moment. */
+  private branchOf(cwd: string): Promise<string | undefined> {
+    const known = this.branches.get(cwd);
+    if (known && Date.now() - known.at < 5000) return known.branch;
+    const branch = gitBranch(cwd);
+    this.branches.set(cwd, { at: Date.now(), branch });
+    if (this.branches.size > 500) this.branches.delete(this.branches.keys().next().value!);
+    return branch;
   }
 
   getSession(sessionId: string): SessionSummary {

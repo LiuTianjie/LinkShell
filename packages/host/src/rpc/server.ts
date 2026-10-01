@@ -82,7 +82,7 @@ export class HostRpcServer {
         void hub.refreshAuthIfStale();
         return options.machineInfo();
       },
-      "projects.list": (params: P<"projects.list">) => ({ projects: hub.listProjects(params.limit) }),
+      "projects.list": async (params: P<"projects.list">) => ({ projects: await hub.listProjects(params.limit) }),
       "sessions.list": (params: P<"sessions.list">) => hub.listSessions(params),
       "sessions.create": async (params: P<"sessions.create">) => ({ session: await hub.createSession(params) }),
       "sessions.fork": async (params: P<"sessions.fork">) => ({ session: await hub.fork(params.sessionId, { itemId: params.itemId, worktree: params.worktree }) }),

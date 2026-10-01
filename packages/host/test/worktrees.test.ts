@@ -7,7 +7,7 @@ import type { ContentBlock, SessionUpdate } from "@linkshell/wire";
 import type { AgentDriver, DiscoveredSession, DriverHost, ForkOptions } from "../src/drivers/types.js";
 import { SessionHub } from "../src/hub.js";
 import { HostStore } from "../src/store.js";
-import { createWorktree, gitInfo, removeWorktree, worktreeState } from "../src/worktrees.js";
+import { createWorktree, gitBranch, gitInfo, removeWorktree, worktreeState } from "../src/worktrees.js";
 
 // Sessions in git worktrees, and forks: against a real repository.
 
@@ -35,10 +35,23 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("worktrees", () => {
   it("says what git knows about a directory", async () => {
-    expect(await gitInfo(join(repo, "packages", "api"))).toEqual({ root: repo, branch: "main", dirty: false });
+    const head = git(repo, "rev-parse", "--short", "HEAD");
+    expect(await gitInfo(join(repo, "packages", "api"))).toEqual({ root: repo, branch: "main", head, dirty: false });
+    expect(await gitBranch(join(repo, "packages", "api"))).toBe("main");
     writeFileSync(join(repo, "notes.txt"), "wip");
     expect((await gitInfo(repo))?.dirty).toBe(true);
     expect(await gitInfo(dir)).toBeUndefined();
+    expect(await gitBranch(dir)).toBeUndefined();
+    // On a detached HEAD there is no branch: the commit says where it is.
+    git(repo, "checkout", "-q", "--detach");
+    expect(await gitInfo(repo)).toMatchObject({ branch: undefined, head });
+    expect(await gitBranch(repo)).toBe(head);
+    // A repository without a commit yet still has a branch.
+    const fresh = join(dir, "fresh");
+    mkdirSync(fresh);
+    git(fresh, "init", "-q", "-b", "trunk");
+    expect(await gitInfo(fresh)).toMatchObject({ branch: "trunk", head: undefined });
+    expect(await gitBranch(fresh)).toBe("trunk");
   });
 
   it("makes a checkout on its own branch at the last commit, outside the project, and removes it", async () => {
@@ -139,7 +152,7 @@ describe("sessions in worktrees, and forks", () => {
     expect(session.worktree).toEqual({ branch: expect.stringMatching(/^linkshell\/speed-up-checkout-/), source: project });
     expect(driver.created).toEqual([session.cwd]);
     // One project, two sessions: the worktree is not a project of its own.
-    expect(hub.listProjects()).toMatchObject([{ cwd: project, sessionCount: 2 }]);
+    expect(await hub.listProjects()).toMatchObject([{ cwd: project, sessionCount: 2, branch: "main" }]);
     const [worktree] = await hub.listWorktrees();
     expect(worktree).toMatchObject({ source: project, sessions: [session.id], dirty: false, ahead: 0 });
 
@@ -207,6 +220,6 @@ describe("sessions in worktrees, and forks", () => {
     const second = await hub.fork(isolated.id, { worktree: true });
     expect(second.worktree).toMatchObject({ source: project });
     expect(second.cwd).not.toBe(isolated.cwd);
-    expect(hub.listProjects()).toMatchObject([{ cwd: project, sessionCount: 6 }]);
+    expect(await hub.listProjects()).toMatchObject([{ cwd: project, sessionCount: 6, branch: "main" }]);
   });
 });

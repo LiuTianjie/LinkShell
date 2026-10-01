@@ -11,8 +11,8 @@ import { RpcError, type GitInfo } from "@linkshell/wire";
 
 const run = promisify(execFile);
 
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await run("git", ["-C", cwd, ...args], { timeout: 60_000, maxBuffer: 16 * 1024 * 1024 });
+async function git(cwd: string, args: string[], timeout = 60_000): Promise<string> {
+  const { stdout } = await run("git", ["-C", cwd, ...args], { timeout, maxBuffer: 16 * 1024 * 1024 });
   return stdout.trim();
 }
 
@@ -20,9 +20,24 @@ async function git(cwd: string, args: string[]): Promise<string> {
 export async function gitInfo(path: string): Promise<GitInfo | undefined> {
   try {
     const root = await git(path, ["rev-parse", "--show-toplevel"]);
-    const branch = await git(path, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "HEAD");
+    const branch = await git(path, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => "");
+    const head = await git(path, ["rev-parse", "--short", "HEAD"]).catch(() => "");
     const status = await git(path, ["status", "--porcelain"]);
-    return { root, branch: branch === "HEAD" ? undefined : branch, dirty: status.length > 0 };
+    return { root, branch: branch || undefined, head: head || undefined, dirty: status.length > 0 };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The branch checked out in a directory (the abbreviated commit on a detached
+ * HEAD); undefined outside a repository. Doesn't look at the working tree, so
+ * it stays quick in a large repository.
+ */
+export async function gitBranch(path: string): Promise<string | undefined> {
+  try {
+    const branch = await git(path, ["symbolic-ref", "--short", "-q", "HEAD"], 3000).catch(() => "");
+    return branch || (await git(path, ["rev-parse", "--short", "HEAD"], 3000)) || undefined;
   } catch {
     return undefined;
   }
