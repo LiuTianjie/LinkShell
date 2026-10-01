@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants, existsSync, rmSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { delimiter, isAbsolute, join } from "node:path";
@@ -8,11 +8,13 @@ import { RpcError, type ContentBlock, type SessionConfigOption, type SessionUpda
 import { AcpDriver, inOrder } from "../acp/driver.js";
 import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
-import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, HistoryItem, LaunchSpec } from "../types.js";
+import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
 import { descendsFrom, sessionHolders, type SessionHolder } from "./holders.js";
 import {
   claudeConfigDir,
+  encodeProjectDir,
   findTranscript,
+  turnEndUuid,
   mergeSettings,
   readTail,
   readTranscript,
@@ -306,6 +308,38 @@ export class ClaudeDriver extends AcpDriver {
     this.tails.get(nativeId)?.stop();
     this.tails.delete(nativeId);
     await super.detach(nativeId);
+  }
+
+  /**
+   * A copy of the session's transcript under a new id (the SDK's fork), all of
+   * it or through a turn. A fork that works somewhere else (a worktree) has
+   * its transcript moved to that directory's project folder, where Claude
+   * looks for the sessions of a directory.
+   */
+  override async fork(nativeId: string, options: ForkOptions): Promise<DiscoveredSession> {
+    const source = findTranscript(this.configDir, nativeId, options.sourceCwd);
+    if (!source) throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息，没有可分叉的内容");
+    const upToMessageId = options.upTo ? turnEndUuid(source, options.upTo.itemId, options.upTo.turn) : undefined;
+    if (options.upTo && !upToMessageId) throw RpcError.app("not_found", "找不到要分叉的那一轮");
+    const { forkSession } = await import("@anthropic-ai/claude-agent-sdk");
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = this.configDir;
+    let forked: string;
+    try {
+      forked = (await forkSession(nativeId, { dir: options.sourceCwd, upToMessageId })).sessionId;
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previous;
+    }
+    if (options.cwd !== options.sourceCwd) {
+      const made = findTranscript(this.configDir, forked, options.sourceCwd);
+      if (!made) throw RpcError.app("not_found", "分叉出的会话没有写出来");
+      const folder = join(this.configDir, "projects", encodeProjectDir(options.cwd));
+      mkdirSync(folder, { recursive: true });
+      renameSync(made, join(folder, `${forked}.jsonl`));
+    }
+    const now = Date.now();
+    return { nativeId: forked, cwd: options.cwd, createdAt: now, updatedAt: now };
   }
 
   /** Claude's own title record (what /rename writes), so `claude --resume` shows it too. */

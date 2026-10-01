@@ -329,6 +329,33 @@ describe("host + Codex driver (fake app-server)", () => {
     expect(phone.agentText(session.id)).toBe("echo: still here");
   });
 
+  it("forks a session through a turn: the new one opens with that much of the conversation and goes its own way", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    await phone.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    for (const [id, message] of [["f1", "first question"], ["f2", "second question"]] as const) {
+      const before = phone.turnsEnded(session.id).length;
+      await phone.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: id, content: text(message) });
+      await waitFor(() => phone.turnsEnded(session.id).length === before + 1);
+    }
+    const firstReply = phone.of(session.id).find((e) => e.update.sessionUpdate === "agent_message_chunk")!.update as { messageId: string };
+
+    const { session: fork } = await phone.client.call("sessions.fork", { sessionId: session.id, itemId: firstReply.messageId });
+    expect(fork.id).not.toBe(session.id);
+    expect(fork.cwd).toBe(session.cwd);
+    await laptop.client.call("sessions.subscribe", { sessionId: fork.id, fromSeq: 0 });
+    await waitFor(() => laptop.agentText(fork.id) === "echo: first question");
+    // The whole conversation when no point is named.
+    const { session: whole } = await phone.client.call("sessions.fork", { sessionId: session.id });
+    await laptop.client.call("sessions.subscribe", { sessionId: whole.id, fromSeq: 0 });
+    await waitFor(() => laptop.agentText(whole.id) === "echo: first questionecho: second question");
+
+    await laptop.client.call("sessions.prompt", { sessionId: fork.id, clientMessageId: "f3", content: text("another way") });
+    await waitFor(() => laptop.agentText(fork.id).endsWith("echo: another way"));
+    // The original is untouched.
+    expect(phone.agentText(session.id)).toBe("echo: first questionecho: second question");
+    expect(host.hub.getSession(session.id).lastSeq).toBe(phone.of(session.id).at(-1)!.seq);
+  });
+
   it("rejects bad params and unknown methods with typed errors", async () => {
     await expect(phone.client.call("sessions.prompt", { sessionId, clientMessageId: "x", content: [] })).rejects.toMatchObject({
       data: { code: "invalid_params" },

@@ -8,6 +8,8 @@ import {
   sessionDriverSchema,
   sessionSummarySchema,
   subagentInfoSchema,
+  gitInfoSchema,
+  worktreeEntrySchema,
 } from "./model.js";
 import { contentBlockSchema, sessionEventSchema } from "./updates.js";
 
@@ -95,7 +97,23 @@ export const methods = {
       prompt: z.array(contentBlockSchema).optional(),
       clientMessageId: z.string().optional(),
       model: z.string().optional(),
+      /**
+       * Start in a new git worktree of `cwd`'s repository (its own branch, from
+       * the last commit) instead of in `cwd` itself. Refused with `not_a_repo`
+       * outside a git repository.
+       */
+      worktree: z.boolean().optional(),
     }),
+    result: z.object({ session: sessionSummarySchema }),
+  },
+  /**
+   * A new session that starts with this one's conversation: all of it, or up
+   * to and including the turn of `itemId` (a message in it). The original is
+   * untouched. With `worktree` the new session works in a new git worktree of
+   * the project instead of the same directory.
+   */
+  "sessions.fork": {
+    params: z.object({ sessionId: z.string().min(1), itemId: z.string().min(1).optional(), worktree: z.boolean().optional() }),
     result: z.object({ session: sessionSummarySchema }),
   },
   "sessions.subscribe": {
@@ -219,8 +237,13 @@ export const methods = {
    * Deletes a session: the agent's own record where it has one (Codex thread,
    * Claude transcript), and LinkShell's copy either way. Not while it runs.
    */
+  /**
+   * Deletes a session. Its worktree (when it has one that no other session
+   * uses) goes with it if nothing in it would be lost; `worktree: "remove"`
+   * removes it even with uncommitted changes or new commits, "keep" never.
+   */
   "sessions.delete": {
-    params: z.object({ sessionId: z.string().min(1) }),
+    params: z.object({ sessionId: z.string().min(1), worktree: z.enum(["keep", "remove"]).optional() }),
     result: empty,
   },
   "sessions.takeover": {
@@ -285,6 +308,13 @@ export const methods = {
     result: z.object({ link: z.string(), code: z.string(), expiresAt: z.number(), gateway: z.string() }),
   },
   "devices.revoke": { params: z.object({ deviceId: z.string().min(1) }), result: empty },
+  // ── Git: sessions in worktrees ──
+  /** What git says about `path`; no `git` when it isn't in a repository. */
+  "git.info": { params: z.object({ path: z.string().min(1) }), result: z.object({ git: gitInfoSchema.optional() }) },
+  /** The worktrees LinkShell made, newest first. */
+  "worktrees.list": { params: empty, result: z.object({ worktrees: z.array(worktreeEntrySchema) }) },
+  /** Removes a worktree and its branch. Refused (`busy`) while a session uses it, or (`dirty`) when work in it would be lost, unless `force`. */
+  "worktrees.remove": { params: z.object({ path: z.string().min(1), force: z.boolean().optional() }), result: empty },
   // ── Directories: pick where a new session runs ──
   /** Subdirectories of `path` (default: the home directory). */
   "fs.list": {

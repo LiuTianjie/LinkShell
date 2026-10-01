@@ -145,6 +145,13 @@ export const sessionSummarySchema = z.object({
    * holds them (agents that can't take input mid-turn). Oldest first.
    */
   queue: z.array(queuedMessageSchema).optional(),
+  /**
+   * The session works in a git worktree LinkShell made for it: its own
+   * checkout and branch, so it can't disturb the project's working directory.
+   * `cwd` is inside the worktree; `source` is the directory it was made from
+   * (the project the session belongs to).
+   */
+  worktree: z.object({ branch: z.string(), source: z.string() }).optional(),
   /** Live only, for sessions that started sub-agents: how many, and how many are working now (`sessions.subagents` lists them). */
   subagents: z.object({ total: z.number().int(), running: z.number().int() }).optional(),
 });
@@ -159,6 +166,34 @@ export function parseSessionId(id: string): { agent: string; nativeId: string } 
   if (index <= 0 || index === id.length - 1) return null;
   return { agent: id.slice(0, index), nativeId: id.slice(index + 1) };
 }
+
+/** What git says about a directory, to offer starting a session in a worktree of it. */
+export const gitInfoSchema = z.object({
+  /** The repository's top directory. */
+  root: z.string(),
+  /** The branch checked out; absent on a detached HEAD. */
+  branch: z.string().optional(),
+  /** Uncommitted changes in the working directory (a new worktree starts from the last commit, without them). */
+  dirty: z.boolean(),
+});
+export type GitInfo = z.infer<typeof gitInfoSchema>;
+
+/** A worktree LinkShell made for sessions. */
+export const worktreeEntrySchema = z.object({
+  /** The worktree's top directory. */
+  path: z.string(),
+  branch: z.string(),
+  /** The repository it belongs to. */
+  source: z.string(),
+  createdAt: z.number(),
+  /** Sessions working in it. */
+  sessions: z.array(z.string()),
+  /** Uncommitted changes in it. */
+  dirty: z.boolean(),
+  /** Commits made in it since it was created. */
+  ahead: z.number().int().nonnegative(),
+});
+export type WorktreeEntry = z.infer<typeof worktreeEntrySchema>;
 
 export const projectSummarySchema = z.object({
   cwd: z.string(),

@@ -1,7 +1,7 @@
 import { ABANDON, RpcError, type ContentBlock, type RpcId } from "@linkshell/wire";
 import type { AgentAuth } from "@linkshell/wire";
 import { parseCodexLoginStatus, runStatusCommand } from "../auth.js";
-import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, HistoryItem, LaunchSpec } from "../types.js";
+import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
 import { CodexAppServer, detectCodex } from "./app-server.js";
 import {
   APPROVAL_METHODS,
@@ -119,6 +119,29 @@ export class CodexDriver implements AgentDriver {
   async listSessions(limit: number): Promise<DiscoveredSession[]> {
     const result = await this.rpc<{ data: CodexThread[] }>("thread/list", { limit, archived: false });
     return result.data.map(threadToDiscovered);
+  }
+
+  /** Codex's own fork: a new thread with this one's turns, all or through `lastTurnId`, in `cwd`. */
+  async fork(nativeId: string, options: ForkOptions): Promise<DiscoveredSession> {
+    let lastTurnId: string | undefined;
+    if (options.upTo) {
+      const { thread } = await this.rpc<{ thread: CodexThread }>("thread/read", { threadId: nativeId, includeTurns: true });
+      const turns = thread.turns ?? [];
+      const picked = options.upTo;
+      const holding = turns.find((turn) => turn.items.some((item) => (item as { id?: unknown }).id === picked.itemId));
+      lastTurnId = (holding ?? turns[picked.turn - 1])?.id;
+      if (!lastTurnId) throw RpcError.app("not_found", "找不到要分叉的那一轮");
+    }
+    const result = await this.rpc<{ thread: CodexThread; model?: string }>("thread/fork", {
+      threadId: nativeId,
+      lastTurnId: lastTurnId ?? null,
+      cwd: options.cwd,
+      excludeTurns: true,
+    });
+    // (Not `startedHere`: unlike a new thread, a fork has turns to import when it is opened.)
+    this.settings.set(result.thread.id, settingsFrom(result as unknown as Record<string, unknown>));
+    const discovered = threadToDiscovered(result.thread);
+    return { ...discovered, cwd: discovered.cwd || options.cwd, model: discovered.model ?? result.model };
   }
 
   async createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession> {

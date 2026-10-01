@@ -69,6 +69,14 @@ CREATE TABLE IF NOT EXISTS removed_sessions (
   id TEXT PRIMARY KEY,
   ts INTEGER NOT NULL
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS worktrees (
+  path TEXT PRIMARY KEY,
+  branch TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_cwd TEXT NOT NULL,
+  base TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS terminals (
   id TEXT PRIMARY KEY,
   cwd TEXT NOT NULL,
@@ -173,6 +181,30 @@ function toSummary(row: SessionRow): SessionSummary {
     lastSeq: row.last_seq,
     archived: row.archived === 1,
   };
+}
+
+/** A git worktree made for sessions (see worktrees.ts). */
+export interface WorktreeRecord {
+  /** The worktree's top directory. */
+  path: string;
+  branch: string;
+  /** The repository's top directory. */
+  source: string;
+  /** The directory the first session in it was started from (a project, possibly inside the repository). */
+  sourceCwd: string;
+  /** The commit it started at. */
+  base: string;
+  createdAt: number;
+}
+
+/** The worktree `cwd` is in, if any. */
+export function worktreeOf(cwd: string, worktrees: WorktreeRecord[]): WorktreeRecord | undefined {
+  return worktrees.find((worktree) => cwd === worktree.path || cwd.startsWith(`${worktree.path}/`));
+}
+
+/** The project a session in `cwd` belongs to: for a worktree, the directory it was made from. */
+function projectOf(cwd: string, worktrees: WorktreeRecord[]): string {
+  return worktreeOf(cwd, worktrees)?.sourceCwd ?? cwd;
 }
 
 /** How much history one page carries (see `pageStart`). */
@@ -368,17 +400,66 @@ export class HostStore {
 
   listProjects(limit = 50): ProjectSummary[] {
     const rows = this.db
-      .prepare(
-        `SELECT cwd, MAX(updated_at) AS last_active_at, COUNT(*) AS session_count
-         FROM sessions WHERE archived = 0 GROUP BY cwd ORDER BY last_active_at DESC LIMIT ?`,
-      )
-      .all(limit) as { cwd: string; last_active_at: number; session_count: number }[];
+      .prepare(`SELECT cwd, MAX(updated_at) AS last_active_at, COUNT(*) AS session_count FROM sessions WHERE archived = 0 GROUP BY cwd`)
+      .all() as { cwd: string; last_active_at: number; session_count: number }[];
+    // A session in a worktree belongs to the project the worktree was made from.
+    const worktrees = this.listWorktrees();
+    const projects = new Map<string, ProjectSummary>();
+    for (const row of rows) {
+      const cwd = projectOf(row.cwd, worktrees);
+      const project = projects.get(cwd) ?? { cwd, name: basename(cwd) || cwd, lastActiveAt: 0, sessionCount: 0 };
+      project.lastActiveAt = Math.max(project.lastActiveAt, row.last_active_at);
+      project.sessionCount += row.session_count;
+      projects.set(cwd, project);
+    }
+    return [...projects.values()].sort((a, b) => b.lastActiveAt - a.lastActiveAt).slice(0, limit);
+  }
+
+  // ── worktrees ─────────────────────────────────────────────────────
+
+  saveWorktree(worktree: WorktreeRecord): void {
+    this.db
+      .prepare("INSERT OR REPLACE INTO worktrees (path, branch, source, source_cwd, base, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(worktree.path, worktree.branch, worktree.source, worktree.sourceCwd, worktree.base, worktree.createdAt);
+  }
+
+  listWorktrees(): WorktreeRecord[] {
+    const rows = this.db.prepare("SELECT * FROM worktrees ORDER BY created_at DESC").all() as Record<string, unknown>[];
     return rows.map((row) => ({
-      cwd: row.cwd,
-      name: basename(row.cwd) || row.cwd,
-      lastActiveAt: row.last_active_at,
-      sessionCount: row.session_count,
+      path: String(row.path),
+      branch: String(row.branch),
+      source: String(row.source),
+      sourceCwd: String(row.source_cwd),
+      base: String(row.base),
+      createdAt: Number(row.created_at),
     }));
+  }
+
+  deleteWorktree(path: string): void {
+    this.db.prepare("DELETE FROM worktrees WHERE path = ?").run(path);
+  }
+
+  /** Sessions whose directory is `path` or inside it. */
+  sessionsUnder(path: string): string[] {
+    const rows = this.db.prepare("SELECT id FROM sessions WHERE cwd = ? OR substr(cwd, 1, ?) = ?").all(path, path.length + 1, `${path}/`) as { id: string }[];
+    return rows.map((row) => row.id);
+  }
+
+  /** The seq of the latest event that mentions message or tool call `itemId`, and how many turns had started by then. */
+  locateItem(sessionId: string, itemId: string): { seq: number; turn: number } | undefined {
+    const tool = this.db
+      .prepare("SELECT MAX(seq) AS seq FROM event_meta WHERE session_id = ? AND tool = ?")
+      .get(sessionId, itemId) as { seq: number | null };
+    const needle = `"messageId":${JSON.stringify(itemId)}`;
+    const message = this.db
+      .prepare("SELECT MAX(seq) AS seq FROM events WHERE session_id = ? AND instr(body, ?) > 0")
+      .get(sessionId, needle) as { seq: number | null };
+    const seq = Math.max(tool.seq ?? 0, message.seq ?? 0);
+    if (seq === 0) return undefined;
+    const { turn } = this.db
+      .prepare("SELECT COUNT(*) AS turn FROM event_meta WHERE session_id = ? AND kind = 'ls_turn' AND opens_turn = 1 AND seq <= ?")
+      .get(sessionId, seq) as { turn: number };
+    return { seq, turn };
   }
 
   /**

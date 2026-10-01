@@ -85,6 +85,13 @@ export class HostRpcServer {
       "projects.list": (params: P<"projects.list">) => ({ projects: hub.listProjects(params.limit) }),
       "sessions.list": (params: P<"sessions.list">) => hub.listSessions(params),
       "sessions.create": async (params: P<"sessions.create">) => ({ session: await hub.createSession(params) }),
+      "sessions.fork": async (params: P<"sessions.fork">) => ({ session: await hub.fork(params.sessionId, { itemId: params.itemId, worktree: params.worktree }) }),
+      "git.info": async (params: P<"git.info">) => ({ git: await hub.gitInfo(params.path) }),
+      "worktrees.list": async () => ({ worktrees: await hub.listWorktrees() }),
+      "worktrees.remove": async (params: P<"worktrees.remove">) => {
+        await hub.removeWorktree(params.path, params.force);
+        return {};
+      },
       "sessions.subscribe": async (params: P<"sessions.subscribe">, context) => {
         const previous = context.subscriptions.get(params.sessionId);
         if (previous) hub.unsubscribe(params.sessionId, previous);
@@ -140,7 +147,7 @@ export class HostRpcServer {
       "sessions.archive": async (params: P<"sessions.archive">) => ({ session: await hub.archive(params.sessionId, params.archived) }),
       "sessions.rename": async (params: P<"sessions.rename">) => ({ session: await hub.rename(params.sessionId, params.title) }),
       "sessions.delete": async (params: P<"sessions.delete">) => {
-        await hub.delete(params.sessionId);
+        await hub.delete(params.sessionId, params.worktree);
         return {};
       },
       "sessions.setConfig": async (params: P<"sessions.setConfig">) => {

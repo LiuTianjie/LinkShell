@@ -8,6 +8,8 @@ import {
   type SessionEvent,
   type SessionSummary,
   type SubagentInfo,
+  type GitInfo,
+  type WorktreeEntry,
 } from "@linkshell/wire";
 import type { HostLink, LinkStatus } from "./host-link.js";
 import {
@@ -70,7 +72,19 @@ export interface ClientActions {
   /** Hands a handoff session back so the desktop can pick it up again. */
   release(sessionId: string): Promise<void>;
   setConfig(sessionId: string, optionId: string, value: string): Promise<void>;
-  createSession(input: { agent: string; cwd: string; prompt?: ContentBlock[] }): Promise<SessionSummary>;
+  /** `worktree`: start in a new git worktree of the project instead of its working directory. */
+  createSession(input: { agent: string; cwd: string; prompt?: ContentBlock[]; worktree?: boolean }): Promise<SessionSummary>;
+  /**
+   * A new session that starts with this one's conversation (through the turn
+   * of `itemId` when given), in the same directory or in a new worktree. The
+   * new session is opened; the original is untouched.
+   */
+  forkSession(sessionId: string, options?: { itemId?: string; worktree?: boolean }): Promise<SessionSummary>;
+  /** What git says about a directory on the computer (undefined: not a repository). */
+  gitInfo(path: string): Promise<GitInfo | undefined>;
+  /** The worktrees LinkShell made for sessions. */
+  listWorktrees(): Promise<WorktreeEntry[]>;
+  removeWorktree(path: string, force?: boolean): Promise<void>;
   /** Drops a message still waiting in the host's queue. */
   unqueue(sessionId: string, clientMessageId: string): Promise<boolean>;
   /** Takes a queued message back to edit it: removes it from the queue and returns what it said. */
@@ -81,7 +95,8 @@ export interface ClientActions {
   reorderQueue(sessionId: string, clientMessageIds: string[]): Promise<void>;
   archive(sessionId: string, archived: boolean): Promise<void>;
   rename(sessionId: string, title: string): Promise<void>;
-  deleteSession(sessionId: string): Promise<void>;
+  /** `worktree`: what to do with a worktree only this session used ("remove" even if work in it is lost, "keep"; default: removed when nothing would be lost). */
+  deleteSession(sessionId: string, worktree?: "keep" | "remove"): Promise<void>;
   /** Adds archived sessions to `sessions` (the regular list leaves them out). */
   loadArchived(): Promise<void>;
   /**
@@ -397,9 +412,28 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
       },
 
-      async deleteSession(sessionId) {
-        await link.call("sessions.delete", { sessionId });
+      async deleteSession(sessionId, worktree) {
+        await link.call("sessions.delete", { sessionId, worktree }, 60_000);
         forget(sessionId);
+      },
+
+      async forkSession(sessionId, forkOptions) {
+        const { session } = await link.call("sessions.fork", { sessionId, itemId: forkOptions?.itemId, worktree: forkOptions?.worktree }, 90_000);
+        set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
+        get().openSession(session.id);
+        return session;
+      },
+
+      async gitInfo(path) {
+        return (await link.call("git.info", { path })).git;
+      },
+
+      async listWorktrees() {
+        return (await link.call("worktrees.list", {})).worktrees;
+      },
+
+      async removeWorktree(path, force) {
+        await link.call("worktrees.remove", { path, force }, 60_000);
       },
 
       async loadArchived() {
@@ -497,7 +531,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       },
 
       async createSession(input) {
-        const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd }, 60_000);
+        const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd, worktree: input.worktree }, 60_000);
         set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
         get().openSession(session.id);
         if (input.prompt && input.prompt.length > 0) await get().send(session.id, input.prompt);

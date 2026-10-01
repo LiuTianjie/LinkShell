@@ -10,6 +10,8 @@ import {
   type SessionUpdate,
   type SubagentInfo,
   type QueuedMessage,
+  type GitInfo,
+  type WorktreeEntry,
 } from "@linkshell/wire";
 import type {
   AgentDriver,
@@ -20,7 +22,10 @@ import type {
   LaunchSpec,
 } from "./drivers/types.js";
 import { inOrder } from "./drivers/acp/driver.js";
-import { PAGE, type HostStore, type SessionPatch } from "./store.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { PAGE, worktreeOf, type HostStore, type SessionPatch, type WorktreeRecord } from "./store.js";
+import { createWorktree, gitInfo, removeWorktree, worktreeState, type CreatedWorktree } from "./worktrees.js";
 
 export interface Subscriber {
   event(event: SessionEvent): void;
@@ -60,6 +65,16 @@ interface SubagentState {
 function subagentRunning(state: SubagentState, now = Date.now()): boolean {
   if (!state.callDone) return state.turnActive ?? true;
   return state.turnActive === true && now - (state.lastChildTs ?? 0) < 15 * 60_000;
+}
+
+/** A short name for a worktree, from what the session is asked to do. */
+function promptLabel(prompt: ContentBlock[] | undefined): string {
+  return prompt ? textOf(prompt).slice(0, 40) || "session" : "session";
+}
+
+function worktreeLossMessage(state: { dirty: boolean; ahead: number }): string {
+  const parts = [state.dirty ? "未提交的改动" : "", state.ahead > 0 ? `${state.ahead} 个新提交` : ""].filter(Boolean);
+  return `这个 worktree 里有${parts.join("和")}，删除会丢失`;
 }
 
 /** Driver-state key: when a session was renamed, and when it was last active before that. */
@@ -137,6 +152,7 @@ export class SessionHub {
   /** Terminals (`linkshell <agent>`) currently driving handoff sessions. */
   private readonly desktops = new Map<string, DesktopController>();
   private discoveryTimer?: ReturnType<typeof setInterval>;
+  private worktreeCache?: WorktreeRecord[];
   private authRefreshing?: Promise<void>;
 
   readonly driverHost: DriverHost = {
@@ -174,6 +190,8 @@ export class SessionHub {
     private readonly store: HostStore,
     drivers: AgentDriver[],
     private readonly log: (message: string) => void = () => {},
+    /** Where the host keeps its own files: worktrees go under it. */
+    private readonly home: string = join(homedir(), ".linkshell"),
   ) {
     for (const driver of drivers) this.drivers.set(driver.id, driver);
   }
@@ -284,12 +302,24 @@ export class SessionHub {
   }
 
   /** Adds the live-only fields (current activity, first pending permission) to a stored summary. */
+  /** Marks a session that works in one of LinkShell's worktrees. */
+  private withWorktree(summary: SessionSummary): SessionSummary {
+    const worktree = worktreeOf(summary.cwd, this.worktrees());
+    return worktree ? { ...summary, worktree: { branch: worktree.branch, source: worktree.sourceCwd } } : summary;
+  }
+
+  /** The worktrees table, read once and again whenever it changes. */
+  private worktrees(): WorktreeRecord[] {
+    return (this.worktreeCache ??= this.store.listWorktrees());
+  }
+
   private decorate(summary: SessionSummary): SessionSummary {
     const live = this.live.get(summary.id);
-    if (!live) return summary;
+    if (!live) return this.withWorktree(summary);
     const activity = live.turnActive ? live.activity : undefined;
     const first = live.permissions.values().next().value as PermissionUpdate | undefined;
     const subagents = live.attached ? this.subagentsOf(summary.id, live) : undefined;
+    summary = this.withWorktree(summary);
     if (!activity && !first && !live.queue && live.held.length === 0 && !subagents?.size) return summary;
     const decorated: SessionSummary = { ...summary };
     if (subagents?.size) {
@@ -326,11 +356,15 @@ export class SessionHub {
     model?: string;
     prompt?: ContentBlock[];
     clientMessageId?: string;
+    /** Start in a new git worktree of `cwd`'s repository. */
+    worktree?: boolean;
   }): Promise<SessionSummary> {
     const driver = this.requireDriver(input.agent);
-    const discovered = await driver.createSession({ cwd: input.cwd, model: input.model }).catch(async (error: unknown) => {
+    const worktree = input.worktree ? await this.newWorktree(input.cwd, promptLabel(input.prompt)) : undefined;
+    const discovered = await driver.createSession({ cwd: worktree?.cwd ?? input.cwd, model: input.model }).catch(async (error: unknown) => {
       // The app shows "not logged in" from the agent list; make it current.
       if (error instanceof RpcError && error.appCode === "not_logged_in") await this.refreshAuth(driver);
+      if (worktree) await this.dropWorktree(worktree.path);
       throw error;
     });
     this.recordDiscovered(driver.id, discovered);
@@ -340,6 +374,81 @@ export class SessionHub {
       await this.prompt(sessionId, input.clientMessageId ?? `create-${sessionId}`, input.prompt);
     }
     return this.getSession(sessionId);
+  }
+
+  /**
+   * A new session that starts with this one's conversation: all of it, or
+   * through the turn `itemId` is in. With `worktree` it works in a new git
+   * worktree of the project.
+   */
+  async fork(sessionId: string, options: { itemId?: string; worktree?: boolean } = {}): Promise<SessionSummary> {
+    const summary = this.getSession(sessionId);
+    const driver = this.requireDriver(summary.agent);
+    if (!driver.fork || !driver.capabilities.fork) throw RpcError.app("not_supported", `${driver.label} 不支持从会话分叉`);
+    let upTo: { itemId: string; turn: number } | undefined;
+    if (options.itemId) {
+      const located = this.store.locateItem(sessionId, options.itemId);
+      if (!located) throw RpcError.app("not_found", "找不到要分叉的那条消息");
+      upTo = { itemId: options.itemId, turn: located.turn };
+    }
+    // A fork of a worktree session made into a new worktree branches from the project, like its original did.
+    const origin = worktreeOf(summary.cwd, this.store.listWorktrees());
+    const worktree = options.worktree ? await this.newWorktree(origin?.sourceCwd ?? summary.cwd, summary.title ?? "fork") : undefined;
+    let discovered: DiscoveredSession;
+    try {
+      discovered = await driver.fork(summary.nativeId, { cwd: worktree?.cwd ?? summary.cwd, sourceCwd: summary.cwd, upTo });
+    } catch (error) {
+      if (worktree) await this.dropWorktree(worktree.path);
+      throw error;
+    }
+    this.recordDiscovered(driver.id, { ...discovered, title: discovered.title ?? summary.title });
+    return this.getSession(sessionIdFor(driver.id, discovered.nativeId));
+  }
+
+  // ── worktrees ─────────────────────────────────────────────────────
+
+  gitInfo(path: string): Promise<GitInfo | undefined> {
+    return gitInfo(path);
+  }
+
+  private async newWorktree(cwd: string, label: string): Promise<CreatedWorktree> {
+    const created = await createWorktree(cwd, this.home, label);
+    this.store.saveWorktree({ path: created.path, branch: created.branch, source: created.source, sourceCwd: cwd, base: created.base, createdAt: Date.now() });
+    this.worktreeCache = undefined;
+    return created;
+  }
+
+  private async dropWorktree(path: string): Promise<void> {
+    const worktree = this.store.listWorktrees().find((entry) => entry.path === path);
+    if (!worktree) return;
+    await removeWorktree(worktree).catch((error: unknown) => this.log(`[hub] couldn't remove worktree ${path}: ${String(error)}`));
+    this.store.deleteWorktree(path);
+    this.worktreeCache = undefined;
+  }
+
+  async listWorktrees(): Promise<WorktreeEntry[]> {
+    return Promise.all(
+      this.store.listWorktrees().map(async (worktree) => ({
+        path: worktree.path,
+        branch: worktree.branch,
+        source: worktree.sourceCwd,
+        createdAt: worktree.createdAt,
+        sessions: this.store.sessionsUnder(worktree.path),
+        ...(await worktreeState(worktree.path, worktree.base)),
+      })),
+    );
+  }
+
+  /** Removes a worktree and its branch, unless a session uses it or (without `force`) work in it would be lost. */
+  async removeWorktree(path: string, force = false): Promise<void> {
+    const worktree = this.store.listWorktrees().find((entry) => entry.path === path);
+    if (!worktree) throw RpcError.app("not_found", "没有这个 worktree");
+    if (this.store.sessionsUnder(path).length > 0) throw RpcError.app("busy", "还有会话在用这个 worktree：先删除那些会话");
+    if (!force) {
+      const state = await worktreeState(path, worktree.base);
+      if (state.dirty || state.ahead > 0) throw RpcError.app("dirty", worktreeLossMessage(state));
+    }
+    await this.dropWorktree(path);
   }
 
   /**
@@ -683,7 +792,11 @@ export class SessionHub {
     return this.decorate(updated);
   }
 
-  async delete(sessionId: string): Promise<void> {
+  /**
+   * Deletes a session. A worktree only it used goes too when nothing in it
+   * would be lost (or `worktree` says "remove"); "keep" leaves it.
+   */
+  async delete(sessionId: string, worktree?: "keep" | "remove"): Promise<void> {
     const summary = this.getSession(sessionId);
     const live = this.live.get(sessionId);
     if (live?.turnActive || summary.state === "running") throw RpcError.app("busy", "这个会话正在运行：先停止，再删除");
@@ -699,6 +812,10 @@ export class SessionHub {
       }
     }
     this.forget(sessionId);
+    const own = worktreeOf(summary.cwd, this.store.listWorktrees());
+    if (!own || worktree === "keep" || this.store.sessionsUnder(own.path).length > 0) return;
+    const state = await worktreeState(own.path, own.base);
+    if (worktree === "remove" || (!state.dirty && state.ahead === 0)) await this.dropWorktree(own.path);
   }
 
   /** Drops a session from LinkShell and tells every client. */

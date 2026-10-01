@@ -32,6 +32,20 @@ export interface HistoryItem {
   ts?: number;
 }
 
+export interface ForkOptions {
+  /** Where the new session works. */
+  cwd: string;
+  /** Where the original works. */
+  sourceCwd: string;
+  /** Fork through this point instead of the whole conversation. */
+  upTo?: {
+    /** The message or tool call the user picked. */
+    itemId: string;
+    /** Which turn it is in, counting the session's turns from 1. */
+    turn: number;
+  };
+}
+
 /** Callbacks a driver uses to report to the host. */
 export interface DriverHost {
   /** A session was created or changed outside of any client request (e.g. in the desktop TUI). */
@@ -115,6 +129,11 @@ export interface AgentDriver {
   setConfig?(nativeId: string, optionId: string, value: string): Promise<void>;
   /** Drops a message the driver holds in its queue; whether it was there. */
   unqueue?(nativeId: string, clientMessageId: string): boolean;
+  /**
+   * A new session with this one's conversation, all of it or through the turn
+   * `upTo` names, working in `cwd` (the same directory, or a worktree of it).
+   */
+  fork?(nativeId: string, options: ForkOptions): Promise<DiscoveredSession>;
   /** Stops the running turn and sends what the driver's queue holds, without waiting for the turn to end. */
   sendQueuedNow?(nativeId: string): Promise<void>;
   /** Puts the driver's queue in the order of `clientMessageIds`. */
