@@ -56,6 +56,15 @@ linkshell claude    # Claude Code; send from the phone to take over, press any k
 linkshell codex     # Codex; the terminal and the phone are live at the same time
 ```
 
+To watch and control the computer's screen from the phone (optional), set it up once, at the computer:
+
+```bash
+brew install ffmpeg   # the screen capture
+linkshell screen      # macOS: asks for the two permissions, opens the right settings page, waits for each switch
+```
+
+On a Mac the permissions (Screen Recording, Accessibility) belong to **LinkShell**, a small signed app that comes with the CLI: you turn on two switches named LinkShell, once, and they hold whichever terminal starts the host and across upgrades.
+
 <details>
 <summary>Other ways to install</summary>
 
@@ -113,7 +122,7 @@ And the rest:
 - **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
 - **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
 - **Tidy sessions.** Rename, archive and delete; for Codex and Claude this also updates their own records. Projects and sessions show the current git branch.
-- **Screen and files.** Watch the computer's screen (needs `ffmpeg`), full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag, shortcuts (macOS). Send photos or files from the phone into the project.
+- **Screen and files.** Watch the computer's screen, full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag, shortcuts (macOS; set up once with `linkshell screen`). Send photos or files from the phone into the project.
 
 ## Agents
 
@@ -173,6 +182,7 @@ On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss
 | Use the official gateway (Pro) | `linkshell login` / `linkshell logout` |
 | Claude Code / Codex, shareable | `linkshell claude` / `linkshell codex` (arguments pass through) |
 | Run a gateway | `linkshell gateway [--port 8787] [--daemon]` |
+| Set up watching and controlling the screen | `linkshell screen` |
 | Check the environment | `linkshell doctor` |
 | Upgrade | `linkshell upgrade` |
 

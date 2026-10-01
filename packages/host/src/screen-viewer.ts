@@ -95,7 +95,7 @@ let mode = MODES.includes(query.get("mode")) ? query.get("mode") : MODES.include
 // "clear" is the side of a phone lying down that has no camera in it.
 const chrome = Object.assign({ fullscreen: false, landscape: false, canRotate: false, clear: null, insets: { top: 0, right: 0, bottom: 0, left: 0 } }, window.__linkshellChrome || {});
 // Whether this viewer may move the computer's pointer: asked for with the first controlling mode.
-const control = { asked: false, known: false, available: false, trusted: false, reason: "", prompted: false };
+const control = { asked: false, known: false, available: false, trusted: false, reason: "", app: "", prompted: false };
 const content = { w: 0, h: 0 };
 let zoom = 1, pan = { x: 0, y: 0 }, fit = 1;
 let area = { x: 0, y: 0, w: 1, h: 1 }, shown = { x: 0, y: 0, w: 1, h: 1 };
@@ -657,7 +657,8 @@ function explain(was) {
   if (!control.trusted) {
     // The system's own dialog, on the computer, once.
     if (!control.prompted) { control.prompted = true; send({ t: "prompt" }); }
-    return hint("电脑还没有允许被控制：在电脑的「系统设置 › 隐私与安全性 › 辅助功能」里打开运行 LinkShell 的终端，这里会自动继续", 0);
+    const who = control.app ? "「" + control.app + "」" : "LinkShell";
+    return hint("电脑还没有允许被控制。电脑上已经打开「系统设置 › 隐私与安全性 › 辅助功能」，把" + who + "的开关打开，这里会自动继续；人不在电脑旁，回去后运行 linkshell screen 即可。", 0);
   }
   if (!was) hint(HINTS[mode]);
 }

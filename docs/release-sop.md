@@ -63,6 +63,9 @@ cd ../cli
 pnpm publish --access public
 ```
 
+> 🖥 **`@linkshell/host` 带着一个签名的 Mac 程序（`helper/LinkShell.app`）**。它持有看屏幕、控制电脑所需的两项系统权限（录屏、辅助功能），所以**必须在装有 `Developer ID Application` 证书的 Mac 上发布 host**。`packages/host` 的 `prepack` 钩子会以 `LINKSHELL_REQUIRE_HELPER=1` 重新构建：没有证书、没有 Swift 编译器或签名失败，发布直接中止，包发不出去。签名身份决定了权限记在谁名下，换证书等于让所有用户重新授权，不要换。
+> 发布前可以先看一眼：`cd packages/host && pnpm pack`，解开后 `codesign --verify --strict package/helper/LinkShell.app` 应无输出。
+
 ### 4.1 发布后立即抽检 tarball
 
 每发完一个包，下载下来检查 `dependencies`，确认没有任何 `workspace:` 字面量泄漏：

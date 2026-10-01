@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError } from "@linkshell/wire";
-import { InputControl } from "./input.js";
+import { closeInputApp, hostAccess, inputApp, InputControl } from "./input.js";
 import { viewerPage } from "./screen-viewer.js";
 
 // Viewing the computer's screen from the phone. The host serves a small
@@ -15,6 +15,10 @@ import { viewerPage } from "./screen-viewer.js";
 // gates the port: other programs on this machine can't watch the screen
 // without having Screen Recording permission themselves. The same socket
 // carries the viewer's pointer and key events back (see `input.ts`).
+//
+// On a Mac the system allows recording to an app by name. A released package
+// carries one, LinkShell.app, and the capture runs as its child: the
+// permission is LinkShell's, whichever terminal started the host.
 
 const run = promisify(execFile);
 
@@ -38,6 +42,33 @@ async function hasFfmpeg(): Promise<boolean> {
     () => true,
     () => false,
   );
+}
+
+/** Where ffmpeg is: an app the system opened has no shell's PATH to find it on. */
+async function ffmpegPath(): Promise<string> {
+  return run("/usr/bin/which", ["ffmpeg"], { timeout: 5000 }).then(
+    ({ stdout }) => stdout.trim() || "ffmpeg",
+    () => "ffmpeg",
+  );
+}
+
+/** What the phone is told when the picture can't be had for want of the permission. */
+const notAllowed = (app: string) =>
+  `电脑还没有允许${app ? `「${app}」` : ""}录制屏幕。在电脑上运行 linkshell screen 按提示操作，或在「系统设置 › 隐私与安全性 › 录屏与系统录音」里打开${app ? `「${app}」` : "它"}的开关，然后重新进入这个页面。`;
+
+export interface ScreenAccess {
+  supported: boolean;
+  ffmpeg: boolean;
+  recording: boolean | null;
+  control: boolean | null;
+  app?: string;
+  problem?: string;
+}
+
+interface CaptureEvents {
+  data(chunk: Buffer): void;
+  /** Over; with words for the viewer when it ended for a reason they can do something about. */
+  exit(message?: string): void;
 }
 
 /** A display to capture, and which of the system's displays it is (ffmpeg's "Capture screen N" is the Nth active one). */
@@ -184,6 +215,8 @@ export class ScreenShare {
   private token = "";
   private displays: Capturable[] = [];
   private readonly captures = new Set<ChildProcess>();
+  /** Captures the app runs for this host: each one's way to end it. */
+  private readonly stops = new Set<() => void>();
   private readonly controls = new Set<InputControl>();
 
   constructor(private readonly log: (message: string) => void) {
@@ -234,10 +267,74 @@ export class ScreenShare {
     return this.token.length > 0 && given.length === expected.length && timingSafeEqual(given, expected);
   }
 
+  /**
+   * Whether the screen can be watched and controlled, as whatever will do it
+   * sees it: the app where the package has one, this process otherwise. With
+   * `ask`, the system asks for the first permission missing.
+   */
+  async access(ask: boolean): Promise<ScreenAccess> {
+    const supported = process.platform === "darwin" || process.platform === "linux";
+    const ffmpeg = supported && (await hasFfmpeg());
+    if (process.platform !== "darwin") return { supported, ffmpeg, recording: null, control: null, problem: "controlling the screen needs macOS" };
+    const app = inputApp(this.log);
+    try {
+      const status = app ? await app.access() : await hostAccess(this.log);
+      // One question at a time: the picture first, then the hands.
+      const missing = !status.recording ? "recording" : !status.trusted ? "control" : undefined;
+      if (ask && missing) await (app ? app.ask(missing) : hostAccess(this.log, missing));
+      return { supported, ffmpeg, recording: status.recording, control: status.trusted, app: status.app };
+    } catch (error) {
+      return { supported, ffmpeg, recording: null, control: null, problem: (error as Error).message };
+    }
+  }
+
+  /** Starts a capture where it may record; resolves to the way to end it. */
+  private async capture(index: number, quality: ScreenProfile, on: CaptureEvents): Promise<() => void> {
+    const args = captureArgs(index, quality);
+    const finished = (code: number, errors: string) => {
+      if (code) this.log(`[screen] capture exited ${code}: ${errors.trim()}`);
+      on.exit(!code ? undefined : /permission|not authorized|denied/i.test(errors) ? notAllowed("") : "屏幕捕获失败");
+    };
+    const app = process.platform === "darwin" ? inputApp(this.log) : undefined;
+    if (app) {
+      const status = await app.access();
+      if (!status.recording) {
+        // Someone may be at the computer: the system's question, and its settings, come up there.
+        void app.ask("recording").catch(() => {});
+        on.exit(notAllowed(status.app));
+        return () => {};
+      }
+      const stop = await app.capture(await ffmpegPath(), args, { data: on.data, exit: finished });
+      this.stops.add(stop);
+      return () => {
+        this.stops.delete(stop);
+        stop();
+      };
+    }
+    if (process.platform === "darwin") {
+      // Without the permission the capture just waits, and so would the phone.
+      const status = await hostAccess(this.log).catch(() => undefined);
+      if (status && !status.recording) {
+        void hostAccess(this.log, "recording").catch(() => {});
+        on.exit(notAllowed(status.app));
+        return () => {};
+      }
+    }
+    const capture = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    this.captures.add(capture);
+    let errors = "";
+    capture.stdout!.on("data", on.data);
+    capture.stderr!.on("data", (chunk: Buffer) => (errors = (errors + chunk.toString()).slice(-2000)));
+    capture.on("error", (error) => finished(-1, error.message));
+    capture.on("exit", (code) => {
+      this.captures.delete(capture);
+      finished(code ?? 0, errors);
+    });
+    return () => endCapture(capture);
+  }
+
   private stream(ws: WebSocket, display: number, quality: ScreenProfile): void {
     const shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
-    const capture = spawn("ffmpeg", captureArgs(shown?.index ?? 0, quality), { stdio: ["ignore", "pipe", "pipe"] });
-    this.captures.add(capture);
     const tell = (message: object) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(message));
     // The viewer's hands: started when it first asks to control, for the display it is watching.
     const control = new InputControl(
@@ -261,30 +358,34 @@ export class ScreenShare {
       else control.send(message);
     });
     const splitter = new AccessUnitSplitter();
-    let errors = "";
-    capture.stdout!.on("data", (chunk: Buffer) =>
-      splitter.push(chunk, (unit, key) => {
-        // Behind (a slow link): skip frames until the next keyframe rather than queue up delay.
-        if (!key && ws.bufferedAmount > 2_000_000) return;
-        ws.send(Buffer.concat([Buffer.from([key ? 1 : 0]), unit]));
-      }),
+    let closed = false;
+    let stop: (() => void) | undefined;
+    void this.capture(shown?.index ?? 0, quality, {
+      data: (chunk) =>
+        splitter.push(chunk, (unit, key) => {
+          if (ws.readyState !== ws.OPEN) return;
+          // Behind (a slow link): skip frames until the next keyframe rather than queue up delay.
+          if (!key && ws.bufferedAmount > 2_000_000) return;
+          ws.send(Buffer.concat([Buffer.from([key ? 1 : 0]), unit]));
+        }),
+      exit: (message) => {
+        if (message) tell({ error: message });
+        ws.close();
+      },
+    }).then(
+      (end) => {
+        if (closed) end();
+        else stop = end;
+      },
+      (error: Error) => {
+        this.log(`[screen] the capture did not start: ${error.message}`);
+        tell({ error: "屏幕捕获失败" });
+        ws.close();
+      },
     );
-    capture.stderr!.on("data", (chunk: Buffer) => (errors = (errors + chunk.toString()).slice(-2000)));
-    capture.on("exit", (code) => {
-      this.captures.delete(capture);
-      if (code && ws.readyState === ws.OPEN) {
-        this.log(`[screen] capture exited ${code}: ${errors.trim()}`);
-        const permission = /permission|not authorized|denied/i.test(errors);
-        ws.send(
-          JSON.stringify({
-            error: permission ? "电脑没有允许录制屏幕：在「系统设置 › 隐私与安全性 › 录屏与系统录音」里允许运行 LinkShell 的终端" : "屏幕捕获失败",
-          }),
-        );
-      }
-      ws.close();
-    });
     ws.on("close", () => {
-      endCapture(capture);
+      closed = true;
+      stop?.();
       control.stop();
       this.controls.delete(control);
     });
@@ -294,8 +395,11 @@ export class ScreenShare {
     // The host is going: there is no later to insist in.
     for (const capture of this.captures) endCapture(capture, true);
     this.captures.clear();
+    for (const stop of this.stops) stop();
+    this.stops.clear();
     for (const control of this.controls) control.stop();
     this.controls.clear();
+    closeInputApp();
     this.server?.close();
     this.server = undefined;
   }

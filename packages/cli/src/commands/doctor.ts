@@ -138,6 +138,13 @@ export async function runDoctor(version: string, gatewayUrl?: string): Promise<v
   }
   if (gatewayUrl) results.push(await checkGateway(host ? "Gateway (--gateway)" : "Gateway", gatewayUrl));
 
+  if (host) {
+    // Optional: a computer is ready without it, so it never fails the check.
+    const { screenAccess, describeScreen } = await import("./screen.js");
+    const screen = describeScreen(await screenAccess().catch(() => undefined));
+    if (screen) results.push({ name: "Screen (optional)", ok: true, detail: screen });
+  }
+
   for (const r of results) {
     const icon = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
     process.stdout.write(`  ${icon} ${r.name}: ${r.detail}\n`);

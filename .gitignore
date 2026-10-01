@@ -8,6 +8,8 @@ pnpm-debug.log*
 
 # Build outputs
 dist/
+# LinkShell.app, built and signed when the host package is (packages/host/scripts/build-helper.mjs)
+packages/host/helper/
 build/
 coverage/
 .turbo/

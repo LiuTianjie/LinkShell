@@ -92,7 +92,12 @@ const hostCmd = program
       }
       process.stderr.write(`  Log:    ${daemon.getLogFile("host")}\n`);
       process.stderr.write(`  Status: linkshell host status\n`);
-      process.stderr.write(`  Stop:   linkshell host stop\n\n`);
+      process.stderr.write(`  Stop:   linkshell host stop\n`);
+      // The screen needs setting up once, at the computer: said here, where someone is.
+      const { screenAccess, describeScreen, screenReady } = await import("./commands/screen.js");
+      const screen = await screenAccess().catch(() => undefined);
+      if (screen && (screen === "old" || !screenReady(screen))) process.stderr.write(`  Screen: ${describeScreen(screen)}\n`);
+      process.stderr.write("\n");
       return;
     }
     if (running && options.gateway) {
@@ -540,6 +545,19 @@ gatewayCmd
     } else {
       process.stderr.write("  Gateway is not running.\n");
     }
+  });
+
+// ── screen ──────────────────────────────────────────────────────────
+
+program
+  .command("screen")
+  .description("Set this computer up for watching and controlling its screen from the phone (permissions, ffmpeg)")
+  .option("--check", "Only say what is and isn't ready")
+  .action(async (options) => {
+    const { runScreenSetup } = await import("./commands/screen.js");
+    const { silenceSqliteWarning } = await import("./commands/host.js");
+    silenceSqliteWarning();
+    await runScreenSetup({ check: options.check === true });
   });
 
 // ── stop (stops both bridge and gateway) ────────────────────────────

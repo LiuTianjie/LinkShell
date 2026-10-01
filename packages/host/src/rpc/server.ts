@@ -220,6 +220,7 @@ export class HostRpcServer {
       },
       "ports.list": async () => ({ ports: await listPorts() }),
       "screen.start": () => this.screen.start(),
+      "screen.access": (params: P<"screen.access">) => this.screen.access(params.ask === true),
       "proxy.open": async (params: P<"proxy.open">, context) => context.proxy.open(params.port, params.direct),
       "direct.offer": async (params: P<"direct.offer">, context) => ({ sdp: await context.direct.answer(params.sdp) }),
       "proxy.write": (params: P<"proxy.write">, context) => {

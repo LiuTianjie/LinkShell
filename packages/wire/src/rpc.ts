@@ -488,6 +488,27 @@ export const methods = {
       displays: z.array(z.object({ index: z.number().int(), name: z.string() })),
     }),
   },
+  /**
+   * Whether this computer's screen can be watched and controlled: the capture
+   * program, and the two permissions the system gives to an app by name. With
+   * `ask`, the system puts its own question for the first one missing and opens
+   * its settings page there, on the computer.
+   */
+  "screen.access": {
+    params: z.object({ ask: z.boolean().optional() }),
+    result: z.object({
+      /** This kind of computer can show its screen at all. */
+      supported: z.boolean(),
+      ffmpeg: z.boolean(),
+      /** May record the screen / post pointer and key events; null where that isn't known. */
+      recording: z.boolean().nullable(),
+      control: z.boolean().nullable(),
+      /** The app the system lists for these permissions: the one to allow. */
+      app: z.string().optional(),
+      /** Why the answer is missing, or what stands in the way besides the permissions. */
+      problem: z.string().optional(),
+    }),
+  },
   /** Bytes to the host's end of a stream (base64). */
   "proxy.write": {
     params: z.object({ streamId: z.string().min(1), data: z.string().max(2_000_000) }),

@@ -56,6 +56,15 @@ linkshell claude    # Claude Code：手机上发消息即接管，终端里按�
 linkshell codex     # Codex：终端和手机同时在线
 ```
 
+想在手机上看和控制电脑屏幕（可选），在电脑上设置一次：
+
+```bash
+brew install ffmpeg   # 屏幕采集
+linkshell screen      # macOS：请求两项权限，打开对应的设置页，等你打开开关
+```
+
+在 Mac 上，这两项权限（录屏、辅助功能）属于 **LinkShell**——一个随 CLI 一起安装的带签名的小程序。你只需要打开两个名为 LinkShell 的开关，一次即可：不管用哪个终端启动 host、怎么升级，都不用再授权。
+
 <details>
 <summary>其他安装方式</summary>
 
@@ -113,7 +122,7 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 - **在手机上打开 localhost。** dev server 的端口走同一条加密通道，热更新照常，可以全屏。不用暴露端口，也不用同一个 Wi-Fi。
 - **设置跟着会话走。** 模型、思考强度、权限模式、快速模式——Agent 提供什么就能改什么；电脑上正在跑的会话，手机上显示的是它真实的设置。
 - **会话管理。** 重命名、归档、删除；Codex 和 Claude 的会话会同步到它们自己的记录里。项目和会话上显示当前的 git 分支。
-- **屏幕与文件。** 随时看电脑屏幕（需要 `ffmpeg`），可以全屏、横屏；需要时直接接手鼠标和键盘：触控板或点哪点哪两种方式，右键、滚动、拖拽、快捷键都有（macOS）。把手机里的图片和文件传到项目里。
+- **屏幕与文件。** 随时看电脑屏幕，可以全屏、横屏；需要时直接接手鼠标和键盘：触控板或点哪点哪两种方式，右键、滚动、拖拽、快捷键都有（macOS；先用 `linkshell screen` 设置一次）。把手机里的图片和文件传到项目里。
 
 ## 支持的 Agent
 
@@ -173,6 +182,7 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
 | 使用官方网关（Pro） | `linkshell login` / `linkshell logout` |
 | 可交给手机的 Claude Code / Codex | `linkshell claude` / `linkshell codex`（参数原样传递） |
 | 运行网关 | `linkshell gateway [--port 8787] [--daemon]` |
+| 设置看屏幕和控制屏幕 | `linkshell screen` |
 | 检查环境 | `linkshell doctor` |
 | 升级 | `linkshell upgrade` |
 

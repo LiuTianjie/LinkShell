@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Script } from "node:vm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { InputControl, inputEvent, type ControlState } from "../src/input.js";
+import { closeInputApp, inputApp, InputControl, inputEvent, shippedApp, type ControlState } from "../src/input.js";
 import { viewerPage } from "../src/screen-viewer.js";
 
 describe("what a viewer may send", () => {
@@ -62,7 +62,8 @@ describe.skipIf(!hasSwift)("the input helper (dry run: events are reported, not 
     const control = new InputControl(
       { state: (state) => (states.push(state), wake()), cursor: () => {}, posted: (event) => (posted.push(event), wake()) },
       () => {},
-      { dryRun: true },
+      // The helper compiled here, as the host's child: what a build without the signed app runs.
+      { dryRun: true, app: false },
     );
     const until = async (done: () => boolean) => {
       const deadline = Date.now() + 5000;
@@ -81,7 +82,7 @@ describe.skipIf(!hasSwift)("the input helper (dry run: events are reported, not 
     const { control, posted, states, until } = start();
     await control.start(0);
     await until(() => states.length > 0);
-    expect(states[0]).toEqual({ available: true, trusted: true });
+    expect(states[0]).toMatchObject({ available: true, trusted: true });
     expect(readdirSync(join(home, "bin"))).toEqual([expect.stringMatching(/^input-[0-9a-f]{12}$/)]);
 
     control.send({ t: "move", x: 0, y: 0 });
@@ -99,8 +100,13 @@ describe.skipIf(!hasSwift)("the input helper (dry run: events are reported, not 
     await until(() => posted.some((event) => event.kind === "keyup" && event.k === "escape"));
 
     const kinds = posted.map((event) => event.kind);
-    expect(kinds).toEqual(["move", "down", "drag", "up", "scroll", "keydown", "keyup", "textdown", "textup", "keydown", "keyup"]);
-    const [origin, down, drag, , scroll, shortcut, , text] = posted as Record<string, number | string>[];
+    // Modifiers are keys too: down before what they modify, up after it, as a hand does it.
+    expect(kinds).toEqual([
+      "move", "moddown", "moddown", "down", "drag", "up", "modup", "modup",
+      "scroll", "moddown", "keydown", "keyup", "modup", "textdown", "textup", "keydown", "keyup",
+    ]);
+    const plain = posted.filter((event) => event.kind !== "moddown" && event.kind !== "modup");
+    const [origin, down, drag, , scroll, shortcut, , text] = plain as Record<string, number | string>[];
     expect([origin!.x, origin!.y]).toEqual([0, 0]);
     // ⌘ and ⇧, a double click.
     expect([down!.n, down!.flags]).toEqual([2, 0x100000 | 0x20000]);
@@ -120,5 +126,72 @@ describe.skipIf(!hasSwift)("the input helper (dry run: events are reported, not 
     control.stop();
     await until(() => posted.length === 2);
     expect(posted[1]).toMatchObject({ kind: "up", b: "left" });
+  }, 30_000);
+});
+
+describe.skipIf(!shippedApp())("LinkShell.app (dry run), opened by the system as an app of its own", () => {
+  const before = process.env.LINKSHELL_INPUT_DRY_RUN;
+  beforeAll(() => {
+    process.env.LINKSHELL_INPUT_DRY_RUN = "1";
+  });
+  afterAll(() => {
+    closeInputApp();
+    if (before === undefined) delete process.env.LINKSHELL_INPUT_DRY_RUN;
+    else process.env.LINKSHELL_INPUT_DRY_RUN = before;
+  });
+
+  const until = async (done: () => boolean) => {
+    const deadline = Date.now() + 15_000;
+    while (!done()) {
+      if (Date.now() > deadline) throw new Error("timed out");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
+
+  it("holds the permissions under its own name, and serves several viewers at once", async () => {
+    const app = inputApp(() => {})!;
+    // Not the terminal's name, nor this test runner's: its own.
+    expect((await app.access()).app).toBe("LinkShell");
+
+    const seen = { a: [] as Record<string, unknown>[], b: [] as Record<string, unknown>[] };
+    const states: ControlState[] = [];
+    const first = new InputControl({ state: (state) => states.push(state), cursor: () => {}, posted: (event) => seen.a.push(event) }, () => {}, { dryRun: true });
+    const second = new InputControl({ state: () => {}, cursor: () => {}, posted: (event) => seen.b.push(event) }, () => {}, { dryRun: true });
+    await first.start(0);
+    await second.start(0);
+    await until(() => states.length > 0);
+    expect(states[0]).toEqual({ available: true, trusted: true, app: "LinkShell" });
+
+    first.send({ t: "move", x: 0, y: 0 });
+    first.send({ t: "down", b: "left" });
+    second.send({ t: "key", k: "escape" });
+    await until(() => seen.a.length === 2 && seen.b.length === 2);
+    expect(seen.a.map((event) => event.kind)).toEqual(["move", "down"]);
+    expect(seen.b.map((event) => event.kind)).toEqual(["keydown", "keyup"]);
+    // A viewer that leaves lets go of its button; the other is untouched.
+    first.stop();
+    await until(() => seen.a.length === 3);
+    expect(seen.a[2]).toMatchObject({ kind: "up", b: "left" });
+    second.stop();
+  }, 30_000);
+
+  it("runs a capture as its own child and passes its output on", async () => {
+    const app = inputApp(() => {})!;
+    let said = "";
+    let code: number | undefined;
+    await app.capture("/bin/sh", ["-c", "printf frame-1; printf frame-2; echo oops >&2; exit 3"], {
+      data: (chunk) => (said += chunk.toString()),
+      exit: (status, errors) => {
+        code = status;
+        said += `|${errors.trim()}`;
+      },
+    });
+    await until(() => code !== undefined);
+    expect([code, said]).toEqual([3, "frame-1frame-2|oops"]);
+
+    // One that would run for ever ends when it is told to.
+    let ended = false;
+    const stop = await app.capture("/bin/sh", ["-c", "echo up; sleep 60"], { data: () => stop(), exit: () => (ended = true) });
+    await until(() => ended);
   }, 30_000);
 });

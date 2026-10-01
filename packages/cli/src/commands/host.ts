@@ -247,6 +247,11 @@ export async function printHostStatus(): Promise<void> {
     for (const device of gateway.devices) {
       process.stdout.write(`    ${device.online ? "●" : "○"} ${device.name}  paired ${new Date(device.pairedAt).toLocaleDateString()}\n`);
     }
+    const { describeScreen } = await import("./screen.js");
+    const screen = describeScreen(
+      await client.call("screen.access", {}, 20_000).catch((error: Error) => (/method not found|unknown method/i.test(error.message) ? ("old" as const) : undefined)),
+    );
+    if (screen) process.stdout.write(`  Screen:   ${screen}\n`);
   } finally {
     client.close();
   }
