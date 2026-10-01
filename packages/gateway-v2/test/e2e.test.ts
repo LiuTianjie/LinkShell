@@ -227,4 +227,119 @@ describe("gateway v2 end to end", () => {
     await until(() => machine.lastError?.code === "not_admitted");
     expect(machine.lastError?.message).toBe("需要 Pro 订阅");
   });
+
+  it("holds a fast sender back instead of buffering for a slow receiver", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-gw-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const limit = 256 * 1024;
+    const gateway = new Gateway({
+      port: 0,
+      host: "127.0.0.1",
+      databasePath: join(dir, "gateway.db"),
+      verifyToken: async (token) => ACCOUNTS[token],
+      log: () => {},
+      maxBufferedBytes: limit,
+    });
+    const url = `ws://127.0.0.1:${await gateway.start()}`;
+    cleanups.push(() => gateway.stop());
+    // Two peers on one account may reach each other; the device reads nothing for a while.
+    const sender = new RelayClient({
+      url: url + RELAY_PATH,
+      identity: createIdentity(),
+      role: "machine",
+      name: "Mac",
+      token: () => "token-alice",
+      createSocket: (target) => new WebSocket(target) as unknown as RelaySocket,
+    });
+    sender.start();
+    cleanups.push(() => sender.stop());
+    let receiverSocket: WebSocket | undefined;
+    const receiverIdentity = createIdentity();
+    const receiver = new RelayClient({
+      url: url + RELAY_PATH,
+      identity: receiverIdentity,
+      role: "device",
+      name: "iPhone",
+      token: () => "token-alice",
+      createSocket: (target) => (receiverSocket = new WebSocket(target)) as unknown as RelaySocket,
+    });
+    let received = 0;
+    receiver.onFrame(() => received++);
+    receiver.start();
+    cleanups.push(() => receiver.stop());
+    await sender.waitOnline(5000);
+    await receiver.waitOnline(5000);
+
+    receiverSocket!.pause();
+    const frames = 400;
+    const payload = "x".repeat(64 * 1024);
+    let peak = 0;
+    const watch = setInterval(() => (peak = Math.max(peak, gateway.bufferedBytes)), 5);
+    for (let i = 0; i < frames; i++) sender.send(receiverIdentity.id, { k: "data", ch: "c", box: payload });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    // 26 MB were sent; the gateway holds a few frames past its limit, not all of it.
+    expect(received).toBe(0);
+    expect(peak).toBeGreaterThan(0);
+    expect(peak).toBeLessThan(limit * 8);
+    // Once the receiver reads again, everything arrives, in order.
+    receiverSocket!.resume();
+    await until(() => received === frames, 15_000);
+    clearInterval(watch);
+    expect(peak).toBeLessThan(limit * 8);
+  });
+
+  it("follows a login, a gateway change and a logout on a running host", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-gw-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const gateway = new Gateway({
+      port: 0,
+      host: "127.0.0.1",
+      databasePath: join(dir, "gateway.db"),
+      verifyToken: async (token) => ACCOUNTS[token],
+      log: () => {},
+      admit: async ({ role, userId }) => (role === "machine" && !userId ? "需要登录" : undefined),
+    });
+    const url = `ws://127.0.0.1:${await gateway.start()}`;
+    cleanups.push(() => gateway.stop());
+    // What `linkshell login` / `logout` / `host --gateway` change on the computer.
+    const computer: { gateway?: string; token?: string } = {};
+    const host = await startHost({
+      home: join(dir, "host"),
+      version: "test",
+      env: { PATH: process.env.PATH, HOME: dir, SHELL: "/bin/sh", ENV: "", PS1: "$ " },
+      drivers: () => [],
+      log: () => {},
+      gateway: { url: () => computer.gateway, token: () => computer.token, name: "Test Mac" },
+    });
+    cleanups.push(() => host.stop());
+    const local = await connectHost(host.paths.hostSocket);
+    cleanups.push(() => local.close());
+    const changes: string[] = [];
+    local.on("gateway.changed", (status) => changes.push(status.status));
+    expect((await local.call("gateway.status", {})).status).toBe("off");
+
+    // A gateway is chosen before logging in: refused, with the reason.
+    computer.gateway = url;
+    await local.call("gateway.refresh", {});
+    await until(async () => (await local.call("gateway.status", {})).error?.code === "not_admitted");
+
+    // Logging in brings the same host online, on the account.
+    computer.token = "token-alice";
+    await local.call("gateway.refresh", {});
+    await until(async () => (await local.call("gateway.status", {})).status === "online");
+    expect((await local.call("gateway.status", {})).account).toMatchObject({ userId: "alice" });
+    const phone = device(url, "Alice's phone", "token-alice");
+    await phone.relay.waitOnline(5000);
+    const { machines } = await phone.relay.request("machines.list", {});
+    expect(machines).toMatchObject([{ via: "account", online: true }]);
+    expect((await connect(phone.relay, phone.identity, machines[0]!).call("machine.info", {})).hostname).toBeTruthy();
+
+    // Logging out takes it off the gateway.
+    computer.gateway = undefined;
+    computer.token = undefined;
+    expect((await local.call("gateway.refresh", {})).status).toBe("off");
+    await until(async () => (await phone.relay.request("machines.list", {})).machines.every((machine) => !machine.online));
+    await until(() => changes.at(-1) === "off");
+    expect((await local.call("gateway.status", {})).status).toBe("off");
+  });
 });

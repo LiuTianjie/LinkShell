@@ -286,7 +286,8 @@ async function handleRequest(
 
   // Health check
   if (method === "GET" && url.pathname === "/healthz") {
-    json(res, 200, { ok: true, version: GATEWAY_VERSION, relay: relay.connected });
+    // memoryMb: what the process holds, to watch against the container's limit.
+    json(res, 200, { ok: true, version: GATEWAY_VERSION, relay: relay.connected, memoryMb: Math.round(process.memoryUsage.rss() / 1048576) });
     return;
   }
 

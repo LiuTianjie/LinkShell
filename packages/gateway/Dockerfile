@@ -63,6 +63,8 @@ ENV NODE_ENV=production
 ENV PORT=8787
 ENV WEB_DIST=/app/web
 ENV RELAY_DATA_PATH=/data/relay.db
+# Collect garbage well inside a 768 MB container instead of growing into its limit.
+ENV NODE_OPTIONS=--max-old-space-size=512
 EXPOSE 8787
 
 CMD ["node", "packages/gateway/dist/gateway/src/index.js"]

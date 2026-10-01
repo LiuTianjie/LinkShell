@@ -122,6 +122,18 @@ export class RelayClient {
     this.open();
   }
 
+  /** Connects afresh so the gateway sees the current account (after a login or logout). */
+  reauthenticate(): void {
+    if (this.statusValue === "stopped") return;
+    clearTimeout(this.timer);
+    this.attempt = 0;
+    const socket = this.socket;
+    this.socket = undefined;
+    socket?.close(1000, "signing in again");
+    this.failPending("connection closed");
+    this.open();
+  }
+
   /** Waits (up to `timeoutMs`) for the gateway connection. */
   waitOnline(timeoutMs: number): Promise<boolean> {
     if (this.statusValue === "online") return Promise.resolve(true);

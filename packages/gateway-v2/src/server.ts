@@ -34,12 +34,21 @@ export interface GatewayOptions {
    * require a subscription for computers.
    */
   admit?: (peer: { role: PeerRole; userId?: string }) => Promise<string | undefined>;
+  /**
+   * How much may wait to be written to one peer before the gateway stops
+   * reading from whoever is sending to it (default 4 MB), and how long a peer
+   * may stay that far behind before it is dropped (default 60 s).
+   */
+  maxBufferedBytes?: number;
+  stalledPeerMs?: number;
 }
 
 interface Peer {
   record: PeerRecord;
   socket: WebSocket;
   email?: string;
+  /** Not being read: a peer it sends to can't keep up. */
+  held?: boolean;
 }
 
 interface Offer {
@@ -130,9 +139,18 @@ export class Gateway {
     return this.peers.size;
   }
 
+  /** Bytes accepted from senders and not yet written to their receivers. */
+  get bufferedBytes(): number {
+    let total = 0;
+    for (const peer of this.peers.values()) total += peer.socket.bufferedAmount;
+    return total;
+  }
+
   /** Drops connections that didn't answer the previous ping, pings the rest. */
   private sweep(): void {
     for (const peer of this.peers.values()) {
+      // A held peer isn't read, so its pong can't arrive; it is checked again once released.
+      if (peer.held) continue;
       if (!this.alive.has(peer.socket)) {
         peer.socket.terminate();
         continue;
@@ -281,6 +299,33 @@ export class Gateway {
     } satisfies ServerFrame);
     this.options.onRouted?.(frame);
     target.socket.send(frame);
+    this.holdWhileBehind(from, target);
+  }
+
+  /**
+   * Backpressure. What a peer can't take yet would otherwise pile up here, in
+   * memory every user of this gateway shares: stop reading the sender instead,
+   * so the data waits on its side until the receiver catches up.
+   */
+  private holdWhileBehind(from: Peer, target: Peer): void {
+    const limit = this.options.maxBufferedBytes ?? 4 * 1024 * 1024;
+    if (from.held || target.socket.bufferedAmount <= limit) return;
+    from.held = true;
+    from.socket.pause();
+    const since = Date.now();
+    const timer = setInterval(() => {
+      const open = target.socket.readyState === WebSocket.OPEN;
+      if (open && target.socket.bufferedAmount > limit / 4) {
+        if (Date.now() - since < (this.options.stalledPeerMs ?? 60_000)) return;
+        this.log(`${target.record.role} ${target.record.id.slice(0, 8)} can't keep up; dropping it`);
+        target.socket.terminate();
+      }
+      clearInterval(timer);
+      from.held = false;
+      this.alive.add(from.socket);
+      if (from.socket.readyState === WebSocket.OPEN) from.socket.resume();
+    }, 20);
+    timer.unref();
   }
 
   private event<N extends keyof RelayEvents>(peerId: string, name: N, data: RelayEvents[N]): void {

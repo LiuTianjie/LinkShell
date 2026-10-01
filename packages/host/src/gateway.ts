@@ -135,6 +135,16 @@ export class GatewayLink {
     this.relay.stop();
   }
 
+  get url(): string {
+    return this.options.url;
+  }
+
+  /** Signs in to the gateway again: the account on this computer changed. */
+  reauthenticate(): void {
+    for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "gateway reconnecting");
+    this.relay.reauthenticate();
+  }
+
   status(): GatewayStatus {
     const status = this.relay.status;
     return {
