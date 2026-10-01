@@ -19,6 +19,12 @@ export const agentCapabilitiesSchema = z.object({
   steer: z.boolean(),
   permissions: z.boolean(),
   images: z.boolean(),
+  /**
+   * The agent forks sessions itself, keeping everything it knew. Every agent's
+   * sessions can be forked: without this (or from a single reply, where the
+   * agent only forks whole sessions) LinkShell makes the fork — the new session
+   * shows the conversation and its agent is told it as text.
+   */
   fork: z.boolean(),
   models: z.boolean(),
   modes: z.boolean(),

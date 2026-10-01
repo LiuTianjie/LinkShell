@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAcpUpdate, toConfigOptions } from "../src/drivers/acp/mapper.js";
+import { normalizeAcpUpdate, toConfigOptions, withContext } from "../src/drivers/acp/mapper.js";
 
 describe("toConfigOptions", () => {
   it("lists a repeated value once (Copilot sends auto three times)", () => {
@@ -49,5 +49,17 @@ describe("Claude compaction over ACP", () => {
     const other = normalizeAcpUpdate({ sessionUpdate: "tool_call", toolCallId: "c2", title: "Thinking it over", kind: "think", status: "in_progress" });
     expect(other).toMatchObject({ sessionUpdate: "tool_call" });
     expect(other && "detail" in other ? other.detail : undefined).toBeUndefined();
+  });
+});
+
+describe("context carried with a prompt", () => {
+  it("goes to the agent ahead of the message, and isn't shown as the user's when the agent replays it", () => {
+    const [context, message] = withContext([{ type: "text", text: "go on" }], "User: first");
+    expect(message).toEqual({ type: "text", text: "go on" });
+    expect(normalizeAcpUpdate({ sessionUpdate: "user_message_chunk", messageId: "u1", content: context })).toBeUndefined();
+    // Some agents replay a prompt as one text.
+    const joined = { type: "text", text: `${(context as { text: string }).text}\n\ngo on` };
+    expect(normalizeAcpUpdate({ sessionUpdate: "user_message_chunk", messageId: "u1", content: joined })).toMatchObject({ content: { type: "text", text: "go on" } });
+    expect(withContext([{ type: "text", text: "hi" }], undefined)).toEqual([{ type: "text", text: "hi" }]);
   });
 });

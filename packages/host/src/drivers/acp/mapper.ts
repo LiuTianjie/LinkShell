@@ -174,7 +174,9 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
       const messageId = str(update.messageId);
       if (update.sessionUpdate === "user_message_chunk") {
         // A sub-agent's prompt is its spawning call's input; don't show it as the user's.
-        return parentOf(update) ? undefined : { sessionUpdate: "user_message_chunk", messageId, content };
+        if (parentOf(update)) return undefined;
+        const said = withoutContext(content);
+        return said ? { sessionUpdate: "user_message_chunk", messageId, content: said } : undefined;
       }
       // Agent chunks without an id get one from the ItemTracker.
       return { sessionUpdate: update.sessionUpdate, messageId: messageId ?? "", content, parentToolCallId: parentOf(update) };
@@ -400,6 +402,22 @@ export function toHistory(
     unfinished.push(...rest.sort((a, b) => (position.get(a) ?? 0) - (position.get(b) ?? 0)));
   }
   return history;
+}
+
+const CONTEXT_OPEN = "<previous-conversation>";
+const CONTEXT_CLOSE = "</previous-conversation>";
+
+/** A prompt with `context` ahead of it: sent to the agent, not shown as what the user said. */
+export function withContext(prompt: Json[], context: string | undefined): Json[] {
+  return context ? [{ type: "text", text: `${CONTEXT_OPEN}\n${context}\n${CONTEXT_CLOSE}` }, ...prompt] : prompt;
+}
+
+/** What the user said, when an agent replays a prompt that carried context. */
+function withoutContext(content: ContentBlock): ContentBlock | undefined {
+  if (content.type !== "text" || !content.text.startsWith(CONTEXT_OPEN)) return content;
+  const end = content.text.indexOf(CONTEXT_CLOSE);
+  const rest = end < 0 ? "" : content.text.slice(end + CONTEXT_CLOSE.length).trimStart();
+  return rest ? { type: "text", text: rest } : undefined;
 }
 
 export function toAcpPrompt(content: ContentBlock[]): Json[] {

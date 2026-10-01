@@ -116,6 +116,82 @@ describe("generic ACP driver (fake agent)", () => {
     expect(t.host.hub.getSession(session.id)).toMatchObject({ title: "hello", preview: "echo: hello", state: "idle" });
   });
 
+  it("forks a session of an agent that can't fork itself: the conversation is shown, and handed to the agent as text", async () => {
+    const t = await setup();
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "a", content: prompt("first") });
+    await waitFor(() => t.ended(session.id).length === 1);
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "b", content: prompt("second") });
+    await waitFor(() => t.ended(session.id).length === 2);
+    const said = (id: string) =>
+      t.of(id).flatMap((e) =>
+        (e.update.sessionUpdate === "user_message_chunk" || e.update.sessionUpdate === "agent_message_chunk") && e.update.content.type === "text"
+          ? [e.update.content.text]
+          : [],
+      );
+    const firstReply = t.of(session.id).find((e) => e.update.sessionUpdate === "agent_message_chunk")!.update as { messageId: string };
+
+    // From the first reply: what came after it stays behind.
+    const { session: fork } = await t.client.call("sessions.fork", { sessionId: session.id, itemId: firstReply.messageId });
+    expect(fork.id).not.toBe(session.id);
+    expect(fork).toMatchObject({ agent: "fake", cwd: "/w", title: t.host.hub.getSession(session.id).title, state: "idle" });
+    await t.client.call("sessions.subscribe", { sessionId: fork.id, fromSeq: 0 });
+    expect(said(fork.id).join("")).toBe("firstecho: first");
+    expect(t.of(fork.id).find((e) => e.update.sessionUpdate === "ls_notice")?.update).toMatchObject({ title: expect.stringContaining("分叉") });
+
+    // The agent gets the conversation with the first message; the user is shown only what they wrote.
+    await t.client.call("sessions.prompt", { sessionId: fork.id, clientMessageId: "c", content: prompt("go on") });
+    await waitFor(() => t.ended(fork.id).length === 1);
+    const all = said(fork.id).join("");
+    expect(all.startsWith("firstecho: firstgo onecho: <previous-conversation>")).toBe(true);
+    const reply = all.slice("firstecho: firstgo on".length);
+    expect(reply).toContain("<previous-conversation>");
+    expect(reply).toContain("User: first");
+    expect(reply).toContain("Assistant: echo: first");
+    expect(reply).not.toContain("second");
+    expect(reply.trimEnd().endsWith("go on")).toBe(true);
+    // Once is enough.
+    await t.client.call("sessions.prompt", { sessionId: fork.id, clientMessageId: "d", content: prompt("again") });
+    await waitFor(() => t.ended(fork.id).length === 2);
+    expect(said(fork.id).join("").endsWith("go onagainecho: again")).toBe(true);
+
+    // The whole session, and the original is untouched.
+    const { session: whole } = await t.client.call("sessions.fork", { sessionId: session.id });
+    await t.client.call("sessions.subscribe", { sessionId: whole.id, fromSeq: 0 });
+    expect(said(whole.id).join("")).toBe("firstecho: firstsecondecho: second");
+    expect(said(session.id).join("")).toBe("firstecho: firstsecondecho: second");
+  });
+
+  it("uses an agent's own fork for a whole session, and its own way for a fork from a reply", async () => {
+    const t = await setup({ FAKE_ACP_FORK: "1" });
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "a", content: prompt("first") });
+    await waitFor(() => t.ended(session.id).length === 1);
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "b", content: prompt("second") });
+    await waitFor(() => t.ended(session.id).length === 2);
+    expect((await t.client.call("machine.info", {})).agents[0]!.capabilities.fork).toBe(true);
+
+    // Whole: the agent's fork knows the conversation itself — nothing to carry.
+    const { session: whole } = await t.client.call("sessions.fork", { sessionId: session.id });
+    await t.client.call("sessions.subscribe", { sessionId: whole.id, fromSeq: 0 });
+    expect(t.text(whole.id)).toBe("echo: firstecho: second");
+    await t.client.call("sessions.prompt", { sessionId: whole.id, clientMessageId: "c", content: prompt("more") });
+    await waitFor(() => t.ended(whole.id).length === 1);
+    expect(t.text(whole.id)).toBe("echo: firstecho: secondecho: more");
+
+    // From a reply: the agent can't cut a session, so the fork is made from our log.
+    const firstReply = t.of(session.id).find((e) => e.update.sessionUpdate === "agent_message_chunk")!.update as { messageId: string };
+    const { session: cut } = await t.client.call("sessions.fork", { sessionId: session.id, itemId: firstReply.messageId });
+    await t.client.call("sessions.subscribe", { sessionId: cut.id, fromSeq: 0 });
+    expect(t.text(cut.id)).toBe("echo: first");
+    await t.client.call("sessions.prompt", { sessionId: cut.id, clientMessageId: "d", content: prompt("more") });
+    await waitFor(() => t.ended(cut.id).length === 1);
+    expect(t.text(cut.id)).toContain("User: first");
+    expect(t.text(cut.id)).not.toContain("second");
+  });
+
   it("queues a message sent mid-turn when the agent can't steer, then runs it", async () => {
     const t = await setup();
     const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });

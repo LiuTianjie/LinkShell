@@ -123,7 +123,12 @@ export interface AgentDriver {
   attach(nativeId: string, context: AttachContext): Promise<HistoryItem[]>;
   detach(nativeId: string): Promise<void>;
 
-  prompt(nativeId: string, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered" | "queued">;
+  /**
+   * `context`: what the agent should know before this message without it
+   * being part of what the user said — the earlier conversation, for a session
+   * forked from an agent that can't fork itself.
+   */
+  prompt(nativeId: string, content: ContentBlock[], clientMessageId: string, context?: string): Promise<"started" | "steered" | "queued">;
   cancel(nativeId: string): Promise<void>;
   respondPermission(nativeId: string, requestId: string, optionId: string): Promise<void>;
   setConfig?(nativeId: string, optionId: string, value: string): Promise<void>;

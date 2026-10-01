@@ -26,6 +26,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { PAGE, worktreeOf, type HostStore, type SessionPatch, type WorktreeRecord } from "./store.js";
 import { createWorktree, gitInfo, removeWorktree, worktreeState, type CreatedWorktree } from "./worktrees.js";
+import { conversationDigest, isConversation, settled } from "./carry.js";
+import { slimEvent } from "./slim.js";
 
 export interface Subscriber {
   event(event: SessionEvent): void;
@@ -79,6 +81,9 @@ function worktreeLossMessage(state: { dirty: boolean; ahead: number }): string {
 
 /** Driver-state key: when a session was renamed, and when it was last active before that. */
 const RENAMED = "renamed";
+
+/** Driver-state key: the conversation a forked session's agent is still to be told, with its first message. */
+const CARRY = "carry";
 
 /** A returning client catches up from where it was, unless it missed more than this. */
 const CATCH_UP = { events: 800, bytes: 4 * 1024 * 1024 };
@@ -384,25 +389,76 @@ export class SessionHub {
   async fork(sessionId: string, options: { itemId?: string; worktree?: boolean } = {}): Promise<SessionSummary> {
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
-    if (!driver.fork || !driver.capabilities.fork) throw RpcError.app("not_supported", `${driver.label} 不支持从会话分叉`);
+    if (driver.tier === "terminal") throw RpcError.app("not_supported", `${driver.label} 不支持从会话分叉`);
     let upTo: { itemId: string; turn: number } | undefined;
+    let cut = summary.lastSeq;
     if (options.itemId) {
       const located = this.store.locateItem(sessionId, options.itemId);
       if (!located) throw RpcError.app("not_found", "找不到要分叉的那条消息");
       upTo = { itemId: options.itemId, turn: located.turn };
+      cut = this.store.turnEnd(sessionId, located.seq);
     }
     // A fork of a worktree session made into a new worktree branches from the project, like its original did.
     const origin = worktreeOf(summary.cwd, this.store.listWorktrees());
     const worktree = options.worktree ? await this.newWorktree(origin?.sourceCwd ?? summary.cwd, summary.title ?? "fork") : undefined;
-    let discovered: DiscoveredSession;
+    const cwd = worktree?.cwd ?? summary.cwd;
     try {
-      discovered = await driver.fork(summary.nativeId, { cwd: worktree?.cwd ?? summary.cwd, sourceCwd: summary.cwd, upTo });
+      let discovered: DiscoveredSession | undefined;
+      if (driver.fork && driver.capabilities.fork) {
+        discovered = await driver.fork(summary.nativeId, { cwd, sourceCwd: summary.cwd, upTo }).catch((error: unknown) => {
+          // The agent forks, but not this way (only whole sessions, say): the fork is made by us instead.
+          if (error instanceof RpcError && error.appCode === "not_supported") return undefined;
+          throw error;
+        });
+      }
+      if (!discovered) return await this.forkByReplay(summary, driver, cwd, cut);
+      this.recordDiscovered(driver.id, { ...discovered, title: discovered.title ?? summary.title });
+      return this.getSession(sessionIdFor(driver.id, discovered.nativeId));
     } catch (error) {
       if (worktree) await this.dropWorktree(worktree.path);
       throw error;
     }
+  }
+
+  /**
+   * A fork for an agent that can't fork a session itself: a new session that
+   * shows the conversation up to `cut` (its latest page, from our log), whose
+   * agent is told that conversation with the first message sent to it.
+   */
+  private async forkByReplay(summary: SessionSummary, driver: AgentDriver, cwd: string, cut: number): Promise<SessionSummary> {
+    const start = this.store.pageStart(summary.id, cut);
+    const events = this.store.readEvents(summary.id, start, PAGE.maxEvents + 1, cut).filter((event) => isConversation(event.update));
+    const discovered = await driver.createSession({ cwd });
     this.recordDiscovered(driver.id, { ...discovered, title: discovered.title ?? summary.title });
-    return this.getSession(sessionIdFor(driver.id, discovered.nativeId));
+    const forkId = sessionIdFor(driver.id, discovered.nativeId);
+    await this.ensureAttached(forkId);
+    const live = this.liveFor(forkId);
+    live.importing = true;
+    try {
+      // Pictures and long output stay in the original; the fork's own log starts light.
+      for (const event of events) this.commit(forkId, settled(slimEvent(event).update), undefined, event.ts);
+    } finally {
+      live.importing = false;
+    }
+    this.commit(forkId, {
+      sessionUpdate: "ls_notice",
+      level: "info",
+      title: `从「${summary.title ?? "原会话"}」分叉`,
+      detail: `${driver.label} 不能自己分叉会话：之前的对话会以文字交给它${start > 0 ? "，更早的内容在原会话里" : ""}`,
+    });
+    const digest = conversationDigest(events);
+    if (digest) this.store.setDriverState(forkId, CARRY, digest);
+    return this.getSession(forkId);
+  }
+
+  /** Hands a message to the agent — with the conversation a forked session still owes it, the first time. */
+  private deliver(summary: SessionSummary, driver: AgentDriver, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
+    const carry = this.store.getDriverState(summary.id, CARRY);
+    if (!carry) return driver.prompt(summary.nativeId, content, clientMessageId);
+    return driver.prompt(summary.nativeId, content, clientMessageId, carry).then((delivery) => {
+      this.store.setDriverState(summary.id, CARRY, "");
+      return delivery;
+    });
   }
 
   // ── worktrees ─────────────────────────────────────────────────────
@@ -652,7 +708,7 @@ export class SessionHub {
     }
     let delivery: "started" | "steered" | "queued";
     try {
-      delivery = await driver.prompt(summary.nativeId, content, clientMessageId);
+      delivery = await this.deliver(summary, driver, content, clientMessageId);
     } catch (error) {
       this.store.releaseClientMessage(sessionId, clientMessageId);
       throw error;
@@ -725,7 +781,7 @@ export class SessionHub {
     }
     this.announce(sessionId);
     try {
-      const delivery = await driver.prompt(summary.nativeId, item.content, item.clientMessageId);
+      const delivery = await this.deliver(summary, driver, item.content, item.clientMessageId);
       if (delivery === "queued") await driver.sendQueuedNow?.(summary.nativeId);
     } catch (error) {
       live.held.unshift(item);
@@ -745,7 +801,7 @@ export class SessionHub {
     live.sendingHeld = true;
     this.announce(sessionId);
     try {
-      await driver.prompt(summary.nativeId, next.content, next.clientMessageId);
+      await this.deliver(summary, driver, next.content, next.clientMessageId);
     } catch (error) {
       this.store.releaseClientMessage(sessionId, next.clientMessageId);
       this.commit(sessionId, {

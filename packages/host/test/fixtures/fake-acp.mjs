@@ -186,7 +186,7 @@ const handlers = {
     agentCapabilities: {
       loadSession: true,
       promptCapabilities: { image: true, embeddedContext: true },
-      sessionCapabilities: { list: {}, resume: {}, close: {}, delete: {} },
+      sessionCapabilities: { list: {}, resume: {}, close: {}, delete: {}, ...(process.env.FAKE_ACP_FORK === "1" ? { fork: {} } : {}) },
       _meta: steering ? { claudeCode: { promptQueueing: true } } : {},
     },
     agentInfo: { name: "fake-acp", version: "1.2.3" },
@@ -198,6 +198,13 @@ const handlers = {
     const sessionId = randomUUID();
     sessions[sessionId] = { cwd: params.cwd, title: null, updatedAt: new Date().toISOString(), mode: "default", model: "fast", history: [] };
     loaded.add(sessionId);
+    persist();
+    return { sessionId, ...config(sessions[sessionId]) };
+  },
+  "session/fork": (params) => {
+    const original = requireSession(params);
+    const sessionId = randomUUID();
+    sessions[sessionId] = { ...original, cwd: params.cwd, history: [...original.history], updatedAt: new Date().toISOString() };
     persist();
     return { sessionId, ...config(sessions[sessionId]) };
   },

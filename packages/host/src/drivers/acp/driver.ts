@@ -17,6 +17,7 @@ import {
   mapPermissionRequest,
   normalizeAcpUpdate,
   toAcpPrompt,
+  withContext,
   toConfigOptions,
   toHistory,
   toStopReason,
@@ -55,6 +56,7 @@ export function inOrder<T extends { clientMessageId: string }>(items: T[], ids: 
 interface PendingPrompt {
   content: ContentBlock[];
   clientMessageId: string;
+  context?: string;
 }
 
 export interface AcpSessionState {
@@ -254,7 +256,7 @@ export class AcpDriver implements AgentDriver {
     }
   }
 
-  async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
+  async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string, context?: string): Promise<"started" | "steered" | "queued"> {
     const state = this.sessions.get(nativeId);
     if (!state?.loaded) throw RpcError.app("not_ready", "session is not open");
     const prompt = toAcpPrompt(content);
@@ -262,14 +264,14 @@ export class AcpDriver implements AgentDriver {
     if (state.turnActive) {
       if (this.capabilities.steer) {
         this.echoUserMessage(nativeId, content, clientMessageId);
-        void this.sendPrompt(nativeId, state, prompt);
+        void this.sendPrompt(nativeId, state, withContext(prompt, context));
         return "steered";
       }
-      state.queue.push({ content, clientMessageId });
+      state.queue.push({ content, clientMessageId, context });
       this.reportQueue(nativeId, state);
       return "queued";
     }
-    this.startTurn(nativeId, state, content, clientMessageId);
+    this.startTurn(nativeId, state, content, clientMessageId, context);
     return "started";
   }
 
@@ -493,11 +495,11 @@ export class AcpDriver implements AgentDriver {
     this.closeMessage(nativeId);
   }
 
-  protected startTurn(nativeId: string, state: AcpSessionState, content: ContentBlock[], clientMessageId: string): void {
+  protected startTurn(nativeId: string, state: AcpSessionState, content: ContentBlock[], clientMessageId: string, context?: string): void {
     state.turnActive = true;
     this.echoUserMessage(nativeId, content, clientMessageId);
     this.emit(nativeId, { sessionUpdate: "ls_turn", state: "started" });
-    void this.sendPrompt(nativeId, state, toAcpPrompt(content));
+    void this.sendPrompt(nativeId, state, withContext(toAcpPrompt(content), context));
   }
 
   private async sendPrompt(nativeId: string, state: AcpSessionState, prompt: Record<string, unknown>[]): Promise<void> {
@@ -521,7 +523,7 @@ export class AcpDriver implements AgentDriver {
     this.emit(nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason });
     const next = state.queue.shift();
     if (next) this.reportQueue(nativeId, state);
-    if (next && state.loaded) this.startTurn(nativeId, state, next.content, next.clientMessageId);
+    if (next && state.loaded) this.startTurn(nativeId, state, next.content, next.clientMessageId, next.context);
   }
 
   /** The agent's own delete, when it has one (ACP session/delete). */

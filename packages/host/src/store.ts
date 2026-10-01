@@ -462,6 +462,14 @@ export class HostStore {
     return { seq, turn };
   }
 
+  /** Where the exchange that `seq` is in ends: just before the user speaks next, or the end of the session. */
+  turnEnd(sessionId: string, seq: number): number {
+    const next = this.db
+      .prepare("SELECT MIN(seq) AS seq FROM event_meta WHERE session_id = ? AND kind = 'user_message_chunk' AND seq > ?")
+      .get(sessionId, seq) as { seq: number | null };
+    return next.seq ? next.seq - 1 : (this.getSession(sessionId)?.lastSeq ?? seq);
+  }
+
   /**
    * Appends one update to the session's log and returns it with its seq.
    * `activity` false: the session's "last updated" stays (a setting or a name
