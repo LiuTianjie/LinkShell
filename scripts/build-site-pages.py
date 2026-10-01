@@ -20,7 +20,7 @@ PAGES = {
     },
     "pricing": {
         "title": "LinkShell 定价 | 免费使用，Pro 提供官方网关",
-        "description": "LinkShell 全部功能免费，自建网关即可使用。Pro 每月 $1，提供官方网关：不用部署服务器，登录同一账号即可连接。",
+        "description": "LinkShell 全部功能免费，自建网关即可使用。Pro 每月 ¥9.9，提供官方网关：不用部署服务器，登录同一账号即可连接。",
     },
 }
 

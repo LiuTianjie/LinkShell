@@ -17,9 +17,8 @@
   <meta name="format-detection" content="telephone=no,email=no,address=no" />
   <meta name="application-name" content="LinkShell" />
   <meta name="apple-mobile-web-app-title" content="LinkShell" />
-  <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#0d0e12" media="(prefers-color-scheme: dark)" />
-  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#050607" />
+  <meta name="color-scheme" content="dark light" />
   <link rel="canonical" href="https://liutianjie.github.io/LinkShell/docs/" />
   <link rel="manifest" href="site.webmanifest" />
   <link rel="icon" type="image/png" href="assets/adaptive-icon.png" />
@@ -30,7 +29,9 @@
   <meta property="og:description"
     content="LinkShell 文档：安装 CLI、启动 host、用官方网关或自建网关连接手机、在终端里用 linkshell claude / codex 接力，以及常见问题。" />
   <meta property="og:url" content="https://liutianjie.github.io/LinkShell/docs/" />
-  <meta property="og:image" content="https://liutianjie.github.io/LinkShell/assets/shots/ios-session.webp" />
+  <meta property="og:image" content="https://liutianjie.github.io/LinkShell/assets/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="LinkShell 在手机上继续一个 Claude Code 会话" />
   <meta property="og:locale" content="zh_CN" />
   <meta property="og:locale:alternate" content="en_US" />
@@ -38,10 +39,10 @@
   <meta name="twitter:title" content="LinkShell 文档 | 安装、连接手机、自建网关" />
   <meta name="twitter:description"
     content="Your coding agents keep running on your computer; follow, steer and approve them from your phone." />
-  <meta name="twitter:image" content="https://liutianjie.github.io/LinkShell/assets/shots/ios-session.webp" />
+  <meta name="twitter:image" content="https://liutianjie.github.io/LinkShell/assets/og.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" />
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -63,313 +64,557 @@
           "url": "https://liutianjie.github.io/LinkShell/",
           "downloadUrl": "https://github.com/LiuTianjie/LinkShell/releases/latest",
           "offers": [
-            { "@type": "Offer", "price": "0", "priceCurrency": "USD", "name": "Free" },
-            { "@type": "Offer", "price": "1", "priceCurrency": "USD", "name": "Pro (monthly)" }
+            { "@type": "Offer", "price": "0", "priceCurrency": "CNY", "name": "Free" },
+            { "@type": "Offer", "price": "9.9", "priceCurrency": "CNY", "name": "Pro (monthly)" }
           ]
         }
       ]
     }
   </script>
+  <script>
+    // Theme before first paint: ?theme=, then the saved choice; dark otherwise.
+    (function () {
+      var theme = new URLSearchParams(location.search).get('theme');
+      try { if (theme !== 'light' && theme !== 'dark') theme = localStorage.getItem('linkshell-theme'); } catch (e) { }
+      document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+    })();
+  </script>
   <style>
     :root {
-      --bg: #f6f7fb;
+      --bg: #050607;
+      --surface: #0a0b0d;
+      --surface-2: #121417;
+      --border: rgba(255, 255, 255, .08);
+      --line-2: rgba(255, 255, 255, .16);
+      --text: #f3f4f6;
+      --text-sec: #a3a7b0;
+      --text-muted: #747982;
+      --accent: #3de0c0;
+      --accent-ink: #03110d;
+      --accent-soft: rgba(61, 224, 192, .1);
+      --blue: #74a7ff;
+      --violet: #b19cff;
+      --ink: #f3f4f6;
+      --ink-fg: #050607;
+      --success: #3ecf8e;
+      --danger: #ff6b6b;
+      --code-bg: #08090b;
+      --grid: rgba(255, 255, 255, .05);
+      --spot: rgba(255, 255, 255, .07);
+      --shadow-lg: 0 40px 80px -30px rgba(0, 0, 0, .9);
+      --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      --sans: "Geist", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+      --ease: cubic-bezier(.2, .7, .2, 1);
+      --pad: 40px;
+      color-scheme: dark;
+    }
+
+    :root[data-theme="light"] {
+      --bg: #fafafa;
       --surface: #ffffff;
-      --surface-2: #eef0f6;
-      --text: #14161f;
-      --text-sec: #555a6e;
-      --text-muted: #8a8fa3;
-      --border: #e2e5ee;
-      --accent: #4a6cf7;
+      --surface-2: #f0f1f2;
+      --border: rgba(8, 10, 14, .1);
+      --line-2: rgba(8, 10, 14, .2);
+      --text: #0a0b0d;
+      --text-sec: #4d5158;
+      --text-muted: #6c7078;
+      --accent: #078570;
       --accent-ink: #ffffff;
-      --accent-soft: #e8edff;
-      --success: #1f9d63;
-      --warn: #c7771a;
+      --accent-soft: rgba(7, 133, 112, .09);
+      --blue: #2f6fe0;
+      --violet: #6d4fd8;
+      --ink: #0a0b0d;
+      --ink-fg: #ffffff;
+      --success: #17915a;
       --danger: #d64545;
-      --code-bg: #14161f;
-      --code-text: #e6e8f2;
-      --bezel: #1b1d24;
-      --shadow: 0 1px 2px rgba(20, 22, 31, .05), 0 12px 32px rgba(20, 22, 31, .08);
-      --radius: 18px;
-      --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+      --grid: rgba(8, 10, 14, .055);
+      --spot: rgba(7, 133, 112, .07);
+      --shadow-lg: 0 40px 80px -34px rgba(8, 10, 14, .45);
       color-scheme: light;
     }
 
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #0d0e12;
-        --surface: #16181f;
-        --surface-2: #1d2029;
-        --text: #eceef5;
-        --text-sec: #a4a9bb;
-        --text-muted: #6f7488;
-        --border: #262a35;
-        --accent: #7d95ff;
-        --accent-ink: #0d0e12;
-        --accent-soft: #1c2240;
-        --success: #3ecf8e;
-        --warn: #f0a44b;
-        --danger: #ff6b6b;
-        --code-bg: #0a0b0f;
-        --code-text: #e6e8f2;
-        --bezel: #2a2d36;
-        --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 16px 40px rgba(0, 0, 0, .35);
-        color-scheme: dark;
-      }
-    }
-
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; scroll-padding-top: 80px; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+    html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 var(--sans); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
     img { max-width: 100%; height: auto; display: block; }
-    h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; letter-spacing: -.01em; }
+    h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; font-weight: 600; letter-spacing: -.025em; }
+    html[lang^="zh"] :is(h1, h2, h3) { letter-spacing: -.005em; }
     p { margin: 0; }
     code, pre, kbd { font-family: var(--mono); }
-    :not(pre)>code { font-size: .88em; background: var(--surface-2); border: 1px solid var(--border); padding: .08em .38em; border-radius: 6px; }
+    :not(pre)>code { font-size: .86em; background: var(--surface-2); border: 1px solid var(--border); padding: .1em .4em; border-radius: 5px; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+    ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 
     /* one language at a time */
     html[data-lang="zh"] [lang="en"], html[data-lang="en"] [lang="zh"] { display: none !important; }
+    :root[data-theme="light"] .only-dark, :root:not([data-theme="light"]) .only-light { display: none !important; }
 
-    .c { max-width: 1120px; margin: 0 auto; padding-inline: 20px; }
+    /* the frame: two hairlines run the whole page, sections rule across them */
+    .c { max-width: 1200px; margin: 0 auto; padding-inline: var(--pad); border-inline: 1px solid var(--border); }
     .page { display: none; }
     .page.visible { display: block; }
+    .sec > .c { position: relative; padding-block: 96px; border-top: 1px solid var(--border); }
+    .sec.flush > .c { padding-bottom: 0; }
+    .sec.strip > .c { padding-block: 0; }
+    .sec > .c::before, .sec > .c::after { content: ""; position: absolute; top: -6px; width: 11px; height: 11px; z-index: 2;
+      background: linear-gradient(var(--line-2), var(--line-2)) center / 100% 1px no-repeat, linear-gradient(var(--line-2), var(--line-2)) center / 1px 100% no-repeat; }
+    .sec > .c::before { left: -6px; }
+    .sec > .c::after { right: -6px; }
+    main > .sec:first-child > .c { border-top: 0; }
+    main > .sec:first-child > .c::before, main > .sec:first-child > .c::after { display: none; }
+    @media (max-width: 760px) { :root { --pad: 20px; } .c { border-inline: 0; } .sec > .c { padding-block: 64px; } .sec > .c::before, .sec > .c::after { display: none; } }
 
     /* nav */
-    header.nav { position: sticky; top: 0; z-index: 20; backdrop-filter: saturate(1.6) blur(16px); -webkit-backdrop-filter: saturate(1.6) blur(16px); background: color-mix(in srgb, var(--bg) 80%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
-    .nav .c { display: flex; align-items: center; gap: 20px; height: 60px; }
-    .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; color: var(--text); font-size: 17px; }
+    header.nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); background: color-mix(in srgb, var(--bg) 78%, transparent); border-bottom: 1px solid var(--border); }
+    .nav .c { display: flex; align-items: center; gap: 18px; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); font-size: 16px; letter-spacing: -.01em; }
     .brand:hover { text-decoration: none; }
     .brand img { width: 26px; height: 26px; border-radius: 7px; }
-    .nav nav { display: flex; gap: 22px; margin-left: auto; align-items: center; }
-    .nav nav a { color: var(--text-sec); font-size: 15px; }
-    .nav nav a.active, .nav nav a:hover { color: var(--text); text-decoration: none; }
-    .lang { border: 1px solid var(--border); background: var(--surface); color: var(--text-sec); border-radius: 999px; padding: 4px 11px; font: 600 12px var(--sans); cursor: pointer; }
-    @media (max-width: 720px) { .nav nav a.opt { display: none; } .nav nav { gap: 16px; } }
+    .nav nav { display: flex; gap: 2px; margin-left: auto; align-items: center; }
+    .nav nav a { color: var(--text-sec); font-size: 14px; padding: 6px 12px; border-radius: 7px; transition: color .15s, background-color .15s; }
+    .nav nav a.active, .nav nav a:hover { color: var(--text); text-decoration: none; background: var(--surface-2); }
+    .nav-tools { display: flex; align-items: center; gap: 4px; padding-left: 14px; border-left: 1px solid var(--border); }
+    .icon-btn { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; border: 0; background: none; color: var(--text-sec); cursor: pointer; transition: color .15s, background-color .15s; }
+    .icon-btn:hover { color: var(--text); background: var(--surface-2); }
+    .icon-btn svg { width: 17px; height: 17px; }
+    .theme .moon, :root[data-theme="light"] .theme .sun { display: none; }
+    :root[data-theme="light"] .theme .moon { display: block; }
+    .lang { border: 1px solid var(--line-2); background: none; color: var(--text-sec); border-radius: 6px; padding: 5px 9px; margin-left: 4px; font: 500 11.5px var(--mono); letter-spacing: .04em; cursor: pointer; transition: color .15s, border-color .15s; }
+    .lang:hover { color: var(--text); border-color: var(--text-muted); }
+    @media (max-width: 760px) { .nav nav a.opt { display: none; } .nav .c { gap: 8px; } .nav nav a { padding: 6px 9px; } .nav-tools { padding-left: 8px; } }
+    @media (max-width: 400px) { .nav-tools .gh { display: none; } }
 
     /* buttons */
     .btns { display: flex; flex-wrap: wrap; gap: 10px; }
-    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 12px; font-weight: 600; font-size: 15px; border: 1px solid transparent; cursor: pointer; }
-    .btn:hover { text-decoration: none; filter: brightness(1.05); }
-    .btn-p { background: var(--accent); color: var(--accent-ink); }
-    .btn-s { background: var(--surface); color: var(--text); border-color: var(--border); }
-    .btn svg { width: 17px; height: 17px; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 18px; border-radius: 8px; font-weight: 600; font-size: 14.5px; border: 1px solid transparent; cursor: pointer; transition: background-color .15s, border-color .15s, opacity .15s; }
+    .btn:hover { text-decoration: none; }
+    .btn-p { background: var(--ink); color: var(--ink-fg); }
+    .btn-p:hover { opacity: .88; }
+    .btn-s { background: transparent; color: var(--text); border-color: var(--line-2); }
+    .btn-s:hover { background: var(--surface-2); border-color: var(--text-muted); }
+    .btn svg { width: 16px; height: 16px; flex: none; }
+    .tag { display: inline-flex; align-items: center; gap: 7px; font: 500 11.5px/1.5 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--text-sec); border: 1px solid var(--line-2); border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
+    .tag::before { content: ""; width: 5px; height: 5px; background: var(--tint, var(--accent)); }
 
     /* hero */
-    .hero { padding-block: 72px 40px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
-    .badge { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 5px 12px; border-radius: 999px; margin-bottom: 20px; }
-    .hero h1 { font-size: clamp(38px, 5.6vw, 60px); font-weight: 800; letter-spacing: -.025em; }
-    .hero h1 em { font-style: normal; color: var(--accent); }
-    .lead { font-size: 18px; color: var(--text-sec); margin: 20px 0 28px; max-width: 34em; }
-    .phones { position: relative; height: 640px; }
-    .phone { position: absolute; width: 250px; border-radius: 38px; border: 7px solid var(--bezel); background: var(--bezel); overflow: hidden; box-shadow: var(--shadow); }
-    .phone img { border-radius: 31px; width: 100%; }
-    .phones .p1 { left: 50%; top: 0; transform: translateX(-50%); z-index: 3; }
-    .phones .p2 { left: 0; top: 60px; transform: rotate(-6deg) scale(.88); z-index: 2; }
-    .phones .p3 { right: 0; top: 60px; transform: rotate(6deg) scale(.88); z-index: 1; }
-    @media (max-width: 900px) {
-      .hero { grid-template-columns: 1fr; padding-top: 48px; }
-      .phones { height: 520px; max-width: 460px; width: 100%; margin: 0 auto; }
-      .phone { width: 210px; }
+    .hero-wrap { position: relative; isolation: isolate; overflow: hidden; }
+    .hero-wrap::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+      background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 60px 60px; background-position: center top;
+      -webkit-mask-image: radial-gradient(ellipse 70% 90% at 50% 0%, #000 20%, transparent 80%); mask-image: radial-gradient(ellipse 70% 90% at 50% 0%, #000 20%, transparent 80%); }
+    .hero-wrap::after { content: ""; position: absolute; z-index: -1; inset: 0 0 auto 0; height: 560px; pointer-events: none; background: radial-gradient(60% 100% at 50% 0%, var(--spot), transparent 70%); }
+    .hero { padding-block: 84px 92px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr); gap: 64px; align-items: center; }
+    .hero .tag { margin-bottom: 26px; }
+    .hero h1 { font-size: clamp(40px, 5.3vw, 66px); letter-spacing: -.045em; line-height: 1.06; background: linear-gradient(180deg, #fff 35%, #9aa0ab); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    :root[data-theme="light"] .hero h1 { background: none; color: var(--text); }
+    html[lang^="zh"] .hero h1 { letter-spacing: -.01em; line-height: 1.16; }
+    .caret { display: inline-block; width: .42em; height: .82em; margin-left: .12em; vertical-align: -.06em; background: var(--accent); animation: blink 1.1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .lead { font-size: 17px; color: var(--text-sec); margin: 24px 0 32px; max-width: 32em; }
+    .cmd { display: inline-flex; align-items: center; gap: 10px; margin-top: 14px; height: 42px; padding: 0 6px 0 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font: 13.5px var(--mono); color: var(--text); max-width: 100%; }
+    .cmd i { color: var(--accent); font-style: normal; }
+    .cmd code { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: none; border: 0; padding: 0; font-size: 1em; }
+    .cmd .copy { position: static; flex: none; border: 0; background: none; }
+    .works { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 34px; font: 500 11.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+    .works b { font-weight: 500; color: var(--text-sec); }
+
+    /* hero stage: the desk terminal, handed over to the phone */
+    .stage { position: relative; width: 100%; }
+    .phone { position: relative; border-radius: 38px; padding: 5px; background: #000; border: 1px solid rgba(255, 255, 255, .2); box-shadow: var(--shadow-lg); }
+    :root[data-theme="light"] .phone { border-color: #000; }
+    .phone img { border-radius: 32px; width: 100%; }
+    .stage .phone { width: 46%; margin-left: auto; z-index: 3; }
+    .win { background: #08090b; color: #d5d8df; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .16); box-shadow: var(--shadow-lg); overflow: hidden; font: 12.5px/1.85 var(--mono); }
+    .stage .win { position: absolute; left: 0; top: 13%; width: 88%; z-index: 1; }
+    .win-bar { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-bottom: 1px solid rgba(255, 255, 255, .09); }
+    .win-bar i { width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .28); }
+    .win-bar span { color: #747982; font-size: 11.5px; margin-left: 10px; }
+    .win-body { padding: 14px 18px 18px; white-space: nowrap; overflow: hidden; }
+    .win .k { color: #3de0c0; }
+    .win .ok { color: #3de0c0; }
+    .win .dim { color: #747982; }
+    .win .add { color: #3ecf8e; }
+    .win .del { color: #ff7b72; }
+    .takeover { display: inline-flex; align-items: center; gap: 11px; margin-top: 14px; padding: 8px 14px 8px 12px; border-left: 2px solid #3de0c0; background: rgba(61, 224, 192, .07); line-height: 1.5; }
+    .takeover svg { width: 17px; height: 17px; color: #3de0c0; flex: none; }
+    .takeover b { display: block; color: #fff; font-weight: 500; font-family: var(--sans); }
+    .takeover div > span { color: #8b9099; font-size: .92em; font-family: var(--sans); }
+    .hud { position: absolute; z-index: 4; left: 16%; top: 67%; width: 232px; padding: 12px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow-lg); }
+    .hud-top { display: flex; gap: 10px; align-items: center; }
+    .hud-ic { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; border: 1px solid var(--line-2); color: var(--accent); flex: none; }
+    .hud-ic svg { width: 16px; height: 16px; }
+    .hud-top b { display: block; font-size: 13px; font-weight: 600; line-height: 1.35; }
+    .hud-top code { font-size: 11.5px; color: var(--text-muted); background: none; border: 0; padding: 0; }
+    .hud-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 11px; }
+    .hud-btns > span { text-align: center; font-size: 12.5px; font-weight: 600; padding: 5px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--text-sec); }
+    .hud-btns .yes { background: var(--ink); border-color: var(--ink); color: var(--ink-fg); }
+    .stage > .tag { position: absolute; z-index: 4; left: 0; top: 3%; background: var(--bg); }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+    .hero > div:first-child > * { animation: rise .7s var(--ease) both; }
+    .hero > div:first-child > :nth-child(2) { animation-delay: .05s; }
+    .hero > div:first-child > :nth-child(3) { animation-delay: .1s; }
+    .hero > div:first-child > :nth-child(4) { animation-delay: .15s; }
+    .hero > div:first-child > :nth-child(5) { animation-delay: .2s; }
+    .hero > div:first-child > :nth-child(6) { animation-delay: .25s; }
+    .stage .win { animation: rise .8s var(--ease) .15s both; }
+    .stage .phone { animation: rise .8s var(--ease) .28s both; }
+    .stage .hud { animation: rise .8s var(--ease) .45s both; }
+    @media (max-width: 1160px) { .win { font-size: 11.5px; } }
+    @media (max-width: 1000px) {
+      .hero { grid-template-columns: 1fr; padding-block: 52px 64px; gap: 52px; }
+      .stage { max-width: 540px; margin: 0 auto; }
+      .win { font-size: clamp(9px, 2.5vw, 12.5px); }
     }
-    @media (max-width: 480px) { .phones { height: 450px; } .phone { width: 180px; } .phones .p2 { left: -10px; } .phones .p3 { right: -10px; } }
+    @media (max-width: 520px) {
+      .phone { border-radius: 28px; padding: 4px; }
+      .phone img { border-radius: 24px; }
+      .win-bar { padding: 8px 10px; }
+      .win-bar i { width: 7px; height: 7px; }
+      .win-bar span { display: none; }
+      .win-body { padding: 10px 12px 12px; }
+      .takeover { padding: 6px 10px 6px 8px; gap: 8px; }
+      .takeover svg { width: 14px; height: 14px; }
+      .hud { width: 176px; padding: 10px; left: 8%; top: 70%; }
+      .hud-ic { width: 26px; height: 26px; }
+      .hud-top b { font-size: 12px; }
+      .hud-btns > span { font-size: 11.5px; padding: 3px; }
+      .stage > .tag { font-size: 10px; }
+    }
 
-    .agents-strip { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-muted); font-size: 14px; margin-top: 26px; }
-    .pill { border: 1px solid var(--border); background: var(--surface); color: var(--text-sec); border-radius: 999px; padding: 3px 11px; font-size: 13px; }
-
-    /* install box */
-    .install { margin-top: 26px; max-width: 520px; }
-    .tabs { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
-    .tab { border: 0; background: none; color: var(--text-muted); font: 600 13px var(--sans); padding: 5px 10px; border-radius: 8px; cursor: pointer; }
+    /* code blocks */
+    .code { position: relative; }
+    pre { margin: 0; background: var(--code-bg); color: #e3e5ea; border: 1px solid rgba(255, 255, 255, .1); border-radius: 8px; padding: 14px 16px; font-size: 13px; line-height: 1.8; overflow-x: auto; }
+    .code pre { padding-right: 46px; }
+    pre .cm { color: #747982; }
+    pre .pr { color: #3de0c0; user-select: none; }
+    .copy { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid rgba(255, 255, 255, .14); background: #0e1013; color: #a3a7b0; border-radius: 6px; cursor: pointer; transition: color .15s, border-color .15s; }
+    .copy:hover { color: #fff; border-color: rgba(255, 255, 255, .34); }
+    .cmd .copy { color: var(--text-muted); }
+    .cmd .copy:hover { color: var(--text); }
+    .copy.ok, .cmd .copy.ok { color: var(--accent); }
+    .copy svg { width: 14px; height: 14px; }
+    .tabs { display: flex; gap: 2px; margin-bottom: 10px; flex-wrap: wrap; }
+    .tab { border: 0; background: none; color: var(--text-muted); font: 500 12px var(--mono); letter-spacing: .04em; padding: 5px 10px; border-radius: 6px; cursor: pointer; transition: color .15s, background-color .15s; }
+    .tab:hover { color: var(--text); }
     .tab.active { background: var(--surface-2); color: var(--text); }
     .tab-pane { display: none; }
     .tab-pane.active { display: block; }
-    pre { position: relative; margin: 0; background: var(--code-bg); color: var(--code-text); border-radius: 14px; padding: 14px 16px; font-size: 13.5px; line-height: 1.7; overflow-x: auto; }
-    pre .cm { color: #7c8196; }
-    pre .pr { color: #7d95ff; user-select: none; }
-    .copy { position: absolute; top: 8px; right: 8px; border: 1px solid #2c303c; background: #1d2029; color: #b9bdcc; font: 600 11px var(--sans); padding: 4px 8px; border-radius: 7px; cursor: pointer; opacity: .85; }
-    .copy:hover { opacity: 1; }
 
-    /* sections */
-    .sec { padding-block: 72px; }
-    .eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
-    .sec h2 { font-size: clamp(28px, 3.6vw, 40px); font-weight: 800; letter-spacing: -.02em; }
-    .sec .sub { color: var(--text-sec); font-size: 17px; margin-top: 14px; max-width: 40em; }
+    /* section heads */
+    .eyebrow { display: flex; align-items: center; gap: 10px; font: 500 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 18px; }
+    .eyebrow b { font-weight: 500; color: var(--accent); }
+    .eyebrow::before { content: ""; width: 6px; height: 6px; background: var(--accent); }
+    .sec h2 { font-size: clamp(28px, 3.5vw, 42px); letter-spacing: -.035em; max-width: 20em; }
+    html[lang^="zh"] .sec h2 { letter-spacing: -.01em; }
+    .sec .sub { color: var(--text-sec); font-size: 17px; margin-top: 16px; max-width: 38em; }
 
-    .feature { display: grid; grid-template-columns: 1fr 300px; gap: 56px; align-items: center; padding-block: 36px; }
-    .feature.flip { grid-template-columns: 300px 1fr; }
-    .feature.flip .copytext { order: 2; }
-    .feature h3 { font-size: 26px; font-weight: 750; margin-bottom: 12px; }
-    .feature p { color: var(--text-sec); font-size: 16.5px; max-width: 32em; }
-    .feature ul { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; color: var(--text-sec); }
-    .feature li { padding-left: 22px; position: relative; }
-    .feature li::before { content: ""; position: absolute; left: 4px; top: .7em; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-    .feature .phone { position: static; width: 100%; max-width: 280px; margin: 0 auto; }
-    @media (max-width: 820px) {
-      .feature, .feature.flip { grid-template-columns: 1fr; gap: 28px; }
-      .feature.flip .copytext { order: 0; }
-      .feature .phone { max-width: 240px; }
-    }
+    /* cells: grids that share hairlines with the frame */
+    .cells { display: grid; gap: 1px; background: var(--border); border-top: 1px solid var(--border); margin: 56px calc(var(--pad) * -1) 0; }
+    .strip .cells { margin-top: 0; border-top: 0; }
+    .cells > * { background: var(--bg); padding: var(--pad); min-width: 0; }
+    .cells.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cells.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .cells.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .cells + .cells { margin-top: 0; }
+    .cells .span { grid-column: 1 / -1; }
+    @media (max-width: 980px) { .cells.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cells.three { grid-template-columns: 1fr; } }
+    @media (max-width: 760px) { .cells.two { grid-template-columns: 1fr; } }
+    @media (max-width: 520px) { .cells.four { grid-template-columns: 1fr; } .cells.stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 36px; }
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; min-width: 0; }
-    .card h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
-    .card p { color: var(--text-sec); font-size: 15px; }
-    .card .ic { width: 34px; height: 34px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; margin-bottom: 14px; }
-    .card .ic svg { width: 18px; height: 18px; }
+    .stats > div { padding-block: 28px; }
+    .stats b { display: block; font-size: 30px; font-weight: 600; letter-spacing: -.03em; line-height: 1.2; }
+    .stats span { display: block; margin-top: 6px; font: 500 11.5px/1.5 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
 
-    /* table */
-    .tbl { overflow-x: auto; margin-top: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-    table { border-collapse: collapse; width: 100%; font-size: 15px; }
-    th, td { text-align: left; padding: 14px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .ix { display: block; font: 500 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 18px; }
+    .ix b { font-weight: 500; color: var(--accent); margin-right: 8px; }
+    .feat { display: flex; flex-direction: column; padding-bottom: 0 !important; overflow: hidden; }
+    .feat h3 { font-size: 23px; margin-bottom: 12px; }
+    .feat p { color: var(--text-sec); font-size: 15.5px; max-width: 30em; }
+    .feat ul { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; color: var(--text-sec); font-size: 14.5px; }
+    .feat li { padding-left: 18px; position: relative; }
+    .feat li::before { content: ""; position: absolute; left: 0; top: .72em; width: 5px; height: 5px; background: var(--accent); }
+    .shot { margin-top: auto; padding-top: 44px; height: 470px; display: flex; justify-content: center; overflow: hidden;
+      -webkit-mask-image: linear-gradient(#000 72%, transparent 99%); mask-image: linear-gradient(#000 72%, transparent 99%); }
+    .shot .phone { width: 264px; flex: none; align-self: flex-start; box-shadow: none; }
+    @media (max-width: 520px) { .shot { height: 380px; } .shot .phone { width: 220px; } }
+
+    .mini h3 { font-size: 16px; margin: 18px 0 8px; }
+    .mini p { color: var(--text-sec); font-size: 14.5px; }
+    .mini svg { width: 20px; height: 20px; color: var(--accent); }
+
+    /* agents: a spec table */
+    .spec { margin: 56px calc(var(--pad) * -1) 0; border-top: 1px solid var(--border); }
+    .spec > div { display: grid; grid-template-columns: 250px 150px minmax(0, 1fr); gap: 24px; align-items: start; padding: 24px var(--pad); border-bottom: 1px solid var(--border); transition: background-color .15s; }
+    .spec > div:last-child { border-bottom: 0; }
+    .spec > div:not(.spec-h):hover { background: var(--surface); }
+    .spec-h { font: 500 11.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); padding-block: 14px !important; }
+    .spec h3 { font-size: 17px; line-height: 1.45; }
+    .spec h3 small { display: block; font-size: 14px; font-weight: 400; color: var(--text-muted); letter-spacing: 0; }
+    .spec p { color: var(--text-sec); font-size: 15px; }
+    .spec .tag { justify-self: start; margin-top: 2px; }
+    @media (max-width: 820px) { .spec-h { display: none !important; } .spec > div { grid-template-columns: 1fr; gap: 10px; } }
+
+    /* table (docs) */
+    .tbl { overflow-x: auto; margin-top: 32px; border: 1px solid var(--border); border-radius: 10px; }
+    table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+    th, td { text-align: left; padding: 13px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
     tr:last-child td { border-bottom: 0; }
-    th { font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
-    td:first-child { font-weight: 650; white-space: nowrap; }
-    td .muted { color: var(--text-muted); font-size: 13.5px; }
-    @media (max-width: 600px) {
-      #agents thead { display: none; }
-      #agents tr { display: grid; gap: 6px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
-      #agents tr:last-child { border-bottom: 0; }
-      #agents td { border: 0; padding: 0; white-space: normal; }
-    }
-    .tier { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+    td:first-child { font-weight: 600; white-space: nowrap; }
 
     /* steps */
-    .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 36px; }
-    .step { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-    .step .n { font: 600 13px var(--mono); color: var(--accent); }
-    .step h3 { font-size: 18px; font-weight: 700; }
+    .step { display: flex; flex-direction: column; gap: 12px; }
+    .step h3 { font-size: 19px; }
     .step p { color: var(--text-sec); font-size: 15px; }
-    .step pre { font-size: 12.5px; }
-    @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
+    .step .ix { margin-bottom: 6px; }
+    .step .code, .step > pre { margin-top: auto; }
+    .step pre { font-size: 12px; padding: 14px; }
+    .step .code .copy { opacity: 0; }
+    .step .code:hover .copy, .step .copy:focus-visible { opacity: 1; }
+    @media (hover: none) { .step .code .copy { opacity: 1; } .step .code pre { padding-right: 46px; } }
+    .install { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; padding-block: 22px !important; }
+    .install > p { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+    .install .tabs { margin: 0; }
+    .install > div:last-child { flex: 1 1 420px; min-width: 0; }
 
     /* flow diagram */
-    .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1.3fr; align-items: center; gap: 12px; margin-top: 36px; }
-    .node { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; min-width: 0; }
-    .node b { display: block; font-size: 16px; margin-bottom: 4px; }
-    .node span { color: var(--text-sec); font-size: 14px; }
-    .node.host { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
-    .arrow { color: var(--text-muted); font: 500 12px var(--mono); text-align: center; white-space: nowrap; }
-    .arrow::after { content: "⟷"; display: block; font-size: 22px; color: var(--accent); line-height: 1; margin-top: 4px; }
-    @media (max-width: 820px) { .flow { grid-template-columns: 1fr; } .arrow::after { content: "↕"; } }
+    .diagram { position: relative; padding-block: 56px !important; }
+    .diagram::before { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: radial-gradient(var(--grid) 1.2px, transparent 1.2px); background-size: 20px 20px; }
+    .flow { position: relative; display: grid; grid-template-columns: 1fr 140px 1fr 140px 1.5fr; align-items: center; }
+    .node { background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; padding: 20px; min-width: 0; }
+    .node svg { width: 20px; height: 20px; color: var(--accent); margin-bottom: 14px; }
+    .node small { display: block; font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
+    .node b { display: block; font-size: 16px; font-weight: 600; margin-bottom: 2px; }
+    .node > span { color: var(--text-sec); font-size: 14px; }
+    .node.host { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+    .chips > span { font: 500 11.5px var(--mono); color: var(--text-sec); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; }
+    .wire { position: relative; height: 44px; display: grid; place-items: center; }
+    .wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-2); }
+    .wire::after { content: ""; position: absolute; top: 50%; left: 0; width: 5px; height: 5px; margin-top: -2.5px; background: var(--accent); animation: packet 2.4s linear infinite; }
+    .wire:nth-of-type(4)::after { animation-delay: -1.2s; }
+    @keyframes packet { from { left: 0; opacity: 0; } 10%, 90% { opacity: 1; } to { left: calc(100% - 5px); opacity: 0; } }
+    .wire > span { position: relative; top: -15px; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
+    @media (max-width: 900px) {
+      .flow { grid-template-columns: 1fr; }
+      .wire { height: 56px; }
+      .wire::before { left: 50%; right: auto; top: 0; bottom: 0; width: 1px; height: auto; }
+      .wire::after { left: 50%; margin: 0 0 0 -2.5px; animation-name: packet-y; }
+      .wire > span { top: 0; background: var(--bg); padding: 2px 8px; }
+    }
+    @keyframes packet-y { from { top: 0; opacity: 0; } 10%, 90% { opacity: 1; } to { top: calc(100% - 5px); opacity: 0; } }
 
-    /* sponsors / donate */
-    .sponsor { display: inline-block; border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); padding: 16px 32px; color: var(--text); }
-    .sponsor:hover { text-decoration: none; border-color: var(--accent); }
-    .donate-qr { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; margin-top: 24px; }
-    .donate-qr figure { margin: 0; text-align: center; color: var(--text-sec); font-size: 14px; }
-    .donate-qr img { width: 180px; border-radius: 14px; border: 1px solid var(--border); margin-bottom: 8px; }
+    /* sponsors / coffee */
+    .support h2 { font-size: 20px; letter-spacing: -.02em; }
+    .support p { color: var(--text-sec); font-size: 15px; margin-top: 8px; }
+    .sponsor { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; border: 1px solid var(--line-2); border-radius: 10px; padding: 16px 20px; color: var(--text); transition: border-color .15s, background-color .15s; }
+    .sponsor:hover { text-decoration: none; border-color: var(--accent); background: var(--surface); }
+    .sponsor b { font-size: 17px; font-weight: 600; }
+    .sponsor span { display: block; color: var(--text-sec); font-size: 14px; }
+    .sponsor svg { width: 18px; height: 18px; color: var(--text-muted); flex: none; }
+    .donate-qr { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 24px; }
+    .donate-qr figure { margin: 0; text-align: center; color: var(--text-muted); font: 500 11.5px var(--mono); letter-spacing: .05em; }
+    .donate-qr img { width: 124px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 8px; }
 
-    footer { border-top: 1px solid var(--border); padding-block: 28px; color: var(--text-muted); font-size: 14px; }
-    footer .c { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
-    footer nav { display: flex; gap: 18px; }
-    footer a { color: var(--text-sec); }
+    /* closing call to action */
+    .cta > .c { text-align: center; isolation: isolate; }
+    .cta > .c > i { position: absolute; inset: 0; z-index: -1; pointer-events: none;
+      background: radial-gradient(50% 90% at 50% 100%, var(--spot), transparent 70%), linear-gradient(var(--grid) 1px, transparent 1px) center / 60px 60px, linear-gradient(90deg, var(--grid) 1px, transparent 1px) center / 60px 60px;
+      -webkit-mask-image: radial-gradient(ellipse 60% 90% at 50% 100%, #000 20%, transparent 80%); mask-image: radial-gradient(ellipse 60% 90% at 50% 100%, #000 20%, transparent 80%); }
+    .cta img { width: 60px; height: 60px; border-radius: 15px; margin: 0 auto 26px; border: 1px solid var(--line-2); }
+    .cta h2 { max-width: 18em; margin-inline: auto; }
+    .cta p { color: var(--text-sec); font-size: 17px; margin: 16px auto 32px; max-width: 34em; }
+    .cta .btns { justify-content: center; }
+
+    footer > .c { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; padding-block: 28px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13.5px; }
+    footer .brand { font-size: 14.5px; }
+    footer .brand img { width: 20px; height: 20px; border-radius: 5px; }
+    footer .who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+    footer nav { display: flex; gap: 22px; }
+    footer nav a { color: var(--text-sec); transition: color .15s; }
+    footer nav a:hover { color: var(--text); text-decoration: none; }
 
     /* docs */
-    .docs { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; padding-block: 48px 80px; }
-    .toc { position: sticky; top: 84px; align-self: start; display: flex; flex-direction: column; gap: 2px; font-size: 14.5px; }
-    .toc a { color: var(--text-sec); padding: 5px 10px; border-radius: 8px; }
-    .toc a:hover { background: var(--surface-2); text-decoration: none; color: var(--text); }
-    .doc h1 { font-size: 36px; font-weight: 800; margin-bottom: 10px; }
-    .doc h2 { font-size: 24px; font-weight: 750; margin: 48px 0 12px; padding-top: 8px; }
-    .doc h3 { font-size: 17px; font-weight: 700; margin: 26px 0 8px; }
+    .docs { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 64px; padding-block: 64px 104px; }
+    .toc { position: sticky; top: 88px; align-self: start; display: flex; flex-direction: column; font-size: 14px; border-left: 1px solid var(--border); }
+    .toc a { color: var(--text-sec); padding: 6px 14px; margin-left: -1px; border-left: 1px solid transparent; transition: color .15s, border-color .15s; }
+    .toc a:hover { text-decoration: none; color: var(--text); }
+    .toc a.on { color: var(--text); border-left-color: var(--accent); }
+    .doc h1 { font-size: clamp(32px, 4vw, 44px); margin-bottom: 14px; letter-spacing: -.035em; }
+    .doc > p:first-of-type { font-size: 17px; }
+    .doc h2 { font-size: 24px; margin: 52px 0 14px; padding-top: 40px; border-top: 1px solid var(--border); }
+    .doc h3 { font-size: 16.5px; margin: 28px 0 8px; }
     .doc p, .doc li { color: var(--text-sec); max-width: 44em; }
-    .doc p + p, .doc p + pre, .doc pre + p, .doc ul + p, .doc p + ul, .doc pre + pre, .doc ul + pre { margin-top: 12px; }
+    .doc b { color: var(--text); font-weight: 600; }
+    .doc p + p, .doc p + .code, .doc .code + p, .doc ul + p, .doc p + ul, .doc .code + .code, .doc ul + .code,
+    .doc p + pre, .doc pre + p, .doc pre + pre, .doc ul + pre { margin-top: 14px; }
+    .doc .code, .doc > pre, .doc .tbl, .note { max-width: 760px; }
     .doc ul { padding-left: 20px; }
-    .doc li + li { margin-top: 6px; }
-    .note { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; border-radius: 0 12px 12px 0; margin-top: 14px; color: var(--text); font-size: 15px; max-width: 44em; }
-    @media (max-width: 820px) { .docs { grid-template-columns: 1fr; } .toc { position: static; flex-direction: row; flex-wrap: wrap; } }
+    .doc li + li { margin-top: 8px; }
+    .note { border-left: 2px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; margin-top: 16px; color: var(--text); font-size: 15px; }
+    @media (max-width: 820px) {
+      .docs { grid-template-columns: 1fr; gap: 28px; padding-top: 32px; }
+      .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; border: 0; }
+      .toc a { border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 10px; margin: 0; font-size: 13px; }
+      .toc a.on { border-color: var(--accent); }
+    }
 
     /* pricing */
-    .pricing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 360px)); gap: 18px; margin-top: 36px; }
-    @media (max-width: 780px) { .pricing-grid { grid-template-columns: 1fr; } }
-    .pricing-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 22px; padding: 28px; min-width: 0; }
-    .pricing-card.pro { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: var(--shadow); }
-    .pricing-badge { position: absolute; top: -11px; right: 22px; background: var(--accent); color: var(--accent-ink); font: 700 11px var(--sans); letter-spacing: .06em; padding: 4px 10px; border-radius: 999px; }
-    .plan-name { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
-    .plan-price { font-size: 40px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-    .plan-price small { font-size: 15px; font-weight: 500; color: var(--text-sec); }
-    .plan-period { color: var(--text-sec); font-size: 14px; margin-bottom: 18px; }
-    .plan-features { list-style: none; padding: 0; margin: 0 0 22px; display: grid; gap: 9px; font-size: 15px; }
-    .plan-features li { padding-left: 24px; position: relative; }
-    .plan-features li::before { content: "✓"; position: absolute; left: 0; color: var(--success); font-weight: 700; }
-    .cycle-toggle { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
-    .cycle-btn { border: 0; background: none; color: var(--text-sec); font: 600 13px var(--sans); padding: 5px 14px; border-radius: 8px; cursor: pointer; }
-    .cycle-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
-    .auth-form input { width: 100%; font: 15px var(--sans); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
-    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; border: 0; border-radius: 10px; padding: 11px; font: 600 15px var(--sans); cursor: pointer; text-decoration: none !important; }
-    .auth-btn-primary { background: var(--accent); color: var(--accent-ink); }
+    [data-page="pricing"] .sec > .c { display: flex; flex-direction: column; align-items: center; isolation: isolate; overflow: hidden; }
+    [data-page="pricing"] .sec > .c > i { position: absolute; inset: 0 0 auto 0; height: 520px; z-index: -1; pointer-events: none;
+      background: radial-gradient(50% 100% at 50% 0%, var(--spot), transparent 70%), linear-gradient(var(--grid) 1px, transparent 1px) center top / 60px 60px, linear-gradient(90deg, var(--grid) 1px, transparent 1px) center top / 60px 60px;
+      -webkit-mask-image: radial-gradient(ellipse 60% 100% at 50% 0%, #000 20%, transparent 80%); mask-image: radial-gradient(ellipse 60% 100% at 50% 0%, #000 20%, transparent 80%); }
+    [data-page="pricing"] h2, [data-page="pricing"] .sub { text-align: center; }
+    .pricing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 380px)); gap: 16px; margin-top: 52px; width: 100%; justify-content: center; align-items: start; }
+    @media (max-width: 780px) { .pricing-grid { grid-template-columns: minmax(0, 420px); } }
+    .pricing-card { position: relative; background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; padding: 28px; min-width: 0; }
+    .pricing-card.pro { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+    .pricing-badge { position: absolute; top: -10px; right: 20px; background: var(--accent); color: var(--accent-ink); font: 600 10.5px var(--mono); letter-spacing: .1em; padding: 3px 8px; border-radius: 4px; }
+    .plan-name { font: 500 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 14px; }
+    .plan-price { font-size: 46px; font-weight: 600; letter-spacing: -.04em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+    .plan-price small { font-size: 15px; font-weight: 400; color: var(--text-sec); letter-spacing: 0; }
+    .plan-period { color: var(--text-sec); font-size: 14px; margin-bottom: 22px; }
+    .plan-features { list-style: none; padding: 22px 0 0; margin: 0 0 24px; display: grid; gap: 10px; font-size: 14.5px; border-top: 1px solid var(--border); }
+    .plan-features li { padding-left: 18px; position: relative; color: var(--text-sec); }
+    .plan-features li::before { content: ""; position: absolute; left: 0; top: .72em; width: 5px; height: 5px; background: var(--accent); }
+    .cycle-toggle { display: inline-flex; border: 1px solid var(--line-2); border-radius: 7px; padding: 2px; margin-bottom: 16px; }
+    .cycle-btn { border: 0; background: none; color: var(--text-sec); font: 500 12.5px var(--sans); padding: 4px 14px; border-radius: 5px; cursor: pointer; transition: color .15s, background-color .15s; }
+    .cycle-btn.active { background: var(--surface-2); color: var(--text); }
+    .auth-form input { width: 100%; height: 42px; font: 14.5px var(--sans); padding: 0 13px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--bg); color: var(--text); transition: border-color .15s, box-shadow .15s; }
+    .auth-form input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 42px; border: 0; border-radius: 8px; font: 600 14.5px var(--sans); cursor: pointer; text-decoration: none !important; transition: opacity .15s; }
+    .auth-btn:hover { opacity: .88; }
+    .auth-btn-primary { background: var(--ink); color: var(--ink-fg); }
     .auth-btn-afdian { background: #946ce6; color: #fff; }
     .pay-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
-    .pay-tab { flex: 1; border: 1px solid var(--border); background: var(--bg); color: var(--text-sec); border-radius: 10px; padding: 8px; font: 600 13px var(--sans); cursor: pointer; }
+    .pay-tab { flex: 1; border: 1px solid var(--line-2); background: none; color: var(--text-sec); border-radius: 8px; padding: 8px; font: 600 13px var(--sans); cursor: pointer; transition: color .15s, border-color .15s; }
     .pay-tab.active { border-color: var(--accent); color: var(--text); }
+    .pricing-card .btn { width: 100%; justify-content: center; }
     #pricing-auth-status { font-size: 14px; margin-bottom: 10px; }
-    .term { background: var(--surface-2); border-radius: 12px; }
+    .term { background: var(--surface-2); border-radius: 8px; }
     .ts { color: var(--success); }
     .to { color: var(--text-muted); }
-    .faq { margin-top: 56px; max-width: 720px; display: grid; gap: 18px; }
-    .faq b { display: block; margin-bottom: 4px; }
-    .faq p { color: var(--text-sec); }
+    .faq { margin-top: 80px; width: 100%; max-width: 880px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); }
+    @media (max-width: 720px) { .faq { grid-template-columns: 1fr; } }
+    .faq > div { background: var(--bg); padding: 24px; }
+    .faq b { display: block; margin-bottom: 6px; font-weight: 600; }
+    .faq p { color: var(--text-sec); font-size: 14.5px; }
+
+    /* scroll reveal */
+    .js .rv { opacity: 0; transform: translateY(12px); transition: opacity .7s var(--ease) var(--d, 0ms), transform .7s var(--ease) var(--d, 0ms); }
+    .js .rv.in { opacity: 1; transform: none; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation: none !important; }
+      .js .rv { opacity: 1; transform: none; transition: none; }
+    }
   </style>
 </head>
 
 <body>
   <header class="nav">
     <div class="c">
-      <a class="brand" href="./" aria-label="LinkShell"><img src="assets/adaptive-icon.png" alt="" />LinkShell</a>
+      <a class="brand" href="./" aria-label="LinkShell"><img src="assets/adaptive-icon.png" alt="" width="26" height="26" />LinkShell</a>
       <nav>
         <a class="opt" href="#features"><span lang="zh">功能</span><span lang="en">Features</span></a>
         <a class="opt" href="#agents">Agents</a>
         <a href="docs/" data-page-link="docs"><span lang="zh">文档</span><span lang="en">Docs</span></a>
         <a href="pricing/" data-page-link="pricing"><span lang="zh">定价</span><span lang="en">Pricing</span></a>
-        <a class="opt" href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
-        <button class="lang" id="lang-toggle" type="button" aria-label="Switch language">EN</button>
       </nav>
+      <div class="nav-tools">
+        <a class="icon-btn gh" href="https://github.com/LiuTianjie/LinkShell" aria-label="GitHub">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+        <button class="icon-btn theme" id="theme-toggle" type="button" aria-label="Toggle light / dark">
+          <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77"/></svg>
+        </button>
+        <button class="lang" id="lang-toggle" type="button" aria-label="Switch language">EN</button>
+      </div>
     </div>
   </header>
 
   <!-- ═════════════════════════ HOME ═════════════════════════ -->
   <main class="page" data-page="home">
-    <div class="c hero">
-      <div>
-        <div class="badge"><span lang="zh">LinkShell 2.0 · 为 Agent 重新设计</span><span lang="en">LinkShell 2.0 · rebuilt around agents</span></div>
-        <h1><span lang="zh">离开电脑，<br /><em>Agent 接着干。</em></span><span lang="en">Leave your desk.<br /><em>Your agents keep going.</em></span></h1>
-        <p class="lead">
-          <span lang="zh">Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑，你在手机上看它实时干活、随时插话、一键审批，回到电脑前再接着用终端。代码不离开你的电脑，连接全程端到端加密。</span>
-          <span lang="en">Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, add a message any time, approve what they ask, and pick the session back up at your desk. Your code never leaves your machine, and the connection is end-to-end encrypted.</span>
-        </p>
-        <div class="btns">
-          <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
-            <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span>
-          </a>
-          <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
-            <span lang="zh">Android APK</span><span lang="en">Android APK</span>
-          </a>
-          <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
+    <div class="hero-wrap">
+      <div class="c hero">
+        <div>
+          <div class="tag"><span lang="zh">v2.0 · 为 Agent 重新设计</span><span lang="en">v2.0 · rebuilt around agents</span></div>
+          <h1><span lang="zh">离开电脑，<br />Agent 接着干。</span><span lang="en">Leave your desk.<br />Your agents<br />keep going.</span><i class="caret" aria-hidden="true"></i></h1>
+          <p class="lead">
+            <span lang="zh">Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑，你在手机上看它实时干活、随时插话、一键审批，回到电脑前再接着用终端。代码不离开你的电脑，连接全程端到端加密。</span>
+            <span lang="en">Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, add a message any time, approve what they ask, and pick the session back up at your desk. Your code never leaves your machine, and the connection is end-to-end encrypted.</span>
+          </p>
+          <div class="btns">
+            <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
+              <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span>
+            </a>
+            <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
+              Android APK
+            </a>
+            <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
+          </div>
+          <div class="cmd"><i>$</i><code>npm i -g linkshell-cli</code><button class="copy" type="button" data-copy="npm i -g linkshell-cli" aria-label="Copy"></button></div>
+          <div class="works">
+            <span lang="zh">支持</span><span lang="en">Works with</span>
+            <b>Claude Code</b><b>Codex</b><b>Gemini CLI</b><b>GitHub Copilot</b><b>OpenCode</b><b>Cursor</b><b>Grok</b>
+          </div>
         </div>
-        <div class="agents-strip">
-          <span lang="zh">支持</span><span lang="en">Works with</span>
-          <span class="pill">Claude Code</span><span class="pill">Codex</span><span class="pill">Gemini CLI</span><span class="pill">GitHub Copilot</span><span class="pill">OpenCode</span><span class="pill">Cursor</span><span class="pill">Grok</span>
+
+        <div class="stage" aria-hidden="true">
+          <div class="win">
+            <div class="win-bar"><i></i><i></i><i></i><span>weather-app — linkshell claude</span></div>
+            <div class="win-body">
+              <div><span class="k">$</span> linkshell claude</div>
+              <div>&nbsp;</div>
+              <div><span class="k">&gt;</span> <span lang="zh">修一下暗色模式的天气卡片</span><span lang="en">Fix the card in dark mode</span></div>
+              <div><span class="ok">●</span> Update(card.css) <span class="add">+5</span> <span class="del">−2</span></div>
+              <div><span class="ok">●</span> Bash(npm test) <span class="dim">6 passed</span></div>
+              <div class="takeover">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>
+                <div><b><span lang="zh">已由手机接管</span><span lang="en">Taken over by your phone</span></b><span><span lang="zh">按任意键收回到电脑</span><span lang="en">Press any key to take it back</span></span></div>
+              </div>
+            </div>
+          </div>
+          <div class="phone">
+            <img class="only-dark" src="assets/shots/android-session-dark.webp" alt="" width="640" height="1422" />
+            <img class="only-light" src="assets/shots/ios-session.webp" alt="" width="640" height="1391" />
+          </div>
+          <div class="tag">E2E · XChaCha20-Poly1305</div>
+          <div class="hud">
+            <div class="hud-top">
+              <span class="hud-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></span>
+              <div><b><span lang="zh">需要你的批准</span><span lang="en">Needs your approval</span></b><code>npm test</code></div>
+            </div>
+            <div class="hud-btns"><span><span lang="zh">拒绝</span><span lang="en">Deny</span></span><span class="yes"><span lang="zh">允许</span><span lang="en">Allow</span></span></div>
+          </div>
         </div>
-      </div>
-      <div class="phones" aria-hidden="true">
-        <div class="phone p2"><img src="assets/shots/ios-home.webp" alt="" width="640" height="1391" /></div>
-        <div class="phone p1"><img src="assets/shots/ios-session.webp" alt="" width="640" height="1391" /></div>
-        <div class="phone p3"><img src="assets/shots/android-session-dark.webp" alt="" width="640" height="1422" /></div>
       </div>
     </div>
 
-    <section class="sec" id="features">
+    <section class="sec strip">
       <div class="c">
-        <div class="eyebrow"><span lang="zh">功能</span><span lang="en">Features</span></div>
+        <div class="cells four stats">
+          <div><b>7</b><span><span lang="zh">种编程 Agent</span><span lang="en">coding agents</span></span></div>
+          <div><b>E2E</b><span>X25519 · XChaCha20-Poly1305</span></div>
+          <div><b>0</b><span><span lang="zh">个需要开放的端口</span><span lang="en">ports to open</span></span></div>
+          <div><b>MIT</b><span><span lang="zh">开源 · 网关可自建</span><span lang="en">open source · self-hostable</span></span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec flush" id="features">
+      <div class="c">
+        <div class="eyebrow"><b>01</b><span lang="zh">功能</span><span lang="en">Features</span></div>
         <h2><span lang="zh">不是远程桌面，是同一个会话换个地方继续</span><span lang="en">Not a remote desktop. The same session, somewhere else.</span></h2>
         <p class="sub"><span lang="zh">LinkShell 在电脑上托管 Agent 进程，电脑终端和手机都是同一个会话的窗口。手机上看到的是结构化的对话，不是一块缩小的屏幕。</span><span lang="en">LinkShell hosts the agent processes on your computer; your terminal and your phone are both windows onto the same session. The phone shows a real conversation, not a shrunken screen.</span></p>
 
-        <div class="feature">
-          <div class="copytext">
+        <div class="cells two">
+          <article class="feat">
+            <span class="ix"><b>A</b><span lang="zh">接力</span><span lang="en">Handoff</span></span>
             <h3><span lang="zh">电脑与手机之间接力</span><span lang="en">Hand off between desk and phone</span></h3>
             <p><span lang="zh">在终端里用 <code>linkshell claude</code> 开始工作。出门时在手机上发一条消息就接了过来；回到电脑前按任意键收回。同一个会话 ID，上下文一点不丢。</span><span lang="en">Start in your terminal with <code>linkshell claude</code>. Heading out? Send a message from your phone and the session moves with you; back at your desk, press any key to take it back. Same session ID, full context.</span></p>
             <ul>
@@ -377,52 +622,49 @@
               <li><span lang="zh">手机上选好的模型和思考强度，接管时自动生效</span><span lang="en">Model and effort chosen on the phone apply when it takes over</span></li>
               <li><span lang="zh">也可以直接在手机上新建会话，回家后在电脑上继续</span><span lang="en">Or start on the phone and continue on the computer later</span></li>
             </ul>
-          </div>
-          <div class="phone"><img src="assets/shots/ios-session.webp" alt="手机上继续的 Claude 会话：计划、改动与回复" loading="lazy" width="640" height="1391" /></div>
-        </div>
+            <div class="shot"><div class="phone"><img src="assets/shots/ios-session.webp" alt="手机上继续的 Claude 会话：计划、改动与回复" loading="lazy" width="640" height="1391" /></div></div>
+          </article>
 
-        <div class="feature flip">
-          <div class="copytext">
+          <article class="feat">
+            <span class="ix"><b>B</b><span lang="zh">插话与审批</span><span lang="en">Steer</span></span>
             <h3><span lang="zh">插话、排队、审批，都在手机上</span><span lang="en">Steer, queue and approve from your phone</span></h3>
             <p><span lang="zh">回复逐字出现，计划和工具调用实时更新。Agent 忙的时候也能发消息：Codex 和 Claude 直接插进当前这一轮，其他 Agent 排队，排队的消息可以撤回。需要权限时一键允许或拒绝，每个文件的改动都能看 diff。</span><span lang="en">Replies stream in word by word; plans and tool calls update live. Send a message while the agent is busy: Codex and Claude take it into the current turn, other agents queue it (and you can pull it back). Approve or deny in one tap, and read the diff of every file it changed.</span></p>
-          </div>
-          <div class="phone"><img src="assets/shots/ios-diff.webp" alt="改动页面里一个 CSS 文件的 diff" loading="lazy" width="640" height="1391" /></div>
-        </div>
+            <div class="shot"><div class="phone"><img src="assets/shots/ios-diff.webp" alt="改动页面里一个 CSS 文件的 diff" loading="lazy" width="640" height="1391" /></div></div>
+          </article>
 
-        <div class="feature">
-          <div class="copytext">
+          <article class="feat">
+            <span class="ix"><b>C</b><span lang="zh">终端</span><span lang="en">Terminal</span></span>
             <h3><span lang="zh">电脑上的真终端</span><span lang="en">A real terminal on your computer</span></h3>
             <p><span lang="zh">开一个终端跑 dev server、看日志、用 git。原生终端渲染，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断，回来接着看。</span><span lang="en">Open a terminal to run a dev server, tail logs or use git. Native terminal rendering with a Ctrl / Esc / Tab / arrow-key bar; it keeps running when you close the app.</span></p>
-          </div>
-          <div class="phone"><img src="assets/shots/ios-terminal.webp" alt="手机上运行 npm run dev 的终端" loading="lazy" width="640" height="1391" /></div>
-        </div>
+            <div class="shot"><div class="phone"><img src="assets/shots/ios-terminal.webp" alt="手机上运行 npm run dev 的终端" loading="lazy" width="640" height="1391" /></div></div>
+          </article>
 
-        <div class="feature flip">
-          <div class="copytext">
+          <article class="feat">
+            <span class="ix"><b>D</b><span lang="zh">本地预览</span><span lang="en">Preview</span></span>
             <h3><span lang="zh">在手机上打开 localhost</span><span lang="en">Open localhost on your phone</span></h3>
             <p><span lang="zh">电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作，还能全屏看。走同一条加密通道，不需要暴露端口，也不需要同一个 Wi-Fi。</span><span lang="en">Open your computer's <code>localhost:3000</code> right on the phone. Hot reload keeps working and it goes full screen. It travels over the same encrypted channel, so no open ports and no shared Wi-Fi needed.</span></p>
-          </div>
-          <div class="phone"><img src="assets/shots/ios-preview.webp" alt="在手机上预览电脑本地的天气应用" loading="lazy" width="640" height="1391" /></div>
+            <div class="shot"><div class="phone"><img src="assets/shots/ios-preview.webp" alt="在手机上预览电脑本地的天气应用" loading="lazy" width="640" height="1391" /></div></div>
+          </article>
         </div>
 
-        <div class="grid">
-          <div class="card">
-            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+        <div class="cells four">
+          <div class="mini">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
             <h3><span lang="zh">端到端加密</span><span lang="en">End-to-end encrypted</span></h3>
             <p><span lang="zh">网关只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</span><span lang="en">Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</span></p>
           </div>
-          <div class="card">
-            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg></div>
+          <div class="mini">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
             <h3><span lang="zh">会话管理</span><span lang="en">Tidy sessions</span></h3>
             <p><span lang="zh">重命名、归档、删除。Codex 和 Claude 的会话会同步到它们自己的记录里，<code>claude --resume</code> 也能看到新名字。</span><span lang="en">Rename, archive, delete. Codex and Claude sessions change in their own records too, so <code>claude --resume</code> shows the new name.</span></p>
           </div>
-          <div class="card">
-            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+          <div class="mini">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
             <h3><span lang="zh">看电脑屏幕、传文件</span><span lang="en">Screen and files</span></h3>
             <p><span lang="zh">随时看一眼电脑屏幕（需要 ffmpeg），把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Glance at the computer's screen (needs ffmpeg), and send photos and files from your phone into the project for the agent.</span></p>
           </div>
-          <div class="card">
-            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div>
+          <div class="mini">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
             <h3><span lang="zh">在哪都能连</span><span lang="en">Reachable anywhere</span></h3>
             <p><span lang="zh">Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。</span><span lang="en">Pro uses the official gateway: sign in and go. Or run your own with one command or Docker, free.</span></p>
           </div>
@@ -430,58 +672,52 @@
       </div>
     </section>
 
-    <section class="sec" id="agents">
+    <section class="sec flush" id="agents">
       <div class="c">
-        <div class="eyebrow">Agents</div>
+        <div class="eyebrow"><b>02</b>Agents</div>
         <h2><span lang="zh">每个 Agent 做到它能做到的最好</span><span lang="en">Each agent, as far as it can go</span></h2>
         <p class="sub"><span lang="zh">Agent 用你电脑上已经安装、已经登录的那一份。LinkShell 不经手任何 Agent 的账号和密钥。</span><span lang="en">Agents run as the copies already installed and signed in on your computer. LinkShell never touches their accounts or keys.</span></p>
-        <div class="tbl">
-          <table>
-            <thead>
-              <tr><th>Agent</th><th><span lang="zh">方式</span><span lang="en">Mode</span></th><th><span lang="zh">体验</span><span lang="en">What you get</span></th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Codex</td>
-                <td><span class="tier"><span lang="zh">多端同步</span><span lang="en">Shared</span></span></td>
-                <td><span lang="zh">用 <code>linkshell codex</code> 打开的终端和手机同时在线，任何一端都能发消息、打断、审批。</span><span lang="en">The terminal opened with <code>linkshell codex</code> and your phone are live at once; either can send, interrupt and approve.</span></td>
-              </tr>
-              <tr>
-                <td>Claude Code</td>
-                <td><span class="tier"><span lang="zh">接力</span><span lang="en">Handoff</span></span></td>
-                <td><span lang="zh">电脑上用原生界面（<code>linkshell claude</code>），手机发消息即接管，电脑按任意键收回。</span><span lang="en">Claude's own UI at your desk (<code>linkshell claude</code>); a message from the phone takes over, any key on the computer takes it back.</span></td>
-              </tr>
-              <tr>
-                <td>Gemini CLI · GitHub Copilot<br /><span class="muted">OpenCode · Cursor · Grok</span></td>
-                <td><span class="tier"><span lang="zh">远程会话</span><span lang="en">Remote</span></span></td>
-                <td><span lang="zh">通过 Agent Client Protocol 在手机上新建、继续会话，实时输出、审批、切换模式和模型。</span><span lang="en">Start and continue sessions from the phone over the Agent Client Protocol: live output, approvals, modes and models.</span></td>
-              </tr>
-              <tr>
-                <td><span lang="zh">任何命令行工具</span><span lang="en">Any CLI</span></td>
-                <td><span class="tier"><span lang="zh">终端</span><span lang="en">Terminal</span></span></td>
-                <td><span lang="zh">在电脑上开一个终端，手机上看和输入。</span><span lang="en">A terminal on the computer, viewed and typed into from the phone.</span></td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="spec">
+          <div class="spec-h"><span>Agent</span><span><span lang="zh">方式</span><span lang="en">Mode</span></span><span><span lang="zh">体验</span><span lang="en">What you get</span></span></div>
+          <div>
+            <h3>Codex</h3>
+            <span class="tag"><span lang="zh">多端同步</span><span lang="en">Shared</span></span>
+            <p><span lang="zh">用 <code>linkshell codex</code> 打开的终端和手机同时在线，任何一端都能发消息、打断、审批。</span><span lang="en">The terminal opened with <code>linkshell codex</code> and your phone are live at once; either can send, interrupt and approve.</span></p>
+          </div>
+          <div>
+            <h3>Claude Code</h3>
+            <span class="tag" style="--tint:var(--blue)"><span lang="zh">接力</span><span lang="en">Handoff</span></span>
+            <p><span lang="zh">电脑上用原生界面（<code>linkshell claude</code>），手机发消息即接管，电脑按任意键收回。</span><span lang="en">Claude's own UI at your desk (<code>linkshell claude</code>); a message from the phone takes over, any key on the computer takes it back.</span></p>
+          </div>
+          <div>
+            <h3>Gemini CLI · GitHub Copilot<small>OpenCode · Cursor · Grok</small></h3>
+            <span class="tag" style="--tint:var(--violet)"><span lang="zh">远程会话</span><span lang="en">Remote</span></span>
+            <p><span lang="zh">通过 Agent Client Protocol 在手机上新建、继续会话，实时输出、审批、切换模式和模型。</span><span lang="en">Start and continue sessions from the phone over the Agent Client Protocol: live output, approvals, modes and models.</span></p>
+          </div>
+          <div>
+            <h3><span lang="zh">任何命令行工具</span><span lang="en">Any CLI</span></h3>
+            <span class="tag" style="--tint:var(--text-muted)"><span lang="zh">终端</span><span lang="en">Terminal</span></span>
+            <p><span lang="zh">在电脑上开一个终端，手机上看和输入。</span><span lang="en">A terminal on the computer, viewed and typed into from the phone.</span></p>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="sec" id="install">
+    <section class="sec flush" id="install">
       <div class="c">
-        <div class="eyebrow"><span lang="zh">开始使用</span><span lang="en">Get started</span></div>
+        <div class="eyebrow"><b>03</b><span lang="zh">开始使用</span><span lang="en">Get started</span></div>
         <h2><span lang="zh">三步连上你的电脑</span><span lang="en">Three steps to your computer</span></h2>
         <p class="sub"><span lang="zh">电脑需要 macOS 或 Linux，以及 Node.js 22.13 或更新版本。</span><span lang="en">Your computer needs macOS or Linux and Node.js 22.13 or newer.</span></p>
-        <div class="steps">
+        <div class="cells three">
           <div class="step">
-            <div class="n">01</div>
+            <span class="ix"><b>01</b></span>
             <h3><span lang="zh">安装并启动</span><span lang="en">Install and start</span></h3>
             <p><span lang="zh">安装 CLI，在后台启动 LinkShell。它会托管电脑上的 Agent 会话。</span><span lang="en">Install the CLI and start LinkShell in the background. It hosts the agent sessions on this computer.</span></p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
 <span class="pr">$ </span>linkshell host --daemon</code></pre>
           </div>
           <div class="step">
-            <div class="n">02</div>
+            <span class="ix"><b>02</b></span>
             <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span></h3>
             <p><span lang="zh">Pro：电脑上登录，App 里登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Pro: sign in on the computer and in the app with the same account; the computer just appears. Own gateway: pair once with a QR code.</span></p>
             <pre><code><span class="cm"># Pro</span>
@@ -491,52 +727,92 @@
 <span class="pr">$ </span>linkshell pair</code></pre>
           </div>
           <div class="step">
-            <div class="n">03</div>
+            <span class="ix"><b>03</b></span>
             <h3><span lang="zh">开始工作</span><span lang="en">Get going</span></h3>
             <p><span lang="zh">在手机上新建会话；或者在电脑终端里这样启动 Agent，随时交给手机。</span><span lang="en">Start a session on the phone, or launch agents from your terminal like this to hand them over any time.</span></p>
             <pre><code><span class="pr">$ </span>linkshell claude
 <span class="pr">$ </span>linkshell codex</code></pre>
           </div>
-        </div>
-        <div class="install">
-          <p style="color:var(--text-sec);font-size:14px;margin:28px 0 8px"><span lang="zh">其他安装方式</span><span lang="en">Other ways to install</span></p>
-          <div class="tabs">
-            <button class="tab active" data-tab="i-brew" type="button">Homebrew</button>
-            <button class="tab" data-tab="i-curl" type="button">curl</button>
-          </div>
-          <div>
-            <div class="tab-pane active" id="tab-i-brew"><pre><code><span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell</code></pre></div>
-            <div class="tab-pane" id="tab-i-curl"><pre><code><span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre></div>
+          <div class="install span">
+            <p><span lang="zh">其他安装方式</span><span lang="en">Other ways to install</span></p>
+            <div class="tabs">
+              <button class="tab active" data-tab="i-brew" type="button">Homebrew</button>
+              <button class="tab" data-tab="i-curl" type="button">curl</button>
+            </div>
+            <div>
+              <div class="tab-pane active" id="tab-i-brew"><pre><code><span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell</code></pre></div>
+              <div class="tab-pane" id="tab-i-curl"><pre><code><span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre></div>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="sec" id="how">
+    <section class="sec flush" id="how">
       <div class="c">
-        <div class="eyebrow"><span lang="zh">工作原理</span><span lang="en">How it works</span></div>
+        <div class="eyebrow"><b>04</b><span lang="zh">工作原理</span><span lang="en">How it works</span></div>
         <h2><span lang="zh">Agent 留在你的电脑上</span><span lang="en">The agents stay on your computer</span></h2>
         <p class="sub"><span lang="zh">电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。手机通过网关连进来，网关只负责把加密后的数据转过去。</span><span lang="en">LinkShell on your computer holds every session, keeps its history and decides who is driving right now. The phone connects through a gateway that only passes encrypted data along.</span></p>
-        <div class="flow">
-          <div class="node"><b><span lang="zh">手机 App</span><span lang="en">Phone app</span></b><span>iOS · Android</span></div>
-          <div class="arrow"><span lang="zh">密文</span><span lang="en">ciphertext</span></div>
-          <div class="node"><b><span lang="zh">网关</span><span lang="en">Gateway</span></b><span><span lang="zh">官方或自建 · 只转发</span><span lang="en">official or yours · relay only</span></span></div>
-          <div class="arrow">WebSocket</div>
-          <div class="node host"><b><span lang="zh">你的电脑</span><span lang="en">Your computer</span></b><span><span lang="zh">LinkShell host → Claude Code、Codex、ACP Agent、终端、本地端口</span><span lang="en">LinkShell host → Claude Code, Codex, ACP agents, terminals, local ports</span></span></div>
+        <div class="cells">
+          <div class="diagram">
+            <div class="flow">
+              <div class="node">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>
+                <small>Client</small>
+                <b><span lang="zh">手机 App</span><span lang="en">Phone app</span></b><span>iOS · Android</span>
+              </div>
+              <div class="wire"><span><span lang="zh">密文</span><span lang="en">ciphertext</span></span></div>
+              <div class="node">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+                <small>Relay</small>
+                <b><span lang="zh">网关</span><span lang="en">Gateway</span></b><span><span lang="zh">官方或自建 · 只转发</span><span lang="en">official or yours · relay only</span></span>
+              </div>
+              <div class="wire"><span>WebSocket</span></div>
+              <div class="node host">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                <small>Host</small>
+                <b><span lang="zh">你的电脑</span><span lang="en">Your computer</span></b><span>LinkShell host</span>
+                <div class="chips"><span>Claude Code</span><span>Codex</span><span><span lang="zh">ACP Agent</span><span lang="en">ACP agents</span></span><span><span lang="zh">终端</span><span lang="en">Terminals</span></span><span><span lang="zh">本地端口</span><span lang="en">Local ports</span></span></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="sec" style="text-align:center">
+    <section class="sec strip">
       <div class="c">
-        <h2 style="font-size:24px">Sponsors</h2>
-        <p class="sub" style="margin:10px auto 24px"><span lang="zh">感谢以下赞助商对 LinkShell 的支持。</span><span lang="en">Thanks to our sponsors for supporting LinkShell.</span></p>
-        <a class="sponsor" href="https://ai18n.chat/"><b style="font-size:18px">AI18N</b><span style="display:block;color:var(--text-sec);font-size:14px">Unified AI API Gateway</span></a>
-        <h2 style="font-size:24px;margin-top:64px">Buy Me a Coffee</h2>
-        <p class="sub" style="margin:10px auto 0"><span lang="zh">如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。</span><span lang="en">If LinkShell helps you, you can buy the author a coffee.</span></p>
-        <div class="donate-qr">
-          <figure><img src="assets/pay_wechat.jpg" alt="WeChat Pay" loading="lazy" /><figcaption><span lang="zh">微信支付</span><span lang="en">WeChat Pay</span></figcaption></figure>
-          <figure><img src="assets/pay_ali.jpg" alt="Alipay" loading="lazy" /><figcaption><span lang="zh">支付宝</span><span lang="en">Alipay</span></figcaption></figure>
+        <div class="cells two support">
+          <div>
+            <h2>Sponsors</h2>
+            <p><span lang="zh">感谢以下赞助商对 LinkShell 的支持。</span><span lang="en">Thanks to our sponsors for supporting LinkShell.</span></p>
+            <a class="sponsor" href="https://ai18n.chat/">
+              <div><b>AI18N</b><span>Unified AI API Gateway</span></div>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>
+            </a>
+          </div>
+          <div>
+            <h2>Buy Me a Coffee</h2>
+            <p><span lang="zh">如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。</span><span lang="en">If LinkShell helps you, you can buy the author a coffee.</span></p>
+            <div class="donate-qr">
+              <figure><img src="assets/pay_wechat.jpg" alt="WeChat Pay" loading="lazy" /><figcaption><span lang="zh">微信支付</span><span lang="en">WeChat Pay</span></figcaption></figure>
+              <figure><img src="assets/pay_ali.jpg" alt="Alipay" loading="lazy" /><figcaption><span lang="zh">支付宝</span><span lang="en">Alipay</span></figcaption></figure>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec cta">
+      <div class="c">
+        <i aria-hidden="true"></i>
+        <img src="assets/adaptive-icon.png" alt="" width="60" height="60" loading="lazy" />
+        <h2><span lang="zh">下次离开电脑，把会话带上</span><span lang="en">Next time you leave your desk, take the session along</span></h2>
+        <p><span lang="zh">全部功能免费，自建网关一条命令就能跑起来。</span><span lang="en">Every feature is free, and your own gateway is one command away.</span></p>
+        <div class="btns">
+          <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516"><span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span></a>
+          <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
+          <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
         </div>
       </div>
     </section>
@@ -638,6 +914,7 @@
   <main class="page" data-page="pricing">
     <section class="sec">
       <div class="c">
+        <i aria-hidden="true"></i>
         <div class="eyebrow"><span lang="zh">定价</span><span lang="en">Pricing</span></div>
         <h2><span lang="zh">所有功能都免费</span><span lang="en">Every feature is free</span></h2>
         <p class="sub"><span lang="zh">Pro 只多一件事：用官方网关，不用自己部署服务器。</span><span lang="en">Pro adds one thing: the official gateway, so you don't run a server.</span></p>
@@ -645,7 +922,7 @@
         <div class="pricing-grid">
           <div class="pricing-card">
             <div class="plan-name">Free</div>
-            <div class="plan-price">$0</div>
+            <div class="plan-price">¥0</div>
             <div class="plan-period"><span lang="zh">永久免费</span><span lang="en">Free forever</span></div>
             <ul class="plan-features">
               <li><span lang="zh">全部 Agent、接力、审批、终端、预览</span><span lang="en">All agents, handoff, approvals, terminal, previews</span></li>
@@ -663,9 +940,9 @@
               <button class="cycle-btn active" data-cycle="monthly" type="button" onclick="setPricingCycle('monthly')"><span lang="zh">月付</span><span lang="en">Monthly</span></button>
               <button class="cycle-btn" data-cycle="yearly" type="button" onclick="setPricingCycle('yearly')"><span lang="zh">年付</span><span lang="en">Yearly</span></button>
             </div>
-            <div id="price-monthly" class="plan-price">$1<small> /mo</small></div>
-            <div id="price-yearly" class="plan-price" style="display:none">$12<small> /yr</small></div>
-            <div class="plan-period"><span id="price-alt-monthly"><span lang="zh">或 ¥9.9/月（爱发电）</span><span lang="en">or ¥9.9/month (Afdian)</span></span><span id="price-alt-yearly" style="display:none"><span lang="zh">或 ¥99/年（爱发电）</span><span lang="en">or ¥99/year (Afdian)</span></span></div>
+            <div id="price-monthly" class="plan-price">¥9.9<small> <span lang="zh">/月</span><span lang="en">/mo</span></small></div>
+            <div id="price-yearly" class="plan-price" style="display:none">¥99<small> <span lang="zh">/年</span><span lang="en">/yr</span></small></div>
+            <div class="plan-period"><span id="price-alt-monthly"><span lang="zh">或年付 ¥99</span><span lang="en">or ¥99 billed yearly</span></span><span id="price-alt-yearly" style="display:none"><span lang="zh">相当于 ¥8.25/月</span><span lang="en">works out to ¥8.25/month</span></span></div>
             <ul class="plan-features">
               <li><span lang="zh">Free 的全部功能</span><span lang="en">Everything in Free</span></li>
               <li><span lang="zh">官方网关，不用部署服务器</span><span lang="en">The official gateway, no server to run</span></li>
@@ -686,11 +963,14 @@
               </div>
               <div id="pricing-payment" style="display:none">
                 <div class="pay-tabs">
-                  <button class="pay-tab active" type="button" onclick="setPayMethod('paypal')">PayPal</button>
-                  <button class="pay-tab" type="button" onclick="setPayMethod('afdian')"><span lang="zh">爱发电</span><span lang="en">Afdian</span></button>
+                  <button class="pay-tab active" data-method="afdian" type="button" onclick="setPayMethod('afdian')"><span lang="zh">爱发电</span><span lang="en">Afdian</span></button>
+                  <button class="pay-tab" data-method="paypal" type="button" onclick="setPayMethod('paypal')">PayPal</button>
                 </div>
-                <div id="pay-paypal"><div id="paypal-button-container"></div></div>
-                <div id="pay-afdian" style="display:none">
+                <div id="pay-paypal" style="display:none">
+                  <div id="paypal-button-container"></div>
+                  <p style="color:var(--text-muted);font-size:12px;margin-top:8px;text-align:center"><span lang="zh">PayPal 按外币结算，金额以 PayPal 页面为准</span><span lang="en">PayPal bills in a foreign currency; the amount is shown on PayPal's page</span></p>
+                </div>
+                <div id="pay-afdian">
                   <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian" style="margin-bottom:8px"><span lang="zh">前往爱发电支付 ↗</span><span lang="en">Pay on Afdian ↗</span></a>
                   <button class="auth-btn" type="button" style="background:var(--surface-2);color:var(--text)" onclick="pricingRefreshPlan()"><span lang="zh">支付完成？点击刷新状态</span><span lang="en">Paid? Click to refresh status</span></button>
                   <p style="color:var(--text-muted);font-size:12px;margin-top:8px;text-align:center"><span lang="zh">支付后请点击刷新按钮同步订阅状态</span><span lang="en">After paying, refresh to sync your subscription</span></p>
@@ -718,7 +998,10 @@
 
   <footer>
     <div class="c">
-      <span><b style="color:var(--text)">LinkShell</b> · <span lang="zh">出于对 Vibe Coding 的热爱。© 2026，MIT 开源。</span><span lang="en">Made for the love of vibe coding. © 2026, MIT licensed.</span></span>
+      <div class="who">
+        <a class="brand" href="./"><img src="assets/adaptive-icon.png" alt="" width="22" height="22" loading="lazy" />LinkShell</a>
+        <span><span lang="zh">出于对 Vibe Coding 的热爱。© 2026，MIT 开源。</span><span lang="en">Made for the love of vibe coding. © 2026, MIT licensed.</span></span>
+      </div>
       <nav>
         <a href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
         <a href="docs/"><span lang="zh">文档</span><span lang="en">Docs</span></a>
@@ -746,6 +1029,13 @@
     })();
     document.getElementById('lang-toggle').addEventListener('click', () => applyLanguage(currentLang === 'zh' ? 'en' : 'zh'));
 
+    // ── Theme ──
+    document.getElementById('theme-toggle').addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem('linkshell-theme', next); } catch { }
+    });
+
     // ── Tabs ──
     document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -759,22 +1049,66 @@
     });
 
     // ── Copy buttons on commands ──
+    const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    const ICON_DONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
     document.querySelectorAll('pre').forEach((pre) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'code';
+      pre.replaceWith(wrap);
+      wrap.appendChild(pre);
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'copy';
-      button.textContent = 'Copy';
+      button.setAttribute('aria-label', 'Copy');
+      button.innerHTML = ICON_COPY;
       button.addEventListener('click', async () => {
         const text = [...pre.querySelectorAll('code')].map((code) => {
           const clone = code.cloneNode(true);
           clone.querySelectorAll('.pr, .cm, [lang]:not([lang="' + currentLang + '"])').forEach((n) => n.remove());
           return clone.textContent;
         }).join('\n').split('\n').map((l) => l.trimEnd()).filter(Boolean).join('\n');
-        try { await navigator.clipboard.writeText(text); button.textContent = '✓'; } catch { button.textContent = '—'; }
-        setTimeout(() => (button.textContent = 'Copy'), 1400);
+        try { await navigator.clipboard.writeText(text); button.innerHTML = ICON_DONE; button.classList.add('ok'); } catch { }
+        setTimeout(() => { button.innerHTML = ICON_COPY; button.classList.remove('ok'); }, 1400);
       });
-      pre.appendChild(button);
+      wrap.appendChild(button);
     });
+    document.querySelectorAll('.copy[data-copy]').forEach((button) => {
+      button.innerHTML = ICON_COPY;
+      button.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(button.dataset.copy); button.innerHTML = ICON_DONE; button.classList.add('ok'); } catch { }
+        setTimeout(() => { button.innerHTML = ICON_COPY; button.classList.remove('ok'); }, 1400);
+      });
+    });
+
+    // ── Reveal on scroll ──
+    if ('IntersectionObserver' in window) {
+      const reveal = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          entry.target.classList.add('in');
+          reveal.unobserve(entry.target);
+        });
+      }, { rootMargin: '0px 0px -8% 0px' });
+      document.querySelectorAll('[data-page="home"] .sec > .c > :is(.eyebrow, h2, .sub, p, img, .btns), [data-page="home"] .cells > *, [data-page="home"] .spec > div').forEach((el) => {
+        const order = [...el.parentElement.children].filter((n) => n.className === el.className).indexOf(el);
+        el.style.setProperty('--d', Math.min(order, 3) * 70 + 'ms');
+        el.classList.add('rv');
+        reveal.observe(el);
+      });
+      document.documentElement.classList.add('js');
+    }
+
+    // ── Docs: highlight the section being read ──
+    const tocLinks = [...document.querySelectorAll('.toc a')];
+    if (tocLinks.length && 'IntersectionObserver' in window) {
+      const spy = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          tocLinks.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + entry.target.id));
+        });
+      }, { rootMargin: '-90px 0px -70% 0px' });
+      document.querySelectorAll('.doc h2[id]').forEach((h) => spy.observe(h));
+    }
 
     // ── Pages: /, /docs/, /pricing/ (and #docs, #pricing) ──
     const pages = document.querySelectorAll('main.page');
@@ -819,7 +1153,7 @@
     let supabaseClient = null;
     let pricingUser = null;
     let pricingCycle = 'monthly';
-    let pricingPayMethod = 'paypal';
+    let pricingPayMethod = 'afdian';
     let paypalLoaded = false;
 
     function getSupabase() {
@@ -842,9 +1176,7 @@
 
     function setPayMethod(method) {
       pricingPayMethod = method;
-      const tabs = document.querySelectorAll('.pay-tab');
-      tabs[0].classList.toggle('active', method === 'paypal');
-      tabs[1].classList.toggle('active', method === 'afdian');
+      document.querySelectorAll('.pay-tab').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
       document.getElementById('pay-paypal').style.display = method === 'paypal' ? '' : 'none';
       document.getElementById('pay-afdian').style.display = method === 'afdian' ? '' : 'none';
       if (method === 'paypal') renderPaypal();
