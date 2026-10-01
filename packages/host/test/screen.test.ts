@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { AccessUnitSplitter, ScreenShare, endCapture } from "../src/screen.js";
+import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture } from "../src/screen.js";
 
 const nal = (type: number, ...body: number[]) => [0, 0, 0, 1, type, ...body];
 const aud = () => nal(9, 0xf0);
@@ -18,6 +18,20 @@ describe("ending a capture", () => {
     const gone = new Promise<NodeJS.Signals | null>((resolve) => polite.once("exit", (_code, signal) => resolve(signal)));
     endCapture(polite);
     expect(await gone).toBe("SIGTERM");
+  });
+});
+
+describe("what is captured", () => {
+  it("is capped at the profile's frame rate, and lighter when a gateway relays it", () => {
+    const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
+    const full = captureArgs(1);
+    const low = captureArgs(1, "low");
+    // The frame rate is enforced by a filter: the capture device doesn't honour the one it is asked for.
+    expect(value(full, "-vf")).toMatch(/^fps=20,scale='min\(1600,iw\)'/);
+    expect(value(low, "-vf")).toMatch(/^fps=12,scale='min\(1280,iw\)'/);
+    expect([value(full, "-b:v"), value(low, "-b:v")]).toEqual(["3M", "900k"]);
+    // A keyframe every two seconds either way, so a viewer that fell behind can catch up.
+    expect([value(full, "-g"), value(low, "-g")]).toEqual(["40", "24"]);
   });
 });
 

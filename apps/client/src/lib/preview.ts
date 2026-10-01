@@ -1,4 +1,4 @@
-import type { HostLink } from "@linkshell/client-core";
+import type { HostStream, HostStreams } from "@linkshell/client-core";
 import { Buffer } from "buffer";
 import * as Device from "expo-device";
 import TcpSocket from "react-native-tcp-socket";
@@ -35,57 +35,39 @@ function listen(server: Server, port: number): Promise<number> {
 /**
  * Starts forwarding `port` on the computer to the phone's loopback. Keeps
  * the port number when it's free here, so absolute `localhost:<port>` URLs
- * inside the page still resolve.
+ * inside the page still resolve. Each connection is a stream of `streams`:
+ * peer to peer when the computer can be reached directly, through the
+ * gateway otherwise.
  */
-export async function forwardPort(link: HostLink, port: number): Promise<Forward> {
-  const sockets = new Map<string, Socket>();
-  const pending = new Set<Socket>();
-
-  const offData = link.on("proxy.data", ({ streamId, data }) => sockets.get(streamId)?.write(Buffer.from(data, "base64")));
-  const offClosed = link.on("proxy.closed", ({ streamId }) => {
-    const socket = sockets.get(streamId);
-    sockets.delete(streamId);
-    socket?.end();
-  });
-  // The channel dropped: the computer already closed its ends.
-  const offStatus = link.onStatus((status) => {
-    if (status === "online") return;
-    for (const socket of [...sockets.values(), ...pending]) socket.destroy();
-    sockets.clear();
-    pending.clear();
-  });
+export async function forwardPort(streams: HostStreams, port: number): Promise<Forward> {
+  const sockets = new Set<Socket>();
 
   const server = TcpSocket.createServer((socket) => {
-    pending.add(socket);
-    let streamId: string | undefined;
+    sockets.add(socket);
+    let stream: HostStream | undefined;
     let queue: Buffer[] = [];
     let ended = false;
-    const send = (chunk: Buffer) => {
-      void link.call("proxy.write", { streamId: streamId!, data: chunk.toString("base64") }).catch(() => socket.destroy());
-    };
     socket.on("data", (data) => {
       const chunk = typeof data === "string" ? Buffer.from(data) : Buffer.from(data);
-      if (streamId) send(chunk);
+      if (stream) stream.write(chunk);
       else queue.push(chunk);
     });
-    const hangUp = () => {
+    socket.on("close", () => {
       ended = true;
-      pending.delete(socket);
-      if (streamId && sockets.delete(streamId)) void link.call("proxy.close", { streamId }).catch(() => {});
-    };
-    socket.on("close", hangUp);
+      sockets.delete(socket);
+      stream?.close();
+    });
     socket.on("error", () => socket.destroy());
-    link
-      .call("proxy.open", { port })
-      .then((result) => {
-        pending.delete(socket);
-        if (ended) {
-          void link.call("proxy.close", { streamId: result.streamId }).catch(() => {});
-          return;
-        }
-        streamId = result.streamId;
-        sockets.set(streamId, socket);
-        for (const chunk of queue) send(chunk);
+    streams
+      .open(port, {
+        data: (bytes) => socket.write(Buffer.from(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength)),
+        // The computer's end closed, or the path under the stream went away.
+        closed: (error) => (error ? socket.destroy() : socket.end()),
+      })
+      .then((opened) => {
+        if (ended) return opened.close();
+        stream = opened;
+        for (const chunk of queue) opened.write(chunk);
         queue = [];
       })
       .catch(() => socket.destroy());
@@ -105,12 +87,8 @@ export async function forwardPort(link: HostLink, port: number): Promise<Forward
     localPort,
     url: `http://127.0.0.1:${localPort}/`,
     stop() {
-      offData();
-      offClosed();
-      offStatus();
-      for (const socket of [...sockets.values(), ...pending]) socket.destroy();
+      for (const socket of sockets) socket.destroy();
       sockets.clear();
-      pending.clear();
       server.close();
     },
   };

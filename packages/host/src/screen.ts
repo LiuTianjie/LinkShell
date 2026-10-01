@@ -20,8 +20,15 @@ export interface Display {
   name: string;
 }
 
-const FPS = 20;
-const MAX_WIDTH = 1600;
+/**
+ * How the picture is sent. `full` when it goes straight to the device; `low`
+ * when it is relayed by a gateway, which should carry messages rather than video.
+ */
+const PROFILES = {
+  full: { fps: 20, width: 1600, bitrate: "3M", ceiling: "4M" },
+  low: { fps: 12, width: 1280, bitrate: "900k", ceiling: "1300k" },
+} as const;
+export type ScreenProfile = keyof typeof PROFILES;
 
 async function hasFfmpeg(): Promise<boolean> {
   return run("ffmpeg", ["-hide_banner", "-version"], { timeout: 5000 }).then(
@@ -44,15 +51,19 @@ async function listDisplays(): Promise<Display[]> {
   return displays;
 }
 
-function captureArgs(display: number): string[] {
+export function captureArgs(display: number, quality: ScreenProfile = "full"): string[] {
+  const profile = PROFILES[quality];
   const input =
     process.platform === "darwin"
-      ? ["-f", "avfoundation", "-capture_cursor", "1", "-framerate", String(FPS), "-i", `${display}:none`]
-      : ["-f", "x11grab", "-framerate", String(FPS), "-i", process.env.DISPLAY ?? ":0"];
+      ? ["-f", "avfoundation", "-capture_cursor", "1", "-framerate", String(profile.fps), "-i", `${display}:none`]
+      : ["-f", "x11grab", "-framerate", String(profile.fps), "-i", process.env.DISPLAY ?? ":0"];
   const encode =
     process.platform === "darwin"
-      ? ["-c:v", "h264_videotoolbox", "-realtime", "1", "-profile:v", "baseline", "-b:v", "3M", "-maxrate", "4M"]
-      : ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline", "-x264-params", "sliced-threads=0"];
+      ? ["-c:v", "h264_videotoolbox", "-realtime", "1", "-profile:v", "baseline", "-b:v", profile.bitrate, "-maxrate", profile.ceiling]
+      : [
+          "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline", "-x264-params", "sliced-threads=0",
+          "-b:v", profile.bitrate, "-maxrate", profile.ceiling, "-bufsize", profile.ceiling,
+        ];
   return [
     "-hide_banner",
     "-loglevel",
@@ -61,10 +72,10 @@ function captureArgs(display: number): string[] {
     "-vf",
     // AVFoundation captures a screen at its refresh rate whatever -framerate asks (120 a second on a
     // ProMotion display): the frames are dropped here, before the encoder and the network pay for them.
-    `fps=${FPS},scale='min(${MAX_WIDTH},iw)':-2,format=yuv420p`,
+    `fps=${profile.fps},scale='min(${profile.width},iw)':-2,format=yuv420p`,
     ...encode,
     "-g",
-    String(FPS * 2),
+    String(profile.fps * 2),
     "-bf",
     "0",
     // An access-unit delimiter before every frame, so the stream splits into frames cleanly.
@@ -249,7 +260,8 @@ export class ScreenShare {
         socket.destroy();
         return;
       }
-      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN)));
+      const quality: ScreenProfile = url.searchParams.get("q") === "low" ? "low" : "full";
+      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), quality));
     });
     this.server = server;
     return new Promise((resolve, reject) => {
@@ -264,8 +276,8 @@ export class ScreenShare {
     return this.token.length > 0 && given.length === expected.length && timingSafeEqual(given, expected);
   }
 
-  private stream(ws: WebSocket, display: number): void {
-    const capture = spawn("ffmpeg", captureArgs(Number.isFinite(display) ? display : 0), { stdio: ["ignore", "pipe", "pipe"] });
+  private stream(ws: WebSocket, display: number, quality: ScreenProfile): void {
+    const capture = spawn("ffmpeg", captureArgs(Number.isFinite(display) ? display : 0, quality), { stdio: ["ignore", "pipe", "pipe"] });
     this.captures.add(capture);
     const splitter = new AccessUnitSplitter();
     let errors = "";

@@ -44,7 +44,7 @@ function ToolbarButton({ icon, label, disabled, onPress }: { icon: Pick<IconProp
 export function PreviewScreen() {
   const params = useLocalSearchParams<{ port: string; title?: string }>();
   const port = Number(params.port);
-  const { link } = useConnection();
+  const { streams } = useConnection();
   const insets = useSafeAreaInsets();
   const web = useRef<WebView>(null);
   const [forward, setForward] = useState<Forward | null>(null);
@@ -60,7 +60,7 @@ export function PreviewScreen() {
   useEffect(() => {
     let active: Forward | undefined;
     let cancelled = false;
-    forwardPort(link, port)
+    forwardPort(streams, port)
       .then((started) => {
         if (cancelled) started.stop();
         else {
@@ -73,7 +73,7 @@ export function PreviewScreen() {
       cancelled = true;
       active?.stop();
     };
-  }, [link, port]);
+  }, [streams, port]);
 
   // Shown as the computer's address, not the phone's loopback.
   const shown = (url: string | undefined) => {

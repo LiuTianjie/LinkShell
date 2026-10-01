@@ -1,5 +1,5 @@
 import { setHostHome } from "@/lib/format";
-import { createContext, use, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, use, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AppState } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { useStore } from "zustand";
@@ -7,7 +7,9 @@ import { useShallow } from "zustand/react/shallow";
 import {
   createClientStore,
   HostLink,
+  HostStreams,
   TunnelSocket,
+  type StreamPath,
   type ClientActions,
   type ClientState,
   type ClientStore,
@@ -16,6 +18,7 @@ import { relayFor, reconnectRelays, selectedComputer, startRelays, useComputers,
 import { deviceIdentity } from "./identity";
 import { DEFAULT_HOST_URL } from "./settings";
 import { createSocket } from "./socket";
+import { directConnector } from "./direct";
 
 type Client = ClientState & ClientActions;
 
@@ -27,6 +30,8 @@ interface Connection {
   url: string;
   link: HostLink;
   store: ClientStore;
+  /** Streams to the computer's ports (previews, the screen), peer to peer when that can be. */
+  streams: HostStreams;
 }
 
 interface ConnectionContextValue {
@@ -60,10 +65,14 @@ function createConnection(computer: Computer): Connection {
   const store = createClientStore(link, { newId: randomUUID, lazyImages: true });
   // Paths render as ~/… with this computer's home, set before anything renders them.
   setHostHome(undefined);
+  const streams = new HostStreams(link, { connector: directConnector, iceServers: () => store.getState().machine?.direct?.iceServers });
   store.subscribe((state, previous) => {
-    if (state.machine !== previous.machine) setHostHome(state.machine?.home);
+    if (state.machine === previous.machine) return;
+    setHostHome(state.machine?.home);
+    // The computer just said whether it can go direct, and how.
+    streams.connect();
   });
-  return { key: computer.key, computer, url, link, store };
+  return { key: computer.key, computer, url, link, store, streams };
 }
 
 export function ClientProvider({ children }: { children: ReactNode }) {
@@ -86,14 +95,17 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     const { store, link } = connection;
     if (connection.key === NO_COMPUTER_KEY) return;
     store.getState().connect();
+    connection.streams.start();
     // Sockets die quietly in the background; come back as soon as the app does.
     const subscription = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
       reconnectRelays();
       link.reconnectNow();
+      connection.streams.connect();
     });
     return () => {
       subscription.remove();
+      connection.streams.stop();
       store.getState().disconnect();
     };
   }, [connection]);
@@ -125,7 +137,16 @@ export function useHasComputer(): boolean {
 
 export function useConnection() {
   const { connection, setUrl } = useConnectionContext();
-  return { url: connection.url, computer: connection.computer, link: connection.link, setUrl };
+  return { url: connection.url, computer: connection.computer, link: connection.link, streams: connection.streams, setUrl };
+}
+
+/** The path streams opened now would take: peer to peer, or through the gateway. */
+export function useStreamPath(): StreamPath {
+  const { streams } = useConnectionContext().connection;
+  return useSyncExternalStore(
+    (notify) => streams.onPath(notify),
+    () => streams.path,
+  );
 }
 
 /** Selects from the client store; the selector must return stable values. */

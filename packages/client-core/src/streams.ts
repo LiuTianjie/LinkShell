@@ -82,27 +82,26 @@ export class HostStreams {
   private readonly directed = new Map<number, StreamHandlers>();
   /** Frames for a direct stream whose `proxy.open` hasn't answered yet (a server that speaks first). */
   private readonly early = new Map<number, DirectFrame[]>();
-  private readonly offs: (() => void)[] = [];
 
   constructor(
     private readonly link: HostLink,
     private readonly options: HostStreamsOptions,
   ) {
-    this.offs.push(
-      link.on("proxy.data", ({ streamId, data }) => this.relayed.get(streamId)?.data(base64.decode(data))),
-      link.on("proxy.closed", ({ streamId, error }) => {
-        const handlers = this.relayed.get(streamId);
-        this.relayed.delete(streamId);
-        handlers?.closed(error);
-      }),
-      link.onStatus((status) => {
-        if (status === "online") return;
-        // The channel dropped: the computer already closed its ends, and the direct channel was made through it.
-        this.dropRelayed("连接已断开");
-        this.dropDirect();
-      }),
-      link.onOnline(() => this.connect()),
-    );
+    link.on("proxy.data", ({ streamId, data }) => this.relayed.get(streamId)?.data(base64.decode(data)));
+    link.on("proxy.closed", ({ streamId, error }) => {
+      const handlers = this.relayed.get(streamId);
+      this.relayed.delete(streamId);
+      handlers?.closed(error);
+    });
+    link.onStatus((status) => {
+      if (status === "online") return;
+      // The channel dropped: the computer already closed its ends, and the direct channel was made through it.
+      this.dropRelayed("连接已断开");
+      const connection = this.connection;
+      this.dropDirect();
+      connection?.close();
+    });
+    link.onOnline(() => this.connect());
     if (link.status === "online") this.connect();
   }
 
@@ -200,10 +199,17 @@ export class HostStreams {
     };
   }
 
+  /** Looks for a direct path again after `stop` (an app coming back to a connection it had put down). */
+  start(): void {
+    this.stopped = false;
+    this.connect();
+  }
+
+  /** Ends every stream and the direct connection; nothing is tried until `start`. */
   stop(): void {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
-    for (const off of this.offs) off();
+    this.retryTimer = undefined;
     this.dropRelayed();
     const connection = this.connection;
     this.dropDirect();

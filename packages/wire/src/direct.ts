@@ -15,7 +15,7 @@ export const DIRECT_CHUNK = 16 * 1024;
  * STUN servers used when a host names none: they only tell each side its
  * public address. (Several, because none of them is reachable everywhere.)
  */
-export const DEFAULT_ICE_SERVERS = ["stun:stun.cloudflare.com:3478", "stun:stun.miwifi.com:3478", "stun:stun.l.google.com:19302"];
+export const DEFAULT_ICE_SERVERS = ["stun:stun.cloudflare.com:3478", "stun:stun.chat.bilibili.com:3478", "stun:stun.l.google.com:19302"];
 
 export type DirectFrame =
   | { type: "data"; stream: number; data: Uint8Array }

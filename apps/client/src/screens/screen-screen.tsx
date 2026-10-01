@@ -5,7 +5,7 @@ import { WebView } from "react-native-webview";
 import { Button } from "@/components/button";
 import { HeaderActions } from "@/components/header-actions";
 import { Icon } from "@/components/icon";
-import { useConnection } from "@/lib/client";
+import { useConnection, useStreamPath } from "@/lib/client";
 import { forwardPort, type Forward } from "@/lib/preview";
 import { type } from "@/theme/type";
 
@@ -20,20 +20,32 @@ interface Viewer {
  * opened through the encrypted forwarder like a port preview.
  */
 export function ScreenScreen() {
-  const { link } = useConnection();
+  const { link, streams, computer } = useConnection();
+  const path = useStreamPath();
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [display, setDisplay] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // The path the picture is on. It follows `path` to the direct channel when
+  // one comes up (the stream is opened again there), and back when it is lost;
+  // while a direct path is still being looked for, the start waits a moment for it.
+  const [via, setVia] = useState<"direct" | "relay" | null>(path === "connecting" ? null : path);
+  useEffect(() => {
+    if (path !== "connecting") return setVia(path);
+    const timer = setTimeout(() => setVia((current) => current ?? "relay"), 3000);
+    return () => clearTimeout(timer);
+  }, [path]);
 
   useEffect(() => {
+    if (!via) return;
     let started: Forward | undefined;
     let cancelled = false;
     setFailure(null);
+    setViewer(null);
     link
       .call("screen.start", {}, 20_000)
       .then(async ({ port, token, displays }) => {
-        const forward = await forwardPort(link, port);
+        const forward = await forwardPort(streams, port);
         if (cancelled) return forward.stop();
         started = forward;
         setViewer({ forward, token, displays });
@@ -44,10 +56,12 @@ export function ScreenScreen() {
       cancelled = true;
       started?.stop();
     };
-  }, [link, attempt]);
+  }, [link, streams, attempt, via]);
 
   const current = viewer?.displays.find((entry) => entry.index === display);
-  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}` : null;
+  // Through a gateway the picture is lighter: it is someone's relay, not a wire between the two devices.
+  const quality = via === "relay" && computer.kind !== "direct" ? "&q=low" : "";
+  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}` : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000000" }}>
@@ -57,8 +71,10 @@ export function ScreenScreen() {
           headerTitle: () => (
             <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start" }}>
               <Text style={[type.headline, { color: "#ffffff" }]}>电脑屏幕</Text>
-              {current && (viewer?.displays.length ?? 0) > 1 ? (
-                <Text style={[type.caption, { color: "rgba(255,255,255,0.6)" }]}>{current.name}</Text>
+              {viewer ? (
+                <Text style={[type.caption, { color: "rgba(255,255,255,0.6)" }]}>
+                  {[current && viewer.displays.length > 1 ? current.name : null, via === "direct" ? "直连" : "经网关中转"].filter(Boolean).join(" · ")}
+                </Text>
               ) : null}
             </View>
           ),
