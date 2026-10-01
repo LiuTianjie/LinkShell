@@ -3,7 +3,8 @@ import { readlink } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { RpcError, type PortInfo } from "@linkshell/wire";
+import { DIRECT_CHUNK, RpcError, type PortInfo } from "@linkshell/wire";
+import type { DirectPeer } from "./direct.js";
 
 // Previews of the host's local servers. `listPorts` finds what's listening
 // (and what looks like a dev server); `ProxyStreams` carries TCP streams to
@@ -169,9 +170,12 @@ export class ProxyStreams {
       data: (streamId: string, data: string) => void;
       closed: (streamId: string, error?: string) => void;
     },
+    /** The connection's direct channel, when it can have one: streams asked onto it skip the RPC channel. */
+    private readonly direct?: DirectPeer,
   ) {}
 
-  async open(port: number): Promise<string> {
+  /** Opens a stream to `port`. `channel` is its number on the direct channel when it goes there. */
+  async open(port: number, wantDirect = false): Promise<{ streamId: string; channel?: number }> {
     if (this.streams.size >= MAX_STREAMS) throw RpcError.app("busy", "too many open preview connections");
     let socket: Socket;
     try {
@@ -182,13 +186,44 @@ export class ProxyStreams {
     const streamId = randomUUID();
     this.streams.set(streamId, socket);
     socket.setNoDelay(true);
-    socket.on("data", (chunk) => this.send.data(streamId, chunk.toString("base64")));
     let failure: string | undefined;
     socket.on("error", (error) => (failure = error.message));
-    socket.on("close", () => {
-      if (this.streams.delete(streamId)) this.send.closed(streamId, failure);
+    const direct = wantDirect && this.direct?.open ? this.direct : undefined;
+    if (!direct) {
+      socket.on("data", (chunk) => this.send.data(streamId, chunk.toString("base64")));
+      socket.on("close", () => {
+        if (this.streams.delete(streamId)) this.send.closed(streamId, failure);
+      });
+      return { streamId };
+    }
+    const channel = direct.attach({
+      data: (bytes) => socket.write(bytes),
+      close: (lost) => {
+        this.streams.delete(streamId);
+        if (lost) socket.destroy();
+        else {
+          socket.end();
+          setTimeout(() => socket.destroy(), 5000).unref();
+        }
+      },
     });
-    return streamId;
+    socket.on("data", (chunk: Buffer) => {
+      for (let offset = 0; offset < chunk.length; offset += DIRECT_CHUNK) {
+        direct.send({ type: "data", stream: channel, data: chunk.subarray(offset, offset + DIRECT_CHUNK) });
+      }
+      // The device isn't keeping up: stop reading the server until it has. (For the
+      // screen that reaches the viewer server, which then skips frames instead of queueing them.)
+      if (direct.backedUp && !socket.isPaused()) {
+        socket.pause();
+        direct.whenDrained(() => socket.resume());
+      }
+    });
+    socket.on("close", () => {
+      if (!this.streams.delete(streamId)) return;
+      direct.detach(channel);
+      direct.send({ type: "close", stream: channel, error: failure });
+    });
+    return { streamId, channel };
   }
 
   write(streamId: string, data: string): void {

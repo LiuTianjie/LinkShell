@@ -28,9 +28,10 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
-    "vitest": "^3.2.1",
-    "ws": "^8.18.1",
+    "@linkshell/host": "workspace:*",
     "@types/ws": "^8.5.14",
-    "@linkshell/host": "workspace:*"
+    "vitest": "^3.2.1",
+    "werift": "^0.22.9",
+    "ws": "^8.18.1"
   }
 }

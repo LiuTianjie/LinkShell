@@ -221,6 +221,11 @@ export const machineInfoSchema = z.object({
   /** The host user's home directory, so apps can show paths as `~/…`. */
   home: z.string().optional(),
   agents: z.array(agentInfoSchema),
+  /**
+   * The host can send bulk streams peer to peer (`direct.offer`); `iceServers`
+   * are the STUN servers both sides use to find a path.
+   */
+  direct: z.object({ iceServers: z.array(z.string()) }).optional(),
 });
 export type MachineInfo = z.infer<typeof machineInfoSchema>;
 

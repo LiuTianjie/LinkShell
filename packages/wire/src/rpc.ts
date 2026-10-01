@@ -448,8 +448,23 @@ export const methods = {
    * host's bytes arrive as `proxy.data`; the stream ends with `proxy.closed`.
    */
   "proxy.open": {
-    params: z.object({ port: z.number().int().min(1).max(65535) }),
-    result: z.object({ streamId: z.string() }),
+    params: z.object({
+      port: z.number().int().min(1).max(65535),
+      /** Carry the stream on the direct channel, if this connection has one open. */
+      direct: z.boolean().optional(),
+    }),
+    /** `channel`: the stream's number on the direct channel, when it goes there instead of over `proxy.*`. */
+    result: z.object({ streamId: z.string(), channel: z.number().int().nonnegative().optional() }),
+  },
+  /**
+   * Sets up the direct channel (see `direct.ts`): the device's WebRTC offer,
+   * holding the `linkshell-bulk` data channel, answered by the host. Each side
+   * has gathered its addresses before sending. A new offer replaces the
+   * connection made by an earlier one.
+   */
+  "direct.offer": {
+    params: z.object({ sdp: z.string().min(1).max(200_000) }),
+    result: z.object({ sdp: z.string() }),
   },
   /**
    * Starts the host's screen viewer: a page plus H.264 stream on a loopback

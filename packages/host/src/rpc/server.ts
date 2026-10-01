@@ -20,6 +20,7 @@ import type { SessionHub, Subscriber } from "../hub.js";
 import { listDirectory, makeDirectory, readFile, searchDirectories, uploadFile } from "../fs.js";
 import { listPorts, ProxyStreams } from "../ports.js";
 import { ScreenShare } from "../screen.js";
+import { DirectPeer } from "../direct.js";
 import { imageOf, parseImageUri, slimEvent } from "../slim.js";
 import type { OutputListener, TerminalManager } from "../terminals.js";
 
@@ -56,6 +57,8 @@ interface ConnectionContext {
   terminals: Map<string, OutputListener>;
   /** Preview streams to the host's local servers. */
   proxy: ProxyStreams;
+  /** The connection's peer-to-peer channel for those streams, once the device has offered one. */
+  direct: DirectPeer;
 }
 
 /**
@@ -213,7 +216,8 @@ export class HostRpcServer {
       },
       "ports.list": async () => ({ ports: await listPorts() }),
       "screen.start": () => this.screen.start(),
-      "proxy.open": async (params: P<"proxy.open">, context) => ({ streamId: await context.proxy.open(params.port) }),
+      "proxy.open": async (params: P<"proxy.open">, context) => context.proxy.open(params.port, params.direct),
+      "direct.offer": async (params: P<"direct.offer">, context) => ({ sdp: await context.direct.answer(params.sdp) }),
       "proxy.write": (params: P<"proxy.write">, context) => {
         context.proxy.write(params.streamId, params.data);
         return {};
@@ -332,15 +336,20 @@ export class HostRpcServer {
       send: (text) => transport.send(text),
       onRequest: (method, params) => this.dispatch(method, params, context),
     });
+    const direct = new DirectPeer(this.options.machineInfo().direct?.iceServers ?? [], this.options.log);
     const context: ConnectionContext = {
       local: transport.local,
       desktops: new Map(),
       subscriptions: new Map(),
       terminals: new Map(),
-      proxy: new ProxyStreams({
-        data: (streamId, data) => peer.notify("proxy.data", { streamId, data }),
-        closed: (streamId, error) => peer.notify("proxy.closed", error ? { streamId, error } : { streamId }),
-      }),
+      proxy: new ProxyStreams(
+        {
+          data: (streamId, data) => peer.notify("proxy.data", { streamId, data }),
+          closed: (streamId, error) => peer.notify("proxy.closed", error ? { streamId, error } : { streamId }),
+        },
+        direct,
+      ),
+      direct,
       peer,
     };
     this.connections.add(context.peer);
@@ -369,6 +378,7 @@ export class HostRpcServer {
       }
       context.desktops.clear();
       context.proxy.closeAll();
+      context.direct.close();
       context.peer.close();
     });
   }

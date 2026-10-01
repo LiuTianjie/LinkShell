@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { homedir, hostname, platform } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import type { GatewayStatus, MachineInfo } from "@linkshell/wire";
+import { DEFAULT_ICE_SERVERS, type GatewayStatus, type MachineInfo } from "@linkshell/wire";
 import { defaultDrivers } from "./drivers/registry.js";
 import type { AgentDriver } from "./drivers/types.js";
 import { SessionHub } from "./hub.js";
@@ -64,6 +64,13 @@ export interface HostOptions {
   version: string;
   /** Environment agents run with — should be the user's login-shell environment. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * STUN servers for the direct channel (bulk streams peer to peer instead of
+   * through the gateway). Default: `LINKSHELL_ICE_SERVERS`, or a built-in
+   * list. `false`: no direct channel. An empty list still connects devices
+   * on the same network.
+   */
+  iceServers?: string[] | false;
   codexCommand?: string;
   claudeCommand?: string;
   /** Overrides the bundled Claude ACP adapter. */
@@ -107,6 +114,15 @@ export async function isHostRunning(socketPath: string): Promise<boolean> {
   }
 }
 
+function iceServersFromEnv(value: string | undefined): string[] | false {
+  if (value === undefined) return DEFAULT_ICE_SERVERS;
+  if (value.trim().toLowerCase() === "off") return false;
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 export async function startHost(options: HostOptions): Promise<RunningHost> {
   const log = options.log ?? ((message: string) => process.stderr.write(`${message}\n`));
   const paths = hostPaths(options.home);
@@ -135,6 +151,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   const hub = new SessionHub(store, drivers, log, paths.home);
   await hub.start({ discoveryIntervalMs: options.discoveryIntervalMs });
 
+  const iceServers = options.iceServers ?? iceServersFromEnv(process.env.LINKSHELL_ICE_SERVERS);
   const machineInfo = (): MachineInfo => ({
     machineId,
     // LINKSHELL_MACHINE_NAME: how this computer is named in the apps (default: its hostname).
@@ -143,6 +160,8 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     hostVersion: options.version,
     home: homedir(),
     agents: hub.agents(),
+    // LINKSHELL_ICE_SERVERS: STUN servers for the direct channel, comma separated ("off": never direct).
+    ...(iceServers ? { direct: { iceServers } } : {}),
   });
   const terminals = new TerminalManager(env, store);
   const server = new HostRpcServer({
