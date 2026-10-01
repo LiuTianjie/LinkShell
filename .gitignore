@@ -48,3 +48,6 @@ Thumbs.db
 # Copilot/Cursor hook leftovers written into a project CWD. Never commit these —
 # Cursor's coding agent treats project-root hooks.json as its own hook file.
 /hooks.json
+
+# The promo film's sources and renders (docs/site/assets/promo has what the site uses)
+/promo/

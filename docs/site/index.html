@@ -204,7 +204,7 @@
       background-size: 60px 60px; background-position: center top;
       -webkit-mask-image: radial-gradient(ellipse 70% 90% at 50% 0%, #000 20%, transparent 80%); mask-image: radial-gradient(ellipse 70% 90% at 50% 0%, #000 20%, transparent 80%); }
     .hero-wrap::after { content: ""; position: absolute; z-index: -1; inset: 0 0 auto 0; height: 560px; pointer-events: none; background: radial-gradient(60% 100% at 50% 0%, var(--spot), transparent 70%); }
-    .hero { padding-block: 84px 92px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr); gap: 64px; align-items: center; }
+    .hero { padding-block: 84px 92px; display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 64px; align-items: center; }
     .hero .tag { margin-bottom: 26px; }
     .hero h1 { font-size: clamp(40px, 5.3vw, 66px); letter-spacing: -.045em; line-height: 1.06; background: linear-gradient(180deg, #fff 35%, #9aa0ab); -webkit-background-clip: text; background-clip: text; color: transparent; }
     :root[data-theme="light"] .hero h1 { background: none; color: var(--text); }
@@ -343,6 +343,13 @@
       -webkit-mask-image: linear-gradient(#000 72%, transparent 99%); mask-image: linear-gradient(#000 72%, transparent 99%); }
     .shot .phone { width: 264px; flex: none; align-self: flex-start; box-shadow: none; }
     @media (max-width: 520px) { .shot { height: 380px; } .shot .phone { width: 220px; } }
+
+    /* the film (hero) and the feature clips */
+    .film { position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); background: #07080d; aspect-ratio: 16 / 9; animation: rise .8s var(--ease) .15s both; }
+    .film video { display: block; width: 100%; height: 100%; object-fit: cover; }
+    @media (max-width: 760px) { .film { aspect-ratio: 9 / 16; max-width: 340px; margin: 0 auto; border-radius: 22px; } }
+    .clip { margin: auto calc(var(--pad) * -1) 0; padding-top: 40px; }
+    .clip video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #07080d; border-top: 1px solid var(--border); }
 
     .mini h3 { font-size: 16px; margin: 18px 0 8px; }
     .mini p { color: var(--text-sec); font-size: 14.5px; }
@@ -576,32 +583,11 @@
           </div>
         </div>
 
-        <div class="stage" aria-hidden="true">
-          <div class="win">
-            <div class="win-bar"><i></i><i></i><i></i><span>weather-app — linkshell claude</span></div>
-            <div class="win-body">
-              <div><span class="k">$</span> linkshell claude</div>
-              <div>&nbsp;</div>
-              <div><span class="k">&gt;</span> <span lang="zh">修一下暗色模式的天气卡片</span><span lang="en">Fix the card in dark mode</span></div>
-              <div><span class="ok">●</span> Update(card.css) <span class="add">+5</span> <span class="del">−2</span></div>
-              <div><span class="ok">●</span> Bash(npm test) <span class="dim">6 passed</span></div>
-              <div class="takeover">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>
-                <div><b><span lang="zh">已由手机接管</span><span lang="en">Taken over by your phone</span></b><span><span lang="zh">按任意键收回到电脑</span><span lang="en">Press any key to take it back</span></span></div>
-              </div>
-            </div>
-          </div>
-          <div class="phone">
-            <img class="only-dark" src="assets/shots/android-session-dark.webp" alt="" width="640" height="1422" />
-            <img class="only-light" src="assets/shots/ios-session.webp" alt="" width="640" height="1391" />
-          </div>
-          <div class="hud">
-            <div class="hud-top">
-              <span class="hud-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></span>
-              <div><b><span lang="zh">需要你的批准</span><span lang="en">Needs your approval</span></b><code>npm test</code></div>
-            </div>
-            <div class="hud-btns"><span><span lang="zh">拒绝</span><span lang="en">Deny</span></span><span class="yes"><span lang="zh">允许</span><span lang="en">Allow</span></span></div>
-          </div>
+        <div class="film">
+          <video id="film" muted loop playsinline controls preload="none" poster="assets/promo/poster.jpg" aria-label="LinkShell 2.0">
+            <source src="assets/promo/linkshell-2.0-vertical.mp4" type="video/mp4" media="(max-width: 760px)" />
+            <source src="assets/promo/linkshell-2.0.mp4" type="video/mp4" />
+          </video>
         </div>
       </div>
     </div>
@@ -616,38 +602,67 @@
           <article class="feat">
             <span class="ix"><b>A</b><span lang="zh">接力</span><span lang="en">Handoff</span></span>
             <h3><span lang="zh">电脑与手机之间接力</span><span lang="en">Hand off between desk and phone</span></h3>
-            <p><span lang="zh">在终端里用 <code>linkshell claude</code> 开始工作。出门时在手机上发一条消息就接了过来；回到电脑前按任意键收回。同一个会话 ID，上下文一点不丢。</span><span lang="en">Start in your terminal with <code>linkshell claude</code>. Heading out? Send a message from your phone and the session moves with you; back at your desk, press any key to take it back. Same session ID, full context.</span></p>
+            <p><span lang="zh">在终端里用 <code>linkshell claude</code> 开始工作。出门时在手机上接管，发一条消息接着做；回到电脑前按任意键收回。同一个会话，上下文一点不丢。</span><span lang="en">Start in your terminal with <code>linkshell claude</code>. Heading out? Take the session over on your phone and send a message; back at your desk, press any key to take it back. The same session, with all of its context.</span></p>
             <ul>
               <li><span lang="zh">Codex 电脑和手机同时在线，两边同步</span><span lang="en">Codex runs on both at once, in sync</span></li>
-              <li><span lang="zh">手机上选好的模型和思考强度，接管时自动生效</span><span lang="en">Model and effort chosen on the phone apply when it takes over</span></li>
-              <li><span lang="zh">也可以直接在手机上新建会话，回家后在电脑上继续</span><span lang="en">Or start on the phone and continue on the computer later</span></li>
+              <li><span lang="zh">Claude 桌面 App 或普通 <code>claude</code> 里开着的会话，手机上也能接着做</span><span lang="en">A session open in the Claude desktop app or a plain <code>claude</code> can be continued too</span></li>
+              <li><span lang="zh">模型、思考强度、权限模式跟着会话走</span><span lang="en">Model, effort and permission mode travel with the session</span></li>
             </ul>
-            <div class="shot"><div class="phone"><img src="assets/shots/ios-session.webp" alt="手机上继续的 Claude 会话：计划、改动与回复" loading="lazy" width="640" height="1391" /></div></div>
+            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/handoff.jpg" data-src="assets/promo/handoff.mp4" aria-label="手机接管终端里的 Claude 会话，回到电脑按任意键收回"></video></div>
           </article>
 
           <article class="feat">
-            <span class="ix"><b>B</b><span lang="zh">插话与审批</span><span lang="en">Steer</span></span>
-            <h3><span lang="zh">插话、排队、审批，都在手机上</span><span lang="en">Steer, queue and approve from your phone</span></h3>
-            <p><span lang="zh">回复逐字出现，计划和工具调用实时更新。Agent 忙的时候也能发消息：Codex 和 Claude 直接插进当前这一轮，其他 Agent 排队，排队的消息可以撤回。需要权限时一键允许或拒绝，每个文件的改动都能看 diff。</span><span lang="en">Replies stream in word by word; plans and tool calls update live. Send a message while the agent is busy: Codex and Claude take it into the current turn, other agents queue it (and you can pull it back). Approve or deny in one tap, and read the diff of every file it changed.</span></p>
-            <div class="shot"><div class="phone"><img src="assets/shots/ios-diff.webp" alt="改动页面里一个 CSS 文件的 diff" loading="lazy" width="640" height="1391" /></div></div>
+            <span class="ix"><b>B</b><span lang="zh">跟进与审批</span><span lang="en">Follow</span></span>
+            <h3><span lang="zh">看进度、回消息、批准操作</span><span lang="en">Watch it work, answer, approve</span></h3>
+            <p><span lang="zh">回复逐字出现，计划和工具调用实时更新。Agent 需要权限时请求会推到手机上，一键允许或拒绝；每个文件的改动都能看 diff。</span><span lang="en">Replies stream in word by word; plans and tool calls update live. When the agent needs permission the request comes to your phone: allow or deny in one tap, and read the diff of every file it changed.</span></p>
+            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/follow.jpg" data-src="assets/promo/follow.mp4" aria-label="手机上的会话：计划、工具调用和一条权限请求"></video></div>
           </article>
 
           <article class="feat">
-            <span class="ix"><b>C</b><span lang="zh">终端</span><span lang="en">Terminal</span></span>
-            <h3><span lang="zh">电脑上的真终端</span><span lang="en">A real terminal on your computer</span></h3>
-            <p><span lang="zh">开一个终端跑 dev server、看日志、用 git。原生终端渲染，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断，回来接着看。</span><span lang="en">Open a terminal to run a dev server, tail logs or use git. Native terminal rendering with a Ctrl / Esc / Tab / arrow-key bar; it keeps running when you close the app.</span></p>
-            <div class="shot"><div class="phone"><img src="assets/shots/ios-terminal.webp" alt="手机上运行 npm run dev 的终端" loading="lazy" width="640" height="1391" /></div></div>
+            <span class="ix"><b>C</b><span lang="zh">插话</span><span lang="en">Steer</span></span>
+            <h3><span lang="zh">运行中也能说话</span><span lang="en">Talk while it works</span></h3>
+            <p><span lang="zh">Agent 忙的时候发的消息在输入框上方排队：调整顺序、取回重新编辑，或者立即发送——Codex 和 Claude 直接插进当前这一轮，其他 Agent 先停下当前这一轮。电脑上正在跑的那一轮，手机上也能停。</span><span lang="en">A message sent mid-turn waits in a queue above the composer: reorder it, take it back to edit, or send it now — into the running turn for Codex and Claude, by stopping the turn for other agents. A turn running on the computer can be stopped from the phone too.</span></p>
+            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/queue.jpg" data-src="assets/promo/queue.mp4" aria-label="排队的消息：调整顺序后立即发送"></video></div>
           </article>
 
           <article class="feat">
-            <span class="ix"><b>D</b><span lang="zh">本地预览</span><span lang="en">Preview</span></span>
-            <h3><span lang="zh">在手机上打开 localhost</span><span lang="en">Open localhost on your phone</span></h3>
-            <p><span lang="zh">电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作，还能全屏看。走同一条加密通道，不需要暴露端口，也不需要同一个 Wi-Fi。</span><span lang="en">Open your computer's <code>localhost:3000</code> right on the phone. Hot reload keeps working and it goes full screen. It travels over the same encrypted channel, so no open ports and no shared Wi-Fi needed.</span></p>
-            <div class="shot"><div class="phone"><img src="assets/shots/ios-preview.webp" alt="在手机上预览电脑本地的天气应用" loading="lazy" width="640" height="1391" /></div></div>
+            <span class="ix"><b>D</b><span lang="zh">随手可查</span><span lang="en">At hand</span></span>
+            <h3><span lang="zh">子 Agent、长会话、项目文件</span><span lang="en">Sub-agents, long sessions, project files</span></h3>
+            <p><span lang="zh">会话启动过的每个子 Agent 都在标题旁的按钮里，各有自己的对话。几个月的长会话先显示最近几轮，往上翻再加载；图片看到时才加载。项目里的文件可以直接浏览和查看。</span><span lang="en">Every sub-agent a session started is behind a button in its header, each with its own conversation. A session with months of history opens at its latest turns and loads earlier ones as you scroll; pictures load when you look at them. Browse and read the project&#39;s files right there.</span></p>
+            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/agents.jpg" data-src="assets/promo/agents.mp4" aria-label="子 Agent 列表从会话标题旁打开"></video></div>
+          </article>
+
+          <article class="feat">
+            <span class="ix"><b>E</b><span lang="zh">分叉</span><span lang="en">Fork</span></span>
+            <h3><span lang="zh">从任意一条回复分出新方向</span><span lang="en">Fork from any reply</span></h3>
+            <p><span lang="zh">想换个思路试试，就从那条回复分叉出一个新会话，原会话不受影响。新会话可以留在当前目录，也可以放进新的 git worktree——独立的目录和分支，不碰你手头的工作区。</span><span lang="en">Want to try another direction? Fork a new session from that reply; the original is untouched. Keep it in the same directory, or put it in a new git worktree — its own directory and branch, away from what you are working on.</span></p>
+            <ul>
+              <li><span lang="zh">新会话也可以直接开在 worktree 里</span><span lang="en">A new session can start in a worktree too</span></li>
+              <li><span lang="zh">所有 Agent 都能分叉：Claude 和 Codex 原生，其他由 LinkShell 把对话交给它</span><span lang="en">Every agent forks: Claude and Codex natively, the others get the conversation handed over</span></li>
+              <li><span lang="zh">项目和会话上显示当前的 git 分支</span><span lang="en">Projects and sessions show the current git branch</span></li>
+            </ul>
+            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/fork.jpg" data-src="assets/promo/fork.mp4" aria-label="从一条回复分叉到新的 git worktree"></video></div>
+          </article>
+
+          <article class="feat">
+            <span class="ix"><b>F</b><span lang="zh">命令</span><span lang="en">Commands</span></span>
+            <h3><span lang="zh">斜杠命令，手机上直接用</span><span lang="en">Slash commands, on the phone</span></h3>
+            <p><span lang="zh">输入 <code>/</code> 列出 Agent 提供的命令和你的 skills，可以搜索。<code>/compact</code> 压缩上下文、<code>/review</code> 审查改动，对 Codex 同样可用。</span><span lang="en">Type <code>/</code> for the agent&#39;s commands and your skills, with search. <code>/compact</code> to free up context and <code>/review</code> to review changes work for Codex too.</span></p>
+            <div class="clip"><video muted loop playsinline preload="none" poster="assets/promo/slash.jpg" data-src="assets/promo/slash.mp4" aria-label="在输入框里输入斜杠，选择 /compact"></video></div>
           </article>
         </div>
 
-        <div class="cells four">
+        <div class="cells three">
+          <div class="mini">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-5-6-5"/><path d="M12 19h8"/></svg>
+            <h3><span lang="zh">电脑上的真终端</span><span lang="en">A real terminal on your computer</span></h3>
+            <p><span lang="zh">开一个终端跑 dev server、看日志、用 git。带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。</span><span lang="en">Open a terminal to run a dev server, tail logs or use git, with a Ctrl / Esc / Tab / arrow-key bar. It keeps running when you close the app.</span></p>
+          </div>
+          <div class="mini">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M6 6.5h.01M9 6.5h.01"/></svg>
+            <h3><span lang="zh">在手机上打开 localhost</span><span lang="en">Open localhost on your phone</span></h3>
+            <p><span lang="zh">电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作。走同一条加密通道，不用暴露端口，也不用同一个 Wi-Fi。</span><span lang="en">Open your computer&#39;s <code>localhost:3000</code> right on the phone, hot reload included. It travels over the same encrypted channel: no open ports, no shared Wi-Fi.</span></p>
+          </div>
           <div class="mini">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
             <h3><span lang="zh">端到端加密</span><span lang="en">End-to-end encrypted</span></h3>
@@ -661,7 +676,7 @@
           <div class="mini">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
             <h3><span lang="zh">看电脑屏幕、传文件</span><span lang="en">Screen and files</span></h3>
-            <p><span lang="zh">随时看一眼电脑屏幕（需要 ffmpeg），把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Glance at the computer's screen (needs ffmpeg), and send photos and files from your phone into the project for the agent.</span></p>
+            <p><span lang="zh">随时看一眼电脑屏幕（需要 ffmpeg），把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Glance at the computer&#39;s screen (needs ffmpeg), and send photos and files from your phone into the project for the agent.</span></p>
           </div>
           <div class="mini">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
@@ -884,7 +899,10 @@
         <h2 id="d-phone"><span lang="zh">在手机上用</span><span lang="en">On your phone</span></h2>
         <ul>
           <li><span lang="zh"><b>新建会话</b>：选 Agent 和项目目录，直接开始。</span><span lang="en"><b>New session</b>: pick an agent and a project folder and go.</span></li>
-          <li><span lang="zh"><b>忙的时候发消息</b>：Codex 和 Claude 插进当前这一轮；其他 Agent 排队，输入框上方能看到队列，点 × 撤回；停止时排队的文字会放回输入框。</span><span lang="en"><b>Messages while busy</b>: Codex and Claude take them into the current turn; other agents queue them above the composer (tap × to pull one back); stopping puts queued text back in the composer.</span></li>
+          <li><span lang="zh"><b>忙的时候发消息</b>：消息在输入框上方排队，可以调整顺序、取回编辑、立即发送（Codex 和 Claude 直接插进当前这一轮，其他 Agent 先停下当前这一轮）；停止时排队的文字会放回输入框。</span><span lang="en"><b>Messages while busy</b>: they queue above the composer, where you can reorder them, take one back to edit, or send it now (into the running turn for Codex and Claude; other agents stop the turn first). Stopping puts queued text back in the composer.</span></li>
+          <li><span lang="zh"><b>分叉与 worktree</b>：每条回复下方可以「从这里分叉」，会话菜单里可以分叉整个会话；新建会话或分叉时可以选择放进新的 git worktree（在 <code>~/.linkshell/worktrees/</code> 下，独立分支），删除会话时没有改动的 worktree 会一起清掉。</span><span lang="en"><b>Fork and worktrees</b>: fork from under any reply, or the whole session from its menu; a new session or a fork can go into a new git worktree (under <code>~/.linkshell/worktrees/</code>, on its own branch). A worktree without changes is removed with its session.</span></li>
+          <li><span lang="zh"><b>斜杠命令</b>：输入 <code>/</code> 或点「+ → 命令」，列出 Agent 的命令和你的 skills。</span><span lang="en"><b>Slash commands</b>: type <code>/</code> or tap + → Commands for the agent's commands and your skills.</span></li>
+          <li><span lang="zh"><b>子 Agent 与文件</b>：会话标题旁的按钮列出所有子 Agent；会话和终端的菜单里可以浏览项目文件。</span><span lang="en"><b>Sub-agents and files</b>: the button beside a session's title lists its sub-agents; browse the project's files from a session's or a terminal's menu.</span></li>
           <li><span lang="zh"><b>设置</b>：输入框下方可以换模型、思考强度、权限模式（取决于 Agent 提供了哪些）。</span><span lang="en"><b>Settings</b>: under the composer, change model, effort and permission mode (whatever the agent offers).</span></li>
           <li><span lang="zh"><b>整理</b>：长按会话可以重命名、归档、删除；归档的会话在首页底部。</span><span lang="en"><b>Tidying</b>: long-press a session to rename, archive or delete it; archived sessions are at the bottom of Home.</span></li>
           <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕（电脑需要安装 ffmpeg）。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen (needs ffmpeg on the computer).</span></li>
@@ -1077,6 +1095,27 @@
         setTimeout(() => { button.innerHTML = ICON_COPY; button.classList.remove('ok'); }, 1400);
       });
     });
+
+    // ── Film and feature clips: play while they are on screen ──
+    (() => {
+      const film = document.getElementById('film');
+      if (film && matchMedia('(max-width: 760px)').matches) film.poster = 'assets/promo/poster-vertical.jpg';
+      const calm = matchMedia('(prefers-reduced-motion: reduce)').matches || (navigator.connection && navigator.connection.saveData);
+      const clips = [...document.querySelectorAll('.clip video')];
+      if (calm || !('IntersectionObserver' in window)) {
+        clips.forEach((video) => { video.src = video.dataset.src; video.controls = true; });
+        return;
+      }
+      const watch = new IntersectionObserver((entries) => {
+        entries.forEach(({ target: video, isIntersecting }) => {
+          if (!isIntersecting) return video.pause();
+          if (video.dataset.src && !video.getAttribute('src')) video.src = video.dataset.src;
+          video.play().catch(() => {});
+        });
+      }, { threshold: 0.4 });
+      clips.forEach((video) => watch.observe(video));
+      if (film) watch.observe(film);
+    })();
 
     // ── Reveal on scroll ──
     if ('IntersectionObserver' in window) {

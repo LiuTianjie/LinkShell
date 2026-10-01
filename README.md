@@ -24,9 +24,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/site/assets/shots/ios-session.webp" alt="A Claude Code session continued on the phone: plan, file changes and reply" width="230" />
-  <img src="docs/site/assets/shots/ios-home.webp" alt="Home: sessions across projects, a running terminal on top" width="230" />
-  <img src="docs/site/assets/shots/ios-preview.webp" alt="A local dev server opened on the phone" width="230" />
+  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 2.0 — a one-minute film" width="820" /></a><br />
+  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">Watch the one-minute film</a></sub>
 </p>
 
 Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, send a message any time, approve what they ask for, and hand the session back to your terminal when you sit down again. Your code and the agent processes never leave your machine, and the connection is end-to-end encrypted.
@@ -69,19 +68,50 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 
 ## What you can do
 
-- **Hand off between desk and phone.** Same session ID, full context. A model or effort chosen on the phone applies when the phone takes over.
-- **Follow along live.** Replies stream word by word; plans, tool calls and file changes update as they happen, with a diff for every file.
-- **Talk while it works.** A message sent mid-turn waits in a queue above the composer: reorder it, take it back to edit, or send it now — into the running turn for Codex and Claude, by stopping the turn for other agents. Stop works on a turn running on the computer too.
-- **Sub-agents at hand.** The sub-agents a session started are one tap away from its header, each with its own conversation, however far back it began.
-- **Approve from anywhere.** Permission requests arrive on the phone; allow or deny in one tap.
-- **Change settings.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers.
-- **Keep sessions tidy.** Rename, archive and delete; for Codex and Claude this also updates their own records.
-- **Use a real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar. They keep running when you close the app.
-- **Open localhost on your phone.** Your dev server's port, over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
-- **Fork and worktrees.** Fork a session from any reply to try another direction, in the same directory or in a new git worktree; start a session in a worktree so it doesn't touch what you're working on. Claude and Codex fork natively; for other agents LinkShell hands the conversation over as text.
-- **Slash commands.** `/` lists what the agent offers — its commands and your skills. `/compact` and `/review` work for Codex from the phone too.
-- **Long sessions stay light.** A session opens at its latest turns; pull down for earlier ones. Screenshots in it load when you look at them.
-- **Screen and files.** Glance at the computer's screen (needs `ffmpeg`), browse and read the project's files, and send photos or files from the phone into the project.
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-handoff.jpg" alt="The phone taking over a Claude session from the terminal" width="100%" /><br />
+      <strong>Hand off between desk and phone</strong><br />
+      Start with <code>linkshell claude</code> in your terminal, take the session over on the phone, press any key at your desk to take it back. Codex is live on both at once.
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-follow.jpg" alt="A session on the phone with a plan, tool calls and an approval request" width="100%" /><br />
+      <strong>Follow and approve</strong><br />
+      Replies stream word by word; plans, tool calls and diffs update live. Permission requests come to the phone: allow or deny in one tap.
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-queue.jpg" alt="Queued messages above the composer" width="100%" /><br />
+      <strong>Talk while it works</strong><br />
+      Messages sent mid-turn queue above the composer: reorder, take one back to edit, or send it now. Stop works on a turn running on the computer too.
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-agents.jpg" alt="The sub-agent list opened from a session header" width="100%" /><br />
+      <strong>Everything at hand</strong><br />
+      Every sub-agent a session started is one tap from its header. Long sessions open at their latest turns; project files are there to browse and read.
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-fork.jpg" alt="Forking a session from a reply into a new git worktree" width="100%" /><br />
+      <strong>Fork and worktrees</strong><br />
+      Fork a session from any reply to try another direction — in the same directory or in a new git worktree that leaves your working tree alone.
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-slash.jpg" alt="Typing a slash in the composer and picking /compact" width="100%" /><br />
+      <strong>Slash commands</strong><br />
+      <code>/</code> lists the agent's commands and your skills, with search. <code>/compact</code> and <code>/review</code> work for Codex from the phone too.
+    </td>
+  </tr>
+</table>
+
+And the rest:
+
+- **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app.
+- **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
+- **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
+- **Tidy sessions.** Rename, archive and delete; for Codex and Claude this also updates their own records. Projects and sessions show the current git branch.
+- **Screen and files.** Glance at the computer's screen (needs `ffmpeg`), and send photos or files from the phone into the project.
 
 ## Agents
 
@@ -95,6 +125,15 @@ LinkShell runs the agents already installed and signed in on your computer. It n
 | **Any CLI** | Terminal | A terminal on the computer, viewed and typed into from the phone |
 
 A Claude session opened in the Claude desktop app can be followed live and continued from the phone too. The app can't be handed a session, though: it won't show what the phone did until it is restarted. For handing a session back and forth, start it with `linkshell claude`.
+
+What each agent supports from the phone:
+
+| | Codex | Claude Code | Gemini, Copilot and the others |
+| --- | --- | --- | --- |
+| A message into a running turn | joins the turn | joins the turn | stops the turn, then runs |
+| Fork a session, or from a reply | native | native | made by LinkShell: the conversation is handed over as text |
+| Sessions in git worktrees | yes | yes | yes |
+| Slash commands | `/compact`, `/review`, `/init`, your skills | Claude's own list and your skills | whatever the agent offers |
 
 ## Run your own gateway
 
@@ -157,7 +196,7 @@ pnpm test
 | `packages/client-core` | Client state and timeline shared by the apps |
 | `apps/client` | The 2.0 app: Expo / React Native for iOS and Android |
 | `apps/mobile`, `apps/web-dashboard`, `packages/shared-protocol` | 1.x app, web console and protocol |
-| `docs/site` | Website and installer (`python3 scripts/build-site-pages.py` after editing) |
+| `docs/site` | Website and installer (`python3 scripts/build-site-pages.py` after editing; `scripts/site-promo-assets.sh` cuts its film and clips) |
 
 To work on the app, run a host with a local API next to Metro:
 

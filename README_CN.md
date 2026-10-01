@@ -24,9 +24,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/site/assets/shots/ios-session.webp" alt="在手机上继续的 Claude Code 会话：计划、改动与回复" width="230" />
-  <img src="docs/site/assets/shots/ios-home.webp" alt="首页：各个项目的会话，最上面是正在运行的终端" width="230" />
-  <img src="docs/site/assets/shots/ios-preview.webp" alt="在手机上打开电脑本地的开发服务器" width="230" />
+  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 2.0 一分钟介绍片" width="820" /></a><br />
+  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">看一分钟介绍片</a></sub>
 </p>
 
 Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手机上看它实时干活，随时发消息，一键审批它要的权限，回到电脑前再把会话交还给终端。代码和 Agent 进程都不离开你的电脑，连接全程端到端加密。
@@ -69,19 +68,50 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 
 ## 能做什么
 
-- **电脑与手机接力。** 同一个会话 ID，上下文不丢。在手机上选好的模型和思考强度，接管时自动生效。
-- **实时跟进。** 回复逐字出现；计划、工具调用和文件改动实时更新，每个文件都能看 diff。
-- **干活时也能说话。** 运行中发的消息在输入框上方排队：可以调整顺序、取回重新编辑，或者立即发送——Codex 和 Claude 直接插进当前这一轮，其他 Agent 先停下当前这一轮。电脑上正在跑的那一轮，手机上也能停。
-- **子 Agent 随手可查。** 会话标题旁的按钮列出这个会话启动过的所有子 Agent 和各自的对话，不用翻回很早以前。
-- **分叉和 worktree。** 从任意一条回复分叉出新会话，换个方向试试——留在当前目录，或者放进新的 git worktree；新会话也可以直接开在 worktree 里，不碰你手头的工作区。Claude 和 Codex 原生分叉；其他 Agent 由 LinkShell 把之前的对话以文字交给它。
-- **斜杠命令。** 输入 `/` 列出 Agent 提供的命令和你的 skills。Codex 的 `/compact`、`/review` 在手机上同样可用。
-- **随时审批。** 权限请求推到手机上，一键允许或拒绝。
-- **调整设置。** 模型、思考强度、权限模式、快速模式，取决于 Agent 提供了哪些。
-- **整理会话。** 重命名、归档、删除；Codex 和 Claude 会同步到它们自己的记录里。
-- **真终端。** 电脑上的终端，带 Ctrl、Esc、Tab、方向键工具栏；关掉 App 也不会中断。
-- **在手机上打开 localhost。** 电脑上开发服务器的端口，走同一条加密通道，热更新照常，可以全屏。不需要开放端口，也不需要同一个 Wi-Fi。
-- **长会话也轻快。** 打开会话先显示最近几轮，下拉再加载更早的；里面的截图看到时才加载。
-- **屏幕和文件。** 看一眼电脑屏幕（需要 `ffmpeg`），浏览和查看项目里的文件，把手机里的图片和文件传到项目里。
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-handoff.jpg" alt="手机接管终端里的 Claude 会话" width="100%" /><br />
+      <strong>电脑与手机之间接力</strong><br />
+      在终端里用 <code>linkshell claude</code> 开始，出门时在手机上接管，回到电脑按任意键收回。Codex 两边同时在线。
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-follow.jpg" alt="手机上的会话：计划、工具调用和一条权限请求" width="100%" /><br />
+      <strong>跟进与审批</strong><br />
+      回复逐字出现，计划、工具调用和 diff 实时更新。权限请求推到手机上，一键允许或拒绝。
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-queue.jpg" alt="输入框上方排队的消息" width="100%" /><br />
+      <strong>运行中也能说话</strong><br />
+      忙的时候发的消息在输入框上方排队：调整顺序、取回编辑，或立即发送。电脑上正在跑的那一轮，手机上也能停。
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-agents.jpg" alt="从会话标题旁打开的子 Agent 列表" width="100%" /><br />
+      <strong>随手可查</strong><br />
+      会话启动过的每个子 Agent 都在标题旁的按钮里。长会话先显示最近几轮；项目文件可以直接浏览和查看。
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-fork.jpg" alt="从一条回复分叉到新的 git worktree" width="100%" /><br />
+      <strong>分叉与 worktree</strong><br />
+      从任意一条回复分叉出新会话，换个方向试试——留在当前目录，或放进新的 git worktree，不碰手头的工作区。
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-slash.jpg" alt="在输入框里输入斜杠，选择 /compact" width="100%" /><br />
+      <strong>斜杠命令</strong><br />
+      输入 <code>/</code> 列出 Agent 的命令和你的 skills，可以搜索。Codex 的 <code>/compact</code>、<code>/review</code> 在手机上同样可用。
+    </td>
+  </tr>
+</table>
+
+还有：
+
+- **真终端。** 电脑上的终端，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。
+- **在手机上打开 localhost。** dev server 的端口走同一条加密通道，热更新照常，可以全屏。不用暴露端口，也不用同一个 Wi-Fi。
+- **设置跟着会话走。** 模型、思考强度、权限模式、快速模式——Agent 提供什么就能改什么；电脑上正在跑的会话，手机上显示的是它真实的设置。
+- **会话管理。** 重命名、归档、删除；Codex 和 Claude 的会话会同步到它们自己的记录里。项目和会话上显示当前的 git 分支。
+- **屏幕与文件。** 随时看一眼电脑屏幕（需要 `ffmpeg`），把手机里的图片和文件传到项目里。
 
 ## 支持的 Agent
 
@@ -95,6 +125,15 @@ LinkShell 用的是你电脑上已经安装、已经登录的 Agent，不经手�
 | **任何命令行工具** | 终端 | 在电脑上开终端，手机上看和输入 |
 
 在 Claude 桌面 App 里打开的会话，手机上同样可以实时查看、接着做。但桌面 App 没法接收交回的会话：手机上做的内容要重启 App 后它才知道。想来回接力，用 `linkshell claude` 启动会话。
+
+各 Agent 在手机上的支持情况：
+
+| | Codex | Claude Code | Gemini、Copilot 等 |
+| --- | --- | --- | --- |
+| 运行中发消息 | 插进当前这一轮 | 插进当前这一轮 | 先停下当前这一轮再执行 |
+| 分叉会话（整段或从某条回复） | 原生 | 原生 | 由 LinkShell 代做：把之前的对话以文字交给它 |
+| 在 git worktree 里开会话 | 支持 | 支持 | 支持 |
+| 斜杠命令 | `/compact`、`/review`、`/init` 和你的 skills | Claude 自己的命令和你的 skills | Agent 提供什么就有什么 |
 
 ## 自建网关
 
