@@ -2,6 +2,8 @@ import type {
   ContentBlock,
   PermissionOption,
   PlanEntry,
+  Question,
+  QuestionAnswer,
   SessionConfigOption,
   SessionDriver,
   SessionEvent,
@@ -61,7 +63,19 @@ export type TimelineItem =
   | { kind: "error"; id: string; code: string; message: string; hint?: string; ts: number }
   | { kind: "turn-end"; id: string; stopReason: StopReason; ts: number }
   | { kind: "driver"; id: string; driver: SessionDriver; ts: number }
-  | { kind: "permission-result"; id: string; title: string; detail?: string; optionName?: string; allowed?: boolean; ts: number };
+  | {
+      kind: "permission-result";
+      id: string;
+      title: string;
+      detail?: string;
+      optionName?: string;
+      allowed?: boolean;
+      /** For a request that asked questions: each with what was answered (none: it was skipped). */
+      answers?: { question: string; answer: string }[];
+      /** The request was questions, not a permission. */
+      asked?: boolean;
+      ts: number;
+    };
 
 export interface PendingPermission {
   requestId: string;
@@ -69,6 +83,8 @@ export interface PendingPermission {
   title: string;
   detail?: string;
   options: PermissionOption[];
+  /** The agent is asking these rather than asking permission: answered with `answer`, or skipped with an option. */
+  questions?: Question[];
   ts: number;
 }
 
@@ -172,6 +188,17 @@ function parentOf(update: SessionUpdate): string | undefined {
     default:
       return undefined;
   }
+}
+
+/** Questions with what was answered, as text: the options' labels, then the user's own words. */
+function answered(questions: Question[], answers: QuestionAnswer[]): { question: string; answer: string }[] {
+  return questions.flatMap((question) => {
+    const answer = answers.find((entry) => entry.id === question.id);
+    if (!answer) return [];
+    const picked = answer.values.filter(Boolean).map((value) => question.options?.find((option) => option.value === value)?.label ?? value);
+    const said = [...(question.secret && picked.length > 0 ? ["••••••"] : picked), ...(answer.other ? [answer.other] : [])];
+    return said.length > 0 ? [{ question: question.header ?? question.text, answer: said.join("，") }] : [];
+  });
 }
 
 /** Routes a sub-agent's update into its spawning tool call's own timeline. */
@@ -327,7 +354,15 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
         state: "waiting",
         permissions: [
           ...view.permissions,
-          { requestId: update.requestId, toolCallId: update.toolCallId, title: update.title, detail: update.detail, options: update.options, ts },
+          {
+            requestId: update.requestId,
+            toolCallId: update.toolCallId,
+            title: update.title,
+            detail: update.detail,
+            options: update.options,
+            questions: update.questions,
+            ts,
+          },
         ],
       };
     }
@@ -348,6 +383,8 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
         detail: request.detail,
         optionName: option?.name,
         allowed: option ? option.kind.startsWith("allow") : undefined,
+        asked: request.questions ? true : undefined,
+        answers: request.questions && update.answers ? answered(request.questions, update.answers) : undefined,
         ts,
       });
     }

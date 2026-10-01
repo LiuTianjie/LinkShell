@@ -10,6 +10,7 @@ import {
   type SessionUpdate,
   type SubagentInfo,
   type QueuedMessage,
+  type QuestionAnswer,
   type GitInfo,
   type ProjectSummary,
   type WorktreeEntry,
@@ -369,6 +370,7 @@ export class SessionHub {
         title: first.title,
         detail: first.detail,
         options: first.options,
+        questions: first.questions,
       };
     }
     return decorated;
@@ -927,6 +929,29 @@ export class SessionHub {
       throw RpcError.app("invalid_params", `unknown option ${optionId}`);
     }
     await this.requireDriver(summary.agent).respondPermission(summary.nativeId, requestId, optionId);
+  }
+
+  /** Answers the questions an agent is waiting on. */
+  async answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void> {
+    const summary = this.getSession(sessionId);
+    const request = this.live.get(sessionId)?.permissions.get(requestId);
+    if (!request?.questions) throw RpcError.app("not_found", "这个问题已经不在等回答了");
+    const driver = this.requireDriver(summary.agent);
+    if (!driver.answerQuestion) throw RpcError.app("not_supported", `${driver.label} 不能在这里回答问题`);
+    // Only what was asked: answers to its questions, with values the question offers.
+    const kept = request.questions.flatMap((question): QuestionAnswer[] => {
+      const answer = answers.find((entry) => entry.id === question.id);
+      if (!answer) return [];
+      const offered = question.options ? new Set(question.options.map((option) => option.value)) : undefined;
+      const values = (offered ? answer.values.filter((value) => offered.has(value)) : answer.values).slice(0, question.kind === "choices" ? 50 : 1);
+      const other = question.other ? answer.other?.trim() || undefined : undefined;
+      return [{ id: question.id, values, other }];
+    });
+    const missing = request.questions.find(
+      (question) => question.required && !kept.some((answer) => answer.id === question.id && (answer.values.some(Boolean) || answer.other)),
+    );
+    if (missing) throw RpcError.app("invalid_params", `还没回答：${missing.header ?? missing.text}`);
+    await driver.answerQuestion(summary.nativeId, requestId, kept);
   }
 
   async desktopLaunch(

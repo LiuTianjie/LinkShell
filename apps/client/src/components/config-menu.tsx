@@ -110,6 +110,7 @@ function ToggleChip({ option, onChange, disabled }: { option: SessionConfigOptio
   const on = option.current === "on";
   const label = optionLabel(option).replace(/模式$/, "");
   const hint = option.id === "fast" ? "输出更快，可能消耗更多额度" : valueHint(option, "on");
+  const glyph = option.id === "plan" ? ({ sf: "list.bullet.clipboard", md: "checklist" } as const) : ({ sf: on ? "bolt.fill" : "bolt", md: "bolt" } as const);
   const actions: MenuAction[] = (["off", "on"] as const).map((value) => ({
     id: value,
     title: valueLabel(option, value),
@@ -141,7 +142,7 @@ function ToggleChip({ option, onChange, disabled }: { option: SessionConfigOptio
           opacity: disabled ? 0.5 : 1,
         }}
       >
-        <Icon sf={on ? "bolt.fill" : "bolt"} md="bolt" size={12} color={on ? colors.accent : colors.secondaryLabel} />
+        <Icon sf={glyph.sf} md={glyph.md} size={12} color={on ? colors.accent : colors.secondaryLabel} />
         <Text style={[type.footnote, { color: on ? colors.accent : colors.label, fontWeight: on ? "600" : "500" }]}>{label}</Text>
         {on ? null : <Icon sf="chevron.down" md="expand_more" size={8} color={colors.tertiaryLabel} weight="bold" />}
       </View>

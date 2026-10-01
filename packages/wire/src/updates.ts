@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { permissionOptionSchema, sessionDriverSchema, sessionStateSchema, toolKindSchema } from "./model.js";
+import { permissionOptionSchema, questionAnswerSchema, questionSchema, sessionDriverSchema, sessionStateSchema, toolKindSchema } from "./model.js";
 
 // Session updates mirror ACP's `SessionUpdate` shapes (discriminated by
 // `sessionUpdate`) so one renderer works for every agent. LinkShell-specific
@@ -74,6 +74,8 @@ export const toolDetailSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("image_generation"), prompt: z.string().optional() }),
   z.object({ type: z.literal("compaction") }),
   z.object({ type: z.literal("review"), phase: z.enum(["started", "finished"]) }),
+  /** The agent asked the user something (the first question, when there were several). */
+  z.object({ type: z.literal("question"), text: z.string(), more: z.number().int().optional() }),
 ]);
 export type ToolDetail = z.infer<typeof toolDetailSchema>;
 
@@ -198,11 +200,19 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
     title: z.string(),
     detail: z.string().optional(),
     options: z.array(permissionOptionSchema).min(1),
+    /**
+     * The agent is asking the user something: answer with `sessions.answer`.
+     * `options` then hold what else can be done (skip the questions, stop),
+     * which is also all an app that predates questions can offer.
+     */
+    questions: z.array(questionSchema).optional(),
   }),
   z.object({
     sessionUpdate: z.literal("ls_permission_resolved"),
     requestId: z.string(),
     optionId: z.string().optional(),
+    /** How questions were answered, for the record. */
+    answers: z.array(questionAnswerSchema).optional(),
   }),
   z.object({
     sessionUpdate: z.literal("ls_driver"),

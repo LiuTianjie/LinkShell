@@ -20,6 +20,7 @@ describe("Codex settings", () => {
       ["model", "gpt-5"],
       ["effort", "high"],
       ["permissions", "auto"],
+      ["plan", "off"],
     ]);
   });
 
@@ -41,5 +42,16 @@ describe("Codex settings", () => {
       sandboxPolicy: { type: "dangerFullAccess" },
     });
     expect(configOptions({}, {}, []).find((o) => o.id === "permissions")?.current).toBe("custom");
+  });
+  it("offers plan mode, and sets it with the model and effort the thread runs with", () => {
+    const settings = { model: "gpt-5", effort: "high" };
+    expect(configOptions(settings, {}, models).find((o) => o.id === "plan")).toMatchObject({ category: "other", current: "off", values: [{ value: "off" }, { value: "on" }] });
+    expect(configOptions(settings, { plan: true }, models).find((o) => o.id === "plan")?.current).toBe("on");
+    const current = effective(settings, { plan: true }, models);
+    expect(turnOverrides({ plan: true }, current)).toEqual({ collaborationMode: { mode: "plan", settings: { model: "gpt-5", reasoning_effort: "high", developer_instructions: null } } });
+    // Turned off again: said explicitly, so the thread leaves plan mode.
+    expect(turnOverrides({ plan: false }, current)).toMatchObject({ collaborationMode: { mode: "default" } });
+    // Never touched: nothing is sent.
+    expect(turnOverrides({}, current)).toEqual({});
   });
 });

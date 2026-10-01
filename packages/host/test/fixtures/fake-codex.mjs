@@ -20,11 +20,13 @@ if (args[0] === "login" && args[1] === "status") {
   process.stderr.write(process.env.FAKE_CODEX_LOGGED_OUT === "1" ? "Not logged in\n" : "Logged in using ChatGPT\n");
   process.exit(process.env.FAKE_CODEX_LOGGED_OUT === "1" ? 1 : 0);
 }
-if (args[0] !== "app-server" || args[1] !== "--listen" || !args[2]?.startsWith("unix://")) {
+// Like Codex: features can be switched on before --listen.
+const listenAt = args.indexOf("--listen");
+if (args[0] !== "app-server" || listenAt < 1 || !args[listenAt + 1]?.startsWith("unix://")) {
   process.stderr.write(`fake-codex: unsupported args ${args.join(" ")}\n`);
   process.exit(2);
 }
-const socketPath = args[2].slice("unix://".length);
+const socketPath = args[listenAt + 1].slice("unix://".length);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const nowSeconds = () => Math.floor(Date.now() / 1000);
@@ -137,6 +139,36 @@ async function runTurn(thread, turn, text) {
       emitItem(thread, turn, { ...command, status: "declined" });
     }
     if (decision === "cancel" || decision === "interrupted") return finishTurn(thread, turn, "interrupted");
+  }
+  if (text.includes("ASKME")) {
+    // request_user_input: one question with options and an own answer, one to type.
+    const answers = await new Promise((resolve) => {
+      const id = nextServerRequestId++;
+      pendingServerRequests.set(id, (_decision, result) => {
+        if (!pendingServerRequests.delete(id)) return;
+        notifyThread(thread, "serverRequest/resolved", { threadId, requestId: id });
+        resolve(result);
+      });
+      for (const conn of thread.subscribers) {
+        send(conn, {
+          jsonrpc: "2.0",
+          id,
+          method: "item/tool/requestUserInput",
+          params: {
+            threadId,
+            turnId: turn.id,
+            itemId: "call_ask",
+            isBlocking: true,
+            autoResolutionMs: null,
+            questions: [
+              { id: "db", header: "Database", question: "Which database should it use?", isOther: true, isSecret: false, options: [{ label: "Postgres", description: "Good default" }, { label: "SQLite", description: "One file" }] },
+              { id: "token", header: "Token", question: "Paste the deploy token", isOther: false, isSecret: true, options: null },
+            ],
+          },
+        });
+      }
+    });
+    text = `answers ${JSON.stringify(answers)}`;
   }
   const slow = text.includes("SLOW");
   const chunks = slow ? Array.from({ length: 40 }, (_, i) => `w${i} `) : ["echo: ", ...text.split(/(\s+)/).filter(Boolean)];
@@ -328,7 +360,7 @@ wss.on("connection", (ws) => {
   ws.on("message", (data) => {
     const message = JSON.parse(data.toString());
     if (message.method === undefined && message.id !== undefined) {
-      pendingServerRequests.get(message.id)?.(message.result?.decision);
+      pendingServerRequests.get(message.id)?.(message.result?.decision, message.result);
       return;
     }
     if (message.id === undefined) return;

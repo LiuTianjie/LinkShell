@@ -335,6 +335,24 @@ export const DriverChange = memo(function DriverChange({ item }: { item: Of<"dri
 });
 
 export const PermissionResult = memo(function PermissionResult({ item }: { item: Of<"permission-result"> }) {
+  if (item.asked) {
+    // Questions the agent asked: what was answered to each, or that they were skipped.
+    return (
+      <View style={{ gap: 4 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 26 }}>
+          <Icon sf="questionmark.bubble.fill" md="help" size={14} color={item.answers ? colors.accent : colors.tertiaryLabel} />
+          <Text numberOfLines={2} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+            {item.answers ? "已回答" : `没有回答 · ${item.title}`}
+          </Text>
+        </View>
+        {item.answers?.map((entry) => (
+          <Text key={entry.question} style={[type.footnote, { color: colors.secondaryLabel, paddingLeft: 22 }]}>
+            {entry.question}：<Text style={{ color: colors.label }}>{entry.answer}</Text>
+          </Text>
+        ))}
+      </View>
+    );
+  }
   const allowed = item.allowed !== false;
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 26 }}>

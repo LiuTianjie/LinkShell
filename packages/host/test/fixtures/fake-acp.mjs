@@ -132,6 +132,34 @@ async function runPrompt(sessionId, text) {
     running.delete(sessionId);
     throw { code: -32000, message: "Authentication required: please run /login" };
   }
+  if (text.includes("ASK")) {
+    // Like Claude's adapter presents AskUserQuestion: a form, each question with a field for an answer of the user's own.
+    const option = (label, description) => ({ const: label, title: label, ...(description ? { description } : {}) });
+    const outcome = await requestClient("elicitation/create", {
+      mode: "form",
+      sessionId,
+      toolCallId: "toolu_ask",
+      message: "Please answer the following questions.",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          question_0: { type: "string", title: "Database", description: "Which database should it use?", oneOf: [option("Postgres", "Good default"), option("SQLite")] },
+          question_0_custom: { type: "string", title: "Other" },
+          question_1: { type: "array", title: "Checks", description: "Which checks should run?", items: { anyOf: [option("lint"), option("tests"), option("types")] } },
+          question_1_custom: { type: "string", title: "Other" },
+        },
+      },
+    });
+    const messageId = `msg_${++messageCounter}`;
+    update(sessionId, chunk("agent_message_chunk", messageId, `asked: ${JSON.stringify(outcome)}`));
+    session.history.push({ role: "agent", id: messageId, text: `asked: ${JSON.stringify(outcome)}` });
+    if (outcome?.action === "cancel") {
+      running.delete(sessionId);
+      return "cancelled";
+    }
+    running.delete(sessionId);
+    return "end_turn";
+  }
   if (text.includes("RUN")) {
     const toolCallId = `toolu_${++messageCounter}`;
     update(sessionId, { sessionUpdate: "tool_call", toolCallId, title: "Run echo hi", kind: "execute", status: "pending", rawInput: { command: "echo hi" } });

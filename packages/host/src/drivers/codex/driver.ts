@@ -1,11 +1,13 @@
-import { ABANDON, RpcError, type ContentBlock, type RpcId } from "@linkshell/wire";
+import { ABANDON, RpcError, type ContentBlock, type QuestionAnswer, type RpcId } from "@linkshell/wire";
 import type { AgentAuth } from "@linkshell/wire";
 import { parseCodexLoginStatus, runStatusCommand } from "../auth.js";
 import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
 import { CodexAppServer, detectCodex } from "./app-server.js";
 import {
   APPROVAL_METHODS,
+  QUESTION_METHODS,
   mapApprovalRequest,
+  mapQuestionRequest,
   mapNotification,
   threadStateOf,
   threadToDiscovered,
@@ -313,11 +315,12 @@ export class CodexDriver implements AgentDriver {
         this.host?.log(`[codex] steer failed, starting a new turn: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    const overrides = this.overrides.get(nativeId) ?? {};
     await this.rpc("turn/start", {
       threadId: nativeId,
       clientUserMessageId: clientMessageId,
       input,
-      ...turnOverrides(this.overrides.get(nativeId) ?? {}),
+      ...turnOverrides(overrides, overrides.plan === undefined ? {} : effective(this.settings.get(nativeId) ?? {}, overrides, await this.loadModels())),
     });
     return "started";
   }
@@ -344,6 +347,8 @@ export class CodexDriver implements AgentDriver {
     } else if (optionId === "permissions") {
       if (value === "custom") delete next.permissions;
       else next.permissions = value;
+    } else if (optionId === "plan") {
+      next.plan = value === "on";
     } else {
       throw RpcError.app("not_supported", `Codex has no setting ${optionId}`);
     }
@@ -429,6 +434,16 @@ export class CodexDriver implements AgentDriver {
     pending.answer(pending.request.respond(optionId));
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_permission_resolved", requestId, optionId });
     if (optionId === "cancel") await this.cancel(nativeId).catch(() => {});
+  }
+
+  async answerQuestion(nativeId: string, requestId: string, answers: QuestionAnswer[]): Promise<void> {
+    const pending = this.approvals.get(requestId);
+    if (!pending || pending.threadId !== nativeId || !pending.request.answer) {
+      throw RpcError.app("not_found", "这个问题已经不在等回答了");
+    }
+    this.approvals.delete(requestId);
+    pending.answer(pending.request.answer(answers));
+    this.host?.update(this.id, nativeId, { sessionUpdate: "ls_permission_resolved", requestId, optionId: "answered", answers });
   }
 
   desktopLaunch(args: string[], nativeId?: string): LaunchSpec {
@@ -598,9 +613,9 @@ export class CodexDriver implements AgentDriver {
   }
 
   private onServerRequest(method: string, params: unknown, id: RpcId): unknown {
-    if (!APPROVAL_METHODS.has(method)) return ABANDON;
+    if (!APPROVAL_METHODS.has(method) && !QUESTION_METHODS.has(method)) return ABANDON;
     const requestId = String(id);
-    const mapped = mapApprovalRequest(method, params, requestId);
+    const mapped = QUESTION_METHODS.has(method) ? mapQuestionRequest(method, params, requestId) : mapApprovalRequest(method, params, requestId);
     // A sub-agent asking for permission asks in its parent session.
     const request = mapped && this.children.has(mapped.threadId) ? { ...mapped, threadId: this.children.get(mapped.threadId)!.threadId } : mapped;
     if (!request || !this.attached.has(request.threadId)) return ABANDON;

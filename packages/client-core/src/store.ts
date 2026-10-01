@@ -5,6 +5,7 @@ import {
   type MachineInfo,
   type MethodResult,
   type ProjectSummary,
+  type QuestionAnswer,
   type SessionEvent,
   type SessionSummary,
   type SubagentInfo,
@@ -67,6 +68,8 @@ export interface ClientActions {
   retry(clientMessageId: string): Promise<void>;
   discard(clientMessageId: string): void;
   respond(sessionId: string, requestId: string, optionId: string): Promise<void>;
+  /** Answers the questions of a pending request (one whose `questions` are set). */
+  answer(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>;
   cancel(sessionId: string): Promise<void>;
   takeover(sessionId: string): Promise<void>;
   /** Hands a handoff session back so the desktop can pick it up again. */
@@ -366,6 +369,10 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
       async respond(sessionId, requestId, optionId) {
         await link.call("sessions.permission", { sessionId, requestId, optionId });
+      },
+
+      async answer(sessionId, requestId, answers) {
+        await link.call("sessions.answer", { sessionId, requestId, answers });
       },
 
       async cancel(sessionId) {

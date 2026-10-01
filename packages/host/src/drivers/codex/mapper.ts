@@ -3,6 +3,8 @@ import type {
   ContentBlock,
   PermissionOption,
   PlanEntry,
+  Question,
+  QuestionAnswer,
   SessionState,
   SessionUpdate,
   StopReason,
@@ -10,6 +12,7 @@ import type {
   ToolCallStatus,
 } from "@linkshell/wire";
 import { imageFromPath, inlineImage } from "../images.js";
+import { QUESTION_OPTIONS, formContent, formQuestions } from "../../questions.js";
 import type { DiscoveredSession, HistoryItem } from "../types.js";
 
 // Minimal views of the Codex app-server v2 protocol (`codex app-server
@@ -644,6 +647,8 @@ export interface ApprovalRequest {
   update: Extract<SessionUpdate, { sessionUpdate: "ls_permission" }>;
   /** Builds the JSON-RPC result for the chosen option. */
   respond(optionId: string): unknown;
+  /** For a request with questions: the result that carries the user's answers. */
+  answer?: (answers: QuestionAnswer[]) => unknown;
 }
 
 export function mapApprovalRequest(method: string, rawParams: unknown, requestId: string): ApprovalRequest | undefined {
@@ -709,4 +714,84 @@ export function toCodexInput(content: ContentBlock[]): Json[] {
         return [];
     }
   });
+}
+
+// ── Questions ────────────────────────────────────────────────────────
+
+/** Requests that ask the user something instead of asking for permission. */
+export const QUESTION_METHODS = new Set(["item/tool/requestUserInput", "mcpServer/elicitation/request"]);
+
+/**
+ * Codex asking the user: its own request_user_input tool (questions with
+ * options, an own answer, or something secret to type), or an MCP server's
+ * form. Not answered: skipped — Codex goes on without an answer.
+ */
+export function mapQuestionRequest(method: string, rawParams: unknown, requestId: string): ApprovalRequest | undefined {
+  const params = obj(rawParams);
+  const threadId = str(params?.threadId);
+  if (!params || !threadId) return undefined;
+  if (method === "item/tool/requestUserInput") {
+    const questions = arr(params.questions).flatMap((entry): Question[] => {
+      const question = obj(entry);
+      const id = str(question?.id);
+      const text = str(question?.question);
+      if (!id || !text) return [];
+      const options = arr(question?.options).flatMap((raw) => {
+        const option = obj(raw);
+        const label = str(option?.label);
+        return label ? [{ value: label, label, description: str(option?.description) ?? undefined }] : [];
+      });
+      const header = str(question?.header);
+      return [
+        options.length > 0
+          ? { id, header: header ?? undefined, text, kind: "choice", options, other: question?.isOther === true || undefined }
+          : { id, header: header ?? undefined, text, kind: "text", secret: question?.isSecret === true || undefined },
+      ];
+    });
+    if (questions.length === 0) return undefined;
+    const answered = (answers: QuestionAnswer[]) => ({
+      answers: Object.fromEntries(
+        answers.flatMap((answer) => {
+          // Like Codex's own UI: the picks, then what the user added in their own words.
+          const said = [...answer.values.filter(Boolean), ...(answer.other ? [`user_note: ${answer.other}`] : [])];
+          return said.length > 0 ? [[answer.id, { answers: said }]] : [];
+        }),
+      ),
+    });
+    return {
+      threadId,
+      update: {
+        sessionUpdate: "ls_permission",
+        requestId,
+        toolCallId: str(params.itemId),
+        title: questions.length === 1 ? questions[0]!.text : "Codex 有几个问题",
+        options: QUESTION_OPTIONS,
+        questions,
+      },
+      respond: () => answered([]),
+      answer: answered,
+    };
+  }
+  if (method === "mcpServer/elicitation/request") {
+    const mode = str(params.mode);
+    const message = str(params.message);
+    const form = mode === "form" || mode === "openai/form" || mode === "openaiForm" ? formQuestions(params.requestedSchema, message) : undefined;
+    // A page to open (sign-in for an MCP server) belongs on the computer.
+    if (!form) return undefined;
+    const server = str(params.serverName);
+    return {
+      threadId,
+      update: {
+        sessionUpdate: "ls_permission",
+        requestId,
+        title: message ?? form.questions[0]!.text,
+        detail: server ? `来自 MCP 服务 ${server}` : undefined,
+        options: QUESTION_OPTIONS,
+        questions: form.questions,
+      },
+      respond: (optionId) => ({ action: optionId === "cancel" ? "cancel" : "decline", content: null, _meta: null }),
+      answer: (answers) => ({ action: "accept", content: formContent(form, answers), _meta: null }),
+    };
+  }
+  return undefined;
 }

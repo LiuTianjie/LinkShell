@@ -96,6 +96,13 @@ export function describeClaudeTool(name: string, input: Json): { title: string; 
     case "TaskStop":
     case "KillShell":
       return { title: name === "TaskStop" ? "Stop agent" : "Stop shell", kind: "other", detail: name === "TaskStop" ? { type: "subagent", action: "stop" } : undefined };
+    case "AskUserQuestion": {
+      const questions = Array.isArray(input.questions) ? input.questions.flatMap((entry) => str(obj(entry)?.question) ?? []) : [];
+      const [text] = questions;
+      // (Its input arrives after the call is announced: until then there is nothing to say about it.)
+      if (!text) return { title: "Ask a question", kind: "other" };
+      return { title: `Ask: ${text}`, kind: "other", detail: { type: "question", text, more: questions.length > 1 ? questions.length - 1 : undefined } };
+    }
     case "Skill": {
       const skill = str(input.skill) ?? str(input.command) ?? "skill";
       return { title: `Skill: ${skill}`, kind: "other", detail: { type: "skill", name: skill.replace(/^\//, "") } };

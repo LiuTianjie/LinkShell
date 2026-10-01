@@ -190,6 +190,44 @@ describe("host + Codex driver (fake app-server)", () => {
     expect(tools().filter((title) => title === "Context compacted")).toHaveLength(2);
   });
 
+  it("puts Codex's questions to the phone, and its answers back the way Codex's own UI gives them", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    const id = session.id;
+    await phone.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+    await laptop.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+    const asked = (who: typeof phone) => who.of(id).flatMap((e) => (e.update.sessionUpdate === "ls_permission" ? [e.update] : []));
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "q1", content: text("ASKME") });
+    await waitFor(() => asked(phone).length === 1 && asked(laptop).length === 1);
+    const request = asked(phone)[0]!;
+    expect(request).toMatchObject({
+      toolCallId: "call_ask",
+      questions: [
+        { id: "db", header: "Database", text: "Which database should it use?", kind: "choice", other: true, options: [{ value: "Postgres", label: "Postgres", description: "Good default" }, { value: "SQLite" }] },
+        { id: "token", header: "Token", text: "Paste the deploy token", kind: "text", secret: true },
+      ],
+    });
+    expect(host.hub.getSession(id).state).toBe("waiting");
+    await phone.client.call("sessions.answer", {
+      sessionId: id,
+      requestId: request.requestId,
+      answers: [
+        { id: "db", values: ["SQLite"], other: "in memory for tests" },
+        { id: "token", values: ["s3cret"] },
+      ],
+    });
+    await waitFor(() => phone.turnsEnded(id).length === 1);
+    expect(phone.agentText(id)).toBe(`echo: answers ${JSON.stringify({ answers: { db: { answers: ["SQLite", "user_note: in memory for tests"] }, token: { answers: ["s3cret"] } } })}`);
+    // The other device's card goes away too.
+    await waitFor(() => laptop.of(id).some((e) => e.update.sessionUpdate === "ls_permission_resolved"));
+
+    // Skipped: Codex goes on without answers.
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "q2", content: text("ASKME again") });
+    await waitFor(() => asked(phone).length === 2);
+    await phone.client.call("sessions.permission", { sessionId: id, requestId: asked(phone)[1]!.requestId, optionId: "skip" });
+    await waitFor(() => phone.turnsEnded(id).length === 2);
+    expect(phone.agentText(id)).toContain('echo: answers {"answers":{}}');
+  });
+
   it("gives a second client the identical log, and a retried send is not delivered twice", async () => {
     await laptop.client.call("sessions.subscribe", { sessionId, fromSeq: 0 });
     // (The last live event may still be on its way to the phone's own connection.)

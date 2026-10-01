@@ -445,6 +445,7 @@ export function SessionScreen() {
           onReorderQueue={(clientMessageIds) => void guard(() => actions.reorderQueue(id, clientMessageIds), "调整顺序失败")}
           onCommands={() => router.push({ pathname: "/session/[id]/commands", params: { id } })}
           onRespond={(requestId, optionId) => actions.respond(id, requestId, optionId)}
+          onAnswer={(requestId, answers) => actions.answer(id, requestId, answers)}
           onTakeover={() => actions.takeover(id)}
           onConfig={(optionId, value) => void guard(() => actions.setConfig(id, optionId, value), "切换失败")}
         />

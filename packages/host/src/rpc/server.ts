@@ -138,6 +138,10 @@ export class HostRpcServer {
         await hub.respondPermission(params.sessionId, params.requestId, params.optionId);
         return {};
       },
+      "sessions.answer": async (params: P<"sessions.answer">) => {
+        await hub.answerQuestion(params.sessionId, params.requestId, params.answers);
+        return {};
+      },
       "sessions.sendQueued": async (params: P<"sessions.sendQueued">) => {
         await hub.sendQueuedNow(params.sessionId, params.clientMessageId);
         return {};

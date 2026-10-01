@@ -231,6 +231,8 @@ function describeDetail(detail: ToolDetail, changes: FileChange[]): ToolDescript
       return { verb: "生成图片", subject: detail.prompt ?? "", code: false, glyph: { sf: "photo", md: "image" }, changes };
     case "compaction":
       return { verb: "", subject: "压缩了上下文", code: false, glyph: { sf: "arrow.down.right.and.arrow.up.left", md: "compress" }, changes };
+    case "question":
+      return { verb: "提问", subject: detail.more ? `${detail.text}（还有 ${detail.more} 个）` : detail.text, code: false, glyph: { sf: "questionmark.bubble", md: "help" }, changes };
     case "review":
       return { verb: "", subject: detail.phase === "started" ? "开始代码审查" : "代码审查完成", code: false, glyph: { sf: "eye", md: "rate_review" }, changes };
   }

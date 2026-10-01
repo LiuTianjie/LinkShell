@@ -312,6 +312,61 @@ describe("generic ACP driver (fake agent)", () => {
     expect(t.host.hub.getSession(session.id)).toMatchObject({ state: "idle", pendingPermissions: 0 });
   });
 
+  it("puts an agent's questions to the phone: picks, an own answer, skipping", async () => {
+    const t = await setup();
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    const asked = () => t.of(session.id).flatMap((e) => (e.update.sessionUpdate === "ls_permission" ? [e.update] : []));
+
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "a", content: prompt("ASK me") });
+    await waitFor(() => asked().length === 1);
+    const request = asked()[0]!;
+    // Each question once, with what can be picked; the adapter's "Other" fields are the questions' own-answer box.
+    expect(request).toMatchObject({
+      toolCallId: "toolu_ask",
+      options: [{ optionId: "skip" }, { optionId: "cancel" }],
+      questions: [
+        { id: "question_0", header: "Database", text: "Which database should it use?", kind: "choice", other: true, options: [{ value: "Postgres", description: "Good default" }, { value: "SQLite" }] },
+        { id: "question_1", header: "Checks", text: "Which checks should run?", kind: "choices", other: true },
+      ],
+    });
+    // The session waits for the user, and says with what.
+    expect(t.host.hub.getSession(session.id)).toMatchObject({ state: "waiting", pendingPermissions: 1, permission: { requestId: request.requestId, questions: [{ id: "question_0" }, { id: "question_1" }] } });
+
+    // Something that wasn't offered isn't an answer; what was asked for is passed on in the form's own shape.
+    await t.client.call("sessions.answer", {
+      sessionId: session.id,
+      requestId: request.requestId,
+      answers: [
+        { id: "question_0", values: ["Postgres", "MySQL"], other: "version 16 please" },
+        { id: "question_1", values: ["lint", "types", "deploy"] },
+        { id: "question_9", values: ["x"] },
+      ],
+    });
+    await waitFor(() => t.ended(session.id).length === 1);
+    expect(t.text(session.id)).toBe(
+      `asked: ${JSON.stringify({ action: "accept", content: { question_0: "Postgres", question_0_custom: "version 16 please", question_1: ["lint", "types"] } })}`,
+    );
+    const resolved = t.of(session.id).find((e) => e.update.sessionUpdate === "ls_permission_resolved")?.update;
+    expect(resolved).toMatchObject({ requestId: request.requestId, optionId: "answered", answers: [{ id: "question_0", values: ["Postgres"], other: "version 16 please" }, { id: "question_1", values: ["lint", "types"] }] });
+    expect(t.host.hub.getSession(session.id)).toMatchObject({ state: "idle", pendingPermissions: 0 });
+    // Answered once.
+    await expect(t.client.call("sessions.answer", { sessionId: session.id, requestId: request.requestId, answers: [] })).rejects.toMatchObject({ appCode: "not_found" });
+
+    // Skipping lets the agent go on without an answer; stopping ends the turn.
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "b", content: prompt("ASK again") });
+    await waitFor(() => asked().length === 2);
+    await t.client.call("sessions.permission", { sessionId: session.id, requestId: asked()[1]!.requestId, optionId: "skip" });
+    await waitFor(() => t.ended(session.id).length === 2);
+    expect(t.text(session.id)).toContain('asked: {"action":"decline"}');
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "c", content: prompt("ASK once more") });
+    await waitFor(() => asked().length === 3);
+    await t.client.call("sessions.cancel", { sessionId: session.id });
+    await waitFor(() => t.ended(session.id).length === 3);
+    expect(t.text(session.id)).toContain('asked: {"action":"cancel"}');
+    expect(t.host.hub.getSession(session.id).pendingPermissions).toBe(0);
+  });
+
   it("changes model and mode", async () => {
     const t = await setup();
     const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });

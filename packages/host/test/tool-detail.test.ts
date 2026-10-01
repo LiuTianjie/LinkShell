@@ -91,6 +91,10 @@ describe("tool detail", () => {
     expect(toolCall(mcp.updates)?.detail).toEqual({ type: "mcp", server: "playwright", tool: "browser_click" });
     const task = transcriptLine(line({ id: "msg", content: [{ type: "tool_use", id: "t2", name: "Task", input: { description: "Audit pages" } }] }));
     expect(toolCall(task.updates)?.detail).toEqual({ type: "subagent", action: "spawn", task: "Audit pages" });
+    const ask = transcriptLine(
+      line({ id: "msg", content: [{ type: "tool_use", id: "t9", name: "AskUserQuestion", input: { questions: [{ question: "Which database?", header: "DB", options: [] }, { question: "Which checks?" }] } }] }),
+    );
+    expect(toolCall(ask.updates)).toMatchObject({ title: "Ask: Which database?", detail: { type: "question", text: "Which database?", more: 1 } });
     const skill = transcriptLine(line({ id: "msg", content: [{ type: "tool_use", id: "t3", name: "Skill", input: { skill: "pdf" } }] }));
     expect(toolCall(skill.updates)?.detail).toEqual({ type: "skill", name: "pdf" });
     const command = transcriptLine(

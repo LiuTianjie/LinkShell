@@ -55,7 +55,9 @@ export function Button({
       accessibilityLabel={accessibilityLabel ?? title}
       accessibilityState={{ disabled: inactive, busy }}
       hitSlop={size === "small" ? 6 : 0}
-      style={[wide ? { flex: 1 } : null, style]}
+      // Sharing a row equally is the pressable's own layout; what is inside fills it.
+      outerStyle={wide ? { flex: 1 } : undefined}
+      style={style}
     >
       <View
         style={{

@@ -4,6 +4,7 @@ import type {
   AgentTier,
   ContentBlock,
   QueuedMessage,
+  QuestionAnswer,
   SessionState,
   SessionUpdate,
 } from "@linkshell/wire";
@@ -135,6 +136,8 @@ export interface AgentDriver {
   prompt(nativeId: string, content: ContentBlock[], clientMessageId: string, context?: string): Promise<"started" | "steered" | "queued">;
   cancel(nativeId: string): Promise<void>;
   respondPermission(nativeId: string, requestId: string, optionId: string): Promise<void>;
+  /** Answers the questions of a pending request (an `ls_permission` with `questions`). */
+  answerQuestion?(nativeId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>;
   setConfig?(nativeId: string, optionId: string, value: string): Promise<void>;
   /** Drops a message the driver holds in its queue; whether it was there. */
   unqueue?(nativeId: string, clientMessageId: string): boolean;

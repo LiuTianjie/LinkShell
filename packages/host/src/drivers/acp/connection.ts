@@ -114,6 +114,9 @@ export class AcpConnection {
           clientCapabilities: {
             fs: { readTextFile: false, writeTextFile: false },
             terminal: false,
+            // Questions for the user (Claude's AskUserQuestion, an MCP server's form) come as
+            // forms to fill in. Not `url`: a page to open belongs on the computer, not on a phone.
+            elicitation: { form: {} },
             // Ask adapters that support it (Claude's) to stream sub-agents' own
             // messages and tool calls, each stamped with the spawning call.
             _meta: { "subagent-transcript": true },

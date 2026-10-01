@@ -97,12 +97,44 @@ export const sessionActivitySchema = z.object({
 export type SessionActivity = z.infer<typeof sessionActivitySchema>;
 
 /** The oldest unanswered permission request, so lists can offer approval inline. Live only. */
+/**
+ * Something the agent asks the user rather than asks permission for: a choice
+ * among options, several of them, or something to type (Claude's
+ * AskUserQuestion, Codex's request_user_input, an MCP server's form).
+ */
+export const questionSchema = z.object({
+  id: z.string(),
+  /** A short label for the question ("Auth method"). */
+  header: z.string().optional(),
+  text: z.string(),
+  /** `choice`: one of `options`; `choices`: any number of them; `text`: typed. */
+  kind: z.enum(["choice", "choices", "text"]),
+  options: z.array(z.object({ value: z.string(), label: z.string(), description: z.string().optional() })).optional(),
+  /** With options: an answer of the user's own can be typed instead of, or beside, a pick. */
+  other: z.boolean().optional(),
+  /** What is typed shouldn't be shown (a token). */
+  secret: z.boolean().optional(),
+  required: z.boolean().optional(),
+});
+export type Question = z.infer<typeof questionSchema>;
+
+export const questionAnswerSchema = z.object({
+  id: z.string(),
+  /** The values picked (`choice`: at most one), or what was typed for a `text` question. */
+  values: z.array(z.string().max(20_000)).max(50),
+  /** The user's own answer beside the options. */
+  other: z.string().max(20_000).optional(),
+});
+export type QuestionAnswer = z.infer<typeof questionAnswerSchema>;
+
 export const pendingPermissionSchema = z.object({
   requestId: z.string(),
   toolCallId: z.string().optional(),
   title: z.string(),
   detail: z.string().optional(),
   options: z.array(permissionOptionSchema).min(1),
+  /** Set when this is a question to answer (`sessions.answer`) rather than a permission to give. */
+  questions: z.array(questionSchema).optional(),
 });
 export type PendingPermissionSummary = z.infer<typeof pendingPermissionSchema>;
 

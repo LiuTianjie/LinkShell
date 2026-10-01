@@ -1,5 +1,5 @@
 import type { PendingPermission } from "@linkshell/client-core";
-import type { AgentInfo, ContentBlock, QueuedMessage, SessionConfigOption, SessionDriver } from "@linkshell/wire";
+import type { AgentInfo, ContentBlock, QuestionAnswer, QueuedMessage, SessionConfigOption, SessionDriver } from "@linkshell/wire";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -18,6 +18,7 @@ import { Icon } from "./icon";
 import { PermissionActions } from "./permission-actions";
 import { PlusMenu } from "./plus-menu";
 import { QueuePanel } from "./queue-panel";
+import { QuestionCard } from "./question-card";
 import { UsageRing } from "./usage-ring";
 
 interface Attachment {
@@ -45,6 +46,8 @@ export interface ComposerProps {
   onSend: (content: ContentBlock[]) => Promise<"started" | "steered" | "queued" | "duplicate" | "failed">;
   onStop: () => Promise<void>;
   onRespond: (requestId: string, optionId: string) => Promise<void>;
+  /** Answers the questions of a pending request. */
+  onAnswer: (requestId: string, answers: QuestionAnswer[]) => Promise<void>;
   onTakeover: () => Promise<void>;
   onConfig: (optionId: string, value: string) => void;
   /** Messages the computer holds until the current turn ends. */
@@ -187,46 +190,58 @@ export function Composer(props: ComposerProps) {
     <View onLayout={props.onLayout} style={{ paddingHorizontal: 10, paddingBottom: bottomInset + 8, paddingTop: 6, gap: 8 }}>
       {permission ? (
         <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(220)}>
-          <Glass style={{ borderRadius: 26, padding: 14, gap: 10 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <View
-                style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: 9,
-                  borderCurve: "continuous",
-                  backgroundColor: colors.waitingSoft,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Icon sf="hand.raised.fill" md="front_hand" size={13} color={colors.waiting} />
-              </View>
-              <Text numberOfLines={2} style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
-                {permission.title}
-              </Text>
-              {permissionCount > 1 ? (
-                <Text style={[type.caption, { color: colors.waiting, fontWeight: "600" }]}>1/{permissionCount}</Text>
-              ) : null}
-            </View>
-            {permission.detail ? (
-              <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", padding: 10 }}>
-                <Text selectable numberOfLines={6} style={{ fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.codeText }}>
-                  {permission.detail}
-                </Text>
-              </View>
-            ) : null}
-            <PermissionActions
+          {permission.questions?.length ? (
+            <QuestionCard
               key={permission.requestId}
-              options={permission.options}
+              request={permission}
+              count={permissionCount}
+              agentName={name}
               disabled={!props.online}
-              size="large"
-              onChoose={(optionId) => props.onRespond(permission.requestId, optionId)}
+              onAnswer={props.onAnswer}
+              onChoose={props.onRespond}
             />
-            {tier === "multi_client" || tier === "handoff" ? (
-              <Text style={[type.caption, { color: colors.tertiaryLabel, textAlign: "center" }]}>在哪边回答都行，另一边会同步收起</Text>
-            ) : null}
-          </Glass>
+          ) : (
+            <Glass style={{ borderRadius: 26, padding: 14, gap: 10 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: 9,
+                    borderCurve: "continuous",
+                    backgroundColor: colors.waitingSoft,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Icon sf="hand.raised.fill" md="front_hand" size={13} color={colors.waiting} />
+                </View>
+                <Text numberOfLines={2} style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
+                  {permission.title}
+                </Text>
+                {permissionCount > 1 ? (
+                  <Text style={[type.caption, { color: colors.waiting, fontWeight: "600" }]}>1/{permissionCount}</Text>
+                ) : null}
+              </View>
+              {permission.detail ? (
+                <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", padding: 10 }}>
+                  <Text selectable numberOfLines={6} style={{ fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.codeText }}>
+                    {permission.detail}
+                  </Text>
+                </View>
+              ) : null}
+              <PermissionActions
+                key={permission.requestId}
+                options={permission.options}
+                disabled={!props.online}
+                size="large"
+                onChoose={(optionId) => props.onRespond(permission.requestId, optionId)}
+              />
+              {tier === "multi_client" || tier === "handoff" ? (
+                <Text style={[type.caption, { color: colors.tertiaryLabel, textAlign: "center" }]}>在哪边回答都行，另一边会同步收起</Text>
+              ) : null}
+            </Glass>
+          )}
         </Animated.View>
       ) : null}
 

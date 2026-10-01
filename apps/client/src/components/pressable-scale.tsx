@@ -7,11 +7,14 @@ const EASE_OUT = cubicBezier(0.23, 1, 0.32, 1);
 /** A pressable that dips to 97% while held — the app's one press feedback. */
 export function PressableScale({
   style,
+  outerStyle,
   pressedScale = 0.97,
   children,
   ...props
 }: Omit<PressableProps, "style" | "children"> & {
   style?: StyleProp<ViewStyle>;
+  /** Layout of the pressable itself in its parent (`flex: 1` to share a row); `style` is what scales inside it. */
+  outerStyle?: StyleProp<ViewStyle>;
   pressedScale?: number;
   children: React.ReactNode;
 }) {
@@ -28,6 +31,7 @@ export function PressableScale({
         props.onPressOut?.(event);
       }}
       pressRetentionOffset={16}
+      style={outerStyle}
     >
       <Animated.View
         style={[

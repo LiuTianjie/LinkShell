@@ -8,6 +8,7 @@ import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 import { Icon } from "./icon";
+import { Button } from "./button";
 import { PermissionActions } from "./permission-actions";
 import { openSession, SessionAvatar } from "./session-row";
 
@@ -52,7 +53,12 @@ export const NeedCard = memo(function NeedCard({ session, now }: { session: Sess
 
       <View style={{ backgroundColor: colors.waitingSoft, borderRadius: 16, borderCurve: "continuous", padding: 12, gap: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Icon sf="hand.raised.fill" md="front_hand" size={14} color={colors.waiting} />
+          <Icon
+            sf={permission?.questions ? "questionmark.bubble.fill" : "hand.raised.fill"}
+            md={permission?.questions ? "help" : "front_hand"}
+            size={14}
+            color={colors.waiting}
+          />
           <Text numberOfLines={2} style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
             {permission?.title ?? "需要你的确认"}
           </Text>
@@ -67,7 +73,10 @@ export const NeedCard = memo(function NeedCard({ session, now }: { session: Sess
         ) : null}
       </View>
 
-      {permission ? (
+      {permission?.questions ? (
+        // Questions are answered in the session, where there is room for them.
+        <Button title="去回答" variant="primary" wide onPress={() => openSession(session.id)} />
+      ) : permission ? (
         <PermissionActions
           key={permission.requestId}
           options={permission.options}

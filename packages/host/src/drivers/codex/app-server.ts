@@ -70,7 +70,9 @@ export class CodexAppServer {
     if (existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
     const child = spawn(
       this.options.command ?? "codex",
-      ["app-server", "--listen", `unix://${this.options.socketPath}`],
+      // Codex asks the user questions outside plan mode only with this (still off by default in the
+      // CLI): the phone and the TUI can both answer them now. A Codex without the feature ignores it.
+      ["app-server", "--enable", "default_mode_request_user_input", "--listen", `unix://${this.options.socketPath}`],
       { env: this.options.env, stdio: ["ignore", "pipe", "pipe"] },
     );
     this.child = child;
@@ -158,7 +160,8 @@ export class CodexAppServer {
     this.peer = peer;
     await peer.request("initialize", {
       clientInfo: { name: "linkshell", title: "LinkShell", version: this.options.clientVersion },
-      capabilities: { experimentalApi: false, requestAttestation: false, optOutNotificationMethods: OPT_OUT_NOTIFICATIONS },
+      // experimentalApi: plan mode (`collaborationMode`) and the questions Codex asks (`item/tool/requestUserInput`) need it.
+      capabilities: { experimentalApi: true, requestAttestation: false, optOutNotificationMethods: OPT_OUT_NOTIFICATIONS },
     });
     peer.notify("initialized", {});
   }

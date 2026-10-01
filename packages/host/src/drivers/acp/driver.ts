@@ -9,9 +9,11 @@ import {
   type RpcId,
   type SessionUpdate,
   type StopReason,
+  type QuestionAnswer,
 } from "@linkshell/wire";
 import type { AgentDriver, AttachContext, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem } from "../types.js";
 import { AcpConnection } from "./connection.js";
+import { QUESTION_OPTIONS, formContent, formQuestions, type Form } from "../../questions.js";
 import {
   AcpItemTracker,
   mapPermissionRequest,
@@ -71,6 +73,8 @@ export interface AcpSessionState {
   inflight: number;
   queue: PendingPrompt[];
   permissions: Map<string, (outcome: unknown) => void>;
+  /** Questions waiting for an answer: the form each came as, and how it is answered. */
+  questions: Map<string, { form: Form; resolve: (response: unknown) => void }>;
 }
 
 /** Turns agent failures into something a person can act on. */
@@ -294,6 +298,14 @@ export class AcpDriver implements AgentDriver {
   }
 
   async respondPermission(nativeId: string, requestId: string, optionId: string): Promise<void> {
+    const question = this.sessions.get(nativeId)?.questions.get(requestId);
+    if (question) {
+      // Not answering: skip (the agent goes on without an answer) or stop.
+      this.sessions.get(nativeId)?.questions.delete(requestId);
+      question.resolve({ action: optionId === "cancel" ? "cancel" : "decline" });
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_permission_resolved", requestId, optionId });
+      return;
+    }
     const resolve = this.sessions.get(nativeId)?.permissions.get(requestId);
     if (!resolve) throw RpcError.app("not_found", "this permission request is no longer pending");
     this.sessions.get(nativeId)?.permissions.delete(requestId);
@@ -420,6 +432,7 @@ export class AcpDriver implements AgentDriver {
         inflight: 0,
         queue: [],
         permissions: new Map(),
+        questions: new Map(),
       };
       this.sessions.set(nativeId, state);
     }
@@ -466,6 +479,7 @@ export class AcpDriver implements AgentDriver {
   }
 
   private onRequest(method: string, params: unknown, id: RpcId): unknown {
+    if (method === "elicitation/create") return this.onQuestions(params, id);
     if (method !== "session/request_permission") {
       throw new RpcError(-32601, `LinkShell does not implement ${method}`);
     }
@@ -481,9 +495,44 @@ export class AcpDriver implements AgentDriver {
     });
   }
 
+  /** The agent asks the user something (a form to fill in): it waits as a request with questions. */
+  private onQuestions(params: unknown, id: RpcId): unknown {
+    const request = params as { sessionId?: unknown; mode?: unknown; message?: unknown; requestedSchema?: unknown; toolCallId?: unknown } | undefined;
+    const sessionId = typeof request?.sessionId === "string" ? request.sessionId : undefined;
+    const state = sessionId ? this.sessions.get(sessionId) : undefined;
+    const message = typeof request?.message === "string" ? request.message : undefined;
+    const form = request?.mode === "form" ? formQuestions(request.requestedSchema, message) : undefined;
+    // Nothing we can show (a page to open, a form without fields): the agent goes on without an answer.
+    if (!sessionId || !state || !form) return { action: "decline" };
+    const requestId = `${this.id}-q${this.nextPermissionId++}-${String(id)}`;
+    return new Promise((resolve) => {
+      state.questions.set(requestId, { form, resolve });
+      this.closeMessage(sessionId);
+      this.host?.update(this.id, sessionId, {
+        sessionUpdate: "ls_permission",
+        requestId,
+        toolCallId: typeof request?.toolCallId === "string" ? request.toolCallId : undefined,
+        title: message ?? form.questions[0]!.text,
+        options: QUESTION_OPTIONS,
+        questions: form.questions,
+      });
+    });
+  }
+
+  async answerQuestion(nativeId: string, requestId: string, answers: QuestionAnswer[]): Promise<void> {
+    const state = this.sessions.get(nativeId);
+    const pending = state?.questions.get(requestId);
+    if (!state || !pending) throw RpcError.app("not_found", "这个问题已经不在等回答了");
+    state.questions.delete(requestId);
+    pending.resolve({ action: "accept", content: formContent(pending.form, answers) });
+    this.host?.update(this.id, nativeId, { sessionUpdate: "ls_permission_resolved", requestId, optionId: "answered", answers });
+  }
+
   private cancelPermissions(state: AcpSessionState): void {
     for (const resolve of state.permissions.values()) resolve({ outcome: { outcome: "cancelled" } });
     state.permissions.clear();
+    for (const pending of state.questions.values()) pending.resolve({ action: "cancel" });
+    state.questions.clear();
   }
 
   private echoUserMessage(nativeId: string, content: ContentBlock[], clientMessageId: string): void {

@@ -11,6 +11,7 @@ const optionNames: Record<string, string> = {
   mode: "权限模式",
   permissions: "权限",
   fast: "快速模式",
+  plan: "计划模式",
 };
 
 const valueNames: Record<string, string> = {
@@ -50,6 +51,11 @@ const scoped: Record<string, Record<string, { name: string; hint?: string }>> = 
   },
   fast: {
     on: { name: "开", hint: "更快的输出，额度消耗更多" },
+    off: { name: "关" },
+  },
+  // Codex's plan mode
+  plan: {
+    on: { name: "开", hint: "先讨论、出计划，谈好了再动手" },
     off: { name: "关" },
   },
 };

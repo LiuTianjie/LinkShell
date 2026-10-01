@@ -29,6 +29,8 @@ export interface CodexOverrides {
   model?: string;
   effort?: string;
   permissions?: string;
+  /** Codex's plan mode: it discusses and plans (and asks questions) instead of making changes. */
+  plan?: boolean;
 }
 
 /** The Codex TUI's `/approvals` presets. */
@@ -129,12 +131,31 @@ export function configOptions(settings: CodexSettings, overrides: CodexOverrides
       ...PERMISSION_PRESETS.map((p) => ({ value: p.id, name: p.name, description: p.description })),
     ],
   });
+  // The TUI's Shift+Tab. Only offered when the model is known: a mode is set together with one.
+  if (model) {
+    options.push({
+      id: "plan",
+      name: "Plan mode",
+      category: "other",
+      current: overrides.plan ? "on" : "off",
+      values: [
+        { value: "off", name: "Off" },
+        { value: "on", name: "On", description: "Discuss and plan first; no changes until the plan is agreed" },
+      ],
+    });
+  }
   return options;
 }
 
-/** `turn/start` parameters for the pending overrides. */
-export function turnOverrides(overrides: CodexOverrides): Record<string, unknown> {
+/** `turn/start` parameters for the pending overrides. `current` is what the thread runs with (a mode names its model). */
+export function turnOverrides(overrides: CodexOverrides, current: { model?: string; effort?: string | null } = {}): Record<string, unknown> {
   const params: Record<string, unknown> = {};
+  if (overrides.plan !== undefined && current.model) {
+    params.collaborationMode = {
+      mode: overrides.plan ? "plan" : "default",
+      settings: { model: current.model, reasoning_effort: current.effort ?? null, developer_instructions: null },
+    };
+  }
   if (overrides.model) params.model = overrides.model;
   if (overrides.effort) params.effort = overrides.effort;
   const preset = PERMISSION_PRESETS.find((p) => p.id === overrides.permissions);

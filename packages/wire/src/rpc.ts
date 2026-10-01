@@ -10,6 +10,7 @@ import {
   subagentInfoSchema,
   gitInfoSchema,
   worktreeEntrySchema,
+  questionAnswerSchema,
 } from "./model.js";
 import { contentBlockSchema, sessionEventSchema } from "./updates.js";
 
@@ -194,6 +195,15 @@ export const methods = {
       requestId: z.string().min(1),
       optionId: z.string().min(1),
     }),
+    result: empty,
+  },
+  /**
+   * Answers the questions of a pending request (an `ls_permission` with
+   * `questions`). Skipping or stopping instead is `sessions.permission` with
+   * one of the request's options.
+   */
+  "sessions.answer": {
+    params: z.object({ sessionId: z.string().min(1), requestId: z.string().min(1), answers: z.array(questionAnswerSchema).max(50) }),
     result: empty,
   },
   "sessions.setConfig": {
