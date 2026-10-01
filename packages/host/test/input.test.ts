@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Script } from "node:vm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeInputApp, inputApp, InputControl, inputEvent, shippedApp, type ControlState } from "../src/input.js";
+import { closeInputApp, inputApp, InputControl, inputEvent, shippedApp, usableApp, type ControlState } from "../src/input.js";
 import { viewerPage } from "../src/screen-viewer.js";
 
 describe("what a viewer may send", () => {
@@ -127,6 +127,42 @@ describe.skipIf(!hasSwift)("the input helper (dry run: events are reported, not 
     await until(() => posted.length === 2);
     expect(posted[1]).toMatchObject({ kind: "up", b: "left" });
   }, 30_000);
+});
+
+describe.skipIf(!shippedApp())("LinkShell.app as a package delivers it", () => {
+  const work = mkdtempSync(join(tmpdir(), "linkshell-app-"));
+  afterAll(() => {
+    chmodSync(join(work, "locked"), 0o755);
+    rmSync(work, { recursive: true, force: true });
+  });
+  const program = (app: string) => join(app, "Contents/MacOS/LinkShell");
+  const status = (app: string) => JSON.parse(execFileSync(program(app), ["--status"], { encoding: "utf8" })) as { t: string };
+
+  it("runs again after packing dropped its permission to run, signature intact", () => {
+    // What `pnpm pack` leaves: every file a plain one.
+    const packed = join(work, "packed/LinkShell.app");
+    cpSync(shippedApp()!, packed, { recursive: true });
+    chmodSync(program(packed), 0o644);
+    expect(usableApp(packed, join(work, "unused/LinkShell.app"))).toBe(packed);
+    expect(statSync(program(packed)).mode & 0o111).not.toBe(0);
+    expect(status(packed).t).toBe("status");
+    expect(() => execFileSync("/usr/bin/codesign", ["--verify", "--strict", packed])).not.toThrow();
+  });
+
+  it("uses a copy of its own where the installation can't be written to", () => {
+    const locked = join(work, "locked/LinkShell.app");
+    cpSync(shippedApp()!, locked, { recursive: true });
+    chmodSync(program(locked), 0o644);
+    // Not root's, but as good as: the program can't be made runnable where it is.
+    chmodSync(join(locked, "Contents/MacOS"), 0o555);
+    chmodSync(program(locked), 0o444);
+    const copy = join(work, "home/LinkShell.app");
+    const usable = process.getuid?.() === 0 ? copy : usableApp(locked, copy);
+    // The owner can still change the mode of their own file, so either answer is a runnable app.
+    expect([locked, copy]).toContain(usable);
+    expect(status(usable!).t).toBe("status");
+    chmodSync(join(locked, "Contents/MacOS"), 0o755);
+  });
 });
 
 describe.skipIf(!shippedApp())("LinkShell.app (dry run), opened by the system as an app of its own", () => {

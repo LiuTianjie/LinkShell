@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, rmSync } from "node:fs";
+import { accessSync, chmodSync, constants, cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -66,19 +66,66 @@ const dryRunByDefault = () => process.env.LINKSHELL_INPUT_DRY_RUN === "1";
 
 // ── Where the helper is ─────────────────────────────────────────────
 
+const home = () => process.env.LINKSHELL_HOME || join(homedir(), ".linkshell");
+const programOf = (app: string) => join(app, "Contents/MacOS/LinkShell");
+
+function runnable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The app as it came in the package, made runnable. Packing a package drops
+ * the program's permission to run (pnpm stores every file that isn't a `bin`
+ * as a plain one): it is given back here, and where the installation can't be
+ * written to (a root-owned one), a copy under the user's own directory is used.
+ * Neither touches the signature.
+ */
+export function usableApp(packaged: string, copyTo = join(home(), "LinkShell.app")): string | undefined {
+  if (runnable(programOf(packaged))) return packaged;
+  try {
+    chmodSync(programOf(packaged), 0o755);
+    return packaged;
+  } catch {
+    // Not ours to change: fall through to a copy.
+  }
+  try {
+    const plist = (app: string) => readFileSync(join(app, "Contents/Info.plist"), "utf8");
+    if (!existsSync(programOf(copyTo)) || plist(copyTo) !== plist(packaged)) {
+      rmSync(copyTo, { recursive: true, force: true });
+      cpSync(packaged, copyTo, { recursive: true });
+    }
+    chmodSync(programOf(copyTo), 0o755);
+    return copyTo;
+  } catch {
+    return undefined;
+  }
+}
+
+let found: { app: string | undefined } | undefined;
+
 /** The signed app this package was made with, if it was. */
 export function shippedApp(): string | undefined {
   if (process.platform !== "darwin" || process.env.LINKSHELL_INPUT_APP === "off") return undefined;
+  if (found) return found.app;
+  found = { app: undefined };
   // Beside `dist` in a package (the host's own, or the CLI's, which compiles the host in); beside `src` in a checkout.
   for (const relative of ["../../../helper/LinkShell.app", "../helper/LinkShell.app"]) {
     const path = fileURLToPath(new URL(relative, import.meta.url));
-    if (existsSync(join(path, "Contents/MacOS/LinkShell"))) return path;
+    if (existsSync(programOf(path))) {
+      found.app = usableApp(path);
+      break;
+    }
   }
-  return undefined;
+  return found.app;
 }
 
 function binDir(): string {
-  return join(process.env.LINKSHELL_HOME || join(homedir(), ".linkshell"), "bin");
+  return join(home(), "bin");
 }
 
 async function build(log: (message: string) => void): Promise<string> {
@@ -127,7 +174,7 @@ export function inputHelper(log: (message: string) => void = () => {}): Promise<
 
 /** The helper to run as this process's child: the app's own program, or the one compiled here. */
 function childHelper(log: (message: string) => void, app: string | undefined): Promise<string> {
-  return app ? Promise.resolve(join(app, "Contents/MacOS/LinkShell")) : inputHelper(log);
+  return app ? Promise.resolve(programOf(app)) : inputHelper(log);
 }
 
 function parse(line: string): Record<string, unknown> | undefined {
