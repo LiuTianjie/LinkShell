@@ -156,6 +156,8 @@ function parentOf(update: Record<string, unknown>): string | undefined {
 function toolDetail(update: Record<string, unknown>): ToolDetail | undefined {
   const claudeTool = str(obj(obj(update._meta)?.claudeCode)?.toolName);
   if (claudeTool) return describeClaudeTool(claudeTool, obj(update.rawInput) ?? {}).detail;
+  // Claude's adapter reports `/compact` (and compacting by itself) as a call of no tool.
+  if (update.kind === "think" && str(update.title) === "Compact conversation") return { type: "compaction" };
   return undefined;
 }
 
@@ -218,15 +220,21 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
           return [{ content: str(plan?.content)!, status, priority }];
         }),
       };
-    case "available_commands_update":
+    case "available_commands_update": {
+      // Skills come with a paragraph each, and some agents list one twice: a
+      // device needs the name and a line about it.
+      const seen = new Set<string>();
       return {
         sessionUpdate: "available_commands_update",
         availableCommands: arr(update.availableCommands).flatMap((entry) => {
           const command = obj(entry);
-          if (!str(command?.name)) return [];
-          return [{ name: str(command?.name)!, description: str(command?.description) ?? "", hint: str(obj(command?.input)?.hint) }];
+          const name = str(command?.name);
+          if (!name || seen.has(name)) return [];
+          seen.add(name);
+          return [{ name, description: brief(str(command?.description) ?? ""), hint: str(obj(command?.input)?.hint) }];
         }),
       };
+    }
     case "current_mode_update":
       return str(update.currentModeId) ? { sessionUpdate: "current_mode_update", currentModeId: str(update.currentModeId)! } : undefined;
     case "config_option_update": {
@@ -452,3 +460,8 @@ export function mapPermissionRequest(params: unknown, requestId: string): AcpPer
   };
 }
 
+/** The first line or so of a description. */
+function brief(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > 160 ? `${line.slice(0, 159)}…` : line;
+}

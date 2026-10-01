@@ -363,6 +363,7 @@ export class SessionHub {
       }
     }
     const live = this.liveFor(sessionId);
+    if (driver?.tier === "handoff") this.lendCommands(this.getSession(sessionId));
     const lastSeq = this.store.getSession(sessionId)?.lastSeq ?? 0;
     let startSeq = fromSeq;
     const missed = fromSeq > 0 && fromSeq <= lastSeq ? this.store.sizeAfter(sessionId, fromSeq) : undefined;
@@ -380,6 +381,29 @@ export class SessionHub {
     }
     live.subscribers.add(subscriber);
     return { session: this.getSession(sessionId), startSeq };
+  }
+
+  /**
+   * A handoff agent names its commands only once it runs here, so a session
+   * still driven at the desk has none to offer. It borrows the list of the
+   * agent's latest session in the same folder (or its latest anywhere) until
+   * it gets its own: `/compact` typed on the phone works from the first message.
+   */
+  private lendCommands(summary: SessionSummary): void {
+    const kind = "available_commands_update" as const;
+    if (this.store.latestOfKind(summary.id, kind, summary.lastSeq).length > 0) return;
+    let found: SessionEvent | undefined;
+    for (const other of this.store.listSessions({ limit: 80, includeArchived: true })) {
+      if (other.agent !== summary.agent || other.id === summary.id) continue;
+      const [event] = this.store.latestOfKind(other.id, kind, other.lastSeq);
+      if (!event) continue;
+      found ??= event;
+      if (other.cwd === summary.cwd) {
+        found = event;
+        break;
+      }
+    }
+    if (found) this.commit(summary.id, found.update);
   }
 
   /** The page of history before `beforeSeq`, oldest first. */

@@ -18,6 +18,7 @@ import {
 } from "./mapper.js";
 import { nestHistory, nestUnder } from "../nesting.js";
 import { configOptions, effective, settingsFrom, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
+import { COMMANDS, INIT_PROMPT, commandOf, type CodexSkill } from "./commands.js";
 
 export interface CodexDriverOptions {
   socketPath: string;
@@ -71,6 +72,9 @@ export class CodexDriver implements AgentDriver {
   private readonly children = new Map<string, { threadId: string; toolCallId: string }>();
   /** Threads Codex reported as sub-agents (parentThreadId set); never shown as sessions. */
   private readonly subThreads = new Set<string>();
+  /** Each thread's working directory: where its skills are looked up. */
+  private readonly cwds = new Map<string, string>();
+  private readonly skills = new Map<string, Promise<CodexSkill[]>>();
   private models?: Promise<CodexModel[]>;
   private restartTimer?: ReturnType<typeof setTimeout>;
   private restartDelay: number;
@@ -123,6 +127,7 @@ export class CodexDriver implements AgentDriver {
       model: options.model ?? null,
     }).then((result) => {
       this.startedHere.add(result.thread.id);
+      this.cwds.set(result.thread.id, result.thread.cwd ?? options.cwd);
       this.settings.set(result.thread.id, settingsFrom(result as unknown as Record<string, unknown>));
       return result;
     });
@@ -145,6 +150,7 @@ export class CodexDriver implements AgentDriver {
       // thread/start already subscribed us, and a thread without turns has no
       // rollout yet, so thread/resume would fail. Nothing to import either.
       void this.announceConfig(nativeId);
+      void this.announceCommands(nativeId);
       return [];
     }
     let thread: CodexThread;
@@ -153,7 +159,9 @@ export class CodexDriver implements AgentDriver {
       const resumed = await this.rpc<{ thread: CodexThread }>("thread/resume", { threadId: nativeId });
       thread = resumed.thread;
       this.settings.set(nativeId, settingsFrom(resumed as unknown as Record<string, unknown>));
+      if (thread.cwd) this.cwds.set(nativeId, thread.cwd);
       void this.announceConfig(nativeId);
+      void this.announceCommands(nativeId);
     } catch (error) {
       this.attached.delete(nativeId);
       if (error instanceof Error && /no rollout/i.test(error.message)) {
@@ -208,7 +216,64 @@ export class CodexDriver implements AgentDriver {
   }
 
   async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered"> {
-    const input = toCodexInput(content);
+    const command = commandOf(content);
+    if (command) {
+      const ran = await this.runCommand(nativeId, command, clientMessageId);
+      if (ran) return ran;
+    }
+    return this.send(nativeId, toCodexInput(content), clientMessageId);
+  }
+
+  /**
+   * `/compact`, `/review`, `/init` and `/<skill>`: what the TUI does for them,
+   * through the app-server. Anything else is an ordinary message.
+   */
+  private async runCommand(
+    nativeId: string,
+    command: { name: string; args: string; text: string },
+    clientMessageId: string,
+  ): Promise<"started" | "steered" | undefined> {
+    const echo = () =>
+      this.host?.update(
+        this.id,
+        nativeId,
+        { sessionUpdate: "user_message_chunk", messageId: `local-${clientMessageId}`, content: { type: "text", text: command.text } },
+        `command:${clientMessageId}`,
+      );
+    if (command.name === "compact" || command.name === "review") {
+      if (this.stateOf(nativeId).activeTurnId) {
+        throw RpcError.app("busy", command.name === "compact" ? "等这一轮结束后再压缩上下文" : "等这一轮结束后再开始审查");
+      }
+      if (command.name === "compact") {
+        await this.rpc("thread/compact/start", { threadId: nativeId });
+      } else {
+        await this.rpc("review/start", {
+          threadId: nativeId,
+          target: command.args ? { type: "custom", instructions: command.args } : { type: "uncommittedChanges" },
+          delivery: "inline",
+        });
+      }
+      echo();
+      return "started";
+    }
+    if (command.name === "init") {
+      const text = command.args ? `${INIT_PROMPT}\n\n${command.args}` : INIT_PROMPT;
+      return this.send(nativeId, [{ type: "text", text, text_elements: [] }], clientMessageId);
+    }
+    const skill = (await this.loadSkills(this.cwds.get(nativeId))).find((entry) => entry.name === command.name);
+    if (!skill) return undefined;
+    // The way the TUI sends a skill: the skill itself, and `$name` in the text.
+    return this.send(
+      nativeId,
+      [
+        { type: "skill", name: skill.name, path: skill.path },
+        { type: "text", text: command.args ? `$${skill.name} ${command.args}` : `$${skill.name}`, text_elements: [] },
+      ],
+      clientMessageId,
+    );
+  }
+
+  private async send(nativeId: string, input: unknown[], clientMessageId: string): Promise<"started" | "steered"> {
     if (input.length === 0) throw RpcError.app("invalid_params", "nothing to send");
     const activeTurnId = this.stateOf(nativeId).activeTurnId;
     if (activeTurnId) {
@@ -278,6 +343,40 @@ export class CodexDriver implements AgentDriver {
     const models = await this.loadModels();
     const options = configOptions(this.settings.get(nativeId) ?? {}, this.overrides.get(nativeId) ?? {}, models);
     if (options.length > 0) this.host?.update(this.id, nativeId, { sessionUpdate: "ls_config", options });
+  }
+
+  private loadSkills(cwd: string | undefined): Promise<CodexSkill[]> {
+    const key = cwd ?? "";
+    let loading = this.skills.get(key);
+    if (!loading) {
+      loading = this.rpc<{ data: { skills?: CodexSkill[] }[] }>("skills/list", cwd ? { cwds: [cwd] } : {})
+        .then((result) => result.data.flatMap((entry) => entry.skills ?? []).filter((skill) => skill.enabled !== false && skill.name && skill.path))
+        .catch((error: unknown) => {
+          this.skills.delete(key);
+          this.host?.log(`[codex] skills/list failed: ${error instanceof Error ? error.message : String(error)}`);
+          return [];
+        });
+      this.skills.set(key, loading);
+    }
+    return loading;
+  }
+
+  /** What `/` offers on a device: the commands above, then the skills this project can use. */
+  private async announceCommands(nativeId: string): Promise<void> {
+    const skills = await this.loadSkills(this.cwds.get(nativeId));
+    const taken = new Set(COMMANDS.map((command) => command.name));
+    this.host?.update(this.id, nativeId, {
+      sessionUpdate: "available_commands_update",
+      availableCommands: [
+        ...COMMANDS,
+        ...skills
+          .filter((skill) => !taken.has(skill.name))
+          .map((skill) => ({
+            name: skill.name,
+            description: (skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description ?? "").slice(0, 160),
+          })),
+      ],
+    });
   }
 
   async archive(nativeId: string, archived: boolean): Promise<void> {
@@ -380,6 +479,7 @@ export class CodexDriver implements AgentDriver {
 
   private onDown(reason: string): void {
     this.models = undefined;
+    this.skills.clear();
     if (this.stopped) return;
     this.host?.log(`[codex] ${reason}`);
     for (const pending of this.approvals.values()) pending.abandon();

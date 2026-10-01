@@ -10,7 +10,7 @@ import { HostStore } from "../src/store.js";
 class FakeDriver implements AgentDriver {
   readonly id = "fake";
   readonly label = "Fake";
-  readonly tier = "multi_client" as const;
+  tier: "multi_client" | "handoff" = "multi_client";
   readonly capabilities = { interrupt: true, steer: false, permissions: true, images: false, fork: false, models: false, modes: false };
   host!: DriverHost;
   history: HistoryItem[] = [];
@@ -51,8 +51,8 @@ class FakeDriver implements AgentDriver {
   async respondPermission(_nativeId: string, requestId: string, optionId: string) {
     this.answers.push({ requestId, optionId });
   }
-  emit(update: SessionUpdate, itemId?: string) {
-    this.host.update(this.id, "s1", update, itemId);
+  emit(update: SessionUpdate, itemId?: string, nativeId = "s1") {
+    this.host.update(this.id, nativeId, update, itemId);
   }
 }
 
@@ -88,6 +88,50 @@ afterEach(() => {
 describe("SessionHub", () => {
   it("discovers sessions on start", () => {
     expect(hub.listSessions({}).sessions.map((s) => s.id)).toEqual(["fake:s1"]);
+  });
+
+  it("offers a session still driven at the desk the commands its agent named elsewhere", async () => {
+    driver.tier = "handoff";
+    driver.sessions = [
+      { nativeId: "s1", cwd: "/w/app", createdAt: 1, updatedAt: 1 },
+      { nativeId: "s2", cwd: "/w/app", createdAt: 1, updatedAt: 2 },
+      { nativeId: "s3", cwd: "/w/other", createdAt: 1, updatedAt: 3 },
+      { nativeId: "s4", cwd: "/w/elsewhere", createdAt: 1, updatedAt: 4 },
+    ];
+    await hub.refreshDiscovery();
+    const names = (events: SessionEvent[]) =>
+      events.flatMap((e) => (e.update.sessionUpdate === "available_commands_update" ? [e.update.availableCommands.map((c) => c.name)] : []));
+    const commands = (...list: string[]): SessionUpdate => ({
+      sessionUpdate: "available_commands_update",
+      availableCommands: list.map((name) => ({ name, description: "" })),
+    });
+
+    // Nothing known yet: nothing to offer.
+    const none = collector();
+    await hub.subscribe("fake:s4", 0, none.subscriber);
+    expect(names(none.events)).toEqual([]);
+
+    // The agent ran here for s2 and s3 and said what it can do there.
+    await hub.subscribe("fake:s2", 0, collector().subscriber);
+    await hub.subscribe("fake:s3", 0, collector().subscriber);
+    driver.emit(commands("compact", "app-skill"), undefined, "s2");
+    driver.emit(commands("compact", "other-skill"), undefined, "s3");
+
+    // Same folder first; any other of the agent's sessions otherwise. It doesn't count as activity.
+    const same = collector();
+    await hub.subscribe("fake:s1", 0, same.subscriber);
+    expect(names(same.events)).toEqual([["compact", "app-skill"]]);
+    expect(hub.getSession("fake:s1").updatedAt).toBe(1);
+    const any = collector();
+    hub.unsubscribe("fake:s4", none.subscriber);
+    await hub.subscribe("fake:s4", 0, any.subscriber);
+    expect(names(any.events)).toHaveLength(1);
+
+    // Its own list, once it has one, is the one that counts — and nothing more is borrowed.
+    driver.emit(commands("compact", "mine"), undefined, "s1");
+    const again = collector();
+    await hub.subscribe("fake:s1", 0, again.subscriber);
+    expect(names(again.events)).toEqual([["compact", "app-skill"], ["compact", "mine"]]);
   });
 
   it("imports history on first subscribe, then streams live events with no gap", async () => {

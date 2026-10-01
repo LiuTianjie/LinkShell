@@ -202,6 +202,24 @@ function taskNotification(text: string, agents?: Set<string>): SessionUpdate[] |
 }
 
 /** Slash-command plumbing and interruption markers that aren't real user messages. */
+/** The context was compacted (`/compact`, or by itself when it ran out): a card saying so, with how much it freed. */
+function compaction(line: Json): SessionUpdate[] {
+  const uuid = str(line.uuid);
+  if (line.subtype !== "compact_boundary" || !uuid || line.isSidechain === true) return [];
+  const meta = obj(line.compactMetadata);
+  return [
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: `compact:${uuid}`,
+      title: "Context compacted",
+      kind: "think",
+      status: "completed",
+      detail: { type: "compaction" },
+      rawInput: meta ? { trigger: meta.trigger, preTokens: meta.preTokens, postTokens: meta.postTokens } : undefined,
+    },
+  ];
+}
+
 function isNoise(text: string): boolean {
   const trimmed = text.trimStart();
   return (
@@ -281,10 +299,13 @@ export function transcriptLine(raw: string, options: { sidechain?: boolean; hidd
       break;
     case "attachment":
       return queuedPrompt(line, options.agents);
+    case "system":
+      return { updates: compaction(line) };
     default:
       return { updates: [] };
   }
-  if ((line.isSidechain === true && !options.sidechain) || line.isMeta === true) return { updates: [] };
+  // What Claude writes for itself after compacting (the summary it continues from) isn't something the user said.
+  if ((line.isSidechain === true && !options.sidechain) || line.isMeta === true || line.isCompactSummary === true) return { updates: [] };
   const stamp = str(line.timestamp) ? Date.parse(str(line.timestamp)!) : Number.NaN;
   const ts = Number.isFinite(stamp) ? stamp : undefined;
   const message = obj(line.message);

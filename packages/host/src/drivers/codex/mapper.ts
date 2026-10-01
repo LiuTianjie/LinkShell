@@ -49,6 +49,15 @@ export interface MappedUpdate {
 /** Per-thread state the mapper needs across notifications. */
 export interface CodexThreadState {
   activeTurnId?: string;
+  /** Messages whose text arrived as it was written; one that only arrives whole is sent when it completes. */
+  streamed?: Set<string>;
+  /** Between a review starting and finishing: the instruction Codex gives itself isn't something the user said. */
+  reviewing?: boolean;
+}
+
+/** Codex's own review instruction, recorded as a user message inside the review. */
+function isReviewPrompt(item: Json, reviewing: boolean | undefined): boolean {
+  return reviewing === true && item.type === "userMessage" && !str(item.clientId);
 }
 
 const str = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
@@ -427,7 +436,11 @@ export function threadToHistory(thread: CodexThread): HistoryItem[] {
     // Codex reports turn times in seconds.
     const started = typeof turn.startedAt === "number" ? turn.startedAt : undefined;
     const ts = started === undefined ? undefined : started < 1e12 ? started * 1000 : started;
+    let reviewing = false;
     for (const item of turn.items) {
+      if (item.type === "enteredReviewMode") reviewing = true;
+      else if (item.type === "exitedReviewMode") reviewing = false;
+      if (isReviewPrompt(item, reviewing)) continue;
       const entry = itemToHistory(item);
       if (entry) history.push(ts === undefined ? entry : { ...entry, ts });
     }
@@ -479,6 +492,8 @@ export function mapNotification(
     case "turn/completed": {
       const turn = obj(params.turn) as unknown as CodexTurn | undefined;
       state.activeTurnId = undefined;
+      state.reviewing = false;
+      state.streamed = undefined;
       const updates = [
         out({
           sessionUpdate: "ls_turn",
@@ -537,9 +552,9 @@ export function mapNotification(
     case "item/plan/delta": {
       const itemId = str(params.itemId);
       const delta = str(params.delta);
-      return itemId && delta
-        ? [out({ sessionUpdate: "agent_message_chunk", messageId: itemId, content: { type: "text", text: delta } })]
-        : [];
+      if (!itemId || !delta) return [];
+      (state.streamed ??= new Set()).add(itemId);
+      return [out({ sessionUpdate: "agent_message_chunk", messageId: itemId, content: { type: "text", text: delta } })];
     }
     case "item/reasoning/summaryTextDelta":
     case "item/reasoning/textDelta": {
@@ -563,6 +578,8 @@ export function mapNotification(
     case "item/started": {
       const item = obj(params.item);
       if (!item) return [];
+      if (item.type === "enteredReviewMode") state.reviewing = true;
+      if (isReviewPrompt(item, state.reviewing)) return [];
       if (item.type === "userMessage") {
         const history = itemToHistory(item);
         if (!history) return [];
@@ -581,11 +598,16 @@ export function mapNotification(
         case "userMessage":
           return [];
         case "agentMessage":
-        case "plan":
-          return [out({ sessionUpdate: "ls_message_done", messageId: itemId, role: "agent" }, itemId)];
+        case "plan": {
+          const done = out({ sessionUpdate: "ls_message_done", messageId: itemId, role: "agent" }, itemId);
+          // A review's findings arrive whole, not written out bit by bit.
+          const text = state.streamed?.delete(itemId) ? undefined : str(item.text);
+          return text ? [out({ sessionUpdate: "agent_message_chunk", messageId: itemId, content: { type: "text", text } }), done] : [done];
+        }
         case "reasoning":
           return [out({ sessionUpdate: "ls_message_done", messageId: itemId, role: "thought" }, itemId)];
         default: {
+          if (item.type === "exitedReviewMode") state.reviewing = false;
           const finish = toolFinish(item, { includeOutput: false });
           return finish ? [out(finish, itemId)] : [];
         }

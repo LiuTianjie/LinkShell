@@ -103,12 +103,20 @@ describe("host + Codex driver (fake app-server)", () => {
     expect(seeded).toMatchObject({ agent: "codex", cwd: "/seed/project", preview: "what is 2+2" });
 
     await phone.client.call("sessions.subscribe", { sessionId: seeded!.id, fromSeq: 0 });
-    expect(phone.of(seeded!.id).map((e) => e.update.sessionUpdate)).toEqual([
+    await waitFor(() => phone.of(seeded!.id).some((e) => e.update.sessionUpdate === "available_commands_update"));
+    expect(phone.of(seeded!.id).map((e) => e.update.sessionUpdate).slice(0, 4)).toEqual([
       "user_message_chunk",
       "agent_message_chunk",
       "ls_message_done",
       "ls_status",
-      "ls_config",
+    ]);
+    // What `/` offers: the commands the app-server can run, then the project's skills that are on.
+    const commands = phone.of(seeded!.id).find((e) => e.update.sessionUpdate === "available_commands_update")?.update;
+    expect(commands?.sessionUpdate === "available_commands_update" && commands.availableCommands.map((c) => c.name)).toEqual([
+      "compact",
+      "review",
+      "init",
+      "tidy",
     ]);
     const config = phone.of(seeded!.id).find((e) => e.update.sessionUpdate === "ls_config")?.update;
     expect(config).toMatchObject({
@@ -128,6 +136,58 @@ describe("host + Codex driver (fake app-server)", () => {
     const user = phone.of(sessionId).find((e) => e.update.sessionUpdate === "user_message_chunk");
     expect(user?.update).toMatchObject({ content: { type: "text", text: "hello world" } });
     expect(host.hub.getSession(sessionId)).toMatchObject({ state: "idle", title: "hello world", preview: "echo: hello world" });
+  });
+
+  it("runs /compact, /review and a skill from the phone the way the TUI does", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    const id = session.id;
+    await phone.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "k1", content: text("hello") });
+    await waitFor(() => phone.turnsEnded(id).length === 1);
+    const tools = () =>
+      phone.of(id).flatMap((e) => (e.update.sessionUpdate === "tool_call" ? [e.update.title] : []));
+    const said = () =>
+      phone.of(id).flatMap((e) => (e.update.sessionUpdate === "user_message_chunk" && e.update.content.type === "text" ? [[e.update.messageId, e.update.content.text]] : []));
+
+    expect(await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "k2", content: text("/compact") })).toEqual({ delivery: "started" });
+    await waitFor(() => phone.turnsEnded(id).length === 2);
+    expect(tools()).toEqual(["Context compacted"]);
+    // The command shows as what the user sent, under the id the phone's own copy has.
+    expect(said()).toContainEqual(["local-k2", "/compact"]);
+    expect(phone.agentText(id)).toBe("echo: hello");
+
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "k3", content: text("/review only the tests") });
+    await waitFor(() => phone.turnsEnded(id).length === 3);
+    expect(tools()).toEqual(["Context compacted", "Review started", "Review finished"]);
+    const started = phone.of(id).find((e) => e.update.sessionUpdate === "tool_call" && e.update.title === "Review started")?.update;
+    expect(started).toMatchObject({ rawInput: { review: "only the tests" } });
+    // Codex's instruction to itself isn't shown as something the user said; its findings, sent whole, are shown.
+    expect(said().map(([, said]) => said)).toEqual(["hello", "/compact", "/review only the tests"]);
+    expect(phone.agentText(id)).toBe("echo: hellolooks fine");
+
+    // A skill goes as the skill itself plus `$name`, like the TUI sends it.
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "k4", content: text("/tidy the docs") });
+    await waitFor(() => phone.turnsEnded(id).length === 4);
+    expect(phone.agentText(id)).toBe("echo: hellolooks fineecho: $tidy the docs");
+    const skill = phone.of(id).find((e) => e.update.sessionUpdate === "user_message_chunk" && e.update.content.type === "resource_link")?.update;
+    expect(skill).toMatchObject({ messageId: "local-k4", content: { kind: "skill", name: "tidy", uri: "/skills/tidy/SKILL.md" } });
+
+    // Not a command or a skill: an ordinary message.
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "k5", content: text("/etc/hosts has what") });
+    await waitFor(() => phone.turnsEnded(id).length === 5);
+    expect(phone.agentText(id)).toContain("echo: /etc/hosts has what");
+
+    // Compacting waits for the turn to end rather than cutting into it.
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "k6", content: text("SLOW") });
+    await waitFor(() => host.hub.getSession(id).state === "running");
+    await expect(phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "k7", content: text("/compact") })).rejects.toMatchObject({
+      appCode: "busy",
+    });
+    expect(await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "k7", content: text("/compact"), whenBusy: "queue" })).toEqual({
+      delivery: "queued",
+    });
+    await waitFor(() => phone.turnsEnded(id).length === 7);
+    expect(tools().filter((title) => title === "Context compacted")).toHaveLength(2);
   });
 
   it("gives a second client the identical log, and a retried send is not delivered twice", async () => {

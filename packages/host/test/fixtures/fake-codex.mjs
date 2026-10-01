@@ -247,6 +247,51 @@ const handlers = {
     broadcast("thread/deleted", { threadId: params.threadId });
     return {};
   },
+  "skills/list": (params) => ({
+    data: [
+      {
+        cwd: params.cwds?.[0] ?? process.cwd(),
+        skills: [
+          { name: "tidy", description: "Tidy the project up", path: "/skills/tidy/SKILL.md", scope: "user", enabled: true },
+          { name: "off", description: "Turned off", path: "/skills/off/SKILL.md", scope: "user", enabled: false },
+        ],
+        errors: [],
+      },
+    ],
+  }),
+  // Like Codex: both run as a turn of their own, without a user message.
+  "thread/compact/start": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: "unknown thread" };
+    if (thread.active) throw { code: -32600, message: "a turn is already running" };
+    const turn = { id: randomUUID(), items: [], status: "inProgress" };
+    thread.turns.push(turn);
+    thread.active = turn;
+    setImmediate(() => {
+      notifyThread(thread, "turn/started", { threadId: thread.meta.id, turn: { id: turn.id, items: [], status: "inProgress" } });
+      emitItem(thread, turn, { type: "contextCompaction", id: randomUUID() });
+      finishTurn(thread, turn, "completed");
+    });
+    return {};
+  },
+  "review/start": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: "unknown thread" };
+    if (thread.active) throw { code: -32600, message: "a turn is already running" };
+    const turn = { id: randomUUID(), items: [], status: "inProgress" };
+    thread.turns.push(turn);
+    thread.active = turn;
+    const review = params.target.type === "custom" ? params.target.instructions : "current changes";
+    setImmediate(() => {
+      notifyThread(thread, "turn/started", { threadId: thread.meta.id, turn: { id: turn.id, items: [], status: "inProgress" } });
+      emitItem(thread, turn, { type: "enteredReviewMode", id: randomUUID(), review });
+      emitItem(thread, turn, { type: "userMessage", id: randomUUID(), clientId: null, content: [{ type: "text", text: `Review ${review}.` }] });
+      emitItem(thread, turn, { type: "exitedReviewMode", id: randomUUID(), review: "looks fine" });
+      emitItem(thread, turn, { type: "agentMessage", id: randomUUID(), text: "looks fine" });
+      finishTurn(thread, turn, "completed");
+    });
+    return { turn: { id: turn.id, items: [], status: "inProgress" }, reviewThreadId: thread.meta.id };
+  },
   "fake/crash": () => {
     setImmediate(() => process.exit(1));
     return {};

@@ -50,6 +50,41 @@ describe("tool detail", () => {
     expect(toolCall(image?.updates)?.detail).toEqual({ type: "image_generation", prompt: "a cat" });
   });
 
+  it("Claude transcript: a compaction is a card, and the summary Claude continues from isn't shown as the user's", () => {
+    const boundary = transcriptLine(
+      JSON.stringify({
+        type: "system",
+        subtype: "compact_boundary",
+        uuid: "b1",
+        content: "Conversation compacted",
+        compactMetadata: { trigger: "manual", preTokens: 27232, postTokens: 2723, preservedSegment: { headUuid: "x" } },
+      }),
+    );
+    expect(boundary.updates).toEqual([
+      {
+        sessionUpdate: "tool_call",
+        toolCallId: "compact:b1",
+        title: "Context compacted",
+        kind: "think",
+        status: "completed",
+        detail: { type: "compaction" },
+        rawInput: { trigger: "manual", preTokens: 27232, postTokens: 2723 },
+      },
+    ]);
+    const summary = transcriptLine(
+      JSON.stringify({
+        type: "user",
+        uuid: "s1",
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+        message: { role: "user", content: "This session is being continued from a previous conversation that ran out of context. …" },
+      }),
+    );
+    expect(summary.updates).toEqual([]);
+    // Other system lines (hook output, timing) stay out.
+    expect(transcriptLine(JSON.stringify({ type: "system", subtype: "turn_duration", uuid: "d1", durationMs: 5 })).updates).toEqual([]);
+  });
+
   it("Claude transcript: MCP and Task tools, with tool-result images", () => {
     const line = (message: unknown, type = "assistant") => JSON.stringify({ type, uuid: "u", timestamp: "2026-09-30T00:00:00Z", message });
     const mcp = transcriptLine(line({ id: "msg", content: [{ type: "tool_use", id: "t1", name: "mcp__playwright__browser_click", input: { ref: "e1" } }] }));

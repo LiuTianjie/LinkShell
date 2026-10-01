@@ -30,6 +30,39 @@ describe("codex mapper", () => {
     ).toEqual([{ threadId: "t", update: { sessionUpdate: "ls_message_done", messageId: "m", role: "agent" }, itemId: "m" }]);
   });
 
+  it("shows a review as its start, its findings and its end — not the instruction Codex gives itself", () => {
+    const { map } = mapper();
+    const kinds = (updates: ReturnType<typeof map>) => updates.map((entry) => entry.update.sessionUpdate);
+    const prompt = { type: "userMessage", id: "u1", clientId: null, content: [{ type: "text", text: "Review the current code changes." }] };
+    const findings = { type: "agentMessage", id: "m1", text: "Nothing to fix." };
+    expect(kinds(map("item/started", { threadId: "t", turnId: "u", item: { type: "enteredReviewMode", id: "r1", review: "current changes" } }))).toEqual(["tool_call"]);
+    expect(map("item/started", { threadId: "t", turnId: "u", item: prompt })).toEqual([]);
+    // The findings come whole, without having been streamed.
+    expect(map("item/completed", { threadId: "t", turnId: "u", item: findings }).map((entry) => entry.update)).toEqual([
+      { sessionUpdate: "agent_message_chunk", messageId: "m1", content: { type: "text", text: "Nothing to fix." } },
+      { sessionUpdate: "ls_message_done", messageId: "m1", role: "agent" },
+    ]);
+    map("item/completed", { threadId: "t", turnId: "u", item: { type: "exitedReviewMode", id: "r2", review: "Nothing to fix." } });
+    // After the review, a message without a client id (typed in the TUI) is the user's again.
+    expect(kinds(map("item/started", { threadId: "t", turnId: "u2", item: { ...prompt, id: "u2" } }))).toEqual(["user_message_chunk"]);
+
+    const history = threadToHistory({
+      id: "t",
+      cwd: "/w",
+      createdAt: 1,
+      updatedAt: 2,
+      turns: [
+        {
+          id: "turn-1",
+          status: "completed",
+          items: [{ type: "enteredReviewMode", id: "r1", review: "current changes" }, prompt, { type: "exitedReviewMode", id: "r2", review: "Nothing to fix." }, findings],
+        },
+        { id: "turn-2", status: "completed", items: [{ ...prompt, id: "u2" }] },
+      ],
+    });
+    expect(history.map((item) => item.itemId)).toEqual(["r1", "r2", "m1", "u2"]);
+  });
+
   it("tracks the active turn and maps stop reasons", () => {
     const { map, states } = mapper();
     map("turn/started", { threadId: "t", turn: { id: "turn-1", items: [], status: "inProgress" } });
