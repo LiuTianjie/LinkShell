@@ -486,9 +486,6 @@
     .auth-btn:hover { opacity: .88; }
     .auth-btn-primary { background: var(--ink); color: var(--ink-fg); }
     .auth-btn-afdian { background: #946ce6; color: #fff; }
-    .pay-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
-    .pay-tab { flex: 1; border: 1px solid var(--line-2); background: none; color: var(--text-sec); border-radius: 8px; padding: 8px; font: 600 13px var(--sans); cursor: pointer; transition: color .15s, border-color .15s; }
-    .pay-tab.active { border-color: var(--accent); color: var(--text); }
     .pricing-card .btn { width: 100%; justify-content: center; }
     #pricing-auth-status { font-size: 14px; margin-bottom: 10px; }
     .term { background: var(--surface-2); border-radius: 8px; }
@@ -961,14 +958,6 @@
                 </div>
               </div>
               <div id="pricing-payment" style="display:none">
-                <div class="pay-tabs">
-                  <button class="pay-tab active" data-method="afdian" type="button" onclick="setPayMethod('afdian')"><span lang="zh">爱发电</span><span lang="en">Afdian</span></button>
-                  <button class="pay-tab" data-method="paypal" type="button" onclick="setPayMethod('paypal')">PayPal</button>
-                </div>
-                <div id="pay-paypal" style="display:none">
-                  <div id="paypal-button-container"></div>
-                  <p style="color:var(--text-muted);font-size:12px;margin-top:8px;text-align:center"><span lang="zh">PayPal 按外币结算，金额以 PayPal 页面为准</span><span lang="en">PayPal bills in a foreign currency; the amount is shown on PayPal's page</span></p>
-                </div>
                 <div id="pay-afdian">
                   <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian" style="margin-bottom:8px"><span lang="zh">前往爱发电支付 ↗</span><span lang="en">Pay on Afdian ↗</span></a>
                   <button class="auth-btn" type="button" style="background:var(--surface-2);color:var(--text)" onclick="pricingRefreshPlan()"><span lang="zh">支付完成？点击刷新状态</span><span lang="en">Paid? Click to refresh status</span></button>
@@ -988,8 +977,8 @@
         <div class="faq">
           <div><b><span lang="zh">免费版有什么限制？</span><span lang="en">What does Free leave out?</span></b><p><span lang="zh">没有功能限制，只是需要自己运行一个网关。Pro 提供官方托管网关，省去部署和维护。</span><span lang="en">No features. You just run a gateway yourself; Pro gives you the hosted one instead.</span></p></div>
           <div><b><span lang="zh">官方网关能看到我的代码吗？</span><span lang="en">Can the official gateway see my code?</span></b><p><span lang="zh">不能。手机和电脑之间端到端加密，网关只转发密文。</span><span lang="en">No. Phone and computer are encrypted end to end; the gateway only relays ciphertext.</span></p></div>
-          <div><b><span lang="zh">可以随时取消吗？</span><span lang="en">Can I cancel any time?</span></b><p><span lang="zh">可以。PayPal 订阅随时取消，当前周期结束前仍可使用。</span><span lang="en">Yes. Cancel the PayPal subscription any time; Pro lasts until the end of the period.</span></p></div>
-          <div><b><span lang="zh">支持哪些支付方式？</span><span lang="en">How can I pay?</span></b><p><span lang="zh">国际用户推荐 PayPal（支持信用卡），国内用户可使用爱发电（微信 / 支付宝）。</span><span lang="en">PayPal (cards accepted) internationally; Afdian (WeChat / Alipay) in China.</span></p></div>
+          <div><b><span lang="zh">Pro 到期后会怎样？</span><span lang="en">What happens when Pro ends?</span></b><p><span lang="zh">回到 Free：功能一个不少，改用自建网关就能继续连接。</span><span lang="en">You are back on Free: every feature stays, and you connect through your own gateway.</span></p></div>
+          <div><b><span lang="zh">支持哪些支付方式？</span><span lang="en">How can I pay?</span></b><p><span lang="zh">通过爱发电支付，支持微信和支付宝。</span><span lang="en">Through Afdian, with WeChat Pay or Alipay.</span></p></div>
         </div>
       </div>
     </section>
@@ -1138,13 +1127,10 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
-  <!-- Pricing: Supabase sign-in, PayPal subscriptions, Afdian -->
+  <!-- Pricing: Supabase sign-in, Afdian -->
   <script>
     const SUPABASE_URL = 'https://mkbeusztkzffnzjdwmqk.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rYmV1c3p0a3pmZm56amR3bXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5Nzc0NzgsImV4cCI6MjA4MTU1MzQ3OH0.2wlT6q6687Z5rpEYsdp01IQpNNl_XWv0IAfBgwPyDP0';
-    const PAYPAL_CLIENT_ID = 'Aeu_JU69ebK6bYL1EvrgmgwybrEAmd27Likg5IUPQvG6Bv6WKC6by0f6eYIMV5dAa5cTXsag1klYUFEy';
-    const PAYPAL_MONTHLY_PLAN = 'P-22T6697901334320RNGLSTWA';
-    const PAYPAL_YEARLY_PLAN = 'P-8VP22277J80187409NGLSSXY';
     const AFDIAN_URL = 'https://ifdian.net/order/create';
     const AFDIAN_MONTHLY_PLAN = '44b0ef7e0e4111f1b7cb52540025c377';
     const AFDIAN_YEARLY_PLAN = 'b44fe6000e4111f1b1cb5254001e7c00';
@@ -1152,8 +1138,6 @@
     let supabaseClient = null;
     let pricingUser = null;
     let pricingCycle = 'monthly';
-    let pricingPayMethod = 'afdian';
-    let paypalLoaded = false;
 
     function getSupabase() {
       if (!supabaseClient && window.supabase) {
@@ -1170,16 +1154,6 @@
       document.getElementById('price-alt-monthly').style.display = cycle === 'monthly' ? '' : 'none';
       document.getElementById('price-alt-yearly').style.display = cycle === 'yearly' ? '' : 'none';
       updateAfdianLink();
-      renderPaypal();
-    }
-
-    function setPayMethod(method) {
-      pricingPayMethod = method;
-      document.querySelectorAll('.pay-tab').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
-      document.getElementById('pay-paypal').style.display = method === 'paypal' ? '' : 'none';
-      document.getElementById('pay-afdian').style.display = method === 'afdian' ? '' : 'none';
-      if (method === 'paypal') renderPaypal();
-      if (method === 'afdian') updateAfdianLink();
     }
 
     function updateAfdianLink() {
@@ -1187,56 +1161,6 @@
       const userId = pricingUser ? pricingUser.id : '';
       const link = document.getElementById('afdian-link');
       if (link) link.href = AFDIAN_URL + '?plan_id=' + planId + '&product_type=0&custom_order_id=' + userId;
-    }
-
-    function loadPaypalSdk() {
-      return new Promise((resolve, reject) => {
-        if (paypalLoaded) { resolve(); return; }
-        if (document.getElementById('paypal-sdk')) { resolve(); return; }
-        const s = document.createElement('script');
-        s.id = 'paypal-sdk';
-        s.src = 'https://www.paypal.com/sdk/js?client-id=' + PAYPAL_CLIENT_ID + '&vault=true&intent=subscription&currency=USD';
-        s.onload = () => { paypalLoaded = true; resolve(); };
-        s.onerror = reject;
-        document.head.appendChild(s);
-      });
-    }
-
-    async function renderPaypal() {
-      const container = document.getElementById('paypal-button-container');
-      if (!container || pricingPayMethod !== 'paypal' || !pricingUser) return;
-      container.innerHTML = '';
-      try {
-        await loadPaypalSdk();
-        if (!window.paypal) return;
-        const planId = pricingCycle === 'yearly' ? PAYPAL_YEARLY_PLAN : PAYPAL_MONTHLY_PLAN;
-        window.paypal.Buttons({
-          style: { layout: 'vertical', shape: 'rect', color: 'gold', label: 'subscribe' },
-          createSubscription: function (data, actions) {
-            return actions.subscription.create({ plan_id: planId });
-          },
-          onApprove: async function (data) {
-            if (!data.subscriptionID || !pricingUser) return;
-            try {
-              const sb = getSupabase();
-              const { data: { session: authSession } } = await sb.auth.getSession();
-              const token = authSession?.access_token ?? '';
-              const res = await fetch('https://itool.tech/api/paypal/capture-subscription', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                body: JSON.stringify({ subscriptionID: data.subscriptionID, userID: pricingUser.id, planType: pricingCycle }),
-              });
-              if (res.ok) await checkPricingPlan();
-              else showAuthError('Payment capture failed. Please contact support.');
-            } catch (e) {
-              showAuthError('Network error. Please try again.');
-            }
-          },
-          onError: function (err) { console.error('[PayPal]', err); }
-        }).render('#paypal-button-container');
-      } catch (e) {
-        container.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Failed to load PayPal. Please try again.</p>';
-      }
     }
 
     function showAuthError(msg) {
@@ -1284,7 +1208,6 @@
           document.getElementById('pricing-pro-status').style.display = 'none';
           signedInLine('Free', 'to');
           updateAfdianLink();
-          if (pricingPayMethod === 'paypal') renderPaypal();
         }
       } catch {
         document.getElementById('pricing-login-form').style.display = 'none';
@@ -1351,7 +1274,6 @@
       document.getElementById('pricing-payment').style.display = 'none';
       document.getElementById('pricing-pro-status').style.display = 'none';
       document.getElementById('pricing-auth-status').textContent = '';
-      document.getElementById('paypal-button-container').innerHTML = '';
     }
 
     async function pricingRefreshPlan() {
