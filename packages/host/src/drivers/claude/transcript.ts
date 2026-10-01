@@ -531,6 +531,33 @@ function eachLine(path: string, onLine: (line: string) => void): number {
   return consumed;
 }
 
+/**
+ * Where a fork "through the turn of `itemId`" ends: the uuid of the last
+ * message of that turn. The item is a reply's message id or a prompt's uuid;
+ * when it isn't in the transcript, `turn` (counted from 1) names the turn.
+ */
+export function turnEndUuid(path: string, itemId: string, turn: number): string | undefined {
+  let current = 0;
+  let picked: number | undefined;
+  const lastOfTurn: (string | undefined)[] = [];
+  eachLine(path, (raw) => {
+    if (!raw.trim() || raw.includes('"isSidechain":true')) return;
+    if (!/"type":"(user|assistant)"/.test(raw)) return;
+    let line: { type?: string; uuid?: string; message?: { id?: string } };
+    try {
+      line = JSON.parse(raw) as typeof line;
+    } catch {
+      return;
+    }
+    if (line.type !== "user" && line.type !== "assistant") return;
+    const starts = transcriptLine(raw).updates.some((update) => update.sessionUpdate === "ls_turn" && update.state === "started" && !update.parentToolCallId);
+    if (starts) current += 1;
+    if (line.uuid) lastOfTurn[current] = line.uuid;
+    if (line.uuid === itemId || line.message?.id === itemId) picked = current;
+  });
+  return lastOfTurn[picked ?? turn];
+}
+
 /** The last `bytes` of a file, as text (the first line may be partial). */
 export function readTail(path: string, bytes: number): string {
   const size = statSync(path).size;

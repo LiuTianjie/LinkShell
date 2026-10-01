@@ -179,6 +179,23 @@ const handlers = {
     broadcast("thread/started", { thread: view(thread, false) });
     return { thread: view(thread, false), model: "fake-model", modelProvider: "fake", cwd: thread.meta.cwd };
   },
+  "thread/read": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: "unknown thread" };
+    return { thread: view(thread, params.includeTurns === true) };
+  },
+  "thread/fork": (params, conn) => {
+    const source = threads.get(params.threadId);
+    if (!source) throw { code: -32600, message: "unknown thread" };
+    const end = params.lastTurnId ? source.turns.findIndex((turn) => turn.id === params.lastTurnId) : source.turns.length - 1;
+    if (end < 0 && params.lastTurnId) throw { code: -32600, message: "unknown turn" };
+    const thread = newThread(params.cwd ?? source.meta.cwd, { name: source.meta.name, preview: source.meta.preview });
+    // A fork is on disk with its own copies of the turns it was made through.
+    thread.turns = source.turns.slice(0, end + 1).map((turn) => ({ ...turn, id: randomUUID(), items: turn.items.map((item) => ({ ...item })) }));
+    thread.subscribers.add(conn);
+    broadcast("thread/started", { thread: view(thread, false) });
+    return { thread: view(thread, params.excludeTurns !== true), model: "fake-model", modelProvider: "fake", cwd: thread.meta.cwd };
+  },
   "thread/resume": (params, conn) => {
     const thread = threads.get(params.threadId);
     // Like Codex: resume needs the rollout on disk, which only exists after the first turn.

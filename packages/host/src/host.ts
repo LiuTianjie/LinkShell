@@ -132,7 +132,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
         claudeAdapter: options.claudeAdapter,
       });
   const store = new HostStore(paths.database);
-  const hub = new SessionHub(store, drivers, log);
+  const hub = new SessionHub(store, drivers, log, paths.home);
   await hub.start({ discoveryIntervalMs: options.discoveryIntervalMs });
 
   const machineInfo = (): MachineInfo => ({

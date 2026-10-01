@@ -10,7 +10,7 @@ import {
   type SessionUpdate,
   type StopReason,
 } from "@linkshell/wire";
-import type { AgentDriver, AttachContext, DiscoveredSession, DriverHost, DriverStatus, HistoryItem } from "../types.js";
+import type { AgentDriver, AttachContext, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem } from "../types.js";
 import { AcpConnection } from "./connection.js";
 import {
   AcpItemTracker,
@@ -176,6 +176,16 @@ export class AcpDriver implements AgentDriver {
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
     return found;
+  }
+
+  /** ACP's session/fork, for agents that offer it: the whole conversation, in `cwd`. */
+  async fork(nativeId: string, options: ForkOptions): Promise<DiscoveredSession> {
+    if (!this.connection?.alive) await this.ensureStarted();
+    if (!this.connection?.capabilities.sessionCapabilities?.fork) throw RpcError.app("not_supported", `${this.label} 不支持从会话分叉`);
+    if (options.upTo) throw RpcError.app("not_supported", `${this.label} 只能分叉整个会话`);
+    const response = await this.rpc<{ sessionId: string }>("session/fork", { sessionId: nativeId, cwd: options.cwd, mcpServers: [] });
+    const now = Date.now();
+    return { nativeId: response.sessionId, cwd: options.cwd, createdAt: now, updatedAt: now };
   }
 
   async createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession> {
