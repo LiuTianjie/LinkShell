@@ -163,6 +163,25 @@ describe("generic ACP driver (fake agent)", () => {
     expect(said(session.id).join("")).toBe("firstecho: firstsecondecho: second");
   });
 
+  it("keeps a fork's new replies apart from the copied ones when the agent numbers its messages per session", async () => {
+    const t = await setup({ FAKE_ACP_MESSAGE_IDS: "0" });
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "a", content: prompt("first") });
+    await waitFor(() => t.ended(session.id).length === 1);
+    const { session: fork } = await t.client.call("sessions.fork", { sessionId: session.id });
+    await t.client.call("sessions.subscribe", { sessionId: fork.id, fromSeq: 0 });
+    await t.client.call("sessions.prompt", { sessionId: fork.id, clientMessageId: "b", content: prompt("go on") });
+    await waitFor(() => t.ended(fork.id).length === 1);
+    const agentIds = t
+      .of(fork.id)
+      .flatMap((e) => (e.update.sessionUpdate === "agent_message_chunk" ? [e.update.messageId] : []));
+    // The copied reply and the new one are two messages.
+    expect(new Set(agentIds).size).toBe(2);
+    expect(agentIds[0]).toMatch(/^fork:/);
+    expect(agentIds.at(-1)).not.toMatch(/^fork:/);
+  });
+
   it("uses an agent's own fork for a whole session, and its own way for a fork from a reply", async () => {
     const t = await setup({ FAKE_ACP_FORK: "1" });
     const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });

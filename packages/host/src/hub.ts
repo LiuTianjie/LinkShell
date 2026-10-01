@@ -27,7 +27,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { PAGE, worktreeOf, type HostStore, type SessionPatch, type WorktreeRecord } from "./store.js";
 import { createWorktree, gitBranch, gitInfo, removeWorktree, worktreeState, type CreatedWorktree } from "./worktrees.js";
-import { conversationDigest, isConversation, settled } from "./carry.js";
+import { conversationDigest, copied, isConversation } from "./carry.js";
 import { slimEvent } from "./slim.js";
 
 export interface Subscriber {
@@ -451,15 +451,15 @@ export class SessionHub {
     live.importing = true;
     try {
       // Pictures and long output stay in the original; the fork's own log starts light.
-      for (const event of events) this.commit(forkId, settled(slimEvent(event).update), undefined, event.ts);
+      for (const event of events) this.commit(forkId, copied(slimEvent(event).update), undefined, event.ts);
     } finally {
       live.importing = false;
     }
     this.commit(forkId, {
       sessionUpdate: "ls_notice",
       level: "info",
-      title: `从「${summary.title ?? "原会话"}」分叉`,
-      detail: `${driver.label} 不能自己分叉会话：之前的对话会以文字交给它${start > 0 ? "，更早的内容在原会话里" : ""}`,
+      title: "分叉的会话",
+      detail: `之前的对话以文字交给 ${driver.label}${start > 0 ? "，更早的内容在原会话里" : ""}`,
     });
     const digest = conversationDigest(events);
     if (digest) this.store.setDriverState(forkId, CARRY, digest);

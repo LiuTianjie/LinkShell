@@ -20,12 +20,22 @@ export function isConversation(update: SessionUpdate): boolean {
   }
 }
 
-/** A copied event leaves nothing open: a call that was still running when the fork was made isn't running in the fork. */
-export function settled(update: SessionUpdate): SessionUpdate {
-  if ((update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && (update.status === "pending" || update.status === "in_progress")) {
-    return { ...update, status: "completed" };
+/**
+ * An event as the fork's log keeps it. Its ids are the original session's: an
+ * agent that numbers its messages per session would give the fork's first reply
+ * the id of the original's first, so copied ones are set apart. Nothing is left
+ * open either — a call still running when the fork was made isn't running here.
+ */
+export function copied(update: SessionUpdate): SessionUpdate {
+  const mark = (id: string) => `fork:${id}`;
+  const next = { ...update } as SessionUpdate & { messageId?: string; toolCallId?: string; parentToolCallId?: string; status?: string };
+  if (typeof next.messageId === "string" && next.messageId) next.messageId = mark(next.messageId);
+  if (typeof next.toolCallId === "string") next.toolCallId = mark(next.toolCallId);
+  if (typeof next.parentToolCallId === "string") next.parentToolCallId = mark(next.parentToolCallId);
+  if ((next.sessionUpdate === "tool_call" || next.sessionUpdate === "tool_call_update") && (next.status === "pending" || next.status === "in_progress")) {
+    next.status = "completed";
   }
-  return update;
+  return next;
 }
 
 const MAX_MESSAGE = 6000;
