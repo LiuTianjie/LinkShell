@@ -122,7 +122,9 @@ describe("gateway v2 end to end", () => {
     const { terminal } = await link.call("terminals.create", { cols: 80, rows: 24 });
     await link.call("terminals.attach", { terminalId: terminal.id });
     await link.call("terminals.input", { terminalId: terminal.id, data: "echo SECRET-$((40+2))\n" });
-    await until(() => /\nSECRET-42/.test(output));
+    // What was typed has no "42" in it, so this is the command's own output — wherever the
+    // prompt landed (a shell slow to start draws it after the tty has echoed the typing).
+    await until(() => output.includes("SECRET-42"));
 
     // Remote devices can't use the terminal shim's methods.
     await expect(link.call("desktop.launch", { agent: "codex", args: [] })).rejects.toThrow(/only available locally/);
