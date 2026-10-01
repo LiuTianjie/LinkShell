@@ -1,5 +1,6 @@
 package com.termux.terminal;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
@@ -34,6 +35,14 @@ public final class TerminalSession extends TerminalOutput {
     private final byte[] mUtf8InputBuffer = new byte[5];
     private boolean mFinished = false;
 
+    /**
+     * Output that arrived before the view had a size, and so before there was
+     * an emulator to draw it: a reopened terminal's replay. Kept for the first
+     * layout instead of dropped (LinkShell change).
+     */
+    private final ByteArrayOutputStream mPending = new ByteArrayOutputStream();
+    private static final int MAX_PENDING_BYTES = 8 * 1024 * 1024;
+
     public TerminalSession(Remote remote, Integer transcriptRows, TerminalSessionClient client) {
         this.mRemote = remote;
         this.mTranscriptRows = transcriptRows;
@@ -49,6 +58,12 @@ public final class TerminalSession extends TerminalOutput {
     public void updateSize(int columns, int rows) {
         if (mEmulator == null) {
             mEmulator = new TerminalEmulator(this, columns, rows, mTranscriptRows, mClient);
+            if (mPending.size() > 0) {
+                byte[] held = mPending.toByteArray();
+                mPending.reset();
+                mEmulator.append(held, held.length);
+                notifyScreenUpdate();
+            }
         } else {
             mEmulator.resize(columns, rows);
         }
@@ -62,7 +77,11 @@ public final class TerminalSession extends TerminalOutput {
 
     /** Output from the host. */
     public void feed(byte[] data) {
-        if (mEmulator == null || data.length == 0) return;
+        if (data.length == 0) return;
+        if (mEmulator == null) {
+            if (mPending.size() + data.length <= MAX_PENDING_BYTES) mPending.write(data, 0, data.length);
+            return;
+        }
         mEmulator.append(data, data.length);
         notifyScreenUpdate();
     }
@@ -111,7 +130,10 @@ public final class TerminalSession extends TerminalOutput {
 
     /** Clear the screen and state (a full redraw follows). */
     public void reset() {
-        if (mEmulator == null) return;
+        if (mEmulator == null) {
+            mPending.reset();
+            return;
+        }
         mEmulator.reset();
         notifyScreenUpdate();
     }
@@ -119,10 +141,14 @@ public final class TerminalSession extends TerminalOutput {
     /** The remote shell ended: show it and stop sending keys. */
     public void finish(String message) {
         mFinished = true;
-        if (mEmulator != null && message != null) {
+        if (message != null) {
             byte[] bytes = message.getBytes(StandardCharsets.UTF_8);
-            mEmulator.append(bytes, bytes.length);
-            notifyScreenUpdate();
+            if (mEmulator != null) {
+                mEmulator.append(bytes, bytes.length);
+                notifyScreenUpdate();
+            } else {
+                mPending.write(bytes, 0, bytes.length);
+            }
         }
         mClient.onSessionFinished(this);
     }

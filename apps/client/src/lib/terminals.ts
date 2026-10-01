@@ -39,6 +39,15 @@ export function useTerminals(): { terminals: TerminalInfo[]; loaded: boolean } {
 
 const SHELLS = /^-?(zsh|bash|sh|fish|dash|ksh|tcsh|nu|pwsh|powershell)\b/;
 
+/**
+ * A start command as a one-line title. The UI font has no Nerd Font glyphs
+ * (private-use code points), which would show as boxes; the terminal itself
+ * draws them with its symbol font.
+ */
+export function commandTitle(command: string): string {
+  return command.replace(/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu, "").replace(/\s+/g, " ").trim();
+}
+
 /** How a terminal reads in a list: its title, what it's doing, and whether it has ended. */
 export function terminalState(terminal: TerminalInfo) {
   const ended = terminal.exitCode !== undefined || terminal.interrupted === true;
@@ -54,7 +63,7 @@ export function terminalState(terminal: TerminalInfo) {
         ? `正在运行 ${foreground}`
         : "空闲";
   return {
-    title: terminal.command ?? "终端",
+    title: (terminal.command && commandTitle(terminal.command)) || "终端",
     mono: Boolean(terminal.command),
     ended,
     busy: Boolean(foreground),
