@@ -42,7 +42,7 @@ linkshell host --daemon
 
 Then connect your phone ([iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)) one of two ways:
 
-- **Pro — the official gateway.** Run `linkshell login` (restart the host if it was already running), then sign in to the app with the same account. Your computer shows up by itself; no QR codes.
+- **Pro — the official gateway.** Run `linkshell login`, then sign in to the app with the same account. Your computer shows up by itself; no QR codes.
 - **Free — your own gateway.** Run a gateway ([below](#run-your-own-gateway)), point the host at it and pair once:
 
   ```bash
@@ -71,13 +71,17 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 
 - **Hand off between desk and phone.** Same session ID, full context. A model or effort chosen on the phone applies when the phone takes over.
 - **Follow along live.** Replies stream word by word; plans, tool calls and file changes update as they happen, with a diff for every file.
-- **Talk while it works.** Codex and Claude take a new message into the current turn; other agents queue it above the composer, where you can pull it back. Stopping puts queued text back in the composer.
+- **Talk while it works.** A message sent mid-turn waits in a queue above the composer: reorder it, take it back to edit, or send it now — into the running turn for Codex and Claude, by stopping the turn for other agents. Stop works on a turn running on the computer too.
+- **Sub-agents at hand.** The sub-agents a session started are one tap away from its header, each with its own conversation, however far back it began.
 - **Approve from anywhere.** Permission requests arrive on the phone; allow or deny in one tap.
 - **Change settings.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers.
 - **Keep sessions tidy.** Rename, archive and delete; for Codex and Claude this also updates their own records.
 - **Use a real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar. They keep running when you close the app.
 - **Open localhost on your phone.** Your dev server's port, over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
-- **Screen and files.** Glance at the computer's screen (needs `ffmpeg`), and send photos or files from the phone into the project.
+- **Fork and worktrees.** Fork a session from any reply to try another direction, in the same directory or in a new git worktree; start a session in a worktree so it doesn't touch what you're working on. Claude and Codex fork natively; for other agents LinkShell hands the conversation over as text.
+- **Slash commands.** `/` lists what the agent offers — its commands and your skills. `/compact` and `/review` work for Codex from the phone too.
+- **Long sessions stay light.** A session opens at its latest turns; pull down for earlier ones. Screenshots in it load when you look at them.
+- **Screen and files.** Glance at the computer's screen (needs `ffmpeg`), browse and read the project's files, and send photos or files from the phone into the project.
 
 ## Agents
 
@@ -89,6 +93,8 @@ LinkShell runs the agents already installed and signed in on your computer. It n
 | **Claude Code** | Handoff | Claude's own UI at your desk; a message from the phone takes over, any key on the computer takes it back |
 | **Gemini CLI, GitHub Copilot, OpenCode, Cursor, Grok** | Remote | Start and continue sessions from the phone over the [Agent Client Protocol](https://agentclientprotocol.com): live output, approvals, modes and models |
 | **Any CLI** | Terminal | A terminal on the computer, viewed and typed into from the phone |
+
+A Claude session opened in the Claude desktop app can be followed live and continued from the phone too. The app can't be handed a session, though: it won't show what the phone did until it is restarted. For handing a session back and forth, start it with `linkshell claude`.
 
 ## Run your own gateway
 
@@ -120,6 +126,7 @@ On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss
 | See agents, sessions and the gateway | `linkshell host status` |
 | Stop it | `linkshell host stop` |
 | Pair a phone (own gateway) | `linkshell pair` |
+| See or remove paired phones | `linkshell devices` / `linkshell devices remove <name>` |
 | Use the official gateway (Pro) | `linkshell login` / `linkshell logout` |
 | Claude Code / Codex, shareable | `linkshell claude` / `linkshell codex` (arguments pass through) |
 | Run a gateway | `linkshell gateway [--port 8787] [--daemon]` |

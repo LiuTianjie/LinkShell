@@ -66,6 +66,7 @@ or with Docker: `nickname4th/linkshell-gateway` (see the [self-hosting guide](ht
 ├── auth.json             the Pro login, if any
 ├── config.json           the chosen gateway
 ├── host.log              the host's log
+├── worktrees/            git worktrees made for sessions started (or forked) into one
 └── relay.db              pairings, when this computer runs a gateway
 ```
 

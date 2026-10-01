@@ -42,7 +42,7 @@ linkshell host --daemon
 
 然后用下面任一方式连接手机（[iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)）：
 
-- **Pro：官方网关。** 运行 `linkshell login`（如果 host 已经在运行，重启一下），然后在 App 里登录同一个账号，电脑会自动出现，不用扫码。
+- **Pro：官方网关。** 运行 `linkshell login`，然后在 App 里登录同一个账号，电脑会自动出现，不用扫码。
 - **免费：自建网关。** 先运行一个网关（见[下文](#自建网关)），让 host 连上它，配对一次：
 
   ```bash
@@ -71,13 +71,17 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 
 - **电脑与手机接力。** 同一个会话 ID，上下文不丢。在手机上选好的模型和思考强度，接管时自动生效。
 - **实时跟进。** 回复逐字出现；计划、工具调用和文件改动实时更新，每个文件都能看 diff。
-- **干活时也能说话。** Codex 和 Claude 把新消息直接插进当前这一轮；其他 Agent 在输入框上方排队，排队的消息可以撤回；停止时，排队的文字会放回输入框。
+- **干活时也能说话。** 运行中发的消息在输入框上方排队：可以调整顺序、取回重新编辑，或者立即发送——Codex 和 Claude 直接插进当前这一轮，其他 Agent 先停下当前这一轮。电脑上正在跑的那一轮，手机上也能停。
+- **子 Agent 随手可查。** 会话标题旁的按钮列出这个会话启动过的所有子 Agent 和各自的对话，不用翻回很早以前。
+- **分叉和 worktree。** 从任意一条回复分叉出新会话，换个方向试试——留在当前目录，或者放进新的 git worktree；新会话也可以直接开在 worktree 里，不碰你手头的工作区。Claude 和 Codex 原生分叉；其他 Agent 由 LinkShell 把之前的对话以文字交给它。
+- **斜杠命令。** 输入 `/` 列出 Agent 提供的命令和你的 skills。Codex 的 `/compact`、`/review` 在手机上同样可用。
 - **随时审批。** 权限请求推到手机上，一键允许或拒绝。
 - **调整设置。** 模型、思考强度、权限模式、快速模式，取决于 Agent 提供了哪些。
 - **整理会话。** 重命名、归档、删除；Codex 和 Claude 会同步到它们自己的记录里。
 - **真终端。** 电脑上的终端，带 Ctrl、Esc、Tab、方向键工具栏；关掉 App 也不会中断。
 - **在手机上打开 localhost。** 电脑上开发服务器的端口，走同一条加密通道，热更新照常，可以全屏。不需要开放端口，也不需要同一个 Wi-Fi。
-- **屏幕和文件。** 看一眼电脑屏幕（需要 `ffmpeg`），把手机里的图片和文件传到项目里。
+- **长会话也轻快。** 打开会话先显示最近几轮，下拉再加载更早的；里面的截图看到时才加载。
+- **屏幕和文件。** 看一眼电脑屏幕（需要 `ffmpeg`），浏览和查看项目里的文件，把手机里的图片和文件传到项目里。
 
 ## 支持的 Agent
 
@@ -89,6 +93,8 @@ LinkShell 用的是你电脑上已经安装、已经登录的 Agent，不经手�
 | **Claude Code** | 接力 | 电脑上用 Claude 自己的界面；手机发消息即接管，电脑按任意键收回 |
 | **Gemini CLI、GitHub Copilot、OpenCode、Cursor、Grok** | 远程会话 | 通过 [Agent Client Protocol](https://agentclientprotocol.com) 在手机上新建、继续会话：实时输出、审批、模式和模型 |
 | **任何命令行工具** | 终端 | 在电脑上开终端，手机上看和输入 |
+
+在 Claude 桌面 App 里打开的会话，手机上同样可以实时查看、接着做。但桌面 App 没法接收交回的会话：手机上做的内容要重启 App 后它才知道。想来回接力，用 `linkshell claude` 启动会话。
 
 ## 自建网关
 
@@ -120,6 +126,7 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
 | 查看 Agent、会话和网关 | `linkshell host status` |
 | 停止 | `linkshell host stop` |
 | 配对手机（自建网关） | `linkshell pair` |
+| 查看、移除已配对的手机 | `linkshell devices` / `linkshell devices remove <名称>` |
 | 使用官方网关（Pro） | `linkshell login` / `linkshell logout` |
 | 可交给手机的 Claude Code / Codex | `linkshell claude` / `linkshell codex`（参数原样传递） |
 | 运行网关 | `linkshell gateway [--port 8787] [--daemon]` |
