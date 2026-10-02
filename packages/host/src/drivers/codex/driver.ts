@@ -24,7 +24,7 @@ import {
 import { nestHistory, nestUnder } from "../nesting.js";
 import { configOptions, effective, settingsFrom, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
 import { COMMANDS, INIT_PROMPT, commandOf, type CodexSkill } from "./commands.js";
-import { desktopBusSocket, interruptThroughDesktop } from "./desktop-ipc.js";
+import { desktopBusSocket, interruptThroughDesktop, startThroughDesktop, steerThroughDesktop } from "./desktop-ipc.js";
 
 export interface CodexDriverOptions {
   socketPath: string;
@@ -72,6 +72,8 @@ interface Waiting {
   submissionId: string;
   text: string;
   images: number;
+  /** As Codex has it: what is sent if the message is put into the running turn instead. */
+  input: unknown[];
 }
 
 /** A thread this host is subscribed to: what has finished in it, and what was still running when it was joined. */
@@ -94,15 +96,21 @@ function fileStamp(path: string): string | undefined {
   }
 }
 
+/** The text of a message as Codex holds it. */
+function textOf(input: Record<string, unknown>[]): string {
+  return input.map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : "")).join("").trim();
+}
+
 /** A request id from Codex's background server: both servers count theirs from the same numbers. */
 const sharedRequestId = (id: string): string => `shared-${id}`;
 
 // (Shown as one small line in the conversation: short enough to read at a glance.)
-const HELD_NOTICE = { title: "会话开在电脑的另一个 Codex 里 · 消息会排队，等这一轮结束后发送" };
+const HELD_NOTICE = { title: "会话开在电脑的另一个 Codex 里 · 这一轮结束前发的消息会排队" };
 const HELD_SEND = "会话开在电脑的另一个 Codex 里，这条消息没能排进它的队列。在那边关掉这个会话后再发。";
-const HELD_STOP = "这一轮跑在电脑的另一个 Codex（桌面 App 或 IDE 插件）里，手机停不了它：请在电脑上停止。";
+// (The desktop app's windows can lose each other, after which none of them answers for its threads until the app is restarted.)
+const HELD_STOP = "这一轮跑在电脑的 Codex 桌面 App（或 IDE 插件）里，这次没能从手机停下它。请在电脑上停止；一直这样的话，重启一下 Codex 桌面 App。";
 const HELD_NOW =
-  "这一轮跑在电脑的另一个 Codex（桌面 App 或 IDE 插件）里，手机插不进去。它结束后这条消息会自动发送；想现在就插入，在电脑上对这条排队消息点 Steer。";
+  "这一轮跑在电脑的 Codex 桌面 App（或 IDE 插件）里，这次没能从手机插进去。它结束后这条消息会自动发送；想现在就插入，在电脑上对这条排队消息点 Steer。一直这样的话，重启一下 Codex 桌面 App。";
 const HELD_COMMAND = "会话开在电脑的另一个 Codex 里，要在那边关掉它之后才能从手机做。";
 
 interface PendingApproval {
@@ -532,7 +540,18 @@ export class CodexDriver implements AgentDriver {
    * Leaves a message in Codex's own queue for a thread another process holds.
    * That process starts it when it is idle, or right after the turn it is running.
    */
-  private async enqueue(threadId: string, input: unknown[], clientMessageId: string): Promise<"queued"> {
+  private async enqueue(threadId: string, input: unknown[], clientMessageId: string): Promise<"started" | "queued"> {
+    const watch = this.observed.get(threadId);
+    if (watch && !watch.running && this.desktopBusPath) {
+      // Idle: the app starts it at once when asked, where its queue is only looked at every so often.
+      try {
+        await startThroughDesktop(this.desktopBusPath, threadId, this.desktopMessage(threadId, input, clientMessageId));
+        void this.refresh(threadId);
+        return "started";
+      } catch (error) {
+        this.host?.log(`[codex] the Codex desktop app didn't start a turn in ${threadId}, queueing instead: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     try {
       await this.rpc("thread/queue/add", { threadId, input, clientUserMessageId: clientMessageId });
     } catch (error) {
@@ -554,8 +573,9 @@ export class CodexDriver implements AgentDriver {
       listed.data.map((entry) => ({
         clientMessageId: entry.clientUserMessageId,
         submissionId: entry.id,
-        text: entry.input.map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : "")).join("").trim(),
+        text: textOf(entry.input),
         images: entry.input.filter((part) => part.type === "image" || part.type === "localImage").length,
+        input: entry.input,
       })),
     );
   }
@@ -585,12 +605,37 @@ export class CodexDriver implements AgentDriver {
     return true;
   }
 
-  /** A queued message can't be put into the turn another Codex is running: that turn is stopped, and the queue goes on. */
-  async sendQueuedNow(nativeId: string): Promise<void> {
-    if (!this.waiting.has(nativeId)) return;
-    await this.stopElsewhere(nativeId).catch(() => {
+  /**
+   * A message waiting in Codex's queue goes into the turn another Codex is
+   * running, by asking that Codex's app: what its own "Steer" on the waiting
+   * message does.
+   */
+  async sendQueuedNow(nativeId: string, clientMessageId?: string): Promise<void> {
+    const waiting = this.waiting.get(nativeId) ?? [];
+    const entry = clientMessageId ? waiting.find((candidate) => candidate.clientMessageId === clientMessageId) : waiting[0];
+    const watch = this.observed.get(nativeId);
+    // (Joined since: what waits is started by the app-server the thread is in now.)
+    if (!entry || !watch) return;
+    try {
+      if (!this.desktopBusPath) throw new Error("not asked");
+      const message = this.desktopMessage(nativeId, entry.input, entry.clientMessageId);
+      if (watch.running) await steerThroughDesktop(this.desktopBusPath, nativeId, message);
+      else await startThroughDesktop(this.desktopBusPath, nativeId, message);
+    } catch (error) {
+      this.host?.log(`[codex] couldn't put a message into ${nativeId} through the Codex desktop app: ${error instanceof Error ? error.message : String(error)}`);
       throw RpcError.app("busy", HELD_NOW);
-    });
+    }
+    // In the turn now. (Taken out of the queue only after: a message that runs twice is better than one that is lost.)
+    this.setWaiting(
+      nativeId,
+      waiting.filter((candidate) => candidate !== entry),
+    );
+    await this.rpc("thread/queue/delete", { threadId: nativeId, queuedSubmissionId: entry.submissionId }).catch(() => {});
+    void this.refresh(nativeId);
+  }
+
+  private desktopMessage(threadId: string, input: unknown[], clientMessageId: string) {
+    return { input, text: textOf(input as Record<string, unknown>[]), clientMessageId, cwd: this.cwds.get(threadId) };
   }
 
   /**

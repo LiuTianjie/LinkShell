@@ -793,7 +793,7 @@ export class SessionHub {
     const item = live.held[index];
     if (!item) {
       // Held by the driver (another Claude is mid-turn in the session), or already gone.
-      await driver.sendQueuedNow?.(summary.nativeId);
+      await driver.sendQueuedNow?.(summary.nativeId, clientMessageId);
       return;
     }
     live.held.splice(index, 1);
@@ -807,7 +807,7 @@ export class SessionHub {
     this.announce(sessionId);
     try {
       const delivery = await this.deliver(summary, driver, item.content, item.clientMessageId);
-      if (delivery === "queued") await driver.sendQueuedNow?.(summary.nativeId);
+      if (delivery === "queued") await driver.sendQueuedNow?.(summary.nativeId, item.clientMessageId);
     } catch (error) {
       live.held.unshift(item);
       this.announce(sessionId);

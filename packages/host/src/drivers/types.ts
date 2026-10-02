@@ -152,8 +152,8 @@ export interface AgentDriver {
    * `upTo` names, working in `cwd` (the same directory, or a worktree of it).
    */
   fork?(nativeId: string, options: ForkOptions): Promise<DiscoveredSession>;
-  /** Stops the running turn and sends what the driver's queue holds, without waiting for the turn to end. */
-  sendQueuedNow?(nativeId: string): Promise<void>;
+  /** Sends what the driver's queue holds (the message named, or the first) without waiting for the running turn to end: into that turn, or by stopping it. */
+  sendQueuedNow?(nativeId: string, clientMessageId?: string): Promise<void>;
   /** Puts the driver's queue in the order of `clientMessageIds`. */
   reorderQueue?(nativeId: string, clientMessageIds: string[]): void;
 

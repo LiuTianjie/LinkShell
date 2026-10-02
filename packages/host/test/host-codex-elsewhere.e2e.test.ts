@@ -112,9 +112,20 @@ function deskCodex(disk: string, id: string, cwd: string) {
       write();
     },
     turnId: () => turn().id,
+    /** A turn started with a message from another program. */
+    start(clientId: string, content: Record<string, unknown>[]) {
+      const turnId = `turn-${stored.turns.length + 1}`;
+      stored.turns.push({ id: turnId, status: "inProgress", startedAt: seconds(), completedAt: null, items: [{ type: "userMessage", id: `${turnId}-user`, clientId, content }] });
+      write();
+    },
     queue: (): { clientUserMessageId: string; input: Record<string, unknown>[] }[] => {
       const path = join(disk, `${id}.queue.json`);
-      return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : [];
+      if (!existsSync(path)) return [];
+      // (Read while the other process is writing it, the file is empty for a moment.)
+      for (;;) {
+        const text = readFileSync(path, "utf8");
+        if (text) return JSON.parse(text);
+      }
     },
     /** As Codex does when the thread is idle: starts the first message waiting in its queue. */
     runQueued(reply: string) {
@@ -144,6 +155,7 @@ function deskCodex(disk: string, id: string, cwd: string) {
 function desktopBus(path: string, handle: (request: { method: string; params: Record<string, unknown> }) => unknown) {
   const requests: Record<string, unknown>[] = [];
   const discoveryAnswers: unknown[] = [];
+  const owners: unknown[] = [];
   const server = createServer((socket: Socket) => {
     let buffered = Buffer.alloc(0);
     const write = (message: Record<string, unknown>) => {
@@ -165,7 +177,13 @@ function desktopBus(path: string, handle: (request: { method: string; params: Re
           write({ type: "client-discovery-request", requestId: "who-runs-it", request: { type: "request", method: "thread-owner-discovery", params: {} } });
           continue;
         }
-        requests.push({ method: message.method, version: message.version, sourceClientId: message.sourceClientId, params: message.params });
+        if (message.method === "thread-owner-discovery") {
+          // The window that runs the thread answers for it; the request proper is then sent to that window.
+          owners.push(message.params);
+          write({ type: "response", requestId: message.requestId, resultType: "success", method: message.method, handledByClientId: "owner", result: { supportsUntrustedAppInput: true } });
+          continue;
+        }
+        requests.push({ method: message.method, version: message.version, sourceClientId: message.sourceClientId, targetClientId: message.targetClientId, params: message.params });
         try {
           write({ type: "response", requestId: message.requestId, resultType: "success", method: message.method, handledByClientId: "owner", result: handle(message) });
         } catch (error) {
@@ -175,7 +193,7 @@ function desktopBus(path: string, handle: (request: { method: string; params: Re
     });
   });
   server.listen(path);
-  return { requests, discoveryAnswers, close: () => new Promise((resolve) => server.close(resolve)) };
+  return { requests, discoveryAnswers, owners, close: () => new Promise((resolve) => server.close(resolve)) };
 }
 
 let home: string;
@@ -301,7 +319,7 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
     // No desktop app to ask.
     await expect(phone.client.call("sessions.cancel", { sessionId: id })).rejects.toMatchObject({
       appCode: "busy",
-      message: expect.stringMatching(/另一个 Codex.*请在电脑上停止/),
+      message: expect.stringMatching(/Codex 桌面 App.*请在电脑上停止/),
     });
 
     const bus = desktopBus(busSocket, (request) => {
@@ -315,9 +333,11 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
         method: "thread-follower-interrupt-turn",
         version: 4,
         sourceClientId: "client-9",
+        targetClientId: "owner",
         params: { conversationId: "desk-thread", mode: "user-stop", expectedTurnId: desk.turnId() },
       },
     ]);
+    expect(bus.owners).toEqual([{ hostId: "local", conversationId: "desk-thread" }]);
     // Asked, like every client on the bus, whether it runs a thread: it never does.
     expect(bus.discoveryAnswers).toEqual([{ canHandle: false }]);
     await waitFor(() => host.hub.getSession(id).state === "idle");
@@ -334,6 +354,67 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
     await waitFor(() => host.hub.getSession(id).state === "idle");
   });
 
+  it("puts a waiting message into the running turn, and starts one at once when idle, by asking the desktop app", async () => {
+    desk.startTurn("a third long job");
+    await waitFor(() => host.hub.getSession(id).state === "running");
+    expect(await prompt(id, "s1", "look at main only")).toEqual({ delivery: "queued" });
+    await waitFor(() => desk.queue().length === 1);
+    // No desktop app to ask: it stays waiting, and the phone is told what can be done instead.
+    await expect(phone.client.call("sessions.sendQueued", { sessionId: id, clientMessageId: "s1" })).rejects.toMatchObject({
+      appCode: "busy",
+      message: expect.stringContaining("Steer"),
+    });
+    expect(desk.queue()).toHaveLength(1);
+
+    const bus = desktopBus(busSocket, (request) => {
+      const params = request.params as { clientUserMessageId?: string; input?: Record<string, unknown>[]; turnStart?: { request: { clientUserMessageId: string; input: Record<string, unknown>[] } } };
+      if (request.method === "thread-follower-steer-turn") {
+        desk.add({ type: "userMessage", id: `steered-${params.clientUserMessageId}`, clientId: params.clientUserMessageId, content: params.input });
+        return { result: { turnId: desk.turnId() } };
+      }
+      desk.start(params.turnStart!.request.clientUserMessageId, params.turnStart!.request.input);
+      return { result: { turn: { id: desk.turnId() } } };
+    });
+    await waitFor(() => existsSync(busSocket));
+    await phone.client.call("sessions.sendQueued", { sessionId: id, clientMessageId: "s1" });
+    expect(bus.requests).toEqual([
+      {
+        method: "thread-follower-steer-turn",
+        version: 1,
+        sourceClientId: "client-9",
+        targetClientId: "owner",
+        params: expect.objectContaining({
+          conversationId: "desk-thread",
+          clientUserMessageId: "s1",
+          input: [expect.objectContaining({ type: "text", text: "look at main only" })],
+          // The app reads these from every message it steers.
+          restoreMessage: expect.objectContaining({ id: "s1", text: "look at main only", cwd: "/desk/project", context: expect.objectContaining({ prompt: "look at main only" }) }),
+        }),
+      },
+    ]);
+    // In the turn, as the phone's own message, and no longer waiting anywhere.
+    await waitFor(() => phone.of(id).some((e) => e.update.sessionUpdate === "user_message_chunk" && e.update.messageId === "local-s1"));
+    await waitFor(() => host.hub.getSession(id).queue === undefined);
+    expect(desk.queue()).toEqual([]);
+
+    desk.endTurn();
+    await waitFor(() => host.hub.getSession(id).state === "idle");
+    // Idle: started there at once instead of waiting in the queue.
+    expect(await prompt(id, "s2", "and now the server")).toEqual({ delivery: "started" });
+    expect(bus.requests[1]).toMatchObject({
+      method: "thread-follower-start-turn",
+      version: 2,
+      targetClientId: "owner",
+      params: { conversationId: "desk-thread", turnStart: { request: { threadId: "desk-thread", clientUserMessageId: "s2", input: [{ type: "text", text: "and now the server" }] }, context: {} } },
+    });
+    expect(desk.queue()).toEqual([]);
+    await waitFor(() => phone.of(id).some((e) => e.update.sessionUpdate === "user_message_chunk" && e.update.messageId === "local-s2"));
+    await waitFor(() => host.hub.getSession(id).state === "running");
+    desk.endTurn();
+    await waitFor(() => host.hub.getSession(id).state === "idle");
+    await bus.close();
+  });
+
   it("is an ordinary session again once that Codex lets go, with nothing twice and nothing missing", async () => {
     // Written just before it closed, after the host last looked.
     desk.startTurn("one more thing");
@@ -343,7 +424,7 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
 
     expect(await prompt(id, "d3", "from the phone again")).toEqual({ delivery: "started" });
     await waitFor(() => phone.turnsEnded(id).length === 1);
-    expect(phone.said(id)).toEqual(["fix the build", "from the phone", "a long job", "another long job", "one more thing", "from the phone again"]);
+    expect(phone.said(id)).toEqual(["fix the build", "from the phone", "a long job", "another long job", "a third long job", "look at main only", "and now the server", "one more thing", "from the phone again"]);
     expect(phone.agentText(id)).toBe("Looking.Built.On it.Done.echo: from the phone again");
     expect(phone.tools(id)).toHaveLength(2);
     expect(host.hub.getSession(id)).toMatchObject({ state: "idle", driver: "none" });
