@@ -60,7 +60,7 @@ const gateway = await startGateway({ port: 8787, databasePath: "./relay.db" });
 | `PORT` | `8787` | 监听端口 |
 | `LOG_LEVEL` | `info` | 日志级别：debug / info / warn / error |
 | `RELAY_DATA_PATH` | `./data/relay.db` | 数据文件（SQLite）。Docker 镜像里是 `/data/relay.db` |
-| `TRUSTED_PROXIES` | 空 | 反向代理的 IP（网关看到的来源地址），逗号分隔。只有连接来自这些地址时才采信 `X-Forwarded-For`；留空则一律按直接连接的地址计算限流 |
+| `TRUSTED_PROXIES` | 空 | 反向代理的 IP（网关看到的来源地址），逗号分隔；IPv4 可以写成网段，如 `172.16.0.0/12`。只有连接来自这些地址时才采信 `X-Forwarded-For`；留空则一律按直接连接的地址计算限流 |
 | `WS_CONNECT_RATE_LIMIT_MAX` | `20` | 每个 IP 在一个时间窗口内允许的连接次数（本机回环地址不限） |
 | `WS_CONNECT_RATE_LIMIT_WINDOW_MS` | `60000` | 上面的时间窗口 |
 | `SUPABASE_URL`、`SUPABASE_ANON_KEY` | - | 两个都设置后启用账号：校验账号令牌，同一账号下的手机和电脑不用配对就能互相访问 |
@@ -71,6 +71,9 @@ const gateway = await startGateway({ port: 8787, databasePath: "./relay.db" });
 
 - 没有设置 `TRUSTED_PROXIES`：所有连接都算作来自代理的地址。代理在另一台机器或另一个容器里时，所有用户共用一份限额（每分钟 20 次连接）；代理在本机（`127.0.0.1`）时则完全不限流。
 - 设置为代理的地址（代理在本机时是 `127.0.0.1,::1`）：按 `X-Forwarded-For` 里每个用户自己的地址分别限流。
+- 代理在容器网络里、地址每次部署都会变：写成它所在的网段（如 `172.16.0.0/12`）。
+- 前面有多层代理（CDN 再到 nginx）：每一层都要列出来。用户的地址取的是 `X-Forwarded-For` 里**从右往左第一个不属于代理的地址**：最左边那一段是调用方自己写的，不能信。
+- 不确定代理的地址是什么：先不设置，看网关日志。收到带 `X-Forwarded-For` 却不在名单里的连接时，日志会写出它的地址（每个地址只说一次）。
 
 ### 带账号和订阅校验的部署
 

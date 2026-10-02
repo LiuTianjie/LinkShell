@@ -157,6 +157,12 @@ describe("startGateway", () => {
     // Only the relay path counts: a refused path doesn't use up the allowance.
     expect(await upgrade(`${behindProxy.ws}/ws`, { "x-forwarded-for": "198.51.100.8" })).toBe(0);
 
+    // What the caller wrote in front of the proxy's own entry doesn't give them a new allowance.
+    const spoofing = await gateway({ trustedProxies: ["127.0.0.1"], wsConnectLimit: limit });
+    expect(await upgrade(spoofing.ws + RELAY_PATH, { "x-forwarded-for": "1.1.1.1, 203.0.113.9" })).toBe("open");
+    expect(await upgrade(spoofing.ws + RELAY_PATH, { "x-forwarded-for": "2.2.2.2, 203.0.113.9" })).toBe("open");
+    expect(await upgrade(spoofing.ws + RELAY_PATH, { "x-forwarded-for": "3.3.3.3, 203.0.113.9" })).toBe(429);
+
     // Nobody is trusted: the header is ignored, and this machine itself is never limited.
     const direct = await gateway({ wsConnectLimit: limit });
     for (let i = 0; i < 4; i++) expect(await upgrade(direct.ws + RELAY_PATH, forwarded)).toBe("open");

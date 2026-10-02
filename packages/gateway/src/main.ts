@@ -7,7 +7,7 @@ import { requirePro, supabaseSubscriptions } from "./subscription.js";
 //   RELAY_DATA_PATH               SQLite file with pairings and keys (./data/relay.db); keep it on a volume
 //   SUPABASE_URL + SUPABASE_ANON_KEY   turn accounts on
 //   AUTH_REQUIRED=true            computers need an active Pro account (with SUPABASE_SERVICE_ROLE_KEY)
-//   TRUSTED_PROXIES               comma-separated proxy addresses whose X-Forwarded-For is believed
+//   TRUSTED_PROXIES               comma-separated proxy addresses (or IPv4 ranges, 10.0.0.0/8) whose X-Forwarded-For is believed
 //   WS_CONNECT_RATE_LIMIT_MAX / WS_CONNECT_RATE_LIMIT_WINDOW_MS   connections per address (20 per 60000 ms)
 //   LOG_LEVEL                     debug | info | warn | error (info)
 

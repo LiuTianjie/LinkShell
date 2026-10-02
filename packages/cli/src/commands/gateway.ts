@@ -10,7 +10,13 @@ export async function runGatewayForeground(version: string, port: number): Promi
   const { startGateway } = await import("@linkshell/gateway");
   // Pairings live here; keeping this file keeps phones paired.
   const databasePath = join(daemon.linkshellDir(), "relay.db");
-  const gateway = await startGateway({ port, databasePath });
+  const gateway = await startGateway({
+    port,
+    databasePath,
+    log: (message) => process.stderr.write(`[gateway] ${message}\n`),
+    // As for the Docker image: the reverse proxy in front, whose X-Forwarded-For says who is connecting.
+    trustedProxies: (process.env.TRUSTED_PROXIES ?? "").split(","),
+  });
   daemon.savePid("gateway", process.pid);
 
   process.stderr.write(`\n  LinkShell Gateway ${version}\n`);

@@ -49,6 +49,17 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
   const limit = options.wsConnectLimit ?? { max: 20, windowMs: 60_000 };
   const connectLimiter = new RateLimiter(limit.max, limit.windowMs);
 
+  // A proxy that isn't in `trustedProxies` makes every user share one allowance. Said once per address, so
+  // the gateway's log names the address to add.
+  const untrustedProxies = new Set<string>();
+  const noteUntrustedProxy = (request: IncomingMessage) => {
+    const peer = request.socket.remoteAddress ?? "";
+    if (request.headers["x-forwarded-for"] === undefined || isLoopback(peer) || trustedProxies.has(peer)) return;
+    if (untrustedProxies.has(peer) || untrustedProxies.size >= 16) return;
+    untrustedProxies.add(peer);
+    options.log?.(`a connection from ${peer} carries X-Forwarded-For, which is ignored: if ${peer} is your reverse proxy, add it to TRUSTED_PROXIES so each user gets their own connection limit`);
+  };
+
   const server = createServer((request, response) => {
     if (request.method === "GET" && pathOf(request) === "/healthz") {
       // memoryMb: what the process holds, to watch against the container's limit.
@@ -64,6 +75,7 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
       return;
     }
     const ip = clientIp(request, trustedProxies);
+    noteUntrustedProxy(request);
     if (!isLoopback(ip) && !connectLimiter.allow(ip)) {
       socket.write("HTTP/1.1 429 Too Many Requests\r\n\r\n");
       socket.destroy();

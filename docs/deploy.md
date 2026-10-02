@@ -74,6 +74,20 @@ server {
 
 `Upgrade` / `Connection` 头是 WebSocket 必需的；较长的 `proxy_read_timeout` 防止空闲连接被断开。证书可以用 `certbot --nginx -d gw.example.com` 免费申请。
 
+### 让连接限流按用户计算
+
+网关限制每个地址每分钟的连接次数。前面有反向代理时，网关看到的来源都是代理，所以要告诉它哪些地址是代理，它才会采信 `X-Forwarded-For`：
+
+```bash
+# 用 CLI 运行，代理在同一台机器上
+TRUSTED_PROXIES=127.0.0.1,::1 linkshell gateway --port 8787 --daemon
+
+# 用 Docker 运行，代理在宿主机上：容器看到的是 Docker 网桥的地址
+docker run -d ... -e TRUSTED_PROXIES=172.16.0.0/12 nickname4th/linkshell-gateway:latest
+```
+
+不设置也能用，只是限流不准：代理在本机时完全不限流，在别处时所有用户共用一份限额。细节见 [`packages/gateway/README.md`](../packages/gateway/README.md)。
+
 ## 3. 连接电脑和手机
 
 在电脑上：
