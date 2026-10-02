@@ -1,6 +1,6 @@
 import { LegendList } from "@legendapp/list/react-native";
 import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
-import { router, Stack } from "expo-router";
+import { router } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Icon } from "@/components/icon";
@@ -125,6 +125,7 @@ export function HomeScreen() {
   const { terminals } = useTerminals();
   const { items, waiting } = useMemo(
     () => buildItems(Object.values(sessionsById), terminals, Date.now()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` is not read: it is what says the buckets are stale.
     [sessionsById, terminals, day],
   );
   const empty = loaded && Object.keys(sessionsById).length === 0;

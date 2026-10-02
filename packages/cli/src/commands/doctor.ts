@@ -66,6 +66,7 @@ export async function runDoctor(version: string, gatewayUrl?: string): Promise<v
         `could not load node-pty from this LinkShell installation: ${reason}. ` +
         "Reinstall linkshell-cli with the package manager you used to install it. " +
         "For a pnpm source checkout, approve node-pty build scripts and reinstall.",
+        { cause: error },
       );
     }
   }));

@@ -6,7 +6,6 @@ import { createServer, type Server, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { promisify } from "node:util";
 import { z } from "zod";
 
 // LinkShell.app, the Mac side of the screen (apps/mac): it captures and sends
@@ -18,8 +17,6 @@ import { z } from "zod";
 // permissions are asked for and kept under the name LinkShell, whichever
 // terminal started the host and however often the CLI is upgraded. It comes
 // in `@linkshell/mac`, installed with the host on a Mac.
-
-const run = promisify(execFile);
 
 const unit = z.number().min(0).max(1);
 const button = z.enum(["left", "right"]);

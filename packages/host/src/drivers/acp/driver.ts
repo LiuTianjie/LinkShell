@@ -553,7 +553,7 @@ export class AcpDriver implements AgentDriver {
 
   private async sendPrompt(nativeId: string, state: AcpSessionState, prompt: Record<string, unknown>[]): Promise<void> {
     state.inflight += 1;
-    let stopReason: StopReason = "end_turn";
+    let stopReason: StopReason;
     try {
       const result = await this.rpc<{ stopReason?: unknown }>("session/prompt", { sessionId: nativeId, prompt }, 0);
       stopReason = toStopReason(result.stopReason);

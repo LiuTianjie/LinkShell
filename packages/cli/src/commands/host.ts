@@ -355,7 +355,7 @@ export async function runAgentShim(agent: string, args: string[]): Promise<void>
 
   const sessionId = launch.sessionId;
   let child: import("node:child_process").ChildProcess | undefined;
-  let yielded = false;
+  let yielded: boolean;
   let showingRemote = false;
   client.on("desktop.yield", ({ sessionId: target }) => {
     if (target !== sessionId) return;

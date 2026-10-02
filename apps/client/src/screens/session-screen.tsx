@@ -31,6 +31,9 @@ import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { HeaderActions, useHeaderTitleWidth } from "@/components/header-actions";
 
+// One array for "nothing yet": a new one on every render would make everything computed from the items run again.
+const NO_ITEMS: TimelineItem[] = [];
+
 /** iOS 26-style title capsule: agent icon, title and where it runs, on glass. */
 function HeaderTitle({
   agent,
@@ -122,7 +125,7 @@ export function SessionScreen() {
     if (ready) void actions.loadSubagents(id).catch(() => {});
   }, [actions, id, ready, subagentsTotal, subagentsRunning]);
 
-  const items = view?.items ?? [];
+  const items = view?.items ?? NO_ITEMS;
   // The session opens at its latest turns; what came before loads a page at a time.
   const hasEarlier = (view?.startSeq ?? 0) > 0;
   const earlier = useMemo(

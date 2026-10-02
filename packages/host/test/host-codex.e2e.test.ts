@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RpcPeer, type SessionEvent, type SessionSummary } from "@linkshell/wire";
-import { connectHost, type HostClient } from "../src/rpc/client.js";
+import { connectHost } from "../src/rpc/client.js";
 import { startHost, type RunningHost } from "../src/host.js";
 import { CodexDriver } from "../src/drivers/codex/driver.js";
 

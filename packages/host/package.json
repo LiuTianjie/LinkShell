@@ -42,7 +42,7 @@
     "@xterm/headless": "^6.0.0",
     "node-pty": "^1.1.0",
     "werift": "^0.22.9",
-    "ws": "^8.18.1",
+    "ws": "^8.21.0",
     "zod": "^3.24.3"
   },
   "optionalDependencies": {

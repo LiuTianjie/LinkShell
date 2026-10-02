@@ -4,7 +4,6 @@ import Storage from "expo-sqlite/kv-store";
 import { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AgentTile } from "@/components/agent-tile";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
@@ -95,7 +94,6 @@ export function NewSessionScreen() {
   const projects = useClient((state) => state.projects);
   const online = useClient((state) => state.status === "online");
   const { createSession, send } = useActions();
-  const insets = useSafeAreaInsets();
 
   const agents = useMemo(() => (machine?.agents ?? []).filter((agent) => agent.installed && agent.tier !== "terminal"), [machine]);
   const [agentId, setAgentId] = useState<string | null>(() => {

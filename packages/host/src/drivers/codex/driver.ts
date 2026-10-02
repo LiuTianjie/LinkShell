@@ -661,7 +661,7 @@ export class CodexDriver implements AgentDriver {
         // (Joined meanwhile: then the turn is reported by the server the thread is in.)
         const watch = this.observed.get(threadId);
         if (!watch || watch.running) break;
-        if (Date.now() >= deadline) throw new Error(`${error.message}, and no turn began`);
+        if (Date.now() >= deadline) throw new Error(`${error.message}, and no turn began`, { cause: error });
         await new Promise((resolve) => setTimeout(resolve, Math.min(500, this.observeIntervalMs)));
       }
     }

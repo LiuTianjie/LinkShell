@@ -1,0 +1,26 @@
+name: audit
+
+# Known vulnerabilities in what the published packages depend on. On its own schedule, so that an advisory
+# published overnight shows up here and not as a failure of somebody's unrelated change.
+on:
+  schedule:
+    - cron: "0 2 * * 1"
+  push:
+    branches: [main]
+    paths: [pnpm-lock.yaml, scripts/audit-packages.mjs]
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Reads the lockfile; nothing needs installing.
+      - run: node scripts/audit-packages.mjs

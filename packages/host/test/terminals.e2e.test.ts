@@ -11,7 +11,8 @@ afterEach(async () => {
   for (const { host, home, clients } of running.splice(0)) {
     for (const client of clients) client.close();
     await host.stop();
-    rmSync(home, { recursive: true, force: true });
+    // A shell on its way out may still be writing into its home (it is the HOME of the test's shells).
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 

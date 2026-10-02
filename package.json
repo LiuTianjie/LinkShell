@@ -24,10 +24,17 @@
     "dev:cli": "pnpm --filter linkshell-cli dev",
     "dev:app": "pnpm --filter @linkshell/client start",
     "dev:ios": "pnpm --filter @linkshell/client ios",
-    "dev:android": "pnpm --filter @linkshell/client android"
+    "dev:android": "pnpm --filter @linkshell/client android",
+    "lint": "eslint .",
+    "audit": "node scripts/audit-packages.mjs"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.15.29",
-    "typescript": "^5.8.3"
+    "eslint": "^10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.71.0"
   }
 }

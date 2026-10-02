@@ -18,7 +18,11 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-      - run: pnpm install --frozen-lockfile=false
+      # Exactly what the lockfile says: a package.json changed without it fails here, not on a user's machine.
+      - run: pnpm install --frozen-lockfile
       - run: pnpm -r --filter "./packages/*" build
-      # The packages only: apps/mac is Swift for macOS (its own checks run where it is built: pnpm --filter @linkshell/mac check).
-      - run: pnpm -r --filter "./packages/*" --if-present --workspace-concurrency=1 test
+      # Everything in TypeScript, the app included (it is checked against the packages just built).
+      - run: pnpm typecheck
+      - run: pnpm lint
+      # apps/mac is Swift for macOS: its own checks run where it is built (pnpm --filter @linkshell/mac check).
+      - run: pnpm -r --filter "!@linkshell/mac" --if-present --workspace-concurrency=1 test

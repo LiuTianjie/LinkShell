@@ -15,7 +15,7 @@ function fakeClient() {
 }
 
 describe("waiting for a phone to pair", () => {
-  let sigintBefore: Function[];
+  let sigintBefore: ReturnType<typeof process.listeners>;
   beforeEach(() => {
     vi.useFakeTimers();
     sigintBefore = process.listeners("SIGINT");
