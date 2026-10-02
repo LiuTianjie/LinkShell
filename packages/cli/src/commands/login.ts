@@ -26,6 +26,7 @@ export async function runLogin(): Promise<LoginResult | null> {
   process.stderr.write("\n  LinkShell Login\n\n");
 
   return new Promise<LoginResult | null>((resolve) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     const server = http.createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
 
@@ -136,6 +137,8 @@ export async function runLogin(): Promise<LoginResult | null> {
           `  \x1b[32m✓\x1b[0m Logged in as ${email || userId} (${planLabel})\n\n`,
         );
 
+        // Left pending, the five-minute limit would keep the command alive long after the login.
+        clearTimeout(timeout);
         setTimeout(() => {
           server.close();
           resolve({
@@ -182,7 +185,7 @@ export async function runLogin(): Promise<LoginResult | null> {
       } catch {}
 
       // Timeout after 5 minutes
-      setTimeout(() => {
+      timeout = setTimeout(() => {
         process.stderr.write("  Login timed out.\n\n");
         server.close();
         resolve(null);

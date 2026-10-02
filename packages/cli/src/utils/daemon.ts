@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, openSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, openSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
@@ -58,9 +58,24 @@ export function getLogFile(service: ServiceName): string {
   return logFile(service);
 }
 
+const MAX_LOG_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Keeps a log from growing forever: a full one becomes `<service>.log.1`, replacing the one before it.
+ * Only when a daemon starts, since a running one holds the file open.
+ */
+export function rotateLog(log: string, maxBytes = MAX_LOG_BYTES): void {
+  try {
+    if (statSync(log).size > maxBytes) renameSync(log, `${log}.1`);
+  } catch {
+    // No log yet.
+  }
+}
+
 export function spawnDaemon(service: ServiceName, args: string[]): number {
   mkdirSync(LINKSHELL_DIR, { recursive: true });
   const log = logFile(service);
+  rotateLog(log);
   const out = openSync(log, "a");
   const err = openSync(log, "a");
 
