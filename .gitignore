@@ -8,8 +8,6 @@ pnpm-debug.log*
 
 # Build outputs
 dist/
-# LinkShell.app, built and signed when the host package is (packages/host/scripts/build-helper.mjs)
-packages/host/helper/
 build/
 coverage/
 .turbo/
@@ -23,13 +21,6 @@ temp/
 # Expo / React Native
 .expo/
 .expo-shared/
-apps/mobile/.expo/
-apps/mobile/web-build/
-apps/mobile/android/
-apps/mobile/ios/
-
-# Generated files
-apps/mobile/src/generated/
 
 # Environment and local overrides
 .env
