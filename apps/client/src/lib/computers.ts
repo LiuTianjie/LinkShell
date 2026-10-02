@@ -104,7 +104,12 @@ interface ComputersState {
   select(key: string): void;
   addPaired(gateway: string, machine: MachineEntry): string;
   addDirect(url: string, name: string): string;
-  remove(key: string): Promise<void>;
+  /**
+   * Removes a computer from this phone's list. A paired one is unpaired; one that is here through
+   * the account is taken off the account at the gateway (it comes back if it ever signs in again).
+   * False when the gateway kept it: one from before it could forget an account's computer.
+   */
+  remove(key: string): Promise<boolean>;
   refresh(gateway: string): Promise<void>;
   setOnline(gateway: string, id: string, online: boolean): void;
 }
@@ -152,6 +157,16 @@ export const useComputers = create<ComputersState>((set, get) => ({
     };
     persist(saved);
     set({ saved });
+    if (relayEntry) return true;
+    // Not paired, so here through the account: only the gateway can forget it.
+    for (const [gateway, machines] of Object.entries(get().live)) {
+      const machine = machines.find((entry) => relayKey(gateway, entry.id) === key);
+      if (!machine) continue;
+      await relayFor(gateway).request("machines.forget", { machineId: machine.id }).catch(() => {});
+      await get().refresh(gateway);
+      return !(get().live[gateway] ?? []).some((entry) => entry.id === machine.id);
+    }
+    return true;
   },
   async refresh(gateway) {
     try {

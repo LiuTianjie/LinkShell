@@ -222,7 +222,9 @@ function ComputerRow({ computer, current }: { computer: Computer; current: boole
     computer.kind === "relay"
       ? `${computer.machine.via === "account" ? "同一账号" : "已配对"} · ${online ? "在线" : relayStatus === "connecting" ? "连接中" : "离线"} · ${hostOf(computer.gateway)}`
       : `局域网 · ${computer.url.replace(/^wss?:\/\//, "")}`;
-  const removable = !(computer.kind === "relay" && computer.machine.via === "account");
+  const viaAccount = computer.kind === "relay" && computer.machine.via === "account";
+  // One that is online and signed in would only come straight back.
+  const removable = !viaAccount || !online;
   return (
     <Row
       icon={computer.kind === "relay" ? { sf: "laptopcomputer", md: "laptop_mac" } : { sf: "wifi", md: "wifi" }}
@@ -244,9 +246,19 @@ function ComputerRow({ computer, current }: { computer: Computer; current: boole
       onLongPress={
         removable
           ? () =>
-              Alert.alert(`移除「${name}」？`, "之后要重新配对才能连接。", [
+              Alert.alert(`移除「${name}」？`, viaAccount ? "它会从你的账号下移除。如果这台电脑以后重新上线并登录同一账号，会再次出现。" : "之后要重新配对才能连接。", [
                 { text: "取消", style: "cancel" },
-                { text: "移除", style: "destructive", onPress: () => void useComputers.getState().remove(computer.key) },
+                {
+                  text: "移除",
+                  style: "destructive",
+                  onPress: () =>
+                    void useComputers
+                      .getState()
+                      .remove(computer.key)
+                      .then((removed) => {
+                        if (!removed) Alert.alert("没能移除", "这个网关的版本还不支持移除同一账号下的电脑，升级网关后再试。");
+                      }),
+                },
               ])
           : undefined
       }
@@ -285,7 +297,7 @@ export function AccountScreen() {
         >
           {account ? <SignedIn /> : <SignInForm />}
 
-          <Section title="我的电脑" footer="长按可以移除配对的电脑。连接始终端到端加密，网关看不到内容。">
+          <Section title="我的电脑" footer="长按可以移除配对的电脑，或账号下已经离线的电脑。连接始终端到端加密，网关看不到内容。">
             {computers.map((computer, index) => (
               <View key={computer.key}>
                 {index > 0 ? <Separator inset={58} /> : null}
