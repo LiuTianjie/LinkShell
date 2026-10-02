@@ -252,7 +252,7 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
     expect(phone.tools(id)).toEqual([]);
     expect(host.hub.getSession(id)).toMatchObject({ state: "running", driver: "desktop" });
     const notice = phone.of(id).find((e) => e.update.sessionUpdate === "ls_notice")?.update;
-    expect(notice).toMatchObject({ title: expect.stringContaining("另一个 Codex"), detail: expect.stringContaining("linkshell codex") });
+    expect(notice).toMatchObject({ title: expect.stringContaining("另一个 Codex") });
     expect(logs.filter((line) => line.includes("attach"))).toEqual([]);
   });
 
@@ -301,7 +301,7 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
     // No desktop app to ask.
     await expect(phone.client.call("sessions.cancel", { sessionId: id })).rejects.toMatchObject({
       appCode: "busy",
-      message: expect.stringMatching(/另一个 Codex.*请在那边停止/),
+      message: expect.stringMatching(/另一个 Codex.*请在电脑上停止/),
     });
 
     const bus = desktopBus(busSocket, (request) => {

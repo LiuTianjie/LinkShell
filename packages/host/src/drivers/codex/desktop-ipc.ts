@@ -42,7 +42,9 @@ export async function interruptThroughDesktop(
   socketPath: string,
   threadId: string,
   turnId: string | undefined,
-  timeoutMs = 12_000,
+  // The window that runs the thread answers at once. The bus itself waits ten
+  // seconds for every client that doesn't answer before it says nobody does.
+  timeoutMs = 3000,
 ): Promise<void> {
   if (!existsSync(socketPath)) throw new Error("the Codex desktop app isn't running");
   const socket = connect(socketPath);

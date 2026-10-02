@@ -97,15 +97,13 @@ function fileStamp(path: string): string | undefined {
 /** A request id from Codex's background server: both servers count theirs from the same numbers. */
 const sharedRequestId = (id: string): string => `shared-${id}`;
 
-const HELD_NOTICE = {
-  title: "这个会话开在电脑上的另一个 Codex 里",
-  detail:
-    "这里会跟着显示它的进展。从手机发的消息会排进 Codex 的队列：那边空闲时就开始，正在跑的一轮结束后接着跑。Codex 桌面 App 和 IDE 插件不和别的程序共用会话，所以排队的消息不能插进正在跑的一轮；用 linkshell codex 或终端里的 codex 打开的会话，两边可以同时操作。",
-};
-const HELD_SEND =
-  "这个会话开在电脑上的另一个 Codex（桌面 App 或 IDE 插件）里，这条消息没能排进它的队列。在那边关掉这个会话后再发；用 linkshell codex 或终端里的 codex 打开的会话，两边可以同时操作。";
-const HELD_STOP = "这一轮跑在电脑上的另一个 Codex（桌面 App 或 IDE 插件）里，没能从手机停下它：请在那边停止。";
-const HELD_COMMAND = "这个会话开在电脑上的另一个 Codex 里：压缩上下文和审查要等那边关掉这个会话后才能从手机做。";
+// (Shown as one small line in the conversation: short enough to read at a glance.)
+const HELD_NOTICE = { title: "会话开在电脑的另一个 Codex 里 · 消息会排队，等这一轮结束后发送" };
+const HELD_SEND = "会话开在电脑的另一个 Codex 里，这条消息没能排进它的队列。在那边关掉这个会话后再发。";
+const HELD_STOP = "这一轮跑在电脑的另一个 Codex（桌面 App 或 IDE 插件）里，手机停不了它：请在电脑上停止。";
+const HELD_NOW =
+  "这一轮跑在电脑的另一个 Codex（桌面 App 或 IDE 插件）里，手机插不进去。它结束后这条消息会自动发送；想现在就插入，在电脑上对这条排队消息点 Steer。";
+const HELD_COMMAND = "会话开在电脑的另一个 Codex 里，要在那边关掉它之后才能从手机做。";
 
 interface PendingApproval {
   threadId: string;
@@ -539,7 +537,7 @@ export class CodexDriver implements AgentDriver {
       await this.rpc("thread/queue/add", { threadId, input, clientUserMessageId: clientMessageId });
     } catch (error) {
       this.host?.log(`[codex] couldn't queue a message for ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
-      throw this.refused(threadId, "这条消息没有发出去", HELD_SEND);
+      throw this.refused(threadId, "消息没发出去 · 在电脑的 Codex 里关掉这个会话后再发", HELD_SEND);
     }
     await this.syncWaiting(threadId);
     return "queued";
@@ -589,7 +587,10 @@ export class CodexDriver implements AgentDriver {
 
   /** A queued message can't be put into the turn another Codex is running: that turn is stopped, and the queue goes on. */
   async sendQueuedNow(nativeId: string): Promise<void> {
-    if (this.waiting.has(nativeId)) await this.stopElsewhere(nativeId);
+    if (!this.waiting.has(nativeId)) return;
+    await this.stopElsewhere(nativeId).catch(() => {
+      throw RpcError.app("busy", HELD_NOW);
+    });
   }
 
   /**
@@ -613,9 +614,9 @@ export class CodexDriver implements AgentDriver {
    * What a message for a thread held elsewhere is refused with. The apps show
    * a failed message without its reason, so the reason goes into the session too.
    */
-  private refused(threadId: string, title: string, detail: string): RpcError {
-    this.host?.update(this.id, threadId, { sessionUpdate: "ls_notice", level: "warning", title, detail });
-    return RpcError.app("busy", detail);
+  private refused(threadId: string, notice: string, message: string): RpcError {
+    this.host?.update(this.id, threadId, { sessionUpdate: "ls_notice", level: "warning", title: notice });
+    return RpcError.app("busy", message);
   }
 
   /** Says, when it becomes so and when it is over, that the session is in a Codex this host can't join. */
@@ -761,7 +762,7 @@ export class CodexDriver implements AgentDriver {
       );
     if (command.name === "compact" || command.name === "review") {
       // Not something a queue can carry: they run in the app-server that has the thread.
-      if (this.observed.has(nativeId)) throw this.refused(nativeId, command.name === "compact" ? "现在不能压缩上下文" : "现在不能开始审查", HELD_COMMAND);
+      if (this.observed.has(nativeId)) throw this.refused(nativeId, `会话开在电脑的另一个 Codex 里 · 这里不能${command.name === "compact" ? "压缩上下文" : "开始审查"}`, HELD_COMMAND);
       if (this.stateOf(nativeId).activeTurnId) {
         throw RpcError.app("busy", command.name === "compact" ? "等这一轮结束后再压缩上下文" : "等这一轮结束后再开始审查");
       }
