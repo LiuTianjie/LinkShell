@@ -40,6 +40,13 @@ const OWNER_TIMEOUT_MS = 3000;
 
 type Frame = Record<string, unknown>;
 
+/**
+ * The window that runs the thread was asked and didn't say how it went: the
+ * app gives its own windows five seconds to answer each other, and starting a
+ * turn can take it longer than that. What was asked for usually still happens.
+ */
+export class DesktopUnconfirmed extends Error {}
+
 function frame(message: Frame): Buffer {
   const body = Buffer.from(JSON.stringify(message), "utf8");
   const head = Buffer.alloc(4);
@@ -67,7 +74,10 @@ async function askOwner(socketPath: string, threadId: string, method: string, pa
       throw new Error(`no window of the Codex desktop app runs this thread (${error.message})`);
     });
     const owner = typeof found.handledByClientId === "string" ? found.handledByClientId : undefined;
-    return (await bus.request(method, params, version, timeoutMs, owner)).result;
+    const answered = await bus.request(method, params, version, timeoutMs, owner).catch((error: Error) => {
+      throw /timeout$/.test(error.message) ? new DesktopUnconfirmed(error.message) : error;
+    });
+    return answered.result;
   } finally {
     socket.destroy();
   }

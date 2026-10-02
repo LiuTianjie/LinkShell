@@ -24,7 +24,7 @@ import {
 import { nestHistory, nestUnder } from "../nesting.js";
 import { configOptions, effective, settingsFrom, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
 import { COMMANDS, INIT_PROMPT, commandOf, type CodexSkill } from "./commands.js";
-import { desktopBusSocket, interruptThroughDesktop, startThroughDesktop, steerThroughDesktop } from "./desktop-ipc.js";
+import { DesktopUnconfirmed, desktopBusSocket, interruptThroughDesktop, startThroughDesktop, steerThroughDesktop } from "./desktop-ipc.js";
 
 export interface CodexDriverOptions {
   socketPath: string;
@@ -47,6 +47,8 @@ export interface CodexDriverOptions {
   observeIntervalMs?: number;
   /** How long a thread no device has open, and that isn't working, stays joined. */
   releaseDelayMs?: number;
+  /** How long to look for a turn the desktop app was asked to start and didn't confirm. */
+  confirmStartMs?: number;
 }
 
 /** Where a thread is loaded: this host's app-server, or Codex's own background server. */
@@ -190,6 +192,7 @@ export class CodexDriver implements AgentDriver {
   private readonly announced = new Map<string, string>();
   private readonly observeIntervalMs: number;
   private readonly releaseDelayMs: number;
+  private readonly confirmStartMs: number;
   private readonly sharedSocketPath?: string;
   private readonly desktopBusPath?: string;
 
@@ -199,6 +202,7 @@ export class CodexDriver implements AgentDriver {
     this.sharedSocketPath = options.sharedSocketPath === false ? undefined : (options.sharedSocketPath ?? sharedServerSocket(options.env));
     this.observeIntervalMs = options.observeIntervalMs ?? 2000;
     this.releaseDelayMs = options.releaseDelayMs ?? 30_000;
+    this.confirmStartMs = options.confirmStartMs ?? 20_000;
   }
 
   status(): DriverStatus {
@@ -545,8 +549,7 @@ export class CodexDriver implements AgentDriver {
     if (watch && !watch.running && this.desktopBusPath) {
       // Idle: the app starts it at once when asked, where its queue is only looked at every so often.
       try {
-        await startThroughDesktop(this.desktopBusPath, threadId, this.desktopMessage(threadId, input, clientMessageId));
-        void this.refresh(threadId);
+        await this.startElsewhere(threadId, this.desktopMessage(threadId, input, clientMessageId));
         return "started";
       } catch (error) {
         this.host?.log(`[codex] the Codex desktop app didn't start a turn in ${threadId}, queueing instead: ${error instanceof Error ? error.message : String(error)}`);
@@ -619,8 +622,15 @@ export class CodexDriver implements AgentDriver {
     try {
       if (!this.desktopBusPath) throw new Error("not asked");
       const message = this.desktopMessage(nativeId, entry.input, entry.clientMessageId);
-      if (watch.running) await steerThroughDesktop(this.desktopBusPath, nativeId, message);
-      else await startThroughDesktop(this.desktopBusPath, nativeId, message);
+      if (watch.running) {
+        await steerThroughDesktop(this.desktopBusPath, nativeId, message).catch((error: unknown) => {
+          // Asked, and the app is at it: left in the queue too, it would be said twice.
+          if (!(error instanceof DesktopUnconfirmed)) throw error;
+          this.host?.log(`[codex] the Codex desktop app took a message for ${nativeId} without saying how it went`);
+        });
+      } else {
+        await this.startElsewhere(nativeId, message);
+      }
     } catch (error) {
       this.host?.log(`[codex] couldn't put a message into ${nativeId} through the Codex desktop app: ${error instanceof Error ? error.message : String(error)}`);
       throw RpcError.app("busy", HELD_NOW);
@@ -632,6 +642,30 @@ export class CodexDriver implements AgentDriver {
     );
     await this.rpc("thread/queue/delete", { threadId: nativeId, queuedSubmissionId: entry.submissionId }).catch(() => {});
     void this.refresh(nativeId);
+  }
+
+  /**
+   * Starts a turn in the desktop app that has the thread. The app often
+   * starts it and answers too late for its own bus: then the thread itself
+   * says whether the turn began, so the message isn't queued as well and run twice.
+   */
+  private async startElsewhere(threadId: string, message: ReturnType<CodexDriver["desktopMessage"]>): Promise<void> {
+    if (!this.desktopBusPath) throw new Error("not asked");
+    try {
+      await startThroughDesktop(this.desktopBusPath, threadId, message);
+    } catch (error) {
+      if (!(error instanceof DesktopUnconfirmed)) throw error;
+      const deadline = Date.now() + this.confirmStartMs;
+      for (;;) {
+        await this.refresh(threadId);
+        // (Joined meanwhile: then the turn is reported by the server the thread is in.)
+        const watch = this.observed.get(threadId);
+        if (!watch || watch.running) break;
+        if (Date.now() >= deadline) throw new Error(`${error.message}, and no turn began`);
+        await new Promise((resolve) => setTimeout(resolve, Math.min(500, this.observeIntervalMs)));
+      }
+    }
+    void this.refresh(threadId);
   }
 
   private desktopMessage(threadId: string, input: unknown[], clientMessageId: string) {

@@ -234,6 +234,7 @@ beforeAll(async () => {
         desktopBusPath: busSocket,
         observeIntervalMs: 20,
         releaseDelayMs: 150,
+        confirmStartMs: 300,
       }),
     ],
     log: (message) => logs.push(message),
@@ -415,6 +416,32 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
     await bus.close();
   });
 
+  it("doesn't queue a message the desktop app started without saying so in time", async () => {
+    // The app gives its windows five seconds to answer each other; starting a turn can take it longer.
+    let starts = true;
+    const bus = desktopBus(busSocket, (request) => {
+      const { turnStart } = request.params as { turnStart: { request: { clientUserMessageId: string; input: Record<string, unknown>[] } } };
+      if (starts) desk.start(turnStart.request.clientUserMessageId, turnStart.request.input);
+      throw new Error("thread-follower-start-turn-timeout");
+    });
+    await waitFor(() => existsSync(busSocket));
+    expect(await prompt(id, "t1", "started late")).toEqual({ delivery: "started" });
+    // Said once: not left in the queue as well, to run again after this turn.
+    expect(desk.queue()).toEqual([]);
+    expect(host.hub.getSession(id).queue).toBeUndefined();
+    await waitFor(() => phone.of(id).some((e) => e.update.sessionUpdate === "user_message_chunk" && e.update.messageId === "local-t1"));
+    desk.endTurn();
+    await waitFor(() => host.hub.getSession(id).state === "idle");
+
+    // Asked, and nothing began: then it waits in the queue after all.
+    starts = false;
+    expect(await prompt(id, "t2", "never started there")).toEqual({ delivery: "queued" });
+    await waitFor(() => desk.queue().length === 1);
+    desk.runQueued("Late.");
+    await waitFor(() => host.hub.getSession(id).queue === undefined);
+    await bus.close();
+  });
+
   it("is an ordinary session again once that Codex lets go, with nothing twice and nothing missing", async () => {
     // Written just before it closed, after the host last looked.
     desk.startTurn("one more thing");
@@ -424,8 +451,8 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
 
     expect(await prompt(id, "d3", "from the phone again")).toEqual({ delivery: "started" });
     await waitFor(() => phone.turnsEnded(id).length === 1);
-    expect(phone.said(id)).toEqual(["fix the build", "from the phone", "a long job", "another long job", "a third long job", "look at main only", "and now the server", "one more thing", "from the phone again"]);
-    expect(phone.agentText(id)).toBe("Looking.Built.On it.Done.echo: from the phone again");
+    expect(phone.said(id)).toEqual(["fix the build", "from the phone", "a long job", "another long job", "a third long job", "look at main only", "and now the server", "started late", "never started there", "one more thing", "from the phone again"]);
+    expect(phone.agentText(id)).toBe("Looking.Built.On it.Late.Done.echo: from the phone again");
     expect(phone.tools(id)).toHaveLength(2);
     expect(host.hub.getSession(id)).toMatchObject({ state: "idle", driver: "none" });
     // What the phone has is the log, in order.
