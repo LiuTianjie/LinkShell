@@ -122,7 +122,7 @@ And the rest:
 - **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app.
 - **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
 - **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
-- **Tidy sessions.** Rename, archive and delete; for Codex and Claude this also updates their own records. Projects and sessions show the current git branch.
+- **Tidy sessions.** Rename, archive and delete; for Codex and Claude this also updates their own records. Projects and sessions show the current git branch. A computer you no longer use is removed with a long press under My computers.
 - **Screen and files.** Watch the computer's screen, full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag; a sheet of one-tap Mac shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own); and a text box for anything longer, which also takes the phone's clipboard (macOS, Apple silicon; `linkshell setup` gets the permissions in place). Send photos or files from the phone into the project.
 
 ## Agents
@@ -177,6 +177,7 @@ On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss
 
 | Task | Command |
 | --- | --- |
+| Set a computer up, once: the host, the screen's permissions, your phone | `linkshell setup` |
 | Start LinkShell in the background | `linkshell host --daemon` |
 | See agents, sessions and the gateway | `linkshell host status` |
 | Stop it | `linkshell host stop` |

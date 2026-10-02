@@ -122,7 +122,7 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 - **真终端。** 电脑上的终端，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。
 - **在手机上打开 localhost。** dev server 的端口走同一条加密通道，热更新照常，可以全屏。不用暴露端口，也不用同一个 Wi-Fi。
 - **设置跟着会话走。** 模型、思考强度、权限模式、快速模式——Agent 提供什么就能改什么；电脑上正在跑的会话，手机上显示的是它真实的设置。
-- **会话管理。** 重命名、归档、删除；Codex 和 Claude 的会话会同步到它们自己的记录里。项目和会话上显示当前的 git 分支。
+- **会话管理。** 重命名、归档、删除；Codex 和 Claude 的会话会同步到它们自己的记录里。项目和会话上显示当前的 git 分支。不再使用的电脑，在「我的电脑」里长按即可移除。
 - **屏幕与文件。** 随时看电脑屏幕，可以全屏、横屏；需要时直接接手鼠标和键盘：触控板或点哪点哪两种方式，右键、滚动、拖拽都有；一页一点即发的 Mac 快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）；长一点的内容用“发送文字”写好再发，还能带上手机剪贴板（macOS、Apple 芯片；权限由 `linkshell setup` 带你设置）。把手机里的图片和文件传到项目里。
 
 ## 支持的 Agent
@@ -177,6 +177,7 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
 
 | 做什么 | 命令 |
 | --- | --- |
+| 首次设置：host、屏幕权限、连接手机，一次做完 | `linkshell setup` |
 | 后台启动 LinkShell | `linkshell host --daemon` |
 | 查看 Agent、会话和网关 | `linkshell host status` |
 | 停止 | `linkshell host stop` |

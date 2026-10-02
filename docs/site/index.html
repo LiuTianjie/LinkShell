@@ -496,7 +496,7 @@
               <dt><span lang="zh">会话管理</span><span lang="en">Tidy sessions</span></dt>
               <dd><span lang="zh">重命名、归档、删除。Codex 和 Claude 的会话会同步到它们自己的记录里，<code>claude --resume</code> 也能看到新名字。</span><span lang="en">Rename, archive, delete. Codex and Claude sessions change in their own records too, so <code>claude --resume</code> shows the new name.</span></dd>
               <dt><span lang="zh">看电脑屏幕、传文件</span><span lang="en">Screen and files</span></dt>
-              <dd><span lang="zh">随时看电脑屏幕，可以全屏、横屏；需要时直接接手鼠标和键盘（macOS）。把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Watch the computer&#39;s screen, full screen or in landscape, and take the mouse and keyboard when you need to (macOS). Send photos and files from your phone into the project for the agent.</span></dd>
+              <dd><span lang="zh">随时看电脑屏幕：直连时是实时视频，比电脑自己的显示器只慢几十毫秒，可以全屏、横屏。需要时直接接手鼠标和键盘，还有一页一点即发的快捷操作（macOS，Apple 芯片）。把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Watch the computer&#39;s screen: real-time video when the two connect directly, a few tens of milliseconds behind the computer&#39;s own display, full screen or in landscape. Take the mouse and keyboard when you need to, with a sheet of one-tap shortcuts (macOS, Apple silicon). Send photos and files from your phone into the project for the agent.</span></dd>
             </dl>
           </div>
         </article>
@@ -681,16 +681,22 @@
           <li><span lang="zh"><b>斜杠命令</b>：输入 <code>/</code> 或点「+ → 命令」，列出 Agent 的命令和你的 skills。</span><span lang="en"><b>Slash commands</b>: type <code>/</code> or tap + → Commands for the agent's commands and your skills.</span></li>
           <li><span lang="zh"><b>子 Agent 与文件</b>：会话标题旁的按钮列出所有子 Agent；会话和终端的菜单里可以浏览项目文件。</span><span lang="en"><b>Sub-agents and files</b>: the button beside a session's title lists its sub-agents; browse the project's files from a session's or a terminal's menu.</span></li>
           <li><span lang="zh"><b>设置</b>：输入框下方可以换模型、思考强度、权限模式（取决于 Agent 提供了哪些）。</span><span lang="en"><b>Settings</b>: under the composer, change model, effort and permission mode (whatever the agent offers).</span></li>
-          <li><span lang="zh"><b>整理</b>：长按会话可以重命名、归档、删除；归档的会话在首页底部。</span><span lang="en"><b>Tidying</b>: long-press a session to rename, archive or delete it; archived sessions are at the bottom of Home.</span></li>
-          <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它（电脑上先运行一次 <code>linkshell screen</code>，打开两个名为 LinkShell 的权限开关；控制仅支持 macOS）。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen and control it with a trackpad and keyboard (run <code>linkshell screen</code> on the computer once, for two permission switches named LinkShell; control is macOS only).</span></li>
+          <li><span lang="zh"><b>整理</b>：长按会话可以重命名、归档、删除；归档的会话在首页底部。不再使用的电脑，在账号页的「我的电脑」里长按移除。</span><span lang="en"><b>Tidying</b>: long-press a session to rename, archive or delete it; archived sessions are at the bottom of Home. A computer you no longer use: long-press it under My computers on the account page.</span></li>
+          <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它。屏幕工具条上有快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）和「发送文字」（写好一段再发，可以带上手机剪贴板）。需要 Apple 芯片的 Mac；两项权限由 <code>linkshell setup</code> 带你打开，单独设置用 <code>linkshell screen</code>。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen and control it with a trackpad and keyboard. The screen&#39;s toolbar has one-tap shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own) and a text box to write in and send, with the phone&#39;s clipboard. Needs a Mac with Apple silicon; <code>linkshell setup</code> takes you through its two permissions, <code>linkshell screen</code> does just that part.</span></li>
         </ul>
 
         <h2 id="d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></h2>
         <dl>
+          <dt><code>linkshell setup</code></dt>
+          <dd><span lang="zh">首次设置：启动 LinkShell、打开屏幕的两项权限、连接手机</span><span lang="en">First-time setup: start LinkShell, the screen&#39;s two permissions, connect your phone</span></dd>
           <dt><code>linkshell host <span class="nb">[--daemon]</span> <span class="nb">[--gateway &lt;url&gt;]</span></code></dt>
           <dd><span lang="zh">启动 LinkShell；<code>status</code>、<code>stop</code></span><span lang="en">Start LinkShell; <code>status</code>, <code>stop</code></span></dd>
           <dt><code>linkshell pair</code></dt>
           <dd><span lang="zh">通过网关配对手机</span><span lang="en">Pair a phone through the gateway</span></dd>
+          <dt><code>linkshell devices</code></dt>
+          <dd><span lang="zh">列出已配对的手机；<code>remove</code> 移除一台</span><span lang="en">List paired phones; <code>remove</code> unpairs one</span></dd>
+          <dt><code>linkshell screen</code></dt>
+          <dd><span lang="zh">设置看屏幕和控制屏幕（macOS 的两项权限）</span><span lang="en">Set up watching and controlling the screen (the two macOS permissions)</span></dd>
           <dt><code>linkshell login</code> / <code>logout</code></dt>
           <dd><span lang="zh">Pro 账号（官方网关）</span><span lang="en">Pro account (official gateway)</span></dd>
           <dt><code>linkshell claude</code> / <code>codex</code></dt>
