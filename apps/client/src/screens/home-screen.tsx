@@ -9,6 +9,7 @@ import { NeedCard } from "@/components/need-card";
 import { SectionHeader } from "@/components/section-header";
 import { SessionRow, positionOf, type RowPosition } from "@/components/session-row";
 import { TerminalRow } from "@/components/terminal-row";
+import { searchWords, sessionMatches, terminalMatches } from "@/lib/search";
 import { terminalState, useTerminals } from "@/lib/terminals";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
 import { useActions, useClient, useHasComputer } from "@/lib/client";
@@ -18,7 +19,7 @@ import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { useFloatingTabInset } from "@/components/floating-tabs";
 import { NEW_SESSION } from "@/components/new-session-action";
-import { PageHeader, StatusBarFade } from "@/components/page-header";
+import { PageHeader, PageSearch, StatusBarFade } from "@/components/page-header";
 
 type Item =
   | {
@@ -94,6 +95,29 @@ function buildItems(sessions: SessionSummary[], terminals: TerminalInfo[], now: 
   return { items, waiting: waiting.length, running: running.length };
 }
 
+/**
+ * What a search finds, newest first, as one plain list: no "needs you" cards or days, since the question
+ * was "where is it". Archived sessions are found too, under their own heading.
+ */
+function searchItems(sessions: SessionSummary[], terminals: TerminalInfo[], words: string[]): Item[] {
+  const matching = sessions.filter((session) => sessionMatches(session, words));
+  const current: Entry[] = [
+    ...matching.filter((session) => !session.archived).map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
+    ...terminals.filter((terminal) => terminalMatches(terminal, words)).map((terminal): Entry => ({ kind: "terminal", terminal, at: terminal.activeAt })),
+  ].sort((a, b) => b.at - a.at);
+  const archived = matching.filter((session) => session.archived).sort(newest);
+  const items: Item[] = [];
+  if (current.length) {
+    items.push({ type: "header", key: "h-found", title: "找到", count: current.length });
+    current.forEach((entry, index) => items.push(rowOf(entry, positionOf(index, current.length), "f")));
+  }
+  if (archived.length) {
+    items.push({ type: "header", key: "h-found-archived", title: "已归档", count: archived.length });
+    archived.forEach((session, index) => items.push({ type: "row", key: `fa-${session.id}`, session, position: positionOf(index, archived.length) }));
+  }
+  return items;
+}
+
 /** Which computer, and only the one thing worth saying: what's waiting on you. */
 function Summary({ waiting }: { waiting: number }) {
   const machine = useClient((state) => state.machine);
@@ -119,6 +143,9 @@ export function HomeScreen() {
   const { refresh } = useActions();
   const now = useNow();
   const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState("");
+  const words = useMemo(() => searchWords(query), [query]);
+  const searching = words.length > 0;
 
   // Re-bucket when the day changes, not on every tick.
   const day = new Date(now).toDateString();
@@ -129,6 +156,7 @@ export function HomeScreen() {
     [sessionsById, terminals, day],
   );
   const empty = loaded && Object.keys(sessionsById).length === 0;
+  const results = useMemo(() => (searching ? searchItems(Object.values(sessionsById), terminals, words) : []), [searching, sessionsById, terminals, words]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -159,7 +187,7 @@ export function HomeScreen() {
   return (
     <>
       <LegendList
-        data={loaded && !empty ? items : []}
+        data={!loaded || empty ? [] : searching ? results : items}
         keyExtractor={(item) => item.key}
         getItemType={(item) => item.type}
         renderItem={renderItem}
@@ -167,6 +195,8 @@ export function HomeScreen() {
         estimatedItemSize={64}
         recycleItems
         contentInsetAdjustmentBehavior="never"
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingBottom: 32 + tabInset,
@@ -178,12 +208,14 @@ export function HomeScreen() {
           <View>
             <PageHeader title="首页" actions={[NEW_SESSION]}>
               <Summary waiting={waiting} />
+              {loaded && !empty ? <PageSearch value={query} onChangeText={setQuery} placeholder="搜索会话" /> : null}
             </PageHeader>
             <ConnectionBanner />
           </View>
         }
         ListFooterComponent={
-          loaded && !empty ? (
+          // (A search already looks through the archived ones.)
+          loaded && !empty && !searching ? (
             <Pressable
               onPress={() => router.push("/archived")}
               accessibilityRole="button"
@@ -211,6 +243,8 @@ export function HomeScreen() {
             ) : (
               <LoadingState label="正在读取会话…" />
             )
+          ) : searching ? (
+            <EmptyState icon={{ sf: "magnifyingglass", md: "search" }} title={`没有匹配“${query.trim()}”的会话`} message="可以搜标题、消息、项目、分支和 Agent。" />
           ) : (
             <EmptyState
               icon={{ sf: "bubble.left.and.text.bubble.right", md: "forum" }}
