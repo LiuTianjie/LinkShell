@@ -24,8 +24,8 @@
 </p>
 
 <p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 2.0 一分钟介绍片" width="820" /></a><br />
-  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">看一分钟介绍片</a></sub>
+  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 介绍片" width="820" /></a><br />
+  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">看 40 秒介绍片</a></sub>
 </p>
 
 Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手机上看它实时干活，随时发消息，一键审批它要的权限，回到电脑前再把会话交还给终端。代码和 Agent 进程都不离开你的电脑，连接全程端到端加密。
@@ -81,36 +81,19 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 <table>
   <tr>
     <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-handoff.jpg" alt="手机接管终端里的 Claude 会话" width="100%" /><br />
-      <strong>电脑与手机之间接力</strong><br />
-      在终端里用 <code>linkshell claude</code> 开始，出门时在手机上接管，回到电脑按任意键收回。Codex 两边同时在线。
-    </td>
-    <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-follow.jpg" alt="手机上的会话：计划、工具调用和一条权限请求" width="100%" /><br />
-      <strong>跟进与审批</strong><br />
-      回复逐字出现，计划、工具调用和 diff 实时更新。权限请求推到手机上，一键允许或拒绝。
+      <strong>看着它干活，点一下批准</strong><br />
+      回复逐字出现，计划、工具调用和 diff 实时更新。它需要权限或者要你做选择时，请求推到手机上，允许或拒绝点一下就行。
     </td>
     <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-queue.jpg" alt="输入框上方排队的消息" width="100%" /><br />
-      <strong>运行中也能说话</strong><br />
-      忙的时候发的消息在输入框上方排队：调整顺序、取回编辑，或立即发送。电脑上正在跑的那一轮，手机上也能停。
-    </td>
-  </tr>
-  <tr>
-    <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-agents.jpg" alt="从会话标题旁打开的子 Agent 列表" width="100%" /><br />
-      <strong>随手可查</strong><br />
-      会话启动过的每个子 Agent 都在标题旁的按钮里。长会话先显示最近几轮；项目文件可以直接浏览和查看。
+      <strong>它正忙，你照样能插话</strong><br />
+      忙的时候发的消息先排队：调整顺序、取回重写，或者立即发送，直接插进当前这一轮。电脑上正在跑的那一轮，手机上也能停。会话在终端、桌面 App 里开的都行。
     </td>
     <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-fork.jpg" alt="从一条回复分叉到新的 git worktree" width="100%" /><br />
-      <strong>分叉与 worktree</strong><br />
-      从任意一条回复分叉出新会话，换个方向试试——留在当前目录，或放进新的 git worktree，不碰手头的工作区。
-    </td>
-    <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-slash.jpg" alt="在输入框里输入斜杠，选择 /compact" width="100%" /><br />
-      <strong>斜杠命令</strong><br />
-      输入 <code>/</code> 列出 Agent 的命令和你的 skills，可以搜索。Codex 的 <code>/compact</code>、<code>/review</code> 在手机上同样可用。
+      <img src="docs/site/assets/promo/card-screen.jpg" alt="手机横屏显示电脑屏幕，触控板模式" width="100%" /><br />
+      <strong>直接看电脑屏幕</strong><br />
+      能直连时是实时视频，比电脑自己的显示器只慢几十毫秒。全屏、横屏，切到触控板模式就能接手鼠标和键盘（macOS，Apple 芯片）。
     </td>
   </tr>
 </table>
@@ -119,6 +102,9 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 
 - **回答它的提问。** Agent 让你做选择或填内容时——Claude 的提问、Codex 的提问、MCP 服务的表单——问题会连同选项一起推到手机上：选一个、自己写，或者跳过。
 - **直连你的电脑。** 屏幕画面和端口预览在能直连时点对点传输（同一网络，或者穿透 NAT），网关只负责帮两边找到对方。直连时 Mac 的屏幕是实时视频（WebRTC、硬件编码，指针在手机上本地绘制），延迟只有几十毫秒；连不上时才经网关中转，并自动降低画质，保证跟得上。
+- **分叉和 worktree。** 想换个思路，就从那条回复分叉出一个新会话；可以留在当前目录，也可以放进新的 git worktree，不碰你手头的工作区。
+- **子 Agent 和长会话。** 会话启动过的每个子 Agent 都在标题旁的按钮里，各有自己的对话。长会话先显示最近几轮；项目里的文件可以直接浏览和查看。
+- **斜杠命令。** 输入 `/` 列出 Agent 的命令和你的 skills，可以搜索。`/compact`、`/review` 对 Codex 同样可用。
 - **真终端。** 电脑上的终端，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。
 - **在手机上打开 localhost。** dev server 的端口走同一条加密通道，热更新照常，可以全屏。不用暴露端口，也不用同一个 Wi-Fi。
 - **设置跟着会话走。** 模型、思考强度、权限模式、快速模式——Agent 提供什么就能改什么；电脑上正在跑的会话，手机上显示的是它真实的设置。

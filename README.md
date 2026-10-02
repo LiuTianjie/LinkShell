@@ -24,8 +24,8 @@
 </p>
 
 <p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 2.0 — a one-minute film" width="820" /></a><br />
-  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">Watch the one-minute film</a></sub>
+  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell: a 40-second film" width="820" /></a><br />
+  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">Watch the 40-second film</a></sub>
 </p>
 
 Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, send a message any time, approve what they ask for, and hand the session back to your terminal when you sit down again. Your code and the agent processes never leave your machine, and the connection is end-to-end encrypted.
@@ -81,36 +81,19 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 <table>
   <tr>
     <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-handoff.jpg" alt="The phone taking over a Claude session from the terminal" width="100%" /><br />
-      <strong>Hand off between desk and phone</strong><br />
-      Start with <code>linkshell claude</code> in your terminal, take the session over on the phone, press any key at your desk to take it back. Codex is live on both at once.
-    </td>
-    <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-follow.jpg" alt="A session on the phone with a plan, tool calls and an approval request" width="100%" /><br />
-      <strong>Follow and approve</strong><br />
-      Replies stream word by word; plans, tool calls and diffs update live. Permission requests come to the phone: allow or deny in one tap.
+      <strong>Watch it work, approve with a tap</strong><br />
+      Replies stream word by word; plans, tool calls and diffs update live. When it needs permission, or wants you to choose, the request comes to the phone: allow or deny in one tap.
     </td>
     <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-queue.jpg" alt="Queued messages above the composer" width="100%" /><br />
-      <strong>Talk while it works</strong><br />
-      Messages sent mid-turn queue above the composer: reorder, take one back to edit, or send it now. Stop works on a turn running on the computer too.
-    </td>
-  </tr>
-  <tr>
-    <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-agents.jpg" alt="The sub-agent list opened from a session header" width="100%" /><br />
-      <strong>Everything at hand</strong><br />
-      Every sub-agent a session started is one tap from its header. Long sessions open at their latest turns; project files are there to browse and read.
+      <strong>Cut in while it is busy</strong><br />
+      Messages sent mid-turn queue above the composer: reorder, take one back to rewrite, or send it now, straight into the running turn. Stop works on a turn running on the computer too. The session can have been opened in a terminal or in a desktop app.
     </td>
     <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-fork.jpg" alt="Forking a session from a reply into a new git worktree" width="100%" /><br />
-      <strong>Fork and worktrees</strong><br />
-      Fork a session from any reply to try another direction — in the same directory or in a new git worktree that leaves your working tree alone.
-    </td>
-    <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-slash.jpg" alt="Typing a slash in the composer and picking /compact" width="100%" /><br />
-      <strong>Slash commands</strong><br />
-      <code>/</code> lists the agent's commands and your skills, with search. <code>/compact</code> and <code>/review</code> work for Codex from the phone too.
+      <img src="docs/site/assets/promo/card-screen.jpg" alt="The phone in landscape showing the computer's screen in trackpad mode" width="100%" /><br />
+      <strong>The computer's screen</strong><br />
+      Real-time video when the two connect directly, a few tens of milliseconds behind the computer's own display. Full screen or landscape; trackpad mode takes the mouse and keyboard (macOS, Apple silicon).
     </td>
   </tr>
 </table>
@@ -119,6 +102,9 @@ And the rest:
 
 - **Answer its questions.** When an agent asks you to choose or to type something — Claude's questions, Codex's, an MCP server's form — the question arrives with its options: pick, write your own answer, or skip.
 - **Straight to your computer.** The screen and port previews travel peer to peer whenever a direct path exists (the same network, or through NAT); the gateway then only helps the two sides find each other. A Mac's screen then comes as real-time video (WebRTC, hardware encoded, the pointer drawn on the phone), a few tens of milliseconds behind. Without a direct path it is relayed, with a lighter picture that keeps up rather than falls behind.
+- **Forks and worktrees.** Fork a session from any reply to try another direction — in the same directory or in a new git worktree that leaves your working tree alone.
+- **Sub-agents and long sessions.** Every sub-agent a session started is one tap from its header, with its own conversation. Long sessions open at their latest turns; project files are there to browse and read.
+- **Slash commands.** `/` lists the agent's commands and your skills, with search. `/compact` and `/review` work for Codex from the phone too.
 - **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app.
 - **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
 - **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
