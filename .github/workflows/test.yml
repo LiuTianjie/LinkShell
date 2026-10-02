@@ -20,4 +20,5 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm -r --filter "./packages/*" build
-      - run: pnpm -r --if-present --workspace-concurrency=1 test
+      # The packages only: apps/mac is Swift for macOS (its own checks run where it is built: pnpm --filter @linkshell/mac check).
+      - run: pnpm -r --filter "./packages/*" --if-present --workspace-concurrency=1 test
