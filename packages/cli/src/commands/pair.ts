@@ -1,4 +1,5 @@
 import qrcode from "qrcode-terminal";
+import type { HostClient } from "@linkshell/host";
 
 // `linkshell pair`: show a QR code (and a code to type) that lets a phone reach
 // this computer through the gateway, then wait for it to pair.
@@ -34,19 +35,29 @@ export async function runPair(): Promise<void> {
     const code = `${offer.code.slice(0, 3)} ${offer.code.slice(3)}`;
     const minutes = Math.round((offer.expiresAt - Date.now()) / 60_000);
     process.stdout.write(`\n  Or enter the code:  ${code}   (valid ${minutes} min, gateway ${offer.gateway})\n\n  Waiting for your phone…`);
-    const device = await new Promise<{ name: string } | undefined>((resolve) => {
-      const stop = client.on("pairing.done", ({ device }) => {
-        stop();
-        resolve(device);
-      });
-      setTimeout(() => {
-        stop();
-        resolve(undefined);
-      }, offer.expiresAt - Date.now());
-      process.on("SIGINT", () => resolve(undefined));
-    });
-    process.stdout.write(device ? `\r  ✓ Paired with ${device.name}. It can reach this computer from anywhere now.\n\n` : "\r  Pairing window closed.            \n\n");
+    const outcome = await waitForPairing(client, offer.expiresAt);
+    process.stdout.write(typeof outcome === "object" ? `\r  ✓ Paired with ${outcome.name}. It can reach this computer from anywhere now.\n\n` : "\r  Pairing window closed.            \n\n");
+    // What a shell expects of a command ended by Ctrl-C.
+    if (outcome === "interrupted") process.exitCode = 130;
   } finally {
     client.close();
   }
+}
+
+/** Waits for a phone to pair: the device, or why the wait ended without one. */
+export function waitForPairing(client: Pick<HostClient, "on">, expiresAt: number): Promise<{ name: string } | "expired" | "interrupted"> {
+  return new Promise((resolve) => {
+    // However the wait ends, the timer and the listeners end with it: a pending timer keeps the process alive until
+    // the window closes, and a SIGINT listener left behind swallows every later Ctrl-C.
+    const finish = (outcome: { name: string } | "expired" | "interrupted") => {
+      stop();
+      clearTimeout(timer);
+      process.off("SIGINT", interrupt);
+      resolve(outcome);
+    };
+    const stop = client.on("pairing.done", ({ device }) => finish(device));
+    const timer = setTimeout(() => finish("expired"), expiresAt - Date.now());
+    const interrupt = () => finish("interrupted");
+    process.on("SIGINT", interrupt);
+  });
 }
