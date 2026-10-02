@@ -44,7 +44,7 @@ export function requirePro(check: CheckSubscription, warn: (message: string) => 
     if (!userId) return "官方网关需要登录 Pro 账号：在电脑上运行 linkshell login";
     const subscription = await check(userId);
     // A lookup failure isn't a lapsed subscription; don't lock people out over it.
-    if (subscription.status === "inactive") return "官方网关需要 Pro 订阅：https://itool.tech";
+    if (subscription.status === "inactive") return "官方网关需要 Pro 订阅：https://liutianjie.github.io/LinkShell/pricing/";
     if (subscription.status === "unknown") warn(`subscription check unavailable (${subscription.reason}); admitting ${userId}`);
     return undefined;
   };

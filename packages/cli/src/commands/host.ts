@@ -210,7 +210,7 @@ export async function joinGatewayAfterLogin(plan: "pro" | "free"): Promise<void>
   if (!chosen && plan !== "pro") {
     // A running host now gets the gateway's own answer, instead of an old login's.
     await refreshGateway(0);
-    out("The official gateway needs a Pro subscription: https://itool.tech");
+    out("The official gateway needs a Pro subscription: https://liutianjie.github.io/LinkShell/pricing/");
     out("Or use your own gateway: linkshell host --gateway <url>, then linkshell pair\n");
     return;
   }

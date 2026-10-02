@@ -313,22 +313,14 @@
     .cycle-btn.active { background: var(--surface-2); color: var(--text); }
     .plan ul { margin: 24px 0 28px; padding-left: 22px; color: var(--text-sec); }
     .plan li + li { margin-top: 6px; }
-    #pricing-auth-area { max-width: 400px; }
-    #pricing-auth-status { font-size: 16px; }
-    #pricing-auth-status:not(:empty) { margin-bottom: 14px; }
-    #pricing-auth-status a { font-size: 15px !important; color: var(--text-sec) !important; text-decoration: underline; text-underline-offset: 3px; }
-    .auth-form { display: flex; flex-direction: column; gap: 10px; }
-    .auth-form[style*="none"] { display: none; }
-    .auth-form input { width: 100%; height: 48px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: 16px var(--sans); transition: border-color .15s; }
-    .auth-form input:focus { outline: 0; border-color: var(--accent); }
+    #pricing-buy { max-width: 400px; }
+    #pricing-buy ol { margin: 0 0 18px; padding-left: 22px; font-size: 16px; color: var(--text-sec); }
+    #pricing-buy li + li { margin-top: 8px; }
+    #pricing-buy p { margin-top: 14px; font-size: 15px; color: var(--text-sec); }
     .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 48px; border: 0; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 500 16px var(--sans); cursor: pointer; text-decoration: none !important; transition: opacity .15s; }
     .auth-btn:hover { opacity: .86; }
     .auth-btn-primary { background: var(--ink); color: var(--ink-fg); }
-    .auth-btn-afdian { background: #946ce6; color: #fff; margin-bottom: 10px; }
-    #pricing-auth-error { color: var(--danger); font-size: 15px; }
-    #pricing-payment p { margin-top: 12px; font-size: 15px; color: var(--text-sec); }
-    #pricing-pro-status { font-size: 17px; }
-    #pricing-pro-status p { font-size: 15px; color: var(--text-sec); }
+    .auth-btn + .auth-btn { margin-top: 10px; }
     .ts { color: var(--success); }
     .to { color: var(--text-sec); }
     .faq h2 { font-size: 27px; }
@@ -758,24 +750,15 @@
           <li><span lang="zh">优先支持</span><span lang="en">Priority support</span></li>
         </ul>
 
-        <div id="pricing-auth-area">
-          <div id="pricing-auth-status"></div>
-          <div id="pricing-login-form" class="auth-form" style="display:none">
-            <input type="email" id="pricing-email" placeholder="Email" autocomplete="email" />
-            <input type="password" id="pricing-password" placeholder="Password" autocomplete="current-password" />
-            <div id="pricing-auth-error" style="display:none"></div>
-            <button class="auth-btn auth-btn-primary" type="button" onclick="pricingSignIn()"><span lang="zh">登录</span><span lang="en">Sign in</span></button>
-            <button class="auth-btn" type="button" onclick="pricingSignUp()"><span lang="zh">注册新账户</span><span lang="en">Create an account</span></button>
-          </div>
-          <div id="pricing-payment" style="display:none">
-            <a id="afdian-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-afdian"><span lang="zh">前往爱发电支付 ↗</span><span lang="en">Pay on Afdian ↗</span></a>
-            <button class="auth-btn" type="button" onclick="pricingRefreshPlan()"><span lang="zh">支付完成？点击刷新状态</span><span lang="en">Paid? Click to refresh status</span></button>
-            <p><span lang="zh">支付后请点击刷新按钮同步订阅状态</span><span lang="en">After paying, refresh to sync your subscription</span></p>
-          </div>
-          <div id="pricing-pro-status" style="display:none">
-            <span class="ts">✓</span> <span lang="zh">你已是 Pro 用户</span><span lang="en">You're on Pro</span>
-            <p><span lang="zh">到期时间：</span><span lang="en">Renews/expires: </span><span id="pricing-expires"></span></p>
-          </div>
+        <div id="pricing-buy">
+          <ol>
+            <li><span lang="zh">在链动小铺买一张激活码，微信或支付宝付款。</span><span lang="en">Buy an activation code on Liandong Xiaopu, with WeChat Pay or Alipay.</span></li>
+            <li><span lang="zh">登录 iTool，在“设置 → 升级 Pro”里粘贴激活码兑换。用你登录 LinkShell 的那个账号。</span><span lang="en">Sign in to iTool and paste the code under Settings → Upgrade to Pro. Use the account you sign in to LinkShell with.</span></li>
+          </ol>
+          <a id="buy-link" href="https://pay.ldxp.cn/item/7lgv1s" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary"><span lang="zh">购买激活码 ↗</span><span lang="en">Buy a code ↗</span></a>
+          <a lang="zh" href="https://itool.tech/zh/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">已有激活码，去 iTool 兑换 ↗</a>
+          <a lang="en" href="https://itool.tech/en/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">Have a code? Redeem it on iTool ↗</a>
+          <p><span lang="zh">LinkShell Pro 就是 iTool Pro：同一个账号，同一份会员，iTool 里的 Pro 功能也一起开通。再买一张会在剩余时间上叠加。</span><span lang="en">LinkShell Pro is iTool Pro: one account, one membership, and iTool's Pro features come with it. Another code adds to the time you have left.</span></p>
         </div>
       </section>
 
@@ -788,7 +771,7 @@
         <h3><span lang="zh">Pro 到期后会怎样？</span><span lang="en">What happens when Pro ends?</span></h3>
         <p><span lang="zh">回到 Free：功能一个不少，改用自建网关就能继续连接。</span><span lang="en">You are back on Free: every feature stays, and you connect through your own gateway.</span></p>
         <h3><span lang="zh">支持哪些支付方式？</span><span lang="en">How can I pay?</span></h3>
-        <p><span lang="zh">通过爱发电支付，支持微信和支付宝。</span><span lang="en">Through Afdian, with WeChat Pay or Alipay.</span></p>
+        <p><span lang="zh">在链动小铺买激活码，支持微信和支付宝；买到后在 iTool 里兑换，会员立刻生效。</span><span lang="en">Buy an activation code on Liandong Xiaopu with WeChat Pay or Alipay, then redeem it on iTool; the membership starts at once.</span></p>
       </section>
     </div>
   </main>
@@ -950,26 +933,11 @@
     window.addEventListener('DOMContentLoaded', () => { if (shown === 'pricing') initPricing(); });
   </script>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-
-  <!-- Pricing: Supabase sign-in, Afdian -->
+  <!-- Pricing: the code is bought on Liandong Xiaopu and redeemed on iTool, whose membership this is -->
   <script>
-    const SUPABASE_URL = 'https://mkbeusztkzffnzjdwmqk.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rYmV1c3p0a3pmZm56amR3bXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5Nzc0NzgsImV4cCI6MjA4MTU1MzQ3OH0.2wlT6q6687Z5rpEYsdp01IQpNNl_XWv0IAfBgwPyDP0';
-    const AFDIAN_URL = 'https://ifdian.net/order/create';
-    const AFDIAN_MONTHLY_PLAN = '44b0ef7e0e4111f1b7cb52540025c377';
-    const AFDIAN_YEARLY_PLAN = 'b44fe6000e4111f1b1cb5254001e7c00';
-
-    let supabaseClient = null;
-    let pricingUser = null;
+    const BUY_MONTHLY = 'https://pay.ldxp.cn/item/7lgv1s';
+    const BUY_YEARLY = 'https://pay.ldxp.cn/item/yw2vbl';
     let pricingCycle = 'monthly';
-
-    function getSupabase() {
-      if (!supabaseClient && window.supabase) {
-        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      }
-      return supabaseClient;
-    }
 
     function setPricingCycle(cycle) {
       pricingCycle = cycle;
@@ -978,137 +946,11 @@
       document.getElementById('price-yearly').style.display = cycle === 'yearly' ? '' : 'none';
       document.getElementById('price-alt-monthly').style.display = cycle === 'monthly' ? '' : 'none';
       document.getElementById('price-alt-yearly').style.display = cycle === 'yearly' ? '' : 'none';
-      updateAfdianLink();
+      document.getElementById('buy-link').href = cycle === 'yearly' ? BUY_YEARLY : BUY_MONTHLY;
     }
 
-    function updateAfdianLink() {
-      const planId = pricingCycle === 'yearly' ? AFDIAN_YEARLY_PLAN : AFDIAN_MONTHLY_PLAN;
-      const userId = pricingUser ? pricingUser.id : '';
-      const link = document.getElementById('afdian-link');
-      if (link) link.href = AFDIAN_URL + '?plan_id=' + planId + '&product_type=0&custom_order_id=' + userId;
-    }
-
-    function showAuthError(msg) {
-      const el = document.getElementById('pricing-auth-error');
-      if (el) { el.textContent = msg; el.style.display = ''; }
-    }
-
-    function hideAuthError() {
-      const el = document.getElementById('pricing-auth-error');
-      if (el) el.style.display = 'none';
-    }
-
-    function signedInLine(label, className) {
-      const line = document.getElementById('pricing-auth-status');
-      line.textContent = '';
-      const dot = document.createElement('span');
-      dot.className = className;
-      dot.textContent = '● ';
-      const who = document.createTextNode((pricingUser.email || pricingUser.id) + ' ');
-      const plan = document.createElement('b');
-      plan.textContent = label;
-      const out = document.createElement('a');
-      out.href = '#pricing';
-      out.style.cssText = 'color:var(--text-muted);font-size:12px;margin-left:8px';
-      out.textContent = currentLang === 'zh' ? '退出' : 'Sign out';
-      out.addEventListener('click', (e) => { e.preventDefault(); pricingSignOut(); });
-      line.append(dot, who, plan, out);
-    }
-
-    async function checkPricingPlan() {
-      if (!pricingUser) return;
-      const sb = getSupabase();
-      if (!sb) return;
-      try {
-        const { data } = await sb.from('profiles').select('plan,plan_expires_at').eq('id', pricingUser.id).limit(1).single();
-        if (data && data.plan === 'pro' && data.plan_expires_at && new Date(data.plan_expires_at) > new Date()) {
-          document.getElementById('pricing-login-form').style.display = 'none';
-          document.getElementById('pricing-payment').style.display = 'none';
-          document.getElementById('pricing-pro-status').style.display = '';
-          document.getElementById('pricing-expires').textContent = new Date(data.plan_expires_at).toLocaleDateString();
-          signedInLine('Pro', 'ts');
-        } else {
-          document.getElementById('pricing-login-form').style.display = 'none';
-          document.getElementById('pricing-payment').style.display = '';
-          document.getElementById('pricing-pro-status').style.display = 'none';
-          signedInLine('Free', 'to');
-          updateAfdianLink();
-        }
-      } catch {
-        document.getElementById('pricing-login-form').style.display = 'none';
-        document.getElementById('pricing-payment').style.display = '';
-        document.getElementById('pricing-pro-status').style.display = 'none';
-      }
-    }
-
-    async function initPricing() {
-      const sb = getSupabase();
-      if (!sb) return;
-      try {
-        const { data: { session } } = await sb.auth.getSession();
-        if (session && session.user) {
-          pricingUser = session.user;
-          await checkPricingPlan();
-        } else {
-          pricingUser = null;
-          document.getElementById('pricing-login-form').style.display = '';
-          document.getElementById('pricing-payment').style.display = 'none';
-          document.getElementById('pricing-pro-status').style.display = 'none';
-          document.getElementById('pricing-auth-status').textContent = '';
-        }
-      } catch {
-        document.getElementById('pricing-login-form').style.display = '';
-      }
-    }
-
-    async function pricingSignIn() {
-      hideAuthError();
-      const email = document.getElementById('pricing-email').value.trim();
-      const password = document.getElementById('pricing-password').value;
-      if (!email || !password) { showAuthError(currentLang === 'zh' ? '请输入邮箱和密码' : 'Please enter email and password'); return; }
-      const sb = getSupabase();
-      if (!sb) return;
-      const { data, error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) { showAuthError(error.message); return; }
-      pricingUser = data.user;
-      await checkPricingPlan();
-    }
-
-    async function pricingSignUp() {
-      hideAuthError();
-      const email = document.getElementById('pricing-email').value.trim();
-      const password = document.getElementById('pricing-password').value;
-      if (!email || !password) { showAuthError(currentLang === 'zh' ? '请输入邮箱和密码' : 'Please enter email and password'); return; }
-      const sb = getSupabase();
-      if (!sb) return;
-      const { data, error } = await sb.auth.signUp({ email, password });
-      if (error) { showAuthError(error.message); return; }
-      if (data.user && data.session) {
-        pricingUser = data.user;
-        await checkPricingPlan();
-      } else {
-        showAuthError(currentLang === 'zh' ? '注册成功，请查收验证邮件后登录' : 'Registration successful. Please check your email to verify.');
-      }
-    }
-
-    async function pricingSignOut() {
-      const sb = getSupabase();
-      if (sb) await sb.auth.signOut();
-      pricingUser = null;
-      document.getElementById('pricing-login-form').style.display = '';
-      document.getElementById('pricing-payment').style.display = 'none';
-      document.getElementById('pricing-pro-status').style.display = 'none';
-      document.getElementById('pricing-auth-status').textContent = '';
-    }
-
-    async function pricingRefreshPlan() {
-      if (!pricingUser) return;
-      const btn = event.currentTarget;
-      btn.disabled = true;
-      btn.style.opacity = '.6';
-      await checkPricingPlan();
-      btn.disabled = false;
-      btn.style.opacity = '';
+    function initPricing() {
+      setPricingCycle(pricingCycle);
     }
   </script>
 </body>
