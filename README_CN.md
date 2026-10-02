@@ -36,8 +36,10 @@ Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手�
 
 ```bash
 npm i -g linkshell-cli
-linkshell host --daemon
+linkshell setup
 ```
+
+`linkshell setup` 一次把该做的都做完：在后台启动 host，把屏幕准备好（Mac 上会弹出一个 LinkShell 窗口，带你到两个权限开关前，开一个勾一个），再连上你的手机。随时可以再运行；每一步也有各自的命令。
 
 然后用下面任一方式连接手机（[iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)）：
 
@@ -56,14 +58,13 @@ linkshell claude    # Claude Code：手机上发消息即接管，终端里按�
 linkshell codex     # Codex：终端和手机同时在线
 ```
 
-想在手机上看和控制电脑屏幕（可选），在电脑上设置一次：
+在手机上看和控制电脑屏幕需要 macOS 的两项权限，`linkshell setup` 会带你设置好；只想做这一步，或者以后想检查：
 
 ```bash
-brew install ffmpeg   # 屏幕采集
-linkshell screen      # macOS：请求两项权限，打开对应的设置页，等你打开开关
+linkshell screen      # macOS：弹出 LinkShell 窗口，带你到每个开关前，等你打开
 ```
 
-在 Mac 上，这两项权限（录屏、辅助功能）属于 **LinkShell**——一个随 CLI 一起安装的带签名的小程序。你只需要打开两个名为 LinkShell 的开关，一次即可：不管用哪个终端启动 host、怎么升级，都不用再授权。
+在 Mac 上不需要再装别的：画面和控制都由 **LinkShell** 完成——一个随 CLI 一起安装的带签名的程序。它的两项权限（录屏、辅助功能）是两个名为 LinkShell 的开关，打开一次即可：不管用哪个终端启动 host、怎么升级，都不用再授权。需要 Apple 芯片的 Mac、macOS 13 及以上。Linux 上可以看屏幕（不能控制），需要装有 `ffmpeg`。
 
 <details>
 <summary>其他安装方式</summary>
@@ -117,12 +118,12 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 还有：
 
 - **回答它的提问。** Agent 让你做选择或填内容时——Claude 的提问、Codex 的提问、MCP 服务的表单——问题会连同选项一起推到手机上：选一个、自己写，或者跳过。
-- **直连你的电脑。** 屏幕画面和端口预览在能直连时点对点传输（同一网络，或者穿透 NAT），网关只负责帮两边找到对方；连不上时才经网关中转，并自动降低画质。
+- **直连你的电脑。** 屏幕画面和端口预览在能直连时点对点传输（同一网络，或者穿透 NAT），网关只负责帮两边找到对方。直连时 Mac 的屏幕是实时视频（WebRTC、硬件编码，指针在手机上本地绘制），延迟只有几十毫秒；连不上时才经网关中转，并自动降低画质，保证跟得上。
 - **真终端。** 电脑上的终端，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。
 - **在手机上打开 localhost。** dev server 的端口走同一条加密通道，热更新照常，可以全屏。不用暴露端口，也不用同一个 Wi-Fi。
 - **设置跟着会话走。** 模型、思考强度、权限模式、快速模式——Agent 提供什么就能改什么；电脑上正在跑的会话，手机上显示的是它真实的设置。
 - **会话管理。** 重命名、归档、删除；Codex 和 Claude 的会话会同步到它们自己的记录里。项目和会话上显示当前的 git 分支。
-- **屏幕与文件。** 随时看电脑屏幕，可以全屏、横屏；需要时直接接手鼠标和键盘：触控板或点哪点哪两种方式，右键、滚动、拖拽、快捷键都有（macOS；先用 `linkshell screen` 设置一次）。把手机里的图片和文件传到项目里。
+- **屏幕与文件。** 随时看电脑屏幕，可以全屏、横屏；需要时直接接手鼠标和键盘：触控板或点哪点哪两种方式，右键、滚动、拖拽都有；一页一点即发的 Mac 快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）；长一点的内容用“发送文字”写好再发，还能带上手机剪贴板（macOS、Apple 芯片；权限由 `linkshell setup` 带你设置）。把手机里的图片和文件传到项目里。
 
 ## 支持的 Agent
 
@@ -208,8 +209,9 @@ pnpm test
 | `packages/gateway` | 可部署的网关（官方与自建），包含 1.x 支持 |
 | `packages/cli` | `linkshell`：host、配对、Agent 启动器、网关、登录 |
 | `packages/client-core` | App 共用的客户端状态与时间线 |
-| `apps/client` | 2.0 App：Expo / React Native，iOS 与 Android |
-| `apps/mobile`、`apps/web-dashboard`、`packages/shared-protocol` | 1.x 的 App、网页控制台和协议 |
+| `apps/client` | 手机 App：Expo / React Native，iOS 与 Android |
+| `apps/mac` | LinkShell.app（`@linkshell/mac`）：Mac 这一侧的屏幕——采集、WebRTC 视频、输入、系统权限 |
+| `apps/web-dashboard`、`packages/shared-protocol` | 1.x 的网页控制台和协议 |
 | `docs/site` | 官网与安装脚本（修改后运行 `python3 scripts/build-site-pages.py`） |
 
 开发 App 时，在 Metro 旁边跑一个带本地 API 的 host：

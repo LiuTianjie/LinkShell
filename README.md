@@ -36,8 +36,10 @@ Your computer needs macOS or Linux and **Node.js 22.13 or newer**.
 
 ```bash
 npm i -g linkshell-cli
-linkshell host --daemon
+linkshell setup
 ```
+
+`linkshell setup` does everything once, in order: it starts the host in the background, gets the screen ready (on a Mac a LinkShell window takes you to the two permission switches and ticks them off), and connects your phone. Run it again any time; each part also has its own command.
 
 Then connect your phone ([iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)) one of two ways:
 
@@ -56,14 +58,13 @@ linkshell claude    # Claude Code; send from the phone to take over, press any k
 linkshell codex     # Codex; the terminal and the phone are live at the same time
 ```
 
-To watch and control the computer's screen from the phone (optional), set it up once, at the computer:
+Watching and controlling the computer's screen from the phone needs two macOS permissions. `linkshell setup` takes care of them; to do just that part, or to check it later:
 
 ```bash
-brew install ffmpeg   # the screen capture
-linkshell screen      # macOS: asks for the two permissions, opens the right settings page, waits for each switch
+linkshell screen      # macOS: a LinkShell window takes you to each switch and waits for it
 ```
 
-On a Mac the permissions (Screen Recording, Accessibility) belong to **LinkShell**, a small signed app that comes with the CLI: you turn on two switches named LinkShell, once, and they hold whichever terminal starts the host and across upgrades.
+On a Mac nothing else needs installing: the picture and the control are **LinkShell**'s, a signed app that comes with the CLI. Its two permissions (Screen Recording, Accessibility) are switches named LinkShell that you turn on once; they hold whichever terminal starts the host and across upgrades. It needs a Mac with Apple silicon, macOS 13 or later. On Linux the screen can be watched (not controlled) and needs `ffmpeg`.
 
 <details>
 <summary>Other ways to install</summary>
@@ -117,12 +118,12 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 And the rest:
 
 - **Answer its questions.** When an agent asks you to choose or to type something — Claude's questions, Codex's, an MCP server's form — the question arrives with its options: pick, write your own answer, or skip.
-- **Straight to your computer.** The screen and port previews travel peer to peer whenever a direct path exists (the same network, or through NAT); the gateway then only helps the two sides find each other. Without one they are relayed, with a lighter picture.
+- **Straight to your computer.** The screen and port previews travel peer to peer whenever a direct path exists (the same network, or through NAT); the gateway then only helps the two sides find each other. A Mac's screen then comes as real-time video (WebRTC, hardware encoded, the pointer drawn on the phone), a few tens of milliseconds behind. Without a direct path it is relayed, with a lighter picture that keeps up rather than falls behind.
 - **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app.
 - **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
 - **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
 - **Tidy sessions.** Rename, archive and delete; for Codex and Claude this also updates their own records. Projects and sessions show the current git branch.
-- **Screen and files.** Watch the computer's screen, full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag, shortcuts (macOS; set up once with `linkshell screen`). Send photos or files from the phone into the project.
+- **Screen and files.** Watch the computer's screen, full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag; a sheet of one-tap Mac shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own); and a text box for anything longer, which also takes the phone's clipboard (macOS, Apple silicon; `linkshell setup` gets the permissions in place). Send photos or files from the phone into the project.
 
 ## Agents
 
@@ -208,8 +209,9 @@ pnpm test
 | `packages/gateway` | The deployable gateway (official and self-hosted), including 1.x support |
 | `packages/cli` | `linkshell`: host, pairing, agent launchers, gateway, login |
 | `packages/client-core` | Client state and timeline shared by the apps |
-| `apps/client` | The 2.0 app: Expo / React Native for iOS and Android |
-| `apps/mobile`, `apps/web-dashboard`, `packages/shared-protocol` | 1.x app, web console and protocol |
+| `apps/client` | The app: Expo / React Native for iOS and Android |
+| `apps/mac` | LinkShell.app (`@linkshell/mac`): the Mac side of the screen — capture, WebRTC video, input, permissions |
+| `apps/web-dashboard`, `packages/shared-protocol` | 1.x web console and protocol |
 | `docs/site` | Website and installer (`python3 scripts/build-site-pages.py` after editing; `scripts/site-promo-assets.sh` cuts its film and clips) |
 
 To work on the app, run a host with a local API next to Metro:

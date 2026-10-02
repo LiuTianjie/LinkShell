@@ -76,7 +76,7 @@ export class HostRpcServer {
   private readonly handlers: { [M in MethodName]: (params: never, context: ConnectionContext) => Promise<MethodResult<M>> | MethodResult<M> };
 
   constructor(private readonly options: HostRpcServerOptions) {
-    this.screen = new ScreenShare(options.log);
+    this.screen = new ScreenShare(options.log, () => options.machineInfo().direct?.iceServers ?? []);
     const hub = options.hub;
     const terminals = options.terminals;
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;

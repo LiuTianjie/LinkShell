@@ -7,14 +7,18 @@
 // keyframe once the path has caught up, and moves to a lighter picture when
 // that keeps happening.
 
-/** How the picture is sent, best first. A gateway carries messages rather than video: relayed, it starts lower. */
+/** How the picture is sent, best first (rates in bits a second). A gateway carries messages rather than video: relayed, it starts lower. */
 export const LADDER = [
-  { fps: 20, width: 1600, bitrate: "3M", ceiling: "4M" },
-  { fps: 15, width: 1440, bitrate: "1500k", ceiling: "2M" },
-  { fps: 12, width: 1280, bitrate: "900k", ceiling: "1300k" },
-  { fps: 10, width: 1024, bitrate: "500k", ceiling: "700k" },
-  { fps: 8, width: 854, bitrate: "260k", ceiling: "380k" },
+  { fps: 20, width: 1600, bitrate: 3_000_000, ceiling: 4_000_000 },
+  { fps: 15, width: 1440, bitrate: 1_500_000, ceiling: 2_000_000 },
+  { fps: 12, width: 1280, bitrate: 900_000, ceiling: 1_300_000 },
+  { fps: 10, width: 1024, bitrate: 500_000, ceiling: 700_000 },
+  { fps: 8, width: 854, bitrate: 260_000, ceiling: 380_000 },
 ] as const;
+export type Rung = (typeof LADDER)[number];
+
+/** The rung for a level, whatever number is asked for. */
+export const rung = (level: number): Rung => LADDER[Math.min(Math.max(Math.trunc(level) || 0, 0), LADDER.length - 1)]!;
 
 /** The level a relayed stream starts at, and never goes above. */
 export const RELAY_LEVEL = 2;
@@ -61,6 +65,17 @@ export class Pacer {
   /** Whether frames are being dropped for the viewer to catch up. */
   get dropping(): boolean {
     return this.behindSince !== undefined;
+  }
+
+  /**
+   * Dropping, and a keyframe now would be sent: the viewer has caught up, or nothing has been heard
+   * for so long that one goes anyway. A capture that makes keyframes when asked is asked now, rather
+   * than the viewer waiting for the next one due.
+   */
+  needsKey(now: number): boolean {
+    if (this.behindSince === undefined) return false;
+    const own = Number.isFinite(this.floor) ? Math.min(this.floor, FLOOR_MAX_MS) : 0;
+    return this.sentAt.size === 0 || this.lag(now) <= own + CAUGHT_UP_MS || now - this.lastSent >= PROBE_MS;
   }
 
   /** How long ago the oldest frame not yet shown was sent. */
@@ -128,6 +143,16 @@ export class Pacer {
       return "up";
     }
     return undefined;
+  }
+
+  /**
+   * The picture changed level without the stream stopping: what is on its way still arrives and is
+   * still answered for. The new level is judged afresh, once it has had time to show.
+   */
+  changed(now: number): void {
+    this.troubles = [];
+    this.calmSince = now;
+    this.settledAt = now + SETTLE_MS;
   }
 
   /**

@@ -51,7 +51,7 @@ const program = new Command();
 program
   .name("linkshell")
   .description(
-    "Your coding agents and terminals, on your phone. Run `linkshell host --daemon`, then `linkshell pair` (or `linkshell login` for the official gateway).",
+    "Your coding agents and terminals, on your phone. Start with `linkshell setup`.",
   )
   .version(pkg.version);
 
@@ -93,7 +93,9 @@ const hostCmd = program
       process.stderr.write(`  Log:    ${daemon.getLogFile("host")}\n`);
       process.stderr.write(`  Status: linkshell host status\n`);
       process.stderr.write(`  Stop:   linkshell host stop\n`);
-      // The screen needs setting up once, at the computer: said here, where someone is.
+      // The first start here: the rest of the setup happens now, while someone is at the computer.
+      const { offerSetup } = await import("./commands/setup.js");
+      if (await offerSetup(pkg.version)) process.exit(process.exitCode ?? 0);
       const { screenAccess, describeScreen, screenReady } = await import("./commands/screen.js");
       const screen = await screenAccess().catch(() => undefined);
       if (screen && (screen === "old" || !screenReady(screen))) process.stderr.write(`  Screen: ${describeScreen(screen)}\n`);
@@ -551,7 +553,7 @@ gatewayCmd
 
 program
   .command("screen")
-  .description("Set this computer up for watching and controlling its screen from the phone (permissions, ffmpeg)")
+  .description("Set this computer up for watching and controlling its screen from the phone (the two macOS permissions; on Linux, ffmpeg)")
   .option("--check", "Only say what is and isn't ready")
   .action(async (options) => {
     const { runScreenSetup } = await import("./commands/screen.js");
@@ -611,9 +613,10 @@ program
 
 program
   .command("setup")
-  .description("Configure the v1 bridge (`linkshell start`)")
+  .description("Set this computer up, once: the host, the screen's permissions, and your phone")
   .action(async () => {
-    await runSetup();
+    await runSetup(pkg.version);
+    process.exit(process.exitCode ?? 0);
   });
 
 program
@@ -729,6 +732,14 @@ program
       "  Connect: linkshell start --gateway <url>\n\n",
     );
   });
+
+// `linkshell` by itself, on a computer where nothing has been set up yet: the setup, rather than a page of help.
+program.action(async () => {
+  const { setupDone } = await import("./commands/setup.js");
+  if (process.stdin.isTTY !== true || process.stdout.isTTY !== true || (await setupDone())) return program.help();
+  await runSetup(pkg.version);
+  process.exit(process.exitCode ?? 0);
+});
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

@@ -60,9 +60,26 @@ export async function forwardPort(streams: HostStreams, port: number): Promise<F
     socket.on("error", () => socket.destroy());
     streams
       .open(port, {
-        data: (bytes) => socket.write(Buffer.from(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength)),
+        // The page's end can go first (the viewer left, the app went to the background): a socket that has
+        // closed throws when written to, and what the computer still sends has nobody to reach.
+        data: (bytes) => {
+          if (ended) return;
+          try {
+            socket.write(Buffer.from(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength));
+          } catch {
+            socket.destroy();
+          }
+        },
         // The computer's end closed, or the path under the stream went away.
-        closed: (error) => (error ? socket.destroy() : socket.end()),
+        closed: (error) => {
+          if (ended) return;
+          try {
+            if (error) socket.destroy();
+            else socket.end();
+          } catch {
+            socket.destroy();
+          }
+        },
       })
       .then((opened) => {
         if (ended) return opened.close();

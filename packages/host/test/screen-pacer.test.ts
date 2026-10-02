@@ -164,4 +164,41 @@ describe("a viewer that drops what it had when the picture changes", () => {
     }
     expect(after).toBeGreaterThan(18);
   });
+
+  it("says when only a keyframe is missing to carry on, for a capture that makes one when asked", () => {
+    const pacer = new Pacer(0);
+    // Twenty frames a second, each shown 100 ms later, until the path stalls at 1 s.
+    let shown = 0;
+    for (let now = 0; now < 1000; now += 50) {
+      const seq = pacer.next(now === 0, now);
+      if (now >= 100) pacer.ack(++shown, now);
+      expect(seq).toBeDefined();
+    }
+    expect(pacer.needsKey(1000)).toBe(false);
+    let last = shown;
+    for (let now = 1000; now < 2000; now += 50) last = pacer.next(false, now) ?? last;
+    expect(pacer.dropping).toBe(true);
+    // Still behind: a keyframe now would only join the queue.
+    expect(pacer.needsKey(2000)).toBe(false);
+    // …unless nothing has been heard for so long that one goes anyway, to find out.
+    expect(pacer.needsKey(1950 + 8000)).toBe(true);
+    pacer.ack(last, 2050);
+    expect(pacer.needsKey(2050)).toBe(true);
+    // The keyframe asked for goes out, and that is the end of the dropping.
+    expect(pacer.next(true, 2100)).toBeDefined();
+    expect(pacer.dropping).toBe(false);
+    expect(pacer.needsKey(2100)).toBe(false);
+  });
+
+  it("judges a level changed without stopping afresh, and still hears about the frames on their way", () => {
+    const pacer = new Pacer(0);
+    const { sent } = play(pacer, { from: 0, to: 6000, fps: 20, delay: (at) => (at >= 1000 ? 4000 : 100) });
+    expect(pacer.advice(6000, false, true)).toBe("down");
+    pacer.changed(6000);
+    // Nothing more is concluded until the new level has had time to show.
+    expect(pacer.advice(6100, false, true)).toBeUndefined();
+    // Unlike a restart, the frames sent before the change are still answered for.
+    pacer.ack(sent.at(-1)!.seq, 6200);
+    expect(pacer.needsKey(6200)).toBe(true);
+  });
 });

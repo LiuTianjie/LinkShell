@@ -49,10 +49,10 @@ if command -v linkshell >/dev/null 2>&1; then
   VER=$(linkshell --version 2>/dev/null || echo "unknown")
   ok "linkshell ${VER}"
   echo ""
-  info "Get started:"
-  echo "    linkshell host --daemon      # start LinkShell in the background"
-  echo "    linkshell login              # Pro: the official gateway, no pairing"
-  echo "    linkshell pair               # or pair a phone through your own gateway"
+  info "Next: set this computer up (the host, the screen's permissions, your phone):"
+  echo "    linkshell setup"
+  echo ""
+  info "Then, any time:"
   echo "    linkshell claude             # Claude Code you can hand to your phone"
   echo ""
 else

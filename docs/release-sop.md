@@ -63,8 +63,15 @@ cd ../cli
 pnpm publish --access public
 ```
 
-> 🖥 **`@linkshell/host` 带着一个签名的 Mac 程序（`helper/LinkShell.app`）**。它持有看屏幕、控制电脑所需的两项系统权限（录屏、辅助功能），所以**必须在装有 `Developer ID Application` 证书的 Mac 上发布 host**。`packages/host` 的 `prepack` 钩子会以 `LINKSHELL_REQUIRE_HELPER=1` 重新构建：没有证书、没有 Swift 编译器或签名失败，发布直接中止，包发不出去。签名身份决定了权限记在谁名下，换证书等于让所有用户重新授权，不要换。
-> 发布前可以先看一眼：`cd packages/host && pnpm pack`，解开后 `codesign --verify --strict package/helper/LinkShell.app` 应无输出。包里的主程序没有可执行权限是正常的（pnpm 打包会去掉），host 第一次用到时会自己补回来（`usableApp`），不影响签名。
+> 🖥 **LinkShell.app 在 `@linkshell/mac` 这个包里（源码在 `apps/mac`）**。它是 Mac 上的画面引擎：采集屏幕、编码、WebRTC 发送、注入鼠标键盘，并持有两项系统权限（录屏、辅助功能）。`@linkshell/host` 把它列为可选依赖（`os: darwin`），所以**改了 `apps/mac` 就要先发 `@linkshell/mac`，再发 host、cli**：
+> ```bash
+> cd apps/mac && pnpm publish --access public   # prepack 会重新构建、签名、打成 build/LinkShell.app.tar.gz
+> ```
+> - **必须在装有 `Developer ID Application` 证书的 Mac 上发布**。`prepack` 以 `LINKSHELL_REQUIRE_SIGNED=1` 构建：没有证书或签名失败，发布直接中止。签名身份和 bundle id（`com.bd.linkshell.host`）决定了权限记在谁名下，换掉等于让所有用户重新授权，不要换。
+> - 包里装的是**压缩包**而不是 .app 本身：npm 包带不了 framework 里的符号链接，也保不住可执行权限。host 第一次用到时把它解到 `~/.linkshell/LinkShell.app`（`unpackedApp`），升级时原地替换。
+> - 发布前抽检：`cd apps/mac && pnpm pack`，解开 tgz 再解开里面的 `build/LinkShell.app.tar.gz`，`codesign --verify --deep --strict LinkShell.app` 应无输出；`pnpm --filter @linkshell/mac check` 应全部通过。
+> - Mac 上不再需要 ffmpeg（Linux 主机仍然用它）。
+> - 只支持 Apple 芯片的 Mac（`cpu: arm64`），macOS 13 及以上；Intel Mac 上屏幕功能不可用，其余功能不受影响。
 
 ### 4.1 发布后立即抽检 tarball
 

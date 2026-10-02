@@ -9,7 +9,14 @@
 //   both    two-finger tap or a long press: right click; two fingers moving:
 //           scroll; a second tap that stays down and moves: drag; pinch: zoom;
 //           three-finger tap: the keyboard
+// Beside the gestures: a sheet of the computer's shortcuts, one tap each (and the user's own), and a
+// box to write text in as on any phone, sent to the computer when it is ready.
 // With a mouse (a desktop browser) the pointer, buttons, wheel and keys go straight through.
+//
+// The picture comes one of two ways (docs/v2/screen-realtime.md). Where the computer's app and this
+// device can reach each other, it is a video track from the app, with the hands and the pointer on
+// data channels beside it; the page draws the pointer, which that picture does not have in it.
+// Otherwise it is H.264 down the page's socket, decoded here onto a canvas, as it always was.
 
 const icon = (body: string) =>
   `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
@@ -24,6 +31,9 @@ const ICONS = {
   expand: icon('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
   shrink: icon('<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>'),
   down: icon('<path d="m6 9.5 6 6 6-6"/>'),
+  quick: icon('<path d="M13 2.8 5.2 13.6H11l-1 7.6 7.8-10.8H12Z"/>'),
+  compose: icon('<path d="M4 5h16v10.5H9.5L5.5 19v-3.5H4Z"/><path d="M8 9h8M8 12h5"/>'),
+  close: icon('<path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/>'),
 };
 
 const STYLE = String.raw`
@@ -31,12 +41,15 @@ const STYLE = String.raw`
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   body { position: fixed; inset: 0; color: #fff; font: 15px/1.45 -apple-system, system-ui, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
   #stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
-  canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+  canvas, video { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+  video { object-fit: fill; pointer-events: none; }
   #pointer { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 50%; pointer-events: none;
     border: 2px solid rgba(255,255,255,0.95); box-shadow: 0 0 0 1px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(0,0,0,0.35);
     opacity: 0; transition: opacity 0.3s; will-change: transform; }
   #pointer.on { opacity: 1; transition: none; }
   #pointer.pressed { background: rgba(255,255,255,0.4); }
+  #pointer.own { border: 0; border-radius: 0; box-shadow: none; background: transparent center / 100% 100% no-repeat; }
+  #stage.own { cursor: none; }
   #note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 32px;
     color: rgba(255,255,255,0.72); text-align: center; pointer-events: none; }
   .glass { background: rgba(38,38,42,0.74); -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);
@@ -55,25 +68,229 @@ const STYLE = String.raw`
   .choice.on { background: rgba(255,255,255,0.16); }
   .choice b { display: block; font-weight: 600; font-size: 15px; }
   .choice span { display: block; font-size: 12.5px; color: rgba(255,255,255,0.62); }
+  #status { margin-top: 6px; padding: 8px 12px 5px; border-top: 0.5px solid rgba(255,255,255,0.12); font-size: 12px; line-height: 1.5;
+    color: rgba(255,255,255,0.5); white-space: pre-line; font-variant-numeric: tabular-nums; }
   #toast { position: absolute; left: 50%; max-width: min(86vw, 420px); width: max-content; transform: translateX(-50%); padding: 10px 16px; border-radius: 18px;
     font-size: 13.5px; text-align: center; color: rgba(255,255,255,0.94); pointer-events: none; opacity: 0; transition: opacity 0.3s; }
   #toast.on { opacity: 1; }
-  #keys { position: absolute; left: 0; right: 0; height: 46px; display: flex; align-items: center; gap: 5px; padding: 0 6px;
+  #keys { position: absolute; left: 0; right: 0; height: 46px; display: flex; align-items: center; gap: 4px; padding: 0 5px;
     background: rgba(28,28,30,0.96); border-top: 0.5px solid rgba(255,255,255,0.14); }
   .key { flex: 1 1 0; min-width: 0; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
     background: rgba(255,255,255,0.13); color: #fff; font-size: 15px; font-variant-numeric: tabular-nums; }
   .key.word { font-size: 12.5px; }
+  .key svg { width: 20px; height: 20px; }
   .key:active { background: rgba(255,255,255,0.3); }
   .key.on { background: #fff; color: #111; }
+  #sheet { position: absolute; display: flex; flex-direction: column; border-radius: 24px; overflow: hidden; }
+  #sheethead { display: flex; align-items: center; gap: 2px; padding: 8px 6px 4px 10px; }
+  #compose { flex: 1; min-width: 0; height: 40px; margin-right: 4px; border-radius: 20px; display: flex; align-items: center; gap: 8px; padding: 0 14px;
+    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.62); font-size: 14.5px; white-space: nowrap; }
+  #compose:active { background: rgba(255,255,255,0.2); }
+  #compose svg { width: 19px; height: 19px; flex: none; }
+  #actions, #maker { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: 0 10px 12px; }
+  .group { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px 7px; font-size: 12.5px; color: rgba(255,255,255,0.55); }
+  .group i { font-style: normal; padding: 4px 8px; margin: -4px -4px -4px 0; border-radius: 10px; color: rgba(255,255,255,0.86); }
+  .group i:active { background: rgba(255,255,255,0.16); }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .tiles.six { grid-template-columns: repeat(6, minmax(0, 1fr)); margin-bottom: 6px; }
+  #sheet.narrow .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #sheet.narrow .tiles.six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .tile { position: relative; min-height: 52px; padding: 6px 3px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.1); text-align: center; }
+  .tile b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: 13.5px; line-height: 1.3; }
+  .tile span { font-size: 11.5px; line-height: 1.3; color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums; }
+  .tiles.six .tile { min-height: 44px; }
+  .tile:active, .tile.hit { background: rgba(255,255,255,0.3); }
+  .tile.on { background: #fff; color: #111; }
+  .tile.on span { color: rgba(0,0,0,0.55); }
+  .tile.sure, .tile.sure:active { background: #d9392f; }
+  .tile.sure span { color: rgba(255,255,255,0.86); }
+  .tile.add { background: transparent; border: 1px dashed rgba(255,255,255,0.3); color: rgba(255,255,255,0.78); }
+  .tile.loose::after { content: "×"; position: absolute; top: -5px; right: -4px; width: 19px; height: 19px; border-radius: 10px; background: #d9392f;
+    font-size: 14px; line-height: 18px; text-align: center; }
+  .field { display: flex; align-items: center; gap: 12px; height: 46px; margin-top: 6px; padding: 0 12px; border-radius: 12px; background: rgba(255,255,255,0.1); }
+  .field span { flex: none; font-size: 14px; color: rgba(255,255,255,0.62); }
+  .field select, .field input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; border-radius: 0; background: transparent; color: #fff;
+    font: inherit; font-size: 16px; text-align: right; text-align-last: right; -webkit-appearance: none; appearance: none; -webkit-user-select: text; user-select: text; }
+  .field input::placeholder { color: rgba(255,255,255,0.36); }
+  .ends { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  .soft { flex: none; height: 38px; padding: 0 13px; border-radius: 19px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.13);
+    font-size: 14px; white-space: nowrap; }
+  .soft:active { background: rgba(255,255,255,0.3); }
+  .soft.strong { padding: 0 17px; background: #fff; color: #111; font-weight: 600; }
+  .soft.strong:active { background: rgba(255,255,255,0.82); }
+  .soft svg { width: 20px; height: 20px; }
+  .spring { flex: 1; }
+  #composer { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 8px; background: rgba(28,28,30,0.96); border-top: 0.5px solid rgba(255,255,255,0.14); }
+  #composer.wide { flex-direction: row; align-items: flex-end; }
+  #wordsbox { position: relative; flex: none; }
+  #composer.wide #wordsbox { flex: 1; min-width: 0; }
+  #words { display: block; width: 100%; height: 66px; margin: 0; padding: 9px 12px; border: 0; outline: 0; resize: none; border-radius: 12px; background: rgba(255,255,255,0.12);
+    color: #fff; font: inherit; font-size: 16px; line-height: 1.4; -webkit-user-select: text; user-select: text; }
+  #composer.wide #words { height: 44px; }
+  #wordshint { position: absolute; left: 12px; right: 12px; top: 9px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 16px; line-height: 1.4;
+    color: rgba(255,255,255,0.36); pointer-events: none; }
+  #sendrow { display: flex; align-items: center; gap: 6px; }
   #typing, #shortcut { position: absolute; left: 0; top: 0; width: 2px; height: 2px; padding: 0; border: 0; outline: 0; resize: none; opacity: 0;
     background: transparent; color: transparent; caret-color: transparent; font-size: 16px; -webkit-user-select: text; user-select: text; }
 `;
 
-const SCRIPT = String.raw`
-(() => {
+/**
+ * The parts of the page's script that only work things out, with nothing of the page in them:
+ * exported so that they can be tried without a browser.
+ */
+export const VIEWER_LOGIC = String.raw`
+/** Undoes the Gray code the time on a clock strip is written in. */
+function fromGray(gray) {
+  let n = gray;
+  for (let shift = 1; shift < 16; shift <<= 1) n ^= n >> shift;
+  return n;
+}
+
+/**
+ * The time on a clock strip, from one pixel (RGBA) at the middle of each of its 20 cells: white, black,
+ * the 16 bits, black, white. Undefined when what is there is not a strip.
+ */
+function stripTime(pixels) {
+  const light = (cell) => (pixels[cell * 4] + pixels[cell * 4 + 1] + pixels[cell * 4 + 2]) / 3;
+  const white = (light(0) + light(19)) / 2, black = (light(1) + light(18)) / 2;
+  if (white - black < 80) return undefined;
+  let gray = 0;
+  for (let cell = 2; cell < 18; cell++) gray = (gray << 1) | (light(cell) > (white + black) / 2 ? 1 : 0);
+  return fromGray(gray);
+}
+
+/**
+ * How old a frame is when it is shown: shownAt is on the computer's clock, in milliseconds, and the time
+ * on the frame's strip is that clock's low 16 bits. More than half a minute is a misreading.
+ */
+function lateness(shownAt, time) {
+  const late = (((shownAt - time) % 65536) + 65536) % 65536;
+  return late > 30000 ? undefined : Math.round(late * 10) / 10;
+}
+
+function summary(samples) {
+  const sorted = [...samples].sort((a, b) => a - b);
+  const rank = (p) => (sorted.length ? sorted[Math.max(0, Math.ceil(p * sorted.length) - 1)] : null);
+  return { n: sorted.length, min: rank(0), p50: rank(0.5), p95: rank(0.95), max: rank(1) };
+}
+
+/**
+ * How far the computer's clock is ahead of the page's, from a question sent at one time (the page's) and
+ * answered with the computer's. The answer that came back quickest is the one kept: it is off by half its trip at most.
+ */
+function synced(clock, sent, back, now) {
+  const trip = back - sent;
+  return trip < clock.trip ? { trip, offset: now - (sent + trip / 2) } : clock;
+}
+
+/**
+ * Whether a position the computer reports for its pointer is one this page put it at within the last
+ * second (trail: what it sent, and when): its own move coming back, a round trip late.
+ */
+function ownEcho(trail, x, y, now) {
+  return trail.some((point) => now - point.t < 1000 && Math.abs(point.x - x) < 0.003 && Math.abs(point.y - y) < 0.003);
+}
+
+/**
+ * Which of the app's two channels an event goes on. "pointer" (no order, sent once) has only what nothing
+ * waits for: a move or a turn of the wheel that is not placed (sent with what happens at it), not made
+ * with a button held, and not tied to a position that went on "input".
+ */
+function laneOf(kind, placed, held, tied) {
+  return (kind === "move" || kind === "scroll") && !placed && !held && !tied ? "pointer" : "input";
+}
+
+/**
+ * Whether the phone's keyboard is up, from what is known. A field with the focus is not enough: a phone
+ * takes its keyboard down without a word to the page (the app was put aside and came back, something
+ * else of the app's took the keys), and the field goes on saying it has the focus.
+ *   focused  one of the page's fields has the focus
+ *   asked    milliseconds since the page asked for the keyboard: it takes a few hundred to come up, and
+ *            nobody has seen it yet
+ *   said     what the app around the page says of the keyboard; undefined in a browser, which has
+ *            nobody to ask, and in an app from before it said anything
+ *   shrunk   failing that, whether the window is shorter than it has been: undefined where it has never
+ *            been seen to make room for a keyboard
+ *   live     the page is the one the keys go to. A field with the focus in a page that is not, is one
+ *            the keyboard was taken from. In one that is, with no keyboard on show, the keys are a real
+ *            keyboard's and typing works: the app says when a keyboard that was up has gone, and the
+ *            field is let go of at that (see settle), so it is not that
+ */
+function keyboardIsUp(known) {
+  if (!known.focused) return false;
+  if (known.asked < 1000) return true;
+  if (known.said !== undefined) return known.said || known.live;
+  return known.shrunk === undefined ? known.live : known.shrunk;
+}
+
+/** Text in pieces no longer than one event may carry, counted as the computer counts (UTF-16), and never cut through a character. */
+function pieces(text, most) {
+  const out = [];
+  let piece = "";
+  for (const character of text) {
+    if (piece.length + character.length > most) {
+      out.push(piece);
+      piece = "";
+    }
+    piece += character;
+  }
+  if (piece) out.push(piece);
+  return out;
+}
+
+/** What typing a text on the computer is: its lines as text, the return key between them. */
+function typingOf(text, most) {
+  const events = [];
+  text.replace(/\r\n?/g, "\n").split("\n").forEach((line, index) => {
+    if (index) events.push({ t: "key", k: "return" });
+    for (const s of pieces(line, most)) events.push({ t: "text", s });
+  });
+  return events;
+}
+
+// The keys the computer knows by name (apps/mac, Keys.swift), and how a shortcut is written.
+const MOD_ORDER = ["ctrl", "alt", "shift", "cmd"];
+const MOD_SIGNS = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘" };
+const KEY_SIGNS = { return: "↩\uFE0E", tab: "Tab", space: "Space", backspace: "⌫", escape: "Esc", left: "←", right: "→", down: "↓", up: "↑",
+  delete: "⌦", home: "Home", end: "End", pageup: "PgUp", pagedown: "PgDn" };
+const KEY_CHARACTERS = "abcdefghijklmnopqrstuvwxyz1234567890-=[]\\;',./\x60";
+
+function keyKnown(k) {
+  return typeof k === "string" && (Object.hasOwn(KEY_SIGNS, k) || /^f([1-9]|1[0-2])$/.test(k) || (k.length === 1 && KEY_CHARACTERS.includes(k)));
+}
+
+/** The modifiers among these names that are modifiers, each once, in the order they are written in. */
+function modsOf(names) {
+  return MOD_ORDER.filter((mod) => Array.isArray(names) && names.includes(mod));
+}
+
+/** A shortcut as a Mac writes it: ⌃⌥⇧⌘ and the key. */
+function comboSign(k, m) {
+  return modsOf(m).map((mod) => MOD_SIGNS[mod]).join("") + (KEY_SIGNS[k] || k.toUpperCase());
+}
+
+/**
+ * The user's own shortcuts, from wherever they were kept (the app, the browser): only those the computer
+ * would take, 24 at most, each with a name (the shortcut itself when it was given none).
+ */
+function cleanShortcuts(list) {
+  const out = [];
+  for (const one of Array.isArray(list) ? list : []) {
+    if (!one || typeof one !== "object" || !keyKnown(one.k)) continue;
+    const m = modsOf(one.m), name = [...(typeof one.name === "string" ? one.name.trim() : "")].slice(0, 16).join("");
+    out.push({ name: name || comboSign(one.k, m), k: one.k, m });
+    if (out.length === 24) break;
+  }
+  return out;
+}
+`;
+
+const BODY = String.raw`
 const $ = (id) => document.getElementById(id);
-const stage = $("stage"), canvas = $("screen"), ctx = canvas.getContext("2d"), pointer = $("pointer");
+const stage = $("stage"), canvas = $("screen"), ctx = canvas.getContext("2d"), video = $("video"), pointer = $("pointer");
 const note = $("note"), bar = $("bar"), menu = $("menu"), toast = $("toast"), keys = $("keys"), typing = $("typing"), shortcut = $("shortcut");
+const sheet = $("sheet"), actions = $("actions"), maker = $("maker"), naming = $("makername"), composer = $("composer"), words = $("words");
 const query = new URLSearchParams(location.search);
 const app = window.ReactNativeWebView;
 const tellApp = (message) => { if (app) app.postMessage(JSON.stringify(message)); };
@@ -100,19 +317,29 @@ const content = { w: 0, h: 0 };
 let zoom = 1, pan = { x: 0, y: 0 }, fit = 1;
 let area = { x: 0, y: 0, w: 1, h: 1 }, shown = { x: 0, y: 0, w: 1, h: 1 };
 const cursor = { x: 0.5, y: 0.5 };
-let keysOpen = false;
+let keysOpen = false, sheetOpen = false, composerOpen = false;
 const mods = new Set();
 
 // ---- The picture ----------------------------------------------------------
 
 const say = (text) => { note.textContent = text; note.classList.toggle("gone", !text); };
+const round = (value, digits) => (value == null || !isFinite(value) ? null : +value.toFixed(digits === undefined ? 1 : digits));
 const hex = (n) => n.toString(16).padStart(2, "0");
 function sps(unit) {
   for (let i = 0; i + 3 < unit.length; i++)
     if (unit[i] === 0 && unit[i + 1] === 0 && unit[i + 2] === 1 && (unit[i + 3] & 0x1f) === 7) return unit.subarray(i + 3);
 }
-if (!("VideoDecoder" in window)) say("这个系统版本的浏览器内核不支持视频解码，请升级系统后再试。");
-let decoder, skipping = false, arrived = 0;
+// "low": the page is reached through a gateway. The picture is asked for as a video track where this end can
+// show one: an app around the page that doesn't say it plays video in place would open the system's
+// full-screen player for it. The app says so in the address as well (?video=1): on Android what it tells the
+// page as it loads can arrive after this script has run. ?video=0 keeps to the socket, to try that way out.
+const relayed = query.get("q") === "low";
+const wantVideo = "RTCPeerConnection" in window && (!app || chrome.video === true || query.get("video") === "1") && query.get("video") !== "0";
+const unseeable = () => say("这个系统版本的浏览器内核不支持视频解码，请升级系统后再试。");
+if (!wantVideo && !("VideoDecoder" in window)) unseeable();
+let decoder, skipping = false, skipped = 0, arrived = 0, keyAsked = -Infinity;
+// Only a keyframe gets a decoder that lost its place going again, and the host makes them when asked rather than by the clock.
+const askKey = () => { const now = performance.now(); if (now - keyAsked > 500) { keyAsked = now; send({ t: "keyframe" }); } };
 // The host is told which frame is on screen: that is how it knows when this end has fallen behind,
 // and stops sending rather than let the picture drift into the past.
 let lastShown = 0, telling = 0;
@@ -123,11 +350,17 @@ function shownUpTo(seq) {
   if (lag && performance.now() < lagUntil) { const late = lastShown; setTimeout(() => send({ t: "ack", n: late }), lag); return; }
   if (!telling) telling = setTimeout(() => { telling = 0; send({ t: "ack", n: lastShown }); }, 40);
 }
-let lighterAt = -Infinity;
-const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream" + location.search);
+let lighterAt = -Infinity, failures = 0;
+const asked = new URLSearchParams(location.search);
+asked.delete("video");
+if (wantVideo) asked.set("video", "1");
+const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream?" + asked);
 ws.binaryType = "arraybuffer";
 const send = (message) => { if (ws.readyState === 1) ws.send(JSON.stringify(message)); };
-ws.onopen = () => { if (mode !== "view") askControl(); };
+ws.onopen = () => { if (mode !== "view") askControl(); if (document.hidden) send({ t: "hidden" }); };
+// Out of sight, a page answers late (its timers slow to one a second) and shows nothing: the host sends no
+// picture down the socket meanwhile, and starts again at a keyframe.
+document.addEventListener("visibilitychange", () => send({ t: document.hidden ? "hidden" : "shown" }));
 ws.onmessage = (event) => {
   if (typeof event.data === "string") return heard(JSON.parse(event.data));
   if (!("VideoDecoder" in window)) return;
@@ -138,33 +371,46 @@ ws.onmessage = (event) => {
   const unit = new Uint8Array(event.data, 5);
   arrived = seq;
   // A decoder that can't keep up skips to the next keyframe; what it skips has still arrived.
-  if (decoder && !key && (skipping || decoder.decodeQueueSize > 8)) { skipping = true; return shownUpTo(seq); }
+  if (decoder && !key && (skipping || decoder.decodeQueueSize > 8)) { skipping = true; skipped += 1; askKey(); return shownUpTo(seq); }
   skipping = false;
   if (!decoder) {
     const params = key && sps(unit);
-    if (!params) return;
+    if (!params) { askKey(); return shownUpTo(seq); }
     decoder = new VideoDecoder({
       output: (frame) => {
-        if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+        // The first frame down the socket takes the picture over from a video track that didn't last.
+        const taken = live;
+        if (taken) show(false);
+        if (content.w !== frame.displayWidth || content.h !== frame.displayHeight) {
           canvas.width = content.w = frame.displayWidth;
           canvas.height = content.h = frame.displayHeight;
           layout();
         }
+        if (taken && !menu.classList.contains("gone")) status();
         ctx.drawImage(frame, 0, 0);
         shownUpTo(frame.timestamp);
+        if (meter) meter.drawn(frame);
         frame.close();
         say("");
       },
-      error: (error) => say("解码失败：" + error.message),
+      // A new decoder at the next keyframe, which is asked for: one bad frame is not the end of the picture.
+      error: (error) => { if (failures++ > 4) return say("解码失败：" + error.message); decoder = undefined; askKey(); },
     });
     decoder.configure({ codec: "avc1." + hex(params[1]) + hex(params[2]) + hex(params[3]), optimizeForLatency: true });
   }
   decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: seq, data: unit }));
 };
-ws.onclose = () => { if (note.classList.contains("gone") || note.textContent.startsWith("正在")) say("屏幕连接已断开"); };
+ws.onclose = () => {
+  // A video track is this socket's: without the one there is no finding the other again, and no hands.
+  drop();
+  if (blocked || note.classList.contains("gone") || note.textContent.startsWith("正在")) say("屏幕连接已断开");
+  blocked = false;
+};
 
 function heard(message) {
   if (message.error) return say(message.error);
+  if (message.rtc) return signal(message.rtc);
+  if (message.pong) return meter && meter.pong(message.pong);
   if (message.restart) {
     // The host starts the stream again at another quality: a new decoder for it.
     try { if (decoder) decoder.close(); } catch {}
@@ -183,8 +429,229 @@ function heard(message) {
     if (mode !== "view") explain(was);
     refresh();
   }
-  // The computer's own pointer moved: the next swipe starts from where it is now.
-  if (message.cursor && !gesture) { cursor.x = message.cursor.x; cursor.y = message.cursor.y; place(); }
+  if (message.cursor) echo(message.cursor.x, message.cursor.y);
+}
+
+// ---- The picture as a video track -----------------------------------------
+
+// The computer's app offers the track, and channels beside it for the hands and the pointer; this end only
+// answers. The socket carries what the two need to find each other — and the picture itself once the host
+// says so (rtc "off"): there is no app to send a track, or this end said the track didn't get across.
+// rtc is the connection while there is one; live, that the picture on show is the track's. A socket that
+// has given the track up does not try again.
+let rtc = null, live = false, tried = false, gaveUp = false, blocked = false, patience = 0;
+// For trying the way back out: ?failAfter=5 gives the track up 5 s after it was offered.
+const failAfter = Number(query.get("failAfter")) || 0;
+
+function signal(message) {
+  if (message.t === "off") return fallBack();
+  if (gaveUp) return;
+  if (message.t === "config") return connect(message.iceServers || []);
+  const mine = rtc;
+  if (!mine) return;
+  if (message.t === "offer") {
+    tried = true;
+    patience = setTimeout(() => giveUp("not connected within 8 s of the offer"), 8000);
+    if (failAfter) setTimeout(() => { if (rtc === mine) giveUp("asked to (failAfter)"); }, failAfter * 1000);
+    // The answer is the browser's own, as it made it: the sender's playout-delay header has to survive in it.
+    mine.described = mine.pc.setRemoteDescription({ type: "offer", sdp: message.sdp })
+      .then(() => mine.pc.createAnswer())
+      .then((answer) => mine.pc.setLocalDescription(answer))
+      .then(() => { if (rtc === mine) send({ t: "rtc.answer", sdp: mine.pc.localDescription.sdp }); });
+    mine.described.catch((error) => { if (rtc === mine) giveUp("the offer could not be answered: " + error.message); });
+  } else if (message.t === "ice") {
+    // A candidate that comes before the offer is in place waits for it.
+    mine.described.then(() => mine.pc.addIceCandidate({ candidate: message.candidate, sdpMid: message.sdpMid, sdpMLineIndex: message.sdpMLineIndex })).catch(() => {});
+  }
+}
+
+function connect(iceServers) {
+  drop();
+  const pc = new RTCPeerConnection({ iceServers });
+  const mine = (rtc = { pc, channels: {}, described: Promise.resolve(), up: false, away: 0 });
+  pc.onicecandidate = ({ candidate }) => {
+    // The empty one only says there are no more.
+    if (candidate && candidate.candidate) send({ t: "rtc.ice", candidate: candidate.candidate, sdpMid: candidate.sdpMid ?? null, sdpMLineIndex: candidate.sdpMLineIndex ?? null });
+  };
+  pc.ontrack = ({ receiver, track, streams }) => {
+    // No waiting beyond what decoding takes. Safari has neither knob: there the sender's playout-delay header does it.
+    if ("jitterBufferTarget" in receiver) receiver.jitterBufferTarget = 0;
+    if ("playoutDelayHint" in receiver) receiver.playoutDelayHint = 0;
+    video.srcObject = streams[0] || new MediaStream([track]);
+    play();
+  };
+  pc.ondatachannel = ({ channel }) => {
+    mine.channels[channel.label] = channel;
+    if (channel.label === "cursor" || channel.label === "shape") channel.onmessage = (event) => { if (rtc === mine) told(JSON.parse(event.data)); };
+  };
+  pc.oniceconnectionstatechange = pc.onconnectionstatechange = () => { if (rtc === mine) watch(mine); };
+}
+
+function watch(mine) {
+  // The whole connection's state where the browser has one: a path found is not yet a connection made.
+  const state = mine.pc.connectionState || mine.pc.iceConnectionState;
+  if (state === "failed" || mine.pc.iceConnectionState === "failed") return giveUp(mine.up ? "the connection failed" : "no path between the two (ICE failed)");
+  if (state === "disconnected") {
+    // A path that drops for a moment comes back by itself; one gone for longer is given up.
+    if (mine.up && !mine.away) mine.away = setTimeout(() => away(mine, performance.now()), 4000);
+  } else if (state === "connected" || state === "completed") {
+    clearTimeout(mine.away);
+    mine.away = 0;
+    if (mine.up) return;
+    mine.up = true;
+    clearTimeout(patience);
+    if (!live) patience = setTimeout(frameless, 4000);
+  }
+}
+
+function away(mine, since) {
+  // A page that was put aside (another app, another tab) could not hear the path come back: once it is
+  // looked at again it is given the time again.
+  const now = performance.now();
+  if (document.hidden || now - since > 6000) mine.away = setTimeout(() => away(mine, now), 4000);
+  else giveUp("disconnected for more than 4 s");
+}
+
+function frameless() {
+  // A page nobody is looking at is shown nothing, and one waiting for a tap has not begun: neither is the path's doing.
+  if (document.hidden || blocked) patience = setTimeout(frameless, 4000);
+  else giveUp("connected, but no frame within 4 s");
+}
+
+/** The track is not getting across: the host is asked for the picture down the socket instead. */
+function giveUp(reason) {
+  if (gaveUp || !rtc) return;
+  gaveUp = true;
+  send({ t: "rtc.failed", reason });
+  drop();
+}
+
+function drop() {
+  clearTimeout(patience);
+  if (!rtc) return;
+  clearTimeout(rtc.away);
+  const pc = rtc.pc;
+  rtc = null;
+  pc.ontrack = pc.ondatachannel = pc.onicecandidate = pc.oniceconnectionstatechange = pc.onconnectionstatechange = null;
+  pc.close();
+}
+
+/** The picture comes down the socket from here on. What the track last showed stays up until its first frame. */
+function fallBack() {
+  gaveUp = true;
+  drop();
+  if (blocked) say("正在连接电脑屏幕…");
+  blocked = false;
+  if (!("VideoDecoder" in window)) return unseeable();
+  if (tried) hint(live ? "直连断开了：已改用兼容方式传画面，延迟会高一些" : "没能和电脑直连：已改用兼容方式传画面，延迟会高一些", 5000);
+}
+
+function play() {
+  const started = video.play();
+  if (!started) return;
+  started.then(() => {
+    if (!blocked) return;
+    blocked = false;
+    say(live ? "" : "正在连接电脑屏幕…");
+  }, (error) => {
+    // A new stream replacing the one being started rejects the first call too; that is not a refusal.
+    if (error.name === "AbortError" || !rtc) return;
+    blocked = true;
+    say("轻点屏幕，开始显示画面");
+  });
+}
+// What a browser takes as someone's say-so to start a video.
+if (wantVideo) for (const name of ["pointerup", "touchend", "click", "keydown"]) addEventListener(name, () => { if (blocked && rtc) play(); }, true);
+
+/** The track's picture has a size: at its first frame, and whenever the sender changes its resolution. */
+function sized() {
+  if (!rtc || !video.videoWidth) return;
+  content.w = video.videoWidth;
+  content.h = video.videoHeight;
+  if (!blocked) say("");
+  if (live) return layout();
+  clearTimeout(patience);
+  show(true);
+}
+video.addEventListener("resize", sized);
+video.addEventListener("loadedmetadata", sized);
+
+/** Which of the two the picture is on: the video while its track runs, the canvas otherwise. */
+function show(track) {
+  live = track;
+  video.classList.toggle("gone", !track);
+  canvas.classList.toggle("gone", track);
+  if (!track) {
+    video.srcObject = null;
+    content.w = content.h = 0;
+    pointer.classList.remove("on");
+  }
+  refresh();
+}
+
+// ---- The pointer in a video ----------------------------------------------
+
+// A video track has no pointer in its picture. The app says where the pointer is (every position, on
+// "cursor") and what it looks like ("shape": the picture the first time, its id after that), and the page
+// draws it — an arrow of its own until it has been told.
+const ARROW = { w: 14.5, h: 20, hotX: 1.5, hotY: 1.5, url: "data:image/svg+xml," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14.5 20'><path d='M1.5 1.5v15l4-3.4 2.6 5.4 2.5-1.2-2.6-5.3 5-.6Z' fill='#000' stroke='#fff' stroke-width='1.3' stroke-linejoin='round'/></svg>") };
+const shapes = new Map();
+// worn: the shape's id. span: the display's width in the points the shapes are measured in.
+// pointed: the pointer has been somewhere to draw it at (it may be on another display, and never be).
+let worn = "", span = 0, drawn = 0, pointed = false;
+
+function told(message) {
+  if (message.t === "cursor") {
+    // The channel keeps no order: a position older than the one drawn is not drawn after it.
+    if (message.i <= drawn) return;
+    if (message.i) drawn = message.i;
+    return echo(message.x, message.y);
+  }
+  if (message.t !== "shape") return;
+  if (message.png) shapes.set(message.id, { url: "data:image/png;base64," + message.png, w: message.w, h: message.h, hotX: message.hotX, hotY: message.hotY });
+  if (message.displayW) span = message.displayW;
+  worn = message.id;
+  dress();
+}
+
+/** The computer says where its pointer is. */
+function echo(x, y) {
+  if (live) {
+    // Every position comes back, this page's own moves among them, a round trip late; and the hand here is
+    // ahead of that. So what is drawn stays where the hand has it while the hand is moving it, and for any
+    // position the hand put it at within the last second. Anything else is news — someone at the computer,
+    // a program — and is drawn at once.
+    const now = performance.now();
+    if (now - movedAt < 250 || ownEcho(trail, x, y, now)) return;
+  }
+  // In the socket's picture the pointer is drawn already. It moved by itself: the next swipe starts from where it is now.
+  else if (gesture) return;
+  cursor.x = x;
+  cursor.y = y;
+  if (rtc && !pointed) point();
+  else place();
+}
+
+/** The pointer is somewhere, for the first time. */
+function point() {
+  pointed = true;
+  dress();
+}
+
+/** What the pointer looks like: the computer's own over a video; otherwise the ring that follows a finger on the trackpad. */
+function dress() {
+  const look = live ? shapes.get(worn) || ARROW : null, style = pointer.style;
+  pointer.classList.toggle("own", !!look);
+  if (look) pointer.classList.toggle("on", pointed);
+  // A mouse here would be a second pointer on top of the one drawn: while it controls, the drawn one is it.
+  stage.classList.toggle("own", !!look && controlling());
+  style.width = look ? look.w + "px" : "";
+  style.height = look ? look.h + "px" : "";
+  style.left = look ? -look.hotX + "px" : "";
+  style.top = look ? -look.hotY + "px" : "";
+  style.transformOrigin = look ? look.hotX + "px " + look.hotY + "px" : "";
+  style.backgroundImage = look ? 'url("' + look.url + '")' : "";
+  place();
 }
 
 // ---- Layout ---------------------------------------------------------------
@@ -194,11 +661,57 @@ function viewport() {
   return v ? { w: v.width, h: v.height, x: v.offsetLeft, y: v.offsetTop } : { w: innerWidth, h: innerHeight, x: 0, y: 0 };
 }
 
+// What a browser's window has been seen to do: a keyboard coming up makes it shorter, on a phone (see keyboardIsUp).
+const seen = { w: 0, h: 0, follows: false };
+
 function layout() {
   const v = viewport(), inset = chrome.insets;
-  // Above the keyboard, or above the phone's bottom edge when the keys are a real keyboard's.
-  const keysHeight = keysOpen ? 46 + inset.bottom : 0;
-  area = { x: v.x + inset.left, y: v.y + inset.top, w: Math.max(1, v.w - inset.left - inset.right), h: Math.max(1, v.h - inset.top - keysHeight) };
+  if (v.w !== seen.w) Object.assign(seen, { w: v.w, h: v.h });
+  else if (v.h > seen.h) seen.h = v.h;
+  if (seen.h - v.h > 120 && fieldFocused()) seen.follows = true;
+  // A phone lying down has its room beside the picture, not under it.
+  const wide = v.w > v.h && v.w >= 560;
+  // Beside the picture, things take the side without the camera.
+  const onLeft = chrome.clear ? chrome.clear === "left" : inset.left < inset.right;
+  // Under the picture: the box text is written in, or the key bar (above the keyboard, or above the phone's
+  // bottom edge when the keys are a real keyboard's), or the shortcuts. Each has the picture make room for it.
+  let under = 0, aside = 0;
+  composer.classList.toggle("gone", !composerOpen);
+  composer.classList.toggle("wide", wide);
+  keys.classList.toggle("gone", !keysOpen || composerOpen);
+  sheet.classList.toggle("gone", !sheetOpen);
+  sheet.classList.toggle("narrow", wide);
+  if (composerOpen) {
+    composer.style.padding = "8px " + (8 + inset.right) + "px " + (8 + inset.bottom) + "px " + (8 + inset.left) + "px";
+    under = composer.offsetHeight;
+    composer.style.top = v.y + v.h - under + "px";
+  } else if (keysOpen) {
+    under = 46 + inset.bottom;
+    keys.style.top = v.y + v.h - under + "px";
+    keys.style.height = under + "px";
+    // Clear of the camera, with the phone lying down.
+    keys.style.padding = "0 " + (5 + inset.right) + "px " + inset.bottom + "px " + (5 + inset.left) + "px";
+  } else if (sheetOpen && wide) {
+    // Clear of the screen's round corners; on a side that may have something of the system's in it, clear of that too.
+    const edge = chrome.clear ? 12 : Math.max(12, onLeft ? inset.left : inset.right), top = Math.max(inset.top, 12);
+    const width = Math.min(320, Math.round(v.w * 0.42));
+    sheet.style.width = width + "px";
+    sheet.style.height = Math.max(96, v.h - top - 12) + "px";
+    sheet.style.left = (onLeft ? v.x + edge : v.x + v.w - edge - width) + "px";
+    sheet.style.top = v.y + top + "px";
+    aside = edge + width + 8;
+  } else if (sheetOpen) {
+    const edge = Math.max(inset.bottom, 8), side = Math.max(inset.left, inset.right, 8), most = Math.max(96, v.h - inset.top - edge - 8);
+    // All the room there is while a name is typed into it: the keyboard has the rest.
+    const height = document.activeElement === naming ? most : Math.min(most, clamp(Math.round(v.h * 0.5), 260, 400));
+    sheet.style.width = v.w - side * 2 + "px";
+    sheet.style.height = height + "px";
+    sheet.style.left = v.x + side + "px";
+    sheet.style.top = v.y + v.h - edge - height + "px";
+    under = height + edge + 8;
+  }
+  const left = Math.max(inset.left, onLeft ? aside : 0), right = Math.max(inset.right, onLeft ? 0 : aside);
+  area = { x: v.x + left, y: v.y + inset.top, w: Math.max(1, v.w - left - right), h: Math.max(1, v.h - inset.top - under) };
   if (content.w) {
     fit = Math.min(area.w / content.w, area.h / content.h);
     const w = content.w * fit * zoom, h = content.h * fit * zoom;
@@ -206,19 +719,20 @@ function layout() {
     pan.x = w <= area.w ? area.x + (area.w - w) / 2 : clamp(pan.x, area.x + area.w - w, area.x);
     pan.y = h <= area.h ? area.y + (area.h - h) / 2 : clamp(pan.y, area.y + area.h - h, area.y);
     shown = { x: pan.x, y: pan.y, w, h };
-    canvas.style.transform = "translate(" + pan.x + "px," + pan.y + "px) scale(" + fit * zoom + ")";
+    if (live) {
+      // The video's box is the picture's place, not its pixels: the sender changes the resolution as the
+      // network changes, and the picture stays where it is and as large, only sharper or softer.
+      video.style.width = content.w * fit + "px";
+      video.style.height = content.h * fit + "px";
+      video.style.transform = "translate(" + pan.x + "px," + pan.y + "px) scale(" + zoom + ")";
+    } else canvas.style.transform = "translate(" + pan.x + "px," + pan.y + "px) scale(" + fit * zoom + ")";
   }
-  keys.classList.toggle("gone", !keysOpen);
-  keys.style.top = v.y + v.h - keysHeight + "px";
-  keys.style.height = keysHeight + "px";
-  keys.style.paddingBottom = inset.bottom + "px";
-  // The toolbar stands in the black beside the picture when there is some, under it otherwise; the keyboard takes its place.
+  // The toolbar stands in the black beside the picture when there is some, under it otherwise; whatever opens takes its place.
   const beside = content.w ? area.w - content.w * fit > area.h - content.h * fit + inset.bottom : v.w > v.h;
   bar.classList.toggle("side", beside);
-  bar.classList.toggle("hidden", keysOpen);
+  bar.classList.toggle("hidden", keysOpen || sheetOpen || composerOpen);
   const size = { w: bar.offsetWidth, h: bar.offsetHeight };
-  // Beside the picture it takes the side without the camera, and stands in the middle of the black there.
-  const onLeft = beside && (chrome.clear ? chrome.clear === "left" : inset.left < inset.right);
+  // Beside the picture it stands in the middle of the black there.
   if (beside) {
     const edge = onLeft ? inset.left : inset.right;
     const black = edge + (content.w ? (area.w - content.w * fit) / 2 : 0);
@@ -239,7 +753,10 @@ function layout() {
 }
 
 function place() {
-  pointer.style.transform = "translate(" + (shown.x + cursor.x * shown.w) + "px," + (shown.y + cursor.y * shown.h) + "px)";
+  // Over a video the pointer is as large as it is in the picture, and never smaller than it is on the computer:
+  // on a phone the whole screen is a few fingers wide, and a pointer to scale would be lost in it.
+  const size = live ? " scale(" + (span ? Math.max(1, shown.w / span) : 1) + ")" : "";
+  pointer.style.transform = "translate(" + (shown.x + cursor.x * shown.w) + "px," + (shown.y + cursor.y * shown.h) + "px)" + size;
 }
 
 addEventListener("resize", layout);
@@ -274,27 +791,72 @@ function askControl() {
   send({ t: "control" });
 }
 
-let moveWaiting = false;
-function flush() {
-  if (!moveWaiting) return;
-  moveWaiting = false;
-  send({ t: "move", x: +cursor.x.toFixed(5), y: +cursor.y.toFixed(5) });
+// Where an event travels: down the socket, in order, until a video's two channels to the app are open; then
+//   input    in order, nothing lost    buttons, keys, text
+//   pointer  no order, sent once       the pointer on its way somewhere, the wheel
+// The two keep no time with each other, so nothing goes on "pointer" that something on "input" has to come
+// after, or before. The position a button, a key or the wheel acts at goes on "input" just ahead of it,
+// however it was sent before. With a button down every position does: a drag is a path, and ends where it
+// is let go. The wheel stays on "input" for the rest of a gesture whose position went there. And a pointer
+// that comes to rest says where once more on "input", in case its last move was the one lost. Each event on
+// the channels has a number (one count for both): by it the app drops a move from "pointer" that arrives
+// after something sent later.
+let wired = false, held = 0, sure = true, sent = 0, rest = 0, movedAt = -Infinity;
+const trail = [];
+
+function lanes() {
+  const channels = rtc && rtc.channels;
+  const open = !!channels && !!channels.input && channels.input.readyState === "open" && !!channels.pointer && channels.pointer.readyState === "open";
+  // Not taken up with a button down: its release goes the way it went down.
+  if (open !== wired && (!open || !held)) wired = open;
 }
+
+function post(message, lane) {
+  if (!wired) return send(message);
+  message.i = ++sent;
+  rtc.channels[lane].send(JSON.stringify(message));
+}
+
+let moveWaiting = false;
+/** Says where the pointer is: in order, when something is about to happen there. */
+function tell(placed) {
+  lanes();
+  moveWaiting = false;
+  const now = performance.now(), lane = laneOf("move", placed, held > 0, false);
+  if (rtc) {
+    // What was sent, to know it by when it comes back (see echo).
+    trail.push({ x: cursor.x, y: cursor.y, t: now });
+    while (now - trail[0].t > 1000) trail.shift();
+  }
+  post({ t: "move", x: +cursor.x.toFixed(5), y: +cursor.y.toFixed(5) }, lane);
+  sure = !wired || lane === "input";
+  clearTimeout(rest);
+  if (!sure) rest = setTimeout(() => { if (!sure) tell(true); }, 80);
+}
+const flush = () => { if (moveWaiting) tell(false); };
 // A pointer position a frame: as often as the picture could show it.
 function moved() {
   if (!moveWaiting) requestAnimationFrame(flush);
   moveWaiting = true;
+  movedAt = performance.now();
   glow();
   place();
 }
 // Everything else goes at once, after the position it happens at.
 function act(message) {
-  flush();
-  send(message);
+  lanes();
+  const placed = moveWaiting || !sure;
+  if (placed) tell(true);
+  if (message.t === "down") held += 1;
+  if (message.t === "scroll" && placed && gesture) gesture.tied = true;
+  post(message, laneOf(message.t, placed, held > 0, !!gesture && !!gesture.tied));
+  if (message.t === "up") held = Math.max(0, held - 1);
 }
 
 let fade = 0;
 function glow() {
+  // Over a video the pointer is on show for good once it has been somewhere.
+  if (live) return pointed || point();
   if (mode !== "trackpad") return;
   pointer.classList.add("on");
   clearTimeout(fade);
@@ -313,7 +875,7 @@ function takeMods() {
 function click(buttonName, count) {
   const m = takeMods();
   act({ t: "down", b: buttonName, n: count, m });
-  send({ t: "up", b: buttonName, n: count, m });
+  act({ t: "up", b: buttonName, n: count, m });
 }
 
 /** Puts the pointer under a point of the page; false when that is outside the picture. */
@@ -365,8 +927,8 @@ function endOne() {
 
 stage.addEventListener("pointerdown", (event) => {
   wake();
-  // A touch that closes the menu does nothing else.
-  const closing = closeMenu();
+  // A touch that closes the menu, or the shortcuts, does nothing else.
+  const closing = [closeMenu(), closeSheet()].some(Boolean);
   if (event.pointerType === "mouse") return closing ? undefined : mouseDown(event);
   event.preventDefault();
   try { stage.setPointerCapture(event.pointerId); } catch {}
@@ -506,7 +1068,8 @@ function tap(g, now) {
 let mouseHeld = null, mouseClicks = { t: 0, n: 0, x: 0, y: 0, b: 0 };
 function mouseDown(event) {
   if (!controlling()) { mouseHeld = "pan"; return; }
-  typing.focus({ preventScroll: true });
+  // Keys go to the computer as they are pressed, unless text is being written here to be sent whole.
+  if (!composerOpen) typing.focus({ preventScroll: true });
   event.preventDefault();
   if (!pointAt(event.clientX, event.clientY)) return;
   const now = performance.now();
@@ -561,7 +1124,7 @@ function typed(text) {
   if (mods.size && [...text].length === 1) return press(KEY_OF[text] || text.toLowerCase());
   const lines = text.split("\n");
   lines.forEach((line, index) => {
-    if (line) act({ t: "text", s: line });
+    for (const s of pieces(line, 4000)) act({ t: "text", s });
     if (index < lines.length - 1) press("return");
   });
 }
@@ -631,9 +1194,9 @@ function isLeftover(text) {
   leftover = null;
   return mine;
 }
-const keyboardUp = () => document.activeElement === typing || document.activeElement === shortcut;
+const fieldFocused = () => document.activeElement === typing || document.activeElement === shortcut;
 function syncField() {
-  if (!keyboardUp()) return;
+  if (!fieldFocused()) return;
   const field = mods.size ? shortcut : typing;
   if (document.activeElement === field) return;
   switching = true;
@@ -645,10 +1208,83 @@ for (const field of [typing, shortcut]) {
   field.addEventListener("blur", () => { if (switching) return; keysOpen = false; mods.clear(); drawKeys(); layout(); refresh(); });
 }
 
-function toggleKeys() {
-  if (keyboardUp()) document.activeElement.blur();
-  else typing.focus({ preventScroll: true });
+// A field with the focus is not a keyboard on the screen. A phone takes its keyboard down without the field
+// hearing of it — the app was put aside and came back, something else of the app's took the keys, the
+// system's Back on Android — and the field still says it has the focus: asked for the keyboard then, it
+// would only be let go of, and nothing would come up. So the app, which hears of the keyboard from the
+// system, says whether it is up (chrome.keyboard), and a keyboard is asked for in a way that works from
+// any state.
+let askedAt = -Infinity, wanted = null, wentDown = false, settling = 0;
+
+const keyboardShown = () => keyboardIsUp({
+  focused: fieldFocused(),
+  asked: performance.now() - askedAt,
+  said: app && typeof chrome.keyboard === "boolean" ? chrome.keyboard : undefined,
+  live: document.hasFocus(),
+  shrunk: coarse && seen.follows ? seen.h - viewport().h > 120 : undefined,
+});
+
+/** Brings the phone's keyboard up for a field. Within a touch: a browser gives a keyboard to nothing else. */
+function ask(field, again) {
+  // A keyboard goes to the view the keys go to, and inside an app that is not always the page: the app
+  // sees to it, and has the page ask once more (linkshellKeyboard) if no keyboard has come.
+  if (!again) tellApp({ type: "keyboard" });
+  askedAt = performance.now();
+  wanted = field;
+  // Focusing the field that has the focus does nothing: one the keyboard was taken from is let go of first,
+  // without the page taking that for the keyboard going.
+  if (document.activeElement === field) {
+    switching = true;
+    field.blur();
+    switching = false;
+  }
+  field.focus({ preventScroll: true });
 }
+window.linkshellKeyboard = () => {
+  if (chrome.keyboard === true || !wanted || performance.now() - askedAt > 3000) return;
+  ask(wanted, true);
+};
+
+/** The keyboard goes, and the key bar with it: said here too, for a field that hears nothing because the page is not the one the keys go to. */
+function dropKeys() {
+  wanted = null;
+  if (fieldFocused()) document.activeElement.blur();
+  if (!keysOpen && !mods.size) return;
+  keysOpen = false;
+  mods.clear();
+  drawKeys();
+  refresh();
+}
+
+function raiseKeys() {
+  closeSheet();
+  closeComposer();
+  ask(mods.size ? shortcut : typing);
+}
+
+function toggleKeys() {
+  if (keyboardShown()) dropKeys();
+  else raiseKeys();
+}
+
+/** The app said the keyboard that was up has gone: the page lets go of the field it was up for. */
+function settle() {
+  // Turning the phone takes the keyboard down and brings it straight back, and so does putting the app
+  // aside and coming back to it: only a keyboard that stays down is gone. A page nobody sees waits to be seen.
+  if (!wentDown || chrome.keyboard !== false || document.hidden) return;
+  // One asked for a moment ago may be on its way up still.
+  if (performance.now() - askedAt < 1000) return settleIn(1000);
+  wentDown = false;
+  const field = document.activeElement;
+  wanted = null;
+  if (field === words || field === naming) field.blur();
+  else dropKeys();
+}
+function settleIn(ms) {
+  clearTimeout(settling);
+  settling = setTimeout(settle, ms);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) settleIn(1200); });
 
 // ---- Toolbar, menu, key bar ----------------------------------------------
 
@@ -662,6 +1298,22 @@ function tappable(element, action) {
     event.stopPropagation();
     const box = element.getBoundingClientRect();
     if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) action();
+  });
+}
+
+/** The same inside something that scrolls: the touch is left to the browser, and counts if it stayed where it landed. */
+function pressable(element, action) {
+  let from = null;
+  element.addEventListener("pointerdown", (event) => { event.stopPropagation(); wake(); from = { id: event.pointerId, x: event.clientX, y: event.clientY }; });
+  element.addEventListener("pointercancel", () => { from = null; });
+  // The mouse's events a browser makes up after a touch would land on whatever the action has left under the
+  // finger, and take the focus from the field it gave it to. A touch that scrolled has none to stop.
+  element.addEventListener("touchend", (event) => { if (event.cancelable) event.preventDefault(); });
+  element.addEventListener("mousedown", (event) => event.preventDefault());
+  element.addEventListener("pointerup", (event) => {
+    const was = from;
+    from = null;
+    if (was && was.id === event.pointerId && Math.hypot(event.clientX - was.x, event.clientY - was.y) < SLOP) action();
   });
 }
 
@@ -698,9 +1350,11 @@ function setMode(next) {
   mode = next;
   try { localStorage.setItem("linkshell.screen.mode", mode); } catch {}
   tellApp({ type: "mode", mode });
-  pointer.classList.remove("on");
+  if (!live) pointer.classList.remove("on");
   if (mode === "view") {
-    if (keyboardUp()) document.activeElement.blur();
+    closeSheet();
+    closeComposer();
+    dropKeys();
     hint(HINTS.view);
   } else {
     askControl();
@@ -712,6 +1366,7 @@ function setMode(next) {
 function closeMenu() {
   if (menu.classList.contains("gone")) return false;
   menu.classList.add("gone");
+  clearInterval(statusTimer);
   wake();
   return true;
 }
@@ -720,13 +1375,15 @@ function refresh() {
   $("mode").innerHTML = ICON[mode];
   $("mode").classList.toggle("on", mode !== "view");
   $("keyboard").classList.toggle("gone", mode === "view");
+  $("quick").classList.toggle("gone", mode === "view");
   $("fit").classList.toggle("gone", zoom < 1.05);
   $("rotate").classList.toggle("gone", !app || !chrome.canRotate);
   $("rotate").classList.toggle("on", chrome.landscape);
   const full = app ? chrome.fullscreen : !!document.fullscreenElement;
   $("full").classList.toggle("gone", !app && !document.fullscreenEnabled);
   $("full").innerHTML = full ? ICON.shrink : ICON.expand;
-  for (const choice of menu.children) choice.classList.toggle("on", choice.dataset.mode === mode);
+  for (const choice of choices) choice.classList.toggle("on", choice.dataset.mode === mode);
+  dress();
   layout();
 }
 
@@ -735,9 +1392,74 @@ function drawKeys() {
   syncField();
 }
 
+// ---- The way the picture comes ---------------------------------------------
+
+const RANK = ["host", "prflx", "srflx", "relay"];
+/** What the connection says of the track: the picture's size and pace, the round trip, the waits. */
+async function vitals(pc, before) {
+  const pairs = [], ends = new Map();
+  let track = {}, transport = {};
+  (await pc.getStats()).forEach((entry) => {
+    if (entry.type === "inbound-rtp" && (entry.kind || entry.mediaType) === "video") track = entry;
+    else if (entry.type === "transport") transport = entry;
+    else if (entry.type === "candidate-pair") pairs.push(entry);
+    else if (entry.type === "local-candidate" || entry.type === "remote-candidate") ends.set(entry.id, entry);
+  });
+  const pair = pairs.find((one) => one.id === transport.selectedCandidatePairId) || pairs.find((one) => one.selected) || pairs.find((one) => one.nominated && one.state === "succeeded") || {};
+  const near = ends.get(pair.localCandidateId), far = ends.get(pair.remoteCandidateId);
+  const was = before || {}, since = (field) => (track[field] || 0) - (was[field] || 0);
+  const each = (total, count) => (since(count) > 0 ? (since(total) / since(count)) * 1000 : null);
+  return {
+    raw: track,
+    width: track.frameWidth || video.videoWidth,
+    height: track.frameHeight || video.videoHeight,
+    fps: round(before ? (since("framesDecoded") * 1000) / (track.timestamp - was.timestamp) : track.framesPerSecond),
+    rttMs: round(pair.currentRoundTripTime == null ? null : pair.currentRoundTripTime * 1000),
+    jitterBufferMs: round(each("jitterBufferDelay", "jitterBufferEmittedCount")),
+    decodeMs: round(each("totalDecodeTime", "framesDecoded"), 2),
+    dropped: track.framesDropped ?? null,
+    freezes: track.freezeCount ?? null,
+    // The less direct of the two ends.
+    path: near && far ? RANK[Math.max(RANK.indexOf(near.candidateType), RANK.indexOf(far.candidateType))] : null,
+  };
+}
+
+/** The line at the foot of the menu: which way the picture comes and, for a video track, how it is doing. */
+let statusTimer = 0, statusWas = null;
+async function status() {
+  const line = $("status");
+  const put = (text) => {
+    if (line.textContent === text) return;
+    line.textContent = text;
+    layout();
+  };
+  const way = !content.w ? "正在连接…" : live ? "直连 · 视频" : (relayed ? "中继" : "直连") + " · 兼容\n" + content.w + "×" + content.h;
+  const pc = live && rtc && rtc.pc;
+  if (!pc || !line.textContent.startsWith(way)) put(way);
+  const now = pc && (await vitals(pc, statusWas).catch(() => null));
+  if (!now || rtc === null || rtc.pc !== pc) return;
+  statusWas = now.raw;
+  put(way + "\n" + [now.width + "×" + now.height, now.fps === null ? "" : Math.round(now.fps) + " 帧/秒", now.rttMs === null ? "" : "往返 " + Math.round(now.rttMs) + " 毫秒"].filter(Boolean).join(" · "));
+}
+
 const ICON = JSON.parse($("icons").textContent);
-tappable($("mode"), () => { menu.classList.toggle("gone"); layout(); });
-tappable($("keyboard"), toggleKeys);
+const choices = menu.querySelectorAll(".choice");
+tappable($("mode"), () => {
+  closeSheet();
+  menu.classList.toggle("gone");
+  clearInterval(statusTimer);
+  // Kept up to date while it can be seen.
+  if (!menu.classList.contains("gone")) {
+    statusWas = null;
+    status();
+    statusTimer = setInterval(status, 1500);
+  }
+  layout();
+});
+// On a phone the button is there only while the key bar is not, which is while the page knows of no keyboard:
+// there it only ever raises one, whatever state the field was left in. With a mouse it gives the keys and takes them.
+tappable($("keyboard"), () => (coarse ? raiseKeys() : toggleKeys()));
+tappable($("quick"), openSheet);
 tappable($("fit"), () => zoomTo(1, { x: area.x + area.w / 2, y: area.y + area.h / 2 }));
 tappable($("rotate"), () => tellApp({ type: "landscape", on: !chrome.landscape }));
 tappable($("full"), () => {
@@ -746,7 +1468,7 @@ tappable($("full"), () => {
   else document.documentElement.requestFullscreen().catch(() => {});
 });
 document.addEventListener("fullscreenchange", refresh);
-for (const choice of menu.children) {
+for (const choice of choices) {
   choice.querySelector("i").innerHTML = ICON[choice.dataset.mode];
   tappable(choice, () => { closeMenu(); setMode(choice.dataset.mode); });
 }
@@ -758,23 +1480,445 @@ for (const key of keys.children) {
       return drawKeys();
     }
     if (key.dataset.key) return press(key.dataset.key);
-    if (keyboardUp()) document.activeElement.blur();
+    if (key.id === "quickkey") return openSheet();
+    if (key.id === "composekey") return openComposer();
+    dropKeys();
   });
 }
 $("hide").innerHTML = ICON.down;
+$("quickkey").innerHTML = ICON.quick;
+$("composekey").innerHTML = ICON.compose;
 
-/** The app tells the page what it did with the phone's screen. */
+// ---- Shortcuts --------------------------------------------------------------
+
+// Keys for the computer that a phone's keyboard has not got, one tap each, by what they are for: name, key,
+// modifiers, and how the sheet takes the tap. "again": it stays, for another (the rest close it: what comes
+// next is on the picture). "sure": asked twice, being a slip of the finger away from losing work.
+const QUICK = [
+  ["常用", [["复制", "c", "cmd"], ["粘贴", "v", "cmd"], ["剪切", "x", "cmd"], ["全选", "a", "cmd"], ["撤销", "z", "cmd", "again"], ["重做", "z", "shift cmd", "again"],
+    ["保存", "s", "cmd"], ["查找", "f", "cmd"]]],
+  ["窗口与应用", [["切换应用", "tab", "cmd", "again"], ["同应用窗口", "\x60", "cmd", "again"], ["新标签", "t", "cmd"], ["关闭窗口", "w", "cmd"], ["最小化", "m", "cmd"],
+    ["全屏", "f", "ctrl cmd"], ["退出应用", "q", "cmd", "sure"]]],
+  ["系统", [["聚焦搜索", "space", "cmd"], ["调度中心", "up", "ctrl"], ["应用窗口", "down", "ctrl"], ["左边桌面", "left", "ctrl", "again"], ["右边桌面", "right", "ctrl", "again"],
+    ["切换输入法", "space", "ctrl", "again"], ["截图", "4", "shift cmd"], ["截图工具", "5", "shift cmd"], ["强制退出", "escape", "alt cmd", "sure"], ["锁定屏幕", "q", "ctrl cmd", "sure"]]],
+];
+const F_KEYS = Array.from({ length: 12 }, (_, n) => "f" + (n + 1));
+const PLAIN_KEYS = { home: "Home", end: "End", pageup: "PgUp", pagedown: "PgDn", delete: "⌦", escape: "Esc", tab: "Tab", return: "回车" };
+const SHORTCUTS_KEPT = "linkshell.screen.shortcuts";
+
+// The user's own. The app keeps them (a page's own storage goes with its address, and this page's changes
+// with every visit) and hands them back with the rest of what it tells the page; a browser has only its own.
+// An app from before there were any does neither, and is known by saying nothing of them.
+const helped = () => !!app && Array.isArray(chrome.shortcuts);
+let mine = [];
+if (helped()) mine = cleanShortcuts(chrome.shortcuts);
+else try { mine = cleanShortcuts(JSON.parse(localStorage.getItem(SHORTCUTS_KEPT))); } catch {}
+function keepMine() {
+  if (helped()) return tellApp({ type: "shortcuts", list: mine });
+  try { localStorage.setItem(SHORTCUTS_KEPT, JSON.stringify(mine)); } catch {}
+}
+
+// back: the sheet took the keyboard's place, and gives it back once a key has done what it was opened for.
+let back = false, loosening = false, armed = null, disarming = 0;
+
+function disarm() {
+  if (!armed) return;
+  clearTimeout(disarming);
+  armed.classList.remove("sure");
+  armed.firstChild.textContent = armed.dataset.name;
+  armed = null;
+}
+
+function fire(item, element) {
+  if (!controlling()) return explain(false);
+  if (item.how === "sure" && armed !== element) {
+    disarm();
+    armed = element;
+    element.dataset.name = item.name;
+    element.classList.add("sure");
+    element.firstChild.textContent = "再点一次";
+    disarming = setTimeout(disarm, 3000);
+    return;
+  }
+  disarm();
+  act({ t: "key", k: item.k, m: item.m.length ? item.m : undefined });
+  tellApp({ type: "haptic", kind: "light" });
+  element.classList.add("hit");
+  setTimeout(() => element.classList.remove("hit"), 160);
+  const sign = comboSign(item.k, item.m);
+  hint(sign === item.name ? sign : item.name + "  " + sign, 1300);
+  if (item.how !== "again") closeSheet(back);
+}
+
+function tile(name, k, m, how, action) {
+  const item = { name, k, m: modsOf(m), how }, element = document.createElement("div"), label = document.createElement("b"), sign = document.createElement("span");
+  element.className = "tile";
+  label.textContent = name;
+  sign.textContent = comboSign(k, item.m);
+  element.append(label);
+  if (sign.textContent !== name) element.append(sign);
+  pressable(element, () => (action ? action(element) : fire(item, element)));
+  return element;
+}
+
+function group(into, title, tiles, six) {
+  const head = document.createElement("div"), grid = document.createElement("div");
+  head.className = "group";
+  head.append(Object.assign(document.createElement("span"), { textContent: title }));
+  grid.className = six ? "tiles six" : "tiles";
+  grid.append(...tiles);
+  if (title) into.append(head);
+  into.append(grid);
+  return head;
+}
+
+for (const [title, items] of QUICK) group(actions, title, items.map(([name, k, m, how]) => tile(name, k, m.split(" "), how)));
+group(actions, "按键", F_KEYS.map((k) => tile(k.toUpperCase(), k, [], "again")), true);
+group(actions, "", Object.keys(PLAIN_KEYS).map((k) => tile(PLAIN_KEYS[k], k, [], "again")));
+const own = actions.appendChild(document.createElement("div"));
+
+function drawMine() {
+  own.textContent = "";
+  if (!mine.length) loosening = false;
+  const tiles = mine.map((one, index) => {
+    const made = tile(one.name, one.k, one.m, "", loosening ? () => { mine.splice(index, 1); keepMine(); drawMine(); } : null);
+    made.classList.toggle("loose", loosening);
+    return made;
+  });
+  const add = document.createElement("div");
+  add.className = "tile add";
+  add.append(Object.assign(document.createElement("b"), { textContent: "＋ 添加" }));
+  pressable(add, () => (mine.length < 24 ? showMaker(true) : hint("最多 24 个：先删掉用不到的", 2500)));
+  const head = group(own, "我的", [...tiles, add]);
+  if (!mine.length) return;
+  const turn = head.appendChild(Object.assign(document.createElement("i"), { textContent: loosening ? "完成" : "删除" }));
+  pressable(turn, () => { loosening = !loosening; drawMine(); });
+}
+
+// A shortcut of the user's own making: the modifiers, one key of those the computer knows by name, a name.
+const making = new Set(), makerKey = $("makerkey");
+const KEY_NAMES = { return: "回车 ↩\uFE0E", tab: "Tab", space: "空格", backspace: "删除 ⌫", delete: "向后删除 ⌦", escape: "Esc", left: "← 左", right: "→ 右", up: "↑ 上", down: "↓ 下",
+  home: "Home", end: "End", pageup: "Page Up", pagedown: "Page Down" };
+for (const [title, list] of [["字母", [..."abcdefghijklmnopqrstuvwxyz"]], ["数字", [..."1234567890"]], ["符号", [..."-=[]\\;',./\x60"]], ["功能键", F_KEYS], ["其他", Object.keys(KEY_NAMES)]]) {
+  const set = makerKey.appendChild(Object.assign(document.createElement("optgroup"), { label: title }));
+  for (const k of list) set.append(Object.assign(document.createElement("option"), { value: k, textContent: KEY_NAMES[k] || k.toUpperCase() }));
+}
+function drawMaker() {
+  for (const one of $("makermods").children) one.classList.toggle("on", making.has(one.dataset.mod));
+  $("makersign").textContent = comboSign(makerKey.value, [...making]);
+}
+function showMaker(on) {
+  if (on) {
+    making.clear();
+    making.add("cmd");
+    makerKey.value = "a";
+    naming.value = "";
+    drawMaker();
+  } else if (document.activeElement === naming) naming.blur();
+  actions.classList.toggle("gone", on);
+  maker.classList.toggle("gone", !on);
+  layout();
+}
+function saveMaker() {
+  mine = cleanShortcuts([...mine, { name: naming.value, k: makerKey.value, m: [...making] }]);
+  keepMine();
+  loosening = false;
+  drawMine();
+  showMaker(false);
+  // The new one is the last thing in the sheet.
+  actions.scrollTop = actions.scrollHeight;
+}
+for (const one of $("makermods").children) tappable(one, () => { if (!making.delete(one.dataset.mod)) making.add(one.dataset.mod); drawMaker(); });
+makerKey.addEventListener("change", drawMaker);
+naming.addEventListener("focus", layout);
+naming.addEventListener("blur", layout);
+naming.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); saveMaker(); } });
+tappable($("makercancel"), () => showMaker(false));
+tappable($("makersave"), saveMaker);
+
+function openSheet() {
+  if (mode === "view" || sheetOpen) return;
+  closeMenu();
+  closeComposer();
+  back = keysOpen && fieldFocused();
+  dropKeys();
+  sheetOpen = true;
+  loosening = false;
+  drawMine();
+  showMaker(false);
+  refresh();
+}
+
+/** True when there was a sheet to close. toKeys: the keyboard it took the place of comes back. */
+function closeSheet(toKeys) {
+  if (!sheetOpen) return false;
+  sheetOpen = false;
+  disarm();
+  if (document.activeElement === naming) naming.blur();
+  refresh();
+  if (toKeys) raiseKeys();
+  return true;
+}
+$("compose").insertAdjacentHTML("afterbegin", ICON.compose);
+$("sheetkeys").innerHTML = ICON.keyboard;
+$("sheetclose").innerHTML = ICON.close;
+tappable($("compose"), openComposer);
+tappable($("sheetkeys"), () => closeSheet(true));
+tappable($("sheetclose"), () => closeSheet(false));
+
+// ---- Text, written here and sent whole --------------------------------------
+
+// Typing into the computer a key at a time suits a word or two. Anything longer is written in a box on the
+// phone, where its keyboard, dictation and paste work as they do everywhere, and sent when it is ready.
+// writing: an input method (pinyin, say) is in the middle of a word in the box. What it holds is not text yet,
+// and the box is not emptied under it: on a phone it would go on composing with what is no longer there.
+let writing = false;
+words.addEventListener("compositionstart", () => { writing = true; });
+words.addEventListener("compositionend", () => { writing = false; });
+const unfinished = () => writing && (hint("先在键盘上选好字，再发送", 2500), true);
+
+function grow() {
+  const wide = composer.classList.contains("wide");
+  // What to write there, said by the page: a phone's browser has been seen to draw a text box's own
+  // placeholder cut to the width of what an input method last wrote in it.
+  $("wordshint").classList.toggle("gone", words.value !== "");
+  words.style.height = "";
+  words.style.height = clamp(words.scrollHeight, wide ? 44 : 66, wide ? 66 : 132) + "px";
+  layout();
+}
+
+function openComposer() {
+  if (mode === "view") return;
+  closeMenu();
+  closeSheet();
+  if (!composerOpen) {
+    composerOpen = true;
+    // The app reads the clipboard for the page (one that knows how: see helped); a browser may let the page.
+    $("pasteclip").classList.toggle("gone", app ? !helped() : !(navigator.clipboard && navigator.clipboard.readText));
+    refresh();
+    grow();
+  }
+  ask(words);
+}
+
+function closeComposer() {
+  if (!composerOpen) return;
+  composerOpen = false;
+  wanted = null;
+  writing = false;
+  if (document.activeElement === words) words.blur();
+  refresh();
+}
+
+function sendWords(andReturn) {
+  if (!controlling()) return explain(false);
+  if (unfinished()) return;
+  const text = words.value;
+  if (!text && !andReturn) return;
+  for (const event of typingOf(text, 4000)) act(event);
+  if (andReturn) act({ t: "key", k: "return" });
+  words.value = "";
+  grow();
+  tellApp({ type: "haptic", kind: "light" });
+  hint(text ? "已发送 " + [...text].length + " 个字" + (andReturn ? "，并回车" : "") : "已回车", 1500);
+}
+
+/** The phone's clipboard, put where the caret is: to be looked over, and sent by the user. */
+function pasted(text) {
+  if (!composerOpen) return;
+  if (typeof text !== "string" || !text) return hint("手机剪贴板里没有文字", 2500);
+  if (writing) return hint("先在键盘上选好字，再粘贴", 2500);
+  words.setRangeText(text.slice(0, 20000), words.selectionStart, words.selectionEnd, "end");
+  grow();
+  words.scrollTop = words.scrollHeight;
+}
+window.linkshellClipboard = pasted;
+
+words.addEventListener("input", grow);
+tappable($("composeclose"), closeComposer);
+tappable($("pasteclip"), () => {
+  if (app) return tellApp({ type: "clipboard" });
+  navigator.clipboard.readText().then(pasted, () => hint("浏览器没有允许读取剪贴板", 2500));
+});
+tappable($("sendwords"), () => sendWords(false));
+tappable($("sendreturn"), () => sendWords(true));
+$("composeclose").innerHTML = ICON.down;
+
+/** The app tells the page what it did with the phone's screen, whether the keyboard is on it, and what shortcuts it keeps for the user. */
 window.linkshellChrome = (next) => {
+  const was = chrome.keyboard;
   Object.assign(chrome, next);
+  if (chrome.keyboard === true) wentDown = false;
+  else if (was === true && chrome.keyboard === false) {
+    wentDown = true;
+    settleIn(300);
+  }
+  if (next.shortcuts && JSON.stringify(cleanShortcuts(next.shortcuts)) !== JSON.stringify(mine)) {
+    mine = cleanShortcuts(next.shortcuts);
+    drawMine();
+  }
   refresh();
 };
+
+// ---- Measuring (?measure=1) ------------------------------------------------
+
+// How late the picture is, by a clock the computer's app draws on its screen when the host is started with
+// LINKSHELL_SCREEN_CLOCK=1: a strip of 20 cells across x 0.05–0.45 of the display at y 0.12, holding the time
+// in milliseconds. Each frame's strip is read as the frame is shown, and once a second the host is told what
+// was seen, whichever way the picture comes. The page's clock is taken to be the computer's (a browser on
+// it, a simulator); with ?measure=sync the host is asked the time, for a device with a clock of its own.
+let meter = null;
+if (query.get("measure")) meter = (() => {
+  const pageTime = () => performance.timeOrigin + performance.now();
+  const sync = query.get("measure") === "sync", pings = new Map();
+  let clock = { offset: 0, trip: Infinity }, pinged = 0;
+  let late = [], unread = 0, frames = 0, presented = 0;
+  let before = { at: performance.now(), presented: 0, raw: null };
+
+  const small = () => Object.assign(document.createElement("canvas"), { width: 20, height: 1 });
+  // One pixel a cell, at its middle. Through WebGL the frame stays on the GPU and only those 20 come back.
+  function throughGL() {
+    const gl = small().getContext("webgl", { antialias: false, depth: false, alpha: false });
+    if (!gl) return null;
+    const shader = (type, source) => {
+      const made = gl.createShader(type);
+      gl.shaderSource(made, source);
+      gl.compileShader(made);
+      return made;
+    };
+    const program = gl.createProgram();
+    gl.attachShader(program, shader(gl.VERTEX_SHADER, "attribute vec2 corner; varying vec2 at; void main() { at = vec2(0.05 + 0.4 * (corner.x * 0.5 + 0.5), 0.12); gl_Position = vec4(corner, 0.0, 1.0); }"));
+    gl.attachShader(program, shader(gl.FRAGMENT_SHADER, "precision mediump float; uniform sampler2D frame; varying vec2 at; void main() { gl_FragColor = texture2D(frame, at); }"));
+    gl.bindAttribLocation(program, 0, "corner");
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null;
+    gl.useProgram(program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+    // Not averaged with its neighbours; and a frame is no power of two, which leaves only these settings.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const pixels = new Uint8Array(80);
+    return (source) => {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.readPixels(0, 0, 20, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      return pixels;
+    };
+  }
+  // The same through a canvas in memory, where WebGL can't be had or won't take the frame.
+  function throughCanvas() {
+    const context = small().getContext("2d", { willReadFrequently: true });
+    context.imageSmoothingEnabled = false;
+    return (source, w, h) => {
+      context.drawImage(source, 0.05 * w, 0.12 * h - 0.5, 0.4 * w, 1, 0, 0, 20, 1);
+      return context.getImageData(0, 0, 20, 1).data;
+    };
+  }
+  let reader = throughGL();
+  let plain = reader ? null : throughCanvas();
+
+  /** One frame, w by h, shown at a time on the page's clock. Returns the time on its strip. */
+  function seen(source, w, h, at) {
+    let pixels;
+    try {
+      pixels = (reader || plain)(source, w, h);
+    } catch {
+      reader = null;
+      pixels = (plain = plain || throughCanvas())(source, w, h);
+    }
+    const time = stripTime(pixels), ms = time === undefined ? undefined : lateness(at + clock.offset, time);
+    frames += 1;
+    if (ms === undefined) unread += 1;
+    else late.push(ms);
+    return time;
+  }
+
+  if ("requestVideoFrameCallback" in video) {
+    const each = (now, metadata) => {
+      video.requestVideoFrameCallback(each);
+      presented = metadata.presentedFrames;
+      seen(video, video.videoWidth, video.videoHeight, performance.timeOrigin + metadata.expectedDisplayTime);
+    };
+    video.requestVideoFrameCallback(each);
+  } else {
+    // Without frame callbacks a frame is seen on several refreshes of the screen: only its first sighting counts.
+    let last;
+    const each = () => {
+      requestAnimationFrame(each);
+      if (!live || video.readyState < 2) return;
+      const count = late.length, time = seen(video, video.videoWidth, video.videoHeight, pageTime());
+      if (time === last) {
+        frames -= 1;
+        if (late.length > count) late.pop();
+        else unread -= 1;
+      }
+      last = time;
+    };
+    requestAnimationFrame(each);
+  }
+
+  if (sync) {
+    const ping = () => {
+      pings.set(++pinged, pageTime());
+      send({ t: "ping", n: pinged, at: Date.now() });
+    };
+    ws.addEventListener("open", () => {
+      for (let i = 0; i < 10; i++) setTimeout(ping, i * 100);
+      setInterval(ping, 5000);
+    });
+  }
+
+  setInterval(async () => {
+    const counted = { late, unread, frames }, now = { at: performance.now(), presented, raw: null };
+    late = [];
+    unread = frames = 0;
+    const track = live, pc = track && rtc && rtc.pc, seconds = (now.at - before.at) / 1000;
+    const said = pc ? await vitals(pc, before.raw).catch(() => null) : null;
+    if (said) now.raw = said.raw;
+    send({
+      t: "measure",
+      mode: track ? "video" : "legacy",
+      latency: summary(counted.late),
+      // What was put on the screen: the browser's own count for a video, the frames drawn for the socket's picture.
+      fps: round((track && now.presented > before.presented ? now.presented - before.presented : counted.frames) / seconds),
+      width: content.w,
+      height: content.h,
+      jitterBufferMs: said && said.jitterBufferMs,
+      decodeMs: said && said.decodeMs,
+      rttMs: said && said.rttMs,
+      path: said ? said.path : relayed ? "relay" : "socket",
+      dropped: said ? said.dropped : skipped,
+      freezes: said && said.freezes,
+      unread: counted.unread,
+      clock: sync ? { offsetMs: round(clock.offset), tripMs: round(clock.trip) } : undefined,
+    });
+    before = now;
+  }, 1000);
+
+  return {
+    /** A frame of the socket's picture, just drawn. */
+    drawn: (frame) => seen(frame, frame.displayWidth, frame.displayHeight, pageTime()),
+    pong: (answer) => {
+      const sent = pings.get(answer.n);
+      pings.delete(answer.n);
+      if (sent !== undefined) clock = synced(clock, sent, pageTime(), answer.now);
+    },
+  };
+})();
 
 resetTyping();
 refresh();
 wake();
 tellApp({ type: "ready", mode });
-})();
 `;
+
+const SCRIPT = `(() => {${VIEWER_LOGIC}${BODY}})();`;
 
 export function viewerPage(): string {
   return `<!doctype html>
@@ -783,22 +1927,56 @@ export function viewerPage(): string {
 <title>屏幕</title>
 <style>${STYLE}</style></head>
 <body>
-<div id="stage"><canvas id="screen"></canvas><div id="pointer"></div></div>
+<div id="stage"><canvas id="screen"></canvas><video id="video" class="gone" autoplay playsinline muted></video><div id="pointer"></div></div>
 <div id="note">正在连接电脑屏幕…</div>
 <div id="toast" class="glass"></div>
 <div id="menu" class="glass gone">
   <div class="choice" data-mode="view"><i></i><div><b>只看</b><span>不会碰到电脑上的任何东西</span></div></div>
   <div class="choice" data-mode="trackpad"><i></i><div><b>触控板</b><span>滑动移动指针，轻点点击</span></div></div>
   <div class="choice" data-mode="touch"><i></i><div><b>点按</b><span>点哪里，就点击哪里</span></div></div>
+  <div id="status"></div>
 </div>
 <div id="bar" class="glass">
   <div class="tool" id="mode" role="button" aria-label="控制方式"></div>
   <div class="tool" id="keyboard" role="button" aria-label="键盘">${ICONS.keyboard}</div>
+  <div class="tool" id="quick" role="button" aria-label="快捷操作">${ICONS.quick}</div>
   <div class="tool" id="fit" role="button" aria-label="还原缩放">${ICONS.fit}</div>
   <div class="tool" id="rotate" role="button" aria-label="横屏">${ICONS.rotate}</div>
   <div class="tool" id="full" role="button" aria-label="全屏"></div>
 </div>
+<div id="sheet" class="glass gone">
+  <div id="sheethead">
+    <div id="compose" role="button">发送文字…</div>
+    <div class="tool" id="sheetkeys" role="button" aria-label="键盘"></div>
+    <div class="tool" id="sheetclose" role="button" aria-label="关闭"></div>
+  </div>
+  <div id="actions"></div>
+  <div id="maker" class="gone">
+    <div class="group"><span>添加快捷键</span><span id="makersign"></span></div>
+    <div class="tiles" id="makermods">
+      <div class="tile" data-mod="ctrl"><b>⌃</b><span>control</span></div>
+      <div class="tile" data-mod="alt"><b>⌥</b><span>option</span></div>
+      <div class="tile" data-mod="shift"><b>⇧</b><span>shift</span></div>
+      <div class="tile" data-mod="cmd"><b>⌘</b><span>command</span></div>
+    </div>
+    <label class="field"><span>按键</span><select id="makerkey" aria-label="按键"></select></label>
+    <label class="field"><span>名称</span><input id="makername" type="text" maxlength="16" placeholder="可不填" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-label="名称"></label>
+    <div class="ends"><div class="soft" id="makercancel" role="button">取消</div><div class="soft strong" id="makersave" role="button">添加</div></div>
+  </div>
+</div>
+<div id="composer" class="gone">
+  <div id="wordsbox"><textarea id="words" maxlength="20000" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="要发送的文字"></textarea><div id="wordshint">在这里写好，再发到电脑上</div></div>
+  <div id="sendrow">
+    <div class="soft" id="composeclose" role="button" aria-label="收起"></div>
+    <div class="soft" id="pasteclip" role="button">粘贴手机剪贴板</div>
+    <div class="spring"></div>
+    <div class="soft" id="sendreturn" role="button">发送并回车</div>
+    <div class="soft strong" id="sendwords" role="button">发送</div>
+  </div>
+</div>
 <div id="keys" class="gone">
+  <div class="key" id="quickkey" role="button" aria-label="快捷操作"></div>
+  <div class="key" id="composekey" role="button" aria-label="发送文字"></div>
   <div class="key word" data-key="escape">esc</div>
   <div class="key word" data-key="tab">tab</div>
   <div class="key" data-mod="ctrl">⌃</div>

@@ -7,6 +7,7 @@ import { ensureHostRunning, hostRuntimeOk, withRunningHost } from "./host.js";
 
 export interface ScreenAccess {
   supported: boolean;
+  /** Whether what captures the screen is there: LinkShell.app on a Mac (installed with the CLI), ffmpeg on Linux. */
   ffmpeg: boolean;
   recording: boolean | null;
   control: boolean | null;
@@ -39,8 +40,8 @@ export function screenReady(access: ScreenAccess): boolean {
 export function describeScreen(access: ScreenAccess | "old" | undefined): string | undefined {
   if (!access) return undefined;
   if (access === "old") return "restart the host to check (linkshell host stop && linkshell host --daemon)";
-  if (!access.supported) return "not available on this system";
-  if (!access.ffmpeg) return `needs ffmpeg (${process.platform === "darwin" ? "brew install ffmpeg" : "install it with your package manager"})`;
+  if (!access.supported) return process.platform === "darwin" ? "needs a Mac with Apple silicon" : "not available on this system";
+  if (!access.ffmpeg) return process.platform === "darwin" ? MISSING_APP : "needs ffmpeg (install it with your package manager)";
   if (process.platform !== "darwin") return "can be watched (controlling it needs macOS)";
   if (access.recording === null || access.control === null) return `can't tell${access.problem ? `: ${access.problem}` : ""}`;
   if (access.recording && access.control) return "can be watched and controlled from the phone";
@@ -48,96 +49,101 @@ export function describeScreen(access: ScreenAccess | "old" | undefined): string
   return `${missing} isn't allowed yet — set it up with: linkshell screen`;
 }
 
+/** A Mac without LinkShell.app: the optional package that carries it wasn't installed (npm run with --omit=optional, or a failed download). */
+const MISSING_APP = "LinkShell.app is missing — reinstall with: npm install -g linkshell-cli";
+
 const PERMISSIONS = {
-  recording: {
-    label: "Watching the screen",
-    where: "Screen & System Audio Recording (录屏与系统录音)",
-  },
-  control: {
-    label: "Controlling it",
-    where: "Accessibility (辅助功能)",
-  },
+  recording: "Watching the screen",
+  control: "Controlling it",
 } as const;
 
+type Print = (line?: string) => void;
+const row = (out: Print, ok: boolean, label: string, detail: string) => out(`  ${ok ? green("✓") : red("✗")} ${label.padEnd(22)} ${detail}`);
+
+/**
+ * Gets this computer's screen ready for the phone, as far as it can be, saying
+ * what it finds. On a Mac the two permissions are LinkShell.app's: its own
+ * window comes up on this computer, takes the user to each switch and ticks
+ * them off, and this waits beside it. True when everything is in place.
+ */
+export async function setUpScreen(out: Print, interactive: boolean): Promise<boolean> {
+  let access = await screenAccess();
+  if (!access) {
+    row(out, false, "Host", "not running — start it with: linkshell host --daemon");
+    return false;
+  }
+  if (access === "old") {
+    row(out, false, "Host", "is older than this CLI — restart it (stops running agent turns):");
+    out("      linkshell host stop && linkshell host --daemon");
+    return false;
+  }
+  if (!access.supported) {
+    row(out, false, "Screen", process.platform === "darwin" ? "needs a Mac with Apple silicon" : "not available on this system");
+    return false;
+  }
+  if (process.platform !== "darwin") {
+    row(out, access.ffmpeg, "ffmpeg", access.ffmpeg ? "found" : "not installed — install it with your package manager, then run this again");
+    if (access.ffmpeg) out(dim("    The screen can be watched from the phone; controlling it needs macOS."));
+    return access.ffmpeg;
+  }
+  if (!access.ffmpeg) {
+    row(out, false, "LinkShell.app", "missing from this installation — reinstall with: npm install -g linkshell-cli");
+    return false;
+  }
+  if (access.recording === null || access.control === null) {
+    row(out, false, "Permissions", access.problem ?? "could not be checked");
+    return false;
+  }
+
+  const kinds = ["recording", "control"] as const;
+  const said = new Set<string>();
+  const tell = (now: ScreenAccess) => {
+    for (const kind of kinds) {
+      if (now[kind] && !said.has(kind)) {
+        said.add(kind);
+        row(out, true, PERMISSIONS[kind], "allowed");
+      }
+    }
+  };
+  tell(access);
+  if (screenReady(access)) return true;
+  if (!interactive) {
+    for (const kind of kinds) if (!access[kind]) row(out, false, PERMISSIONS[kind], "not allowed yet");
+    return false;
+  }
+
+  // The app's own window: it has the system ask, opens the settings at each switch, and shows what is done.
+  await screenAccess(true);
+  const missing = kinds.filter((kind) => !(access as ScreenAccess)[kind]).length;
+  out(`  A LinkShell window has opened on this Mac: turn on the ${missing === 2 ? "two switches" : "switch"} it shows.`);
+  out(dim("  Waiting… (Ctrl+C to stop; `linkshell screen` picks up where this left off)"));
+  const deadline = Date.now() + 10 * 60_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const now = await screenAccess().catch(() => undefined);
+    if (!now || now === "old") continue;
+    access = now;
+    tell(now);
+    if (screenReady(now)) return true;
+  }
+  for (const kind of kinds) if (!access[kind]) row(out, false, PERMISSIONS[kind], "still not allowed");
+  return false;
+}
+
 export async function runScreenSetup(options: { check?: boolean }): Promise<void> {
-  const out = (line = "") => process.stdout.write(`${line}\n`);
-  const row = (ok: boolean, label: string, detail: string) => out(`  ${ok ? green("✓") : red("✗")} ${label.padEnd(22)} ${detail}`);
+  const out: Print = (line = "") => process.stdout.write(`${line}\n`);
   out("\n  LinkShell screen\n");
   if (!hostRuntimeOk()) {
-    row(false, "Host", `needs Node.js 22.13 or newer (this is ${process.version})`);
+    row(out, false, "Host", `needs Node.js 22.13 or newer (this is ${process.version})`);
     process.exitCode = 1;
     return;
   }
   if (!options.check) await ensureHostRunning();
-  let access = await screenAccess();
-  if (!access) {
-    row(false, "Host", "not running — start it with: linkshell host --daemon");
-    process.exitCode = 1;
-    return;
-  }
-  if (access === "old") {
-    row(false, "Host", "is older than this CLI — restart it (stops running agent turns):");
-    out("      linkshell host stop && linkshell host --daemon\n");
-    process.exitCode = 1;
-    return;
-  }
-  if (!access.supported) {
-    row(false, "Screen", "not available on this system");
-    process.exitCode = 1;
-    return;
-  }
-  row(access.ffmpeg, "ffmpeg", access.ffmpeg ? "found" : `not installed — ${process.platform === "darwin" ? "brew install ffmpeg" : "install it with your package manager"}, then run this again`);
-  if (process.platform !== "darwin") {
-    out(`\n  ${access.ffmpeg ? "The screen can be watched from the phone." : ""} Controlling it needs macOS.\n`);
-    if (!access.ffmpeg) process.exitCode = 1;
-    return;
-  }
-  if (access.recording === null || access.control === null) {
-    row(false, "Permissions", access.problem ?? "could not be checked");
-    process.exitCode = 1;
-    return;
-  }
-
-  const app = access.app || "LinkShell";
   const interactive = !options.check && process.stdin.isTTY === true;
-  for (const kind of ["recording", "control"] as const) {
-    const permission = PERMISSIONS[kind];
-    if (access[kind]) {
-      row(true, permission.label, "allowed");
-      continue;
-    }
-    if (!interactive) {
-      row(false, permission.label, "not allowed yet");
-      continue;
-    }
-    // The system's own question comes up on this computer, and its settings open at the switch.
-    await screenAccess(true);
-    out(`  ${red("✗")} ${permission.label.padEnd(22)} not allowed yet`);
-    out(`      System Settings has opened at Privacy & Security › ${permission.where}.`);
-    out(`      Turn on the switch for "${app}" there.${kind === "recording" ? " If macOS offers to quit and reopen it, later is fine." : ""}`);
-    out(dim("      Waiting for the switch… (Ctrl+C to stop; run this again any time)"));
-    const deadline = Date.now() + 10 * 60_000;
-    let allowed = false;
-    while (!allowed && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      const now = await screenAccess().catch(() => undefined);
-      if (now && now !== "old") {
-        access = now;
-        allowed = now[kind] === true;
-      }
-    }
-    if (!allowed) {
-      out(`\n  Still not allowed. Run ${"`linkshell screen`"} again when you are at the switch.\n`);
-      process.exitCode = 1;
-      return;
-    }
-    row(true, permission.label, "allowed");
-  }
-
-  if (screenReady(access)) {
-    out(`\n  ${green("Ready.")} In the app: 电脑 › 屏幕. To take the pointer and keyboard, pick 触控板 or 点按 in the viewer's toolbar.\n`);
+  if (await setUpScreen(out, interactive)) {
+    out(process.platform === "darwin" ? `\n  ${green("Ready.")} In the app: 电脑 › 屏幕. To take the pointer and keyboard, pick 触控板 or 点按 in the viewer's toolbar.\n` : "");
   } else {
-    out(`\n  Not ready yet${access.ffmpeg ? "" : ": install ffmpeg"}${interactive ? "" : "; run `linkshell screen` in a terminal to set it up"}.\n`);
+    out(`\n  Not ready yet${interactive ? "" : "; run `linkshell screen` in a terminal to set it up"}.\n`);
     process.exitCode = 1;
   }
 }

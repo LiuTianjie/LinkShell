@@ -70,7 +70,8 @@ class Terminal {
   ) {
     this.title = basename(shell);
     this.mirror = new ScreenMirror({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true });
-    this.mirror.loadAddon(this.serializer);
+    // The addon's types are written against the browser's terminal; it only uses what the headless one has too.
+    this.mirror.loadAddon(this.serializer as unknown as Parameters<InstanceType<typeof ScreenMirror>["loadAddon"]>[0]);
     pty.onData((data) => this.onData(data));
     pty.onExit(({ exitCode }) => {
       this.flush();

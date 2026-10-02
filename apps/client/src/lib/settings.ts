@@ -57,3 +57,48 @@ export function saveScreenMode(mode: ScreenMode): void {
     // As above: the viewer starts watching only.
   }
 }
+
+const SCREEN_SHORTCUTS_KEY = "screen.shortcuts";
+const SHORTCUT_MODIFIERS = ["ctrl", "alt", "shift", "cmd"] as const;
+// The keys the computer knows by name (apps/mac, Keys.swift).
+const SHORTCUT_KEY = /^(?:[a-z0-9\-=[\]\\;',./`]|return|tab|space|backspace|escape|left|right|down|up|delete|home|end|pageup|pagedown|f(?:[1-9]|1[0-2]))$/;
+
+/** A key combination the user added to the screen viewer's shortcuts: a name, a key, its modifiers. */
+export interface ScreenShortcut {
+  name: string;
+  k: string;
+  m: (typeof SHORTCUT_MODIFIERS)[number][];
+}
+
+/** What the viewer page sent, or what was kept: only the shortcuts the computer would take, 24 at most. */
+export function screenShortcuts(value: unknown): ScreenShortcut[] {
+  const kept: ScreenShortcut[] = [];
+  for (const entry of Array.isArray(value) ? value : []) {
+    if (kept.length === 24) break;
+    if (!entry || typeof entry !== "object") continue;
+    const { name, k, m } = entry as { name?: unknown; k?: unknown; m?: unknown };
+    if (typeof k !== "string" || !SHORTCUT_KEY.test(k) || typeof name !== "string" || !name.trim()) continue;
+    kept.push({ name: [...name.trim()].slice(0, 16).join(""), k, m: SHORTCUT_MODIFIERS.filter((modifier) => Array.isArray(m) && m.includes(modifier)) });
+  }
+  return kept;
+}
+
+/**
+ * The user's own shortcuts in the screen viewer. Kept here and handed to the page, because the page has
+ * nowhere to keep them: its address (a port on loopback) is another one every time.
+ */
+export function loadScreenShortcuts(): ScreenShortcut[] {
+  try {
+    return screenShortcuts(JSON.parse(read(SCREEN_SHORTCUTS_KEY) ?? "[]"));
+  } catch {
+    return [];
+  }
+}
+
+export function saveScreenShortcuts(shortcuts: ScreenShortcut[]): void {
+  try {
+    Storage.setItemSync(SCREEN_SHORTCUTS_KEY, JSON.stringify(shortcuts));
+  } catch {
+    // As above: the viewer then has only the shortcuts it comes with.
+  }
+}

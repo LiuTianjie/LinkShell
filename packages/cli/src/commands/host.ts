@@ -19,6 +19,8 @@ export function silenceSqliteWarning(): void {
 interface HostConfig {
   /** v2 gateway base URL (ws:// or wss://), or "off". Unset: the official gateway once logged in. */
   gateway?: string;
+  /** Set once `linkshell setup` has run here (by itself on the first start, or by hand). */
+  setup?: "done";
 }
 
 /** LinkShell's own gateway: a Pro account's computers are reachable there. */

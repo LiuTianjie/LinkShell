@@ -497,7 +497,7 @@
               <dt><span lang="zh">会话管理</span><span lang="en">Tidy sessions</span></dt>
               <dd><span lang="zh">重命名、归档、删除。Codex 和 Claude 的会话会同步到它们自己的记录里，<code>claude --resume</code> 也能看到新名字。</span><span lang="en">Rename, archive, delete. Codex and Claude sessions change in their own records too, so <code>claude --resume</code> shows the new name.</span></dd>
               <dt><span lang="zh">看电脑屏幕、传文件</span><span lang="en">Screen and files</span></dt>
-              <dd><span lang="zh">随时看电脑屏幕（需要 ffmpeg），可以全屏、横屏；需要时直接接手鼠标和键盘（macOS）。把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Watch the computer&#39;s screen (needs ffmpeg), full screen or in landscape, and take the mouse and keyboard when you need to (macOS). Send photos and files from your phone into the project for the agent.</span></dd>
+              <dd><span lang="zh">随时看电脑屏幕，可以全屏、横屏；需要时直接接手鼠标和键盘（macOS）。把手机里的图片和文件传到项目目录里交给 Agent。</span><span lang="en">Watch the computer&#39;s screen, full screen or in landscape, and take the mouse and keyboard when you need to (macOS). Send photos and files from your phone into the project for the agent.</span></dd>
             </dl>
           </div>
         </article>
@@ -538,9 +538,9 @@
 
           <div class="step">
             <h3><span lang="zh">1. 安装并启动</span><span lang="en">1. Install and start</span></h3>
-            <p><span lang="zh">安装 CLI，在后台启动 LinkShell。它会托管电脑上的 Agent 会话。</span><span lang="en">Install the CLI and start LinkShell in the background. It hosts the agent sessions on this computer.</span></p>
+            <p><span lang="zh">安装 CLI，运行一次设置：它在后台启动 LinkShell、带你打开看屏幕需要的两个权限开关，并连上你的手机。</span><span lang="en">Install the CLI and run the setup once: it starts LinkShell in the background, takes you to the two permission switches the screen needs, and connects your phone.</span></p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
-<span class="pr">$ </span>linkshell host --daemon</code></pre>
+<span class="pr">$ </span>linkshell setup</code></pre>
             <p><span lang="zh">不用 npm 的话，也可以用 Homebrew 或安装脚本：</span><span lang="en">Without npm, install it with Homebrew or the install script:</span></p>
             <pre><code><span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
 <span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
@@ -683,7 +683,7 @@
           <li><span lang="zh"><b>子 Agent 与文件</b>：会话标题旁的按钮列出所有子 Agent；会话和终端的菜单里可以浏览项目文件。</span><span lang="en"><b>Sub-agents and files</b>: the button beside a session's title lists its sub-agents; browse the project's files from a session's or a terminal's menu.</span></li>
           <li><span lang="zh"><b>设置</b>：输入框下方可以换模型、思考强度、权限模式（取决于 Agent 提供了哪些）。</span><span lang="en"><b>Settings</b>: under the composer, change model, effort and permission mode (whatever the agent offers).</span></li>
           <li><span lang="zh"><b>整理</b>：长按会话可以重命名、归档、删除；归档的会话在首页底部。</span><span lang="en"><b>Tidying</b>: long-press a session to rename, archive or delete it; archived sessions are at the bottom of Home.</span></li>
-          <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它（电脑上先运行一次 <code>linkshell screen</code>：安装 ffmpeg，并打开两个名为 LinkShell 的权限开关；控制仅支持 macOS）。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen and control it with a trackpad and keyboard (run <code>linkshell screen</code> on the computer once: ffmpeg, and two permission switches named LinkShell; control is macOS only).</span></li>
+          <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它（电脑上先运行一次 <code>linkshell screen</code>，打开两个名为 LinkShell 的权限开关；控制仅支持 macOS）。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen and control it with a trackpad and keyboard (run <code>linkshell screen</code> on the computer once, for two permission switches named LinkShell; control is macOS only).</span></li>
         </ul>
 
         <h2 id="d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></h2>

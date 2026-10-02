@@ -1,5 +1,6 @@
-import { execFileSync, spawn } from "node:child_process";
-import { afterEach, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { closeInputApp, shippedApp } from "../src/input.js";
 import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture } from "../src/screen.js";
 
 const nal = (type: number, ...body: number[]) => [0, 0, 0, 1, type, ...body];
@@ -21,17 +22,16 @@ describe("ending a capture", () => {
   });
 });
 
-describe("what is captured", () => {
+describe("what ffmpeg captures (Linux)", () => {
   it("is capped at its level's frame rate, and lighter the further down the ladder", () => {
     const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
-    const best = captureArgs(1);
-    const relayed = captureArgs(1, 2);
-    const lightest = captureArgs(1, 99);
-    // The frame rate is enforced by a filter: the capture device doesn't honour the one it is asked for.
+    const best = captureArgs();
+    const relayed = captureArgs(2);
+    const lightest = captureArgs(99);
     expect(value(best, "-vf")).toMatch(/^fps=20,scale='min\(1600,iw\)'/);
     expect(value(relayed, "-vf")).toMatch(/^fps=12,scale='min\(1280,iw\)'/);
     expect(value(lightest, "-vf")).toMatch(/^fps=8,scale='min\(854,iw\)'/);
-    expect([value(best, "-b:v"), value(relayed, "-b:v"), value(lightest, "-b:v")]).toEqual(["3M", "900k", "260k"]);
+    expect([value(best, "-b:v"), value(relayed, "-b:v"), value(lightest, "-b:v")]).toEqual(["3000k", "900k", "260k"]);
     // A keyframe every second, so a viewer that fell behind is back on the live picture within one.
     expect([value(best, "-g"), value(relayed, "-g")]).toEqual(["20", "12"]);
   });
@@ -54,18 +54,11 @@ describe("AccessUnitSplitter", () => {
   });
 });
 
-const hasFfmpeg = (() => {
-  try {
-    execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
-describe.skipIf(!hasFfmpeg || process.platform !== "darwin")("screen viewer server", () => {
+// On a Mac the displays are LinkShell.app's to list: skipped where it hasn't been built.
+describe.skipIf(!shippedApp())("screen viewer server", () => {
   let screen: ScreenShare | undefined;
   afterEach(() => screen?.stop());
+  afterAll(() => closeInputApp());
 
   it("serves the viewer only with the current token", async () => {
     screen = new ScreenShare(() => {});

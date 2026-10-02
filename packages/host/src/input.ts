@@ -1,27 +1,23 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { accessSync, chmodSync, constants, cpSync, existsSync, readFileSync, rmSync } from "node:fs";
-import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { createServer, type Server, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { INPUT_HELPER_SOURCE } from "./input-helper.js";
 
-// Controlling the computer from the phone: the screen viewer sends pointer and
-// key events down the same socket the picture comes up, and a small helper
-// posts them to the system. macOS only, and the system has to allow it
-// (Privacy & Security › Accessibility).
+// LinkShell.app, the Mac side of the screen (apps/mac): it captures and sends
+// the picture, and posts the viewer's pointer and key events to the system.
+// macOS only, and the system has to allow both (Privacy & Security › Screen
+// Recording, Accessibility).
 //
-// A released package carries the helper as LinkShell.app, signed. The host has
-// the system open it, which makes it an app of its own: the permission is
-// asked for and kept under the name LinkShell, whichever terminal started the
-// host and however often the CLI is upgraded. A build without the app (a
-// checkout with no signing identity) compiles the same source on first use and
-// runs it as the host's child; the permission is then the terminal's.
+// The host has the system open the app, which makes it an app of its own: the
+// permissions are asked for and kept under the name LinkShell, whichever
+// terminal started the host and however often the CLI is upgraded. It comes
+// in `@linkshell/mac`, installed with the host on a Mac.
 
 const run = promisify(execFile);
 
@@ -60,9 +56,60 @@ export interface HelperStatus {
   trusted: boolean;
   recording: boolean;
   app: string;
+  /** The app can send the screen as a video track (it carries the media engine). */
+  video: boolean;
 }
 
+/** A display as the app sees it. `screen` is its number in everything said to the app. */
+export interface AppDisplay {
+  screen: number;
+  name: string;
+  /** In pixels. */
+  w: number;
+  h: number;
+  main: boolean;
+}
+
+/** The picture asked of the app for a pipe that loses nothing: rates in bits a second. */
+export interface StreamProfile {
+  width: number;
+  fps: number;
+  bitrate: number;
+  ceiling: number;
+}
+
+/** A stream under way. */
+export interface AppStream {
+  /** Another profile, without stopping: a new size starts a new generation, at a keyframe. */
+  set(profile: StreamProfile): void;
+  /** The next frame a keyframe. */
+  key(): void;
+  end(): void;
+}
+
+/** How the app is to offer a screen as a video track. */
+export interface VideoOffer {
+  /** Which of the system's displays. */
+  screen: number;
+  iceServers: { urls: string[] }[];
+  /** Frames a second; the app's own choice when left out. */
+  fps?: number;
+}
+
+/** What a viewer answers the app's offer with, and the candidates it finds. */
+export type VideoSignal =
+  | { t: "rtc.answer"; sdp: string }
+  | { t: "rtc.ice"; candidate: string; sdpMid: string | null; sdpMLineIndex: number | null };
+
+const line = z.string().max(64_000);
+export const videoSignal = z.discriminatedUnion("t", [
+  z.object({ t: z.literal("rtc.answer"), sdp: line }),
+  z.object({ t: z.literal("rtc.ice"), candidate: z.string().max(2000), sdpMid: z.string().max(64).nullable(), sdpMLineIndex: z.number().int().min(0).max(64).nullable() }),
+]);
+
 const dryRunByDefault = () => process.env.LINKSHELL_INPUT_DRY_RUN === "1";
+/** Measuring latency: the app shows a clock on the screen it sends, which the viewer page reads back (`?measure=1`). */
+const measuring = () => process.env.LINKSHELL_SCREEN_CLOCK === "1";
 
 // ── Where the helper is ─────────────────────────────────────────────
 
@@ -79,103 +126,69 @@ function runnable(path: string): boolean {
 }
 
 /**
- * The app as it came in the package, made runnable. Packing a package drops
- * the program's permission to run (pnpm stores every file that isn't a `bin`
- * as a plain one): it is given back here, and where the installation can't be
- * written to (a root-owned one), a copy under the user's own directory is used.
- * Neither touches the signature.
+ * The app out of the archive it is shipped in, unpacked under the user's own
+ * directory. An archive, because a package can carry neither the links a
+ * framework is made of nor a program's permission to run; unpacked whole, the
+ * app is as it was signed. Always at the same place, so that an upgrade
+ * replaces the app instead of adding another: macOS has been seen to ask
+ * about recording again for the same app run from a new path. (A host still
+ * running the app being replaced keeps the one it has open.)
  */
-export function usableApp(packaged: string, copyTo = join(home(), "LinkShell.app")): string | undefined {
-  if (runnable(programOf(packaged))) return packaged;
+export function unpackedApp(archive: string, at = join(home(), "LinkShell.app")): string | undefined {
   try {
-    chmodSync(programOf(packaged), 0o755);
-    return packaged;
-  } catch {
-    // Not ours to change: fall through to a copy.
-  }
-  try {
-    const plist = (app: string) => readFileSync(join(app, "Contents/Info.plist"), "utf8");
-    if (!existsSync(programOf(copyTo)) || plist(copyTo) !== plist(packaged)) {
-      rmSync(copyTo, { recursive: true, force: true });
-      cpSync(packaged, copyTo, { recursive: true });
+    const hash = createHash("sha256").update(readFileSync(archive)).digest("hex");
+    const mark = `${at}.unpacked`;
+    const current = () => existsSync(mark) && readFileSync(mark, "utf8").trim() === hash && runnable(programOf(at));
+    if (current()) return at;
+    const partial = `${at}.${process.pid}.partial`;
+    rmSync(partial, { recursive: true, force: true });
+    mkdirSync(partial, { recursive: true });
+    execFileSync("/usr/bin/tar", ["-xzf", archive, "-C", partial], { stdio: "ignore", timeout: 60_000 });
+    // Another host may have done the same meanwhile: its app is this one.
+    if (!current()) {
+      const old = `${at}.${process.pid}.old`;
+      rmSync(mark, { force: true });
+      if (existsSync(at)) renameSync(at, old);
+      renameSync(join(partial, "LinkShell.app"), at);
+      writeFileSync(mark, hash);
+      rmSync(old, { recursive: true, force: true });
     }
-    chmodSync(programOf(copyTo), 0o755);
-    return copyTo;
+    rmSync(partial, { recursive: true, force: true });
+    return runnable(programOf(at)) ? at : undefined;
   } catch {
     return undefined;
   }
 }
 
+/** The app from `@linkshell/mac`: as built, in a checkout; out of its archive, in an installation. */
+function packagedApp(): string | undefined {
+  let root: string;
+  try {
+    root = dirname(createRequire(import.meta.url).resolve("@linkshell/mac/package.json"));
+  } catch {
+    // Not a Mac, or installed without optional packages.
+    return undefined;
+  }
+  const built = join(root, "build/LinkShell.app");
+  if (runnable(programOf(built))) return built;
+  const archive = join(root, "build/LinkShell.app.tar.gz");
+  return existsSync(archive) ? unpackedApp(archive) : undefined;
+}
+
 let found: { app: string | undefined } | undefined;
 
-/** The signed app this package was made with, if it was. */
+/** LinkShell.app, where this installation has it: a Mac with Apple silicon, with `@linkshell/mac` installed beside the host. */
 export function shippedApp(): string | undefined {
-  if (process.platform !== "darwin" || process.env.LINKSHELL_INPUT_APP === "off") return undefined;
-  if (found) return found.app;
-  found = { app: undefined };
-  // Beside `dist` in a package (the host's own, or the CLI's, which compiles the host in); beside `src` in a checkout.
-  for (const relative of ["../../../helper/LinkShell.app", "../helper/LinkShell.app"]) {
-    const path = fileURLToPath(new URL(relative, import.meta.url));
-    if (existsSync(programOf(path))) {
-      found.app = usableApp(path);
-      break;
-    }
-  }
+  if (process.platform !== "darwin" || process.arch !== "arm64" || process.env.LINKSHELL_INPUT_APP === "off") return undefined;
+  found ??= { app: packagedApp() };
   return found.app;
 }
 
-function binDir(): string {
-  return join(home(), "bin");
-}
-
-async function build(log: (message: string) => void): Promise<string> {
-  const hash = createHash("sha256").update(INPUT_HELPER_SOURCE).digest("hex").slice(0, 12);
-  const dir = binDir();
-  const path = join(dir, `input-${hash}`);
-  if (existsSync(path)) return path;
-  // Asking the `swiftc` shim on a Mac without the tools opens an install dialog there: look first.
-  const tools = await run("/usr/bin/xcode-select", ["-p"], { timeout: 5000 }).then(
-    () => true,
-    () => false,
-  );
-  if (!tools) throw new Error("控制电脑需要 Xcode 命令行工具：在电脑上运行 xcode-select --install 后再试");
-  await mkdir(dir, { recursive: true });
-  const source = `${path}.swift`;
-  const partial = `${path}.${process.pid}.partial`;
-  await writeFile(source, INPUT_HELPER_SOURCE);
-  try {
-    await run("/usr/bin/swiftc", ["-O", "-swift-version", "5", "-o", partial, source], { timeout: 180_000 });
-    await rename(partial, path);
-  } catch (error) {
-    log(`[screen] the input helper did not compile: ${(error as { stderr?: string }).stderr?.trim() || (error as Error).message}`);
-    throw new Error("控制组件没能在这台电脑上编译，详情见电脑上的 LinkShell 日志");
-  } finally {
-    await rm(source, { force: true });
-    await rm(partial, { force: true });
-  }
-  // Helpers built from an earlier version's source.
-  for (const name of await readdir(dir).catch(() => [])) {
-    if (/^input-[0-9a-f]{12}$/.test(name) && name !== `input-${hash}`) await rm(join(dir, name), { force: true });
-  }
-  log("[screen] built the input helper");
-  return path;
-}
-
-let compiled: Promise<string> | undefined;
-
-/** The helper compiled here; built on first use, once per version of its source. */
-export function inputHelper(log: (message: string) => void = () => {}): Promise<string> {
-  compiled ??= build(log).catch((error: unknown) => {
-    compiled = undefined;
-    throw error;
-  });
-  return compiled;
-}
-
-/** The helper to run as this process's child: the app's own program, or the one compiled here. */
-function childHelper(log: (message: string) => void, app: string | undefined): Promise<string> {
-  return app ? Promise.resolve(programOf(app)) : inputHelper(log);
-}
+/** What to tell someone whose Mac has no LinkShell.app: it is an Intel Mac (the app is built for Apple silicon only), or the package that carries it wasn't installed. */
+export const NO_APP =
+  process.arch === "arm64"
+    ? "这次安装缺少 LinkShell.app（可选组件没有装上）。重新安装一次即可：npm install -g linkshell-cli"
+    : "查看和控制屏幕需要 Apple 芯片的 Mac（这台是 Intel 芯片）";
 
 function parse(line: string): Record<string, unknown> | undefined {
   try {
@@ -187,23 +200,42 @@ function parse(line: string): Record<string, unknown> | undefined {
 }
 
 function statusOf(message: Record<string, unknown>): HelperStatus {
-  return { trusted: message.trusted === true, recording: message.recording === true, app: typeof message.app === "string" ? message.app : "" };
-}
-
-/**
- * What this process itself (so: the host, and the capture it starts) is
- * allowed to do, and under which app's name. `ask` has the system put its
- * question for that permission, and opens the settings page for it.
- */
-export async function hostAccess(log: (message: string) => void, ask?: "recording" | "control"): Promise<HelperStatus> {
-  const helper = await childHelper(log, shippedApp());
-  const { stdout } = await run(helper, [ask ? `--ask-${ask}` : "--status"], { timeout: 15_000 });
-  const message = parse(stdout.trim().split("\n").pop() ?? "");
-  if (!message) throw new Error("the input helper gave no answer");
-  return statusOf(message);
+  return {
+    trusted: message.trusted === true,
+    recording: message.recording === true,
+    app: typeof message.app === "string" ? message.app : "",
+    video: message.video === true,
+  };
 }
 
 // ── The app: one for the whole host, opened by the system ───────────
+
+const RECORD_HEAD = 6;
+/**
+ * A keyframe is made when one is needed (a viewer coming back from having fallen behind asks), not
+ * by the clock: each costs as much as seconds of ordinary frames. This is only what a stream is
+ * never without for longer, should a request go astray.
+ */
+const STREAM_GOP_SECONDS = 10;
+/** No frame is this large: a length beyond it is not a record. */
+const RECORD_MAX = 16 * 1024 * 1024;
+
+function displaysOf(list: unknown): AppDisplay[] {
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((entry: unknown) => {
+    const display = entry as Partial<Record<keyof AppDisplay, unknown>> | null;
+    if (!display || typeof display.screen !== "number" || !Number.isInteger(display.screen) || display.screen < 0) return [];
+    return [
+      {
+        screen: display.screen,
+        name: typeof display.name === "string" ? display.name.slice(0, 80) : "",
+        w: typeof display.w === "number" ? display.w : 0,
+        h: typeof display.h === "number" ? display.h : 0,
+        main: display.main === true,
+      },
+    ];
+  });
+}
 
 type Route = (message: Record<string, unknown>) => void;
 
@@ -214,7 +246,8 @@ class HelperApp {
   private status?: HelperStatus;
   private readonly routes = new Map<string, Route>();
   private readonly watchers = new Set<(status: HelperStatus) => void>();
-  private waiting: ((status: HelperStatus) => void)[] = [];
+  private waiting: { resolve(status: HelperStatus): void; reject(error: Error): void }[] = [];
+  private listing: ((displays: AppDisplay[]) => void)[] = [];
 
   constructor(
     private readonly app: string,
@@ -254,7 +287,7 @@ class HelperApp {
       server.listen(path, () => {
         chmodSync(path, 0o600);
         // Opened by the system, not started as a child: that is what makes it an app of its own to the privacy settings.
-        execFile("/usr/bin/open", ["-n", "-g", "-a", this.app, "--args", "--connect", path, ...(this.dryRun ? ["--dry-run"] : [])], (error) => {
+        execFile("/usr/bin/open", ["-n", "-g", "-a", this.app, "--args", "--connect", path, ...(this.dryRun ? ["--dry-run"] : []), ...(measuring() ? ["--clock"] : [])], (error) => {
           if (error) fail(new Error(`LinkShell.app could not be opened: ${error.message}`));
         });
       });
@@ -272,16 +305,26 @@ class HelperApp {
       // The app went (quit, or crashed): each viewer hears it, and the next one to ask opens it again.
       for (const route of this.routes.values()) route({ t: "gone" });
       this.routes.clear();
+      for (const waiter of this.waiting.splice(0)) waiter.reject(new Error("LinkShell.app went before it answered"));
     });
     createInterface({ input: socket }).on("line", (line) => {
       const message = parse(line);
       if (!message) return;
       if (message.t === "status") {
+        const before = this.status;
         this.status = statusOf(message);
-        for (const waiter of this.waiting.splice(0)) waiter(this.status);
+        for (const waiter of this.waiting.splice(0)) waiter.resolve(this.status);
+        // Recording was just allowed: the process that was running before it was can't count on the
+        // system letting it record. With nobody using it, it is let go; the next use opens it afresh.
+        if (before && !before.recording && this.status.recording && this.routes.size === 0) socket.destroy();
       } else if (message.t === "trusted" && this.status) {
         this.status = { ...this.status, trusted: message.on === true };
         for (const watcher of this.watchers) watcher(this.status);
+      } else if (message.t === "log") {
+        this.log(`[app] ${String(message.message).slice(0, 2000)}`);
+      } else if (message.t === "displays") {
+        const displays = displaysOf(message.list);
+        for (const waiter of this.listing.splice(0)) waiter(displays);
       } else if (typeof message.v === "string") {
         this.routes.get(message.v)?.(message);
       }
@@ -297,41 +340,74 @@ class HelperApp {
   async access(): Promise<HelperStatus> {
     await this.link();
     if (this.status) {
-      const answer = new Promise<HelperStatus>((resolve) => this.waiting.push(resolve));
+      const answer = new Promise<HelperStatus>((resolve, reject) => this.waiting.push({ resolve, reject }));
       await this.write({ t: "status" });
       return answer;
     }
-    return new Promise<HelperStatus>((resolve) => this.waiting.push(resolve));
+    return new Promise<HelperStatus>((resolve, reject) => this.waiting.push({ resolve, reject }));
   }
 
-  /** The system's dialog and its settings page, for the app. */
-  ask(what: "control" | "recording" = "control"): Promise<void> {
-    return this.write({ t: what === "recording" ? "ask-recording" : "ask" });
+  /** The displays there are to watch. */
+  async displays(): Promise<AppDisplay[]> {
+    await this.link();
+    const answer = new Promise<AppDisplay[]>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("LinkShell.app did not list the displays")), 8000);
+      this.listing.push((displays) => {
+        clearTimeout(timer);
+        resolve(displays);
+      });
+    });
+    await this.write({ t: "displays" });
+    return answer;
   }
 
   /**
-   * Has the app run a screen capture: as the app's child, the recording is the
-   * app's to be allowed. The picture comes down a socket of its own; the
-   * returned function ends the capture.
+   * Has the app capture a screen and encode it for a pipe that loses nothing:
+   * the socket to a viewer it couldn't reach directly. Whole frames come to
+   * `on.frame`, each with the generation of picture size it belongs to.
    */
-  async capture(exec: string, args: string[], on: { data(chunk: Buffer): void; exit(code: number, errors: string): void }): Promise<() => void> {
+  async stream(
+    screen: number,
+    profile: StreamProfile,
+    on: { frame(unit: Buffer, key: boolean, generation: number): void; exit(error?: string): void },
+  ): Promise<AppStream> {
     await this.link();
-    const id = `capture-${randomBytes(6).toString("hex")}`;
-    const path = join(tmpdir(), `linkshell-capture-${process.pid}-${randomBytes(4).toString("hex")}.sock`);
+    const id = `stream-${randomBytes(6).toString("hex")}`;
+    const path = join(tmpdir(), `linkshell-stream-${process.pid}-${randomBytes(4).toString("hex")}.sock`);
+    let over = false;
+    let pending: Buffer = Buffer.alloc(0);
     const server = createServer((socket) => {
       server.close();
       rmSync(path, { force: true });
       socket.on("error", () => {});
-      socket.on("data", on.data);
+      // Records: length (4 bytes), flags (bit 0: keyframe), generation, then that many bytes of one frame.
+      socket.on("data", (chunk: Buffer) => {
+        pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+        while (pending.length >= RECORD_HEAD) {
+          const length = pending.readUInt32BE(0);
+          if (length > RECORD_MAX) {
+            socket.destroy();
+            return;
+          }
+          if (pending.length < RECORD_HEAD + length) break;
+          if (!over) on.frame(pending.subarray(RECORD_HEAD, RECORD_HEAD + length), (pending[4]! & 1) === 1, pending[5]!);
+          pending = pending.subarray(RECORD_HEAD + length);
+        }
+      });
     });
-    let over = false;
-    this.routes.set(id, (message) => {
-      if (over || (message.t !== "captured" && message.t !== "gone")) return;
+    const tellApp = (message: object) => {
+      if (!over && this.socket && !this.socket.destroyed) this.socket.write(`${JSON.stringify({ ...message, v: id })}\n`);
+    };
+    const finish = () => {
       over = true;
       this.routes.delete(id);
       server.close();
       rmSync(path, { force: true });
-      on.exit(typeof message.code === "number" ? message.code : -1, typeof message.errors === "string" ? message.errors : "");
+    };
+    this.routes.set(id, (message) => {
+      if (over || (message.t !== "stream.ended" && message.t !== "gone")) return;
+      finish();
+      on.exit(typeof message.error === "string" ? message.error : message.t === "gone" ? "LinkShell.app went" : undefined);
     });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -340,10 +416,49 @@ class HelperApp {
         resolve();
       });
     });
-    await this.write({ t: "capture", v: id, exec, args, socket: path });
-    return () => {
-      if (!over && this.socket && !this.socket.destroyed) this.socket.write(`${JSON.stringify({ t: "stop", v: id })}\n`);
+    await this.write({ t: "stream.open", v: id, screen, socket: path, gop: STREAM_GOP_SECONDS, ...profile });
+    return {
+      set: (next) => tellApp({ t: "stream.set", ...next }),
+      key: () => tellApp({ t: "stream.key" }),
+      end: () => {
+        if (over) return;
+        tellApp({ t: "stream.close" });
+        finish();
+      },
     };
+  }
+
+  /**
+   * Opens LinkShell's own window for its permissions, on this computer: it says
+   * what each is for, has the system ask, takes the user to the switch, and
+   * ticks each off as it is turned on. Nothing appears when both are allowed
+   * already, and there is only ever one such window.
+   */
+  ask(): Promise<void> {
+    return new Promise((resolve, reject) =>
+      execFile("/usr/bin/open", ["-n", "-a", this.app, "--args", "--setup", "--quiet-if-done"], (error) => (error ? reject(error) : resolve())),
+    );
+  }
+
+  /**
+   * Has the app offer a screen to one viewer as a video track. What the app
+   * says of it (`rtc.offer`, `rtc.ice`, `rtc.state`, `rtc.error`, and `gone`
+   * when the app itself went) comes to `route`; the viewer's answer goes back
+   * with `signal`. The picture and the viewer's hands then travel between the
+   * two of them, not through here.
+   */
+  async offerVideo(id: string, offer: VideoOffer, route: Route): Promise<void> {
+    this.routes.set(id, route);
+    await this.write({ t: "rtc.open", v: id, ...offer });
+  }
+
+  signal(id: string, signal: VideoSignal): void {
+    if (this.socket && !this.socket.destroyed && this.routes.has(id)) this.socket.write(`${JSON.stringify({ ...signal, v: id })}\n`);
+  }
+
+  endVideo(id: string): void {
+    if (!this.routes.delete(id)) return;
+    if (this.socket && !this.socket.destroyed) this.socket.write(`${JSON.stringify({ t: "rtc.close", v: id })}\n`);
   }
 
   async join(id: string, screen: number, route: Route, watcher: (status: HelperStatus) => void): Promise<void> {
@@ -402,11 +517,11 @@ export class InputControl {
   constructor(
     private readonly listener: InputListener,
     private readonly log: (message: string) => void,
-    /** `app: false` keeps to a child process even when the package has the app (tests). */
+    /** `app: false` runs the app's program as this process's child instead of having the system open it (tests). */
     private readonly options: { dryRun?: boolean; app?: boolean } = {},
   ) {}
 
-  /** Starts the helper for the display ffmpeg calls "Capture screen `screen`". Reports through the listener; never throws. */
+  /** Starts control of the display the app numbers `screen`. Reports through the listener; never throws. */
   async start(screen: number): Promise<void> {
     if (this.started || this.stopped) return;
     this.started = true;
@@ -415,8 +530,12 @@ export class InputControl {
       return;
     }
     const dryRun = this.options.dryRun ?? dryRunByDefault();
-    const app = this.options.app === false ? undefined : shippedApp();
-    if (app) {
+    const app = shippedApp();
+    if (!app) {
+      this.listener.state({ available: false, reason: NO_APP });
+      return;
+    }
+    if (this.options.app !== false) {
       try {
         await this.joinApp(helperApp(app, dryRun, this.log), screen);
         return;
@@ -425,15 +544,8 @@ export class InputControl {
         this.log(`[screen] ${(error as Error).message}; controlling as the host's own process instead`);
       }
     }
-    let path: string;
-    try {
-      path = await childHelper(this.log, app);
-    } catch (error) {
-      this.listener.state({ available: false, reason: (error as Error).message });
-      return;
-    }
     if (this.stopped) return;
-    this.spawn(path, screen, dryRun);
+    this.spawn(programOf(app), screen, dryRun);
   }
 
   private async joinApp(app: HelperApp, screen: number): Promise<void> {

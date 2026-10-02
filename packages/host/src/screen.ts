@@ -5,21 +5,25 @@ import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError } from "@linkshell/wire";
-import { closeInputApp, hostAccess, inputApp, InputControl } from "./input.js";
-import { LADDER, Pacer, RELAY_LEVEL } from "./screen-pacer.js";
+import { closeInputApp, inputApp, InputControl, NO_APP, videoSignal, type HelperApp } from "./input.js";
+import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
 import { viewerPage } from "./screen-viewer.js";
 
 // Viewing the computer's screen from the phone. The host serves a small
-// viewer page and an H.264 stream on a loopback port; the phone opens it
-// through the same encrypted forwarder as port previews, so the video never
-// leaves the end-to-end channel and needs no NAT traversal. A random token
-// gates the port: other programs on this machine can't watch the screen
-// without having Screen Recording permission themselves. The same socket
-// carries the viewer's pointer and key events back (see `input.ts`).
+// viewer page on a loopback port; the phone opens it through the same
+// encrypted forwarder as port previews. A random token gates the port: other
+// programs on this machine can't watch the screen without having Screen
+// Recording permission themselves.
 //
-// On a Mac the system allows recording to an app by name. A released package
-// carries one, LinkShell.app, and the capture runs as its child: the
-// permission is LinkShell's, whichever terminal started the host.
+// On a Mac the picture is LinkShell.app's (apps/mac; see `input.ts`), which
+// holds the system's permissions under its own name. Where the app and the
+// viewer can reach each other, it is a video track the app sends the viewer
+// directly (docs/v2/screen-realtime.md): the page's socket then carries only
+// what the two need to find each other. Where they can't, the app encodes the
+// picture for the socket instead, and the host paces it (`screen-pacer.ts`):
+// H.264 frames down a pipe that loses nothing, through the forwarder, with the
+// viewer's pointer and key events coming back up it. On Linux that second way
+// is the only one, with ffmpeg capturing.
 
 const run = promisify(execFile);
 
@@ -32,14 +36,6 @@ async function hasFfmpeg(): Promise<boolean> {
   return run("ffmpeg", ["-hide_banner", "-version"], { timeout: 5000 }).then(
     () => true,
     () => false,
-  );
-}
-
-/** Where ffmpeg is: an app the system opened has no shell's PATH to find it on. */
-async function ffmpegPath(): Promise<string> {
-  return run("/usr/bin/which", ["ffmpeg"], { timeout: 5000 }).then(
-    ({ stdout }) => stdout.trim() || "ffmpeg",
-    () => "ffmpeg",
   );
 }
 
@@ -57,7 +53,10 @@ export interface ScreenAccess {
 }
 
 interface CaptureEvents {
-  data(chunk: Buffer): void;
+  /** One whole frame. */
+  frame(unit: Buffer, key: boolean): void;
+  /** The frames from here on are of another size (a capture that changes level without stopping). */
+  resized?(): void;
   /** Over, and not because it was ended here; with words for the viewer when they can do something about it. */
   exit(message?: string): void;
 }
@@ -68,51 +67,30 @@ interface Running {
   gone: Promise<void>;
   /** Whose it is. */
   on: CaptureEvents;
+  /** Another level without stopping, where the capture can do that. */
+  change?(level: number): void;
+  /** The next frame a keyframe, where the capture can do that. */
+  key?(): void;
 }
 
-/** A display to capture, and which of the system's displays it is (ffmpeg's "Capture screen N" is the Nth active one). */
+/** A display to capture, and its number to the app (`index` is what the viewer names it by). */
 interface Capturable extends Display {
   screen: number;
 }
 
-/** macOS: AVFoundation's "Capture screen N" devices. */
-async function listDisplays(): Promise<Capturable[]> {
-  if (process.platform !== "darwin") return [{ index: 0, name: "屏幕", screen: 0 }];
-  const output = await run("ffmpeg", ["-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""], { timeout: 8000 }).then(
-    ({ stderr }) => stderr,
-    (error: { stderr?: string }) => error.stderr ?? "",
-  );
-  const displays: Capturable[] = [];
-  for (const match of output.matchAll(/\[(\d+)\] Capture screen (\d+)/g)) {
-    displays.push({ index: Number(match[1]), name: `屏幕 ${Number(match[2]) + 1}`, screen: Number(match[2]) });
-  }
-  return displays;
-}
-
-/** The capture for one rung of the ladder (see `screen-pacer.ts`): 0 is the best picture. */
-export function captureArgs(display: number, level = 0): string[] {
-  const profile = LADDER[Math.min(Math.max(level, 0), LADDER.length - 1)]!;
-  const input =
-    process.platform === "darwin"
-      ? ["-f", "avfoundation", "-capture_cursor", "1", "-framerate", String(profile.fps), "-i", `${display}:none`]
-      : ["-f", "x11grab", "-framerate", String(profile.fps), "-i", process.env.DISPLAY ?? ":0"];
-  const encode =
-    process.platform === "darwin"
-      ? ["-c:v", "h264_videotoolbox", "-realtime", "1", "-profile:v", "baseline", "-b:v", profile.bitrate, "-maxrate", profile.ceiling]
-      : [
-          "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline", "-x264-params", "sliced-threads=0",
-          "-b:v", profile.bitrate, "-maxrate", profile.ceiling, "-bufsize", profile.ceiling,
-        ];
+/** ffmpeg's capture of an X display (Linux), for one rung of the ladder (see `screen-pacer.ts`): 0 is the best picture. */
+export function captureArgs(level = 0): string[] {
+  const profile = rung(level);
+  const rate = (bits: number) => `${Math.round(bits / 1000)}k`;
   return [
     "-hide_banner",
     "-loglevel",
     "error",
-    ...input,
+    "-f", "x11grab", "-framerate", String(profile.fps), "-i", process.env.DISPLAY ?? ":0",
     "-vf",
-    // AVFoundation captures a screen at its refresh rate whatever -framerate asks (120 a second on a
-    // ProMotion display): the frames are dropped here, before the encoder and the network pay for them.
     `fps=${profile.fps},scale='min(${profile.width},iw)':-2,format=yuv420p`,
-    ...encode,
+    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline", "-x264-params", "sliced-threads=0",
+    "-b:v", rate(profile.bitrate), "-maxrate", rate(profile.ceiling), "-bufsize", rate(profile.ceiling),
     // A keyframe a second: a viewer that fell behind is back on the live picture within one.
     "-g",
     String(profile.fps),
@@ -164,10 +142,7 @@ export class AccessUnitSplitter {
   }
 }
 
-/**
- * Ends a capture. ffmpeg holding a screen through avfoundation can sit through
- * SIGTERM — and through its output going away — so it is asked, then made to.
- */
+/** Ends a capture. ffmpeg holding a screen can sit through SIGTERM — and through its output going away — so it is asked, then made to. */
 export function endCapture(capture: ChildProcess, now = false): void {
   if (capture.exitCode !== null || capture.signalCode !== null) return;
   if (now) {
@@ -223,21 +198,37 @@ export class ScreenShare {
    */
   private holder?: Running;
   private turn: Promise<unknown> = Promise.resolve();
+  /** The viewer the app is sending the screen to as a video track. One at a time, like captures. */
+  private video?: { id: string; taken(): void };
   private readonly controls = new Set<InputControl>();
 
-  constructor(private readonly log: (message: string) => void) {
+  constructor(
+    private readonly log: (message: string) => void,
+    /** The servers both ends ask for their public address, to reach each other directly. */
+    private readonly iceServers: () => string[] = () => [],
+  ) {
     void reapOrphanCaptures(log);
   }
 
   async start(): Promise<{ port: number; token: string; displays: Display[] }> {
-    if (process.platform !== "darwin" && process.platform !== "linux") throw RpcError.app("not_supported", "这台电脑的系统暂不支持查看屏幕");
-    if (!(await hasFfmpeg())) throw RpcError.app("not_supported", "查看屏幕需要电脑上装有 ffmpeg（brew install ffmpeg）");
-    const displays = (this.displays = await listDisplays());
+    const displays = (this.displays = await this.listDisplays());
     if (!displays.length) throw RpcError.app("not_supported", "没有找到可以捕获的屏幕");
     // A fresh token per start: an old viewer URL stops working.
     this.token = randomBytes(24).toString("base64url");
     const port = await this.listen();
     return { port, token: this.token, displays: displays.map(({ index, name }) => ({ index, name })) };
+  }
+
+  private async listDisplays(): Promise<Capturable[]> {
+    if (process.platform === "darwin") {
+      const app = inputApp(this.log);
+      if (!app) throw RpcError.app("not_supported", NO_APP);
+      const displays = await app.displays();
+      return displays.map(({ screen, name }) => ({ index: screen, screen, name: name || `屏幕 ${screen + 1}` }));
+    }
+    if (process.platform !== "linux") throw RpcError.app("not_supported", "这台电脑的系统暂不支持查看屏幕");
+    if (!(await hasFfmpeg())) throw RpcError.app("not_supported", "查看屏幕需要电脑上装有 ffmpeg");
+    return [{ index: 0, name: "屏幕", screen: 0 }];
   }
 
   private listen(): Promise<number> {
@@ -246,6 +237,12 @@ export class ScreenShare {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (!this.authorized(url)) {
         response.writeHead(403).end();
+        return;
+      }
+      // Measuring (LINKSHELL_SCREEN_CLOCK=1): every viewer reads the clock the app shows, whoever made its address.
+      if (process.env.LINKSHELL_SCREEN_CLOCK === "1" && !url.searchParams.has("measure")) {
+        url.searchParams.set("measure", "sync");
+        response.writeHead(302, { location: `${url.pathname}${url.search}`, "cache-control": "no-store" }).end();
         return;
       }
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }).end(viewerPage());
@@ -259,7 +256,9 @@ export class ScreenShare {
       }
       // "low": the viewer is reached through a gateway, which should carry messages rather than video.
       const relayed = url.searchParams.get("q") === "low";
-      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed));
+      // "video": the viewer can take the picture as a video track.
+      const video = url.searchParams.get("video") === "1";
+      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video));
     });
     this.server = server;
     return new Promise((resolve, reject) => {
@@ -275,74 +274,89 @@ export class ScreenShare {
   }
 
   /**
-   * Whether the screen can be watched and controlled, as whatever will do it
-   * sees it: the app where the package has one, this process otherwise. With
-   * `ask`, the system asks for the first permission missing.
+   * Whether the screen can be watched and controlled. On a Mac that is the
+   * app's to say; with `ask`, the app opens its window for what is missing.
+   * (`ffmpeg`: whether what captures is there — ffmpeg itself on Linux.)
    */
   async access(ask: boolean): Promise<ScreenAccess> {
     const supported = process.platform === "darwin" || process.platform === "linux";
-    const ffmpeg = supported && (await hasFfmpeg());
-    if (process.platform !== "darwin") return { supported, ffmpeg, recording: null, control: null, problem: "controlling the screen needs macOS" };
+    if (process.platform !== "darwin") return { supported, ffmpeg: supported && (await hasFfmpeg()), recording: null, control: null, problem: "controlling the screen needs macOS" };
     const app = inputApp(this.log);
+    if (!app) {
+      const problem =
+        process.arch === "arm64"
+          ? "LinkShell.app is missing from this installation (the optional package @linkshell/mac was not installed): reinstall with `npm install -g linkshell-cli`"
+          : "the screen needs a Mac with Apple silicon (this one is Intel)";
+      return { supported: process.arch === "arm64", ffmpeg: false, recording: null, control: null, problem };
+    }
     try {
-      const status = app ? await app.access() : await hostAccess(this.log);
-      // One question at a time: the picture first, then the hands.
-      const missing = !status.recording ? "recording" : !status.trusted ? "control" : undefined;
-      if (ask && missing) await (app ? app.ask(missing) : hostAccess(this.log, missing));
-      return { supported, ffmpeg, recording: status.recording, control: status.trusted, app: status.app };
+      const status = await app.access();
+      if (ask && (!status.recording || !status.trusted)) await app.ask();
+      return { supported, ffmpeg: true, recording: status.recording, control: status.trusted, app: status.app };
     } catch (error) {
-      return { supported, ffmpeg, recording: null, control: null, problem: (error as Error).message };
+      return { supported, ffmpeg: true, recording: null, control: null, problem: (error as Error).message };
     }
   }
 
   /** Starts a capture where it may record. Undefined when it may not: the viewer has been told why. */
-  private async capture(index: number, level: number, on: CaptureEvents): Promise<Running | undefined> {
-    const args = captureArgs(index, level);
+  private async capture(screen: number, level: number, on: CaptureEvents): Promise<Running | undefined> {
     let ended = false;
     let leave = () => {};
     const gone = new Promise<void>((resolve) => (leave = resolve));
-    const data = (chunk: Buffer) => {
-      if (!ended) on.data(chunk);
-    };
-    const finished = (code: number, errors: string) => {
-      leave();
-      if (ended) return;
-      if (code) this.log(`[screen] capture exited ${code}: ${errors.trim()}`);
-      on.exit(!code ? undefined : /permission|not authorized|denied/i.test(errors) ? notAllowed("") : "屏幕捕获失败");
-    };
-    const app = process.platform === "darwin" ? inputApp(this.log) : undefined;
-    if (app) {
+    if (process.platform === "darwin") {
+      const app = inputApp(this.log);
+      if (!app) {
+        on.exit(NO_APP);
+        return undefined;
+      }
       const status = await app.access();
       if (!status.recording) {
-        // Someone may be at the computer: the system's question, and its settings, come up there.
-        void app.ask("recording").catch(() => {});
+        // Someone may be at the computer: the app's window for its permissions comes up there.
+        void app.ask().catch(() => {});
         on.exit(notAllowed(status.app));
         return undefined;
       }
-      const stop = await app.capture(await ffmpegPath(), args, { data, exit: finished });
+      let size: number | undefined;
+      const stream = await app.stream(screen, rung(level), {
+        frame: (unit, key, generation) => {
+          if (ended) return;
+          if (size !== undefined && generation !== size) on.resized?.();
+          size = generation;
+          on.frame(unit, key);
+        },
+        exit: (error) => {
+          leave();
+          if (ended) return;
+          if (error) this.log(`[screen] the app's capture ended: ${error}`);
+          on.exit(!error ? undefined : /permission|not allowed|not authorized|denied|declined/i.test(error) ? notAllowed(status.app) : "屏幕捕获失败");
+        },
+      });
       return {
         on,
         gone,
         end: () => {
           ended = true;
-          stop();
+          stream.end();
+          leave();
         },
+        change: (next) => stream.set(rung(next)),
+        key: () => stream.key(),
       };
     }
-    if (process.platform === "darwin") {
-      // Without the permission the capture just waits, and so would the phone.
-      const status = await hostAccess(this.log).catch(() => undefined);
-      if (status && !status.recording) {
-        void hostAccess(this.log, "recording").catch(() => {});
-        on.exit(notAllowed(status.app));
-        return undefined;
-      }
-    }
-    const capture = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const capture = spawn("ffmpeg", captureArgs(level), { stdio: ["ignore", "pipe", "pipe"] });
     this.captures.add(capture);
+    const splitter = new AccessUnitSplitter();
     let errors = "";
-    capture.stdout!.on("data", data);
+    capture.stdout!.on("data", (chunk: Buffer) => {
+      if (!ended) splitter.push(chunk, on.frame);
+    });
     capture.stderr!.on("data", (chunk: Buffer) => (errors = (errors + chunk.toString()).slice(-2000)));
+    const finished = (code: number, said: string) => {
+      leave();
+      if (ended) return;
+      if (code) this.log(`[screen] capture exited ${code}: ${said.trim()}`);
+      on.exit(code ? "屏幕捕获失败" : undefined);
+    };
     capture.on("error", (error) => finished(-1, error.message));
     capture.on("exit", (code) => {
       this.captures.delete(capture);
@@ -359,8 +373,9 @@ export class ScreenShare {
   }
 
   /** Takes the screen for a new capture: whatever holds it is ended, and has left, before the new one starts. */
-  private take(index: number, level: number, on: CaptureEvents, wanted: () => boolean): Promise<Running | undefined> {
+  private take(screen: number, level: number, on: CaptureEvents, wanted: () => boolean): Promise<Running | undefined> {
     const mine = this.turn.then(async () => {
+      this.video?.taken();
       const previous = this.holder;
       if (previous) {
         this.holder = undefined;
@@ -370,7 +385,7 @@ export class ScreenShare {
         await Promise.race([previous.gone, new Promise((resolve) => setTimeout(resolve, 3000))]);
       }
       if (!wanted()) return undefined;
-      const running = await this.capture(index, level, on);
+      const running = await this.capture(screen, level, on);
       this.holder = running;
       return running;
     });
@@ -378,7 +393,68 @@ export class ScreenShare {
     return mine;
   }
 
-  private stream(ws: WebSocket, display: number, relayed: boolean): void {
+  /**
+   * Has the app offer the screen to this viewer as a video track. False when it can't (no app, an
+   * app without the media engine): the picture then goes down the socket.
+   */
+  private async offerVideo(screen: number, viewer: { closed(): boolean; tell(message: object): void; refuse(message: string): void; lost(): void }): Promise<{ app: HelperApp; id: string } | "refused" | undefined> {
+    // LINKSHELL_SCREEN_VIDEO=off: every viewer gets the picture down the socket (to compare the two, or should the track ever misbehave).
+    const app = process.platform === "darwin" && process.env.LINKSHELL_SCREEN_VIDEO !== "off" ? inputApp(this.log) : undefined;
+    if (!app) return undefined;
+    const status = await app.access();
+    if (!status.video) return undefined;
+    if (!status.recording) {
+      // Someone may be at the computer: the system's question, and its settings, come up there.
+      void app.ask().catch(() => {});
+      viewer.refuse(notAllowed(status.app));
+      return "refused";
+    }
+    if (viewer.closed()) return "refused";
+    // The latest viewer has the screen, whichever way the one before was getting it.
+    this.video?.taken();
+    const holder = this.holder;
+    if (holder) {
+      this.holder = undefined;
+      holder.end();
+      holder.on.exit("屏幕画面被另一台设备接手了");
+    }
+    const id = `video-${randomBytes(6).toString("hex")}`;
+    const mine = {
+      id,
+      taken: () => {
+        if (this.video === mine) this.video = undefined;
+        app.endVideo(id);
+        viewer.refuse("屏幕画面被另一台设备接手了");
+      },
+    };
+    this.video = mine;
+    let reached: unknown;
+    const iceServers = this.iceServers().map((url) => ({ urls: [url] }));
+    viewer.tell({ rtc: { t: "config", iceServers } });
+    // LINKSHELL_SCREEN_FPS: another frame rate than the app's own choice, to try one out.
+    const fps = Number(process.env.LINKSHELL_SCREEN_FPS);
+    await app.offerVideo(id, { screen, iceServers, ...(fps >= 1 && fps <= 120 ? { fps } : {}) }, (message) => {
+      if (this.video !== mine) return;
+      const kind = String(message.t);
+      if (kind === "gone" || kind === "rtc.error") {
+        this.log(`[screen] the video track ended: ${kind === "gone" ? "LinkShell.app went" : String(message.message)}`);
+        viewer.lost();
+      } else if (kind === "posted") {
+        // A dry run: what the viewer's events, come to the app directly, would have done.
+        this.log(`[screen] dry run: ${JSON.stringify(message)}`);
+      } else if (kind === "rtc.offer" || kind === "rtc.ice" || kind === "rtc.state") {
+        if (kind === "rtc.state" && message.connection !== reached) {
+          reached = message.connection;
+          if (reached === "connected") this.log("[screen] the picture is a video track, straight to the viewer");
+        }
+        const { v: _viewer, t: _kind, ...rest } = message;
+        viewer.tell({ rtc: { ...rest, t: kind.slice(4) } });
+      }
+    });
+    return { app, id };
+  }
+
+  private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean): void {
     const shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
     const tell = (message: object) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(message));
     // The viewer's hands: started when it first asks to control, for the display it is watching.
@@ -396,32 +472,49 @@ export class ScreenShare {
     const best = relayed ? RELAY_LEVEL : 0;
     const pacer = new Pacer(Date.now());
     let level = best;
-    let splitter = new AccessUnitSplitter();
     let closed = false;
     let changing = false;
+    let lighter = false;
+    let askedForKey = 0;
+    // Nobody is looking at the viewer (its page is hidden): nothing is sent, and its slowness to answer means nothing.
+    let unwatched = false;
+    // Sending again starts at a keyframe.
+    let wantsKey = false;
     let running: Running | undefined;
+    // Dropping, with only a keyframe missing to carry on: a capture that makes one when asked is asked.
+    const askForKey = () => {
+      const now = Date.now();
+      if (!running?.key || now - askedForKey < 500 || !pacer.needsKey(now)) return;
+      askedForKey = now;
+      running.key();
+    };
+    // A still screen sends no frame to be reminded by.
+    const reminder = setInterval(askForKey, 500);
     const events: CaptureEvents = {
-      data: (chunk) =>
-        splitter.push(chunk, (unit, key) => {
-          if (ws.readyState !== ws.OPEN) return;
-          const now = Date.now();
-          const seq = pacer.next(key, now);
-          if (seq !== undefined) {
-            const head = Buffer.allocUnsafe(5);
-            head[0] = key ? 1 : 0;
-            head.writeUInt32BE(seq >>> 0, 1);
-            ws.send(Buffer.concat([head, unit]));
-          }
-          const advice = changing ? undefined : pacer.advice(now, level > best, level < LADDER.length - 1);
-          if (advice) void change(level + (advice === "down" ? 1 : -1));
-        }),
+      frame: (unit, key) => {
+        if (ws.readyState !== ws.OPEN || unwatched) return;
+        if (wantsKey && !key) return;
+        wantsKey = false;
+        const now = Date.now();
+        const seq = pacer.next(key, now);
+        if (seq !== undefined) {
+          const head = Buffer.allocUnsafe(5);
+          head[0] = key ? 1 : 0;
+          head.writeUInt32BE(seq >>> 0, 1);
+          ws.send(Buffer.concat([head, unit]));
+        } else askForKey();
+        const advice = changing ? undefined : pacer.advice(now, level > best, level < LADDER.length - 1);
+        if (advice) void change(level + (advice === "down" ? 1 : -1));
+      },
+      // The page starts its decoder afresh for the new size; what it had of the old one came before this, in order.
+      resized: () => tell({ restart: true, level, lighter }),
       exit: (message) => {
         if (message) tell({ error: message });
         ws.close();
       },
     };
     const begin = async () => {
-      const started = await this.take(shown?.index ?? 0, level, events, () => !closed);
+      const started = await this.take(shown?.screen ?? 0, level, events, () => !closed);
       if (closed) started?.end();
       else running = started;
     };
@@ -432,17 +525,66 @@ export class ScreenShare {
     };
     const change = async (next: number) => {
       changing = true;
-      this.log(`[screen] picture ${next > level ? "lighter" : "better"}: ${LADDER[next]!.width} wide, ${LADDER[next]!.fps} a second, ${LADDER[next]!.bitrate}`);
+      lighter = next > level;
+      const to = rung(next);
+      this.log(`[screen] picture ${lighter ? "lighter" : "better"}: ${to.width} wide, ${to.fps} a second, ${Math.round(to.bitrate / 1000)} kbit/s`);
+      if (running?.change) {
+        // The capture carries on: the new level takes over at a keyframe, with nothing lost in between.
+        running.change(next);
+        level = next;
+        pacer.changed(Date.now());
+        changing = false;
+        return;
+      }
       // Nothing more of the old stream goes out; the page starts its decoder afresh for the new one.
       running?.end();
-      tell({ restart: true, level: next, lighter: next > level });
+      tell({ restart: true, level: next, lighter });
       level = next;
-      splitter = new AccessUnitSplitter();
       await begin().catch(failed);
       pacer.restarted(Date.now());
       changing = false;
     };
-    void begin().catch(failed);
+
+    // The picture as a video track; down this socket when that can't be had, or didn't get across.
+    let video: { app: HelperApp; id: string } | undefined;
+    const endVideo = () => {
+      if (!video) return;
+      video.app.endVideo(video.id);
+      if (this.video?.id === video.id) this.video = undefined;
+      video = undefined;
+    };
+    const fallBack = () => {
+      if (!video) return;
+      endVideo();
+      if (closed) return;
+      tell({ rtc: { t: "off" } });
+      void begin().catch(failed);
+    };
+    if (wantsVideo) {
+      this.offerVideo(shown?.screen ?? 0, {
+        closed: () => closed,
+        tell,
+        refuse: (message) => {
+          video = undefined;
+          tell({ error: message });
+          ws.close();
+        },
+        lost: fallBack,
+      })
+        .then((offered) => {
+          if (offered === "refused") return;
+          if (closed) {
+            if (offered) offered.app.endVideo(offered.id);
+            return;
+          }
+          if (offered) video = offered;
+          else {
+            tell({ rtc: { t: "off" } });
+            return begin();
+          }
+        })
+        .catch(failed);
+    } else void begin().catch(failed);
 
     ws.on("message", (data, binary) => {
       if (binary) return;
@@ -454,13 +596,45 @@ export class ScreenShare {
       }
       const kind = (message as { t?: unknown } | null)?.t;
       if (kind === "ack") pacer.ack(Number((message as { n?: unknown }).n), Date.now());
+      else if (kind === "rtc.answer" || kind === "rtc.ice") {
+        const signal = videoSignal.safeParse(message);
+        if (signal.success && video) video.app.signal(video.id, signal.data);
+      }
+      // The viewer's decoder lost its place (it skipped ahead, or failed): it can only carry on from a keyframe.
+      // (Named apart from the viewer's own events: whatever isn't one of these kinds is taken for a pointer or key event.)
+      else if (kind === "keyframe") {
+        const now = Date.now();
+        if (running?.key && now - askedForKey >= 500) {
+          askedForKey = now;
+          running.key();
+        }
+      } else if (kind === "hidden") unwatched = true;
+      else if (kind === "shown") {
+        if (!unwatched) return;
+        unwatched = false;
+        wantsKey = true;
+        // What was on its way when the page went out of sight is not waited for.
+        pacer.restarted(Date.now());
+        running?.key?.();
+      }
+      // No direct path between the two, or none in time: the viewer asks for the picture here instead.
+      else if (kind === "rtc.failed") {
+        this.log(`[screen] no video track for this viewer (${String((message as { reason?: unknown }).reason ?? "no reason given").slice(0, 200)}): the picture goes down the socket`);
+        fallBack();
+      }
+      // A viewer measuring (`?measure=1`): its clock against this computer's (it keeps the answer that came back
+      // quickest), then what it sees, once a second.
+      else if (kind === "ping") tell({ pong: { n: (message as { n?: unknown }).n, at: (message as { at?: unknown }).at, now: Date.now() } });
+      else if (kind === "measure") this.log(`[screen] measured: ${JSON.stringify(message).slice(0, 1000)}`);
       else if (kind === "control") void control.start(shown?.screen ?? 0);
       else control.send(message);
     });
     ws.on("close", () => {
       closed = true;
+      clearInterval(reminder);
       if (running && this.holder === running) this.holder = undefined;
       running?.end();
+      endVideo();
       control.stop();
       this.controls.delete(control);
     });
@@ -470,6 +644,7 @@ export class ScreenShare {
     // The host is going: there is no later to insist in.
     this.holder?.end();
     this.holder = undefined;
+    this.video = undefined;
     for (const capture of this.captures) endCapture(capture, true);
     this.captures.clear();
     for (const control of this.controls) control.stop();

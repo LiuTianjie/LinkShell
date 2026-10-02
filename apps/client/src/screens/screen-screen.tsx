@@ -1,4 +1,6 @@
+import * as Clipboard from "expo-clipboard";
 import * as Device from "expo-device";
+import { useKeepAwake } from "expo-keep-awake";
 import { Stack } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
@@ -14,7 +16,7 @@ import { Icon } from "@/components/icon";
 import { useConnection, useStreamPath } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { forwardPort, type Forward } from "@/lib/preview";
-import { loadScreenMode, saveScreenMode, type ScreenMode } from "@/lib/settings";
+import { loadScreenMode, loadScreenShortcuts, saveScreenMode, saveScreenShortcuts, screenShortcuts, type ScreenMode } from "@/lib/settings";
 import { type } from "@/theme/type";
 
 interface Viewer {
@@ -34,8 +36,9 @@ const LANDSCAPE = Platform.OS === "ios" ? ScreenOrientation.OrientationLock.LAND
  * The computer's screen, live: the host's viewer page and H.264 stream,
  * opened through the encrypted forwarder like a port preview. The page has
  * the gestures and the toolbar (they come with the host); this screen gives it
- * what a page can't take: the whole display, its orientation, and room above
- * the keyboard.
+ * what a page can't take: the whole display, its orientation, room above the
+ * keyboard and word of whether it is up, the phone's clipboard, and a place to
+ * keep the user's own shortcuts.
  */
 export function ScreenScreen() {
   const { link, streams, computer } = useConnection();
@@ -45,10 +48,14 @@ export function ScreenScreen() {
   const [display, setDisplay] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
   const web = useRef<WebView>(null);
+  // Watching is not touching: the phone must not lock while the screen is being watched.
+  useKeepAwake("screen");
   const insets = useSafeAreaInsets();
   // The mode the page opens in is the one last chosen; after that the page reports its own.
   const [initialMode] = useState(loadScreenMode);
   const [mode, setMode] = useState<ScreenMode>(initialMode);
+  // The user's own shortcuts: the page shows and edits them, and they are kept here.
+  const [shortcuts, setShortcuts] = useState(loadScreenShortcuts);
   const [fullscreen, setFullscreen] = useState(false);
   const [landscape, setLandscape] = useState(false);
   // Landscape has no room for a header, so it is always the full screen; leaving the full screen stands the phone up again.
@@ -88,6 +95,10 @@ export function ScreenScreen() {
   }, [fullscreen, present]);
 
   const keyboardOpen = useKeyboardState((state) => state.isVisible);
+  const keyboardUp = useRef(keyboardOpen);
+  keyboardUp.current = keyboardOpen;
+  const keyboardRetry = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(keyboardRetry.current), []);
   // What the page is told about the display it has: under the header only the sides and the bottom are the phone's edges.
   const chrome = useMemo(
     () =>
@@ -95,19 +106,25 @@ export function ScreenScreen() {
         fullscreen,
         landscape,
         canRotate,
+        // This app lets the page play video in place: the page may take the picture as a video track.
+        video: true,
         // Lying down that way, the right is the side without the camera.
         clear: landscape && Platform.OS === "ios" ? "right" : null,
+        // Whether the keyboard is on the screen: the system tells the app, and a page only its field's focus,
+        // which a phone leaves standing when it takes the keyboard away.
+        keyboard: keyboardOpen,
+        shortcuts,
         // The keyboard covers the bottom edge while it is up.
         insets: { top: fullscreen ? insets.top : 0, right: insets.right, bottom: keyboardOpen ? 0 : insets.bottom, left: insets.left },
       }),
-    [fullscreen, landscape, keyboardOpen, insets.top, insets.right, insets.bottom, insets.left],
+    [fullscreen, landscape, keyboardOpen, shortcuts, insets.top, insets.right, insets.bottom, insets.left],
   );
   const tellPage = useCallback((state: string) => web.current?.injectJavaScript(`window.linkshellChrome && window.linkshellChrome(${state}); true;`), []);
   useEffect(() => tellPage(chrome), [chrome, tellPage]);
 
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
-      let message: { type?: string; on?: boolean; mode?: string; kind?: string };
+      let message: { type?: string; on?: boolean; mode?: string; kind?: string; list?: unknown };
       try {
         message = JSON.parse(event.nativeEvent.data);
       } catch {
@@ -116,13 +133,36 @@ export function ScreenScreen() {
       if (message.type === "fullscreen") present(message.on === true, message.on === true && landscape);
       else if (message.type === "landscape") present(fullscreen, message.on === true);
       else if (message.type === "haptic") (message.kind === "medium" ? haptics.medium : haptics.light)();
-      else if (message.type === "ready" || message.type === "mode") {
+      else if (message.type === "keyboard") {
+        // The page is asking for the keyboard, and the system gives one only to the view the keys go to. That
+        // is not always the web view: something of the app's may have taken them, or the system let go of them
+        // while the app was put aside. Should no keyboard have come up after that, the page asks once more.
+        web.current?.requestFocus();
+        clearTimeout(keyboardRetry.current);
+        keyboardRetry.current = setTimeout(() => {
+          if (!keyboardUp.current) web.current?.injectJavaScript("window.linkshellKeyboard && window.linkshellKeyboard(); true;");
+        }, 900);
+      } else if (message.type === "shortcuts") {
+        const kept = screenShortcuts(message.list);
+        saveScreenShortcuts(kept);
+        setShortcuts(kept);
+      } else if (message.type === "clipboard") {
+        // Into the page's text box, for the user to look over and send: nothing goes to the computer from here.
+        void Clipboard.getStringAsync()
+          .catch(() => "")
+          .then((text) => web.current?.injectJavaScript(`window.linkshellClipboard && window.linkshellClipboard(${JSON.stringify(text.slice(0, 20_000))}); true;`));
+      } else if (message.type === "ready" || message.type === "mode") {
         if (message.mode === "view" || message.mode === "trackpad" || message.mode === "touch") {
           setMode(message.mode);
           if (message.type === "mode") saveScreenMode(message.mode);
         }
         // A page that has just loaded (again) learns where it stands.
-        if (message.type === "ready") tellPage(chrome);
+        if (message.type === "ready") {
+          tellPage(chrome);
+          // Android gives a web view the focus on a tap the page lets through, and this page takes every touch
+          // for the computer: without the focus its keyboard button raises no keyboard.
+          if (Platform.OS === "android") web.current?.requestFocus();
+        }
       }
     },
     [present, landscape, fullscreen, tellPage, chrome],
@@ -166,7 +206,8 @@ export function ScreenScreen() {
   const current = viewer?.displays.find((entry) => entry.index === display);
   // Through a gateway the picture is lighter: it is someone's relay, not a wire between the two devices.
   const quality = via === "relay" && computer.kind !== "direct" ? "&q=low" : "";
-  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}&mode=${initialMode}` : null;
+  // video=1: this app plays video in place. Said here as well as in `chrome`, which on Android can reach the page after its script has run.
+  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}&mode=${initialMode}&video=1` : null;
 
   return (
     <Animated.View style={[{ flex: 1, backgroundColor: "#000000" }, lift]}>
@@ -237,6 +278,9 @@ export function ScreenScreen() {
           contentInsetAdjustmentBehavior="never"
           hideKeyboardAccessoryView
           keyboardDisplayRequiresUserAction={false}
+          // The picture is a video the page plays where it is, at once, without being asked to.
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
           style={{ flex: 1, backgroundColor: "#000000" }}
           containerStyle={{ backgroundColor: "#000000" }}
         />
