@@ -207,7 +207,7 @@ describe("startGateway", () => {
 
     const lapsed = peer(ws, "machine", "token-lapsed");
     await until(() => lapsed.errors.some((error) => error.code === "not_admitted"));
-    expect(lapsed.errors.find((error) => error.code === "not_admitted")?.message).toContain("https://itool.tech");
+    expect(lapsed.errors.find((error) => error.code === "not_admitted")?.message).toContain("https://liutianjie.github.io/LinkShell/pricing/");
     lapsed.relay.stop();
 
     expect(await peer(ws, "machine", "token-active").relay.waitOnline(5000)).toBe(true);
