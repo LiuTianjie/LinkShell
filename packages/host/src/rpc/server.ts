@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import { existsSync, rmSync } from "node:fs";
 import WebSocket, { WebSocketServer } from "ws";
 import {
@@ -23,6 +23,27 @@ import { ScreenShare } from "../screen.js";
 import { DirectPeer } from "../direct.js";
 import { imageOf, parseImageUri, slimEvent } from "../slim.js";
 import type { OutputListener, TerminalManager } from "../terminals.js";
+
+// How a development client names this machine: loopback, or the Android emulator's alias for its host's loopback.
+const DEVELOPMENT_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "10.0.2.2"]);
+
+/**
+ * Whether a WebSocket handshake on the development port comes from a development client and not from a web
+ * page. Browsers let any page open a socket to 127.0.0.1, and this API runs commands. A page can't hide its
+ * Origin, so one from elsewhere is refused; the Host must be this machine by address, so a name the page's
+ * site has pointed at 127.0.0.1 (DNS rebinding) is refused too. Native clients send no Origin, or their own
+ * server's (React Native on Android).
+ */
+export function isLocalDevelopmentClient(headers: { host?: string; origin?: string }): boolean {
+  const host = headers.host?.toLowerCase();
+  if (!host || !DEVELOPMENT_HOSTS.has(host.replace(/:\d+$/, ""))) return false;
+  if (headers.origin === undefined) return true;
+  try {
+    return new URL(headers.origin).host === host;
+  } catch {
+    return false;
+  }
+}
 
 export interface HostRpcServerOptions {
   hub: SessionHub;
@@ -247,7 +268,9 @@ export class HostRpcServer {
     if (existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
     await this.listen((server) => server.listen(this.options.socketPath));
     if (this.options.tcpPort !== undefined) {
-      await this.listen((server) => server.listen(this.options.tcpPort, "127.0.0.1"));
+      // The unix socket is guarded by its directory's permissions; a TCP port is open to every
+      // browser tab on this machine, so it checks who is asking.
+      await this.listen((server) => server.listen(this.options.tcpPort, "127.0.0.1"), isLocalDevelopmentClient);
     }
   }
 
@@ -264,12 +287,17 @@ export class HostRpcServer {
     return address && typeof address === "object" ? address.port : undefined;
   }
 
-  private listen(bind: (server: Server) => void): Promise<void> {
+  private listen(bind: (server: Server) => void, allowed?: (headers: { host?: string; origin?: string }) => boolean): Promise<void> {
     const server = createServer((_, response) => {
       response.writeHead(426, { "content-type": "text/plain" });
       response.end("LinkShell host: WebSocket required\n");
     });
-    const wss = new WebSocketServer({ server, perMessageDeflate: false, maxPayload: 32 * 1024 * 1024 });
+    const wss = new WebSocketServer({
+      server,
+      perMessageDeflate: false,
+      maxPayload: 32 * 1024 * 1024,
+      verifyClient: allowed && (({ req }: { req: IncomingMessage }) => allowed({ host: req.headers.host, origin: req.headers.origin })),
+    });
     wss.on("connection", (socket) => this.accept(socket));
     this.servers.push(server);
     return new Promise((resolve, reject) => {
