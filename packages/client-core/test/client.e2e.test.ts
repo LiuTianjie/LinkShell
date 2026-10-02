@@ -6,7 +6,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { AcpDriver, connectHost, startHost, type RunningHost } from "@linkshell/host";
 import { HostLink, type SocketLike } from "../src/host-link.js";
-import { createClientStore, subagentKey, type ClientStore } from "../src/store.js";
+import { createClientStore, shownQueue, subagentKey, type ClientStore } from "../src/store.js";
 import type { TimelineItem } from "../src/timeline.js";
 
 const FAKE_ACP = fileURLToPath(new URL("../../host/test/fixtures/fake-acp.mjs", import.meta.url));
@@ -183,8 +183,20 @@ describe("client core against a real host", () => {
     const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });
     const queue = () => store.getState().sessions[session.id]?.queue?.map((entry) => entry.text) ?? [];
     expect(await store.getState().send(session.id, text("SLOW first"))).toBe("started");
-    await waitFor(() => store.getState().views[session.id]?.turnActive);
-    expect(await store.getState().send(session.id, text("second"))).toBe("queued");
+    await waitFor(() => store.getState().views[session.id]?.turnActive && store.getState().sessions[session.id]?.state === "running");
+    const users = () => store.getState().views[session.id]!.items.filter((item) => item.kind === "user");
+    const sending = store.getState().send(session.id, text("second"));
+    // Headed for the queue: it shows there at once, still on its way, and never as a sent message first.
+    expect(shownQueue(store.getState().sessions[session.id]?.queue, store.getState().queueing[session.id])).toEqual([
+      expect.objectContaining({ text: "second", images: 0, pending: true }),
+    ]);
+    expect(users()).toHaveLength(1);
+    expect(await sending).toBe("queued");
+    expect(store.getState().queueing[session.id]).toBeUndefined();
+    expect(shownQueue(store.getState().sessions[session.id]?.queue, store.getState().queueing[session.id])).toEqual([
+      expect.objectContaining({ text: "second" }),
+    ]);
+    expect(users()).toHaveLength(1);
     expect(await store.getState().send(session.id, text("third"))).toBe("queued");
     await waitFor(() => queue().length === 2);
     // Waiting messages aren't in the conversation yet.

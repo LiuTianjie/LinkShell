@@ -171,6 +171,17 @@ describe("timeline reducer", () => {
     expect(failed.items[0]).toMatchObject({ failed: true, pending: false });
   });
 
+  it("shows a queued message that was sent now as said, until the agent's own copy takes its place", () => {
+    seq = 0;
+    let v = addOptimisticMessage(emptyView("s"), "c3", [text("look at main only")], 500, true);
+    expect(v.items[0]).toMatchObject({ id: "local-c3", pending: true, accepted: true });
+    v = applyEvent(v, ev({ sessionUpdate: "user_message_chunk", messageId: "local-c3", content: text("look at main only") }));
+    // Replaced, not said twice.
+    expect(v.items).toHaveLength(1);
+    expect(v.items[0]).toMatchObject({ id: "local-c3", blocks: [text("look at main only")], ts: 500 });
+    expect(v.items[0]).not.toHaveProperty("accepted");
+  });
+
   it("reports handoffs after the initial driver, and applies config, commands and usage", () => {
     seq = 0;
     const v = applyEvents(emptyView("s"), [

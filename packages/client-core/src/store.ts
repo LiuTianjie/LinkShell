@@ -5,6 +5,7 @@ import {
   type MachineInfo,
   type MethodResult,
   type ProjectSummary,
+  type QueuedMessage,
   type QuestionAnswer,
   type SessionEvent,
   type SessionSummary,
@@ -51,6 +52,24 @@ export interface ClientState {
   subagentViews: Record<string, SessionView>;
   /** Unsent or failed messages, by client message id. */
   outbox: Record<string, { sessionId: string; content: ContentBlock[] }>;
+  /**
+   * Messages sent while a turn runs, on their way to the session's queue:
+   * shown at the end of it until the host has them.
+   */
+  queueing: Record<string, QueueEntry[]>;
+}
+
+/** A message in a session's queue, or (`pending`) one this device has sent there and the host hasn't confirmed. */
+export interface QueueEntry extends QueuedMessage {
+  pending?: boolean;
+}
+
+/** The session's queue as it is shown: what the host holds, then what is still on its way there. */
+export function shownQueue(queue: QueuedMessage[] | undefined, queueing: QueueEntry[] | undefined): QueueEntry[] {
+  const held = queue ?? [];
+  if (!queueing?.length) return held;
+  const known = new Set(held.map((entry) => entry.clientMessageId));
+  return [...held, ...queueing.filter((entry) => !known.has(entry.clientMessageId))];
 }
 
 export interface ClientActions {
@@ -235,6 +254,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         open: without(state.open),
         ready: without(state.ready),
         loadingEarlier: without(state.loadingEarlier),
+        queueing: without(state.queueing),
         subagents: without(state.subagents),
         subagentViews: Object.fromEntries(Object.entries(state.subagentViews).filter(([key]) => !key.startsWith(`${sessionId}\n`))),
       };
@@ -284,6 +304,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       subagents: {},
       subagentViews: {},
       outbox: {},
+      queueing: {},
 
       connect() {
         link.start();
@@ -340,12 +361,42 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
       async send(sessionId, content, sendOptions) {
         const clientMessageId = newId();
+        const session = get().sessions[sessionId];
+        // A turn is running (or messages already wait): this one is headed for the
+        // queue, so that is where it shows from the start, not as a sent message first.
+        const queues = !sendOptions?.now && (session?.state === "running" || session?.state === "waiting" || (session?.queue?.length ?? 0) > 0);
         set((state) => ({ outbox: { ...state.outbox, [clientMessageId]: { sessionId, content } } }));
-        updateView(sessionId, (view) => addOptimisticMessage(view, clientMessageId, content));
+        if (queues) {
+          const entry: QueueEntry = {
+            clientMessageId,
+            text: content.map((block) => (block.type === "text" ? block.text : "")).join("").trim(),
+            images: content.filter((block) => block.type === "image").length,
+            pending: true,
+          };
+          set((state) => ({ queueing: { ...state.queueing, [sessionId]: [...(state.queueing[sessionId] ?? []), entry] } }));
+        } else {
+          updateView(sessionId, (view) => addOptimisticMessage(view, clientMessageId, content));
+        }
         const delivery = await deliver(clientMessageId, sendOptions?.now);
-        // Waiting in the host's queue: it shows there (summary.queue) until its
-        // turn starts, when the agent's echo puts it in the timeline.
-        if (delivery === "queued") updateView(sessionId, (view) => removeItem(view, `local-${clientMessageId}`));
+        if (!queues) {
+          // Waiting in the host's queue after all: it shows there (summary.queue)
+          // until its turn starts, when the agent's echo puts it in the timeline.
+          if (delivery === "queued") updateView(sessionId, (view) => removeItem(view, `local-${clientMessageId}`));
+          return delivery;
+        }
+        // (The host announces its queue before it answers, so the message is in `summary.queue` by now.)
+        set((state) => {
+          const rest = (state.queueing[sessionId] ?? []).filter((entry) => entry.clientMessageId !== clientMessageId);
+          const queueing = { ...state.queueing };
+          if (rest.length > 0) queueing[sessionId] = rest;
+          else delete queueing[sessionId];
+          return { queueing };
+        });
+        // The turn ended meanwhile and it went straight out, or it didn't go at all: a message like any other.
+        if (delivery === "started" || delivery === "steered" || delivery === "failed") {
+          updateView(sessionId, (view) => (view.index[`local-${clientMessageId}`] === undefined ? addOptimisticMessage(view, clientMessageId, content) : view));
+          if (delivery === "failed") updateView(sessionId, (view) => markMessageFailed(view, clientMessageId));
+        }
         return delivery;
       },
 
@@ -408,7 +459,19 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       },
 
       async sendQueuedNow(sessionId, clientMessageId) {
+        const queue = get().sessions[sessionId]?.queue ?? [];
+        const entry = clientMessageId ? queue.find((queued) => queued.clientMessageId === clientMessageId) : queue[0];
+        const content = entry && (queuedContent.get(entry.clientMessageId) ?? (entry.text ? [{ type: "text" as const, text: entry.text }] : []));
         await link.call("sessions.sendQueued", { sessionId, clientMessageId }, 30_000);
+        if (entry && content?.length) {
+          // Out of the queue and with the agent: it shows as said at once. The agent's own
+          // copy, which replaces it, can be a while (it is recorded when the agent takes it up).
+          const id = entry.clientMessageId;
+          const stillQueued = get().sessions[sessionId]?.queue?.some((queued) => queued.clientMessageId === id);
+          if (!stillQueued) {
+            updateView(sessionId, (view) => (view.index[`local-${id}`] === undefined ? addOptimisticMessage(view, id, content, Date.now(), true) : view));
+          }
+        }
       },
 
       async reorderQueue(sessionId, clientMessageIds) {

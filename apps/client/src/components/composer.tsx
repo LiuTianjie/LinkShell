@@ -1,5 +1,5 @@
-import type { PendingPermission } from "@linkshell/client-core";
-import type { AgentInfo, ContentBlock, QuestionAnswer, QueuedMessage, SessionConfigOption, SessionDriver } from "@linkshell/wire";
+import type { PendingPermission, QueueEntry } from "@linkshell/client-core";
+import type { AgentInfo, ContentBlock, QuestionAnswer, SessionConfigOption, SessionDriver } from "@linkshell/wire";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -51,7 +51,7 @@ export interface ComposerProps {
   onTakeover: () => Promise<void>;
   onConfig: (optionId: string, value: string) => void;
   /** Messages the computer holds until the current turn ends. */
-  queue?: QueuedMessage[];
+  queue?: QueueEntry[];
   onUnqueue: (clientMessageId: string) => void;
   /** Takes a queued message out of the queue; what it said goes back into the input. */
   onTakeQueued: (clientMessageId: string) => Promise<ContentBlock[] | undefined>;
@@ -164,7 +164,10 @@ export function Composer(props: ComposerProps) {
   const stop = async () => {
     haptics.medium();
     // Stopping drops what's queued; its text comes back here, like the terminal does.
-    const queued = (props.queue ?? []).map((entry) => entry.text).filter(Boolean);
+    const queued = (props.queue ?? [])
+      .filter((entry) => !entry.pending)
+      .map((entry) => entry.text)
+      .filter(Boolean);
     if (queued.length) setText((current) => [...queued, current].filter(Boolean).join("\n\n"));
     setStopping(true);
     try {

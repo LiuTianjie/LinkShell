@@ -60,7 +60,7 @@ export const UserMessage = memo(function UserMessage({
               borderCurve: "continuous",
               paddingHorizontal: 14,
               paddingVertical: 9,
-              opacity: item.pending ? 0.65 : 1,
+              opacity: item.pending && !item.accepted ? 0.65 : 1,
               gap: 6,
             }}
           >
@@ -81,7 +81,7 @@ export const UserMessage = memo(function UserMessage({
       ) : null}
       {item.failed ? (
         <Text style={[type.caption, { color: colors.danger }]}>发送失败 · 轻点重试</Text>
-      ) : item.pending ? (
+      ) : item.pending && !item.accepted ? (
         <Text style={[type.caption, { color: colors.tertiaryLabel }]}>发送中…</Text>
       ) : null}
     </View>

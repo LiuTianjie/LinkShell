@@ -1,5 +1,5 @@
 import type { LegendListRef } from "@legendapp/list/react-native";
-import type { TimelineItem } from "@linkshell/client-core";
+import { shownQueue, type TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
@@ -97,6 +97,7 @@ export function SessionScreen() {
   const ready = useClient((state) => !!state.ready[id]);
   const online = useClient((state) => state.status === "online");
   const loadingEarlier = useClient((state) => !!state.loadingEarlier[id]);
+  const queueing = useClient((state) => state.queueing[id]);
   const subagentsListed = useClient((state) => state.subagents[id]?.length ?? 0);
   const subagentsTotal = summary?.subagents?.total ?? 0;
   const subagentsRunning = summary?.subagents?.running ?? 0;
@@ -438,7 +439,7 @@ export function SessionScreen() {
           onLayout={(event) => composerInset.set(event.nativeEvent.layout.height)}
           onSend={(content) => actions.send(id, content)}
           onStop={() => guard(() => actions.cancel(id), "停止失败")}
-          queue={summary.queue}
+          queue={shownQueue(summary.queue, queueing)}
           onUnqueue={(clientMessageId) => void guard(() => actions.unqueue(id, clientMessageId).then(() => {}), "取消失败")}
           onTakeQueued={(clientMessageId) => actions.takeQueued(id, clientMessageId)}
           onSendQueuedNow={(clientMessageId) => guard(() => actions.sendQueuedNow(id, clientMessageId), "发送失败")}

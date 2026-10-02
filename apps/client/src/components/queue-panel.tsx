@@ -1,5 +1,5 @@
 import type { MenuAction } from "@react-native-menu/menu";
-import type { QueuedMessage } from "@linkshell/wire";
+import type { QueueEntry } from "@linkshell/client-core";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { haptics } from "@/lib/haptics";
@@ -15,7 +15,8 @@ const ROW = 46;
 const SHOWN = 3;
 
 export interface QueuePanelProps {
-  queue: QueuedMessage[];
+  /** What waits, and at the end what is still on its way to the queue (`pending`). */
+  queue: QueueEntry[];
   /** Offline, or the composer can't take a message: the rows only show. */
   disabled?: boolean;
   onSendNow: (clientMessageId: string) => Promise<void>;
@@ -37,7 +38,7 @@ function Row({
   onRemove,
   onMove,
 }: {
-  entry: QueuedMessage;
+  entry: QueueEntry;
   index: number;
   count: number;
   first: boolean;
@@ -75,11 +76,19 @@ function Row({
       }}
     >
       <Text style={[type.caption, { width: 16, color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{index + 1}</Text>
-      <Text numberOfLines={2} style={[type.footnote, { flex: 1, paddingRight: 6, color: entry.text ? colors.label : colors.secondaryLabel }]}>
+      <Text
+        numberOfLines={2}
+        style={[type.footnote, { flex: 1, paddingRight: 6, color: entry.text && !entry.pending ? colors.label : colors.secondaryLabel }]}
+      >
         {entry.text || images}
         {entry.text && images ? <Text style={{ color: colors.secondaryLabel }}> · {images}</Text> : null}
       </Text>
-      {disabled ? null : (
+      {entry.pending ? (
+        // Not in the queue yet: nothing can be done with it until the computer has it.
+        <View accessibilityLabel="正在排队" style={{ width: 36, height: 40, marginRight: 8, alignItems: "center", justifyContent: "center" }}>
+          <ActivityIndicator size="small" color={colors.secondaryLabel} style={{ transform: [{ scale: 0.7 }] }} />
+        </View>
+      ) : disabled ? null : (
         <>
           <Pressable
             onPress={sendNow}
@@ -137,13 +146,16 @@ function Row({
  */
 export function QueuePanel({ queue, disabled = false, onSendNow, onEdit, onRemove, onReorder }: QueuePanelProps) {
   const move = (index: number, by: -1 | 1) => {
-    const ids = queue.map((entry) => entry.clientMessageId);
+    // (Only what the computer holds has an order to change.)
+    const ids = queue.filter((entry) => !entry.pending).map((entry) => entry.clientMessageId);
     const target = index + by;
     if (target < 0 || target >= ids.length) return;
     [ids[index], ids[target]] = [ids[target]!, ids[index]!];
     haptics.selection();
     onReorder(ids);
   };
+
+  const held = queue.filter((entry) => !entry.pending).length;
 
   return (
     <Glass style={{ borderRadius: 22, paddingHorizontal: 4, overflow: "hidden" }}>
@@ -163,7 +175,7 @@ export function QueuePanel({ queue, disabled = false, onSendNow, onEdit, onRemov
             key={entry.clientMessageId}
             entry={entry}
             index={index}
-            count={queue.length}
+            count={held}
             first={index === 0}
             disabled={disabled}
             onSendNow={() => onSendNow(entry.clientMessageId)}

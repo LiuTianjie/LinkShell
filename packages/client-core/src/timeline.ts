@@ -29,6 +29,8 @@ export type TimelineItem =
       ts: number;
       /** Sent from this device and not yet confirmed by the host. */
       pending?: boolean;
+      /** The host took it (a queued message sent now): it shows as said while the agent's own copy is on its way. */
+      accepted?: boolean;
       failed?: boolean;
     }
   | {
@@ -507,9 +509,12 @@ export function prependEvents(view: SessionView, events: SessionEvent[], startSe
   return { ...joinViews(earlier, view), startSeq };
 }
 
-/** Shows a message the user just sent, before the host confirms it. */
-export function addOptimisticMessage(view: SessionView, clientMessageId: string, blocks: ContentBlock[], ts = Date.now()): SessionView {
-  return upsert(view, { kind: "user", id: `local-${clientMessageId}`, blocks, ts, pending: true });
+/**
+ * Shows a message the user just sent, before the host confirms it. `accepted`:
+ * the host has it already, and only the agent's own copy is still to come.
+ */
+export function addOptimisticMessage(view: SessionView, clientMessageId: string, blocks: ContentBlock[], ts = Date.now(), accepted = false): SessionView {
+  return upsert(view, { kind: "user", id: `local-${clientMessageId}`, blocks, ts, pending: true, ...(accepted ? { accepted: true } : {}) });
 }
 
 export function markMessageFailed(view: SessionView, clientMessageId: string): SessionView {
