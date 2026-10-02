@@ -44,7 +44,7 @@ export function isLoopback(ip: string): boolean {
 }
 
 /** IPv4 addresses arrive IPv6-mapped (::ffff:1.2.3.4) on a dual-stack socket. */
-function normalizeIp(ip: string): string {
+export function normalizeIp(ip: string): string {
   const trimmed = ip.trim().toLowerCase();
   return trimmed.startsWith("::ffff:") ? trimmed.slice(7) : trimmed;
 }

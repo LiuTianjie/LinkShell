@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { RELAY_PATH } from "@linkshell/wire";
 import type { VerifyToken } from "./accounts.js";
-import { clientIp, isLoopback, RateLimiter, trustedProxySet } from "./rate-limit.js";
+import { clientIp, isLoopback, normalizeIp, RateLimiter, trustedProxySet } from "./rate-limit.js";
 import { Gateway, type GatewayOptions } from "./relay.js";
 
 export interface StartGatewayOptions {
@@ -53,7 +53,8 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
   // the gateway's log names the address to add.
   const untrustedProxies = new Set<string>();
   const noteUntrustedProxy = (request: IncomingMessage) => {
-    const peer = request.socket.remoteAddress ?? "";
+    // As it would be written in TRUSTED_PROXIES: without the IPv6 mapping a dual-stack socket adds.
+    const peer = normalizeIp(request.socket.remoteAddress ?? "");
     if (request.headers["x-forwarded-for"] === undefined || isLoopback(peer) || trustedProxies.has(peer)) return;
     if (untrustedProxies.has(peer) || untrustedProxies.size >= 16) return;
     untrustedProxies.add(peer);
