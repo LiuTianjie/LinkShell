@@ -276,7 +276,12 @@ export class HostRpcServer {
 
   async stop(): Promise<void> {
     this.screen.stop();
+    // A connection tidies up after itself when its socket closes, and that reaches into the hub. The close
+    // comes a moment after terminate(): waited for here, so that it isn't still to come when the hub and
+    // its database are gone.
+    const closed = [...this.sockets].map((socket) => new Promise<void>((resolve) => socket.once("close", () => resolve())));
     for (const socket of this.sockets) socket.terminate();
+    await Promise.all(closed);
     await Promise.all(this.servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
     rmSync(this.options.socketPath, { force: true });
   }
