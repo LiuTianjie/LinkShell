@@ -1,5 +1,7 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
 import { ABANDON, RpcPeer, type RpcId } from "@linkshell/wire";
@@ -23,18 +25,66 @@ const OPT_OUT_NOTIFICATIONS = [
   "thread/goal/updated",
 ];
 
-export interface CodexAppServerOptions {
+export interface CodexConnectionOptions {
   /** Unix socket path; must stay under the ~104-byte sun_path limit. */
   socketPath: string;
-  command?: string;
-  env?: NodeJS.ProcessEnv;
   clientVersion: string;
-  log: (message: string) => void;
   onNotification: (method: string, params: unknown) => void;
   /** Server → client requests (approvals). Return ABANDON to leave one to other clients. */
   onRequest: (method: string, params: unknown, id: RpcId) => unknown;
   /** Called when the app-server process or its socket goes away unexpectedly. */
   onDown: (reason: string) => void;
+}
+
+export interface CodexAppServerOptions extends CodexConnectionOptions {
+  command?: string;
+  env?: NodeJS.ProcessEnv;
+  log: (message: string) => void;
+}
+
+/**
+ * Where Codex's own background server listens: the one a plain `codex` in a
+ * terminal starts and talks to (`codex app-server daemon`), unless it is run
+ * with `--no-daemon` or with configuration overrides.
+ */
+export function sharedServerSocket(env: NodeJS.ProcessEnv = process.env): string {
+  return join(env.CODEX_HOME || join(homedir(), ".codex"), "app-server-control", "app-server-control.sock");
+}
+
+/** A client connection to an app-server socket. The socket speaks WebSocket; permessage-deflate must be off or the upgrade is reset. */
+async function openConnection(options: CodexConnectionOptions, closing: () => boolean): Promise<{ socket: WebSocket; peer: RpcPeer }> {
+  const socket = new WebSocket(`ws+unix://${options.socketPath}:/`, { perMessageDeflate: false, handshakeTimeout: 10_000 });
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", () => resolve());
+    socket.once("error", reject);
+  });
+  const peer = new RpcPeer({
+    send: (text) => socket.send(text),
+    onNotification: (method, params) => options.onNotification(method, params),
+    onRequest: (method, params, id) => options.onRequest(method, params, id) ?? ABANDON,
+    requestTimeoutMs: 60_000,
+  });
+  socket.on("message", (data) => peer.receive(data.toString()));
+  let ready = false;
+  socket.on("close", () => {
+    peer.close("codex app-server connection closed");
+    if (ready && !closing()) options.onDown("codex app-server connection closed");
+  });
+  // A failure after the handshake arrives as "close" too; this only keeps it from being thrown.
+  socket.on("error", () => {});
+  try {
+    await peer.request("initialize", {
+      clientInfo: { name: "linkshell", title: "LinkShell", version: options.clientVersion },
+      // experimentalApi: plan mode (`collaborationMode`) and the questions Codex asks (`item/tool/requestUserInput`) need it.
+      capabilities: { experimentalApi: true, requestAttestation: false, optOutNotificationMethods: OPT_OUT_NOTIFICATIONS },
+    });
+  } catch (error) {
+    socket.close();
+    throw error;
+  }
+  peer.notify("initialized", {});
+  ready = true;
+  return { socket, peer };
 }
 
 export async function detectCodex(command = "codex", env?: NodeJS.ProcessEnv): Promise<string | undefined> {
@@ -79,8 +129,6 @@ export function enableArgs(listing: string): string[] {
  * Owns one `codex app-server --listen unix://…` process and a client connection
  * to it. The same socket is what `codex --remote` attaches the desktop TUI to,
  * so the TUI and LinkShell are peers on the same threads.
- *
- * The socket speaks WebSocket; permessage-deflate must be off or the upgrade is reset.
  */
 export class CodexAppServer {
   private child?: ChildProcess;
@@ -167,29 +215,60 @@ export class CodexAppServer {
   }
 
   private async connect(): Promise<void> {
-    const socket = new WebSocket(`ws+unix://${this.options.socketPath}:/`, { perMessageDeflate: false });
-    await new Promise<void>((resolve, reject) => {
-      socket.once("open", () => resolve());
-      socket.once("error", reject);
-    });
-    const peer = new RpcPeer({
-      send: (text) => socket.send(text),
-      onNotification: (method, params) => this.options.onNotification(method, params),
-      onRequest: (method, params, id) => this.options.onRequest(method, params, id) ?? ABANDON,
-      requestTimeoutMs: 60_000,
-    });
-    socket.on("message", (data) => peer.receive(data.toString()));
-    socket.on("close", () => {
-      peer.close("codex app-server connection closed");
-      if (!this.stopping) this.options.onDown("codex app-server connection closed");
-    });
+    const { socket, peer } = await openConnection(this.options, () => this.stopping);
     this.socket = socket;
     this.peer = peer;
-    await peer.request("initialize", {
-      clientInfo: { name: "linkshell", title: "LinkShell", version: this.options.clientVersion },
-      // experimentalApi: plan mode (`collaborationMode`) and the questions Codex asks (`item/tool/requestUserInput`) need it.
-      capabilities: { experimentalApi: true, requestAttestation: false, optOutNotificationMethods: OPT_OUT_NOTIFICATIONS },
-    });
-    peer.notify("initialized", {});
+  }
+}
+
+/**
+ * A client connection to Codex's own background server, which this host
+ * neither starts nor stops. A thread that lives there (opened by a plain
+ * `codex`) can't be loaded anywhere else, but any number of clients can be on
+ * it there: joining it is how the phone and that terminal share a thread.
+ */
+export class CodexSharedServer {
+  private socket?: WebSocket;
+  private peer?: RpcPeer;
+  private connecting?: Promise<boolean>;
+  private closing = false;
+
+  constructor(private readonly options: CodexConnectionOptions) {}
+
+  /** Connects if that server is running; false when it isn't (it is never started from here). */
+  connect(): Promise<boolean> {
+    if (this.peer) return Promise.resolve(true);
+    if (!existsSync(this.options.socketPath)) return Promise.resolve(false);
+    this.closing = false;
+    this.connecting ??= openConnection({ ...this.options, onDown: (reason) => this.dropped(reason) }, () => this.closing)
+      .then(({ socket, peer }) => {
+        this.socket = socket;
+        this.peer = peer;
+        return true;
+      })
+      .catch(() => false)
+      .finally(() => {
+        this.connecting = undefined;
+      });
+    return this.connecting;
+  }
+
+  request<T>(method: string, params: unknown, timeoutMs?: number): Promise<T> {
+    if (!this.peer) return Promise.reject(new Error("Codex's background server is not connected"));
+    return this.peer.request<T>(method, params, timeoutMs);
+  }
+
+  close(): void {
+    this.closing = true;
+    this.peer?.close("stopping");
+    this.socket?.close();
+    this.peer = undefined;
+    this.socket = undefined;
+  }
+
+  private dropped(reason: string): void {
+    this.peer = undefined;
+    this.socket = undefined;
+    this.options.onDown(reason);
   }
 }

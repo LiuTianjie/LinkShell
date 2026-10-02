@@ -6,6 +6,7 @@ import {
   threadToDiscovered,
   threadToHistory,
   toCodexInput,
+  turnUnderWay,
   type CodexThreadState,
 } from "../src/drivers/codex/mapper.js";
 
@@ -227,6 +228,70 @@ describe("command titles", () => {
       kind: "execute",
       rawInput: { command: "npm test" },
     });
+  });
+});
+
+describe("a thread joined while its turn is running", () => {
+  it("reports a message that was already being written whole when it completes, not the part that arrives", () => {
+    const { map, states } = mapper();
+    states.set("t", { activeTurnId: "turn-1", midTurn: true });
+    // Its start was before the join: the rest of it isn't shown as it comes.
+    expect(map("item/agentMessage/delta", { threadId: "t", turnId: "turn-1", itemId: "m1", delta: "lf of it" })).toEqual([]);
+    expect(map("item/completed", { threadId: "t", turnId: "turn-1", item: { type: "agentMessage", id: "m1", text: "All of it" } }).map((entry) => entry.update)).toEqual([
+      { sessionUpdate: "agent_message_chunk", messageId: "m1", content: { type: "text", text: "All of it" } },
+      { sessionUpdate: "ls_message_done", messageId: "m1", role: "agent" },
+    ]);
+    // One that starts after the join streams as usual, and so does the next turn.
+    map("item/started", { threadId: "t", turnId: "turn-1", item: { type: "agentMessage", id: "m2", text: "" } });
+    expect(map("item/agentMessage/delta", { threadId: "t", turnId: "turn-1", itemId: "m2", delta: "Next" })).toHaveLength(1);
+    expect(map("item/completed", { threadId: "t", turnId: "turn-1", item: { type: "agentMessage", id: "m2", text: "Next" } }).map((entry) => entry.update.sessionUpdate)).toEqual(["ls_message_done"]);
+    map("turn/completed", { threadId: "t", turn: { id: "turn-1", items: [], status: "completed" } });
+    expect(map("item/agentMessage/delta", { threadId: "t", turnId: "turn-2", itemId: "m3", delta: "Hi" })).toHaveLength(1);
+  });
+
+  it("reports a tool whose start it didn't see as the whole tool, with its output", () => {
+    const { map } = mapper();
+    const command = { type: "commandExecution", id: "c1", command: "make", cwd: "/w", status: "completed", exitCode: 0, aggregatedOutput: "ok\n" };
+    expect(map("item/commandExecution/outputDelta", { threadId: "t", turnId: "u", itemId: "c1", delta: "ok\n" })).toEqual([]);
+    const whole = map("item/completed", { threadId: "t", turnId: "u", item: command });
+    expect(whole.map((entry) => [entry.update.sessionUpdate, entry.itemId])).toEqual([
+      ["tool_call", undefined],
+      ["tool_call_update", "c1"],
+    ]);
+    expect(whole[1]?.update).toMatchObject({ status: "completed", appendOutput: "ok\n" });
+  });
+
+  it("leaves a command still running, and a turn that only looks interrupted from another process, out of history", () => {
+    const thread = {
+      id: "t",
+      cwd: "/w",
+      createdAt: 1,
+      updatedAt: 2,
+      turns: [
+        {
+          id: "turn-1",
+          // How a process that doesn't run the thread reads a turn that is running: stopped, with no end.
+          status: "interrupted" as const,
+          startedAt: 10,
+          completedAt: null,
+          items: [
+            { type: "agentMessage", id: "m1", text: "Looking." },
+            { type: "commandExecution", id: "c1", command: "make", cwd: "/w", status: "inProgress" },
+          ],
+        },
+      ],
+    };
+    expect(turnUnderWay(thread.turns[0])).toBe(true);
+    expect(threadToHistory(thread).map((item) => item.itemId)).toEqual(["m1"]);
+    // A turn that really was interrupted has the time it ended.
+    expect(turnUnderWay({ ...thread.turns[0]!, completedAt: 12 })).toBe(false);
+  });
+
+  it("gives a failed turn's error the id its history has, so it isn't logged twice", () => {
+    const { map } = mapper();
+    const failed = { id: "turn-1", items: [], status: "failed" as const, error: { message: "quota exceeded" } };
+    expect(map("turn/completed", { threadId: "t", turn: failed }).at(-1)?.itemId).toBe("turn-error:turn-1");
+    expect(threadToHistory({ id: "t", cwd: "/w", createdAt: 1, updatedAt: 2, turns: [failed] }).map((item) => item.itemId)).toEqual(["turn-error:turn-1"]);
   });
 });
 

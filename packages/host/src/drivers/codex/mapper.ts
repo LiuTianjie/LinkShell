@@ -30,6 +30,8 @@ export interface CodexThread {
   createdAt: number;
   updatedAt: number;
   status?: { type: string; activeFlags?: string[] };
+  /** The thread's file on disk, when the server says where it is. */
+  path?: string | null;
   turns?: CodexTurn[];
 }
 
@@ -56,6 +58,24 @@ export interface CodexThreadState {
   streamed?: Set<string>;
   /** Between a review starting and finishing: the instruction Codex gives itself isn't something the user said. */
   reviewing?: boolean;
+  /**
+   * The thread was joined while this turn was running. A message that had
+   * begun before that is reported whole when it completes, not from the part
+   * of it that happens to arrive: half a message would stay half.
+   */
+  midTurn?: boolean;
+  /** Items seen starting and not yet finished. A tool that finishes without having been seen to start is reported whole. */
+  begun?: Set<string>;
+}
+
+/**
+ * Whether a turn is still running. A server that runs the thread says so; one
+ * that only reads it from disk (another process runs it) sees a turn that
+ * stopped without an end, which is how it reports an interrupted one too —
+ * except that an interrupted turn has the time it ended.
+ */
+export function turnUnderWay(turn: CodexTurn | undefined): boolean {
+  return turn?.status === "inProgress" || (turn?.status === "interrupted" && turn.completedAt == null);
 }
 
 /** Codex's own review instruction, recorded as a user message inside the review. */
@@ -250,7 +270,7 @@ export function spawnedThreads(item: unknown): string[] {
 }
 
 /** Updates that open a tool-like item. Returns undefined for non-tool items. */
-function toolStart(item: Json): Extract<SessionUpdate, { sessionUpdate: "tool_call" }> | undefined {
+export function toolStart(item: Json): Extract<SessionUpdate, { sessionUpdate: "tool_call" }> | undefined {
   const id = str(item.id);
   if (!id) return undefined;
   const base = { sessionUpdate: "tool_call" as const, toolCallId: id };
@@ -444,6 +464,8 @@ export function threadToHistory(thread: CodexThread): HistoryItem[] {
       if (item.type === "enteredReviewMode") reviewing = true;
       else if (item.type === "exitedReviewMode") reviewing = false;
       if (isReviewPrompt(item, reviewing)) continue;
+      // Still running (a command in a turn under way): history is what has finished.
+      if (item.status === "inProgress" && turnUnderWay(turn)) continue;
       const entry = itemToHistory(item);
       if (entry) history.push(ts === undefined ? entry : { ...entry, ts });
     }
@@ -474,6 +496,9 @@ function planEntries(plan: unknown): PlanEntry[] {
   });
 }
 
+/** Items that are text someone wrote; the rest are tools of some kind. */
+const MESSAGE_ITEMS = new Set(["userMessage", "agentMessage", "plan", "reasoning"]);
+
 /** Maps one app-server notification to session updates. */
 export function mapNotification(
   method: string,
@@ -485,11 +510,14 @@ export function mapNotification(
   if (!params || !threadId) return [];
   const state = stateOf(threadId);
   const out = (update: SessionUpdate, itemId?: string): MappedUpdate => ({ threadId, update, itemId });
+  /** False for a message that was already being written when the thread was joined. */
+  const fromItsStart = (itemId: string): boolean => !state.midTurn || state.begun?.has(itemId) === true;
 
   switch (method) {
     case "turn/started": {
       const turn = obj(params.turn);
       state.activeTurnId = str(turn?.id);
+      state.midTurn = undefined;
       return [out({ sessionUpdate: "ls_turn", state: "started", turnId: state.activeTurnId })];
     }
     case "turn/completed": {
@@ -497,6 +525,7 @@ export function mapNotification(
       state.activeTurnId = undefined;
       state.reviewing = false;
       state.streamed = undefined;
+      state.midTurn = undefined;
       const updates = [
         out({
           sessionUpdate: "ls_turn",
@@ -507,12 +536,16 @@ export function mapNotification(
       ];
       if (turn?.status === "failed" && turn.error?.message) {
         updates.push(
-          out({
-            sessionUpdate: "ls_error",
-            code: "turn_failed",
-            message: turn.error.message,
-            hint: turn.error.additionalDetails ?? undefined,
-          }),
+          out(
+            {
+              sessionUpdate: "ls_error",
+              code: "turn_failed",
+              message: turn.error.message,
+              hint: turn.error.additionalDetails ?? undefined,
+            },
+            // The same item the turn's history has, so reading the thread again doesn't repeat it.
+            `turn-error:${turn.id}`,
+          ),
         );
       }
       return updates;
@@ -555,7 +588,7 @@ export function mapNotification(
     case "item/plan/delta": {
       const itemId = str(params.itemId);
       const delta = str(params.delta);
-      if (!itemId || !delta) return [];
+      if (!itemId || !delta || !fromItsStart(itemId)) return [];
       (state.streamed ??= new Set()).add(itemId);
       return [out({ sessionUpdate: "agent_message_chunk", messageId: itemId, content: { type: "text", text: delta } })];
     }
@@ -563,24 +596,31 @@ export function mapNotification(
     case "item/reasoning/textDelta": {
       const itemId = str(params.itemId);
       const delta = str(params.delta);
-      return itemId && delta
+      return itemId && delta && fromItsStart(itemId)
         ? [out({ sessionUpdate: "agent_thought_chunk", messageId: itemId, content: { type: "text", text: delta } })]
         : [];
     }
     case "item/commandExecution/outputDelta": {
       const itemId = str(params.itemId);
       const delta = str(params.delta);
-      return itemId && delta ? [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, appendOutput: delta })] : [];
+      // (Without its card, output has nowhere to go: the tool is reported whole when it finishes.)
+      return itemId && delta && state.begun?.has(itemId) ? [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, appendOutput: delta })] : [];
     }
     case "item/fileChange/patchUpdated": {
       const itemId = str(params.itemId);
-      return itemId
+      return itemId && state.begun?.has(itemId)
         ? [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, content: patchContent(params.changes) })]
         : [];
     }
     case "item/started": {
       const item = obj(params.item);
       if (!item) return [];
+      if (str(item.id)) {
+        const begun = (state.begun ??= new Set());
+        begun.add(str(item.id)!);
+        // (One that never finishes — its turn was interrupted — would stay for good.)
+        if (begun.size > 500) begun.delete(begun.values().next().value!);
+      }
       if (item.type === "enteredReviewMode") state.reviewing = true;
       if (isReviewPrompt(item, state.reviewing)) return [];
       if (item.type === "userMessage") {
@@ -597,6 +637,15 @@ export function mapNotification(
       const item = obj(params.item);
       const itemId = str(item?.id);
       if (!item || !itemId) return [];
+      const begun = state.begun?.delete(itemId) === true;
+      if (!begun && (state.midTurn || !MESSAGE_ITEMS.has(str(item.type) ?? ""))) {
+        // Only its end was seen (it began before the thread was joined, or in
+        // a turn that is over): the whole item, as history would have it.
+        if (item.type === "enteredReviewMode") state.reviewing = true;
+        else if (item.type === "exitedReviewMode") state.reviewing = false;
+        const whole = isReviewPrompt(item, state.reviewing) ? undefined : itemToHistory(item);
+        return whole ? whole.updates.map((update, index) => out(update, index === whole.updates.length - 1 ? itemId : undefined)) : [];
+      }
       switch (item.type) {
         case "userMessage":
           return [];

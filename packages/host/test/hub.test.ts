@@ -51,6 +51,10 @@ class FakeDriver implements AgentDriver {
   async respondPermission(_nativeId: string, requestId: string, optionId: string) {
     this.answers.push({ requestId, optionId });
   }
+  watches: boolean[] = [];
+  watched(_nativeId: string, open: boolean) {
+    this.watches.push(open);
+  }
   emit(update: SessionUpdate, itemId?: string, nativeId = "s1") {
     this.host.update(this.id, nativeId, update, itemId);
   }
@@ -163,6 +167,20 @@ describe("SessionHub", () => {
     expect(second.events.map((e) => e.seq)).toEqual([3, 4]);
     expect(first.events.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
     expect(driver.attachCalls).toBe(1);
+  });
+
+  it("tells the driver when the first device opens a session and when the last one leaves", async () => {
+    const first = collector();
+    const second = collector();
+    await hub.subscribe("fake:s1", 0, first.subscriber);
+    await hub.subscribe("fake:s1", 0, second.subscriber);
+    expect(driver.watches).toEqual([true]);
+    hub.unsubscribe("fake:s1", first.subscriber);
+    expect(driver.watches).toEqual([true]);
+    hub.unsubscribe("fake:s1", second.subscriber);
+    // (Leaving twice is leaving once.)
+    hub.unsubscribe("fake:s1", second.subscriber);
+    expect(driver.watches).toEqual([true, false]);
   });
 
   it("buffers live updates during attach and drops completions the history already has", async () => {

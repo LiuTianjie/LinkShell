@@ -127,6 +127,12 @@ export interface AgentDriver {
    */
   attach(nativeId: string, context: AttachContext): Promise<HistoryItem[]>;
   detach(nativeId: string): Promise<void>;
+  /**
+   * Whether a device has the session open, said when the first one opens it
+   * and when the last one leaves. For a driver that holds something only
+   * while someone is looking.
+   */
+  watched?(nativeId: string, open: boolean): void;
 
   /**
    * `context`: what the agent should know before this message without it

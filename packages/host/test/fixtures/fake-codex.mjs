@@ -5,10 +5,21 @@
 // deltas, approvals answered by whichever client is first, interrupt and steer.
 //
 // Prompt keywords: "SLOW" streams 40 chunks at 40ms; "RUN" asks for command
-// approval first. FAKE_CODEX_SEED=1 preloads one finished thread on disk.
+// approval first ("RUN LONG": the command takes a while); "BACKGROUND" leaves
+// a command running after the turn. FAKE_CODEX_SEED=1 preloads one finished
+// thread on disk.
+//
+// FAKE_CODEX_DISK=<dir> is the disk several Codex processes share: threads are
+// saved there as they are written, and a thread loaded in one process is
+// locked against the others (thread/resume: "already has an active writer"),
+// which can still read what is on disk — where a turn that is running
+// elsewhere reads as interrupted, with no end time. The disk also holds each
+// thread's queue (thread/queue/add from any process): the process that has
+// the thread loaded starts what is queued when the thread is idle.
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { WebSocketServer } from "ws";
 
 const args = process.argv.slice(2);
@@ -43,6 +54,54 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 const threads = new Map();
 const connections = new Set();
+
+const DISK = process.env.FAKE_CODEX_DISK;
+if (DISK) mkdirSync(DISK, { recursive: true });
+const filePath = (id) => join(DISK, `${id}.json`);
+const lockPath = (id) => join(DISK, `${id}.lock`);
+
+function save(thread) {
+  if (!DISK || thread.turns.length === 0) return;
+  writeFileSync(filePath(thread.meta.id), JSON.stringify({ meta: thread.meta, archived: thread.archived === true, turns: thread.turns }));
+}
+function onDisk(id) {
+  if (!DISK || !existsSync(filePath(id))) return undefined;
+  return JSON.parse(readFileSync(filePath(id), "utf8"));
+}
+/** The process that has the thread loaded, if it is still alive. */
+function writer(id) {
+  if (!DISK || !existsSync(lockPath(id))) return undefined;
+  const pid = Number(readFileSync(lockPath(id), "utf8"));
+  try {
+    process.kill(pid, 0);
+    return pid;
+  } catch {
+    return undefined;
+  }
+}
+function lock(id) {
+  if (!DISK) return;
+  const pid = writer(id);
+  if (pid !== undefined && pid !== process.pid) throw { code: -32600, message: `thread ${id} already has an active writer` };
+  writeFileSync(lockPath(id), String(process.pid));
+}
+/** Like Codex: a thread nobody is subscribed to, and that isn't working, is unloaded and free for another process. */
+function unloadIfUnused(thread) {
+  if (thread.subscribers.size > 0 || thread.active) return;
+  thread.loaded = false;
+  if (!DISK) return;
+  if (writer(thread.meta.id) === process.pid) rmSync(lockPath(thread.meta.id), { force: true });
+  if (thread.turns.length > 0) threads.delete(thread.meta.id);
+}
+const queuePath = (id) => join(DISK, `${id}.queue.json`);
+const queued = (id) => (DISK && existsSync(queuePath(id)) ? JSON.parse(readFileSync(queuePath(id), "utf8")) : []);
+const setQueued = (id, entries) => writeFileSync(queuePath(id), JSON.stringify(entries));
+
+/** As a process that doesn't run the thread reads it: a turn still running has stopped without an end. */
+function diskView(stored, withTurns) {
+  const turns = stored.turns.map((turn) => (turn.status === "inProgress" ? { ...turn, status: "interrupted", completedAt: null } : turn));
+  return { ...stored.meta, status: { type: "notLoaded" }, path: filePath(stored.meta.id), turns: withTurns ? turns : [] };
+}
 const pendingServerRequests = new Map();
 let nextServerRequestId = 1000;
 
@@ -56,6 +115,7 @@ function newThread(cwd, extra = {}) {
     pendingApproval: undefined,
   };
   threads.set(thread.meta.id, thread);
+  lock(thread.meta.id);
   return thread;
 }
 
@@ -78,7 +138,26 @@ function view(thread, withTurns) {
     : thread.loaded
       ? { type: "idle" }
       : { type: "notLoaded" };
-  return { ...thread.meta, status, turns: withTurns ? thread.turns : [] };
+  return { ...thread.meta, status, path: DISK ? filePath(thread.meta.id) : null, turns: withTurns ? thread.turns : [] };
+}
+/**
+ * What thread/resume returns. Like Codex, a turn that is running is given
+ * from memory: its messages numbered item-1, item-2… rather than under their
+ * ids, and with the command that is still running.
+ */
+function resumeView(thread) {
+  const turns = thread.turns.map((turn) =>
+    turn !== thread.active
+      ? turn
+      : {
+          ...turn,
+          items: [
+            ...turn.items.map((item, index) => (item.type === "userMessage" || item.type === "agentMessage" ? { ...item, id: `item-${index + 1}` } : item)),
+            ...(turn.running ? [turn.running] : []),
+          ],
+        },
+  );
+  return { ...view(thread, false), turns };
 }
 
 function send(conn, message) {
@@ -94,6 +173,7 @@ function emitItem(thread, turn, item) {
   const threadId = thread.meta.id;
   notifyThread(thread, "item/started", { threadId, turnId: turn.id, item, startedAtMs: Date.now() });
   turn.items.push(item);
+  save(thread);
   notifyThread(thread, "item/completed", { threadId, turnId: turn.id, item, completedAtMs: Date.now() });
 }
 function setStatus(thread) {
@@ -127,10 +207,13 @@ function requestApproval(thread, turn, item) {
 
 function finishTurn(thread, turn, status) {
   turn.status = status;
+  turn.completedAt = nowSeconds();
   thread.active = undefined;
   thread.meta.updatedAt = nowSeconds();
+  save(thread);
   notifyThread(thread, "turn/completed", { threadId: thread.meta.id, turn: { id: turn.id, items: [], status, error: null } });
   setStatus(thread);
+  unloadIfUnused(thread);
 }
 
 async function runTurn(thread, turn, text) {
@@ -141,10 +224,15 @@ async function runTurn(thread, turn, text) {
     const command = { type: "commandExecution", id: randomUUID(), command: "echo hi", cwd: thread.meta.cwd, status: "inProgress" };
     const decision = await requestApproval(thread, turn, command);
     if (decision === "accept" || decision === "acceptForSession") {
+      turn.running = command;
       notifyThread(thread, "item/started", { threadId, turnId: turn.id, item: command, startedAtMs: Date.now() });
       notifyThread(thread, "item/commandExecution/outputDelta", { threadId, turnId: turn.id, itemId: command.id, delta: "hi\n" });
+      // "LONG": the command takes a while, so a client can join while it runs.
+      if (text.includes("LONG")) await sleep(400);
       const done = { ...command, status: "completed", exitCode: 0, aggregatedOutput: "hi\n", durationMs: 3 };
+      turn.running = undefined;
       turn.items.push(done);
+      save(thread);
       notifyThread(thread, "item/completed", { threadId, turnId: turn.id, item: done, completedAtMs: Date.now() });
     } else {
       emitItem(thread, turn, { ...command, status: "declined" });
@@ -193,10 +281,40 @@ async function runTurn(thread, turn, text) {
     accumulated += chunk;
     notifyThread(thread, "item/agentMessage/delta", { threadId, turnId: turn.id, itemId: messageId, delta: chunk });
   }
+  // "BACKGROUND": the turn leaves a command running after it ends, like a dev server.
+  if (text.includes("BACKGROUND")) thread.background = [{ itemId: randomUUID(), processId: "1", command: "npm run dev", cwd: thread.meta.cwd, osPid: null, cpuPercent: null, rssKb: null }];
   const message = { type: "agentMessage", id: messageId, text: accumulated };
   turn.items.push(message);
+  save(thread);
   notifyThread(thread, "item/completed", { threadId, turnId: turn.id, item: message, completedAtMs: Date.now() });
   finishTurn(thread, turn, turn.interrupted ? "interrupted" : "completed");
+}
+
+function startTurn(thread, input, clientId) {
+  const turn = { id: randomUUID(), items: [], status: "inProgress", startedAt: nowSeconds(), completedAt: null };
+  thread.turns.push(turn);
+  thread.active = turn;
+  const { item, text } = userItem(input, clientId);
+  if (!thread.meta.preview) thread.meta.preview = text;
+  save(thread);
+  setImmediate(() => {
+    emitItem(thread, turn, item);
+    void runTurn(thread, turn, text);
+  });
+  return turn;
+}
+
+// Like Codex: whoever queued it, the process that has the thread loaded starts it once the thread is idle.
+if (DISK) {
+  setInterval(() => {
+    for (const thread of threads.values()) {
+      if (!thread.loaded || thread.active) continue;
+      const [next, ...rest] = queued(thread.meta.id);
+      if (!next) continue;
+      setQueued(thread.meta.id, rest);
+      startTurn(thread, next.input, next.clientUserMessageId);
+    }
+  }, 25);
 }
 
 function userItem(input, clientId) {
@@ -208,10 +326,15 @@ const handlers = {
   initialize: () => ({ userAgent: "fake-codex", codexHome: "/tmp/fake", platformFamily: "unix", platformOs: "macos" }),
   "thread/list": () => ({
     // Like Codex: a thread is only persisted (and listed) once it has a turn.
-    data: [...threads.values()]
-      .filter((t) => t.turns.length > 0 && !t.archived)
-      .sort((a, b) => b.meta.updatedAt - a.meta.updatedAt)
-      .map((t) => view(t, false)),
+    data: [
+      ...[...threads.values()].filter((t) => t.turns.length > 0 && !t.archived).map((t) => view(t, false)),
+      // What other processes have written.
+      ...(DISK ? readdirSync(DISK) : [])
+        .filter((name) => name.endsWith(".json") && !threads.has(name.slice(0, -5)))
+        .map((name) => onDisk(name.slice(0, -5)))
+        .filter((stored) => !stored.archived)
+        .map((stored) => diskView(stored, false)),
+    ].sort((a, b) => b.updatedAt - a.updatedAt),
     nextCursor: null,
     backwardsCursor: null,
   }),
@@ -224,8 +347,10 @@ const handlers = {
   },
   "thread/read": (params) => {
     const thread = threads.get(params.threadId);
-    if (!thread) throw { code: -32600, message: "unknown thread" };
-    return { thread: view(thread, params.includeTurns === true) };
+    if (thread) return { thread: view(thread, params.includeTurns === true) };
+    const stored = onDisk(params.threadId);
+    if (!stored) throw { code: -32600, message: "unknown thread" };
+    return { thread: diskView(stored, params.includeTurns === true) };
   },
   "thread/fork": (params, conn) => {
     const source = threads.get(params.threadId);
@@ -235,36 +360,59 @@ const handlers = {
     const thread = newThread(params.cwd ?? source.meta.cwd, { name: source.meta.name, preview: source.meta.preview });
     // A fork is on disk with its own copies of the turns it was made through.
     thread.turns = source.turns.slice(0, end + 1).map((turn) => ({ ...turn, id: randomUUID(), items: turn.items.map((item) => ({ ...item })) }));
+    save(thread);
     thread.subscribers.add(conn);
     broadcast("thread/started", { thread: view(thread, false) });
     return { thread: view(thread, params.excludeTurns !== true), model: "fake-model", modelProvider: "fake", cwd: thread.meta.cwd };
   },
   "thread/resume": (params, conn) => {
-    const thread = threads.get(params.threadId);
+    let thread = threads.get(params.threadId);
+    if (!thread) {
+      // Not loaded here: from disk, unless another process has it.
+      const stored = onDisk(params.threadId);
+      if (stored) {
+        lock(params.threadId);
+        thread = { meta: stored.meta, archived: stored.archived, turns: stored.turns, subscribers: new Set(), loaded: false, active: undefined, pendingApproval: undefined };
+        threads.set(params.threadId, thread);
+      }
+    }
     // Like Codex: resume needs the rollout on disk, which only exists after the first turn.
     if (!thread || thread.turns.length === 0) throw { code: -32600, message: `no rollout found for thread id ${params.threadId}` };
+    lock(params.threadId);
     thread.loaded = true;
     thread.subscribers.add(conn);
-    return { thread: view(thread, true), model: "fake-model", modelProvider: "fake", cwd: thread.meta.cwd };
+    return { thread: params.excludeTurns === true ? view(thread, false) : resumeView(thread), model: "fake-model", modelProvider: "fake", cwd: thread.meta.cwd };
   },
   "thread/unsubscribe": (params, conn) => {
-    threads.get(params.threadId)?.subscribers.delete(conn);
-    return {};
+    const thread = threads.get(params.threadId);
+    if (!thread?.subscribers.delete(conn)) return { status: "notSubscribed" };
+    unloadIfUnused(thread);
+    return { status: "unsubscribed" };
   },
   "turn/start": (params) => {
     const thread = threads.get(params.threadId);
     if (!thread) throw { code: -32600, message: "unknown thread" };
     if (thread.active) throw { code: -32600, message: "a turn is already running" };
-    const turn = { id: randomUUID(), items: [], status: "inProgress" };
-    thread.turns.push(turn);
-    thread.active = turn;
-    const { item, text } = userItem(params.input, params.clientUserMessageId);
-    if (!thread.meta.preview) thread.meta.preview = text;
-    setImmediate(() => {
-      emitItem(thread, turn, item);
-      void runTurn(thread, turn, text);
-    });
+    const turn = startTurn(thread, params.input, params.clientUserMessageId);
     return { turn: { id: turn.id, items: [], status: "inProgress" } };
+  },
+  "thread/queue/add": (params) => {
+    if (!DISK || (!threads.has(params.threadId) && !onDisk(params.threadId))) throw { code: -32600, message: "unknown thread" };
+    const queuedSubmission = { id: randomUUID(), input: params.input, clientUserMessageId: params.clientUserMessageId };
+    setQueued(params.threadId, [...queued(params.threadId), queuedSubmission]);
+    return { queuedSubmission };
+  },
+  "thread/queue/list": (params) => ({ data: queued(params.threadId), nextCursor: null }),
+  "thread/backgroundTerminals/list": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread?.loaded) throw { code: -32600, message: `thread not found: ${params.threadId}` };
+    return { data: thread.background ?? [], nextCursor: null };
+  },
+  "thread/queue/delete": (params) => {
+    const entries = queued(params.threadId);
+    const kept = entries.filter((entry) => entry.id !== params.queuedSubmissionId);
+    if (kept.length !== entries.length) setQueued(params.threadId, kept);
+    return { deleted: kept.length !== entries.length };
   },
   "turn/steer": (params) => {
     const thread = threads.get(params.threadId);
@@ -286,6 +434,7 @@ const handlers = {
     const thread = threads.get(params.threadId);
     if (!thread) throw { code: -32600, message: "unknown thread" };
     thread.archived = true;
+    save(thread);
     broadcast("thread/archived", { threadId: params.threadId });
     return {};
   },
@@ -293,17 +442,20 @@ const handlers = {
     const thread = threads.get(params.threadId);
     if (!thread) throw { code: -32600, message: "unknown thread" };
     thread.archived = false;
+    save(thread);
     return {};
   },
   "thread/name/set": (params) => {
     const thread = threads.get(params.threadId);
     if (!thread) throw { code: -32600, message: "unknown thread" };
     thread.meta.name = params.name;
+    save(thread);
     broadcast("thread/name/updated", { threadId: params.threadId, threadName: params.name });
     return {};
   },
   "thread/delete": (params) => {
     if (!threads.delete(params.threadId)) throw { code: -32600, message: "unknown thread" };
+    if (DISK) for (const path of [filePath(params.threadId), lockPath(params.threadId)]) rmSync(path, { force: true });
     broadcast("thread/deleted", { threadId: params.threadId });
     return {};
   },
@@ -366,7 +518,7 @@ wss.on("connection", (ws) => {
   connections.add(conn);
   ws.on("close", () => {
     connections.delete(conn);
-    for (const thread of threads.values()) thread.subscribers.delete(conn);
+    for (const thread of [...threads.values()]) if (thread.subscribers.delete(conn)) unloadIfUnused(thread);
   });
   ws.on("message", (data) => {
     const message = JSON.parse(data.toString());
@@ -387,6 +539,7 @@ wss.on("connection", (ws) => {
 server.listen(socketPath);
 const shutdown = () => {
   rmSync(socketPath, { force: true });
+  if (DISK) for (const id of threads.keys()) if (writer(id) === process.pid) rmSync(lockPath(id), { force: true });
   process.exit(0);
 };
 process.on("SIGTERM", shutdown);

@@ -566,6 +566,7 @@ export class SessionHub {
       cursor = batch[batch.length - 1]!.seq;
     }
     live.subscribers.add(subscriber);
+    if (live.subscribers.size === 1) driver?.watched?.(summary.nativeId, true);
     return { session: this.getSession(sessionId), startSeq };
   }
 
@@ -701,7 +702,10 @@ export class SessionHub {
   }
 
   unsubscribe(sessionId: string, subscriber: Subscriber): void {
-    this.live.get(sessionId)?.subscribers.delete(subscriber);
+    const live = this.live.get(sessionId);
+    if (!live?.subscribers.delete(subscriber) || live.subscribers.size > 0) return;
+    const summary = this.store.getSession(sessionId);
+    if (summary) this.drivers.get(summary.agent)?.watched?.(summary.nativeId, false);
   }
 
   async prompt(
