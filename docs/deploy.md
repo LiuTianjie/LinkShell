@@ -2,6 +2,8 @@
 
 网关让手机在任何网络下都能连到你的电脑。它只做两件事：转发手机和电脑之间**端到端加密**的数据，以及在配对时让两边碰头。网关看不到你的代码和对话，也不需要多少资源。
 
+自建网关和官方网关是同一个程序，只是没有账号：不用登录，每台手机和电脑配对一次（扫码或输入 6 位配对码）。
+
 > 不想自己部署？Pro 订阅提供官方网关：电脑上 `linkshell login`，App 里登录同一账号即可。
 
 ## 1. 运行网关
@@ -29,7 +31,8 @@ docker run -d --name linkshell-gateway --restart unless-stopped \
 
 - 配对关系保存在 `/data/relay.db`，请挂载卷（上面的 `-v`），否则重建容器后需要重新配对。
 - 镜像目前是 `linux/amd64`。在 arm64 主机上加 `--platform linux/amd64`。
-- 更新：`docker pull nickname4th/linkshell-gateway:latest`，然后删掉旧容器、用同样的命令重新运行。
+- 更新：`docker pull nickname4th/linkshell-gateway:latest`，然后删掉旧容器、用同样的命令重新运行。只要卷还在，手机不用重新配对。
+- 可以用 `-e` 传入的环境变量（端口、日志级别、反向代理地址、连接限流）见 [`packages/gateway/README.md`](../packages/gateway/README.md)。自建网关一般一个都不用设。
 
 从源码构建：`git clone https://github.com/LiuTianjie/LinkShell && cd LinkShell && docker compose up -d`。
 
@@ -108,13 +111,19 @@ ufw allow 8787/tcp    # 直接暴露网关时
 
 ```bash
 curl http://localhost:8787/healthz
-# {"ok":true, …}
+# {"ok":true,"version":"0.6.0","relay":2,"memoryMb":61}
 ```
+
+`relay` 是当前在线的连接数（电脑加手机），`version` 是网关的版本。
+
+## 数据与备份
+
+网关保存的全部数据是一个 SQLite 文件：每台电脑、每台手机的公钥和名称，以及谁和谁配对。没有任何会话内容。用 CLI 时是 `~/.linkshell/relay.db`，Docker 里是卷中的 `/data/relay.db`。迁移服务器时带上它（连同旁边的 `-wal`、`-shm` 文件，或者先停掉网关），手机就不用重新配对。
 
 ## 资源
 
-网关只转发数据：内存几十 MB，CPU 几乎可以忽略，带宽取决于你在手机上看了多少输出。一台最小规格的云服务器就够用。
+网关只转发数据：内存几十 MB，CPU 几乎可以忽略，带宽取决于你在手机上看了多少输出（屏幕和端口预览在能直连时不经过网关）。一台最小规格的云服务器就够用。
 
-## 1.x
+## 从旧版本升级
 
-同一个网关也继续服务 1.x 的 `linkshell start` 和 1.x App，不需要单独部署。
+网关 0.6（CLI 0.10）起只服务 2.x 的 App 和 `linkshell host`；1.x 的 App、`linkshell start` 和网页控制台不再支持。数据文件没有变：升级后沿用原来的 `relay.db`（Docker 沿用原来的卷），已配对的手机不受影响。

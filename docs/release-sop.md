@@ -1,38 +1,82 @@
 # LinkShell 发版 SOP
 
-## 版本号规范
+## 包、版本号和 tag
 
-- CLI: `linkshell-cli@x.y.z`
-- Gateway: `@linkshell/gateway@x.y.z`
-- Protocol: `@linkshell/protocol@x.y.z`
-- Docker tag: `gateway-vx.y.z`
+| 发布物 | 目录 | 版本号 | 依赖 |
+|---|---|---|---|
+| `@linkshell/wire` | `packages/wire` | `package.json` | — |
+| `@linkshell/mac`（LinkShell.app） | `apps/mac` | `package.json` | — |
+| `@linkshell/host` | `packages/host` | `package.json` | wire；mac（可选依赖，仅 macOS arm64） |
+| `@linkshell/gateway` | `packages/gateway` | `package.json` | wire |
+| `linkshell-cli` | `packages/cli` | `package.json` | wire、host、gateway |
+| Docker 镜像 `nickname4th/linkshell-gateway` | `packages/gateway/Dockerfile` | tag `gateway-vX.Y.Z` | — |
+| App（iOS / Android） | `apps/client` | tag `vX.Y.Z` | — |
 
-Protocol → Gateway → CLI 是依赖链。只改 CLI 时可以只发布 CLI；改 shared protocol 或 gateway relay/tunnel/agent envelope 时，按依赖链依次发。
+发布顺序就是依赖顺序：**wire → mac → host → gateway → cli**。没改的包跳过，但要注意：`workspace:*` 在发布时会被写成当时的**确切版本号**，所以上游发了新版本，下游也要跟着发一版才会用上它（改了 wire，就要发 host、gateway、cli；改了 `apps/mac`，就要发 mac、host、cli）。
+
+`@linkshell/client-core` 和 `apps/client` 是私有包，不发 npm。`@linkshell/protocol`、`@linkshell/gateway-v2` 是已经删除的 1.x / 过渡包，不再发布。
+
+三种 tag，各管各的：
+
+- `cli-vX.Y.Z`：标记一次 CLI 发版，不触发 CI。
+- `gateway-vX.Y.Z`：触发 CI 构建并推送 Docker 镜像。
+- `vX.Y.Z`：触发 App 的 iOS、Android 构建。**只给 App 用**，不要拿它标记 CLI 版本。
 
 ## 1. 发版前检查
 
 ```bash
-# 确保代码干净
-git status
-
-# 类型检查
+git status                # 干净
+pnpm install
+pnpm build                # 全量：CLI 会一并编译 host 和 gateway 的源码，单包检查发现不了的问题在这里暴露
 pnpm typecheck
-
-# 本地测试
-pnpm dev:cli start --provider custom --command bash
-
-# Agent Workspace smoke test（如果本机安装了 Claude Code 或 Codex）
-pnpm --filter linkshell-cli dev start --agent-ui --provider custom --command bash
+pnpm test                 # Mac 上包含 apps/mac 的 swift test
 ```
+
+再按改动范围做真实验证：
+
+```bash
+# CLI / host：从源码跑一遍
+cd packages/cli && npx tsx src/index.ts doctor
+
+# host 的 Agent 驱动有改动（需要本机装好并登录对应的 Agent；live:claude 要在自己的终端里跑）
+pnpm --filter @linkshell/host live:codex
+pnpm --filter @linkshell/host live:claude
+
+# apps/mac 有改动
+pnpm --filter @linkshell/mac check
+
+# gateway 有改动：本地构建镜像，跑起来
+docker build -f packages/gateway/Dockerfile -t linkshell-gateway:dev .
+docker run -d --name gw-dev -p 18787:8787 -v gw-dev:/data linkshell-gateway:dev
+curl -s http://127.0.0.1:18787/healthz
+```
+
+然后用一个临时的 host 连上去（`LINKSHELL_HOME` 指向临时目录，不碰 `~/.linkshell`，也不带账号）：
+
+```bash
+# 终端 A：前台运行 host
+export LINKSHELL_HOME=$(mktemp -d); echo $LINKSHELL_HOME
+cd packages/cli && npx tsx src/index.ts host --gateway ws://127.0.0.1:18787
+
+# 终端 B：同一个 LINKSHELL_HOME
+export LINKSHELL_HOME=<终端 A 打印的目录>
+cd packages/cli && npx tsx src/index.ts pair        # 应该出现二维码和 6 位配对码
+
+# 结束后
+docker rm -f gw-dev && docker volume rm gw-dev
+```
+
+> ⚠️ **网关的数据兼容性**。`packages/gateway/src/store.ts` 的表结构一旦有改动，必须验证旧数据还能读：用线上正在跑的那个镜像版本在一个新卷上启动、配对一次，再换成新镜像挂**同一个卷**，确认配对还在：直接用 sqlite 查 `links` 表，或者让配对过的那台手机不重新配对就连上。只看 `linkshell devices` 的列表不算数：那份列表来自 host 本地的 `paired-devices.json`，网关的数据丢了它也照样列出来。`/v2/connect` 这个路径和握手里的挑战串 `linkshell-gateway-v2:${nonce}` 不能改：所有已安装的电脑和手机都依赖它们。
 
 ## 2. 更新版本号
 
 ```bash
-# 更新 packages/shared-protocol/package.json 的 version（如果协议有改动）
-# 更新 packages/gateway/package.json 的 version（如果 gateway 或 protocol 依赖有改动）
-# 更新 packages/cli/package.json 的 version
-# 同步更新根 package.json version，保持仓库级版本可追踪
+# 按依赖顺序改各自的 package.json：
+#   packages/wire → apps/mac → packages/host → packages/gateway → packages/cli
+# 根 package.json 的 version 跟 CLI 保持一致，方便在仓库层面追踪
 ```
+
+App 的版本号来自 tag（见 §8），不用手改。
 
 ## 3. 构建
 
@@ -40,28 +84,23 @@ pnpm --filter linkshell-cli dev start --agent-ui --provider custom --command bas
 pnpm build
 ```
 
+每个包的 `build` 都会先删掉 `dist/` 再编译，`prepack` 会在 `pnpm publish` 时自动再构建一次，所以发出去的包里不会带上已删除源码留下的旧文件。
+
 ## 4. 发布 npm 包
 
 > ⚠️ **必须使用 `pnpm publish`，绝不能用 `npm publish`**。
-> 这个仓库 workspace 里的内部依赖写的是 `workspace:*`（见 `packages/cli/package.json`、`packages/gateway/package.json`）。
+> 这个仓库 workspace 里的内部依赖写的是 `workspace:*`（见 `packages/cli/package.json`、`packages/host/package.json`、`packages/gateway/package.json`）。
 > `pnpm publish` 在打 tarball 时会把 `workspace:*` 重写成具体版本号；`npm publish` 不会，发出去的包到了用户机器上 `npm install` 会直接报 `EUNSUPPORTEDPROTOCOL "workspace:"`，整个 `linkshell upgrade` 链路就坏了。这种情况发生过一次（v0.4.0），当场只能 deprecate + bump 0.4.1 抢救。
 
-> 📦 **CLI 会把 web 控制台打进 tarball（自动）**。`packages/cli` 的 `prepack` 钩子在 `pnpm pack`/`pnpm publish` 时会先构建 `@linkshell/web-dashboard`（及其依赖 protocol），再跑 CLI 自身 build（`tsc` + `copy-web.mjs` 把 `web-dashboard/dist` 拷进 `packages/cli/web`）。所以**发 CLI 前不需要手动构建 web**，发出去的包里 `web/` 一定是新鲜的。内置/局域网/自托管网关靠这份 `web/` 同源伺服 web 控制台（云端 gateway 的 Docker 镜像则在 Dockerfile 里单独构建 web，是另一条线）。
-> ⚠️ 别用 `npm publish`/`npm pack`——除了上面的 `workspace:` 问题，npm 不会触发 pnpm 的 `prepack` 工作区构建逻辑，`web/` 可能是旧的或空的。
-
 ```bash
-# 发布 protocol（如果有改动）
-cd packages/shared-protocol
-pnpm publish --access public
-
-# 发布 gateway（如果有改动）
-cd ../gateway
-pnpm publish --access public
-
-# 发布 CLI
-cd ../cli
-pnpm publish --access public
+cd packages/wire    && pnpm publish --access public   # 如有改动
+cd ../../apps/mac   && pnpm publish --access public   # 如有改动（见下）
+cd ../../packages/host    && pnpm publish --access public
+cd ../gateway             && pnpm publish --access public   # 如有改动
+cd ../cli                 && pnpm publish --access public
 ```
+
+> ⏱ **npm 要过几分钟才看得到新版本**。刚发完就 `npm view`、`npm i -g linkshell-cli@latest` 或跑 `update-brew.sh`，可能拿到旧版本甚至 404。等几分钟；安装验证时写明版本号并加 `--prefer-online`：`npm i -g linkshell-cli@X.Y.Z --prefer-online`。
 
 > 🖥 **LinkShell.app 在 `@linkshell/mac` 这个包里（源码在 `apps/mac`）**。它是 Mac 上的画面引擎：采集屏幕、编码、WebRTC 发送、注入鼠标键盘，并持有两项系统权限（录屏、辅助功能）。`@linkshell/host` 把它列为可选依赖（`os: darwin`），所以**改了 `apps/mac` 就要先发 `@linkshell/mac`，再发 host、cli**：
 > ```bash
@@ -75,24 +114,25 @@ pnpm publish --access public
 
 ### 4.1 发布后立即抽检 tarball
 
-每发完一个包，下载下来检查 `dependencies`，确认没有任何 `workspace:` 字面量泄漏：
+每发完一个包，等它在 npm 上出现后下载下来检查，确认没有任何 `workspace:` 字面量泄漏：
 
 ```bash
 # 替换成刚发的版本号
-VERSION=0.4.1
+VERSION=0.10.0
+GATEWAY_VERSION=0.6.0
 
-cd /tmp && rm -rf ls-publish-check && mkdir ls-publish-check && cd ls-publish-check
+cd "$(mktemp -d)"
 npm pack linkshell-cli@$VERSION
 tar -xzf linkshell-cli-$VERSION.tgz
 grep -n "workspace:" package/package.json && echo "❌ workspace: leaked, DO NOT release; deprecate this version" || echo "✅ deps look clean"
 
-# CLI 还要确认 web 控制台真的进了包且不是空壳（prepack 应已构建好）
-test -f package/web/index.html && ls package/web/assets/*.js >/dev/null 2>&1 \
-  && echo "✅ web console bundled (web/index.html + assets present)" \
-  || echo "❌ web/ missing or has no built assets — embedded-gateway console will be blank; rebuild & republish"
+# CLI 的包里不应该再有 web/（1.x 的网页控制台已经删除）
+test -e package/web && echo "❌ web/ is back in the tarball: check files in packages/cli/package.json" || echo "✅ no web/"
+rm -rf package
 
-npm pack @linkshell/gateway@$VERSION
-tar -xzf linkshell-gateway-$VERSION.tgz
+# 其他包同理：@linkshell/host → linkshell-host-X.Y.Z.tgz，@linkshell/gateway → linkshell-gateway-X.Y.Z.tgz，@linkshell/wire → linkshell-wire-X.Y.Z.tgz
+npm pack @linkshell/gateway@$GATEWAY_VERSION
+tar -xzf linkshell-gateway-$GATEWAY_VERSION.tgz
 grep -n "workspace:" package/package.json && echo "❌ workspace: leaked" || echo "✅ deps look clean"
 ```
 
@@ -100,25 +140,40 @@ grep -n "workspace:" package/package.json && echo "❌ workspace: leaked" || ech
 
 ```bash
 npm deprecate linkshell-cli@$VERSION "broken: workspace:* deps not rewritten; use next patch"
-npm deprecate @linkshell/gateway@$VERSION "broken: workspace:* deps not rewritten; use next patch"
-npm deprecate @linkshell/protocol@$VERSION "use next patch"
 ```
 
-然后 bump patch、改用 `pnpm publish` 重发。
+（哪个包泄漏就 deprecate 哪个包的那个版本。）然后 bump patch、改用 `pnpm publish` 重发。
+
+最后装一遍真的：
+
+```bash
+npm i -g linkshell-cli@$VERSION --prefer-online
+linkshell --version
+linkshell doctor
+```
 
 ## 5. 发布 Docker 镜像
 
-Docker 镜像通过 GitHub Actions 自动构建发布。只需打 tag：
+Docker 镜像通过 GitHub Actions（`.github/workflows/docker-publish.yml`）构建发布。只需打 tag：
 
 ```bash
-# 格式：gateway-vX.Y.Z
-git tag gateway-v0.2.23
-git push origin gateway-v0.2.23
+# 格式：gateway-vX.Y.Z，和 packages/gateway/package.json 的版本一致
+git tag gateway-v0.6.0
+git push origin gateway-v0.6.0
 ```
 
-CI 会自动：
-- 构建 Docker 镜像
-- 推送到 Docker Hub: `nickname4th/linkshell-gateway:latest` + `nickname4th/linkshell-gateway:0.2.23` + `nickname4th/linkshell-gateway:0.2`
+CI 会构建镜像并推送到 Docker Hub：`nickname4th/linkshell-gateway:0.6.0`、`:0.6`、`:latest`。
+
+构建完成后验证镜像本身：
+
+```bash
+docker pull --platform linux/amd64 nickname4th/linkshell-gateway:0.6.0
+docker run --platform linux/amd64 -d --name gw-check -p 18787:8787 -v gw-check:/data nickname4th/linkshell-gateway:0.6.0
+curl -s http://127.0.0.1:18787/healthz     # {"ok":true,"version":"0.6.0","relay":0,…}
+docker rm -f gw-check && docker volume rm gw-check
+```
+
+**打 tag 只是构建镜像，不会更新任何正在运行的网关。** 自建用户自己 `docker pull`；官方网关见下一节。
 
 ### Docker Hub 首次配置
 
@@ -127,32 +182,79 @@ CI 会自动：
    - `DOCKERHUB_USERNAME`: Docker Hub 用户名
    - `DOCKERHUB_TOKEN`: Docker Hub Access Token（在 Docker Hub → Account Settings → Security 创建）
 
-## 6. 更新 Homebrew Formula
+## 6. 部署官方网关（Luma）
 
-npm 发布后，运行脚本自动更新 tap：
+官方网关 `gateway.itool.tech` 由 Luma 部署，清单是仓库根目录的 `luma-gateway.yml`，其中 `image:` 写死了镜像版本。所有 Pro 用户的电脑和手机都连着它：部署会断开所有连接（两端会自动重连），所以挑人少的时候做，做之前和之后都要看。
+
+**部署前**
 
 ```bash
-# 自动检测版本、下载 tarball、算 sha256、更新 tap 仓库并推送
+curl -s https://gateway.itool.tech/healthz
+# 记下 version 和 relay（当前在线的连接数）
+
+docker manifest inspect nickname4th/linkshell-gateway:X.Y.Z >/dev/null && echo "image exists"
+```
+
+确认 `luma-gateway.yml` 里这三处没有被动过：
+
+- `volumes: - linkshell-gateway-relay:/data`
+- `RELAY_DATA_PATH: /data/relay.db`
+- `AUTH_REQUIRED: "true"` 和三个 `SUPABASE_*`
+
+> ⚠️ **`/data/relay.db` 所在的卷绝不能丢、不能改名、不能换路径**。里面是每台电脑和手机的公钥、所属账号和配对关系：没了它，所有配对过的手机都要重新配对。入口不能换成一个读别的路径的程序，`RELAY_DATA_PATH` 也不能改：网关会在一个空数据库上正常启动，`/healthz` 一切正常，而所有人已经被解除配对。
+
+**部署**
+
+```bash
+# 把 luma-gateway.yml 的 image 改成 nickname4th/linkshell-gateway:X.Y.Z
+luma deploy luma-gateway.yml --dry-run
+luma deploy luma-gateway.yml --timeout 3000
+
+git add luma-gateway.yml
+git commit -m "release: deploy gateway vX.Y.Z"
+git push origin main
+```
+
+`SUPABASE_*` 在清单里是 `${…}` 占位符，由 Luma 的密钥库在服务端填入，本地不需要这些值。
+
+**部署后**
+
+```bash
+curl -s https://gateway.itool.tech/healthz
+# version 是新版本；relay 在一两分钟内回到部署前的水平（两端断线后会自动重试，间隔最长约 30 秒）
+# 网关的启动日志里应该有一行：pairings and keys in /data/relay.db
+
+linkshell host status      # 自己这台电脑：Gateway 一行是 online，账号正确
+```
+
+再拿一台**之前就配对好/登录好**的手机打开 App：电脑在线，能进会话，**没有被要求重新配对**。这一条是数据没丢的证明，`/healthz` 证明不了它。
+
+**回滚**
+
+把 `luma-gateway.yml` 的 `image:` 改回上一个版本（`git log -- luma-gateway.yml` 里能看到），重新 `luma deploy`，再做一遍“部署后”的检查。数据卷不动：只要表结构没变，旧镜像读的是同一个 `relay.db`。回滚时同样不要删卷、不要改 `RELAY_DATA_PATH`。
+
+## 7. 更新 Homebrew Formula
+
+npm 上能下载到新版本的 CLI 之后（脚本要下载 tarball 算 sha256），运行：
+
+```bash
+# 版本号取自 packages/cli/package.json，下载 tarball、算 sha256、更新 tap 仓库并推送
 ./scripts/update-brew.sh
 
 # 或指定版本号
 ./scripts/update-brew.sh X.Y.Z
 ```
 
-### Homebrew Tap 首次配置
+tap 仓库是 `LiuTianjie/homebrew-linkshell`，脚本每次都会重写其中的 `Formula/linkshell.rb`。用户安装：`brew install LiuTianjie/linkshell/linkshell`。
 
-1. 创建 GitHub 仓库 `LiuTianjie/homebrew-linkshell`
-2. 将 `docs/brew/Formula/linkshell.rb` 复制到该仓库的 `Formula/linkshell.rb`
-3. 用户安装：`brew install LiuTianjie/linkshell/linkshell`
-
-## 7. 移动端发版（apps/client，2.0）
+## 8. 移动端发版（apps/client）
 
 发布的 App 是 `com.bd.linkshell`（App Store / APK 上的 LinkShell）。开发版用 `APP_VARIANT=development`（`pnpm --filter @linkshell/client ios|android` 已带上），装成 `com.bd.linkshell.v2`，与正式版并存。见 `apps/client/app.config.js`。
 
 ### 推荐：打 tag 走 CI
 
 ```bash
-./scripts/release-mobile.sh 2.0.1
+./scripts/release-mobile.sh 2.3.1
 ```
 
 推送 `vX.Y.Z` 触发两个 self-hosted macOS workflow，都调用 `apps/client/scripts/release.mjs`：
@@ -165,88 +267,69 @@ npm 发布后，运行脚本自动更新 tap：
 
 ```bash
 cd apps/client
-node scripts/release.mjs ios          # 用 app.json 里的版本；或 node scripts/release.mjs ios 2.0.1
-node scripts/release.mjs android      # 输出 build/release/LinkShell-X.Y.Z.apk / .aab
+node scripts/release.mjs ios 2.3.1        # 即根目录的 pnpm prod:ios；不带版本号时用 app.json 里的版本
+node scripts/release.mjs android 2.3.1    # 即 pnpm prod:android；输出 build/release/LinkShell-X.Y.Z.apk / .aab
 gh release create vX.Y.Z build/release/LinkShell-X.Y.Z.apk build/release/LinkShell-X.Y.Z.aab --title "LinkShell X.Y.Z"
 ```
 
-- Android release 用 Expo 模板的 `debug.keystore` 签名（与 1.x 相同），所以 APK 可以直接覆盖安装 1.x。
+- ⚠️ **本地构建完，要取消 CI 里的那两个构建**。`gh release create vX.Y.Z`（或手动推 `vX.Y.Z`）会在 GitHub 上产生这个 tag，照样触发 iOS 和 Android 两个 workflow，把同一个版本再构建、再上传一遍。推完马上 `gh run list --limit 5`，对这两个 run 执行 `gh run cancel <id>`。
+- 每次都是从干净的 prebuild 开始的完整构建，没有“快速”版本。
+- 在不是自己登录 shell 的环境里构建（脚本、后台任务）要补上环境变量，否则 CocoaPods / Gradle 一上来就失败：`LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 ANDROID_HOME=$HOME/Library/Android/sdk`。
+- Android release 用 Expo 模板的 `debug.keystore` 签名，和之前发布的所有版本相同，所以 APK 可以直接覆盖安装。
 - iOS 需要本机 Xcode 登录了 team `L95PYLFT86`；上传后在 App Store Connect 处理完成才会出现在 TestFlight。
 - 本地构建会重新生成 `ios/`、`android/`（正式版）；之后跑开发版需要 `APP_VARIANT=development npx expo prebuild --clean`。
 
-## 8. 提交 & 打 Tag
+README 和官网上的 Android 下载链接指向 GitHub 的 `releases/latest`：**最新的 Release 必须是带 APK 的 App 版本**。
+
+## 9. 提交 & 打 Tag
 
 ```bash
 git add -A
-git commit -m "release: vX.Y.Z"
-git tag vX.Y.Z
-git push origin main --tags
+git commit -m "release: cli X.Y.Z, host X.Y.Z, gateway X.Y.Z"    # 发了哪些写哪些
+git tag cli-vX.Y.Z
+git push origin main cli-vX.Y.Z
 ```
 
-## 9. 创建 GitHub Release
-
-```bash
-gh release create vX.Y.Z \
-  --title "vX.Y.Z" \
-  --notes "## What's Changed
-- feature 1
-- feature 2
-- bug fix 1"
-```
-
-Release notes 建议单独标出：
-- Terminal provider 变化（claude/codex/gemini/copilot/custom）
-- Agent Workspace capability/model/permission 变化
-- Protocol 或 Gateway API 兼容性变化
-- 移动端最低版本要求
-
-如果有 Android APK，附加到 Release：
-
-```bash
-gh release upload vX.Y.Z ./apps/mobile/android/app/build/outputs/apk/release/app-release.apk
-```
+- tag 按名字推，不要用 `--tags`：本地如果留着一个没推过的 `vX.Y.Z`，`--tags` 会顺手触发一次 App 构建。
+- CLI 发版只打 tag，不建 GitHub Release（原因见上一节末尾）。确实要建的话加 `--latest=false`：`gh release create cli-vX.Y.Z --latest=false --title "cli X.Y.Z" --notes "…"`。
 
 ## 10. 发版后验证
 
 ```bash
-# 验证 npm
-npm info linkshell-cli version
+# npm
+npm view linkshell-cli version
+npm view @linkshell/host version
+npm view @linkshell/gateway version
 
-# 验证 Docker
-docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
-docker run --platform linux/amd64 --rm nickname4th/linkshell-gateway:latest node -e "console.log('ok')"
-
-# 验证 Homebrew（首次 tap 后）
-brew update
-brew upgrade linkshell
-
-# 验证 curl 安装
-curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
-
-# 验证 upgrade 命令
+# 升级路径：在一台装着上一个版本的机器上
 linkshell upgrade
+linkshell host stop && linkshell host --daemon     # 后台的 host 还在跑旧版本，重启后才是新的
+linkshell doctor                                    # Host 一行的版本号和 CLI 一致，Gateway 一行 online
+linkshell host status
 
-# 验证 provider detection
-linkshell doctor
-linkshell start --provider claude --no-agent-ui
-linkshell start --provider codex --no-agent-ui
+# 全新安装
+curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
+brew update && brew upgrade linkshell
 
-# 验证 Agent Workspace capabilities（至少覆盖 Codex 或 Claude 其一）
-linkshell start --agent-ui --provider custom --command bash
+# Docker（如果发了 gateway）
+docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
+curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网关
 ```
+
+改了屏幕相关的代码时，在 Mac 上再跑一次 `linkshell screen --check`，并用手机实际看一次屏幕。
 
 ## 快速发版 Checklist
 
-- [ ] 代码通过 typecheck
-- [ ] `pnpm test` 全部通过
-- [ ] 版本号已更新（protocol、gateway、cli、根 package.json，按依赖链）
-- [ ] `pnpm build` 成功
-- [ ] **使用 `pnpm publish`（不是 `npm publish`）发布 npm 包**
-- [ ] 抽检 tarball 里没有残留的 `workspace:` 字面量（见 §4.1）
-- [ ] 抽检 CLI tarball 里 `web/index.html` + `web/assets/*.js` 存在（web 控制台已打包，见 §4.1）
-- [ ] Docker tag 已推送（CI 自动构建）
-- [ ] Homebrew formula 已更新 sha256
-- [ ] GitHub Release 已创建
-- [ ] 移动端已提交（如有改动）
-- [ ] README、README_CN、docs/site、包级 README 已同步新功能
-- [ ] Agent Workspace smoke test 已覆盖至少一个 provider（如有 Agent 改动）
+- [ ] `pnpm build`、`pnpm typecheck`、`pnpm test` 全部通过
+- [ ] 版本号已更新（wire、mac、host、gateway、cli 中改动过的，以及它们的下游；根 package.json 跟 CLI 一致）
+- [ ] 改版本号之后重新 `pnpm build`
+- [ ] **使用 `pnpm publish`（不是 `npm publish`）**，顺序 wire → mac → host → gateway → cli
+- [ ] `@linkshell/mac` 是在有 Developer ID 证书的 Mac 上发的
+- [ ] 抽检 tarball：没有 `workspace:`；CLI 包里没有 `web/`（见 §4.1）
+- [ ] `npm i -g linkshell-cli@X.Y.Z --prefer-online` 能装上，`linkshell doctor` 通过
+- [ ] 如果发了 gateway：`gateway-vX.Y.Z` tag 已推送，镜像本地跑过 `/healthz`
+- [ ] 如果要更新官方网关：`luma-gateway.yml` 已改并部署；`/healthz` 是新版本、`relay` 回升；一台已配对的手机不用重新配对就能连上
+- [ ] Homebrew formula 已更新
+- [ ] `cli-vX.Y.Z` tag 已推送（按名字推，没有用 `--tags`）
+- [ ] App 有改动时：`vX.Y.Z` 已发，TestFlight 和 GitHub Release（带 APK）都在；本地构建的话 CI 里重复的构建已取消
+- [ ] README、README_CN、docs/site（改完跑 `python3 scripts/build-site-pages.py`）、包级 README 已同步新功能

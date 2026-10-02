@@ -1,6 +1,7 @@
 # LinkShell v2 架构设计
 
-> 状态：草案（2026-09-29）· 决策：Expo 一套代码 / 协议直接断代 / 端到端加密
+> 状态：2.0 已按此设计发布（2026-09-30）；v1 代码已于 2026-10 全部删除（见 §8）。本文是当时的设计稿（2026-09-29），保留作背景：与代码不一致的地方以代码为准，现状见根目录 `CLAUDE.md`。
+> 决策：Expo 一套代码 / 协议直接断代 / 端到端加密
 
 ## 0. 为什么要重做
 
@@ -48,11 +49,11 @@ flowchart LR
 
 | 组件 | 职责 | v1 → v2 |
 |---|---|---|
-| **Host Daemon**（`packages/host`） | 常驻进程，持有所有 Agent 会话；SQLite 存会话与事件日志；驾驶权；审批广播；本地 socket 给终端 shim；对外加密通道 | 替代 `bridge-session.ts` + 6590 行的 `agent-workspace.ts` |
-| **CLI**（`packages/cli`） | `linkshell start/pair/status/doctor`；`linkshell claude|codex|gemini|…` 作为终端入口；`linkshell run <cmd>` | 保留命令外壳，内部全换 |
-| **Gateway**（`packages/gateway`） | 只路由密文帧；账号与机器/设备归属；配对会合；推送（APNs/FCM）；开发预览隧道；托管 Web 静态资源 | 去掉所有协议语义（不再缓存/解析 agent 消息） |
-| **Client**（`apps/client`） | Expo + react-native-web，一套代码出 iOS / Android / Web | 替代 `apps/mobile` + `apps/web-dashboard` |
-| **Wire**（`packages/wire`） | 会话模型、ACP 形状的会话事件、RPC 方法的 zod schema，外加与传输无关的 JSON-RPC 对端（客户端可复用） | 替代 `shared-protocol`（v1 的 60+ 种消息） |
+| **Host Daemon**（`packages/host`） | 常驻进程，持有所有 Agent 会话；SQLite 存会话与事件日志；驾驶权；审批广播；本地 socket 给终端 shim；对外加密通道 | 替代 v1 CLI 里的 `bridge-session.ts` + 6590 行的 `agent-workspace.ts`（已删除） |
+| **CLI**（`packages/cli`） | `linkshell setup/host/pair/status/doctor`；`linkshell claude|codex` 作为终端入口；`linkshell gateway` 运行自建网关 | 保留命令外壳，内部全换；v1 的 `linkshell start` 已删除 |
+| **Gateway**（`packages/gateway`） | 只路由密文帧；账号与机器/设备归属；配对会合 | 去掉所有协议语义（不再缓存/解析 agent 消息）。开发预览不再经过网关的隧道代理，而是走端到端通道里的字节流（能直连时点对点） |
+| **Client**（`apps/client`） | Expo，一套代码出 iOS / Android | 替代 v1 的 `apps/mobile` + `apps/web-dashboard`（均已删除） |
+| **Wire**（`packages/wire`） | 会话模型、ACP 形状的会话事件、RPC 方法的 zod schema，外加与传输无关的 JSON-RPC 对端（客户端可复用） | 替代 v1 的 `shared-protocol`（60+ 种消息，已删除） |
 
 ## 3. Agent 驱动层：按档位支持所有 Agent
 
@@ -265,17 +266,21 @@ LinkShell **从不经手 Agent 的凭据**，只用与用户终端完全相同�
 
 ## 8. 代码组织与迁移
 
-同一仓库内重写，新旧并存到 v2 发布，发布后删除旧代码。
+同一仓库内重写，新旧并存到 v2 发布；发布后旧代码已全部删除（2026-10，CLI 0.10 / gateway 0.6）。现在的结构：
 
-| 新 | 说明 | 复用 v1 |
-|---|---|---|
-| `packages/wire` | v2 schema（RPC、事件；加密帧在 M3） | — |
-| `packages/host` | daemon、驱动、SQLite 存储、加密 | node-pty 终端管理、keep-awake、launchd 工具、隧道代理的 host 侧 |
-| `packages/cli` | 命令外壳 + shim | commander 结构、doctor、登录 |
-| `packages/gateway` | 密文路由、配对会合、推送、隧道、静态资源 | Supabase 鉴权、隧道、静态托管 |
-| `apps/client` | Expo 一套代码 | xterm 终端 HTML 构建脚本、主题与图标资源 |
+| 包 | 说明 |
+|---|---|
+| `packages/wire` | schema（RPC、事件）、加密、中继帧与中继客户端、直连通道的帧格式 |
+| `packages/host` | daemon、驱动、SQLite 存储、终端、端口预览、屏幕 |
+| `packages/cli` | 命令外壳 + shim |
+| `packages/gateway` | 中继：密文路由、配对会合、账号校验；官方网关和自建网关是同一份代码 |
+| `packages/client-core` | 客户端状态与时间线（不含界面） |
+| `apps/client` | Expo App（iOS / Android） |
+| `apps/mac` | LinkShell.app：Mac 上的屏幕采集、视频和输入（见 [screen-realtime.md](screen-realtime.md)） |
 
-**发布后删除**：`packages/shared-protocol`、`apps/web-dashboard`、`apps/mobile`（被 `apps/client` 替代）、`packages/cli/src/runtime/acp/*`、v1 的会话/中继逻辑。
+**网关的拆分与合并**：重写期间网关分成两半——v1 网关留在 `packages/gateway`，新中继单独放在 `packages/gateway-v2`，由前者挂在同一个端口的 `/v2/connect` 上，这样一个部署同时服务两代客户端。v1 那一半删除后，中继并入 `packages/gateway`，`packages/gateway-v2` 不复存在。对已安装的电脑和手机没有任何变化：路径仍是 `/v2/connect`，握手里的挑战串仍是 `linkshell-gateway-v2:…`，数据仍是同一个 `relay.db`、同样的表结构。路径和挑战串里的 “v2” 是协议的一部分，不是可以顺手整理掉的版本号；`relay.db` 的位置和表结构同样不能动。
+
+**已删除**：`packages/shared-protocol`、`apps/web-dashboard`、`apps/mobile`（被 `apps/client` 替代）、`packages/gateway-v2`（并入 `packages/gateway`）、CLI 的 v1 运行时（`packages/cli/src/runtime/*`，以及 `linkshell start`、`linkshell list`）、网关的 v1 部分（会话中继、配对接口、隧道代理、静态网页托管）。网页端以后如果重做，直接建在 v2 协议上。
 
 ## 9. 里程碑（每一步都要本地可验证）
 
@@ -287,7 +292,9 @@ LinkShell **从不经手 Agent 的凭据**，只用与用户终端完全相同�
 | M3 | 加密通道 + 网关 v2（路由 / 配对 / 推送）+ 局域网直连 | 端到端测试：网关日志中只有密文；重启后无需重新配对 |
 | M4 | Expo 客户端：首页 / 会话 / 新建 / 电脑 | Web 构建在浏览器里跑通，iOS 模拟器跑通 |
 | M5 | 终端、开发预览、推送、语音输入迁移；发布 | 真机验收 |
-| M6 | 删除 v1 代码 | typecheck + 测试 |
+| M6 ✅ | 删除 v1 代码，网关合并为一个包（2026-10，见 §8） | 全量 build + typecheck + 测试；新镜像挂旧数据卷启动，配对仍在 |
+
+2.0 于 2026-09-30 发布，M3–M5 的主体（加密通道、中继、配对、App、终端、开发预览）都在其中。当时列在里面但没有做的：推送、局域网发现、语音输入、Web 端。屏幕和开发预览的直连后来用 WebRTC 实现（`packages/wire/src/direct.ts`），屏幕的实时视频见 [screen-realtime.md](screen-realtime.md)。
 
 ## 10. 风险
 

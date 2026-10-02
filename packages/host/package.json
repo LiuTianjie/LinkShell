@@ -27,7 +27,7 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist *.tsbuildinfo && tsc -p tsconfig.json",
     "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

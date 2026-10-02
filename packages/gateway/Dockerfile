@@ -6,27 +6,18 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 # pnpm checks every patched dependency in the lockfile against its patch file.
 COPY patches/ patches/
-COPY packages/shared-protocol/package.json packages/shared-protocol/
 COPY packages/wire/package.json packages/wire/
-COPY packages/gateway-v2/package.json packages/gateway-v2/
 COPY packages/gateway/package.json packages/gateway/
-COPY apps/web-dashboard/package.json apps/web-dashboard/
 
-RUN pnpm install --frozen-lockfile --filter @linkshell/gateway --filter @linkshell/protocol --filter @linkshell/wire --filter @linkshell/gateway-v2 --filter @linkshell/web-dashboard
+RUN pnpm install --frozen-lockfile --filter @linkshell/gateway --filter @linkshell/wire
 
-COPY packages/shared-protocol/ packages/shared-protocol/
 COPY packages/wire/ packages/wire/
-COPY packages/gateway-v2/ packages/gateway-v2/
 COPY packages/gateway/ packages/gateway/
-COPY apps/web-dashboard/ apps/web-dashboard/
 COPY tsconfig.base.json ./
 
-# Libraries first (gateway + web depend on their built dist), then both apps.
-RUN pnpm --filter @linkshell/protocol build \
-  && pnpm --filter @linkshell/wire build \
-  && pnpm --filter @linkshell/gateway-v2 build \
-  && pnpm --filter @linkshell/gateway build \
-  && pnpm --filter @linkshell/web-dashboard build
+# The wire protocol first: the gateway runs against its built dist.
+RUN pnpm --filter @linkshell/wire build \
+  && pnpm --filter @linkshell/gateway build
 
 # Prune to production deps only (the app's patches don't apply to the gateway).
 RUN pnpm --filter @linkshell/gateway deploy --legacy --prod --config.allow-unused-patches=true /app/pruned
@@ -36,7 +27,7 @@ RUN pnpm --filter @linkshell/gateway deploy --legacy --prod --config.allow-unuse
 FROM node:22-alpine
 
 LABEL org.opencontainers.image.source="https://github.com/LiuTianjie/LinkShell"
-LABEL org.opencontainers.image.description="LinkShell Gateway — WebSocket relay for remote terminal sessions"
+LABEL org.opencontainers.image.description="LinkShell Gateway — relays end-to-end encrypted frames between computers and phones, and brokers pairing"
 
 RUN addgroup -S linkshell && adduser -S linkshell -G linkshell
 
@@ -44,27 +35,22 @@ WORKDIR /app
 
 # Copy pruned production node_modules + built dist
 COPY --from=builder /app/pruned/node_modules node_modules/
-COPY --from=builder /app/packages/shared-protocol/dist packages/shared-protocol/dist/
-COPY --from=builder /app/packages/shared-protocol/package.json packages/shared-protocol/
 COPY --from=builder /app/packages/gateway/dist packages/gateway/dist/
+# Also where /healthz reads the version from.
 COPY --from=builder /app/packages/gateway/package.json packages/gateway/
-
-# Built web UI — served same-origin by the gateway from WEB_DIST.
-COPY --from=builder /app/apps/web-dashboard/dist web/
 
 # Workspace root package.json needed for module resolution
 COPY --from=builder /app/package.json ./
 
-# The v2 relay keeps pairings and keys here: mount a persistent volume.
+# Pairings and keys are kept here: mount a persistent volume.
 RUN mkdir -p /data && chown -R linkshell:linkshell /app /data
 USER linkshell
 
 ENV NODE_ENV=production
 ENV PORT=8787
-ENV WEB_DIST=/app/web
 ENV RELAY_DATA_PATH=/data/relay.db
 # Collect garbage well inside a 768 MB container instead of growing into its limit.
 ENV NODE_OPTIONS=--max-old-space-size=512
 EXPOSE 8787
 
-CMD ["node", "packages/gateway/dist/gateway/src/index.js"]
+CMD ["node", "packages/gateway/dist/gateway/src/main.js"]

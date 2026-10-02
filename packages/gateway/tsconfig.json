@@ -9,8 +9,6 @@
   },
   "include": [
     "src/**/*.ts",
-    "../shared-protocol/src/**/*.ts",
-    "../gateway-v2/src/**/*.ts",
     "../wire/src/**/*.ts"
   ]
 }

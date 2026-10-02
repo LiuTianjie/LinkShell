@@ -1,1062 +1,371 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createServer } from "node:http";
-import type { Server } from "node:http";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import WebSocket from "ws";
-import { WebSocketServer } from "ws";
-import { createEnvelope, parseEnvelope, serializeEnvelope } from "@linkshell/protocol";
-import { parseTypedPayload as parseLocalTypedPayload } from "../../shared-protocol/src/index.js";
-import { SessionManager } from "../src/sessions.js";
-import { PairingManager } from "../src/pairings.js";
-import { handleSocketMessage } from "../src/relay.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { HostLink, pairByLink, TunnelSocket } from "../../client-core/src/index.js";
+import { startHost, type RunningHost } from "../../host/src/host.js";
+import { connectHost, type HostClient } from "../../host/src/rpc/client.js";
+import {
+  codeSecret,
+  createIdentity,
+  decodePairingLink,
+  pairingProof,
+  publicIdentity,
+  RELAY_PATH,
+  RelayClient,
+  type Identity,
+  type MachineEntry,
+  type RelaySocket,
+} from "@linkshell/wire";
+import { Gateway, type GatewayOptions } from "../src/relay.js";
 
-// ── Helpers ─────────────────────────────────────────────────────────
+// A real gateway, a real host and a scripted device, all in-process.
 
-const TEST_PORT = 18787;
-const BASE = `http://localhost:${TEST_PORT}`;
-const WS_BASE = `ws://localhost:${TEST_PORT}`;
+const cleanups: (() => Promise<void> | void)[] = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
 
-async function postJson(path: string, body: unknown) {
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+const ACCOUNTS: Record<string, { userId: string; email: string }> = {
+  "token-alice": { userId: "alice", email: "alice@example.com" },
+  "token-bob": { userId: "bob", email: "bob@example.com" },
+};
+
+async function world(options: { machineToken?: string; heartbeatMs?: number; admit?: GatewayOptions["admit"] } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "lsh-gw-"));
+  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  const routed: string[] = [];
+  const gateway = new Gateway({
+    port: 0,
+    host: "127.0.0.1",
+    databasePath: join(dir, "gateway.db"),
+    verifyToken: async (token) => ACCOUNTS[token],
+    log: () => {},
+    onRouted: (frame) => routed.push(frame),
+    heartbeatMs: options.heartbeatMs,
+    admit: options.admit,
   });
-  return { status: res.status, body: await res.json() as Record<string, unknown> };
-}
-
-async function getJson(path: string) {
-  const res = await fetch(`${BASE}${path}`);
-  return { status: res.status, body: await res.json() as Record<string, unknown> };
-}
-
-function connectWs(sessionId: string, role: string, deviceId?: string): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    const url = `${WS_BASE}/ws?sessionId=${sessionId}&role=${role}${deviceId ? `&deviceId=${deviceId}` : ""}`;
-    const ws = new WebSocket(url);
-    attachMessageBuffer(ws);
-    ws.on("open", () => resolve(ws));
-    ws.on("error", reject);
+  const port = await gateway.start();
+  cleanups.push(() => gateway.stop());
+  const url = `ws://127.0.0.1:${port}`;
+  const home = join(dir, "host");
+  const host: RunningHost = await startHost({
+    home,
+    version: "test",
+    env: { PATH: process.env.PATH, HOME: dir, SHELL: "/bin/sh", ENV: "", PS1: "$ " },
+    drivers: () => [],
+    log: () => {},
+    gateway: { url, name: "Test Mac", token: options.machineToken ? () => options.machineToken : undefined },
   });
+  cleanups.push(() => host.stop());
+  const local = await connectHost(host.paths.hostSocket);
+  cleanups.push(() => local.close());
+  await until(async () => (await local.call("gateway.status", {})).status === "online");
+  return { gateway, url, host, local, routed };
 }
 
-const messageQueues = new WeakMap<WebSocket, ReturnType<typeof parseEnvelope>[]>();
-const messageWaiters = new WeakMap<WebSocket, Array<(msg: ReturnType<typeof parseEnvelope>) => void>>();
-
-function attachMessageBuffer(ws: WebSocket): void {
-  messageQueues.set(ws, []);
-  messageWaiters.set(ws, []);
-  ws.on("message", (data) => {
-    const msg = parseEnvelope(data.toString());
-    const waiters = messageWaiters.get(ws) ?? [];
-    const waiter = waiters.shift();
-    if (waiter) {
-      waiter(msg);
-    } else {
-      messageQueues.get(ws)?.push(msg);
-    }
+function device(url: string, name: string, token?: string) {
+  const identity = createIdentity();
+  const relay = new RelayClient({
+    url: url + RELAY_PATH,
+    identity,
+    role: "device",
+    name,
+    token: token ? () => token : undefined,
+    createSocket: (target) => new WebSocket(target) as unknown as RelaySocket,
   });
+  relay.start();
+  cleanups.push(() => relay.stop());
+  return { identity, relay };
 }
 
-function waitForMessage(ws: WebSocket): Promise<ReturnType<typeof parseEnvelope>> {
-  const queue = messageQueues.get(ws);
-  const queued = queue?.shift();
-  if (queued) return Promise.resolve(queued);
-  return new Promise((resolve) => {
-    const waiters = messageWaiters.get(ws) ?? [];
-    waiters.push(resolve);
-    messageWaiters.set(ws, waiters);
-  });
+function connect(relay: RelayClient, identity: Identity, machine: MachineEntry | ReturnType<typeof publicIdentity>) {
+  const link = new HostLink({ url: "tunnel", createSocket: () => new TunnelSocket(relay, identity, machine), heartbeatMs: 0 });
+  link.start();
+  cleanups.push(() => link.stop());
+  return link;
 }
 
-async function waitForSessionSummary(
-  sessionId: string,
-  predicate: (summary: Record<string, unknown>) => boolean,
-): Promise<Record<string, unknown>> {
-  for (let i = 0; i < 20; i++) {
-    const { body } = await getJson("/sessions");
-    const sessions = body.sessions as Array<Record<string, unknown>>;
-    const found = sessions.find((s) => s.id === sessionId);
-    if (found && predicate(found)) return found;
+async function until(check: () => boolean | Promise<boolean>, ms = 8000) {
+  const deadline = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error("timed out");
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error(`Timed out waiting for session summary ${sessionId}`);
 }
 
-// ── Test server setup ───────────────────────────────────────────────
-
-let server: Server;
-let wss: WebSocketServer;
-let sessionManager: SessionManager;
-let pairingManager: PairingManager;
-
-beforeAll(async () => {
-  sessionManager = new SessionManager();
-  pairingManager = new PairingManager();
-
-  server = createServer(async (req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
-    const method = req.method ?? "GET";
-
-    if (method === "GET" && url.pathname === "/healthz") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-      return;
-    }
-
-    if (method === "POST" && url.pathname === "/pairings") {
-      const body = await readBody(req);
-      const record = pairingManager.create(body.sessionId as string | undefined);
-      res.writeHead(201, { "content-type": "application/json" });
-      res.end(JSON.stringify({
-        sessionId: record.sessionId,
-        pairingCode: record.pairingCode,
-        expiresAt: new Date(record.expiresAt).toISOString(),
-      }));
-      return;
-    }
-
-    if (method === "POST" && url.pathname === "/pairings/claim") {
-      const body = await readBody(req);
-      const result = pairingManager.claim(body.pairingCode as string);
-      if ("error" in result) {
-        res.writeHead(result.status, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: result.error }));
-        return;
-      }
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ sessionId: result.sessionId }));
-      return;
-    }
-
-    if (method === "GET" && url.pathname === "/sessions") {
-      const sessions = sessionManager
-        .listActive()
-        .map((s) => sessionManager.getSummary(s.id));
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ sessions }));
-      return;
-    }
-
-    res.writeHead(404, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: "not_found" }));
-  });
-
-  wss = new WebSocketServer({ noServer: true });
-
-  server.on("upgrade", (request, socket, head) => {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
-    if (url.pathname !== "/ws") { socket.destroy(); return; }
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request, url);
-    });
-  });
-
-  wss.on("connection", (socket: WebSocket, _req: unknown, url: URL) => {
-    const sessionId = url.searchParams.get("sessionId")!;
-    const role = url.searchParams.get("role") as "host" | "client";
-    const deviceId = url.searchParams.get("deviceId") ?? "test-device";
-
-    const device = { socket, role, deviceId, connectedAt: Date.now() };
-    if (role === "host") {
-      sessionManager.setHost(sessionId, device);
-    } else {
-      sessionManager.addClient(sessionId, device);
-    }
-
-    socket.send(serializeEnvelope(createEnvelope({
-      type: "session.connect",
-      sessionId,
-      payload: { role, clientName: deviceId },
-    })));
-
-    socket.on("message", (data: WebSocket.RawData) => {
-      handleSocketMessage(socket, data.toString(), role, sessionId, deviceId, sessionManager);
-    });
-
-    socket.on("close", () => {
-      if (role === "host") sessionManager.removeHost(sessionId);
-      else sessionManager.removeClient(sessionId, deviceId);
-    });
-  });
-
-  await new Promise<void>((resolve) => server.listen(TEST_PORT, resolve));
-});
-
-afterAll(async () => {
-  wss.clients.forEach((ws) => ws.close());
-  sessionManager.destroy();
-  pairingManager.destroy();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-});
-
-async function readBody(req: import("node:http").IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+async function pairByQr(local: HostClient, relay: RelayClient, identity: Identity) {
+  const offer = await local.call("pairing.start", {});
+  expect(offer.link.length).toBeLessThan(200);
+  const link = decodePairingLink(offer.link)!;
+  const machine = await pairByLink(relay, identity, link);
+  expect(machine.signKey).toBe(link.signKey);
+  return { machine, link, offer };
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
+describe("gateway v2 end to end", () => {
+  it("pairs by QR and runs RPC and a terminal through the tunnel, sealed", async () => {
+    const { url, local, routed } = await world();
+    const phone = device(url, "iPhone");
+    const paired: string[] = [];
+    local.on("pairing.done", ({ device: d }) => paired.push(d.name));
+    const { machine } = await pairByQr(local, phone.relay, phone.identity);
+    await until(() => paired.includes("iPhone"));
 
-describe("Health check", () => {
-  it("returns ok", async () => {
-    const { status, body } = await getJson("/healthz");
-    expect(status).toBe(200);
-    expect(body.ok).toBe(true);
+    const link = connect(phone.relay, phone.identity, machine);
+    const info = await link.call("machine.info", {});
+    expect(info.hostname).toBeTruthy();
+
+    let output = "";
+    link.on("terminal.output", ({ data }) => (output += data));
+    const { terminal } = await link.call("terminals.create", { cols: 80, rows: 24 });
+    await link.call("terminals.attach", { terminalId: terminal.id });
+    await link.call("terminals.input", { terminalId: terminal.id, data: "echo SECRET-$((40+2))\n" });
+    // What was typed has no "42" in it, so this is the command's own output — wherever the
+    // prompt landed (a shell slow to start draws it after the tty has echoed the typing).
+    await until(() => output.includes("SECRET-42"));
+
+    // Remote devices can't use the terminal shim's methods.
+    await expect(link.call("desktop.launch", { agent: "codex", args: [] })).rejects.toThrow(/only available locally/);
+
+    // The gateway routed plenty, but nothing readable.
+    expect(routed.length).toBeGreaterThan(5);
+    const everything = routed.join("\n");
+    for (const secret of ["machine.info", "terminals.create", "SECRET", info.hostname, "echo"]) expect(everything).not.toContain(secret);
+    // (The first test also pays for the cold start: loading the host and its first shell.)
+  }, 20_000);
+
+  it("pairs by typed code, and refuses a wrong code", async () => {
+    const { url, local } = await world();
+    const phone = device(url, "Pixel");
+    const offer = await local.call("pairing.start", {});
+    const wrong = offer.code === "000000" ? "111111" : "000000";
+    await expect(phone.relay.request("pair.claim", { code: wrong, proof: pairingProof(codeSecret(wrong), publicIdentity(phone.identity)) })).rejects.toThrow();
+    // Right code, wrong proof: the machine refuses.
+    await expect(phone.relay.request("pair.claim", { code: offer.code, proof: pairingProof(codeSecret("999999"), publicIdentity(phone.identity)) })).rejects.toThrow(/refused/);
+    const fresh = await local.call("pairing.start", {});
+    const { machine } = await phone.relay.request("pair.claim", { code: fresh.code, proof: pairingProof(codeSecret(fresh.code), publicIdentity(phone.identity)) });
+    const link = connect(phone.relay, phone.identity, machine);
+    expect((await link.call("machine.info", {})).hostname).toBeTruthy();
   });
-});
 
-describe("Protocol schemas", () => {
-  it("keeps provider capability fields for agent v2", () => {
-    const payload = parseLocalTypedPayload("agent.v2.capabilities", {
-      enabled: true,
-      provider: "codex",
-      providers: [{
-        id: "codex",
-        label: "Codex",
-        enabled: true,
-        models: [{ id: "gpt-5.5", label: "GPT-5.5" }],
-        defaultModel: "gpt-5.5",
-        reasoningEfforts: ["none", "minimal", "high"],
-        permissionModes: ["read_only", "workspace_write"],
-        commands: [{
-          id: "codex:linkshell:plan",
-          name: "plan",
-          title: "/plan",
-          description: "Enter plan mode",
-          provider: "codex",
-          source: "linkshell",
-          argsMode: "none",
-          executionKind: "native",
-        }],
-        modes: [{ id: "plan", title: "Plan" }],
-        currentMode: "plan",
-        features: { permissions: true, reasoningEffort: true },
-      }],
-      supportsSessionList: true,
-      supportsSessionLoad: true,
-      supportsImages: true,
-      supportsAudio: false,
-      supportsPermission: true,
-      supportsPlan: true,
-      supportsCancel: true,
+  it("won't route for a device that never paired, and stops after revoking", async () => {
+    const { url, local, host } = await world();
+    const stranger = device(url, "Stranger");
+    await stranger.relay.waitOnline(5000);
+    const machineId = host.gateway!.identity.id;
+    const errors: string[] = [];
+    const socket = new TunnelSocket(stranger.relay, stranger.identity, publicIdentity(host.gateway!.identity));
+    socket.onerror = (event) => errors.push(String((event as { code?: string }).code));
+    await until(() => errors.length > 0);
+    expect(errors[0]).toBe("not_allowed");
+
+    const phone = device(url, "iPhone");
+    const { machine } = await pairByQr(local, phone.relay, phone.identity);
+    expect(machine.id).toBe(machineId);
+    const link = connect(phone.relay, phone.identity, machine);
+    await link.call("machine.info", {});
+    const { devices } = await local.call("gateway.status", {});
+    await local.call("devices.revoke", { deviceId: devices[0]!.id });
+    const after = device(url, "iPhone again");
+    const again = new TunnelSocket(after.relay, after.identity, machine);
+    const reasons: string[] = [];
+    again.onerror = (event) => reasons.push(String((event as { code?: string }).code));
+    await until(() => reasons.length > 0);
+    expect(reasons[0]).toBe("not_allowed");
+  });
+
+  it("lets devices on the machine's account in without pairing, and nobody else", async () => {
+    const { url, host } = await world({ machineToken: "token-alice" });
+    const mine = device(url, "Alice's phone", "token-alice");
+    await mine.relay.waitOnline(5000);
+    const { machines } = await mine.relay.request("machines.list", {});
+    expect(machines).toMatchObject([{ id: host.gateway!.identity.id, via: "account", online: true, name: "Test Mac" }]);
+    const link = connect(mine.relay, mine.identity, machines[0]!);
+    expect((await link.call("machine.info", {})).hostname).toBeTruthy();
+
+    const other = device(url, "Bob's phone", "token-bob");
+    await other.relay.waitOnline(5000);
+    expect((await other.relay.request("machines.list", {})).machines).toEqual([]);
+  });
+
+  it("takes a computer that is gone off the account when a device on it says so, and not one that is there", async () => {
+    const { url, host } = await world({ machineToken: "token-alice" });
+    const mine = device(url, "Alice's phone", "token-alice");
+    await mine.relay.waitOnline(5000);
+    const id = host.gateway!.identity.id;
+
+    // Signed in and connected: forgetting it would only see it straight back, so it stays.
+    await mine.relay.request("machines.forget", { machineId: id });
+    expect((await mine.relay.request("machines.list", {})).machines).toMatchObject([{ id, via: "account", online: true }]);
+
+    // Someone else's phone can't take it off Alice's account, whatever it asks.
+    const other = device(url, "Bob's phone", "token-bob");
+    await other.relay.waitOnline(5000);
+    await host.stop();
+    await until(async () => (await mine.relay.request("machines.list", {})).machines[0]?.online === false);
+    await other.relay.request("machines.forget", { machineId: id });
+    expect((await mine.relay.request("machines.list", {})).machines).toMatchObject([{ id, via: "account", online: false }]);
+
+    // Gone (reinstalled, given away), and its owner's phone says so: the list no longer has it.
+    await mine.relay.request("machines.forget", { machineId: id });
+    expect((await mine.relay.request("machines.list", {})).machines).toEqual([]);
+  });
+
+  it("keeps healthy connections across heartbeats", async () => {
+    const { url, local } = await world({ heartbeatMs: 60 });
+    const phone = device(url, "iPhone");
+    let drops = 0;
+    phone.relay.onStatus((status) => status === "offline" && drops++);
+    await phone.relay.waitOnline(5000);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(drops).toBe(0);
+    expect((await local.call("gateway.status", {})).status).toBe("online");
+  });
+
+  it("rejects a bad account token instead of connecting anonymously", async () => {
+    const { url } = await world();
+    const phone = device(url, "iPhone", "token-forged");
+    await until(() => phone.relay.lastError?.code === "token_invalid");
+  });
+
+  it("admits computers only through the admission check (a subscription on the official gateway)", async () => {
+    const subscribed = new Set(["alice"]);
+    const admit: GatewayOptions["admit"] = async ({ role, userId }) =>
+      role === "machine" && !(userId && subscribed.has(userId)) ? "需要 Pro 订阅" : undefined;
+    // Subscribed: the computer comes online, and a device may connect without an account.
+    const { url } = await world({ machineToken: "token-alice", admit });
+    const phone = device(url, "iPhone");
+    await phone.relay.waitOnline(5000);
+    // Not subscribed: refused with the reason.
+    const bob = createIdentity();
+    const machine = new RelayClient({
+      url: url + RELAY_PATH,
+      identity: bob,
+      role: "machine",
+      name: "Bob's Mac",
+      token: () => "token-bob",
+      createSocket: (target) => new WebSocket(target) as unknown as RelaySocket,
     });
-    expect(payload.providers?.[0]?.models?.[0]?.id).toBe("gpt-5.5");
-    expect(payload.providers?.[0]?.defaultModel).toBe("gpt-5.5");
-    expect(payload.providers?.[0]?.reasoningEfforts).toContain("minimal");
-    expect(payload.providers?.[0]?.permissionModes).toContain("read_only");
-    expect(payload.providers?.[0]?.commands?.[0]?.name).toBe("plan");
-    expect(payload.providers?.[0]?.modes?.[0]?.id).toBe("plan");
-    expect(payload.providers?.[0]?.currentMode).toBe("plan");
-    expect(payload.providers?.[0]?.features?.permissions).toBe(true);
+    machine.start();
+    cleanups.push(() => machine.stop());
+    await until(() => machine.lastError?.code === "not_admitted");
+    expect(machine.lastError?.message).toBe("需要 Pro 订阅");
   });
 
-  it("validates agent command execution and collaboration mode payloads", () => {
-    const command = parseLocalTypedPayload("agent.v2.command.execute", {
-      conversationId: "conversation-1",
-      commandId: "codex:linkshell:plan",
-      rawText: "/plan",
-      clientMessageId: "cmd-1",
+  it("holds a fast sender back instead of buffering for a slow receiver", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-gw-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const limit = 256 * 1024;
+    const gateway = new Gateway({
+      port: 0,
+      host: "127.0.0.1",
+      databasePath: join(dir, "gateway.db"),
+      verifyToken: async (token) => ACCOUNTS[token],
+      log: () => {},
+      maxBufferedBytes: limit,
     });
-    expect(command.commandId).toBe("codex:linkshell:plan");
-
-    const prompt = parseLocalTypedPayload("agent.v2.prompt", {
-      conversationId: "conversation-1",
-      clientMessageId: "msg-1",
-      contentBlocks: [{ type: "text", text: "make a plan" }],
-      collaborationMode: "plan",
+    const url = `ws://127.0.0.1:${await gateway.start()}`;
+    cleanups.push(() => gateway.stop());
+    // Two peers on one account may reach each other; the device reads nothing for a while.
+    const sender = new RelayClient({
+      url: url + RELAY_PATH,
+      identity: createIdentity(),
+      role: "machine",
+      name: "Mac",
+      token: () => "token-alice",
+      createSocket: (target) => new WebSocket(target) as unknown as RelaySocket,
     });
-    expect(prompt.collaborationMode).toBe("plan");
-  });
-
-  it("accepts missing and present machineId fields", () => {
-    const legacyConnect = parseLocalTypedPayload("session.connect", {
-      role: "host",
-      clientName: "old-cli",
+    sender.start();
+    cleanups.push(() => sender.stop());
+    let receiverSocket: WebSocket | undefined;
+    const receiverIdentity = createIdentity();
+    const receiver = new RelayClient({
+      url: url + RELAY_PATH,
+      identity: receiverIdentity,
+      role: "device",
+      name: "iPhone",
+      token: () => "token-alice",
+      createSocket: (target) => (receiverSocket = new WebSocket(target)) as unknown as RelaySocket,
     });
-    expect(legacyConnect.machineId).toBeUndefined();
+    let received = 0;
+    receiver.onFrame(() => received++);
+    receiver.start();
+    cleanups.push(() => receiver.stop());
+    await sender.waitOnline(5000);
+    await receiver.waitOnline(5000);
 
-    const connect = parseLocalTypedPayload("session.connect", {
-      role: "host",
-      clientName: "new-cli",
-      machineId: "machine-123",
+    receiverSocket!.pause();
+    const frames = 400;
+    const payload = "x".repeat(64 * 1024);
+    let peak = 0;
+    const watch = setInterval(() => (peak = Math.max(peak, gateway.bufferedBytes)), 5);
+    for (let i = 0; i < frames; i++) sender.send(receiverIdentity.id, { k: "data", ch: "c", box: payload });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    // 26 MB were sent; the gateway holds a few frames past its limit, not all of it.
+    expect(received).toBe(0);
+    expect(peak).toBeGreaterThan(0);
+    expect(peak).toBeLessThan(limit * 8);
+    // Once the receiver reads again, everything arrives, in order.
+    receiverSocket!.resume();
+    await until(() => received === frames, 15_000);
+    clearInterval(watch);
+    expect(peak).toBeLessThan(limit * 8);
+  });
+
+  it("follows a login, a gateway change and a logout on a running host", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-gw-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const gateway = new Gateway({
+      port: 0,
+      host: "127.0.0.1",
+      databasePath: join(dir, "gateway.db"),
+      verifyToken: async (token) => ACCOUNTS[token],
+      log: () => {},
+      admit: async ({ role, userId }) => (role === "machine" && !userId ? "需要登录" : undefined),
     });
-    expect(connect.machineId).toBe("machine-123");
-
-    const status = parseLocalTypedPayload("terminal.status", {
-      phase: "idle",
-      machineId: "machine-123",
+    const url = `ws://127.0.0.1:${await gateway.start()}`;
+    cleanups.push(() => gateway.stop());
+    // What `linkshell login` / `logout` / `host --gateway` change on the computer.
+    const computer: { gateway?: string; token?: string } = {};
+    const host = await startHost({
+      home: join(dir, "host"),
+      version: "test",
+      env: { PATH: process.env.PATH, HOME: dir, SHELL: "/bin/sh", ENV: "", PS1: "$ " },
+      drivers: () => [],
+      log: () => {},
+      gateway: { url: () => computer.gateway, token: () => computer.token, name: "Test Mac" },
     });
-    expect(status.machineId).toBe("machine-123");
-  });
-
-  it("accepts all terminal providers in connect and spawn payloads", () => {
-    for (const provider of ["claude", "codex", "gemini", "copilot", "custom"] as const) {
-      const connect = parseLocalTypedPayload("session.connect", {
-        role: "host",
-        clientName: `${provider}-cli`,
-        provider,
-      });
-      expect(connect.provider).toBe(provider);
-
-      const spawn = parseLocalTypedPayload("terminal.spawn", {
-        cwd: "/repo",
-        provider,
-      });
-      expect(spawn.provider).toBe(provider);
-
-      const status = parseLocalTypedPayload("terminal.status", {
-        phase: "tool_use",
-        provider,
-      });
-      expect(status.provider).toBe(provider);
-    }
-  });
-
-  it("keeps structured agent v2 patch fields", () => {
-    const payload = parseLocalTypedPayload("agent.v2.event", {
-      conversationId: "conversation-1",
-      patch: {
-        itemId: "tool-1",
-        kind: "command_execution",
-        commandExecution: {
-          command: "pnpm typecheck",
-          status: "running",
-          output: "checking",
-        },
-        fileChange: {
-          entries: [{ path: "packages/shared-protocol/src/index.ts", kind: "modified" }],
-          status: "completed",
-        },
-        metadata: { inputPending: false },
-      },
-    });
-    expect(payload.patch?.commandExecution?.command).toBe("pnpm typecheck");
-    expect(payload.patch?.fileChange?.entries[0]?.path).toBe("packages/shared-protocol/src/index.ts");
-    expect(payload.patch?.metadata?.inputPending).toBe(false);
-  });
-});
-
-describe("Pairing flow", () => {
-  it("creates a pairing and returns code + sessionId", async () => {
-    const { status, body } = await postJson("/pairings", {});
-    expect(status).toBe(201);
-    expect(body.pairingCode).toMatch(/^\d{6}$/);
-    expect(body.sessionId).toBeTruthy();
-    expect(body.expiresAt).toBeTruthy();
-  });
-
-  it("claims a pairing with valid code", async () => {
-    const create = await postJson("/pairings", {});
-    const claim = await postJson("/pairings/claim", { pairingCode: create.body.pairingCode });
-    expect(claim.status).toBe(200);
-    expect(claim.body.sessionId).toBe(create.body.sessionId);
-  });
-
-  it("rejects invalid pairing code", async () => {
-    const { status, body } = await postJson("/pairings/claim", { pairingCode: "000000" });
-    expect(status).toBe(404);
-    expect(body.error).toBe("pairing_not_found");
-  });
-});
-
-describe("WebSocket session", () => {
-  it("host connects and receives session.connect", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host");
-    const msg = await waitForMessage(host);
-    expect(msg.type).toBe("session.connect");
-    expect(msg.sessionId).toBe(sessionId);
-    host.close();
-  });
-
-  it("host output is forwarded to client", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-1");
-    await waitForMessage(host); // session.connect
-
-    const client = await connectWs(sessionId, "client", "client-1");
-    await waitForMessage(client); // session.connect
-
-    // Host sends terminal output
-    const outputEnvelope = createEnvelope({
-      type: "terminal.output",
-      sessionId,
-      seq: 0,
-      payload: { stream: "stdout", data: "hello world", encoding: "utf8", isReplay: false, isFinal: false },
-    });
-    host.send(serializeEnvelope(outputEnvelope));
-
-    const received = await waitForMessage(client);
-    expect(received.type).toBe("terminal.output");
-    expect((received.payload as Record<string, unknown>).data).toBe("hello world");
-    expect(received.seq).toBe(0);
-
-    host.close();
-    client.close();
-  });
-
-  it("client input is forwarded to host", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-2");
-    await waitForMessage(host); // session.connect
-
-    const client = await connectWs(sessionId, "client", "client-2");
-    await waitForMessage(client); // session.connect
-
-    // Client sends input
-    const inputEnvelope = createEnvelope({
-      type: "terminal.input",
-      sessionId,
-      payload: { data: "ls\n" },
-    });
-    client.send(serializeEnvelope(inputEnvelope));
-
-    const received = await waitForMessage(host);
-    expect(received.type).toBe("terminal.input");
-    expect((received.payload as Record<string, unknown>).data).toBe("ls\n");
-
-    host.close();
-    client.close();
-  });
-
-  it("ACK is forwarded from client to host", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-3");
-    await waitForMessage(host);
-
-    const client = await connectWs(sessionId, "client", "client-3");
-    await waitForMessage(client);
-
-    const ackEnvelope = createEnvelope({
-      type: "session.ack",
-      sessionId,
-      payload: { seq: 5 },
-    });
-    client.send(serializeEnvelope(ackEnvelope));
-
-    const received = await waitForMessage(host);
-    expect(received.type).toBe("session.ack");
-    expect((received.payload as Record<string, unknown>).seq).toBe(5);
-
-    host.close();
-    client.close();
-  });
-
-  it("rejects invalid typed payloads without killing the session", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-invalid-payload");
-    await waitForMessage(host);
-
-    const client = await connectWs(sessionId, "client", "client-invalid-payload");
-    await waitForMessage(client);
-
-    host.send(serializeEnvelope(createEnvelope({
-      type: "session.connect",
-      sessionId,
-      payload: {
-        role: "host",
-        clientName: "bad-provider",
-        provider: "not-a-provider",
-      },
-    })));
-
-    const error = await waitForMessage(host);
-    expect(error.type).toBe("session.error");
-    expect((error.payload as Record<string, unknown>).code).toBe("invalid_message");
-
-    host.send(serializeEnvelope(createEnvelope({
-      type: "terminal.output",
-      sessionId,
-      seq: 1,
-      payload: { stream: "stdout", data: "still alive", encoding: "utf8" },
-    })));
-
-    const received = await waitForMessage(client);
-    expect(received.type).toBe("terminal.output");
-    expect((received.payload as Record<string, unknown>).data).toBe("still alive");
-
-    client.send(serializeEnvelope(createEnvelope({
-      type: "terminal.input",
-      sessionId,
-      payload: {},
-    })));
-
-    const clientError = await waitForMessage(client);
-    expect(clientError.type).toBe("session.error");
-    expect((clientError.payload as Record<string, unknown>).code).toBe("invalid_message");
-
-    host.close();
-    client.close();
-  });
-
-  it("rejects envelopes whose sessionId differs from the websocket URL", async () => {
-    const { body: first } = await postJson("/pairings", {});
-    const { body: second } = await postJson("/pairings", {});
-    const sessionId = first.sessionId as string;
-    const otherSessionId = second.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-mismatch");
-    await waitForMessage(host);
-
-    const client = await connectWs(sessionId, "client", "client-mismatch");
-    await waitForMessage(client);
-
-    client.send(serializeEnvelope(createEnvelope({
-      type: "terminal.input",
-      sessionId: otherSessionId,
-      payload: { data: "cross-session\n" },
-    })));
-
-    const error = await waitForMessage(client);
-    expect(error.type).toBe("session.error");
-    expect(error.sessionId).toBe(sessionId);
-    expect((error.payload as Record<string, unknown>).code).toBe("invalid_message");
-
-    host.close();
-    client.close();
-  });
-
-  it("relays agent v2 workspace messages after pairing claim", async () => {
-    const { body: pairing } = await postJson("/pairings", {});
-    const sessionId = pairing.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-agent-pairing");
-    await waitForMessage(host);
-
-    host.send(serializeEnvelope(createEnvelope({
-      type: "session.connect",
-      sessionId,
-      payload: {
-        role: "host",
-        clientName: "local-codex",
-        provider: "codex",
-        machineId: "machine-agent-pairing",
-        hostname: "workstation",
-        cwd: "/repo",
-        projectName: "repo",
-      },
-    })));
-
-    const claim = await postJson("/pairings/claim", {
-      pairingCode: pairing.pairingCode,
-    });
-    expect(claim.status).toBe(200);
-    expect(claim.body.sessionId).toBe(sessionId);
-
-    const client = await connectWs(sessionId, "client", "client-agent-pairing");
-    await waitForMessage(client);
-
-    const { body: sessionsBody } = await getJson("/sessions");
-    const sessions = sessionsBody.sessions as Array<Record<string, unknown>>;
-    const listed = sessions.find((session) => session.id === sessionId);
-    expect(listed).toMatchObject({
-      hasHost: true,
-      provider: "codex",
-      machineId: "machine-agent-pairing",
-      hostname: "workstation",
-      cwd: "/repo",
-      projectName: "repo",
-    });
-
-    client.send(serializeEnvelope(createEnvelope({
-      type: "agent.v2.capabilities.request",
-      sessionId,
-      payload: {},
-    })));
-    const capabilitiesRequest = await waitForMessage(host);
-    expect(capabilitiesRequest.type).toBe("agent.v2.capabilities.request");
-
-    host.send(serializeEnvelope(createEnvelope({
-      type: "agent.v2.capabilities",
-      sessionId,
-      payload: {
-        enabled: true,
-        provider: "codex",
-        providers: [{
-          id: "codex",
-          label: "Codex",
-          enabled: true,
-          defaultModel: "gpt-5.5",
-          supportsImages: true,
-          supportsPermission: true,
-          supportsPlan: true,
-          supportsCancel: true,
-        }],
-        supportsSessionList: true,
-        supportsSessionLoad: true,
-        supportsImages: true,
-        supportsAudio: false,
-        supportsPermission: true,
-        supportsPlan: true,
-        supportsCancel: true,
-      },
-    })));
-    const capabilities = await waitForMessage(client);
-    expect(capabilities.type).toBe("agent.v2.capabilities");
-    expect((capabilities.payload as Record<string, unknown>).provider).toBe("codex");
-
-    client.send(serializeEnvelope(createEnvelope({
-      type: "agent.v2.conversation.open",
-      sessionId,
-      payload: {
-        conversationId: "agent-temp-client",
-        provider: "codex",
-        cwd: "/repo",
-      },
-    })));
-    const openRequest = await waitForMessage(host);
-    expect(openRequest.type).toBe("agent.v2.conversation.open");
-    expect((openRequest.payload as Record<string, unknown>).conversationId).toBe("agent-temp-client");
-
-    host.send(serializeEnvelope(createEnvelope({
-      type: "agent.v2.conversation.opened",
-      sessionId,
-      payload: {
-        requestedConversationId: "agent-temp-client",
-        conversation: {
-          id: "agent-remote-codex-thread-1",
-          agentSessionId: "thread-1",
-          provider: "codex",
-          cwd: "/repo",
-          title: "repo",
-          status: "idle",
-          createdAt: Date.now(),
-          lastActivityAt: Date.now(),
-        },
-        snapshot: [],
-      },
-    })));
-    const opened = await waitForMessage(client);
-    expect(opened.type).toBe("agent.v2.conversation.opened");
-    expect((opened.payload as Record<string, unknown>).requestedConversationId).toBe("agent-temp-client");
-    expect(((opened.payload as Record<string, unknown>).conversation as Record<string, unknown>).id)
-      .toBe("agent-remote-codex-thread-1");
-
-    client.send(serializeEnvelope(createEnvelope({
-      type: "agent.v2.prompt",
-      sessionId,
-      payload: {
-        conversationId: "agent-remote-codex-thread-1",
-        clientMessageId: "msg-1",
-        contentBlocks: [{ type: "text", text: "run tests" }],
-        delivery: "auto",
-      },
-    })));
-    const prompt = await waitForMessage(host);
-    expect(prompt.type).toBe("agent.v2.prompt");
-    expect((prompt.payload as Record<string, unknown>).clientMessageId).toBe("msg-1");
-
-    host.send(serializeEnvelope(createEnvelope({
-      type: "agent.v2.event",
-      sessionId,
-      payload: {
-        conversationId: "agent-remote-codex-thread-1",
-        item: {
-          id: "assistant-1",
-          conversationId: "agent-remote-codex-thread-1",
-          type: "message",
-          role: "assistant",
-          text: "Tests are running.",
-          createdAt: Date.now(),
-        },
-      },
-    })));
-    const event = await waitForMessage(client);
-    expect(event.type).toBe("agent.v2.event");
-    expect((event.payload as Record<string, unknown>).conversationId).toBe("agent-remote-codex-thread-1");
-
-    host.close();
-    client.close();
-  });
-});
-
-describe("Control ownership", () => {
-  it("first client auto-gets control and can send input", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-ctrl");
-    await waitForMessage(host);
-
-    const client = await connectWs(sessionId, "client", "client-ctrl");
-    await waitForMessage(client);
-
-    // Client sends input — should work since first client gets control
-    client.send(serializeEnvelope(createEnvelope({
-      type: "terminal.input",
-      sessionId,
-      payload: { data: "test\n" },
-    })));
-
-    const received = await waitForMessage(host);
-    expect(received.type).toBe("terminal.input");
-
-    host.close();
-    client.close();
-  });
-
-  it("second client without control gets rejected", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-ctrl2");
-    await waitForMessage(host);
-
-    const client1 = await connectWs(sessionId, "client", "client-ctrl2a");
-    await waitForMessage(client1);
-
-    const client2 = await connectWs(sessionId, "client", "client-ctrl2b");
-    await waitForMessage(client2);
-
-    // Client2 tries to send input — should be rejected
-    client2.send(serializeEnvelope(createEnvelope({
-      type: "terminal.input",
-      sessionId,
-      payload: { data: "nope\n" },
-    })));
-
-    const error = await waitForMessage(client2);
-    expect(error.type).toBe("session.error");
-    expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
-
-    host.close();
-    client1.close();
-    client2.close();
-  });
-
-  it("rejects agent prompt from non-controller clients", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-agent-ctrl");
-    await waitForMessage(host);
-
-    const client1 = await connectWs(sessionId, "client", "client-agent-ctrl-a");
-    await waitForMessage(client1);
-
-    const client2 = await connectWs(sessionId, "client", "client-agent-ctrl-b");
-    await waitForMessage(client2);
-
-    client2.send(serializeEnvelope(createEnvelope({
-      type: "agent.prompt",
-      sessionId,
-      payload: {
-        clientMessageId: "test-message",
-        contentBlocks: [{ type: "text", text: "hello" }],
-      },
-    })));
-
-    const error = await waitForMessage(client2);
-    expect(error.type).toBe("session.error");
-    expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
-
-    client2.send(serializeEnvelope(createEnvelope({
-      type: "agent.session.new",
-      sessionId,
-      payload: { cwd: "/tmp" },
-    })));
-
-    const sessionError = await waitForMessage(client2);
-    expect(sessionError.type).toBe("session.error");
-    expect((sessionError.payload as Record<string, unknown>).code).toBe("control_conflict");
-
-    host.close();
-    client1.close();
-    client2.close();
-  });
-
-  it("routes structured input responses only from the controller", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-agent-input");
-    await waitForMessage(host);
-
-    const client1 = await connectWs(sessionId, "client", "client-agent-input-a");
-    await waitForMessage(client1);
-
-    const client2 = await connectWs(sessionId, "client", "client-agent-input-b");
-    await waitForMessage(client2);
-
-    const response = createEnvelope({
-      type: "agent.v2.structured_input.respond",
-      sessionId,
-      payload: {
-        conversationId: "conversation-1",
-        requestId: "input-1",
-        answers: { question: ["answer"] },
-      },
-    });
-
-    client2.send(serializeEnvelope(response));
-    const error = await waitForMessage(client2);
-    expect(error.type).toBe("session.error");
-    expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
-
-    client1.send(serializeEnvelope(response));
-    const received = await waitForMessage(host);
-    expect(received.type).toBe("agent.v2.structured_input.respond");
-    expect((received.payload as Record<string, unknown>).requestId).toBe("input-1");
-
-    host.close();
-    client1.close();
-    client2.close();
-  });
-
-  it("routes agent permission responses and cancel only from the controller", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-agent-permission-cancel");
-    await waitForMessage(host);
-
-    const client1 = await connectWs(sessionId, "client", "client-agent-permission-cancel-a");
-    await waitForMessage(client1);
-
-    const client2 = await connectWs(sessionId, "client", "client-agent-permission-cancel-b");
-    await waitForMessage(client2);
-
-    const permissionResponse = createEnvelope({
-      type: "agent.v2.permission.respond",
-      sessionId,
-      payload: {
-        conversationId: "conversation-1",
-        requestId: "permission-1",
-        outcome: "allow",
-        optionId: "allow_once",
-      },
-    });
-
-    client2.send(serializeEnvelope(permissionResponse));
-    const permissionError = await waitForMessage(client2);
-    expect(permissionError.type).toBe("session.error");
-    expect((permissionError.payload as Record<string, unknown>).code).toBe("control_conflict");
-
-    client1.send(serializeEnvelope(permissionResponse));
-    const receivedPermission = await waitForMessage(host);
-    expect(receivedPermission.type).toBe("agent.v2.permission.respond");
-    expect((receivedPermission.payload as Record<string, unknown>).requestId).toBe("permission-1");
-
-    const cancel = createEnvelope({
-      type: "agent.v2.cancel",
-      sessionId,
-      payload: {
-        conversationId: "conversation-1",
-      },
-    });
-
-    client2.send(serializeEnvelope(cancel));
-    const cancelError = await waitForMessage(client2);
-    expect(cancelError.type).toBe("session.error");
-    expect((cancelError.payload as Record<string, unknown>).code).toBe("control_conflict");
-
-    client1.send(serializeEnvelope(cancel));
-    const receivedCancel = await waitForMessage(host);
-    expect(receivedCancel.type).toBe("agent.v2.cancel");
-    expect((receivedCancel.payload as Record<string, unknown>).conversationId).toBe("conversation-1");
-
-    host.close();
-    client1.close();
-    client2.close();
-  });
-
-  it("routes agent command execution only from the controller", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-agent-command");
-    await waitForMessage(host);
-
-    const client1 = await connectWs(sessionId, "client", "client-agent-command-a");
-    await waitForMessage(client1);
-
-    const client2 = await connectWs(sessionId, "client", "client-agent-command-b");
-    await waitForMessage(client2);
-
-    const command = createEnvelope({
-      type: "agent.v2.command.execute",
-      sessionId,
-      payload: {
-        conversationId: "conversation-1",
-        commandId: "codex:linkshell:plan",
-        rawText: "/plan",
-        clientMessageId: "cmd-1",
-      },
-    });
-
-    client2.send(serializeEnvelope(command));
-    const error = await waitForMessage(client2);
-    expect(error.type).toBe("session.error");
-    expect((error.payload as Record<string, unknown>).code).toBe("control_conflict");
-
-    client1.send(serializeEnvelope(command));
-    const received = await waitForMessage(host);
-    expect(received.type).toBe("agent.v2.command.execute");
-    expect((received.payload as Record<string, unknown>).commandId).toBe("codex:linkshell:plan");
-
-    host.close();
-    client1.close();
-    client2.close();
-  });
-
-  it("does not store agent messages in terminal status replay", async () => {
-    const { body } = await postJson("/pairings", {});
-    const sessionId = body.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-agent-cache");
-    await waitForMessage(host);
-
-    const client = await connectWs(sessionId, "client", "client-agent-cache");
-    await waitForMessage(client);
-
-    host.send(serializeEnvelope(createEnvelope({
-      type: "agent.v2.capabilities",
-      sessionId,
-      payload: {
-        enabled: true,
-        provider: "codex",
-        providers: [],
-        workspaceProtocolVersion: 2,
-        supportsSessionList: true,
-        supportsSessionLoad: true,
-        supportsImages: false,
-        supportsAudio: false,
-        supportsPermission: true,
-        supportsPlan: true,
-        supportsCancel: true,
-      },
-    })));
-
-    const received = await waitForMessage(client);
-    expect(received.type).toBe("agent.v2.capabilities");
-    expect(sessionManager.getStatusReplay(sessionId)).toHaveLength(0);
-
-    host.close();
-    client.close();
-  });
-});
-
-describe("Session list", () => {
-  it("shows active sessions", async () => {
-    const { body: pairing } = await postJson("/pairings", {});
-    const sessionId = pairing.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-list");
-    await waitForMessage(host);
-    sessionManager.setMetadata(
-      sessionId,
-      "codex",
-      "machine-list",
-      "workstation",
-      undefined,
-      "/repo",
-      "repo",
-    );
-
-    const { body } = await getJson("/sessions");
-    const sessions = body.sessions as Array<Record<string, unknown>>;
-    const found = sessions.find((s) => s.id === sessionId);
-    expect(found).toBeTruthy();
-    expect(found!.hasHost).toBe(true);
-    expect(found!.machineId).toBe("machine-list");
-    expect(found!.hostname).toBe("workstation");
-    expect(found!.cwd).toBe("/repo");
-
-    host.close();
-  });
-
-  it("promotes terminal hook status into the session agent summary", async () => {
-    const { body: pairing } = await postJson("/pairings", {});
-    const sessionId = pairing.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-terminal-status");
-    await waitForMessage(host);
-
-    host.send(serializeEnvelope(createEnvelope({
-      type: "terminal.status",
-      sessionId,
-      terminalId: "default",
-      payload: {
-        phase: "tool_use",
-        provider: "codex",
-        toolName: "Bash",
-      },
-    })));
-
-    const found = await waitForSessionSummary(sessionId, (s) => s.agentStatus === "running");
-    expect(found!.agentStatus).toBe("running");
-    expect(found!.agentProvider).toBe("codex");
-    expect(found!.agentConversationId).toBeNull();
-    expect(found!.agentTitle).toBe("外部终端 · Bash");
-
-    host.close();
-  });
-
-  it("does not let terminal idle overwrite an active agent conversation", async () => {
-    const { body: pairing } = await postJson("/pairings", {});
-    const sessionId = pairing.sessionId as string;
-
-    const host = await connectWs(sessionId, "host", "host-agent-terminal-priority");
-    await waitForMessage(host);
-    const client = await connectWs(sessionId, "client", "client-agent-terminal-priority");
-    await waitForMessage(client);
-
-    const now = Date.now();
-    host.send(serializeEnvelope(createEnvelope({
-      type: "agent.v2.event",
-      sessionId,
-      payload: {
-        conversationId: "conversation-running",
-        conversation: {
-          id: "conversation-running",
-          provider: "claude",
-          cwd: "/repo",
-          title: "Running agent",
-          status: "running",
-          archived: false,
-          lastActivityAt: now,
-          createdAt: now,
-        },
-      },
-    })));
-
-    await waitForSessionSummary(sessionId, (s) => s.agentStatus === "running");
-
-    host.send(serializeEnvelope(createEnvelope({
-      type: "terminal.status",
-      sessionId,
-      terminalId: "default",
-      payload: {
-        phase: "idle",
-        provider: "codex",
-      },
-    })));
-
-    let relayed = await waitForMessage(client);
-    while (relayed.type !== "terminal.status") {
-      relayed = await waitForMessage(client);
-    }
-
-    const found = await waitForSessionSummary(sessionId, (s) => s.agentStatus === "running");
-    expect(found!.agentStatus).toBe("running");
-    expect(found!.agentProvider).toBe("claude");
-    expect(found!.agentConversationId).toBe("conversation-running");
-
-    host.close();
-    client.close();
+    cleanups.push(() => host.stop());
+    const local = await connectHost(host.paths.hostSocket);
+    cleanups.push(() => local.close());
+    const changes: string[] = [];
+    local.on("gateway.changed", (status) => changes.push(status.status));
+    expect((await local.call("gateway.status", {})).status).toBe("off");
+
+    // A gateway is chosen before logging in: refused, with the reason.
+    computer.gateway = url;
+    await local.call("gateway.refresh", {});
+    await until(async () => (await local.call("gateway.status", {})).error?.code === "not_admitted");
+
+    // Logging in brings the same host online, on the account.
+    computer.token = "token-alice";
+    await local.call("gateway.refresh", {});
+    await until(async () => (await local.call("gateway.status", {})).status === "online");
+    expect((await local.call("gateway.status", {})).account).toMatchObject({ userId: "alice" });
+    const phone = device(url, "Alice's phone", "token-alice");
+    await phone.relay.waitOnline(5000);
+    const { machines } = await phone.relay.request("machines.list", {});
+    expect(machines).toMatchObject([{ via: "account", online: true }]);
+    expect((await connect(phone.relay, phone.identity, machines[0]!).call("machine.info", {})).hostname).toBeTruthy();
+
+    // Logging out takes it off the gateway.
+    computer.gateway = undefined;
+    computer.token = undefined;
+    expect((await local.call("gateway.refresh", {})).status).toBe("off");
+    await until(async () => (await phone.relay.request("machines.list", {})).machines.every((machine) => !machine.online));
+    await until(() => changes.at(-1) === "off");
+    expect((await local.call("gateway.status", {})).status).toBe("off");
   });
 });

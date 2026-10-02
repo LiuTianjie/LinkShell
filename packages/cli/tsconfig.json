@@ -9,7 +9,7 @@
   },
   "include": [
     "src/**/*.ts",
-    "../shared-protocol/src/**/*.ts",
+    "../gateway/src/**/*.ts",
     "../host/src/**/*.ts",
     "../wire/src/**/*.ts"
   ]

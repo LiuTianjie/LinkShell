@@ -20,6 +20,9 @@ env:
   PORT: "8787"
   RELAY_DATA_PATH: /data/relay.db
   AUTH_REQUIRED: "true"
+  # Connections arrive through the edge, so the limit per address is a limit on everyone at once:
+  # high enough that all of them reconnecting after a deploy get back in.
+  WS_CONNECT_RATE_LIMIT_MAX: "600"
   SUPABASE_URL: ${SUPABASE_URL}
   SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
   SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}

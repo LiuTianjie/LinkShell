@@ -151,7 +151,7 @@ LinkShell 用的是你电脑上已经安装、已经登录的 Agent，不经手�
 
 ## 自建网关
 
-网关只转发加密数据并负责配对，占用资源很少。任选一种：
+网关只转发加密数据并负责配对，占用资源很少。自建网关和官方网关是同一个程序，只是没有账号：不用登录，每台手机配对一次即可，扫码或输入 6 位配对码。任选一种：
 
 ```bash
 # 在服务器上用 CLI
@@ -161,6 +161,8 @@ linkshell gateway --port 8787 --daemon
 docker run -d --name linkshell-gateway -p 8787:8787 \
   -v linkshell-gateway:/data nickname4th/linkshell-gateway
 ```
+
+它保存的全部数据就是一个 SQLite 文件（公钥，以及哪台手机和哪台电脑配对）：用 CLI 时是 `~/.linkshell/relay.db`，容器里是 `/data/relay.db`，上面挂载的卷就是为它准备的。这个文件还在，手机就不用重新配对。
 
 公网上请在前面加一层 HTTPS 反向代理（Caddy、Nginx），然后用 `wss://你的域名`。只在家里用的话，网关可以直接跑在这台电脑上：`linkshell host --gateway ws://局域网IP:8787`。更多见[部署指南](docs/deploy.md)。
 
@@ -187,7 +189,7 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
 | 检查环境 | `linkshell doctor` |
 | 升级 | `linkshell upgrade` |
 
-> **从 1.x 升级？** 2.0 的 App 和电脑端都换了，需要两边一起升级，再重新配对一次。1.x 的 App 仍然可以配合 `linkshell start` 使用。
+> **从 1.x 升级？** 2.0 的 App 和电脑端都换了，需要两边一起升级，再重新配对一次。`linkshell start` 和 1.x 的 App 已不再支持（CLI 0.10、网关 0.6 起移除）。
 
 ## 开发
 
@@ -205,14 +207,12 @@ pnpm test
 | --- | --- |
 | `packages/wire` | 会话模型、JSON-RPC 方法、端到端加密、中继客户端 |
 | `packages/host` | 电脑端守护进程：Agent 驱动（Codex app-server、Claude 接力、ACP）、终端、端口、屏幕 |
-| `packages/gateway-v2` | 中继：转发加密帧，负责配对 |
-| `packages/gateway` | 可部署的网关（官方与自建），包含 1.x 支持 |
+| `packages/gateway` | 网关（官方与自建）：转发加密帧、负责配对的中继 |
 | `packages/cli` | `linkshell`：host、配对、Agent 启动器、网关、登录 |
 | `packages/client-core` | App 共用的客户端状态与时间线 |
 | `apps/client` | 手机 App：Expo / React Native，iOS 与 Android |
 | `apps/mac` | LinkShell.app（`@linkshell/mac`）：Mac 这一侧的屏幕——采集、WebRTC 视频、输入、系统权限 |
-| `apps/web-dashboard`、`packages/shared-protocol` | 1.x 的网页控制台和协议 |
-| `docs/site` | 官网与安装脚本（修改后运行 `python3 scripts/build-site-pages.py`） |
+| `docs/site` | 官网与安装脚本（修改后运行 `python3 scripts/build-site-pages.py`；`scripts/site-promo-assets.sh` 负责剪出其中的影片和片段） |
 
 开发 App 时，在 Metro 旁边跑一个带本地 API 的 host：
 

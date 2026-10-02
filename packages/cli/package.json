@@ -1,6 +1,6 @@
 {
   "name": "linkshell-cli",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Follow, steer and approve the coding agents on your computer (Claude Code, Codex, Gemini, Copilot and more) from your phone",
   "type": "module",
   "main": "dist/index.js",
@@ -11,7 +11,6 @@
     "dist",
     "src",
     "scripts",
-    "web",
     "README.md",
     "LICENSE"
   ],
@@ -31,8 +30,8 @@
     "url": "git+https://github.com/LiuTianjie/LinkShell.git"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-web.mjs",
-    "prepack": "pnpm --filter \"...@linkshell/web-dashboard\" build && pnpm run build",
+    "build": "rm -rf dist *.tsbuildinfo && tsc -p tsconfig.json",
+    "prepack": "pnpm run build",
     "postinstall": "node scripts/postinstall.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/index.ts",
@@ -40,21 +39,13 @@
   },
   "dependencies": {
     "@linkshell/gateway": "workspace:*",
-    "@linkshell/protocol": "workspace:*",
     "commander": "^13.1.0",
-    "node-pty": "^1.0.0",
+    "node-pty": "^1.1.0",
     "qrcode-terminal": "^0.12.0",
-    "ws": "^8.18.1",
-    "zod": "^3.24.3",
     "@linkshell/host": "workspace:*",
     "@linkshell/wire": "workspace:*"
   },
-  "optionalDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.128",
-    "werift": "^0.22.9"
-  },
   "devDependencies": {
-    "@types/ws": "^8.5.14",
     "tsx": "^4.19.3",
     "vitest": "^3.2.1"
   },

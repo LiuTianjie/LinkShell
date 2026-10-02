@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/auth.js", () => ({ isLoggedIn: vi.fn(() => false), getValidToken: vi.fn(async () => null) }));
 const auth = await import("../src/auth.js");
-const { OFFICIAL_GATEWAY, resolveGateway, writeHostConfig } = await import("../src/commands/host.js");
+const { OFFICIAL_GATEWAY, resolveGateway, sameGateway, writeHostConfig } = await import("../src/commands/host.js");
 
 describe("host gateway choice", () => {
   let home: string;
@@ -33,5 +33,15 @@ describe("host gateway choice", () => {
     expect(resolveGateway(home)).toBe("wss://my-gateway.example");
     process.env.LINKSHELL_GATEWAY = "ws://127.0.0.1:8798";
     expect(resolveGateway(home)).toBe("ws://127.0.0.1:8798");
+  });
+
+  it("knows the official gateway however its address is written, and no other for it", () => {
+    // The account's token goes only to the official gateway: one of your own has no accounts and would refuse it.
+    expect(sameGateway(OFFICIAL_GATEWAY, OFFICIAL_GATEWAY)).toBe(true);
+    expect(sameGateway("https://gateway.itool.tech/", OFFICIAL_GATEWAY)).toBe(true);
+    expect(sameGateway("WSS://Gateway.itool.tech", OFFICIAL_GATEWAY)).toBe(true);
+    expect(sameGateway("wss://my-gateway.example", OFFICIAL_GATEWAY)).toBe(false);
+    expect(sameGateway("wss://gateway.itool.tech.evil.example", OFFICIAL_GATEWAY)).toBe(false);
+    expect(sameGateway(undefined, OFFICIAL_GATEWAY)).toBe(false);
   });
 });

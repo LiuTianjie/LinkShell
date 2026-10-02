@@ -151,7 +151,7 @@ What each agent supports from the phone:
 
 ## Run your own gateway
 
-A gateway only relays encrypted frames and brokers pairing, so it needs very little. Either:
+A gateway only relays encrypted frames and brokers pairing, so it needs very little. Yours is the same program as the official one, without the accounts: instead of signing in, you pair each phone once, with a QR code or a six-digit code. Either:
 
 ```bash
 # on a server, with the CLI
@@ -161,6 +161,8 @@ linkshell gateway --port 8787 --daemon
 docker run -d --name linkshell-gateway -p 8787:8787 \
   -v linkshell-gateway:/data nickname4th/linkshell-gateway
 ```
+
+All it keeps is one SQLite file (public keys, and which phone is paired with which computer): `~/.linkshell/relay.db` with the CLI, `/data/relay.db` in the container, which is what the volume is for. Keep the file and phones stay paired.
 
 On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss://your-domain`. For use at home only, the gateway can run on the same computer: `linkshell host --gateway ws://<LAN-IP>:8787`. More in the [deployment guide](docs/deploy.md).
 
@@ -187,7 +189,7 @@ On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss
 | Check the environment | `linkshell doctor` |
 | Upgrade | `linkshell upgrade` |
 
-> **Coming from 1.x?** 2.0 changes both the app and the computer side: upgrade both and pair again. The 1.x app still works with `linkshell start`.
+> **Coming from 1.x?** 2.0 changed both the app and the computer side: upgrade both and pair again. `linkshell start` and the 1.x app are no longer supported (CLI 0.10 and gateway 0.6 removed them).
 
 ## Development
 
@@ -205,13 +207,11 @@ pnpm test
 | --- | --- |
 | `packages/wire` | Session model, JSON-RPC methods, end-to-end encryption, relay client |
 | `packages/host` | The host daemon: agent drivers (Codex app-server, Claude handoff, ACP), terminals, ports, screen |
-| `packages/gateway-v2` | The relay: routes encrypted frames, brokers pairing |
-| `packages/gateway` | The deployable gateway (official and self-hosted), including 1.x support |
+| `packages/gateway` | The gateway, official and self-hosted: the relay that routes encrypted frames and brokers pairing |
 | `packages/cli` | `linkshell`: host, pairing, agent launchers, gateway, login |
 | `packages/client-core` | Client state and timeline shared by the apps |
 | `apps/client` | The app: Expo / React Native for iOS and Android |
 | `apps/mac` | LinkShell.app (`@linkshell/mac`): the Mac side of the screen — capture, WebRTC video, input, permissions |
-| `apps/web-dashboard`, `packages/shared-protocol` | 1.x web console and protocol |
 | `docs/site` | Website and installer (`python3 scripts/build-site-pages.py` after editing; `scripts/site-promo-assets.sh` cuts its film and clips) |
 
 To work on the app, run a host with a local API next to Metro:

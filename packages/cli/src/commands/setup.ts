@@ -1,6 +1,6 @@
 import * as readline from "node:readline";
 import { isLoggedIn, loadAuth } from "../auth.js";
-import { assertHostRuntime, ensureHostRunning, joinGatewayAfterLogin, readHostConfig, withRunningHost, writeHostConfig } from "./host.js";
+import { assertHostRuntime, ensureHostRunning, joinGatewayAfterLogin, OFFICIAL_GATEWAY, readHostConfig, sameGateway, withRunningHost, writeHostConfig } from "./host.js";
 import { setUpScreen } from "./screen.js";
 
 // `linkshell setup`: everything a new installation needs, once, in order —
@@ -41,7 +41,9 @@ async function remember(outcome: "done"): Promise<void> {
 /** The phone's way to this computer: an account both are signed in to, or a pairing through a gateway. */
 async function setUpPhone(out: (line?: string) => void, interactive: boolean): Promise<boolean> {
   const gateway = await withRunningHost((client) => client.call("gateway.status", {}));
-  if (isLoggedIn()) {
+  // The account counts on LinkShell's own gateway only; with a gateway of one's own, phones are paired.
+  const official = !gateway || gateway.status === "off" || !gateway.url || sameGateway(gateway.url, OFFICIAL_GATEWAY);
+  if (isLoggedIn() && official) {
     const email = loadAuth()?.email;
     if (gateway?.status === "online") {
       out(`  ${green("✓")} Signed in${email ? ` as ${email}` : ""}: this computer is online.`);

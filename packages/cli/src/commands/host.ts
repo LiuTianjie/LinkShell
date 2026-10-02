@@ -26,6 +26,12 @@ interface HostConfig {
 /** LinkShell's own gateway: a Pro account's computers are reachable there. */
 export const OFFICIAL_GATEWAY = "wss://gateway.itool.tech";
 
+/** Whether two gateway addresses name the same one, however they were typed (scheme, trailing slash). */
+export function sameGateway(a: string | undefined, b: string): boolean {
+  const key = (url: string) => url.trim().replace(/^http/i, "ws").replace(/\/+$/, "").toLowerCase();
+  return a !== undefined && key(a) === key(b);
+}
+
 /**
  * Where devices reach this computer from outside the LAN: LINKSHELL_GATEWAY,
  * else the saved choice, else the official gateway when logged in.
@@ -33,7 +39,7 @@ export const OFFICIAL_GATEWAY = "wss://gateway.itool.tech";
 export function resolveGateway(home: string): string | undefined {
   const chosen = process.env.LINKSHELL_GATEWAY || readHostConfig(home).gateway;
   if (chosen === "off") return undefined;
-  // config.json is shared with the v1 bridge, whose gateway URLs end in /ws.
+  // A config.json written by 1.x holds a gateway URL ending in /ws.
   if (chosen) return chosen.replace(/\/ws\/?$/, "");
   return isLoggedIn() ? OFFICIAL_GATEWAY : undefined;
 }
@@ -97,7 +103,12 @@ export async function runHostForeground(version: string): Promise<void> {
     version,
     env,
     log,
-    gateway: { url: () => resolveGateway(home), token: async () => (await getValidToken()) ?? undefined },
+    gateway: {
+      url: () => resolveGateway(home),
+      // The account is LinkShell's, so its token goes to LinkShell's gateway and to no other: a
+      // gateway of one's own has no accounts, and would refuse a computer that offered one.
+      token: async () => (sameGateway(resolveGateway(home), OFFICIAL_GATEWAY) ? ((await getValidToken()) ?? undefined) : undefined),
+    },
     tcpPort: devPort,
     claudeCommand: process.env.LINKSHELL_CLAUDE_COMMAND || undefined,
     claudeAdapter: adapter ? { command: adapter, args: [] } : undefined,

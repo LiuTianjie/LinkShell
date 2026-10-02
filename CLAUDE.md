@@ -4,98 +4,141 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is LinkShell
 
-Remote terminal bridge — control local CLI sessions from your phone. A CLI spawns a PTY on the host machine, connects to a gateway (embedded or cloud), and mobile/web clients connect to interact with the terminal in real-time.
+Follow, steer and approve the coding agents running on your computer, from your phone. Three parts:
+
+- **The host** — a daemon on the computer (`linkshell host`). It owns the agent sessions (Codex, Claude Code, ACP agents), terminals, port previews and the screen, and keeps their history.
+- **The app** — iOS / Android (`apps/client`). A client of the host.
+- **The gateway** — a relay between the two. Everything it routes is end-to-end encrypted; it only authenticates peers by key, brokers pairing and knows who may reach whom.
+
+There is one generation of everything. The 1.x PTY bridge, its protocol, its web console and its half of the gateway are deleted; don't bring them back.
 
 ## Build & Dev
 
+pnpm workspace (`apps/*`, `packages/*`), Node.js 22.13+ (the host and the gateway use `node:sqlite`).
+
 ```bash
 pnpm install
-pnpm build                # Build all packages (tsc in each)
-pnpm typecheck            # Type check all packages (tsc --noEmit)
-pnpm dev:gateway          # Dev gateway (localhost:8787)
-pnpm dev:cli              # Dev CLI
-pnpm dev:app              # Dev mobile app (Expo)
-pnpm dev:web              # Dev web dashboard (Vite)
+pnpm build                # pnpm -r build: tsc in each package; on a Mac also builds LinkShell.app (apps/mac)
+pnpm typecheck            # pnpm -r typecheck
+pnpm test                 # every package's tests, one package at a time; on a Mac also apps/mac's swift test
+pnpm -r --filter "./packages/*" build   # the packages only: what CI builds and tests (Linux)
+pnpm --filter @linkshell/host test      # one package (vitest)
 ```
 
-## Mobile Build
+Run the pieces from the checkout:
 
-- iOS: `pnpm prod:ios` (full prebuild, never use `prod:ios:quick`)
-- Android: `pnpm prod:android` or `pnpm prod:android:apk`
+```bash
+cd packages/cli && npx tsx src/index.ts host --dev-port 7878   # a host that also serves its API on ws://127.0.0.1:7878 (loopback, development only)
+pnpm dev:app              # Metro for the app (expo start)
+pnpm dev:ios              # development build "LinkShell Dev" (com.bd.linkshell.v2), installs beside the released app
+pnpm dev:android
+pnpm dev:gateway          # the gateway from source (tsx src/main.ts), port 8787, data in packages/gateway/data/relay.db
+pnpm dev:cli <command>    # the CLI from source (tsx src/index.ts)
+```
+
+- A development build of the app connects to `ws://127.0.0.1:7878` by default (`EXPO_PUBLIC_LINKSHELL_HOST`, `apps/client/src/lib/settings.ts`).
+- `LINKSHELL_HOME=<dir>` gives a host its own state directory, so a development host doesn't share `~/.linkshell` with the installed one.
+- The CLI compiles the host's and the gateway's sources too: after changing either, run the full `pnpm build` and `pnpm typecheck`, not just one package's.
+- Real agents: `pnpm --filter @linkshell/host live:codex` / `live:claude` (need the agent installed and signed in; `live:claude` from your own terminal).
+
+LinkShell.app (`apps/mac`, Swift; macOS 13+, Apple silicon, Xcode's Swift):
+
+```bash
+pnpm --filter @linkshell/mac build    # build/LinkShell.app and build/LinkShell.app.tar.gz
+pnpm --filter @linkshell/mac test     # swift test: what needs no screen and no network
+pnpm --filter @linkshell/mac check    # that, then pass or fail for the built app (about a minute)
+```
+
+Without a Developer ID certificate it is signed ad hoc: fine for development, a different app to macOS (its own permissions), never for release. See `apps/mac/README.md`.
+
+App release builds: `pnpm prod:ios` / `pnpm prod:android` (`apps/client/scripts/release.mjs`; always a clean prebuild of the release variant — there is no quick variant).
 
 ## Project Structure
 
-- `packages/shared-protocol` — Single-file Zod schema (`src/index.ts`): envelope format + 40+ message types
-- `packages/gateway` — Cloud gateway (Node.js HTTP + ws): pairing, session relay, tunnel proxy, auth middleware
-- `packages/cli` — CLI (commander): BridgeSession with PTY (node-pty), daemon mode, embedded gateway, login/upgrade
-- `apps/mobile` — Expo 54 + React Native + Expo Router + xterm.js (in WebView)
-- `apps/web-dashboard` — Vite + React 19 + React Router 7 + Tailwind (login + subscription dashboard)
+- `packages/wire` (`@linkshell/wire`) — what the host, the gateway and the app share. `model.ts` + `updates.ts` (sessions and their events, ACP-shaped), `rpc.ts` (the host's JSON-RPC methods and notifications, zod), `peer.ts` (JSON-RPC peer), `crypto.ts` (identities, signatures, channel keys), `relay.ts` (gateway frames, pairing link, the end-to-end tunnel), `relay-client.ts` (one connection to a gateway), `direct.ts` (direct-channel framing).
+- `packages/host` (`@linkshell/host`) — the daemon. `host.ts` (`startHost`, paths), `hub.ts` (`SessionHub`), `store.ts` (SQLite `state.db`), `drivers/` (`codex/` app-server, `claude/` handoff, `acp/` everything else, `registry.ts`), `rpc/server.ts` (every RPC method), `gateway.ts` (`GatewayLink`: identity, pairing, tunnels), `direct.ts` (WebRTC data channel, werift), `terminals.ts` (node-pty), `ports.ts` (previews), `screen.ts` + `screen-viewer.ts` + `screen-pacer.ts` + `input.ts` (the screen), `worktrees.ts`, `fs.ts`.
+- `packages/gateway` (`@linkshell/gateway`) — the relay; the official gateway and a self-hosted one are this same package. `relay.ts` (`Gateway`: auth, routing, pairing, backpressure), `store.ts` (SQLite), `accounts.ts` (`supabaseVerifier`), `subscription.ts` (the Pro check), `rate-limit.ts`, `serve.ts` (`startGateway`: HTTP server, `/healthz`, the upgrade), `main.ts` (the executable: env → `startGateway`), `index.ts` (exports only). `Dockerfile` builds `nickname4th/linkshell-gateway`.
+- `packages/cli` (`linkshell-cli`, bin `linkshell`) — commander commands in `src/index.ts` and `src/commands/*`; `auth.ts` (the account), `utils/daemon.ts` (background processes, pid and log files).
+- `packages/client-core` (`@linkshell/client-core`) — client state without UI: `host-link.ts` (RPC connection), `tunnel-socket.ts` (that connection through a gateway), `store.ts` (zustand), `timeline.ts` (event log → what is rendered), `streams.ts` (byte streams for previews and the screen), `pairing.ts`.
+- `apps/client` (`@linkshell/client`) — the app: Expo + React Native + Expo Router. Routes in `src/app/`, screens in `src/screens/`, `src/lib/` (`client.tsx`, `computers.ts`, `identity.ts`, `account.ts`, `direct.ts`), native modules in `modules/` (`link-terminal`, `link-socket`). Read `apps/client/AGENTS.md` before touching Expo APIs.
+- `apps/mac` (`@linkshell/mac`) — LinkShell.app: captures the Mac's screen, sends it (WebRTC video, or encoded for the host), posts pointer and key events, and holds the two macOS permissions. Shipped to npm as one archive.
+- `docs/site` — the website and `install.sh` (GitHub Pages). After editing `index.html` run `python3 scripts/build-site-pages.py`.
+- `docs/v2/architecture.md` (design), `docs/v2/screen-realtime.md` (the screen's video path), `docs/deploy.md` (self-hosting), `docs/release-sop.md`.
 
 ## Architecture
 
-### Data Flow
+### The host and its files
 
-1. CLI starts → spawns PTY → connects to gateway (embedded on random port, or remote via `--gateway`)
-2. Gateway generates 6-digit pairing code (7-day TTL) + QR code
-3. Mobile app scans QR / enters code → `POST /pairings/claim` → gets sessionId + deviceToken
-4. Mobile opens WebSocket: `wss://gateway/ws?sessionId=...&role=client&token=...`
-5. Terminal I/O relayed: client sends `terminal.input` → gateway → host PTY; host sends `terminal.output` → gateway → client
+`linkshell host --daemon` starts the host detached; local clients (the CLI, `linkshell claude` / `codex`) reach it over a unix socket. State is in `~/.linkshell` (`LINKSHELL_HOME` moves it):
 
-### Protocol (`packages/shared-protocol`)
+| File | What |
+| --- | --- |
+| `state.db` | sessions and their event logs (SQLite) |
+| `identity.json` | this computer's keys (0600); its id derives from the signing key |
+| `machine.json` | the machine id shown in `machine.info` |
+| `paired-devices.json` | phones paired with it, with their keys (0600) |
+| `config.json` | the chosen gateway (`off` is a choice), whether setup has run |
+| `auth.json` | the account from `linkshell login` (0600) |
+| `run/host.sock`, `run/codex.sock` | the host's API; the shared Codex app-server |
+| `host.pid`, `host.log`, `gateway.pid`, `gateway.log` | background processes |
+| `relay.db` | pairings, when this computer runs `linkshell gateway` |
+| `worktrees/` | git worktrees made for sessions |
+| `LinkShell.app` | unpacked from `@linkshell/mac` on first use (macOS) |
 
-All messages use a unified envelope: `{ id, type, sessionId, terminalId?, deviceId?, timestamp, seq?, ack?, payload }`. Payloads are Zod-validated; invalid messages trigger `session.error`. Message categories: session lifecycle, terminal I/O, terminal management, control (claim/grant/reject), pairing, screen sharing (WebRTC SDP/ICE), file upload, tunnel proxy, history.
+Agents run as the user with the login shell's environment; LinkShell never handles their credentials.
+
+### From phone to host
+
+1. **Relay auth.** Host (role `machine`) and app (role `device`) each open a WebSocket to `<gateway>/v2/connect`. The gateway sends a nonce; the peer signs `linkshell-gateway-v2:${nonce}` with its Ed25519 key, and may add an account token.
+2. **Who may reach whom.** A device reaches a machine it is **paired** with, or one on the same **account**. Pairing: `linkshell pair` asks the gateway for a 6-digit code (10 minutes) and shows a QR code (`linkshell://pair?…`: gateway, the machine's signing key, a one-time secret, the code); the app claims by scan or by code; the host checks the proof and decides. Account: both sides signed in (`linkshell login`, and in the app) — no pairing.
+3. **End-to-end channel.** The device opens a tunnel (`hello` / `welcome`, ephemeral X25519 keys signed by the long-term keys); after that every frame is sealed with XChaCha20-Poly1305. The gateway sees only ciphertext. The host accepts a `hello` only from a device in `paired-devices.json` with the same keys, or, when signed in, one the gateway says shares its account.
+4. **RPC.** Inside the tunnel: JSON-RPC (`packages/wire/src/rpc.ts`) — `sessions.*`, `terminals.*`, `fs.*`, `ports.list` / `proxy.*`, `screen.*`, `direct.offer`, …; the host pushes `session.event` (per-session `seq`, resumable).
+5. **Direct channel.** For bulk streams (port previews, the screen) the device sends a WebRTC offer over the RPC channel (`direct.offer`); when a path exists (same network, or STUN), the streams go peer to peer over a data channel instead of through the gateway. `LINKSHELL_ICE_SERVERS` sets the STUN servers (`off`: never direct). No TURN.
+6. **The screen.** The host serves a viewer page on a loopback port, opened by the phone like a port preview. On a Mac, when LinkShell.app and the viewer can reach each other directly, the picture is a WebRTC **video track** from the app to the page; the page's socket only carries signalling and input. Otherwise the app encodes H.264 for the **socket**, paced by the host (`screen-pacer.ts`), through the direct channel or the relay. On Linux only the socket path exists, with ffmpeg capturing, and no control.
 
 ### Gateway (`packages/gateway`)
 
-- **SessionManager** — In-memory `Map<sessionId, Session>`, buffers last 200 output envelopes per terminal for resume replay, cleanup 60s after host disconnect
-- **PairingManager** — 6-digit codes, 7-day TTL, cleanup every 60s
-- **TokenManager** — Device tokens bound to sessions, 7-day TTL
-- **Relay** — Routes messages host↔clients, handles `session.resume` with buffered replay
-- **Tunnel** — HTTP + WebSocket proxy at `/tunnel/{sessionId}/{port}{path}`, cookie fallback for HMR, 30s timeout
-- **Auth middleware** — Optional (`AUTH_REQUIRED=true`), validates Supabase JWT + subscription check every 5min
-- **Embedded mode** — `startEmbeddedGateway()` used by CLI when no `--gateway` flag, starts on random port
+- Two endpoints: WebSocket `/v2/connect` and `GET /healthz` → `{ ok, version, relay, memoryMb }` (`relay`: connected peers). Everything else is 404.
+- Data: one SQLite file (peers' public keys and account, machine↔device links). `RELAY_DATA_PATH`, default `./data/relay.db`; the Docker image uses `/data/relay.db`; `linkshell gateway` uses `~/.linkshell/relay.db`. Losing it unpairs every phone.
+- Env: `PORT` (8787), `LOG_LEVEL`, `RELAY_DATA_PATH`, `TRUSTED_PROXIES` (IPs whose `X-Forwarded-For` is believed), `WS_CONNECT_RATE_LIMIT_MAX` / `WS_CONNECT_RATE_LIMIT_WINDOW_MS` (20 connects a minute per IP, loopback exempt), `SUPABASE_URL` + `SUPABASE_ANON_KEY` (account tokens are verified), `AUTH_REQUIRED` + `SUPABASE_SERVICE_ROLE_KEY` (a computer needs an active Pro account).
+- Official vs self-hosted: the same code. A self-hosted gateway has no Supabase variables: pairing only. The official one (`gateway.itool.tech`, `luma-gateway.yml`) adds account verification and, through `admit`, the Pro check for computers — at connect only; a failed lookup admits.
 
-### CLI (`packages/cli`)
+### CLI commands
 
-- **BridgeSession** (`runtime/bridge-session.ts`) — Core class: spawns PTY, manages WebSocket, handles pairing, multi-terminal (200-line scrollback per terminal), reconnection (exponential backoff, max 20 attempts)
-- **Daemon** (`utils/daemon.ts`) — Detached child process, PID in `~/.linkshell/bridge.pid`, logs to `~/.linkshell/bridge.log`
-- **Providers** (`providers.ts`) — Resolves CLI executables (claude, codex, gemini, etc.)
-- **Auth** (`auth.ts`) — Tokens in `~/.linkshell/auth.json` (mode 0o600), Supabase OAuth via iTool
-- **Screen sharing** — WebRTC (werift + ffmpeg H.264) preferred, JPEG polling fallback
+`setup` (host, screen permissions, phone — once), `host [--daemon] [--gateway <url|off|default>] [--dev-port <port>]` with `host status` / `host stop`, `pair`, `devices` / `devices remove <device>`, `claude` / `codex` (the agent's own UI attached to the host; arguments pass through), `screen [--check]`, `doctor [--gateway <url>]`, `login`, `logout`, `upgrade`, `status`, `stop`, `gateway [--port] [--daemon]` with `gateway status` / `gateway stop`. Bare `linkshell` runs the setup on a computer that has never had it.
 
-### Mobile (`apps/mobile`)
+## Never rename
 
-- xterm.js runs inside a WebView (React Native has no DOM); communicates via `postMessage`
-- Terminal HTML built by `scripts/build-terminal-html.mjs`
-- Multi-terminal tabs with spawn/kill/status
-- Screen sharing: WebRTC video stream preferred, JPEG fallback
-- Storage: AsyncStorage for device tokens, server list, history
+Every paired phone and every installed host depends on these. Changing one silently breaks or unpairs users.
+
+- `RELAY_PATH = "/v2/connect"` (`packages/wire/src/relay.ts`).
+- The challenge string `linkshell-gateway-v2:${nonce}` (`packages/wire/src/crypto.ts`). The "v2" in both is part of the protocol, not a version to tidy up.
+- The relay's SQLite schema (`packages/gateway/src/store.ts`: tables `peers`, `links`) and production's data file `/data/relay.db` on the volume in `luma-gateway.yml`.
+- LinkShell.app's bundle id `com.bd.linkshell.host` and its Developer ID signing identity: macOS keeps the Screen Recording and Accessibility grants against the pair.
 
 ## Release
 
-See [docs/release-sop.md](docs/release-sop.md) for the full checklist.
+Checklist: [docs/release-sop.md](docs/release-sop.md).
 
-Publish order: protocol → gateway → cli (dependency chain).
+- npm, always `pnpm publish` (it rewrites `workspace:*`), in dependency order: wire → mac → host → gateway → cli; skip what didn't change.
+- `@linkshell/mac` must be published from a Mac with the Developer ID Application certificate (`prepack` refuses to build unsigned).
+- Tag `gateway-vX.Y.Z` → CI builds and pushes `nickname4th/linkshell-gateway` (`.github/workflows/docker-publish.yml`). That only builds: the official gateway is deployed by bumping the image in `luma-gateway.yml`.
+- Tag `cli-vX.Y.Z` marks a CLI release (no CI). `./scripts/update-brew.sh` updates the Homebrew tap.
+- Tag `vX.Y.Z` → the app, on self-hosted macOS runners: iOS to TestFlight, Android AAB + APK to a GitHub release (`./scripts/release-mobile.sh`). Locally: `pnpm prod:ios` / `pnpm prod:android`.
+- `docs/site/` deploys to GitHub Pages on push to main (`.github/workflows/pages.yml`).
 
-Tag `gateway-vX.Y.Z` triggers Docker Hub CI. Run `./scripts/update-brew.sh` to update Homebrew tap.
-
-## Distribution Channels
-
-- npm: `npm install -g linkshell-cli`
-- Homebrew: `brew install LiuTianjie/linkshell/linkshell`
-- curl: `curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh`
-- Docker Hub: `nickname4th/linkshell-gateway` (CI: `.github/workflows/docker-publish.yml`)
-- GitHub Pages: `docs/site/` via `.github/workflows/pages.yml`
+Install channels: `npm i -g linkshell-cli`, `brew install LiuTianjie/linkshell/linkshell`, `curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh`.
 
 ## Auth & Backend
 
-- Supabase project: `mkbeusztkzffnzjdwmqk` (shared with iTool)
-- Tables: `linkshell_device_tokens`, `linkshell_official_gateways` (+ iTool's `profiles` for subscription)
-- Gateway env vars: `AUTH_REQUIRED`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-- Subscription check: queries `profiles.plan` + `profiles.plan_expires_at`
+- Supabase project `mkbeusztkzffnzjdwmqk`, shared with iTool. Sign-in happens at `https://itool.tech/en/auth/linkshell`; the CLI keeps the tokens in `~/.linkshell/auth.json`, the app in the Keychain.
+- Subscription: iTool's `profiles` table, `plan = 'pro'` and `plan_expires_at` in the future. `linkshell login` reads it with the user's token (to say Pro or Free); the official gateway reads it with the service-role key, and its answer is the one that counts.
+- The gateway verifies an account token against `${SUPABASE_URL}/auth/v1/user`.
+- The `linkshell_*` tables in that project are left from 1.x. No code reads them; don't drop them.
 
 ## Conventions
 
 - Commit style: `feat:`, `fix:`, `docs:`, `release:`
-- Chinese UI text in mobile app
-- English in README.md, Chinese in README_CN.md
+- Chinese UI text in the app and in the screen's viewer page (`packages/host/src/screen-viewer.ts`); errors the phone shows are Chinese too
+- English in README.md, Chinese in README_CN.md; keep the two saying the same
+- Comments say why, not what

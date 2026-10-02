@@ -5,12 +5,8 @@ import { spawn } from "node:child_process";
 
 const LINKSHELL_DIR = process.env.LINKSHELL_HOME || join(homedir(), ".linkshell");
 
+// "bridge" is the 1.x daemon: nothing starts one any more, but `linkshell stop` still ends one left running.
 type ServiceName = "gateway" | "bridge" | "host";
-
-export interface ServiceMetadata {
-  keepAwake?: boolean;
-  startedAt?: number;
-}
 
 function pidFile(service: ServiceName): string {
   return join(LINKSHELL_DIR, `${service}.pid`);
@@ -20,6 +16,7 @@ function logFile(service: ServiceName): string {
   return join(LINKSHELL_DIR, `${service}.log`);
 }
 
+/** 1.x kept a `<service>.json` beside its pid file; removed with it. */
 function metadataFile(service: ServiceName): string {
   return join(LINKSHELL_DIR, `${service}.json`);
 }
@@ -59,28 +56,6 @@ export function removePid(service: ServiceName): void {
 
 export function getLogFile(service: ServiceName): string {
   return logFile(service);
-}
-
-export function getPidFile(service: ServiceName): string {
-  return pidFile(service);
-}
-
-export function saveMetadata(
-  service: ServiceName,
-  metadata: ServiceMetadata,
-): void {
-  mkdirSync(LINKSHELL_DIR, { recursive: true });
-  writeFileSync(metadataFile(service), JSON.stringify(metadata), "utf8");
-}
-
-export function readMetadata(service: ServiceName): ServiceMetadata | null {
-  try {
-    const file = metadataFile(service);
-    if (!existsSync(file)) return null;
-    return JSON.parse(readFileSync(file, "utf8")) as ServiceMetadata;
-  } catch {
-    return null;
-  }
 }
 
 export function spawnDaemon(service: ServiceName, args: string[]): number {

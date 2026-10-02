@@ -1,18 +1,21 @@
 {
   "name": "@linkshell/gateway",
-  "version": "0.5.3",
+  "version": "0.6.0",
+  "description": "LinkShell gateway: relays end-to-end encrypted frames between computers and devices, and brokers pairing.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LiuTianjie/LinkShell.git",
+    "directory": "packages/gateway"
+  },
   "type": "module",
   "main": "dist/gateway/src/index.js",
+  "types": "dist/gateway/src/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/gateway/src/index.d.ts",
       "import": "./dist/gateway/src/index.js",
       "default": "./dist/gateway/src/index.js"
-    },
-    "./embedded": {
-      "types": "./dist/gateway/src/embedded.d.ts",
-      "import": "./dist/gateway/src/embedded.js",
-      "default": "./dist/gateway/src/embedded.js"
     }
   },
   "files": [
@@ -26,17 +29,15 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist *.tsbuildinfo && tsc -p tsconfig.json",
+    "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev": "tsx src/index.ts",
+    "dev": "tsx src/main.ts",
     "test": "vitest run"
   },
   "dependencies": {
-    "@linkshell/protocol": "workspace:*",
-    "zod": "^3.24.3",
-    "ws": "^8.18.1",
-    "@linkshell/gateway-v2": "workspace:*",
-    "@linkshell/wire": "workspace:*"
+    "@linkshell/wire": "workspace:*",
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@types/ws": "^8.5.14",

@@ -5,9 +5,6 @@
     "moduleResolution": "NodeNext",
     "baseUrl": ".",
     "paths": {
-      "@linkshell/protocol": [
-        "packages/shared-protocol/src/index.ts"
-      ],
       "@linkshell/wire": [
         "packages/wire/src/index.ts"
       ],
@@ -17,8 +14,8 @@
       "@linkshell/client-core": [
         "packages/client-core/src/index.ts"
       ],
-      "@linkshell/gateway-v2": [
-        "packages/gateway-v2/src/index.ts"
+      "@linkshell/gateway": [
+        "packages/gateway/src/index.ts"
       ]
     },
     "strict": true,
