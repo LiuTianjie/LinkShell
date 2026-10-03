@@ -1,3 +1,5 @@
+import { CryptoDigestAlgorithm, CryptoEncoding, digestStringAsync, getRandomBytes } from "expo-crypto";
+import * as WebBrowser from "expo-web-browser";
 import { create } from "zustand";
 import { deleteSecret, readSecret, writeSecret } from "./secure";
 
@@ -10,7 +12,12 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rYmV1c3p0a3pmZm56amR3bXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5Nzc0NzgsImV4cCI6MjA4MTU1MzQ3OH0.2wlT6q6687Z5rpEYsdp01IQpNNl_XWv0IAfBgwPyDP0";
 const KEY = "linkshell.account.v2";
 
-export const SIGN_UP_URL = "https://itool.tech/en/auth/linkshell";
+export const SIGN_UP_URL = "https://itool.tech/zh/register";
+
+/** Must be in the Supabase project's Redirect URLs, or the provider sends the browser to itool.tech instead. */
+export const OAUTH_REDIRECT = "linkshell://auth-callback";
+
+export type OAuthProvider = "github" | "google";
 
 export interface AccountSession {
   accessToken: string;
@@ -23,6 +30,8 @@ export interface AccountSession {
 interface AccountState {
   session?: AccountSession;
   signIn(email: string, password: string): Promise<void>;
+  /** Signs in in the system browser; false when the user closed it. */
+  signInWith(provider: OAuthProvider): Promise<boolean>;
   signOut(): Promise<void>;
   /** A valid access token, refreshed when close to expiry; undefined when signed out. */
   token(): Promise<string | undefined>;
@@ -49,6 +58,51 @@ async function auth(path: string, body: unknown): Promise<AccountSession> {
   };
 }
 
+function base64url(value: string): string {
+  return value.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function bytesToBase64url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return base64url(btoa(binary));
+}
+
+/** OAuth error text from the redirect, which Supabase may put in the query or the fragment. */
+function redirectParams(url: string): URLSearchParams {
+  const params = new URLSearchParams(url.split("?")[1]?.split("#")[0] ?? "");
+  for (const [key, value] of new URLSearchParams(url.split("#")[1] ?? "")) params.set(key, value);
+  return params;
+}
+
+function oauthError(message: string): string {
+  if (/same email|already registered|linking/i.test(message)) return "这个邮箱已经用另一种方式注册过，请用原来的方式登录";
+  if (/provider is not enabled|unsupported provider/i.test(message)) return "这种登录方式暂时不可用";
+  return message;
+}
+
+// PKCE: the code that comes back through the URL scheme is useless without the
+// verifier that never left the phone, so another app claiming the scheme gets nothing.
+async function oauth(provider: OAuthProvider): Promise<AccountSession | undefined> {
+  const verifier = bytesToBase64url(getRandomBytes(32));
+  const challenge = base64url(await digestStringAsync(CryptoDigestAlgorithm.SHA256, verifier, { encoding: CryptoEncoding.BASE64 }));
+  const query = new URLSearchParams({
+    provider,
+    redirect_to: OAUTH_REDIRECT,
+    code_challenge: challenge,
+    code_challenge_method: "s256",
+    ...(provider === "github" ? { scopes: "read:user user:email" } : {}),
+  });
+  const result = await WebBrowser.openAuthSessionAsync(`${SUPABASE_URL}/auth/v1/authorize?${query}`, OAUTH_REDIRECT);
+  if (result.type !== "success") return undefined;
+  const params = redirectParams(result.url);
+  const failure = params.get("error_description") ?? params.get("error");
+  if (failure) throw new Error(oauthError(failure));
+  const code = params.get("code");
+  if (!code) throw new Error("登录没有完成，请再试一次");
+  return auth("token?grant_type=pkce", { auth_code: code, code_verifier: verifier });
+}
+
 let refreshing: Promise<AccountSession | undefined> | undefined;
 
 export const useAccount = create<AccountState>((set, get) => ({
@@ -57,6 +111,13 @@ export const useAccount = create<AccountState>((set, get) => ({
     const session = await auth("token?grant_type=password", { email: email.trim(), password });
     writeSecret(KEY, session);
     set({ session });
+  },
+  async signInWith(provider) {
+    const session = await oauth(provider);
+    if (!session) return false;
+    writeSecret(KEY, session);
+    set({ session });
+    return true;
   },
   async signOut() {
     await deleteSecret(KEY);
