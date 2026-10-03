@@ -14,23 +14,24 @@ const dark = { ...DarkTheme, colors: { ...DarkTheme.colors, primary: palette.dar
 
 // Sheets hold forms and lists, so they get the app's solid grouped background:
 // iOS's glass material would show the page behind through every field.
-const sheetContent = { backgroundColor: colors.sheet };
-
 export default function RootLayout() {
   const scheme = useColorScheme();
+  const sheetContent = { backgroundColor: colors.sheet };
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
         <ThemeProvider value={scheme === "dark" ? dark : light}>
           <ClientProvider>
-            {/* Android resolves the theme's colour resources when a view is created, and the
-                activity handles a day/night switch itself, so existing views would keep the old
-                colours. Rebuild the navigation tree on a switch, as Android would by default. */}
+            {/* Android's literal theme colors must reach memoized rows and native
+                views too; rebuild the tree when the system appearance changes. */}
             <Fragment key={Platform.OS === "android" ? (scheme ?? "light") : "tree"}>
               <StatusBar style="auto" />
               <Stack screenOptions={{ headerBackButtonDisplayMode: "minimal" }}>
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 <Stack.Screen name="session/[id]/index" options={{ title: "", headerTransparent: true, headerShadowVisible: false }} />
+                <Stack.Screen name="session/[id]/workflow/[call]" options={{ title: "工作流" }} />
+                <Stack.Screen name="session/[id]/workflows" options={{ title: "工作流" }} />
+                <Stack.Screen name="session/[id]/workflow-agent/[call]" options={{ title: "Agent 详情", headerShadowVisible: false }} />
                 <Stack.Screen
                   name="session/[id]/changes"
                   options={{ title: "改动", headerTransparent: Platform.OS === "ios", headerShadowVisible: false }}

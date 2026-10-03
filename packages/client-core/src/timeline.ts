@@ -205,6 +205,12 @@ function answered(questions: Question[], answers: QuestionAnswer[]): { question:
 
 /** Routes a sub-agent's update into its spawning tool call's own timeline. */
 function applyToChild(view: SessionView, parentId: string, update: SessionUpdate, ts: number, key: string): SessionView {
+  if (!get(view, parentId, "tool")) {
+    for (const item of view.items) {
+      if (item.kind !== "tool" || !item.sub || !findTool(item.sub, parentId)) continue;
+      return upsert(view, { ...item, sub: applyToChild(item.sub, parentId, update, ts, key) });
+    }
+  }
   const parent: Extract<TimelineItem, { kind: "tool" }> = get(view, parentId, "tool") ?? {
     kind: "tool",
     id: parentId,
@@ -219,6 +225,18 @@ function applyToChild(view: SessionView, parentId: string, update: SessionUpdate
   const inner = { ...update, parentToolCallId: undefined } as SessionUpdate;
   const sub = applyUpdate(parent.sub ?? emptyView(view.sessionId), inner, ts, key);
   return sub === parent.sub ? view : upsert(view, { ...parent, sub });
+}
+
+/** Workflow agents can themselves contain agents; ids are session-wide. */
+export function findTool(view: SessionView, id: string): Extract<TimelineItem, { kind: "tool" }> | undefined {
+  const own = get(view, id, "tool");
+  if (own) return own;
+  for (const item of view.items) {
+    if (item.kind !== "tool" || !item.sub) continue;
+    const found = findTool(item.sub, id);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 // ── reducer ──────────────────────────────────────────────────────────

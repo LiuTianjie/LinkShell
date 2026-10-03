@@ -8,6 +8,7 @@ import { PressableScale } from "@/components/pressable-scale";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { LiveDot } from "@/components/status";
 import { SubagentGlyph } from "@/components/timeline/subagent";
+import { WorkflowCardContent } from "@/components/workflow";
 import { useActions, useClient } from "@/lib/client";
 import { duration, relativeTime } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -73,8 +74,23 @@ export function SubagentsScreen() {
   const insets = useSafeAreaInsets();
   const { loadSubagents } = useActions();
   const listed = useClient((state) => state.subagents[id]);
+  const workflows = useClient((state) => state.workflows[id]);
+  const runs = useMemo(() => Object.values(workflows ?? {}).sort((a, b) => b.startedAt - a.startedAt), [workflows]);
   // The ones still working first, then newest first (as the computer lists them).
-  const list = useMemo(() => (listed ? [...listed].sort((a, b) => Number(b.running) - Number(a.running)) : undefined), [listed]);
+  const list = useMemo(() => {
+    if (!listed) return undefined;
+    const byId = new Map(listed.map((entry) => [entry.toolCallId, entry]));
+    return listed.filter((entry) => {
+      const visited = new Set<string>();
+      let current: SubagentInfo | undefined = entry;
+      while (current && !visited.has(current.toolCallId)) {
+        if (current.workflow || workflows?.[current.toolCallId]) return false;
+        visited.add(current.toolCallId);
+        current = current.parentToolCallId ? byId.get(current.parentToolCallId) : undefined;
+      }
+      return true;
+    }).sort((a, b) => Number(b.running) - Number(a.running));
+  }, [listed, workflows]);
   const counts = useClient((state) => state.sessions[id]?.subagents);
   const online = useClient((state) => state.status === "online");
   const [error, setError] = useState<string | null>(null);
@@ -100,10 +116,10 @@ export function SubagentsScreen() {
       ) : null}
       <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: Platform.OS === "android" ? 12 : 22, paddingBottom: 10 }}>
         <View style={{ flex: 1, gap: 1 }}>
-          <Text style={[type.title, { color: colors.label }]}>子 Agent</Text>
-          {list?.length ? (
+          <Text style={[type.title, { color: colors.label }]}>{runs.length ? "Agent 与工作流" : "子 Agent"}</Text>
+          {list?.length || runs.length ? (
             <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
-              共 {list.length} 个{counts?.running ? ` · ${counts.running} 个运行中` : ""}
+              {[list?.length ? `${list.length} 个子 Agent` : undefined, runs.length ? `${runs.length} 个工作流` : undefined].filter(Boolean).join(" · ")}
             </Text>
           ) : null}
         </View>
@@ -120,6 +136,7 @@ export function SubagentsScreen() {
       {/* Wrapped: a sheet stretches a scroll view that's a direct child of the screen over the whole sheet. */}
       <View style={{ flex: 1, overflow: "hidden" }}>
         <ScrollView contentInsetAdjustmentBehavior="never" style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: insets.bottom + 24 }}>
+          {runs.length ? <View style={{ gap: 12, marginBottom: list?.length ? 16 : 0 }}>{runs.map((record) => <WorkflowCardContent key={record.toolCallId} record={record} sessionId={id} />)}</View> : null}
           {!list ? (
             error ? (
               <EmptyState icon={{ sf: "exclamationmark.triangle", md: "warning" }} title="读取失败" message={error} />
@@ -127,7 +144,7 @@ export function SubagentsScreen() {
               <LoadingState label="正在读取…" />
             )
           ) : list.length === 0 ? (
-            <EmptyState icon={{ sf: "square.stack.3d.up", md: "layers" }} title="这个会话没有子 Agent" message="Agent 把任务分给子 Agent 后，会列在这里。" />
+            runs.length ? null : <EmptyState icon={{ sf: "square.stack.3d.up", md: "layers" }} title="这个会话没有子 Agent" message="Agent 把任务分给子 Agent 后，会列在这里。" />
           ) : (
             <View style={{ backgroundColor: colors.sheetCard, borderRadius: 20, borderCurve: "continuous", overflow: "hidden" }}>
               {list.map((entry, index) => (

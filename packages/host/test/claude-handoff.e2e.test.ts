@@ -133,6 +133,61 @@ async function terminal(host: RunningHost, e: Env, sessionId?: string) {
 const text = (t: string) => [{ type: "text" as const, text: t }];
 
 describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
+  it("streams new child files and workflow workers while the desktop's main conversation is idle", async () => {
+    const e = makeEnv();
+    const host = await boot(e);
+    const p = await phone(host);
+    const desk = await terminal(host, e);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    desk.type("prepare");
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: prepare"));
+    const native = desk.id.slice("claude:".length);
+    const dir = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"));
+    const transcript = join(dir, `${native}.jsonl`);
+    const children = join(dir, native, "subagents");
+    mkdirSync(children, { recursive: true });
+    const write = (path: string, entry: Record<string, unknown>) => appendFileSync(path, JSON.stringify({ sessionId: native, cwd: e.workDir, entrypoint: "cli", uuid: randomUUID(), timestamp: new Date().toISOString(), ...entry }) + "\n");
+    write(transcript, { type: "assistant", message: { id: "spawn", content: [{ type: "tool_use", id: "agent-live", name: "Agent", input: { description: "Read sources" } }], stop_reason: "tool_use" } });
+    writeFileSync(join(children, "agent-a1.meta.json"), JSON.stringify({ toolUseId: "agent-live" }));
+    write(join(children, "agent-a1.jsonl"), { type: "assistant", isSidechain: true, message: { id: "child-live", content: [{ type: "text", text: "live child output" }], stop_reason: "end_turn" } });
+    await waitFor(() => p.agentTexts(desk.id).includes("live child output"));
+    expect(p.of(desk.id).find((event) => event.update.sessionUpdate === "agent_message_chunk" && event.update.messageId === "child-live")?.update).toMatchObject({ parentToolCallId: "agent-live" });
+
+    const run = join(children, "workflows", "wf_live");
+    mkdirSync(run, { recursive: true });
+    write(transcript, { type: "assistant", message: { id: "wf-spawn", content: [{ type: "tool_use", id: "wf-call", name: "Workflow", input: { name: "research" } }], stop_reason: "tool_use" } });
+    write(transcript, { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "wf-call", content: "Running in background" }] }, toolUseResult: { status: "async_launched", taskId: "wf-task", runId: "wf_live", workflowName: "research" } });
+    writeFileSync(join(run, "journal.jsonl"), JSON.stringify({ type: "started", agentId: "w1" }) + "\n");
+    write(join(run, "agent-w1.jsonl"), { type: "assistant", isSidechain: true, message: { id: "wf-text", content: [{ type: "text", text: "workflow worker output" }], stop_reason: "end_turn" } });
+    await waitFor(() => p.agentTexts(desk.id).includes("workflow worker output"));
+    const worker = "workflow:wf_live:w1";
+    expect(host.hub.subagent(desk.id, worker).some((event) => event.update.sessionUpdate === "agent_message_chunk")).toBe(true);
+    expect(host.hub.subagents(desk.id).find((agent) => agent.toolCallId === "wf-call")?.running).toBe(true);
+    write(transcript, { type: "system", subtype: "task_notification", task_id: "wf-task", status: "stopped" });
+    await waitFor(() => host.hub.subagents(desk.id).find((agent) => agent.toolCallId === "wf-call")?.workflow?.state === "stopped");
+    expect(host.hub.subagents(desk.id).find((agent) => agent.toolCallId === worker)).toMatchObject({ running: true, state: "running" });
+    write(transcript, { type: "system", subtype: "task_progress", task_id: "wf-task", workflow_progress: [{ type: "workflow_agent", agentId: "w1", state: "killed" }] });
+    await waitFor(() => host.hub.subagents(desk.id).find((agent) => agent.toolCallId === worker)?.state === "stopped");
+    expect(host.hub.subagents(desk.id).find((agent) => agent.toolCallId === worker)).toMatchObject({ running: false, failed: undefined });
+
+    // The run was already terminal in the host log. A more complete final
+    // artifact can arrive while the host is down and must replace that snapshot.
+    await desk.quit();
+    await host.stop();
+    const finals = join(dir, native, "workflows");
+    mkdirSync(finals, { recursive: true });
+    writeFileSync(join(finals, "wf_live.json"), JSON.stringify({ runId: "wf_live", workflowName: "Finished run", status: "completed", workflowProgress: [
+      { type: "workflow_phase", index: 1, title: "Reviewed" },
+      { type: "workflow_agent", agentId: "w1", label: "Updated label", state: "done", phaseIndex: 1 },
+    ] }));
+    const restarted = await boot(e);
+    const returning = await phone(restarted);
+    await returning.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    expect(restarted.hub.subagents(desk.id).find((agent) => agent.toolCallId === "wf-call")?.workflow).toMatchObject({
+      state: "completed", name: "Finished run", phases: [{ title: "Reviewed" }], agents: [{ title: "Updated label", state: "completed" }],
+    });
+  }, 20_000);
+
   it("reports Claude as a handoff agent with its login state", async () => {
     const e = makeEnv();
     const host = await boot(e);

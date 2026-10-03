@@ -610,18 +610,28 @@ export class SessionHub {
       const call = event.update as Extract<SessionUpdate, { sessionUpdate: "tool_call" }>;
       // (A call still open when the session was opened again is logged again.)
       if (agents.has(call.toolCallId)) continue;
-      const detail = call.detail?.type === "subagent" ? call.detail : undefined;
+      const detailEvent = this.store.toolDetail(sessionId, call.toolCallId);
+      const latest = detailEvent?.update as Extract<SessionUpdate, { sessionUpdate: "tool_call_update" }> | undefined;
+      const detail = latest?.detail?.type === "subagent" ? latest.detail : call.detail?.type === "subagent" ? call.detail : undefined;
       const state = this.store.toolState(sessionId, call.toolCallId);
       const callDone = state.status === "completed" || state.status === "failed";
-      const running = subagentRunning({ callDone, turnActive: state.turnActive, lastChildTs: state.lastChildTs });
+      const workflow = detail?.workflow && !detail.workflow.state && state.status === "failed"
+        ? { ...detail.workflow, state: "failed" as const, endedAt: state.ts }
+        : detail?.workflow;
+      const running = workflow?.state ? workflow.state === "running" || workflow.state === "paused" || workflow.agents?.some((agent) => agent.state === "running" || agent.state === "paused") === true
+        : subagentRunning({ callDone, turnActive: state.turnActive, lastChildTs: state.lastChildTs });
       agents.set(call.toolCallId, {
         toolCallId: call.toolCallId,
+        parentToolCallId: call.parentToolCallId,
         task: detail?.task ?? call.title,
         agentType: detail?.agentType,
         running,
-        failed: state.status === "failed" || undefined,
-        startedAt: event.ts,
-        endedAt: running ? undefined : callDone ? state.ts : state.lastChildTs,
+        failed: (workflow?.state ? workflow.state === "failed" : detail?.state ? detail.state === "failed" : state.status === "failed") || undefined,
+        startedAt: workflow?.startedAt ?? event.ts,
+        endedAt: running ? undefined : workflow?.endedAt ?? (callDone ? state.ts : state.lastChildTs),
+        state: detail?.state,
+        workflow,
+        lastSeq: Math.max(detailEvent?.seq ?? event.seq, state.seq ?? 0),
       });
     }
     return [...agents.values()].reverse();
@@ -652,7 +662,7 @@ export class SessionHub {
       known.set(update.toolCallId, { callDone: update.status === "completed" || update.status === "failed" });
       return true;
     }
-    if (update.sessionUpdate === "tool_call_update" && !update.parentToolCallId) {
+    if (update.sessionUpdate === "tool_call_update") {
       const state = known.get(update.toolCallId);
       if (!state || state.callDone || (update.status !== "completed" && update.status !== "failed")) return false;
       state.callDone = true;

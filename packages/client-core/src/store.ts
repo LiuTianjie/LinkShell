@@ -14,10 +14,12 @@ import {
   type WorktreeEntry,
 } from "@linkshell/wire";
 import type { HostLink, LinkStatus } from "./host-link.js";
+import { applyWorkflowEvent, mergeWorkflowList, type WorkflowRecords } from "./workflows.js";
 import {
   addOptimisticMessage,
   applyEvents,
   emptyView,
+  findTool,
   markMessageFailed,
   prependEvents,
   removeItem,
@@ -44,6 +46,8 @@ export interface ClientState {
   loadingEarlier: Record<string, true>;
   /** The sub-agents each session started, newest first, as last fetched (`loadSubagents`). */
   subagents: Record<string, SubagentInfo[]>;
+  /** Complete workflow snapshots, including runs outside the loaded history window. */
+  workflows: Record<string, WorkflowRecords>;
   /**
    * Sub-agent conversations opened on their own (`openSubagent`), by
    * `subagentKey`: a view holding the call that started it, whose `sub` is the
@@ -142,10 +146,12 @@ export function subagentKey(sessionId: string, toolCallId: string): string {
   return `${sessionId}\n${toolCallId}`;
 }
 
-/** The tool call an event belongs to, when it is a sub-agent's or about one. */
-function subagentOf(event: SessionEvent): string | undefined {
+/** An independently opened agent is the root of its own view, even inside a workflow. */
+function eventForSubagent(view: SessionView, call: string, event: SessionEvent): SessionEvent | undefined {
   const update = event.update as { parentToolCallId?: string; toolCallId?: string };
-  return update.parentToolCallId ?? update.toolCallId;
+  if (update.toolCallId === call) return { ...event, update: { ...event.update, parentToolCallId: undefined } as SessionEvent["update"] };
+  if (update.parentToolCallId && (update.parentToolCallId === call || findTool(view, update.parentToolCallId))) return event;
+  return undefined;
 }
 
 export interface ClientStoreOptions {
@@ -183,20 +189,27 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     store.setState((state) => {
       let views = state.views;
       let subagentViews = state.subagentViews;
+      let workflows = state.workflows;
       const bySession = new Map<string, SessionEvent[]>();
       for (const event of batch) {
+        const runs = workflows[event.sessionId] ?? {};
+        const nextRuns = applyWorkflowEvent(runs, event);
+        if (nextRuns !== runs) workflows = { ...workflows, [event.sessionId]: nextRuns };
         const list = bySession.get(event.sessionId) ?? [];
         list.push(event);
         bySession.set(event.sessionId, list);
         // A sub-agent opened on its own follows along too.
-        const toolCallId = subagentOf(event);
-        if (!toolCallId) continue;
-        const key = subagentKey(event.sessionId, toolCallId);
-        loadingSubagents.get(key)?.push(event);
-        const current = subagentViews[key];
-        if (!current) continue;
-        const next = applyEvents(current, [event]);
-        if (next !== current) subagentViews = { ...subagentViews, [key]: next };
+        const prefix = `${event.sessionId}\n`;
+        // The parent's history may still be loading, so filter this buffer only
+        // after we know which nested calls belong to that view.
+        for (const [key, buffer] of loadingSubagents) if (key.startsWith(prefix)) buffer.push(event);
+        for (const [key, current] of Object.entries(subagentViews)) {
+          if (!key.startsWith(prefix)) continue;
+          const own = eventForSubagent(current, key.slice(prefix.length), event);
+          if (!own) continue;
+          const next = applyEvents(current, [own]);
+          if (next !== current) subagentViews = { ...subagentViews, [key]: next };
+        }
       }
       for (const [sessionId, events] of bySession) {
         const current = views[sessionId];
@@ -204,7 +217,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         const next = applyEvents(current, events);
         if (next !== current) views = { ...views, [sessionId]: next };
       }
-      return views === state.views && subagentViews === state.subagentViews ? state : { views, subagentViews };
+      return views === state.views && subagentViews === state.subagentViews && workflows === state.workflows ? state : { views, subagentViews, workflows };
     });
   };
 
@@ -256,6 +269,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         loadingEarlier: without(state.loadingEarlier),
         queueing: without(state.queueing),
         subagents: without(state.subagents),
+        workflows: without(state.workflows),
         subagentViews: Object.fromEntries(Object.entries(state.subagentViews).filter(([key]) => !key.startsWith(`${sessionId}\n`))),
       };
     });
@@ -302,6 +316,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       ready: {},
       loadingEarlier: {},
       subagents: {},
+      workflows: {},
       subagentViews: {},
       outbox: {},
       queueing: {},
@@ -545,7 +560,11 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
       async loadSubagents(sessionId) {
         const { subagents } = await link.call("sessions.subagents", { sessionId });
-        set((state) => ({ subagents: { ...state.subagents, [sessionId]: subagents } }));
+        flushEvents();
+        set((state) => ({
+          subagents: { ...state.subagents, [sessionId]: subagents },
+          workflows: { ...state.workflows, [sessionId]: mergeWorkflowList(state.workflows[sessionId] ?? {}, subagents) },
+        }));
         return subagents;
       },
 
@@ -557,7 +576,11 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         try {
           const { events } = await link.call("sessions.subagent", { sessionId, toolCallId, lazyImages: options.lazyImages }, 30_000);
           flushEvents();
-          const view = applyEvents(applyEvents(emptyView(sessionId), events), meanwhile);
+          let view = emptyView(sessionId);
+          for (const event of [...events, ...meanwhile]) {
+            const own = eventForSubagent(view, toolCallId, event);
+            if (own) view = applyEvents(view, [own]);
+          }
           set((state) => ({ subagentViews: { ...state.subagentViews, [key]: view } }));
           return true;
         } catch {

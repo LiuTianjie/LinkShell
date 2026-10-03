@@ -553,22 +553,32 @@ export class HostStore {
 
   /** A tool call's own events (the call and its updates), oldest first. */
   toolEvents(sessionId: string, toolCallId: string): SessionEvent[] {
-    return this.joined("m.session_id = ? AND m.tool = ? AND m.parent IS NULL ORDER BY m.seq ASC", [sessionId, toolCallId]);
+    return this.joined("m.session_id = ? AND m.tool = ? ORDER BY m.seq ASC", [sessionId, toolCallId]);
+  }
+
+  /** A roster needs the latest detail even when the launching turn is no longer loaded. */
+  toolDetail(sessionId: string, toolCallId: string): SessionEvent | undefined {
+    return this.joined("m.session_id = ? AND m.tool = ? AND json_extract(e.body, '$.detail') IS NOT NULL ORDER BY m.seq DESC LIMIT 1", [sessionId, toolCallId])[0];
   }
 
   /** The latest `limit` events of the sub-agent under a tool call, oldest first. */
   eventsUnder(sessionId: string, toolCallId: string, limit: number): SessionEvent[] {
-    return this.joined("m.session_id = ? AND m.parent = ? ORDER BY m.seq DESC LIMIT ?", [sessionId, toolCallId, limit]).reverse();
+    return this.joined(`m.session_id = ? AND m.parent IN (
+      WITH RECURSIVE children(id) AS (
+        SELECT ? UNION SELECT c.tool FROM event_meta c JOIN children p ON c.parent = p.id
+        WHERE c.session_id = ? AND c.spawns = 1 AND c.tool IS NOT NULL
+      ) SELECT id FROM children
+    ) ORDER BY m.seq DESC LIMIT ?`, [sessionId, toolCallId, sessionId, limit]).reverse();
   }
 
   /** A tool call's latest status, whether the sub-agent under it is in a turn, and when that sub-agent last did anything. */
-  toolState(sessionId: string, toolCallId: string): { status?: string; ts?: number; turnActive?: boolean; lastChildTs?: number } {
+  toolState(sessionId: string, toolCallId: string): { status?: string; ts?: number; seq?: number; turnActive?: boolean; lastChildTs?: number } {
     const last = this.db
       .prepare(
-        `SELECT e.ts, json_extract(e.body, '$.status') AS status FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
-         WHERE m.session_id = ? AND m.tool = ? AND m.parent IS NULL AND json_extract(e.body, '$.status') IS NOT NULL ORDER BY m.seq DESC LIMIT 1`,
+        `SELECT e.ts, e.seq, json_extract(e.body, '$.status') AS status FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+         WHERE m.session_id = ? AND m.tool = ? AND json_extract(e.body, '$.status') IS NOT NULL ORDER BY m.seq DESC LIMIT 1`,
       )
-      .get(sessionId, toolCallId) as { ts: number; status: string } | undefined;
+      .get(sessionId, toolCallId) as { ts: number; seq: number; status: string } | undefined;
     const turn = this.db
       .prepare(
         `SELECT json_extract(e.body, '$.state') AS state FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
@@ -581,7 +591,7 @@ export class HostStore {
          WHERE m.session_id = ? AND m.parent = ? ORDER BY m.seq DESC LIMIT 1`,
       )
       .get(sessionId, toolCallId) as { ts: number } | undefined;
-    return { status: last?.status, ts: last?.ts, turnActive: turn ? turn.state === "started" : undefined, lastChildTs: child?.ts };
+    return { status: last?.status, ts: last?.ts, seq: last?.seq, turnActive: turn ? turn.state === "started" : undefined, lastChildTs: child?.ts };
   }
 
   private joined(where: string, values: (string | number)[]): SessionEvent[] {

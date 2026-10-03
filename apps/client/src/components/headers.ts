@@ -7,8 +7,8 @@ import { colors } from "@/theme/colors";
  * Android has no large titles and no automatic content insets, so it gets a
  * solid, flat app bar in the page colour with a Material-sized title.
  */
-export const largeTitleHeader: NativeStackNavigationOptions =
-  Platform.OS === "ios"
+export function largeTitleHeader(): NativeStackNavigationOptions {
+  return Platform.OS === "ios"
     ? {
         headerTransparent: true,
         headerShadowVisible: false,
@@ -26,3 +26,4 @@ export const largeTitleHeader: NativeStackNavigationOptions =
         headerTintColor: colors.label as string,
         contentStyle: { backgroundColor: colors.background },
       };
+}

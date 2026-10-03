@@ -8,7 +8,7 @@ import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSession } from "@/components/timeline/context";
 import { StatusMark, SubagentGlyph, useSubagentProgress } from "@/components/timeline/subagent";
 import { Timeline } from "@/components/timeline/timeline";
-import { useActions, useClient } from "@/lib/client";
+import { useActions, useClient, useSessionSubscription } from "@/lib/client";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
@@ -34,16 +34,21 @@ const galleryItems: TimelineItem[] = __DEV__ ? require("@/dev/fixtures").gallery
  * sub-agents too, when the call that started it is far back in a history that
  * isn't loaded; until that arrives it shows what the session's timeline has.
  */
-export function SubagentScreen() {
+export function WorkflowAgentScreen() { return <SubagentScreen fullScreen />; }
+
+export function SubagentScreen({ fullScreen = false }: { fullScreen?: boolean } = {}) {
   const { id, call } = useLocalSearchParams<{ id: string; call: string }>();
   const gallery = id === "gallery";
   const { openSubagent, closeSubagent } = useActions();
   const items = useClient((state) => (gallery ? undefined : (state.views[id] as SessionView | undefined)?.items));
   const own = useClient((state) => (gallery ? undefined : (state.subagentViews[subagentKey(id, call)] as SessionView | undefined)?.items));
   const [missing, setMissing] = useState(false);
+  const ready = useClient((state) => !!state.ready[id]);
+  useSessionSubscription(id, !gallery);
 
   useEffect(() => {
-    if (gallery) return;
+    if (gallery || !ready) return;
+    setMissing(false);
     let closed = false;
     void openSubagent(id, call).then((opened) => {
       if (!closed && !opened) setMissing(true);
@@ -52,7 +57,7 @@ export function SubagentScreen() {
       closed = true;
       closeSubagent(id, call);
     };
-  }, [gallery, openSubagent, closeSubagent, id, call]);
+  }, [gallery, ready, openSubagent, closeSubagent, id, call]);
 
   const item = useMemo(() => findCall(own, call) ?? findCall(gallery ? galleryItems : items, call), [gallery, own, items, call]);
   if (!item) {
@@ -68,12 +73,12 @@ export function SubagentScreen() {
   }
   return (
     <TimelineSession.Provider value={id}>
-      <SubagentSheet item={item} />
+      <SubagentSheet item={item} fullScreen={fullScreen} />
     </TimelineSession.Provider>
   );
 }
 
-function SubagentSheet({ item }: { item: ToolItem }) {
+function SubagentSheet({ item, fullScreen }: { item: ToolItem; fullScreen: boolean }) {
   const insets = useSafeAreaInsets();
   const bottom = useSharedValue(insets.bottom + 16);
   const [taskOpen, setTaskOpen] = useState(false);
@@ -81,10 +86,10 @@ function SubagentSheet({ item }: { item: ToolItem }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.plain }}>
-      {Platform.OS === "android" ? (
+      {!fullScreen && Platform.OS === "android" ? (
         <View style={{ alignSelf: "center", width: 36, height: 4, borderRadius: 2, marginTop: 10, backgroundColor: colors.separator }} />
       ) : null}
-      <View style={{ paddingTop: Platform.OS === "android" ? 14 : 22, paddingHorizontal: 20, paddingBottom: 12, gap: 10 }}>
+      <View style={{ paddingTop: fullScreen ? 16 : Platform.OS === "android" ? 14 : 22, paddingHorizontal: 20, paddingBottom: 12, gap: 10 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <SubagentGlyph failed={progress.failed} size={40} />
           <View style={{ flex: 1, gap: 2 }}>
@@ -92,10 +97,10 @@ function SubagentSheet({ item }: { item: ToolItem }) {
               {progress.name}
             </Text>
             <Text numberOfLines={1} style={[type.footnote, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>
-              {[progress.model, progress.running ? "运行中" : progress.failed ? null : "已完成", progress.summary].filter(Boolean).join(" · ")}
+              {[progress.model, progress.paused || progress.stopped || progress.unknown ? null : progress.running ? "运行中" : progress.failed ? null : "已完成", progress.summary].filter(Boolean).join(" · ")}
             </Text>
           </View>
-          <StatusMark running={progress.running} failed={progress.failed} />
+          <StatusMark running={progress.running && !progress.paused} failed={progress.failed} paused={progress.paused} stopped={progress.stopped} unknown={progress.unknown} />
         </View>
         {progress.task ? (
           <Pressable onPress={() => setTaskOpen((open) => !open)} accessibilityRole="button" accessibilityState={{ expanded: taskOpen }}>
@@ -122,7 +127,7 @@ function SubagentSheet({ item }: { item: ToolItem }) {
           onFailedMessage={() => {}}
           // An Android sheet keeps its full height below the fold at the half detent,
           // so rows anchored to the bottom would start hidden.
-          anchorEnd={Platform.OS === "ios"}
+          anchorEnd={!fullScreen && Platform.OS === "ios"}
           // No composer here: a short run reads from the top instead of leaving a gap above it.
           alignEnd={false}
         />

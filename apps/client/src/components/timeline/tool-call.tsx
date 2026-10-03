@@ -11,6 +11,7 @@ import { mono, type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Attachments } from "./attachments";
 import { SubagentCard } from "./subagent";
+import { WorkflowCard } from "../workflow";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 
@@ -123,6 +124,7 @@ function StatusGlyph({ status }: { status: ToolItem["status"] }) {
 
 /** One tool call: a single quiet line that opens to show its output or diff. */
 export const ToolCall = memo(function ToolCall({ item }: { item: ToolItem }) {
+  if (item.detail?.type === "subagent" && item.detail.workflow) return <WorkflowCard item={item} />;
   if (item.detail?.type === "subagent" && item.detail.action === "spawn") return <SubagentCard item={item} />;
   return <ToolRow item={item} />;
 });

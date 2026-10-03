@@ -99,6 +99,28 @@ afterEach(() => {
 });
 
 describe("session history in pages", () => {
+  it("restores a workflow launch failure without waiting for a background run that was never created", () => {
+    driver.emit({ sessionUpdate: "tool_call", toolCallId: "wf-failed", title: "Workflow", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", workflow: {} } });
+    driver.emit({ sessionUpdate: "tool_call_update", toolCallId: "wf-failed", status: "failed" });
+    expect(hub.subagents("fake:s1")).toMatchObject([{ toolCallId: "wf-failed", running: false, failed: true, workflow: { state: "failed" }, lastSeq: store.getSession("fake:s1")!.lastSeq }]);
+  });
+
+  it("returns the current workflow roster even when its launch and progress are outside the history window", async () => {
+    driver.emit({ sessionUpdate: "tool_call", toolCallId: "wf", title: "Workflow", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", workflow: {} } });
+    driver.emit({ sessionUpdate: "tool_call_update", toolCallId: "wf", status: "in_progress", detail: { type: "subagent", action: "spawn", task: "Current task", workflow: {
+      name: "Workflow overview", state: "running", started: 1, completed: 0,
+      phases: [{ id: "p", title: "Implementation", order: 1 }], agents: [{ id: "a", title: "Mobile UI", state: "running", phaseId: "p", toolCallId: "worker" }],
+    } } });
+    const seq = store.getSession("fake:s1")!.lastSeq;
+    for (let n = 1; n <= 30; n++) turn(n, 10);
+    const client = collector();
+    const { startSeq } = await hub.subscribe("fake:s1", 0, client.subscriber);
+    expect(startSeq).toBeGreaterThan(seq);
+    expect(hub.subagents("fake:s1")).toMatchObject([{ toolCallId: "wf", task: "Current task", lastSeq: seq, workflow: {
+      phases: [{ title: "Implementation" }], agents: [{ title: "Mobile UI", toolCallId: "worker" }],
+    } }]);
+  });
+
   it("sends a short session whole", async () => {
     turn(1, 2);
     turn(2, 2);
@@ -212,6 +234,16 @@ describe("session history in pages", () => {
     raw.close();
     store = new HostStore(join(dir, "state.db"));
     expect(store.pageStart("fake:s1", store.getSession("fake:s1")!.lastSeq, { minEvents: 5, minBytes: 1e9, maxEvents: 100, maxBytes: 1e9, eventBytes: 1e9 })).toBe(expected);
+  });
+
+  it("serves workflow agents and their nested conversations independently", () => {
+    driver.emit({ sessionUpdate: "tool_call", toolCallId: "wf", title: "Research", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", workflow: { state: "running" } } });
+    driver.emit({ sessionUpdate: "tool_call", toolCallId: "worker", parentToolCallId: "wf", title: "Read sources", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn" } });
+    driver.emit({ sessionUpdate: "agent_message_chunk", messageId: "m1", parentToolCallId: "worker", content: { type: "text", text: "Found a source" } });
+    driver.emit({ sessionUpdate: "tool_call_update", toolCallId: "worker", parentToolCallId: "wf", status: "failed" });
+    expect(hub.subagent("fake:s1", "worker").map((event) => event.update.sessionUpdate)).toEqual(["tool_call", "agent_message_chunk", "tool_call_update"]);
+    expect(hub.subagent("fake:s1", "wf").map((event) => event.update.sessionUpdate)).toEqual(["tool_call", "tool_call", "agent_message_chunk", "tool_call_update"]);
+    expect(hub.subagents("fake:s1").find((agent) => agent.toolCallId === "worker")).toMatchObject({ running: false, failed: true });
   });
 
   it("lists a session's sub-agents and serves each one's conversation, wherever in the history they are", async () => {

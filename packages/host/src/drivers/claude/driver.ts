@@ -10,12 +10,14 @@ import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } 
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
 import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
 import { descendsFrom, sessionHolders, type SessionHolder } from "./holders.js";
+import { ClaudeActivity } from "./activity.js";
 import {
   claudeConfigDir,
   encodeProjectDir,
   findTranscript,
   turnEndUuid,
   mergeSettings,
+  mergeByTime,
   readTail,
   readTranscript,
   settingsOf,
@@ -132,6 +134,7 @@ export interface ClaudeDriverOptions {
 export class ClaudeDriver extends AcpDriver {
   private readonly modes = new Map<string, Mode>();
   private readonly tails = new Map<string, TranscriptTail>();
+  private readonly activity = new Map<string, ClaudeActivity>();
   /**
    * The settings Claude offers (model, effort, permission mode…), as the
    * adapter reported them for any session: what a desktop-driven session
@@ -191,6 +194,7 @@ export class ClaudeDriver extends AcpDriver {
   private readonly waiting = new Map<string, { content: ContentBlock[]; clientMessageId: string }[]>();
   /** Checks that sessions driven from a device haven't been reopened on the computer. */
   private remoteWatch?: ReturnType<typeof setInterval>;
+  private remoteWatchRun?: Promise<void>;
 
   override async start(host: import("../types.js").DriverHost) {
     if (!this.adapterMissing) return super.start(host);
@@ -206,8 +210,11 @@ export class ClaudeDriver extends AcpDriver {
   override async stop(): Promise<void> {
     clearInterval(this.remoteWatch);
     this.remoteWatch = undefined;
+    await this.remoteWatchRun;
     for (const tail of this.tails.values()) tail.stop();
     this.tails.clear();
+    for (const follower of this.activity.values()) follower.stop();
+    this.activity.clear();
     await super.stop();
   }
 
@@ -216,8 +223,24 @@ export class ClaudeDriver extends AcpDriver {
     const path = findTranscript(this.configDir, nativeId, context.cwd);
     let history: HistoryItem[] = [];
     let offset = 0;
+    this.activity.get(nativeId)?.stop();
+    let importing = true;
+    const nested: SessionUpdate[] = [];
+    const activity = new ClaudeActivity({
+      locate: () => findTranscript(this.configDir, nativeId, context.cwd),
+      desktop: () => importing || this.modes.get(nativeId) !== "remote",
+      onUpdate: (update, ts) => {
+        if (importing) {
+          if (ts !== undefined) transcriptTimes.set(update, ts);
+          nested.push(update);
+        } else this.emit(nativeId, update);
+      },
+      onError: (error) => this.host?.log(`[claude] child transcript: ${String(error)}`),
+    });
+    this.activity.set(nativeId, activity);
     if (path) {
-      const transcript = readTranscript(path);
+      const transcript = readTranscript(path, { includeSubagents: false, onLine: (raw) => activity.observe(raw) });
+      activity.poll();
       state.tracker = new AcpItemTracker();
       // What is under way on the computer isn't history yet: a turn's start and
       // the tool calls still running, and agents working in the background
@@ -225,19 +248,33 @@ export class ClaudeDriver extends AcpDriver {
       // happening now (after the history; the hub holds them until then), so
       // the session shows as working and results have a card to land on.
       const underway: SessionUpdate[] = [];
-      history = toHistory(transcript.updates, state.tracker, (update) => transcriptTimes.get(update), underway);
+      history = toHistory(mergeByTime(transcript.updates, nested), state.tracker, (update) => transcriptTimes.get(update), underway);
       const working = turnInProgress(path, this.busyWindowMs);
       for (const update of underway) {
         const call = (update as { parentToolCallId?: string; toolCallId?: string }).parentToolCallId ?? (update as { toolCallId?: string }).toolCallId;
-        if (working || (call && transcript.agents.has(call))) this.host?.update(this.id, nativeId, update, undefined, transcriptTimes.get(update));
+        if (working || (call && (transcript.agents.has(call) || activity.isRunning(call)))) this.host?.update(this.id, nativeId, update, undefined, transcriptTimes.get(update));
       }
+      // A terminal tool item is deduplicated during history import. Its workflow
+      // sidecars can still have changed while the host was down, so reconcile the
+      // current metadata separately, without replaying any conversation text.
+      const snapshots = nested.filter((update): update is Extract<SessionUpdate, { sessionUpdate: "tool_call_update" }> =>
+        update.sessionUpdate === "tool_call_update" && update.detail?.type === "subagent" && (!!update.detail.workflow || !!update.detail.state));
+      const calls = new Set(snapshots.map((update) => update.toolCallId));
+      const turns = new Map<string, Extract<SessionUpdate, { sessionUpdate: "ls_turn" }>>();
+      for (const update of nested) {
+        if (update.sessionUpdate === "ls_turn" && update.parentToolCallId && calls.has(update.parentToolCallId)) turns.set(update.parentToolCallId, update);
+      }
+      for (const update of [...snapshots, ...turns.values()]) this.host?.update(this.id, nativeId, update, undefined, transcriptTimes.get(update));
       offset = transcript.size;
       this.backgroundAgents.set(nativeId, transcript.agents);
       this.seenLines.set(nativeId, transcript.seen);
       this.observed.set(nativeId, transcript.settings);
       if (transcript.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: transcript.title });
     }
+    importing = false;
+    activity.followFrom(offset);
     this.startTail(nativeId, context.cwd, offset);
+    activity.start();
     const mode = this.modes.get(nativeId) ?? "idle";
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_driver", driver: driverOf(mode) });
     if (mode === "remote") this.emitConfig(nativeId, state);
@@ -367,6 +404,8 @@ export class ClaudeDriver extends AcpDriver {
     this.modes.delete(nativeId);
     this.hiddenTools.delete(nativeId);
     this.backgroundAgents.delete(nativeId);
+    this.activity.get(nativeId)?.stop();
+    this.activity.delete(nativeId);
     if (transcript) sweepTranscript(transcript);
   }
 
@@ -662,7 +701,13 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   private startWatch(): void {
-    this.remoteWatch ??= setInterval(() => void this.watchRemoteSessions(), this.holderCheckMs);
+    this.remoteWatch ??= setInterval(() => {
+      // Process inspection can outlast the poll interval. Two simultaneous
+      // checks must not both take over and send the same queued prompt.
+      this.remoteWatchRun ??= this.watchRemoteSessions()
+        .catch((error: unknown) => this.host?.log(`[claude] session watch: ${String(error)}`))
+        .finally(() => { this.remoteWatchRun = undefined; });
+    }, this.holderCheckMs);
     this.remoteWatch.unref?.();
   }
 

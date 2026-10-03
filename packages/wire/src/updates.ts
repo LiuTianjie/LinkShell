@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { permissionOptionSchema, questionAnswerSchema, questionSchema, sessionDriverSchema, sessionStateSchema, toolKindSchema } from "./model.js";
+import { workflowAgentStateSchema, workflowSchema } from "./workflow.js";
 
 // Session updates mirror ACP's `SessionUpdate` shapes (discriminated by
 // `sessionUpdate`) so one renderer works for every agent. LinkShell-specific
@@ -68,6 +69,10 @@ export const toolDetailSchema = z.discriminatedUnion("type", [
     /** The sub-agent's role or type, e.g. "Explore". */
     agentType: z.string().optional(),
     model: z.string().optional(),
+    /** Agent outcome when a tool's coarse completed/failed state is insufficient. */
+    state: workflowAgentStateSchema.optional(),
+    /** A Claude workflow is a background run containing its own agents. Counts are observed, not a predicted total. */
+    workflow: workflowSchema.optional(),
   }),
   z.object({ type: z.literal("skill"), name: z.string(), description: z.string().optional() }),
   z.object({ type: z.literal("web_search"), query: z.string().optional() }),

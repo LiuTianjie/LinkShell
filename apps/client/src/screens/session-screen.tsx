@@ -30,6 +30,7 @@ import { agentLook, tierCopy } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { HeaderActions, useHeaderTitleWidth } from "@/components/header-actions";
+import { LiveWorkflowsBar } from "@/components/workflow";
 
 // One array for "nothing yet": a new one on every render would make everything computed from the items run again.
 const NO_ITEMS: TimelineItem[] = [];
@@ -102,6 +103,7 @@ export function SessionScreen() {
   const loadingEarlier = useClient((state) => !!state.loadingEarlier[id]);
   const queueing = useClient((state) => state.queueing[id]);
   const subagentsListed = useClient((state) => state.subagents[id]?.length ?? 0);
+  const hasWorkflows = useClient((state) => Object.keys(state.workflows[id] ?? {}).length > 0);
   const subagentsTotal = summary?.subagents?.total ?? 0;
   const subagentsRunning = summary?.subagents?.running ?? 0;
   const hasSubagents = subagentsTotal > 0 || subagentsListed > 0;
@@ -291,7 +293,7 @@ export function SessionScreen() {
                   kind: "button" as const,
                   key: "subagents",
                   icon: { sf: "square.stack.3d.up", md: "layers" } as const,
-                  label: subagentsRunning ? `子 Agent，${subagentsRunning} 个运行中` : "子 Agent",
+                  label: hasWorkflows ? "Agent 与工作流" : subagentsRunning ? `子 Agent，${subagentsRunning} 个运行中` : "子 Agent",
                   live: subagentsRunning > 0,
                   onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
                 },
@@ -426,6 +428,8 @@ export function SessionScreen() {
             </Pressable>
           </Animated.View>
         ) : null}
+        <View onLayout={(event) => composerInset.set(event.nativeEvent.layout.height)}>
+        <LiveWorkflowsBar sessionId={id} />
         <Composer
           sessionId={id}
           agent={summary.agent}
@@ -439,7 +443,6 @@ export function SessionScreen() {
           commands={view?.commands ?? []}
           usage={view?.usage}
           bottomInset={insets.bottom}
-          onLayout={(event) => composerInset.set(event.nativeEvent.layout.height)}
           onSend={(content) => actions.send(id, content)}
           onStop={() => guard(() => actions.cancel(id), "停止失败")}
           queue={shownQueue(summary.queue, queueing)}
@@ -453,6 +456,7 @@ export function SessionScreen() {
           onTakeover={() => actions.takeover(id)}
           onConfig={(optionId, value) => void guard(() => actions.setConfig(id, optionId, value), "切换失败")}
         />
+        </View>
       </KeyboardStickyView>
     </View>
   );

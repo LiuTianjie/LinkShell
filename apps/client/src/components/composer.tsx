@@ -42,7 +42,7 @@ export interface ComposerProps {
   commands: { name: string; description: string; hint?: string }[];
   usage?: { usedTokens?: number; contextWindow?: number };
   bottomInset: number;
-  onLayout: (event: LayoutChangeEvent) => void;
+  onLayout?: (event: LayoutChangeEvent) => void;
   onSend: (content: ContentBlock[]) => Promise<"started" | "steered" | "queued" | "duplicate" | "failed">;
   onStop: () => Promise<void>;
   onRespond: (requestId: string, optionId: string) => Promise<void>;

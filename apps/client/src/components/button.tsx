@@ -7,13 +7,15 @@ import { PressableScale } from "./pressable-scale";
 type Variant = "primary" | "tonal" | "plain" | "destructive" | "warning";
 type Size = "small" | "medium" | "large";
 
-const fills: Record<Variant, { background: ColorValue; foreground: ColorValue }> = {
-  primary: { background: colors.accent, foreground: colors.onAccent },
-  tonal: { background: colors.fill, foreground: colors.label },
-  plain: { background: "transparent", foreground: colors.accent },
-  destructive: { background: colors.dangerSoft, foreground: colors.danger },
-  warning: { background: colors.waiting, foreground: "#ffffff" },
-};
+function fills(): Record<Variant, { background: ColorValue; foreground: ColorValue }> {
+  return {
+    primary: { background: colors.accent, foreground: colors.onAccent },
+    tonal: { background: colors.fill, foreground: colors.label },
+    plain: { background: "transparent", foreground: colors.accent },
+    destructive: { background: colors.dangerSoft, foreground: colors.danger },
+    warning: { background: colors.waiting, foreground: "#ffffff" },
+  };
+}
 
 const sizes: Record<Size, { height: number; paddingHorizontal: number; font: typeof type.subhead; icon: number; radius: number }> = {
   small: { height: 32, paddingHorizontal: 12, font: type.footnote, icon: 13, radius: 16 },
@@ -44,7 +46,7 @@ export function Button({
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
 }) {
-  const fill = fills[variant];
+  const fill = fills()[variant];
   const metrics = sizes[size];
   const inactive = disabled || busy;
   return (

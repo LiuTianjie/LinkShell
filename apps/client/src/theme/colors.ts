@@ -1,20 +1,18 @@
 import { Color } from "expo-router";
-import { DynamicColorIOS, Platform, PlatformColor, type ColorValue } from "react-native";
+import { Appearance, DynamicColorIOS, Platform, type ColorValue } from "react-native";
 import brandColors from "./brand-colors.json";
 
-// Semantic system colors adapt to light/dark, contrast and liquid glass on
-// their own; LinkShell's own tints are dynamic on iOS and fixed mid-tones
-// elsewhere. Anything that needs a plain string (markdown styles, Reanimated)
-// reads `palette` via `usePalette()` instead.
+// iOS keeps native semantic colors. Android uses the matching brand palette
+// as literals, resolved whenever a component reads a color during rendering.
 
 /**
  * iOS system colours (they adapt to contrast settings and liquid glass). On
- * Android the same values come from generated day/night resources rather
- * than Material dynamic colour, so both platforms share one look.
+ * Android uses the same explicit light/dark values rather than Material
+ * dynamic colour, so both platforms share one look.
  */
 function system(ios: ColorValue, android: BrandName, web: string): ColorValue {
   if (Platform.OS === "ios") return ios;
-  if (Platform.OS === "android") return PlatformColor(`@color/ls_${android}`);
+  if (Platform.OS === "android") return brandColors[android][Appearance.getColorScheme() === "dark" ? 1 : 0];
   return web;
 }
 
@@ -22,17 +20,15 @@ type BrandName = keyof typeof brandColors;
 
 /**
  * LinkShell's own tints, light/dark. iOS resolves them with DynamicColorIOS;
- * Android reads the same values from generated `values` / `values-night`
- * color resources (plugins/with-brand-colors.js), so both follow the system theme natively.
+ * Android's getters below select the same pair from the current appearance.
  */
 function brand(name: BrandName): ColorValue {
   const [light, dark] = brandColors[name];
   if (Platform.OS === "ios") return DynamicColorIOS({ light, dark });
-  if (Platform.OS === "android") return PlatformColor(`@color/ls_${name}`);
   return light;
 }
 
-export const colors = {
+const nativeColors = {
   label: system(Color.ios.label, "label", "#101014"),
   secondaryLabel: system(Color.ios.secondaryLabel, "secondaryLabel", "#5e5f6a"),
   tertiaryLabel: system(Color.ios.tertiaryLabel, "tertiaryLabel", "#9394a0"),
@@ -75,6 +71,20 @@ export const colors = {
   diffAddText: brand("diffAddText"),
   diffDelText: brand("diffDelText"),
 };
+
+// Android's Fabric text colors are resolved/cached as integers. Recreating the
+// navigation tree alone can still reuse an old PlatformColor result. Read the
+// matching literal at render time instead; RootLayout remounts that tree on an
+// appearance change. Getters also keep helpers from capturing the launch theme.
+// iOS keeps semantic native colors (including contrast and elevated surfaces).
+export const colors: typeof nativeColors = Platform.OS === "android"
+  ? Object.defineProperties({ ...nativeColors }, Object.fromEntries(
+      Object.entries(brandColors).map(([name, pair]) => [name, {
+        enumerable: true,
+        get: () => pair[Appearance.getColorScheme() === "dark" ? 1 : 0],
+      }]),
+    ))
+  : nativeColors;
 
 /** Plain-string colors for APIs that can't take native color objects. */
 export const palette = {

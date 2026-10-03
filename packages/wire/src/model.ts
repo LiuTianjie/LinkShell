@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workflowAgentStateSchema, workflowSchema } from "./workflow.js";
 
 /**
  * How far LinkShell can take a given agent. The UI renders capabilities from
@@ -149,6 +150,7 @@ export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 /** A sub-agent a session started: the tool call it runs under, and how it is doing. */
 export const subagentInfoSchema = z.object({
   toolCallId: z.string(),
+  parentToolCallId: z.string().optional(),
   /** What it was asked to do. */
   task: z.string(),
   /** Its role or type, e.g. "Explore". */
@@ -157,6 +159,10 @@ export const subagentInfoSchema = z.object({
   failed: z.boolean().optional(),
   startedAt: z.number(),
   endedAt: z.number().optional(),
+  state: workflowAgentStateSchema.optional(),
+  workflow: workflowSchema.optional(),
+  /** Orders list snapshots against events arriving while the request is in flight. */
+  lastSeq: z.number().int().nonnegative().optional(),
 });
 export type SubagentInfo = z.infer<typeof subagentInfoSchema>;
 

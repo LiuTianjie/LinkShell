@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AcpDriver, connectHost, startHost, type RunningHost } from "@linkshell/host";
 import { HostLink, type SocketLike } from "../src/host-link.js";
 import { createClientStore, shownQueue, subagentKey, type ClientStore } from "../src/store.js";
-import type { TimelineItem } from "../src/timeline.js";
+import { findTool, type TimelineItem } from "../src/timeline.js";
 
 const FAKE_ACP = fileURLToPath(new URL("../../host/test/fixtures/fake-acp.mjs", import.meta.url));
 chmodSync(FAKE_ACP, 0o755);
@@ -69,6 +69,24 @@ const agentText = (store: ClientStore, id: string) =>
   (store.getState().views[id]?.items ?? []).flatMap((i) => (i.kind === "agent" ? [i.text] : [])).join("|");
 
 describe("client core against a real host", () => {
+  it("keeps an independently opened workflow and its worker live through nested completion", async () => {
+    const { host, store } = await setup();
+    const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });
+    const log = (update: Parameters<typeof host.hub.driverHost.update>[2]) => host.hub.driverHost.update("fake", session.id.slice(5), update);
+    log({ sessionUpdate: "tool_call", toolCallId: "wf", title: "Research", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", workflow: { state: "running" } } });
+    log({ sessionUpdate: "tool_call", toolCallId: "worker", parentToolCallId: "wf", title: "Read sources", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn" } });
+    log({ sessionUpdate: "agent_message_chunk", messageId: "result", parentToolCallId: "worker", content: { type: "text", text: "Found" } });
+    expect(await store.getState().openSubagent(session.id, "wf")).toBe(true);
+    expect(await store.getState().openSubagent(session.id, "worker")).toBe(true);
+    const own = (id: string) => store.getState().subagentViews[subagentKey(session.id, id)]!;
+    expect(own("worker").items.map((item) => item.id)).toEqual(["worker"]);
+    log({ sessionUpdate: "agent_message_chunk", messageId: "result", parentToolCallId: "worker", content: { type: "text", text: " a source" } });
+    log({ sessionUpdate: "tool_call_update", toolCallId: "worker", parentToolCallId: "wf", status: "completed" });
+    await waitFor(() => findTool(own("worker"), "worker")?.status === "completed");
+    expect(findTool(own("worker"), "worker")?.sub?.items[0]).toMatchObject({ text: "Found a source", streaming: false });
+    expect(findTool(own("wf"), "worker")?.sub?.items[0]).toMatchObject({ text: "Found a source", streaming: false });
+  });
+
   it("connects, loads the machine and creates a session with an optimistic first message", async () => {
     const { store } = await setup();
     expect(store.getState()).toMatchObject({ status: "online", machine: { agents: [expect.objectContaining({ id: "fake", installed: true })] } });

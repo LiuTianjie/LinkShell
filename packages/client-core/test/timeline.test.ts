@@ -5,6 +5,7 @@ import {
   applyEvent,
   applyEvents,
   emptyView,
+  findTool,
   markMessageFailed,
   prependEvents,
   startWindow,
@@ -255,6 +256,23 @@ describe("timeline reducer", () => {
     v = applyEvent(v, ev({ sessionUpdate: "tool_call", toolCallId: "p", title: "Agent: x", kind: "other", status: "in_progress" }));
     expect((v.items[0] as Extract<TimelineItem, { kind: "tool" }>).sub!.items.map((i) => i.id)).toEqual(["c"]);
   });
+
+  it("routes workflow grandchildren into their agent instead of creating duplicate cards on the main timeline", () => {
+    seq = 0;
+    const v = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "tool_call", toolCallId: "workflow", title: "Research", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", workflow: { state: "running" } } }),
+      ev({ sessionUpdate: "tool_call", toolCallId: "worker", parentToolCallId: "workflow", title: "Worker", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn" } }),
+      ev({ sessionUpdate: "agent_message_chunk", messageId: "m1", parentToolCallId: "worker", content: text("Found a source") }),
+      ev({ sessionUpdate: "tool_call", toolCallId: "read", parentToolCallId: "worker", title: "Read", kind: "read", status: "in_progress" }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "read", parentToolCallId: "worker", status: "completed" }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "worker", parentToolCallId: "workflow", status: "completed" }),
+    ]);
+    expect(v.items.map((item) => item.id)).toEqual(["workflow"]);
+    expect(findTool(v, "workflow")?.sub?.items.map((item) => item.id)).toEqual(["worker"]);
+    expect(findTool(v, "worker")).toMatchObject({ status: "completed", sub: { items: [
+      { id: "m1", text: "Found a source", streaming: false }, { id: "read", status: "completed" },
+    ] } });
+  });
 });
 
 describe("history in pages", () => {
@@ -330,4 +348,3 @@ describe("history in pages", () => {
     expect(startWindow(view, 3)).toMatchObject({ lastSeq: 0, startSeq: 3 });
   });
 });
-

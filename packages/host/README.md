@@ -6,6 +6,8 @@ file and port previews. Devices reach it over the LAN or through a relay, end-to
 
 Run it through the CLI: `npm install -g linkshell-cli`, then `linkshell host --daemon`.
 
+Claude Workflow progress and background sub-agent transcripts stay synchronized even while the main conversation is idle. The app can open each run, phase and Agent independently.
+
 Requires Node.js 22.13 or newer.
 
 MIT License

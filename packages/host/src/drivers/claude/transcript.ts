@@ -87,6 +87,12 @@ export function describeClaudeTool(name: string, input: Json): { title: string; 
           model: str(input.model),
         },
       };
+    case "Workflow":
+      return {
+        title: `Workflow: ${str(input.name) ?? str(input.description) ?? "工作流"}`,
+        kind: "other",
+        detail: { type: "subagent", action: "spawn", agentType: "工作流", task: str(input.description) ?? str(input.name), workflow: {} },
+      };
     case "SendMessage":
       return {
         title: `Message ${str(input.to) ?? "agent"}`,
@@ -373,7 +379,8 @@ export function transcriptLine(
       } else if (block.type === "tool_result" && str(block.tool_use_id)) {
         if (options.hidden?.delete(str(block.tool_use_id)!)) continue;
         const launched = obj(line.toolUseResult);
-        if (launched?.isAsync === true && str(launched.agentId) && !options.sidechain) {
+        const workflow = launched?.status === "async_launched" || launched?.status === "remote_launched";
+        if (!block.is_error && !launched?.error && ((launched?.isAsync === true && str(launched.agentId)) || (workflow && str(launched?.taskId))) && !options.sidechain) {
           // An agent started in the background: the call returns at once (with
           // nothing to show) while the agent works on. Its end is a task notification.
           options.agents?.add(str(block.tool_use_id)!);
@@ -527,7 +534,7 @@ export function mergeSettings(current: ObservedSettings, next: ObservedSettings 
   return merged;
 }
 
-export function readTranscript(path: string): {
+export function readTranscript(path: string, options: { includeSubagents?: boolean; onLine?: (raw: string) => void } = {}): {
   updates: SessionUpdate[];
   title?: string;
   size: number;
@@ -544,6 +551,7 @@ export function readTranscript(path: string): {
   const seen = new Set<string>();
   const size = eachLine(path, (raw) => {
     if (!raw.trim()) return;
+    options.onLine?.(raw);
     const result = transcriptLine(raw, { hidden, agents, seen });
     // The latest reply and prompt say what the session is using.
     settings = mergeSettings(settings, settingsOf(raw)) ?? settings;
@@ -551,7 +559,7 @@ export function readTranscript(path: string): {
     updates.push(...result.updates);
     if (result.title) title = result.title;
   });
-  return { updates: mergeByTime(updates, readSubagents(path)), title, settings, size, agents, seen };
+  return { updates: mergeByTime(updates, options.includeSubagents === false ? [] : readSubagents(path)), title, settings, size, agents, seen };
 }
 
 /**

@@ -172,3 +172,13 @@ export function useActions(): ClientActions {
     return actions as unknown as ClientActions;
   }, [store]);
 }
+
+/** Detail routes also work when opened directly, without stealing the parent screen's subscription. */
+export function useSessionSubscription(sessionId: string, enabled = true) {
+  const { store } = useConnectionContext().connection;
+  useEffect(() => {
+    if (!enabled || store.getState().open[sessionId]) return;
+    store.getState().openSession(sessionId);
+    return () => store.getState().closeSession(sessionId);
+  }, [store, sessionId, enabled]);
+}

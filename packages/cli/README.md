@@ -32,6 +32,8 @@ linkshell claude    # Claude Code; a message from the phone takes over, any key 
 linkshell codex     # Codex; the terminal and the phone are live at the same time
 ```
 
+Claude Workflow progress, phases and Agent details require CLI 0.10.6 or newer and app 2.3.5 or newer. After upgrading the CLI, restart the host with `linkshell host stop` and `linkshell host --daemon`.
+
 ## Commands
 
 | | |

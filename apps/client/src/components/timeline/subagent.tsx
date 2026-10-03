@@ -4,9 +4,10 @@ import { memo } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { useClient } from "@/lib/client";
 import { describeTool } from "@/lib/describe";
-import { duration } from "@/lib/format";
+import { compactNumber, duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { useNow } from "@/lib/use-now";
+import { findWorkflowAgent } from "@/lib/workflows";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "../icon";
@@ -53,26 +54,41 @@ export function useSubagentProgress(item: ToolItem) {
   // The computer's own record of it, once listed: it knows a background
   // sub-agent is still at work after its call returned, and one that was killed.
   const record = useClient((state) => (sessionId ? state.subagents[sessionId]?.find((entry) => entry.toolCallId === item.id) : undefined));
+  const worker = useClient((state) => sessionId ? findWorkflowAgent(state.workflows[sessionId], item.id) : undefined);
   const children = item.sub?.items ?? [];
-  const running = record ? record.running : item.status === "in_progress" || item.status === "pending" || item.sub?.turnActive === true;
-  const failed = record ? record.failed === true : item.status === "failed";
+  const detail = item.detail?.type === "subagent" ? item.detail : undefined;
+  const workflow = detail?.workflow;
+  const outcome = workflow?.state ?? worker?.state ?? detail?.state ?? record?.state;
+  const running = outcome ? outcome === "running" || outcome === "paused" || outcome === "pending" : record ? record.running : item.status === "in_progress" || item.status === "pending" || item.sub?.turnActive === true;
+  const failed = outcome ? outcome === "failed" : record ? record.failed === true : item.status === "failed";
   const now = useNow(running ? 1000 : null);
-  const steps = children.filter((child) => child.kind === "tool").length;
+  const steps = worker?.toolCalls ?? children.filter((child) => child.kind === "tool").length;
   // Background sub-agents' calls return at launch; the work ends with their last event.
   const lastChild = children.reduce((latest, child) => Math.max(latest, child.kind === "tool" ? (child.endedTs ?? child.ts) : child.ts), 0);
-  const elapsed = (running ? now : (record?.endedAt ?? Math.max(item.endedTs ?? item.ts, lastChild))) - (record?.startedAt ?? item.ts);
-  const detail = item.detail?.type === "subagent" ? item.detail : undefined;
+  const elapsed = worker?.durationMs ?? (running ? now : (worker?.endedAt ?? record?.endedAt ?? Math.max(item.endedTs ?? item.ts, lastChild))) - (worker?.startedAt ?? record?.startedAt ?? item.ts);
+  const paused = outcome === "paused";
+  const stopped = outcome === "stopped";
+  const unknown = outcome === "unknown";
+  const workflowSummary = workflow ? [
+    workflow.started !== undefined ? `已完成 ${workflow.completed ?? 0} / 已启动 ${workflow.started} 个 Agent` : "正在启动…",
+    workflow.tokens !== undefined ? `${compactNumber(workflow.tokens)} tokens` : null,
+    paused ? "已暂停" : stopped ? "已停止" : null,
+  ].filter(Boolean).join(" · ") : undefined;
   return {
     children,
     running,
     failed,
     steps,
     elapsed,
+    paused,
+    stopped,
+    unknown,
+    workflow: !!workflow,
     name: detail?.agentType ?? "子 Agent",
-    model: detail?.model,
+    model: worker?.model ?? detail?.model,
     task: detail?.task ?? item.title.replace(/^[^:：]*[:：]\s*/, ""),
     summary:
-      [steps ? `${steps} 步` : null, elapsed >= 1000 ? `${running ? "已运行" : "用时"} ${duration(elapsed)}` : null, failed ? "失败" : null]
+      [workflowSummary ?? (steps ? `${steps} 步` : null), elapsed >= 1000 ? `${running ? "已运行" : "用时"} ${duration(workflow?.durationMs ?? elapsed)}` : null, paused && !workflow ? "已暂停" : stopped ? "已停止" : unknown ? "结果待确认" : failed ? "失败" : null]
         .filter(Boolean)
         .join(" · ") || (running ? "正在启动…" : "已完成"),
   };
@@ -100,7 +116,7 @@ export const SubagentCard = memo(function SubagentCard({ item }: { item: ToolIte
       }}
       accessibilityRole="button"
       accessibilityLabel={`${progress.name}：${progress.task}`}
-      accessibilityHint="查看这个子 Agent 的全部过程"
+      accessibilityHint={progress.workflow ? "查看工作流和各个 Agent 的过程" : "查看这个子 Agent 的全部过程"}
       style={{ backgroundColor: colors.inset, borderRadius: 18, borderCurve: "continuous", padding: 12, gap: 8 }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
@@ -115,7 +131,7 @@ export const SubagentCard = memo(function SubagentCard({ item }: { item: ToolIte
             </Text>
           ) : null}
         </View>
-        <StatusMark running={running} failed={failed} />
+        <StatusMark running={running && !progress.paused} failed={failed} paused={progress.paused} stopped={progress.stopped} unknown={progress.unknown} />
         <Icon sf="chevron.right" md="chevron_right" size={11} color={colors.tertiaryLabel} weight="semibold" />
       </View>
 
@@ -163,7 +179,10 @@ export function SubagentGlyph({ failed, size }: { failed: boolean; size: number 
   );
 }
 
-export function StatusMark({ running, failed }: { running: boolean; failed: boolean }) {
+export function StatusMark({ running, failed, paused, stopped, unknown }: { running: boolean; failed: boolean; paused?: boolean; stopped?: boolean; unknown?: boolean }) {
+  if (paused) return <Icon sf="pause.circle" md="pause_circle" size={16} color={colors.waiting} />;
+  if (stopped) return <Icon sf="stop.circle" md="stop_circle" size={16} color={colors.secondaryLabel} />;
+  if (unknown) return <Icon sf="questionmark.circle" md="help_outline" size={16} color={colors.secondaryLabel} />;
   if (running) return <ActivityIndicator size="small" color={colors.accent} />;
   if (failed) return <Icon sf="xmark.circle.fill" md="cancel" size={16} color={colors.danger} />;
   return <Icon sf="checkmark.circle.fill" md="check_circle" size={16} color={colors.ok} />;

@@ -1,5 +1,6 @@
 export * from "./model.js";
 export * from "./updates.js";
+export * from "./workflow.js";
 export * from "./rpc.js";
 export * from "./peer.js";
 export * from "./shell.js";

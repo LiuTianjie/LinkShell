@@ -1,4 +1,5 @@
 import { applyEvents, emptyView, type TimelineItem } from "@linkshell/client-core";
+import { galleryWorkflowTool } from "./workflow-fixtures";
 import type { SessionUpdate } from "@linkshell/wire";
 
 // Every kind of timeline row, for the dev-only gallery screen.
@@ -45,6 +46,7 @@ const review = timeline(
 );
 
 export const galleryItems: TimelineItem[] = [
+  galleryWorkflowTool,
   { kind: "driver", id: id("driver"), driver: "remote", ts: at(0) },
   {
     kind: "user",

@@ -200,13 +200,16 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
     case "tool_call_update": {
       const toolCallId = str(update.toolCallId);
       if (!toolCallId) return undefined;
+      // Workflow's tool result only acknowledges launch. Its durable artifacts
+      // and task notification settle the run, including when ACP owns the turn.
+      const workflow = str(obj(obj(update._meta)?.claudeCode)?.toolName) === "Workflow";
       return {
         sessionUpdate: "tool_call_update",
         toolCallId,
         parentToolCallId: parentOf(update),
-        status: toolStatus(update.status),
+        status: workflow && update.status === "completed" ? "in_progress" : toolStatus(update.status),
         title: str(update.title) ?? undefined,
-        detail: toolDetail(update),
+        detail: workflow ? undefined : toolDetail(update),
         content: toolContent(update.content),
         rawOutput: update.rawOutput,
       };
