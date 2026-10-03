@@ -330,7 +330,14 @@ export function ComputerScreen() {
   const account = useAccount((state) => state.session);
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
+  const relayStatus = useComputers((state) => state.relayStatus);
   const computers = useMemo(() => listComputers({ saved, live }), [saved, live]);
+  // Offline paired computers would only clutter the switcher; 账号与电脑 lists
+  // them all and removes them. A LAN address has no presence to go by.
+  const reachable = computers.filter(
+    (entry) => entry.key === computer.key || entry.kind === "direct" || (entry.machine.online && relayStatus[entry.gateway] === "online"),
+  );
+  const hidden = computers.length - reachable.length;
   const [refreshing, setRefreshing] = useState(false);
   const hasComputer = useHasComputer();
   const online = status === "online";
@@ -398,7 +405,7 @@ export function ComputerScreen() {
               <AppMenu
                 title="切换电脑"
                 actions={[
-                  ...computers.map((entry) => ({
+                  ...reachable.map((entry) => ({
                     id: entry.key,
                     title: entry.kind === "relay" ? entry.machine.name : entry.name,
                     subtitle:
@@ -408,9 +415,11 @@ export function ComputerScreen() {
                     state: entry.key === computer.key ? ("on" as const) : ("off" as const),
                   })),
                   { id: "add", title: "添加电脑…" },
+                  { id: "manage", title: "管理电脑…", subtitle: hidden > 0 ? `另有 ${hidden} 台离线` : undefined },
                 ]}
                 onPressAction={({ nativeEvent }) => {
                   if (nativeEvent.event === "add") router.push("/pair");
+                  else if (nativeEvent.event === "manage") router.push("/account");
                   else useComputers.getState().select(nativeEvent.event);
                 }}
               >
