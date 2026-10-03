@@ -123,6 +123,8 @@ function SubagentSheet({ item }: { item: ToolItem }) {
           // An Android sheet keeps its full height below the fold at the half detent,
           // so rows anchored to the bottom would start hidden.
           anchorEnd={Platform.OS === "ios"}
+          // No composer here: a short run reads from the top instead of leaving a gap above it.
+          alignEnd={false}
         />
       )}
     </View>

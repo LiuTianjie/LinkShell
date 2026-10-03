@@ -178,10 +178,12 @@ export interface TimelineProps {
   earlier?: EarlierHistory;
   /** Start at, and stick to, the newest row (chat). Off for lists read from the top. */
   anchorEnd?: boolean;
+  /** Push rows shorter than the screen down to the bottom, against a composer. Defaults to `anchorEnd`. */
+  alignEnd?: boolean;
 }
 
 export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeline(
-  { items, planId, turnActive, composerInset, keyboardOffset, onFailedMessage, onScroll, header, earlier, anchorEnd = true },
+  { items, planId, turnActive, composerInset, keyboardOffset, onFailedMessage, onScroll, header, earlier, anchorEnd = true, alignEnd = anchorEnd },
   ref,
 ) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
@@ -453,7 +455,7 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
       renderItem={renderItem}
       extraData={turnActive}
       estimatedItemSize={56}
-      alignItemsAtEnd={anchorEnd}
+      alignItemsAtEnd={alignEnd}
       initialScrollAtEnd={anchorEnd}
       maintainScrollAtEnd={anchorEnd}
       maintainScrollAtEndThreshold={0.15}
