@@ -3,6 +3,8 @@ import {
   itemToHistory,
   mapApprovalRequest,
   mapNotification,
+  spawnedThreads,
+  subagentHistory,
   threadToDiscovered,
   threadToHistory,
   toCodexInput,
@@ -21,6 +23,35 @@ function mapper() {
 }
 
 describe("codex mapper", () => {
+  it("recognizes desktop sub-agents in history and live notifications", () => {
+    const { map } = mapper();
+    const item = { type: "subAgentActivity", id: "spawn", kind: "started", agentThreadId: "child", agentPath: "/root/reviewer" };
+    expect(spawnedThreads(item)).toEqual(["child"]);
+    expect(spawnedThreads({ type: "collabAgentToolCall", tool: "spawnAgent", receiverThreadIds: ["native-child"] })).toEqual(["native-child"]);
+    expect(itemToHistory(item)?.updates[0]).toMatchObject({ toolCallId: "spawn", detail: { type: "subagent", action: "spawn", task: "reviewer" } });
+    expect(map("item/started", { threadId: "parent", item })[0]?.update).toMatchObject({ sessionUpdate: "tool_call", detail: { action: "spawn" } });
+    expect(map("item/completed", { threadId: "parent", item })[0]?.update).toMatchObject({ sessionUpdate: "tool_call_update", status: "completed" });
+    for (const kind of ["interacted", "completed", "interrupted"]) {
+      const next = { ...item, id: kind, kind };
+      expect(spawnedThreads(next)).toEqual([]);
+      expect(itemToHistory(next)).toBeUndefined();
+      expect(map("item/started", { threadId: "parent", item: next })).toEqual([]);
+      expect(map("item/completed", { threadId: "parent", item: next })).toEqual([]);
+    }
+  });
+
+  it("keeps sub-agent turn boundaries separate from the completed spawn call", () => {
+    const thread = { id: "child", cwd: "/w", createdAt: 1, updatedAt: 2, turns: [
+      { id: "t1", status: "completed" as const, startedAt: 10, completedAt: 11, items: [] },
+      { id: "t2", status: "interrupted" as const, startedAt: 12, completedAt: null, items: [] },
+    ] };
+    expect(subagentHistory(thread)).toEqual([
+      { itemId: "turn-start:t1", ts: 10_000, updates: [{ sessionUpdate: "ls_turn", state: "started", turnId: "t1" }] },
+      { itemId: "turn-end:t1", ts: 11_000, updates: [{ sessionUpdate: "ls_turn", state: "ended", turnId: "t1", stopReason: "end_turn" }] },
+      { itemId: "turn-start:t2", ts: 12_000, updates: [{ sessionUpdate: "ls_turn", state: "started", turnId: "t2" }] },
+    ]);
+  });
+
   it("streams an agent message and marks it done", () => {
     const { map } = mapper();
     expect(map("item/agentMessage/delta", { threadId: "t", turnId: "u", itemId: "m", delta: "Hel" })).toEqual([

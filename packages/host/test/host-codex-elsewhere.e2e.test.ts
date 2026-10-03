@@ -256,6 +256,41 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
   const id = "codex:desk-thread";
   let desk: ReturnType<typeof deskCodex>;
 
+  it("imports desktop sub-agents and follows their files while the parent stays unchanged", async () => {
+    const parent = deskCodex(disk, "agents-parent", "/desk/agents");
+    const child = deskCodex(disk, "agents-child", "/desk/agents");
+    parent.hold();
+    child.hold();
+    child.startTurn("review the changes");
+    child.add({ type: "agentMessage", id: "child-a1", text: "Reviewing." });
+    parent.startTurn("delegate the review");
+    parent.add({ type: "subAgentActivity", id: "spawn-reviewer", kind: "started", agentThreadId: "agents-child", agentPath: "/root/reviewer" });
+    await host.hub.refreshDiscovery();
+    const sessionId = "codex:agents-parent";
+    await phone.client.call("sessions.subscribe", { sessionId, fromSeq: 0 });
+    const listed = () => host.hub.subagents(sessionId);
+    expect(listed()).toMatchObject([{ toolCallId: "spawn-reviewer", task: "reviewer", running: true }]);
+    expect(host.hub.subagent(sessionId, "spawn-reviewer").some((event) =>
+      event.update.sessionUpdate === "agent_message_chunk" && event.update.parentToolCallId === "spawn-reviewer" && event.update.content.type === "text" && event.update.content.text === "Reviewing.")).toBe(true);
+
+    // Let the parent's unchanged-file optimization settle, then change only the child.
+    await sleep(100);
+    child.add({ type: "agentMessage", id: "child-a2", text: "Review complete." });
+    child.endTurn();
+    await waitFor(() => phone.agentText(sessionId).includes("Review complete.") && !listed()[0]?.running);
+    child.startTurn("check one more thing");
+    await waitFor(() => listed()[0]?.running);
+    child.add({ type: "agentMessage", id: "child-a3", text: "Checked again." });
+    child.endTurn();
+    await waitFor(() => phone.agentText(sessionId).includes("Checked again.") && !listed()[0]?.running);
+    parent.add({ type: "subAgentActivity", id: "agent-finished", kind: "completed", agentThreadId: "agents-child", agentPath: "/root/reviewer" });
+    parent.endTurn();
+    await sleep(100);
+    expect(listed()).toHaveLength(1);
+    expect(phone.agentText(sessionId)).toBe("Reviewing.Review complete.Checked again.");
+    await phone.client.call("sessions.unsubscribe", { sessionId });
+  });
+
   it("opens with what that Codex has finished so far, and shows it as running there", async () => {
     desk = deskCodex(disk, "desk-thread", "/desk/project");
     desk.hold();

@@ -262,9 +262,13 @@ const COLLAB_ACTIONS: Record<string, "spawn" | "message" | "wait" | "stop" | "re
   listAgents: "list",
 };
 
-/** Threads a spawnAgent call created: their work nests under the call. */
+/** Both native collab calls and desktop activity items can introduce a sub-agent. */
 export function spawnedThreads(item: unknown): string[] {
   const record = obj(item);
+  if (record?.type === "subAgentActivity" && record.kind === "started") {
+    const threadId = str(record.agentThreadId);
+    return threadId ? [threadId] : [];
+  }
   if (record?.type !== "collabAgentToolCall" || record.tool !== "spawnAgent") return [];
   return arr(record.receiverThreadIds).filter((id): id is string => typeof id === "string");
 }
@@ -350,9 +354,19 @@ export function toolStart(item: Json): Extract<SessionUpdate, { sessionUpdate: "
         detail: { type: "subagent", action, task: str(item.prompt), model: str(item.model) },
       };
     }
-    case "subAgentActivity":
-      // Lifecycle echoes of the collab calls above; the sub-agent's own turn state says the same.
-      return undefined;
+    case "subAgentActivity": {
+      // Desktop sub-agents can have only activity items, with no collab call.
+      // Later interactions belong to this same agent, not new spawn cards.
+      if (item.kind !== "started" || !str(item.agentThreadId)) return undefined;
+      const name = str(item.agentPath)?.split("/").filter(Boolean).at(-1);
+      return {
+        ...base,
+        title: name ? `Sub-agent: ${name}` : "Sub-agent",
+        kind: "other",
+        status: "completed",
+        detail: { type: "subagent", action: "spawn", task: name },
+      };
+    }
     case "imageGeneration":
       return {
         ...base,
@@ -374,6 +388,7 @@ function toolFinish(
 ): Extract<SessionUpdate, { sessionUpdate: "tool_call_update" }> | undefined {
   const id = str(item.id);
   if (!id) return undefined;
+  if (item.type === "subAgentActivity" && !toolStart(item)) return undefined;
   const update: Extract<SessionUpdate, { sessionUpdate: "tool_call_update" }> = {
     sessionUpdate: "tool_call_update",
     toolCallId: id,
@@ -484,6 +499,24 @@ export function threadToHistory(thread: CodexThread): HistoryItem[] {
     }
   }
   return history;
+}
+
+/** A spawn returning says nothing about whether its agent is still working. */
+export function subagentHistory(thread: CodexThread): HistoryItem[] {
+  return (thread.turns ?? []).flatMap((turn) => {
+    const ts = (value: number | null | undefined) => value == null ? undefined : value < 1e12 ? value * 1000 : value;
+    const history: HistoryItem[] = [{
+      itemId: `turn-start:${turn.id}`,
+      ts: ts(turn.startedAt),
+      updates: [{ sessionUpdate: "ls_turn", state: "started", turnId: turn.id }],
+    }, ...threadToHistory({ ...thread, turns: [turn] })];
+    if (!turnUnderWay(turn)) history.push({
+      itemId: `turn-end:${turn.id}`,
+      ts: ts(turn.completedAt),
+      updates: [{ sessionUpdate: "ls_turn", state: "ended", turnId: turn.id, stopReason: stopReasonOf(turn.status) }],
+    });
+    return history;
+  });
 }
 
 function planEntries(plan: unknown): PlanEntry[] {

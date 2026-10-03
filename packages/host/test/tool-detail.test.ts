@@ -45,7 +45,8 @@ describe("tool detail", () => {
     expect(toolCall(spawn?.updates)?.detail).toEqual({ type: "subagent", action: "spawn", task: "check pages", model: "gpt-5" });
     const wait = itemToHistory({ type: "collabAgentToolCall", id: "w2", tool: "wait", status: "inProgress", receiverThreadIds: ["child"] });
     expect(toolCall(wait?.updates)?.detail).toMatchObject({ type: "subagent", action: "wait" });
-    expect(itemToHistory({ type: "subAgentActivity", id: "a", kind: "started", agentThreadId: "child", agentPath: "x" })).toBeUndefined();
+    expect(toolCall(itemToHistory({ type: "subAgentActivity", id: "a", kind: "started", agentThreadId: "child", agentPath: "/root/reviewer" })?.updates)?.detail)
+      .toEqual({ type: "subagent", action: "spawn", task: "reviewer" });
     const image = itemToHistory({ type: "imageGeneration", id: "g", status: "completed", revisedPrompt: "a cat", result: PNG });
     expect(toolCall(image?.updates)?.detail).toEqual({ type: "image_generation", prompt: "a cat" });
   });

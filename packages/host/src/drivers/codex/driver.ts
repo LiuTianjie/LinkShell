@@ -13,6 +13,7 @@ import {
   threadStateOf,
   threadToDiscovered,
   spawnedThreads,
+  subagentHistory,
   threadToHistory,
   toCodexInput,
   toolStart,
@@ -162,7 +163,7 @@ export class CodexDriver implements AgentDriver {
   private readonly settings = new Map<string, CodexSettings>();
   private readonly overrides = new Map<string, CodexOverrides>();
   /** Sub-agent thread → the parent thread and the spawnAgent call its work nests under. */
-  private readonly children = new Map<string, { threadId: string; toolCallId: string }>();
+  private readonly children = new Map<string, { threadId: string; toolCallId: string; path?: string; stamp?: string }>();
   /** Threads Codex reported as sub-agents (parentThreadId set); never shown as sessions. */
   private readonly subThreads = new Set<string>();
   /** Each thread's working directory: where its skills are looked up. */
@@ -460,7 +461,11 @@ export class CodexDriver implements AgentDriver {
     if (!watch || watch.reading) return;
     if (this.waiting.has(threadId)) void this.syncWaiting(threadId);
     const stamp = watch.path ? fileStamp(watch.path) : undefined;
-    if (stamp !== undefined && stamp === watch.stamp) return;
+    // A parent waiting for its agents may not write anything while their own
+    // rollout files keep growing. Each of those files can invalidate the read.
+    const childrenChanged = [...this.children.values()].some((child) =>
+      child.threadId === threadId && (!child.path || child.stamp === undefined || fileStamp(child.path) !== child.stamp));
+    if (stamp !== undefined && stamp === watch.stamp && !childrenChanged) return;
     watch.reading = true;
     try {
       const { thread } = await this.rpc<{ thread: CodexThread }>("thread/read", { threadId, includeTurns: true });
@@ -782,7 +787,10 @@ export class CodexDriver implements AgentDriver {
         const callId = typeof (item as { id?: unknown }).id === "string" ? (item as { id: string }).id : undefined;
         if (!callId || ids.length === 0) continue;
         spawns.set(callId, ids);
-        for (const child of ids) this.children.set(child, { threadId, toolCallId: callId });
+        for (const child of ids) {
+          this.subThreads.add(child);
+          this.children.set(child, { ...this.children.get(child), threadId, toolCallId: callId });
+        }
       }
     }
     if (spawns.size === 0) return history;
@@ -790,11 +798,20 @@ export class CodexDriver implements AgentDriver {
     await Promise.all(
       [...spawns].map(async ([callId, ids]) => {
         const parts = await Promise.all(
-          ids.map((child) =>
-            this.rpcFor<{ thread: CodexThread }>(threadId, "thread/read", { threadId: child, includeTurns: true })
-              .then((result) => nestHistory(threadToHistory(result.thread), callId))
-              .catch(() => [] as HistoryItem[]),
-          ),
+          ids.map(async (child) => {
+            const known = this.children.get(child)!;
+            const stamp = known.path ? fileStamp(known.path) : undefined;
+            try {
+              const result = await this.rpcFor<{ thread: CodexThread }>(threadId, "thread/read", { threadId: child, includeTurns: true });
+              known.path = result.thread.path ?? undefined;
+              known.stamp = stamp;
+              return nestHistory(subagentHistory(result.thread), callId);
+            } catch {
+              // A just-started child may not have written its rollout yet.
+              known.stamp = undefined;
+              return [] as HistoryItem[];
+            }
+          }),
         );
         nested.set(callId, parts.flat());
       }),
