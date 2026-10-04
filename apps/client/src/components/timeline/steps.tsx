@@ -1,4 +1,4 @@
-import type { TimelineItem } from "@linkshell/client-core";
+import type { Step } from "@/lib/timeline-rows";
 import { memo } from "react";
 import { Pressable, Text, View } from "react-native";
 import Animated, { cubicBezier } from "react-native-reanimated";
@@ -10,8 +10,6 @@ import { type } from "@/theme/type";
 import { Icon } from "../icon";
 import { GLYPH } from "./tool-call";
 
-export type Step = Extract<TimelineItem, { kind: "tool" | "thought" }>;
-
 interface Tally {
   commands: number;
   reads: number;
@@ -20,16 +18,24 @@ interface Tally {
   web: number;
   tools: number;
   thoughts: number;
+  agents: number;
+  workflows: number;
   failed: number;
   added: number;
   removed: number;
 }
 
 function tally(steps: Step[]): Tally {
-  const t: Tally = { commands: 0, reads: 0, files: new Set(), searches: 0, web: 0, tools: 0, thoughts: 0, failed: 0, added: 0, removed: 0 };
+  const t: Tally = { commands: 0, reads: 0, files: new Set(), searches: 0, web: 0, tools: 0, thoughts: 0, agents: 0, workflows: 0, failed: 0, added: 0, removed: 0 };
   for (const step of steps) {
     if (step.kind === "thought") {
       t.thoughts += 1;
+      continue;
+    }
+    if (step.detail?.type === "subagent" && step.detail.action === "spawn") {
+      if (step.detail.workflow) t.workflows += 1;
+      else t.agents += 1;
+      if ((step.detail.workflow?.state ?? step.detail.state) === "failed" || step.status === "failed" || step.detail.workflow?.agents?.some((agent) => agent.state === "failed")) t.failed += 1;
       continue;
     }
     if (step.status === "failed") t.failed += 1;
@@ -57,6 +63,8 @@ function tally(steps: Step[]): Tally {
 /** "运行 5 条命令 · 读取 3 个文件 · 修改 2 个文件", most telling first. */
 function describe(t: Tally): string {
   const parts: string[] = [];
+  if (t.workflows) parts.push(`${t.workflows} 个工作流`);
+  if (t.agents) parts.push(`${t.agents} 个子 Agent`);
   if (t.files.size) parts.push(`修改 ${t.files.size} 个文件`);
   if (t.commands) parts.push(`运行 ${t.commands} 条命令`);
   if (t.reads) parts.push(`读取 ${t.reads} 个文件`);

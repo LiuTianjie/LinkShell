@@ -31,6 +31,7 @@ import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { HeaderActions, useHeaderTitleWidth } from "@/components/header-actions";
 import { LiveWorkflowsBar } from "@/components/workflow";
+import { sessionTimelineItems } from "@/lib/workflows";
 
 // One array for "nothing yet": a new one on every render would make everything computed from the items run again.
 const NO_ITEMS: TimelineItem[] = [];
@@ -102,11 +103,13 @@ export function SessionScreen() {
   const online = useClient((state) => state.status === "online");
   const loadingEarlier = useClient((state) => !!state.loadingEarlier[id]);
   const queueing = useClient((state) => state.queueing[id]);
-  const subagentsListed = useClient((state) => state.subagents[id]?.length ?? 0);
-  const hasWorkflows = useClient((state) => Object.keys(state.workflows[id] ?? {}).length > 0);
+  const subagents = useClient((state) => state.subagents[id]);
+  const workflows = useClient((state) => state.workflows[id]);
+  const subagentsListed = subagents?.length ?? 0;
+  const hasWorkflows = Object.keys(workflows ?? {}).length > 0;
   const subagentsTotal = summary?.subagents?.total ?? 0;
   const subagentsRunning = summary?.subagents?.running ?? 0;
-  const hasSubagents = subagentsTotal > 0 || subagentsListed > 0;
+  const hasSubagents = hasWorkflows || subagentsTotal > 0 || subagentsListed > 0;
   const agentInfo = useClient((state) => state.machine?.agents.find((agent) => agent.id === summary?.agent));
   const actions = useActions();
   const insets = useSafeAreaInsets();
@@ -128,6 +131,7 @@ export function SessionScreen() {
   }, [actions, id, ready, subagentsTotal, subagentsRunning]);
 
   const items = view?.items ?? NO_ITEMS;
+  const timelineItems = useMemo(() => sessionTimelineItems(items, workflows, subagents), [items, workflows, subagents]);
   // The session opens at its latest turns; what came before loads a page at a time.
   const hasEarlier = (view?.startSeq ?? 0) > 0;
   const earlier = useMemo(
@@ -377,7 +381,7 @@ export function SessionScreen() {
       <TimelineFork.Provider value={canFork ? askFork : undefined}>
       <Timeline
         ref={listRef}
-        items={items}
+        items={timelineItems}
         planId={view?.planId}
         turnActive={turnActive}
         composerInset={composerInset}

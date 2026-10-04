@@ -167,7 +167,28 @@ export const WorkflowCard = memo(function WorkflowCard({ item }: { item: Extract
   const sessionId = useTimelineSession();
   const saved = useClient((state) => sessionId ? state.workflows[sessionId]?.[item.id] : undefined);
   const record = useMemo(() => saved ?? workflowFromTool(item), [saved, item]);
-  return <WorkflowCardContent record={record} sessionId={sessionId} />;
+  const counts = workflowCounts(record.workflow);
+  const state = record.workflow.state;
+  return (
+    <PressableScale
+      disabled={!sessionId}
+      onPress={() => openWorkflow(sessionId!, record.toolCallId)}
+      accessibilityRole="button"
+      accessibilityLabel={`查看工作流：${record.workflow.name ?? record.task}，${state ? workflowStateText[state] : "正在启动"}，${counts.completed} / ${counts.started} 个 Agent 已完成${counts.failed ? `，${counts.failed} 个失败` : ""}`}
+      accessibilityHint="查看完整流程和各个 Agent 的过程"
+      style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 14, backgroundColor: colors.inset }}
+    >
+      <WorkflowMark state={state} />
+      <View style={{ flex: 1, gap: 3 }}>
+        <Text numberOfLines={1} style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>{record.workflow.name ?? record.task}</Text>
+        <Text numberOfLines={1} style={[type.caption, { color: counts.failed || state === "failed" ? colors.danger : colors.secondaryLabel }]}>
+          {[state ? workflowStateText[state] : "正在启动", `${counts.completed} / ${counts.started} 个 Agent 已完成`, counts.running ? `${counts.running} 个运行中` : undefined].filter(Boolean).join(" · ")}
+        </Text>
+      </View>
+      {counts.failed > 0 ? <Text style={[type.caption, { color: colors.danger }]}>{counts.failed} 个失败</Text> : null}
+      <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />
+    </PressableScale>
+  );
 });
 
 export function WorkflowCardContent({ record, sessionId }: { record: WorkflowRecord; sessionId?: string }) {

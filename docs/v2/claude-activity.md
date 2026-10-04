@@ -16,7 +16,11 @@ Stopping a run does not prove that all its processes have exited. Keep unfinishe
 
 ## Mobile presentation and persistence
 
-The main conversation shows a bounded Workflow card; the input area keeps a live entry even when the main turn is idle. `/session/[id]/workflow/[call]` shows the complete run grouped by phase, with completed phases initially folded. Agents open `/session/[id]/workflow-agent/[call]`, a full-screen host of the existing subagent timeline. Both places use the same reported agent state and metrics.
+The main conversation shows a compact Workflow summary; the input area keeps a live entry even when the main turn is idle. `/session/[id]/workflow/[call]` shows the complete run grouped by phase, with completed phases initially folded. Agents open `/session/[id]/workflow-agent/[call]`, a full-screen host of the existing subagent timeline. Both places use the same reported agent state and metrics.
+
+Paged history can begin with a worker's output before its spawning call is loaded. The timeline reducer then creates a top-level `Sub-agent` placeholder. The main conversation removes these duplicate cards only when the worker's exact `toolCallId` appears in a Workflow roster, or its explicit parent chain reaches a Workflow. Parent relationships come from nested event history and `sessions.subagents.parentToolCallId`; names, task text, timestamps and id prefixes are never membership evidence. Unassociated agents remain visible, and the original event log and child timelines remain intact. Completed runs remain accessible from the session's Agent and Workflow list even when their launch is on an unloaded page.
+
+Consecutive finished Agent and Workflow steps can use the timeline's existing three-step fold, without grouping across a main-agent message or a pagination seam. This is a display fold, not Workflow membership. An ordinary agent needs an explicit terminal outcome to fold: a completed launch or `running: false` alone is insufficient. A stopped Workflow with running or paused workers stays visible.
 
 Run snapshots live in the existing event log's `detail.workflow`. `sessions.subagents` also returns the latest snapshot and its event sequence, so the client can restore an old run without loading all its chat turns. The client's workflow roster is independent of the paged timeline; a slow list response or an older event cannot overwrite a newer snapshot. Multiple runs retain separate identities. No new gateway protocol, database table or dependency is needed. This UI monitors native state; it does not add unverified pause/resume/stop controls.
 
@@ -36,6 +40,7 @@ iOS keeps its native semantic colors and [DynamicColorIOS](https://reactnative.d
 - `pnpm --filter @linkshell/client-core test`
 - `pnpm build`, `pnpm typecheck`, `pnpm --filter @linkshell/client lint`
 - `pnpm --filter @linkshell/client test test/colors.test.ts`: checks every palette color across light → dark → light without re-importing the module; checks background appearance changes and preservation of iOS native colors.
+- `pnpm --filter @linkshell/client test test/workflow-timeline.test.ts`: reproduces 60 paginated worker placeholders, checks exact-id/parent membership, same-name isolation, retained transcripts and conservative background-state folding. These are synthetic regression fixtures, not the issue reporter's original session.
 - Android acceptance: with the app already displaying text, switch light → dark → light. Check lists, forms, sheets and the timeline, and repeat after backgrounding and returning. Native visual acceptance is separate from TypeScript/unit tests.
 
 Release validation for app 2.3.5 / CLI 0.10.6 also passed the real Claude handoff check (`pnpm --filter @linkshell/host live:claude`, 13/13 checks against Claude Code 2.1.168). This covers discovery, transcript import and two-way continuation, not a live native Workflow run. Workflow UI screenshots use an isolated fixture host and the actual Android app in an emulator; they are not Claude execution records.
