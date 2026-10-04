@@ -24,6 +24,10 @@
 </p>
 
 <p align="center">
+  <a href="https://www.producthunt.com/products/linkshell?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-linkshell"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1120419&amp;theme=dark" alt="LinkShell on Product Hunt" width="250" height="54" /></a>
+</p>
+
+<p align="center">
   <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell: a 40-second film" width="820" /></a><br />
   <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">Watch the 40-second film</a></sub>
 </p>
@@ -43,7 +47,7 @@ linkshell setup
 
 Then connect your phone ([iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)) one of two ways:
 
-- **Pro — the official gateway.** Run `linkshell login`, then sign in to the app with the same account. Your computer shows up by itself; no QR codes.
+- **Pro — the official gateway.** Run `linkshell login`, then sign in to the app with the same account. The app supports GitHub and Google sign-in too. Your computer shows up by itself; no QR codes.
 - **Free — your own gateway.** Run a gateway ([below](#run-your-own-gateway)), point the host at it and pair once:
 
   ```bash
@@ -108,6 +112,7 @@ And the rest:
 - **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app.
 - **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
 - **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
+- **Find a session.** Search the home page by title, latest message preview, project path, worktree branch or agent. Results include archived sessions and terminals on the selected computer.
 - **Tidy sessions.** Rename, archive and delete; for Codex and Claude this also updates their own records. Projects and sessions show the current git branch. A computer you no longer use is removed with a long press under My computers.
 - **Screen and files.** Watch the computer's screen, full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag; a sheet of one-tap Mac shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own); and a text box for anything longer, which also takes the phone's clipboard (macOS, Apple silicon; `linkshell setup` gets the permissions in place). Send photos or files from the phone into the project.
 
@@ -180,15 +185,19 @@ On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss
 
 ## Development
 
-A pnpm workspace; Node.js 22 (CI uses 22).
+A pnpm workspace; Node.js 22.13 or newer (CI uses 22).
 
 ```bash
 git clone https://github.com/LiuTianjie/LinkShell.git
 cd LinkShell
 pnpm install
 pnpm build
+pnpm typecheck
+pnpm lint
 pnpm test
 ```
+
+On macOS, the full build also builds LinkShell.app and needs Xcode's Swift toolchain. For TypeScript-only builds, use `pnpm -r --filter "./packages/*" build`; Linux CI uses this command and excludes `@linkshell/mac` from tests.
 
 | Directory | What it is |
 | --- | --- |
@@ -201,11 +210,11 @@ pnpm test
 | `apps/mac` | LinkShell.app (`@linkshell/mac`): the Mac side of the screen — capture, WebRTC video, input, permissions |
 | `docs/site` | Website and installer (`python3 scripts/build-site-pages.py` after editing; `scripts/site-promo-assets.sh` cuts its film and clips) |
 
-To work on the app, run a host with a local API next to Metro:
+To work on the app, run these from the repository root in separate terminals. Give the development host its own state directory so it does not share sessions or configuration with your installed host:
 
 ```bash
-cd packages/cli && npx tsx src/index.ts host --dev-port 7878
-pnpm --filter @linkshell/client start
+LINKSHELL_HOME="$HOME/.linkshell-dev" pnpm dev:cli host --dev-port 7878
+pnpm dev:app
 ```
 
 Focused bug reports and pull requests are welcome. Include the CLI version, OS, agent and a minimal reproduction, and redact pairing codes and tokens. See the [release SOP](docs/release-sop.md) for publishing.

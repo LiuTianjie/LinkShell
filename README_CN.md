@@ -24,6 +24,10 @@
 </p>
 
 <p align="center">
+  <a href="https://www.producthunt.com/products/linkshell?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-linkshell"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1120419&amp;theme=dark" alt="Product Hunt 上的 LinkShell" width="250" height="54" /></a>
+</p>
+
+<p align="center">
   <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 介绍片" width="820" /></a><br />
   <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">看 40 秒介绍片</a></sub>
 </p>
@@ -43,7 +47,7 @@ linkshell setup
 
 然后用下面任一方式连接手机（[iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)）：
 
-- **Pro：官方网关。** 运行 `linkshell login`，然后在 App 里登录同一个账号，电脑会自动出现，不用扫码。
+- **Pro：官方网关。** 运行 `linkshell login`，然后在 App 里登录同一个账号；App 也支持 GitHub 和 Google 登录。电脑会自动出现，不用扫码。
 - **免费：自建网关。** 先运行一个网关（见[下文](#自建网关)），让 host 连上它，配对一次：
 
   ```bash
@@ -108,6 +112,7 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 - **真终端。** 电脑上的终端，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。
 - **在手机上打开 localhost。** dev server 的端口走同一条加密通道，热更新照常，可以全屏。不用暴露端口，也不用同一个 Wi-Fi。
 - **设置跟着会话走。** 模型、思考强度、权限模式、快速模式——Agent 提供什么就能改什么；电脑上正在跑的会话，手机上显示的是它真实的设置。
+- **找到之前的会话。** 首页可以按标题、最近一条消息的预览、项目路径、worktree 分支或 Agent 搜索，结果包含当前电脑的已归档会话和终端。
 - **会话管理。** 重命名、归档、删除；Codex 和 Claude 的会话会同步到它们自己的记录里。项目和会话上显示当前的 git 分支。不再使用的电脑，在「我的电脑」里长按即可移除。
 - **屏幕与文件。** 随时看电脑屏幕，可以全屏、横屏；需要时直接接手鼠标和键盘：触控板或点哪点哪两种方式，右键、滚动、拖拽都有；一页一点即发的 Mac 快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）；长一点的内容用“发送文字”写好再发，还能带上手机剪贴板（macOS、Apple 芯片；权限由 `linkshell setup` 带你设置）。把手机里的图片和文件传到项目里。
 
@@ -180,15 +185,19 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
 
 ## 开发
 
-pnpm workspace，Node.js 22（CI 使用 22）。
+pnpm workspace，Node.js 22.13 或更新版本（CI 使用 22）。
 
 ```bash
 git clone https://github.com/LiuTianjie/LinkShell.git
 cd LinkShell
 pnpm install
 pnpm build
+pnpm typecheck
+pnpm lint
 pnpm test
 ```
+
+macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具链。只构建 TypeScript 包时，运行 `pnpm -r --filter "./packages/*" build`；Linux CI 也使用这条命令，并在测试时排除 `@linkshell/mac`。
 
 | 目录 | 内容 |
 | --- | --- |
@@ -201,11 +210,11 @@ pnpm test
 | `apps/mac` | LinkShell.app（`@linkshell/mac`）：Mac 这一侧的屏幕——采集、WebRTC 视频、输入、系统权限 |
 | `docs/site` | 官网与安装脚本（修改后运行 `python3 scripts/build-site-pages.py`；`scripts/site-promo-assets.sh` 负责剪出其中的影片和片段） |
 
-开发 App 时，在 Metro 旁边跑一个带本地 API 的 host：
+开发 App 时，在两个终端中分别从仓库根目录运行下面两条命令。给开发 host 单独的状态目录，避免与已安装的 host 共用会话和配置：
 
 ```bash
-cd packages/cli && npx tsx src/index.ts host --dev-port 7878
-pnpm --filter @linkshell/client start
+LINKSHELL_HOME="$HOME/.linkshell-dev" pnpm dev:cli host --dev-port 7878
+pnpm dev:app
 ```
 
 欢迎提交聚焦的问题反馈和 PR。请附上 CLI 版本、系统、Agent 和最小复现步骤，并去掉配对码和 token。发版流程见 [release SOP](docs/release-sop.md)。
