@@ -14,9 +14,11 @@ for path in paths:
         assert "workspace:" not in json.dumps(manifest), f"workspace dependency leaked: {path}"
         assert not any(name.startswith("package/web/") for name in archive.getnames()), f"legacy console: {path}"
         packages[manifest["name"]] = manifest
+if "@linkshell/mac" in packages:
+    expected.add("@linkshell/mac")
 assert set(packages) == expected, f"expected {expected}, got {set(packages)}"
 for name, manifest in packages.items():
-    for dependency, version in manifest.get("dependencies", {}).items():
+    for dependency, version in {**manifest.get("dependencies", {}), **manifest.get("optionalDependencies", {})}.items():
         if dependency in packages:
             assert version == packages[dependency]["version"], f"mismatched {name} -> {dependency}: {version}"
     print(f"OK {name}@{manifest['version']}")

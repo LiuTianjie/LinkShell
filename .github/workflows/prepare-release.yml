@@ -43,5 +43,7 @@ jobs:
           path: |
             artifacts/npm/*.tgz
             apps/client/build/release-js/
+            docs/site/
+            docs/releases/2.3.7.md
           if-no-files-found: error
           retention-days: 30

@@ -1,3 +1,4 @@
+import { setComputerPreviewMode } from "@/lib/use-computer-preview";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
@@ -20,7 +21,7 @@ import { TimelineSkeleton } from "@/components/timeline/skeleton";
 import { Timeline } from "@/components/timeline/timeline";
 import { TimelineFork, TimelineSession } from "@/components/timeline/context";
 import { LinkBase } from "@/lib/links";
-import { useActions, useClient, useSessionSubscription } from "@/lib/client";
+import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
 import { fileChanges, sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -138,6 +139,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const actions = useActions();
   const commandControls = useSessionCommands(id);
   const hasDraft = useHasComposerDraft(id);
+  const { computer } = useConnection();
   const insets = usePageInsets();
   const focused = useIsFocused();
   // Some panes already stop above native tabs. Padding and keyboard travel use the same physical edge.
@@ -348,6 +350,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
               { title: "命令", icon: { sf: "command", md: "terminal" }, onPress: () => router.push({ pathname: "/session/[id]/commands", params: { id } }) },
               { title: "会话设置", icon: { sf: "slider.horizontal.3", md: "tune" }, onPress: () => router.push({ pathname: "/session/[id]/settings", params: { id } }) },
               ...(commandControls.commands.some((command) => command.name === "goal") || view?.goal ? [{ title: "持续目标", icon: { sf: "target", md: "flag" } as const, onPress: () => router.push({ pathname: "/session/[id]/goal", params: { id } }) }] : []),
+              { title: "显示电脑画面", icon: { sf: "desktopcomputer", md: "desktop_windows" }, onPress: () => setComputerPreviewMode(JSON.stringify([computer.key, id]), "shown") },
               ...(turnActive
                 ? [{ title: "停止这一轮", icon: { sf: "stop.circle", md: "stop_circle" } as const, destructive: true, onPress: () => void guard(() => actions.cancel(id), "停止失败") }]
                 : []),
