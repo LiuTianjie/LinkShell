@@ -27,6 +27,9 @@ export function useSessionCommands(id: string) {
       case "commands":
         router.push({ pathname: "/session/[id]/commands", params: { id } });
         break;
+      case "tasks":
+        router.push({ pathname: "/session/[id]/agents", params: { id } });
+        break;
       case "goal":
         if (args && args !== "edit") return actions.send(id, content, { now: true });
         router.push({ pathname: "/session/[id]/goal", params: { id } });

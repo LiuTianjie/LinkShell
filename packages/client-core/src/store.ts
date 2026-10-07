@@ -2,6 +2,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   RpcError,
   type ContentBlock,
+  type BackgroundTask,
   type MachineInfo,
   type MethodResult,
   type ProjectSummary,
@@ -14,6 +15,7 @@ import {
   type WorktreeEntry,
 } from "@linkshell/wire";
 import type { HostLink, LinkStatus } from "./host-link.js";
+import { applyTaskEvent, mergeTaskList, type TaskRecords } from "./tasks.js";
 import { applyWorkflowEvent, mergeWorkflowList, type WorkflowRecords } from "./workflows.js";
 import {
   addOptimisticMessage,
@@ -48,6 +50,7 @@ export interface ClientState {
   subagents: Record<string, SubagentInfo[]>;
   /** Complete workflow snapshots, including runs outside the loaded history window. */
   workflows: Record<string, WorkflowRecords>;
+  tasks: Record<string, TaskRecords>;
   /**
    * Sub-agent conversations opened on their own (`openSubagent`), by
    * `subagentKey`: a view holding the call that started it, whose `sub` is the
@@ -131,6 +134,9 @@ export interface ClientActions {
    */
   loadEarlier(sessionId: string): Promise<boolean>;
   /** Fetches the session's sub-agents (also kept in `subagents`). */
+  loadTasks(sessionId: string): Promise<BackgroundTask[]>;
+  loadTaskOutput(sessionId: string, taskId: string, before?: number): Promise<MethodResult<"sessions.taskOutput">>;
+  stopTask(sessionId: string, taskId: string): Promise<void>;
   loadSubagents(sessionId: string): Promise<SubagentInfo[]>;
   /** Loads a sub-agent's conversation into `subagentViews` and keeps it live while the session is open. */
   openSubagent(sessionId: string, toolCallId: string): Promise<boolean>;
@@ -190,8 +196,12 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       let views = state.views;
       let subagentViews = state.subagentViews;
       let workflows = state.workflows;
+      let tasks = state.tasks;
       const bySession = new Map<string, SessionEvent[]>();
       for (const event of batch) {
+        const records = tasks[event.sessionId] ?? {};
+        const nextTasks = applyTaskEvent(records, event);
+        if (nextTasks !== records) tasks = { ...tasks, [event.sessionId]: nextTasks };
         const runs = workflows[event.sessionId] ?? {};
         const nextRuns = applyWorkflowEvent(runs, event);
         if (nextRuns !== runs) workflows = { ...workflows, [event.sessionId]: nextRuns };
@@ -217,7 +227,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         const next = applyEvents(current, events);
         if (next !== current) views = { ...views, [sessionId]: next };
       }
-      return views === state.views && subagentViews === state.subagentViews && workflows === state.workflows ? state : { views, subagentViews, workflows };
+      return views === state.views && subagentViews === state.subagentViews && workflows === state.workflows && tasks === state.tasks ? state : { views, subagentViews, workflows, tasks };
     });
   };
 
@@ -230,6 +240,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     if (!store.getState().open[sessionId]) return;
     flushEvents();
     store.setState((state) => ({ sessions: { ...state.sessions, [sessionId]: summary }, ready: { ...state.ready, [sessionId]: true } }));
+    void store.getState().loadTasks(sessionId).catch(() => {});
   };
 
   // Sub-agent conversations being fetched: live events that arrive meanwhile are applied after.
@@ -270,6 +281,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         queueing: without(state.queueing),
         subagents: without(state.subagents),
         workflows: without(state.workflows),
+        tasks: without(state.tasks),
         subagentViews: Object.fromEntries(Object.entries(state.subagentViews).filter(([key]) => !key.startsWith(`${sessionId}\n`))),
       };
     });
@@ -317,6 +329,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       loadingEarlier: {},
       subagents: {},
       workflows: {},
+      tasks: {},
       subagentViews: {},
       outbox: {},
       queueing: {},
@@ -558,6 +571,17 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         }
       },
 
+      async loadTasks(sessionId) {
+        const { tasks } = await link.call("sessions.tasks", { sessionId });
+        flushEvents();
+        set((state) => ({ tasks: { ...state.tasks, [sessionId]: mergeTaskList(state.tasks[sessionId] ?? {}, tasks) } }));
+        return tasks;
+      },
+      loadTaskOutput: (sessionId, taskId, before) => link.call("sessions.taskOutput", { sessionId, taskId, before }),
+      async stopTask(sessionId, taskId) {
+        await link.call("sessions.stopTask", { sessionId, taskId });
+        await get().loadTasks(sessionId);
+      },
       async loadSubagents(sessionId) {
         const { subagents } = await link.call("sessions.subagents", { sessionId });
         flushEvents();

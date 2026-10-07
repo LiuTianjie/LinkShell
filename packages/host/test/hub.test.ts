@@ -90,6 +90,24 @@ afterEach(() => {
 });
 
 describe("SessionHub", () => {
+  it("keeps durable task status and output independent of turn completion and rejects broad cancellation", async () => {
+    await hub.subscribe("fake:s1", 0, collector().subscriber);
+    const task = { id: "b1", toolCallId: "c1", title: "build", kind: "shell" as const, startedAt: 1, state: "running" as const };
+    driver.emit({ sessionUpdate: "ls_task", task });
+    driver.emit({ sessionUpdate: "tool_call", toolCallId: "c1", title: "build", kind: "execute", status: "in_progress" });
+    driver.emit({ sessionUpdate: "tool_call_update", toolCallId: "c1", appendOutput: "before\n" });
+    driver.emit({ sessionUpdate: "ls_turn", state: "ended" });
+    driver.emit({ sessionUpdate: "tool_call_update", toolCallId: "c1", appendOutput: "after 世界\n" });
+    expect(hub.getSession("fake:s1").tasks).toEqual({ total: 1, running: 1 });
+    expect(hub.taskOutput("fake:s1", "b1").text).toBe("before\nafter 世界\n");
+    await expect(hub.stopTask("fake:s1", "b1")).rejects.toThrow("不能在手机上停止");
+    expect(driver.cancels).toBe(0);
+    driver.emit({ sessionUpdate: "ls_task", task: { ...task, state: "failed", exitCode: 3 } });
+    const restored = new SessionHub(store, [driver]);
+    expect(restored.tasks("fake:s1")[0]).toMatchObject({ id: "b1", state: "failed", exitCode: 3 });
+    expect(hub.getSession("fake:s1").tasks).toEqual({ total: 1, running: 0 });
+    expect(hub.tasks("fake:s1")[0]!.lastSeq).toBeGreaterThan(1);
+  });
   it("discovers sessions on start", () => {
     expect(hub.listSessions({}).sessions.map((s) => s.id)).toEqual(["fake:s1"]);
   });

@@ -72,11 +72,13 @@ export class ClaudeActivity {
     locate: () => string | undefined;
     desktop: () => boolean;
     onUpdate: Emit;
+    onLine?: (raw: string) => void;
     onError?: (error: unknown) => void;
   }) {}
 
   /** Called during history import, then by an independent cursor in every mode. */
   observe(raw: string): void {
+    this.options.onLine?.(raw);
     const line = json(raw);
     if (!line || line.isSidechain === true) return;
     const uuid = string(line.uuid);

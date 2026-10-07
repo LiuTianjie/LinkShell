@@ -282,7 +282,21 @@ async function runTurn(thread, turn, text) {
     notifyThread(thread, "item/agentMessage/delta", { threadId, turnId: turn.id, itemId: messageId, delta: chunk });
   }
   // "BACKGROUND": the turn leaves a command running after it ends, like a dev server.
-  if (text.includes("BACKGROUND")) thread.background = [{ itemId: randomUUID(), processId: "1", command: "npm run dev", cwd: thread.meta.cwd, osPid: null, cpuPercent: null, rssKb: null }];
+  if (text.includes("BACKGROUND")) {
+    thread.background = [1, 2].map((n) => ({ itemId: randomUUID(), processId: String(n), command: "npm run dev", cwd: thread.meta.cwd, osPid: null, cpuPercent: null, rssKb: null }));
+    for (const task of thread.background) {
+      notifyThread(thread, "item/started", { threadId, turnId: turn.id, item: { type: "commandExecution", id: task.itemId, command: task.command, status: "inProgress" } });
+      notifyThread(thread, "item/commandExecution/outputDelta", { threadId, turnId: turn.id, itemId: task.itemId, delta: "started\n" });
+    }
+    if (text.includes("BACKGROUND_FAIL")) {
+      const task = thread.background[0];
+      setTimeout(() => {
+        thread.background = thread.background.filter((entry) => entry !== task);
+        notifyThread(thread, "item/commandExecution/outputDelta", { threadId, turnId: turn.id, itemId: task.itemId, delta: "after turn\n" });
+        notifyThread(thread, "item/completed", { threadId, turnId: turn.id, item: { type: "commandExecution", id: task.itemId, command: task.command, status: "failed", exitCode: 3, aggregatedOutput: "initial output\nstarted\nafter turn\n" } });
+      }, 300);
+    }
+  }
   const message = { type: "agentMessage", id: messageId, text: accumulated };
   turn.items.push(message);
   save(thread);
@@ -426,6 +440,14 @@ const handlers = {
     const thread = threads.get(params.threadId);
     if (!thread?.loaded) throw { code: -32600, message: `thread not found: ${params.threadId}` };
     return { data: thread.background ?? [], nextCursor: null };
+  },
+  "thread/backgroundTerminals/terminate": (params) => {
+    const thread = threads.get(params.threadId);
+    const task = thread?.background?.find((entry) => entry.processId === params.processId);
+    if (!task) return { terminated: false };
+    thread.background = thread.background.filter((entry) => entry !== task);
+    notifyThread(thread, "item/completed", { threadId: params.threadId, item: { type: "commandExecution", id: task.itemId, command: task.command, status: "failed", exitCode: 143, aggregatedOutput: "started\n" } });
+    return { terminated: true };
   },
   "thread/backgroundTerminals/clean": (params) => {
     const thread = threads.get(params.threadId);

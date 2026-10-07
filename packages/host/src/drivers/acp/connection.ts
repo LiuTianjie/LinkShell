@@ -71,6 +71,18 @@ export class AcpConnection {
         if (child.stdin?.writable) child.stdin.write(`${text}\n`);
       },
       onNotification: (method, params) => {
+        if (method === "_claude/sdkMessage") {
+          const raw = params as { sessionId?: string; message?: { type?: string; value?: { condition?: string; iterations?: number; last_reason?: string } | null } };
+          if (raw?.sessionId && raw.message?.type === "active_goal") {
+            const value = raw.message.value;
+            if (value === null || typeof value?.condition === "string") this.options.onUpdate(raw.sessionId, {
+              sessionUpdate: "session_info_update", _meta: { jetbrains: { air: { goal: value === null ? null : {
+                objective: value.condition!.trim(), status: "active", iterations: value.iterations, lastReason: value.last_reason,
+              } } } },
+            });
+          }
+          return;
+        }
         if (method !== "session/update") return;
         const payload = params as { sessionId?: unknown; update?: unknown } | undefined;
         if (typeof payload?.sessionId === "string") this.options.onUpdate(payload.sessionId, payload.update);

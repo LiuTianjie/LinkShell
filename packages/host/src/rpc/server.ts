@@ -134,6 +134,9 @@ export class HostRpcServer {
         const page = hub.history(params.sessionId, params.beforeSeq);
         return { startSeq: page.startSeq, events: page.events.map((event) => slimEvent(event, { lazyImages: params.lazyImages })) };
       },
+      "sessions.tasks": (params: P<"sessions.tasks">) => ({ tasks: hub.tasks(params.sessionId) }),
+      "sessions.taskOutput": (params: P<"sessions.taskOutput">) => hub.taskOutput(params.sessionId, params.taskId, params.before, params.limit),
+      "sessions.stopTask": (params: P<"sessions.stopTask">) => hub.stopTask(params.sessionId, params.taskId).then(() => ({})),
       "sessions.subagents": (params: P<"sessions.subagents">) => ({ subagents: hub.subagents(params.sessionId) }),
       "sessions.subagent": (params: P<"sessions.subagent">) => ({
         events: hub.subagent(params.sessionId, params.toolCallId).map((event) => slimEvent(event, { lazyImages: params.lazyImages })),

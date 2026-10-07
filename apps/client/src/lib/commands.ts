@@ -4,7 +4,7 @@ export interface Command {
   name: string;
   description: string;
   hint?: string;
-  action?: "commands" | "settings" | "goal" | "changes" | "new" | "fork" | "rename" | "context";
+  action?: "tasks" | "commands" | "settings" | "goal" | "changes" | "new" | "fork" | "rename" | "context";
   optionId?: string;
 }
 
@@ -45,6 +45,7 @@ export function normalizeCommandText(text: string): string {
 /** Local controls supplement the native list; native prompt commands stay intact. */
 export function sessionCommands(agent: string, commands: Command[], config: SessionConfigOption[]): Command[] {
   const local: Command[] = [
+    ...(agent === "codex" || agent === "claude" ? [{ name: "tasks", description: "查看后台命令、输出与运行状态", action: "tasks" as const }] : []),
     { name: "help", description: "查看和搜索所有可用命令", action: "commands" },
     { name: "settings", description: "打开会话设置", action: "settings" },
     { name: "diff", description: "查看当前会话的文件改动", action: "changes" },

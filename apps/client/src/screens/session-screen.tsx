@@ -126,11 +126,14 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const queueing = useClient((state) => state.queueing[id]);
   const subagents = useClient((state) => state.subagents[id]);
   const workflows = useClient((state) => state.workflows[id]);
+  const tasks = useClient((state) => state.tasks[id]);
+  const taskCount = Object.keys(tasks ?? {}).length;
+  const tasksRunning = Object.values(tasks ?? {}).filter((task) => task.state === "running").length;
   const subagentsListed = subagents?.length ?? 0;
   const hasWorkflows = Object.keys(workflows ?? {}).length > 0;
   const subagentsTotal = summary?.subagents?.total ?? 0;
   const subagentsRunning = summary?.subagents?.running ?? 0;
-  const hasSubagents = hasWorkflows || subagentsTotal > 0 || subagentsListed > 0;
+  const hasSubagents = taskCount > 0 || (summary?.tasks?.total ?? 0) > 0 || hasWorkflows || subagentsTotal > 0 || subagentsListed > 0;
   const agentInfo = useClient((state) => state.machine?.agents.find((agent) => agent.id === summary?.agent));
   const actions = useActions();
   const commandControls = useSessionCommands(id);
@@ -330,8 +333,8 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
                   kind: "button" as const,
                   key: "subagents",
                   icon: { sf: "square.stack.3d.up", md: "layers" } as const,
-                  label: hasWorkflows ? "Agent 与工作流" : subagentsRunning ? `子 Agent，${subagentsRunning} 个运行中` : "子 Agent",
-                  live: subagentsRunning > 0,
+                  label: taskCount ? `后台任务，${tasksRunning} 个运行中` : hasWorkflows ? "Agent 与工作流" : subagentsRunning ? `子 Agent，${subagentsRunning} 个运行中` : "子 Agent",
+                  live: subagentsRunning > 0 || tasksRunning > 0,
                   onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
                 },
               ]
@@ -487,7 +490,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
           keyboardOffset={keyboardOffset}
           autoFocusOnPoseEntry={folded !== null}
           accessoryHeight={(!atEnd && items.length > 0 ? 42 : 0) + (embedded ? 0 : insets.top)}
-          leadingContent={view?.goal || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <>{view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}{Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} /> : null}</> : undefined}
+          leadingContent={view?.goal || tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <>{view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}{tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} /> : null}</> : undefined}
           onSend={commandControls.send}
           onStop={() => guard(() => actions.cancel(id), "停止失败")}
           queue={shownQueue(summary.queue, queueing)}

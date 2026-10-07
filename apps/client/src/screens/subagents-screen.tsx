@@ -10,6 +10,7 @@ import { PressableScale } from "@/components/pressable-scale";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { LiveDot } from "@/components/status";
 import { SubagentGlyph } from "@/components/timeline/subagent";
+import { TaskList } from "@/components/background-tasks";
 import { WorkflowCardContent } from "@/components/workflow";
 import { useActions, useClient } from "@/lib/client";
 import { duration, relativeTime } from "@/lib/format";
@@ -74,7 +75,10 @@ function Row({ entry, last, now, onPress }: { entry: SubagentInfo; last: boolean
 export function SubagentsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = usePageInsets();
-  const { loadSubagents } = useActions();
+  const { loadSubagents, loadTasks } = useActions();
+  const records = useClient((state) => state.tasks[id]);
+  const taskCounts = useClient((state) => state.sessions[id]?.tasks);
+  const tasks = useMemo(() => Object.values(records ?? {}).sort((a, b) => b.startedAt - a.startedAt), [records]);
   const listed = useClient((state) => state.subagents[id]);
   const workflows = useClient((state) => state.workflows[id]);
   const runs = useMemo(() => Object.values(workflows ?? {}).sort((a, b) => b.startedAt - a.startedAt), [workflows]);
@@ -103,8 +107,8 @@ export function SubagentsScreen() {
   useEffect(() => {
     if (!online) return;
     setError(null);
-    loadSubagents(id).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
-  }, [loadSubagents, id, online, counts?.total, counts?.running]);
+    Promise.all([loadSubagents(id), loadTasks(id)]).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+  }, [loadSubagents, loadTasks, id, online, counts?.total, counts?.running, taskCounts?.total, taskCounts?.running]);
 
   const open = (entry: SubagentInfo) => {
     haptics.selection();
@@ -113,7 +117,7 @@ export function SubagentsScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <SheetHeader title={runs.length ? "Agent 与工作流" : "子 Agent"} />
+      <SheetHeader title={tasks.length ? "后台任务与 Agent" : runs.length ? "Agent 与工作流" : "子 Agent"} />
       {list?.length || runs.length ? (
         <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 }]}>
           {[list?.length ? `${list.length} 个子 Agent` : undefined, runs.length ? `${runs.length} 个工作流` : undefined].filter(Boolean).join(" · ")}
@@ -122,6 +126,7 @@ export function SubagentsScreen() {
       {/* Wrapped: a sheet stretches a scroll view that's a direct child of the screen over the whole sheet. */}
       <View style={{ flex: 1, overflow: "hidden" }}>
         <ScrollView contentInsetAdjustmentBehavior="never" style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: insets.bottom + 24 }}>
+          {tasks.length ? <TaskList sessionId={id} tasks={tasks} /> : null}
           {runs.length ? <View style={{ marginBottom: list?.length ? 16 : 0 }}><AdaptiveGrid>{runs.map((record) => <WorkflowCardContent key={record.toolCallId} record={record} sessionId={id} />)}</AdaptiveGrid></View> : null}
           {!list ? (
             error ? (
@@ -130,7 +135,7 @@ export function SubagentsScreen() {
               <LoadingState label="正在读取…" />
             )
           ) : list.length === 0 ? (
-            runs.length ? null : <EmptyState icon={{ sf: "square.stack.3d.up", md: "layers" }} title="这个会话没有子 Agent" message="Agent 把任务分给子 Agent 后，会列在这里。" />
+            runs.length || tasks.length ? null : <EmptyState icon={{ sf: "square.stack.3d.up", md: "layers" }} title="这个会话没有子 Agent" message="Agent 把任务分给子 Agent 后，会列在这里。" />
           ) : (
             <View style={{ backgroundColor: colors.sheetCard, borderRadius: 20, borderCurve: "continuous", overflow: "hidden" }}>
               {list.map((entry, index) => (

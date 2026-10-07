@@ -69,6 +69,19 @@ const agentText = (store: ClientStore, id: string) =>
   (store.getState().views[id]?.items ?? []).flatMap((i) => (i.kind === "agent" ? [i.text] : [])).join("|");
 
 describe("client core against a real host", () => {
+  it("reloads task snapshots after a disconnect even when the launching conversation is not loaded", async () => {
+    const { host, store } = await setup();
+    const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });
+    await waitFor(() => store.getState().ready[session.id]);
+    const task = { id: "b1", title: "background", kind: "shell" as const, state: "running" as const, startedAt: 1 };
+    host.hub.driverHost.update("fake", session.nativeId, { sessionUpdate: "ls_task", task });
+    await waitFor(() => store.getState().tasks[session.id]?.b1?.state === "running");
+    store.getState().disconnect();
+    host.hub.driverHost.update("fake", session.nativeId, { sessionUpdate: "ls_task", task: { ...task, state: "completed", endedAt: 10 } });
+    store.getState().connect();
+    await waitFor(() => store.getState().tasks[session.id]?.b1?.state === "completed");
+    expect(store.getState().tasks[session.id]?.b1?.endedAt).toBe(10);
+  });
   it("keeps an independently opened workflow and its worker live through nested completion", async () => {
     const { host, store } = await setup();
     const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });

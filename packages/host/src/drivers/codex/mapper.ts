@@ -413,7 +413,7 @@ function toolFinish(
   };
   switch (item.type) {
     case "commandExecution":
-      update.rawOutput = { exitCode: num(item.exitCode) ?? null, durationMs: num(item.durationMs) ?? null, declined: item.status === "declined" };
+      update.rawOutput = { exitCode: num(item.exitCode) ?? null, durationMs: num(item.durationMs) ?? null, declined: item.status === "declined", ...(typeof item.aggregatedOutput === "string" ? { aggregatedOutput: item.aggregatedOutput } : {}) };
       if (options.includeOutput && str(item.aggregatedOutput)) update.appendOutput = str(item.aggregatedOutput);
       break;
     case "fileChange":

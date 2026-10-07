@@ -145,6 +145,28 @@ describe("host + Codex driver (fake app-server)", () => {
     expect(host.hub.getSession(sessionId)).toMatchObject({ state: "idle", title: "hello world", preview: "echo: hello world" });
   });
 
+  it("tracks output after turn completion and stops only one of two identical background commands", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    const sessionId = session.id;
+    await phone.client.call("sessions.subscribe", { sessionId, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId, clientMessageId: "background", content: text("BACKGROUND_FAIL") });
+    await waitFor(() => phone.of(sessionId).some((event) => event.update.sessionUpdate === "ls_task" && event.update.task.state === "failed"));
+    const { tasks } = await phone.client.call("sessions.tasks", { sessionId });
+    expect(tasks).toHaveLength(2);
+    const failed = tasks.find((task) => task.state === "failed")!;
+    const live = tasks.find((task) => task.state === "running")!;
+    expect(failed.exitCode).toBe(3);
+    expect((await phone.client.call("sessions.taskOutput", { sessionId, taskId: failed.id })).text).toBe("initial output\nstarted\nafter turn\n");
+    await phone.client.call("sessions.stopTask", { sessionId, taskId: live.id });
+    expect((await phone.client.call("sessions.tasks", { sessionId })).tasks.find((task) => task.id === live.id)?.state).toBe("stopped");
+    await phone.client.call("sessions.prompt", { sessionId, clientMessageId: "background-two", content: text("BACKGROUND") });
+    await waitFor(() => phone.of(sessionId).filter((event) => event.update.sessionUpdate === "ls_task" && event.update.task.state === "running").length >= 4);
+    const remaining = (await phone.client.call("sessions.tasks", { sessionId })).tasks.filter((task) => task.state === "running");
+    await phone.client.call("sessions.stopTask", { sessionId, taskId: remaining[0]!.id });
+    expect((await phone.client.call("sessions.tasks", { sessionId })).tasks.find((task) => task.id === remaining[1]!.id)?.state).toBe("running");
+    await phone.client.call("sessions.stopTask", { sessionId, taskId: remaining[1]!.id });
+  });
+
   it("manages goals through RPC and slash commands and restores state for another client", async () => {
     const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
     const id = session.id;

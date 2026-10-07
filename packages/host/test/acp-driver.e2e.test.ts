@@ -68,6 +68,14 @@ afterEach(async () => {
 const prompt = (t: string) => [{ type: "text" as const, text: t }];
 
 describe("generic ACP driver (fake agent)", () => {
+  it("accepts raw runtime Goal updates without enabling AIR client behavior", async () => {
+    const f = await setup();
+    const { session } = await f.client.call("sessions.create", { agent: "fake", cwd: "/tmp" });
+    await f.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await f.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "raw-goal", content: prompt("RAW_GOAL") });
+    await waitFor(() => f.of(session.id).some((event) => event.update.sessionUpdate === "ls_goal"));
+    expect(f.of(session.id).find((event) => event.update.sessionUpdate === "ls_goal")?.update).toMatchObject({ goal: { objective: "完整验证", status: "active", iterations: 2 } });
+  });
   it("starts agents that don't list sessions only when first used", async () => {
     const home = mkdtempSync(join(tmpdir(), "lsh-acp-lazy-"));
     const host = await startHost({

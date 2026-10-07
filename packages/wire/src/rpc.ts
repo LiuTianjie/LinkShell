@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { goalChangeSchema, sessionGoalSchema } from "./goal.js";
 import {
+  backgroundTaskSchema,
   gatewayStatusSchema,
   machineInfoSchema,
   portInfoSchema,
@@ -159,6 +160,30 @@ export const methods = {
   "sessions.subagent": {
     params: z.object({ sessionId: z.string().min(1), toolCallId: z.string().min(1), lazyImages: z.boolean().optional() }),
     result: z.object({ events: z.array(sessionEventSchema) }),
+  },
+  /** The commands this session left running in the background, and the ones that have ended; newest first. */
+  "sessions.tasks": {
+    params: z.object({ sessionId: z.string().min(1) }),
+    result: z.object({ tasks: z.array(backgroundTaskSchema) }),
+  },
+  /**
+   * A background task's output, a piece at a time from the end: the text
+   * before byte `before` (default: the end), at most `limit` bytes. `start` is
+   * where that text begins (0: the beginning); `size` is the whole output's.
+   */
+  "sessions.taskOutput": {
+    params: z.object({
+      sessionId: z.string().min(1),
+      taskId: z.string().min(1),
+      before: z.number().int().nonnegative().optional(),
+      limit: z.number().int().positive().max(256 * 1024).optional(),
+    }),
+    result: z.object({ text: z.string(), start: z.number().int().nonnegative(), size: z.number().int().nonnegative() }),
+  },
+  /** Stops one background task, leaving the session's turn and its other tasks alone. */
+  "sessions.stopTask": {
+    params: z.object({ sessionId: z.string().min(1), taskId: z.string().min(1) }),
+    result: empty,
   },
   /** Opens a read-only computer-use preview through the existing bulk-stream transport. */
   "sessions.preview": {

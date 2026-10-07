@@ -194,12 +194,19 @@ export class AcpDriver implements AgentDriver {
     return { nativeId: response.sessionId, cwd: options.cwd, createdAt: now, updatedAt: now };
   }
 
+  protected sessionMeta(): Record<string, unknown> {
+    // Raw Goal messages preserve the normal sub-agent stream. AIR opt-in changes
+    // parentToolUseId/toolName metadata and is incompatible with our mapper.
+    return this.id === "claude" ? { _meta: { claudeCode: { emitRawSDKMessages: [{ type: "active_goal" }] } } } : {};
+  }
+
   async createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession> {
     let response: { sessionId: string } & Record<string, unknown>;
     try {
       response = await this.rpc<{ sessionId: string } & Record<string, unknown>>("session/new", {
         cwd: options.cwd,
         mcpServers: [],
+        ...this.sessionMeta(),
       });
     } catch (error) {
       throw this.signInError(error);
@@ -228,6 +235,7 @@ export class AcpDriver implements AgentDriver {
           sessionId: nativeId,
           cwd: context.cwd,
           mcpServers: [],
+          ...this.sessionMeta(),
         });
         state.config = toConfigOptions(response);
         state.tracker = new AcpItemTracker();
@@ -240,6 +248,7 @@ export class AcpDriver implements AgentDriver {
         sessionId: nativeId,
         cwd: context.cwd,
         mcpServers: [],
+        ...this.sessionMeta(),
       });
       state.config = toConfigOptions(response);
     } else {
@@ -361,9 +370,6 @@ export class AcpDriver implements AgentDriver {
       args: this.spec.args,
       env: this.env,
       clientVersion: this.options.hostVersion,
-      // Claude's published Goal extension uses this namespace. Keep our own
-      // clientInfo identity; opt in only for the adapter whose payload we map.
-      clientMeta: this.id === "claude" ? { jetbrains: { air: { version: 1, capabilities: [] } } } : undefined,
       onUpdate: (sessionId, update) => this.onUpdate(sessionId, update),
       onRequest: (method, params, id) => this.onRequest(method, params, id),
       onExit: (reason) => this.onExit(reason),

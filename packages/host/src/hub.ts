@@ -1,6 +1,7 @@
 import {
   RpcError,
   type GoalChange,
+  type BackgroundTask,
   sessionIdFor,
   type AgentAuth,
   type AgentInfo,
@@ -31,6 +32,7 @@ import { PAGE, worktreeOf, type HostStore, type SessionPatch, type WorktreeRecor
 import { createWorktree, gitBranch, gitInfo, removeWorktree, worktreeState, type CreatedWorktree } from "./worktrees.js";
 import { conversationDigest, copied, isConversation } from "./carry.js";
 import { slimEvent } from "./slim.js";
+import { outputRange } from "./task-output.js";
 import { ComputerPreviews } from "./computer-preview.js";
 import { MacPreviewCapture } from "./computer-preview-capture.js";
 
@@ -56,6 +58,8 @@ function isActivity(update: SessionUpdate): boolean {
     // is opened; a turn starting or ending is what counts.
     case "ls_status":
     case "ls_driver":
+    // A task's record is said again whenever the session is opened; its end is followed by the agent's turn about it.
+    case "ls_task":
       return false;
     default:
       return true;
@@ -130,6 +134,7 @@ interface LiveSession {
   sendingHeld?: boolean;
   /** Sub-agents the session started, and whether each is working; read from the log when first needed. */
   subagents?: Map<string, SubagentState>;
+  tasks?: Map<string, BackgroundTask>;
   /** True while native history is imported: no live activity, one summary at the end. */
   importing?: boolean;
   importChanged?: boolean;
@@ -174,6 +179,10 @@ export class SessionHub {
   readonly previews: ComputerPreviews;
 
   readonly driverHost: DriverHost = {
+    tasks: (agent, nativeId) => {
+      const id = sessionIdFor(agent, nativeId);
+      return this.store.getSession(id) ? this.tasks(id) : [];
+    },
     preview: (agent, nativeId, frame) => {
       // Preview is optional: storage or capture failures must not break agent notifications.
       try { void this.previews.put(sessionIdFor(agent, nativeId), frame).catch(() => this.log("[computer-preview] update failed")); }
@@ -363,10 +372,12 @@ export class SessionHub {
     if (!live) return this.withWorktree(summary);
     const activity = live.turnActive ? live.activity : undefined;
     const first = live.permissions.values().next().value as PermissionUpdate | undefined;
+    const tasks = this.tasksOf(summary.id, live);
     const subagents = live.attached ? this.subagentsOf(summary.id, live) : undefined;
     summary = this.withWorktree(summary);
-    if (!activity && !first && !live.queue && live.held.length === 0 && !subagents?.size) return summary;
+    if (!activity && !first && !live.queue && live.held.length === 0 && !subagents?.size && !tasks.size) return summary;
     const decorated: SessionSummary = { ...summary };
+    if (tasks.size) decorated.tasks = { total: tasks.size, running: [...tasks.values()].filter((task) => task.state === "running").length };
     if (subagents?.size) {
       let running = 0;
       for (const state of subagents.values()) if (subagentRunning(state)) running += 1;
@@ -620,6 +631,48 @@ export class SessionHub {
     if (upTo < 1) return { events: [], startSeq: 0 };
     const startSeq = this.store.pageStart(sessionId, upTo);
     return { events: this.store.readEvents(sessionId, startSeq, PAGE.maxEvents + 1, upTo), startSeq };
+  }
+
+  tasks(sessionId: string): BackgroundTask[] {
+    if (!this.store.getSession(sessionId)) throw RpcError.app("not_found", "找不到这个会话");
+    const tasks = new Map<string, BackgroundTask>();
+    for (const event of this.store.taskEvents(sessionId)) {
+      if (event.update.sessionUpdate === "ls_task") tasks.set(event.update.task.id, { ...event.update.task, lastSeq: event.seq });
+    }
+    return [...tasks.values()].sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  private tasksOf(sessionId: string, live: LiveSession): Map<string, BackgroundTask> {
+    return live.tasks ??= new Map(this.tasks(sessionId).map((task) => [task.id, task]));
+  }
+
+  taskOutput(sessionId: string, taskId: string, before?: number, limit = 64 * 1024) {
+    const summary = this.getSession(sessionId);
+    const task = this.tasks(sessionId).find((entry) => entry.id === taskId);
+    if (!task) throw RpcError.app("not_found", "这个任务已经不在会话记录里");
+    const output = this.requireDriver(summary.agent).taskOutput?.(summary.nativeId, taskId, before, limit);
+    if (output) return output;
+    let text = "";
+    for (const event of task.toolCallId ? this.store.toolEvents(sessionId, task.toolCallId) : []) {
+      const update = event.update;
+      if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") continue;
+      if (update.sessionUpdate === "tool_call_update" && update.appendOutput) text += update.appendOutput;
+      const whole = update.content?.flatMap((block) => block.type === "content" && block.content.type === "text" ? [block.content.text] : []).join("\n");
+      if (whole) text = whole;
+      const aggregate = update.sessionUpdate === "tool_call_update" ? (update.rawOutput as { aggregatedOutput?: unknown } | undefined)?.aggregatedOutput : undefined;
+      if (typeof aggregate === "string") text = aggregate;
+    }
+    return outputRange(Buffer.from(text), before, limit);
+  }
+
+  async stopTask(sessionId: string, taskId: string): Promise<void> {
+    const summary = this.getSession(sessionId);
+    const task = this.tasks(sessionId).find((entry) => entry.id === taskId);
+    if (!task) throw RpcError.app("not_found", "这个任务已经不在会话记录里");
+    if (task.state !== "running") throw RpcError.app("busy", "这个任务已经结束了");
+    const driver = this.requireDriver(summary.agent);
+    if (!task.canStop || !driver.stopTask) throw RpcError.app("not_supported", "这个任务不能在手机上停止");
+    await driver.stopTask(summary.nativeId, taskId);
   }
 
   /** The sub-agents the session started, newest first. */
@@ -1212,6 +1265,11 @@ export class SessionHub {
     if (!before) return;
     const patch: SessionPatch = {};
     let activityChanged = this.trackSubagent(live, update) && !live.importing;
+    if (update.sessionUpdate === "ls_task") {
+      this.tasksOf(sessionId, live).set(update.task.id, update.task);
+      if (live.importing) live.importChanged = true;
+      else activityChanged = true;
+    }
     const setActivity = (next: SessionActivity | undefined) => {
       if (live.importing || sameActivity(live.activity, next)) return;
       live.activity = next;

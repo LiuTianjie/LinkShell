@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import { codexPreview } from "./computer-preview.js";
 import { ABANDON, RpcError, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
-import type { AgentAuth } from "@linkshell/wire";
+import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
 import { parseCodexLoginStatus, runStatusCommand } from "../auth.js";
 import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
 import { CodexAppServer, CodexSharedServer, detectCodex, sharedServerSocket } from "./app-server.js";
@@ -189,6 +189,11 @@ export class CodexDriver implements AgentDriver {
   /** Notifications for a thread being joined, held until its history has been read. */
   private readonly joining = new Map<string, { method: string; params: unknown; from: Home }[]>();
   /** Threads a device has open. */
+  private readonly taskProcesses = new Map<string, Map<string, string>>();
+  private readonly taskPolls = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly taskSyncs = new Map<string, Promise<void>>();
+  private readonly stoppingTasks = new Set<string>();
+  private readonly taskRevisions = new Map<string, number>();
   private readonly watching = new Set<string>();
   /** Threads another client of this host's app-server opened (`linkshell codex`): followed for as long as the host runs. */
   private readonly kept = new Set<string>();
@@ -234,6 +239,8 @@ export class CodexDriver implements AgentDriver {
   }
 
   async stop(): Promise<void> {
+    for (const timer of this.taskPolls.values()) clearTimeout(timer);
+    this.taskPolls.clear();
     this.stopped = true;
     if (this.restartTimer) clearTimeout(this.restartTimer);
     for (const timer of this.followRetries.values()) clearTimeout(timer);
@@ -408,6 +415,7 @@ export class CodexDriver implements AgentDriver {
 
   /** Says where the joined thread stands, then lets through what arrived while it was being read. */
   private goLive(threadId: string, { thread, underWay }: Joined): void {
+    void this.syncTasks(threadId);
     const state = this.stateOf(threadId);
     const active = thread.turns?.find((turn) => turn.status === "inProgress");
     state.activeTurnId = active?.id;
@@ -735,11 +743,83 @@ export class CodexDriver implements AgentDriver {
   watched(nativeId: string, open: boolean): void {
     if (open) {
       this.watching.add(nativeId);
+      void this.syncTasks(nativeId);
       this.cancelRelease(nativeId);
     } else {
       this.watching.delete(nativeId);
       this.considerRelease(nativeId);
     }
+  }
+
+  private publishTask(threadId: string, task: BackgroundTask): void {
+    const { lastSeq: _, ...record } = task;
+    this.host?.update(this.id, threadId, { sessionUpdate: "ls_task", task: record });
+  }
+
+  private loseTasks(threadId: string): void {
+    clearTimeout(this.taskPolls.get(threadId));
+    this.taskPolls.delete(threadId);
+    this.taskProcesses.delete(threadId);
+    this.taskRevisions.set(threadId, (this.taskRevisions.get(threadId) ?? 0) + 1);
+    for (const task of this.host?.tasks(this.id, threadId) ?? []) {
+      if (task.state === "running") this.publishTask(threadId, { ...task, state: "unknown", endedAt: Date.now(), canStop: false });
+    }
+  }
+
+  private syncTasks(threadId: string): Promise<void> {
+    const pending = this.taskSyncs.get(threadId);
+    if (pending) return pending;
+    if (!this.attached.has(threadId) || this.observed.has(threadId)) return Promise.resolve();
+    const sync = this.readTasks(threadId).catch(() => {}).finally(() => {
+      this.taskSyncs.delete(threadId);
+      clearTimeout(this.taskPolls.get(threadId));
+      this.taskPolls.delete(threadId);
+      if (this.attached.has(threadId) && this.watching.has(threadId) && this.host?.tasks(this.id, threadId).some((task) => task.state === "running")) {
+        const timer = setTimeout(() => void this.syncTasks(threadId), 5000);
+        timer.unref?.();
+        this.taskPolls.set(threadId, timer);
+      }
+    });
+    this.taskSyncs.set(threadId, sync);
+    return sync;
+  }
+
+  private async readTasks(threadId: string): Promise<void> {
+    const revision = this.taskRevisions.get(threadId) ?? 0;
+    const entries: { itemId: string; processId: string; command: string }[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.rpcFor<{ data: typeof entries; nextCursor?: string | null }>(threadId, "thread/backgroundTerminals/list", { threadId, limit: 100, ...(cursor ? { cursor } : {}) });
+      entries.push(...page.data);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    if (!this.attached.has(threadId) || revision !== (this.taskRevisions.get(threadId) ?? 0)) return;
+    const previous = new Map((this.host?.tasks(this.id, threadId) ?? []).map((task) => [task.id, task]));
+    const processes = new Map<string, string>();
+    for (const entry of entries) {
+      processes.set(entry.itemId, entry.processId);
+      const old = previous.get(entry.itemId);
+      if (old?.state === "running") continue;
+      this.publishTask(threadId, { id: entry.itemId, kind: "shell", toolCallId: entry.itemId, title: this.toolTitles.get(entry.itemId) ?? entry.command, command: entry.command, state: "running", startedAt: old?.startedAt ?? Date.now(), output: true, canStop: true });
+    }
+    this.taskProcesses.set(threadId, processes);
+    for (const task of previous.values()) {
+      if (task.state === "running" && !processes.has(task.id)) this.publishTask(threadId, { ...task, state: "unknown", endedAt: Date.now(), canStop: false });
+    }
+  }
+
+  async stopTask(nativeId: string, taskId: string): Promise<void> {
+    await this.syncTasks(nativeId);
+    const processId = this.taskProcesses.get(nativeId)?.get(taskId);
+    if (!processId) throw RpcError.app("not_found", "这个后台任务已经不在运行列表里");
+    const key = `${nativeId}:${taskId}`;
+    this.stoppingTasks.add(key);
+    try {
+      const result = await this.rpcFor<{ terminated: boolean }>(nativeId, "thread/backgroundTerminals/terminate", { threadId: nativeId, processId });
+      if (!result.terminated) throw RpcError.app("busy", "没能停止这个后台任务");
+      const task = this.host?.tasks(this.id, nativeId).find((task) => task.id === taskId);
+      if (task?.state === "running") this.publishTask(nativeId, { ...task, state: "stopped", endedAt: Date.now(), canStop: false });
+    } finally { this.stoppingTasks.delete(key); }
   }
 
   private cancelRelease(threadId: string): void {
@@ -849,6 +929,9 @@ export class CodexDriver implements AgentDriver {
   }
 
   async detach(nativeId: string): Promise<void> {
+    clearTimeout(this.taskPolls.get(nativeId));
+    this.taskPolls.delete(nativeId);
+    this.taskProcesses.delete(nativeId);
     this.cancelRelease(nativeId);
     this.stopObserving(nativeId);
     if (!this.attached.delete(nativeId)) return;
@@ -1255,6 +1338,7 @@ export class CodexDriver implements AgentDriver {
     for (const threadId of [...this.attached]) {
       // (What is joined in Codex's background server is still there.)
       if (this.inShared.has(threadId)) continue;
+      this.loseTasks(threadId);
       this.attached.delete(threadId);
       this.threads.delete(threadId);
       this.host?.update(this.id, threadId, { sessionUpdate: "ls_status", state: "offline" });
@@ -1348,6 +1432,15 @@ export class CodexDriver implements AgentDriver {
     }
     this.noteSpawns(params);
     if (method === "item/completed" && typeof threadId === "string") {
+      const item = (params as { item?: { id?: string; exitCode?: number | null; status?: string } }).item;
+      const task = this.host?.tasks(this.id, threadId).find((task) => task.id === item?.id);
+      if (task && task.state === "running") {
+        this.taskRevisions.set(threadId, (this.taskRevisions.get(threadId) ?? 0) + 1);
+        const stopped = this.stoppingTasks.delete(`${threadId}:${task.id}`);
+        this.publishTask(threadId, { ...task, state: stopped ? "stopped" : item?.exitCode === 0 ? "completed" : item?.exitCode != null || item?.status === "failed" ? "failed" : "unknown", endedAt: Date.now(), exitCode: item?.exitCode ?? undefined, canStop: false });
+      }
+    }
+    if (method === "item/completed" && typeof threadId === "string") {
       const frame = codexPreview((params as { item?: unknown }).item);
       if (frame) this.host?.preview?.(this.id, threadId, frame);
     }
@@ -1380,7 +1473,7 @@ export class CodexDriver implements AgentDriver {
       if (update.sessionUpdate === "user_message_chunk" && this.waiting.has(mapped.threadId)) void this.syncWaiting(mapped.threadId);
       if (update.sessionUpdate !== "ls_turn") continue;
       if (update.state === "started") this.fresh.delete(mapped.threadId);
-      else this.considerRelease(mapped.threadId);
+      else { void this.syncTasks(mapped.threadId); this.considerRelease(mapped.threadId); }
     }
   }
 
@@ -1453,6 +1546,7 @@ export class CodexDriver implements AgentDriver {
     const joined = [...this.inShared].filter((threadId) => this.attached.delete(threadId));
     this.inShared.clear();
     for (const threadId of joined) {
+      this.loseTasks(threadId);
       const turnId = this.stateOf(threadId).activeTurnId;
       this.threads.delete(threadId);
       // Whether the turn goes on is told again when the thread is joined again.
