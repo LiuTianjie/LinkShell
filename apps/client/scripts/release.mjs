@@ -6,6 +6,7 @@
 //
 // With a version (CI passes the tag's), app.json gets it and the build number
 // MAJOR*10000 + MINOR*100 + PATCH first; otherwise app.json is used as is.
+// --prepare-only exports an IPA locally without uploading or distributing it.
 // Development builds are separate: APP_VARIANT=development (see app.config.js).
 
 import { execFileSync } from "node:child_process";
@@ -14,11 +15,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const [platform, version] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const prepareOnly = args.includes("--prepare-only");
+const [platform, version] = args.filter((arg) => arg !== "--prepare-only");
+if (args.some((arg) => arg.startsWith("--") && arg !== "--prepare-only")) throw new Error("unknown release option");
 const TEAM_ID = "L95PYLFT86";
 
 if (platform !== "ios" && platform !== "android") {
-  console.error("usage: node scripts/release.mjs ios|android [x.y.z]");
+  console.error("usage: node scripts/release.mjs ios|android [x.y.z] [--prepare-only]");
   process.exit(1);
 }
 
@@ -72,7 +76,7 @@ if (platform === "ios") {
 <plist version="1.0">
 <dict>
   <key>method</key><string>app-store-connect</string>
-  <key>destination</key><string>upload</string>
+  <key>destination</key><string>${prepareOnly ? "export" : "upload"}</string>
   <key>teamID</key><string>${TEAM_ID}</string>
   <key>signingStyle</key><string>automatic</string>
   <key>uploadSymbols</key><true/>
@@ -81,7 +85,7 @@ if (platform === "ios") {
 `,
   );
   run("xcodebuild", ["-exportArchive", "-archivePath", archive, "-exportOptionsPlist", options, "-exportPath", join(outDir, "export"), "-allowProvisioningUpdates"]);
-  console.log("\nUploaded to App Store Connect; the build shows up in TestFlight after processing.");
+  console.log(prepareOnly ? `\nPrepared IPA in ${join(outDir, "export")}; no upload or publication performed.` : "\nUploaded to App Store Connect; the build shows up in TestFlight after processing.");
 } else {
   const android = join(root, "android");
   run("./gradlew", [

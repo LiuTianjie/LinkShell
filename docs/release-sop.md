@@ -333,3 +333,12 @@ curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网�
 - [ ] `cli-vX.Y.Z` tag 已推送（按名字推，没有用 `--tags`）
 - [ ] App 有改动时：`vX.Y.Z` 已发，TestFlight 和 GitHub Release（带 APK）都在；本地构建的话 CI 里重复的构建已取消
 - [ ] README、README_CN、docs/site（改完跑 `python3 scripts/build-site-pages.py`）、包级 README 已同步新功能
+
+## 仅准备制品（不发布）
+
+发布由负责人最后操作。需要先准备时：
+
+- `Prepare release artifacts` 工作流执行构建、类型检查、lint、测试，生成四个 npm tarball 与 iOS / Android JavaScript bundle，只上传到 Actions artifacts，不执行 npm publish、不创建 Release、不上传商店。
+- 原生包在有签名环境的 Mac 上执行 `node scripts/release.mjs ios 2.3.7 --prepare-only` 和 `node scripts/release.mjs android 2.3.7 --prepare-only`。必须在独立干净检出里执行，因为 prebuild 会重新生成原生目录。iOS 导出 IPA，不上传 App Store Connect；Android 只生成 AAB / APK。
+- 不推送 `v*` tag：原有 tag 工作流包含 TestFlight 上传和公开 GitHub Release。
+- `python3 scripts/check-release-packages.py <tarball目录>` 核对版本依赖和 workspace 重写。只有负责人明确执行最终发布步骤后，才能称为已上线。

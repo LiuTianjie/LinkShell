@@ -2,7 +2,7 @@
   "expo": {
     "name": "LinkShell",
     "slug": "linkshell-client",
-    "version": "2.3.5",
+    "version": "2.3.7",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -18,7 +18,7 @@
         },
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "20305"
+      "buildNumber": "20307"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +29,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.bd.linkshell",
-      "versionCode": 20305
+      "versionCode": 20307
     },
     "web": {
       "favicon": "./assets/favicon.png"

@@ -1,0 +1,47 @@
+name: Prepare release artifacts
+
+on:
+  push:
+    branches: ['codex/prepare-commands-goals-tasks']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --filter './packages/*' build
+      - run: pnpm typecheck && pnpm lint
+      - run: pnpm -r --filter '!@linkshell/mac' --if-present --workspace-concurrency=1 test
+      - name: Prepare npm packages without publishing
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/npm"
+          for package in wire host gateway cli; do
+            pnpm --dir "packages/$package" pack --pack-destination "$GITHUB_WORKSPACE/artifacts/npm"
+          done
+          python3 scripts/check-release-packages.py artifacts/npm
+      - name: Export mobile JavaScript bundles
+        working-directory: apps/client
+        run: |
+          pnpm exec expo export --platform ios --output-dir build/release-js/ios
+          pnpm exec expo export --platform android --output-dir build/release-js/android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linkshell-prepared-${{ github.sha }}
+          path: |
+            artifacts/npm/*.tgz
+            apps/client/build/release-js/
+          if-no-files-found: error
+          retention-days: 30
