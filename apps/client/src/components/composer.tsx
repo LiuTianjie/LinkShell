@@ -11,8 +11,7 @@ import { composerCardsHeight, composerCardsKeyboardOffset, composerViewport } fr
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useComposerDraft } from "@/lib/use-composer-draft";
 import { useIsFocused } from "expo-router/react-navigation";
-import { onCommandPicked } from "@/lib/command-pick";
-import { commandDetail, matchCommands, offeredCommands } from "@/lib/commands";
+import { commandDetail, commandQuery, matchCommands, normalizeCommandText } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
@@ -47,7 +46,7 @@ export interface ComposerProps {
   autoFocusOnPoseEntry?: boolean;
   leadingContent?: ReactNode;
   onLayout?: (event: LayoutChangeEvent) => void;
-  onSend: (content: ContentBlock[]) => Promise<"started" | "steered" | "queued" | "duplicate" | "failed">;
+  onSend: (content: ContentBlock[]) => Promise<"started" | "steered" | "queued" | "duplicate" | "failed" | "handled">;
   onStop: () => Promise<void>;
   onRespond: (requestId: string, optionId: string) => Promise<void>;
   /** Answers the questions of a pending request. */
@@ -100,22 +99,18 @@ export function Composer(props: ComposerProps) {
   const hasContent = trimmed.length > 0 || attachments.length > 0;
   const input = useRef<TextInput>(null);
   const poseFocused = useRef(false);
-  const slashQuery = /^\/(\S*)$/.exec(text)?.[1];
+  const slashQuery = commandQuery(text);
   // Names that start with what's typed, then names that contain it; the common built-ins lead.
   const suggestions = useMemo(() => (slashQuery === undefined ? [] : matchCommands(props.commands, slashQuery)), [props.commands, slashQuery]);
-  const hasCommands = useMemo(() => offeredCommands(props.commands).length > 0, [props.commands]);
+  const hasCommands = tier !== "terminal";
 
-  // A command picked in the sheet: into the input, ready for its arguments.
-  useEffect(
-    () =>
-      onCommandPicked((sessionId, command) => {
-        if (sessionId !== props.sessionId) return;
-        setText(`/${command} `);
-        // The sheet is still on its way out; focus once the input can take it.
-        setTimeout(() => input.current?.focus(), 350);
-      }),
-    [props.sessionId, setText],
-  );
+  const commandPicked = /^\s*\/[\S]+ $/.test(text);
+  useEffect(() => {
+    if (!focused || !commandPicked) return;
+    // Wait for the sheet to finish dismissing before restoring the keyboard.
+    const timer = setTimeout(() => input.current?.focus(), 350);
+    return () => clearTimeout(timer);
+  }, [focused, commandPicked]);
 
   const addImage = async (camera: boolean) => {
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], base64: true, quality: 0.8, allowsMultipleSelection: !camera, selectionLimit: 4 };
@@ -161,13 +156,19 @@ export function Composer(props: ComposerProps) {
     haptics.light();
     const content: ContentBlock[] = [
       ...attachments.map((image) => ({ type: "image" as const, mimeType: image.mimeType, data: image.data })),
-      ...(trimmed ? [{ type: "text" as const, text: trimmed }] : []),
+      ...(trimmed ? [{ type: "text" as const, text: normalizeCommandText(trimmed) }] : []),
     ];
     setText("");
     setAttachments([]);
-    const delivery = await props.onSend(content);
-    if (delivery === "steered") showFlash("已插话，正在调整方向");
-    else if (delivery === "failed") haptics.error();
+    try {
+      const delivery = await props.onSend(content);
+      if (delivery === "steered") showFlash("已插话，正在调整方向");
+      else if (delivery === "failed") haptics.error();
+    } catch (error) {
+      setText((current) => current || text);
+      setAttachments((current) => current.length ? current : attachments);
+      Alert.alert("命令未执行", error instanceof Error ? error.message : String(error));
+    }
   };
 
   // A queued message comes back to be edited: its text ahead of what's being typed, its pictures beside the others.
@@ -212,8 +213,8 @@ export function Composer(props: ComposerProps) {
     .sort((a, b) => order[a.category] - order[b.category])
     .slice(0, 4);
 
-  const hasInputExtras = !!(flash || suggestions.length || attachments.length || blocked?.detail || compact && configShown.length);
-  const hasCards = !!(props.leadingContent || permission || props.queue?.length || hasInputExtras);
+  const hasInputExtras = !!(flash || attachments.length || blocked?.detail || compact && configShown.length);
+  const hasCards = !!(slashQuery !== undefined || props.leadingContent || permission || props.queue?.length || hasInputExtras);
 
   return (
     <View onLayout={props.onLayout} style={{ paddingHorizontal: 10, paddingBottom: bottomInset + 8, paddingTop: 6, gap: hasCards && cardsHeight > 0 ? 8 : 0 }}>
@@ -232,6 +233,46 @@ export function Composer(props: ComposerProps) {
         nestedScrollEnabled
         bounces={false}
       >
+      {slashQuery !== undefined ? <Glass style={{ borderRadius: 22, padding: 8 }}>
+          {suggestions.length ? (
+            // Keep a bounded list so suggestions do not take over the conversation.
+            <ScrollView
+              style={{ maxHeight: 220, marginTop: 6 }}
+              contentContainerStyle={{ paddingHorizontal: 4 }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={suggestions.length > 5}
+            >
+              {suggestions.map((command) => (
+                <Pressable
+                  key={command.name}
+                  accessibilityRole="button"
+                  accessibilityLabel={`使用命令 /${command.name}`}
+                  onPress={() => {
+                    haptics.selection();
+                    setText(`/${command.name} `);
+                  }}
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    minHeight: 44,
+                    paddingVertical: 8,
+                    paddingHorizontal: 8,
+                    borderRadius: 10,
+                    backgroundColor: pressed ? colors.fill : "transparent",
+                  })}
+                >
+                  <Text numberOfLines={1} style={{ flexShrink: 1, maxWidth: "55%", fontFamily: mono, fontSize: 14, color: colors.accent, fontWeight: "600" }}>/{command.name}</Text>
+                  <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+                    {commandDetail(command)}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : null}
+{!suggestions.length ? <Text style={[type.footnote, { padding: 12, color: colors.secondaryLabel }]}>{props.commands.length ? "没有匹配的命令 · 可以打开命令面板查看全部" : "Agent 尚未报告命令 · 连接或接管后会自动更新"}</Text> : null}
+</Glass> : null}
       {props.leadingContent}
       {permission ? (
         <View collapsable={false} style={{ flexShrink: 0 }}>
@@ -315,43 +356,6 @@ export function Composer(props: ComposerProps) {
               {flash}
             </Animated.Text>
           ) : null}
-          {suggestions.length ? (
-            // Keep a bounded list so suggestions do not take over the conversation.
-            <ScrollView
-              style={{ maxHeight: 220, marginTop: 6 }}
-              contentContainerStyle={{ paddingHorizontal: 4 }}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={suggestions.length > 5}
-            >
-              {suggestions.map((command) => (
-                <Pressable
-                  key={command.name}
-                  accessibilityRole="button"
-                  accessibilityLabel={`使用命令 /${command.name}`}
-                  onPress={() => {
-                    haptics.selection();
-                    setText(`/${command.name} `);
-                  }}
-                  style={({ pressed }) => ({
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
-                    minHeight: 44,
-                    paddingVertical: 8,
-                    paddingHorizontal: 8,
-                    borderRadius: 10,
-                    backgroundColor: pressed ? colors.fill : "transparent",
-                  })}
-                >
-                  <Text numberOfLines={1} style={{ flexShrink: 1, maxWidth: "55%", fontFamily: mono, fontSize: 14, color: colors.accent, fontWeight: "600" }}>/{command.name}</Text>
-                  <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
-                    {commandDetail(command)}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          ) : null}
           {attachments.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 6, paddingTop: 8 }}>
               {attachments.map((image, index) => (
@@ -421,6 +425,7 @@ export function Composer(props: ComposerProps) {
               onTakePhoto={() => void addImage(true)}
               onCommands={props.onCommands}
             />
+            {hasCommands ? <Pressable accessibilityRole="button" accessibilityLabel="打开命令面板" onPress={props.onCommands} disabled={inputDisabled} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: inputDisabled ? 0.5 : 1 }}><Icon sf="command" md="terminal" size={17} color={colors.secondaryLabel} /></Pressable> : null}
             {!compact ? <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}

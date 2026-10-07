@@ -190,6 +190,7 @@ export class HostRpcServer {
         await hub.delete(params.sessionId, params.worktree);
         return {};
       },
+      "sessions.goal": (params: P<"sessions.goal">) => hub.goal(params.sessionId, params.change),
       "sessions.setConfig": async (params: P<"sessions.setConfig">) => {
         await hub.setConfig(params.sessionId, params.optionId, params.value);
         return {};

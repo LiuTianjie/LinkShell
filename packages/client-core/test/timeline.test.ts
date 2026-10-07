@@ -18,6 +18,14 @@ const text = (t: string) => ({ type: "text" as const, text: t });
 const kinds = (items: TimelineItem[]) => items.map((i) => i.kind);
 
 describe("timeline reducer", () => {
+  it("keeps goals across turn ends and does not restore an old goal when paging history", () => {
+    seq = 0;
+    const old = ev({ sessionUpdate: "ls_goal", goal: { objective: "Old", status: "active" } });
+    let view = applyEvents(emptyView("s"), [old, ev({ sessionUpdate: "ls_goal", goal: { objective: "Current", status: "paused", tokenBudget: 3000, tokensUsed: 100 } }), ev({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" })]);
+    expect(view.goal).toMatchObject({ objective: "Current", status: "paused", tokensUsed: 100 });
+    view = applyEvent(view, ev({ sessionUpdate: "ls_goal", goal: null }));
+    expect(prependEvents(view, [old], 0).goal).toBeNull();
+  });
   it("streams an agent message into one item and closes it", () => {
     seq = 0;
     let v = applyEvents(emptyView("s"), [

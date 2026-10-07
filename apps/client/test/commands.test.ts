@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { commandDetail, matchCommands, offeredCommands, type Command } from "@/lib/commands";
+import { commandDetail, commandQuery, matchCommands, normalizeCommandText, offeredCommands, parseCommand, sessionCommands, type Command } from "@/lib/commands";
 
 const command = (name: string, description = ""): Command => ({ name, description });
 const names = (commands: Command[]) => commands.map((entry) => entry.name);
@@ -8,8 +8,8 @@ const names = (commands: Command[]) => commands.map((entry) => entry.name);
 const fromAgent = [command("deploy", "Deploy the app"), command("model"), command("review", "Review a pull request"), command("compact", ""), command("deploy", "a built-in of the same name")];
 
 describe("the slash commands the phone offers", () => {
-  it("puts the common built-ins first and leaves out what only works at the computer", () => {
-    expect(names(offeredCommands(fromAgent))).toEqual(["compact", "review", "deploy"]);
+  it("puts common built-ins first without hiding capabilities already filtered by the agent", () => {
+    expect(names(offeredCommands(fromAgent))).toEqual(["compact", "review", "deploy", "model"]);
   });
 
   it("keeps the first of two commands with one name", () => {
@@ -31,5 +31,31 @@ describe("the slash commands the phone offers", () => {
     expect(names(matchCommands(commands, "审查"))).toEqual(["review"]);
     expect(names(matchCommands(commands, ""))).toEqual(["review", "init", "preview", "deploy"]);
     expect(matchCommands(commands, "nothing-like-it")).toEqual([]);
+  });
+});
+
+describe("mobile command entry", () => {
+  it("opens after whitespace and full-width punctuation, but closes for arguments and paths", () => {
+    for (const text of ["/", "／", "  /", "\n／"]) expect(commandQuery(text)).toBe("");
+    expect(commandQuery("  ／rev")).toBe("rev");
+    for (const text of ["hello /", "/review ", "/etc/hosts", "/review this", ""]) expect(commandQuery(text)).toBeUndefined();
+    expect(parseCommand(" ／goal 完成测试 ")).toEqual({ name: "goal", args: "完成测试" });
+    expect(normalizeCommandText("／goal 检查／目录")).toBe("/goal 检查／目录");
+  });
+
+  it("offers useful local controls before the native list arrives", () => {
+    for (const agent of ["codex", "claude"]) {
+      expect(names(sessionCommands(agent, [], []))).toEqual(expect.arrayContaining(["help", "settings", "diff", "new", "rename"]));
+      expect(names(sessionCommands(agent, [], []))).not.toContain("goal");
+    }
+  });
+
+  it("keeps remote Claude commands and maps reported settings to controls without duplicates", () => {
+    const native = ["mcp", "output-style", "config", "reload-skills", "goal", "model", "fork"].map((name) => command(name));
+    const list = sessionCommands("claude", native, [{ id: "model", name: "Model", category: "model", current: "sonnet", values: [{ value: "sonnet", name: "Sonnet" }] }]);
+    expect(names(list)).toEqual(expect.arrayContaining(names(native)));
+    expect(list.filter((entry) => entry.name === "model")).toEqual([expect.objectContaining({ action: "settings", optionId: "model" })]);
+    expect(list.find((entry) => entry.name === "fork")?.action).toBeUndefined();
+    expect(list.find((entry) => entry.name === "goal")?.action).toBe("goal");
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sessionGoalSchema } from "./goal.js";
 import { permissionOptionSchema, questionAnswerSchema, questionSchema, sessionDriverSchema, sessionStateSchema, toolKindSchema } from "./model.js";
 import { workflowAgentStateSchema, workflowSchema } from "./workflow.js";
 
@@ -151,6 +152,10 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
   z.object({
     sessionUpdate: z.literal("plan"),
     entries: z.array(planEntrySchema),
+  }),
+  z.object({
+    sessionUpdate: z.literal("ls_goal"),
+    goal: sessionGoalSchema.nullable(),
   }),
   z.object({
     sessionUpdate: z.literal("available_commands_update"),

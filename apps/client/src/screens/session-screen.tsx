@@ -36,6 +36,9 @@ import { SessionWorkspace, useSessionWorkspace } from "@/components/session-work
 import { AdaptivePage, usePageInsets } from "@/components/adaptive-page";
 import { useSessionFoldLayout } from "@/lib/session-fold-layout";
 import { ContentHeight } from "@/lib/content-height";
+import { useHasComposerDraft } from "@/lib/use-composer-draft";
+import { useSessionCommands } from "@/lib/use-session-commands";
+import { GoalCard } from "@/components/goal-card";
 
 // One array for "nothing yet": a new one on every render would make everything computed from the items run again.
 const NO_ITEMS: TimelineItem[] = [];
@@ -98,7 +101,6 @@ function countChanges(items: TimelineItem[]): number {
   return paths.size;
 }
 
-
 export function SessionScreen() {
   const { id, panel } = useLocalSearchParams<{ id: string; panel?: string }>();
   return <AdaptivePage surface="plain"><SessionWorkspace key={id} sessionId={id} initialPanel={panel === "preview" || panel === "changes" ? panel : undefined}><SessionContent sessionId={id} /></SessionWorkspace></AdaptivePage>;
@@ -131,6 +133,8 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const hasSubagents = hasWorkflows || subagentsTotal > 0 || subagentsListed > 0;
   const agentInfo = useClient((state) => state.machine?.agents.find((agent) => agent.id === summary?.agent));
   const actions = useActions();
+  const commandControls = useSessionCommands(id);
+  const hasDraft = useHasComposerDraft(id);
   const insets = usePageInsets();
   const focused = useIsFocused();
   // Some panes already stop above native tabs. Padding and keyboard travel use the same physical edge.
@@ -282,7 +286,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   // Nor is it the start while earlier history is still to load.
   const started = hasEarlier || items.some((item) => item.kind === "user" || item.kind === "agent" || item.kind === "tool" || item.kind === "thought" || item.kind === "plan");
   const intro =
-    loading || started ? null : (
+    loading || started || hasDraft || view?.goal ? null : (
       <View style={{ alignItems: "center", gap: 10, paddingHorizontal: 32 }}>
         <AgentTile agent={summary.agent} size={56} />
         <Text style={[type.headline, { color: colors.label }]}>{look.name}</Text>
@@ -338,6 +342,9 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
             icon: { sf: "ellipsis", md: "more_vert" },
             label: "更多",
             items: [
+              { title: "命令", icon: { sf: "command", md: "terminal" }, onPress: () => router.push({ pathname: "/session/[id]/commands", params: { id } }) },
+              { title: "会话设置", icon: { sf: "slider.horizontal.3", md: "tune" }, onPress: () => router.push({ pathname: "/session/[id]/settings", params: { id } }) },
+              ...(commandControls.commands.some((command) => command.name === "goal") || view?.goal ? [{ title: "持续目标", icon: { sf: "target", md: "flag" } as const, onPress: () => router.push({ pathname: "/session/[id]/goal", params: { id } }) }] : []),
               ...(turnActive
                 ? [{ title: "停止这一轮", icon: { sf: "stop.circle", md: "stop_circle" } as const, destructive: true, onPress: () => void guard(() => actions.cancel(id), "停止失败") }]
                 : []),
@@ -474,14 +481,14 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
           permission={view?.permissions[0]}
           permissionCount={view?.permissions.length ?? 0}
           config={view?.config ?? []}
-          commands={view?.commands ?? []}
+          commands={commandControls.commands}
           usage={view?.usage}
           bottomInset={bottomInset}
           keyboardOffset={keyboardOffset}
           autoFocusOnPoseEntry={folded !== null}
           accessoryHeight={(!atEnd && items.length > 0 ? 42 : 0) + (embedded ? 0 : insets.top)}
-          leadingContent={Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} /> : undefined}
-          onSend={(content) => actions.send(id, content)}
+          leadingContent={view?.goal || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <>{view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}{Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} /> : null}</> : undefined}
+          onSend={commandControls.send}
           onStop={() => guard(() => actions.cancel(id), "停止失败")}
           queue={shownQueue(summary.queue, queueing)}
           onUnqueue={(clientMessageId) => void guard(() => actions.unqueue(id, clientMessageId).then(() => {}), "取消失败")}

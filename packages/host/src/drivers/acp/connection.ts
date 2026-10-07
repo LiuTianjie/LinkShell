@@ -29,6 +29,8 @@ export interface AcpConnectionOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   clientVersion: string;
+  /** Namespace extensions implemented by this client for this adapter. */
+  clientMeta?: Record<string, unknown>;
   onUpdate: (sessionId: string, update: unknown) => void;
   /** Agent → client requests (session/request_permission, …). */
   onRequest: (method: string, params: unknown, id: RpcId) => unknown;
@@ -119,7 +121,7 @@ export class AcpConnection {
             elicitation: { form: {} },
             // Ask adapters that support it (Claude's) to stream sub-agents' own
             // messages and tool calls, each stamped with the spawning call.
-            _meta: { "subagent-transcript": true },
+            _meta: { "subagent-transcript": true, ...this.options.clientMeta },
           },
           clientInfo: { name: "linkshell", title: "LinkShell", version: this.options.clientVersion },
         },

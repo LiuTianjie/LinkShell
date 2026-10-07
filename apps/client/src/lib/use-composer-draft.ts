@@ -5,6 +5,16 @@ import { composerDraftKey, createComposerDrafts, EMPTY_DRAFT, type DraftAttachme
 
 const drafts = createComposerDrafts();
 
+/** The welcome view only needs presence, not a re-render for every keystroke. */
+export function useHasComposerDraft(sessionId: string) {
+  const { computer } = useConnection();
+  const key = composerDraftKey(computer.key, sessionId);
+  return useStore(drafts, (state) => {
+    const draft = state.entries[key];
+    return !!(draft?.text.trim() || draft?.attachments.length);
+  });
+}
+
 export function useComposerDraft(sessionId: string) {
   const { computer } = useConnection();
   const key = composerDraftKey(computer.key, sessionId);

@@ -361,6 +361,9 @@ export class AcpDriver implements AgentDriver {
       args: this.spec.args,
       env: this.env,
       clientVersion: this.options.hostVersion,
+      // Claude's published Goal extension uses this namespace. Keep our own
+      // clientInfo identity; opt in only for the adapter whose payload we map.
+      clientMeta: this.id === "claude" ? { jetbrains: { air: { version: 1, capabilities: [] } } } : undefined,
       onUpdate: (sessionId, update) => this.onUpdate(sessionId, update),
       onRequest: (method, params, id) => this.onRequest(method, params, id),
       onExit: (reason) => this.onExit(reason),

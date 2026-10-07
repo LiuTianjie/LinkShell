@@ -1,18 +1,17 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text, TextInput } from "@/components/fixed-text";
 import { usePageInsets } from "@/components/adaptive-page";
 import { SheetHeader } from "@/components/sheet-header";
 import { Icon } from "@/components/icon";
-import { pickCommand } from "@/lib/command-pick";
-import { useClient, useSessionSubscription } from "@/lib/client";
+import { useSessionCommands } from "@/lib/use-session-commands";
+import { useComposerDraft } from "@/lib/use-composer-draft";
+import { useActions, useClient, useSessionSubscription } from "@/lib/client";
 import { commandDetail, matchCommands, type Command } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
-
-const NONE: Command[] = [];
 
 /**
  * The agent's slash commands, searchable: the common ones first (compact,
@@ -23,19 +22,33 @@ export function CommandsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   useSessionSubscription(id);
   const insets = usePageInsets();
-  const commands = useClient((state) => state.views[id]?.commands) ?? NONE;
+  const { commands } = useSessionCommands(id);
+  const { setText } = useComposerDraft(id);
   const [query, setQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const actions = useActions();
+  const online = useClient((state) => state.status === "online");
   const shown = useMemo(() => matchCommands(commands, query), [commands, query]);
 
   const pick = (command: Command) => {
     haptics.selection();
-    pickCommand(id, command.name);
+    if (command.action === "goal") { router.replace({ pathname: "/session/[id]/goal", params: { id } }); return; }
+    if (command.action === "settings") { router.replace({ pathname: "/session/[id]/settings", params: { id, option: command.optionId } }); return; }
+    if (command.action === "commands") { setQuery(""); return; }
+    // The composer can unmount in adaptive layouts; write its persistent draft
+    // instead of depending on a live event listener behind this sheet.
+    setText(`/${command.name} `);
     router.back();
   };
 
   return (
     <View style={{ flex: 1 }}>
-      <SheetHeader title="命令" />
+      <SheetHeader title="命令" actions={commands.some((command) => command.name === "reload-skills") ? [{ key: "refresh", label: "刷新命令", icon: { sf: "arrow.clockwise", md: "refresh" }, disabled: !online || refreshing, onPress: () => {
+        setRefreshing(true);
+        void actions.send(id, [{ type: "text", text: "/reload-skills" }], { now: true }).then((delivery) => {
+          if (delivery === "failed") Alert.alert("刷新失败", "请在会话中查看原因后重试");
+        }).finally(() => setRefreshing(false));
+      } }] : []} />
       <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
         <View
           style={{

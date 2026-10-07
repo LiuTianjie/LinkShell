@@ -1,4 +1,5 @@
 export * from "./model.js";
+export * from "./goal.js";
 export * from "./updates.js";
 export * from "./workflow.js";
 export * from "./rpc.js";

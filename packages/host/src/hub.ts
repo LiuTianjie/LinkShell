@@ -1,5 +1,6 @@
 import {
   RpcError,
+  type GoalChange,
   sessionIdFor,
   type AgentAuth,
   type AgentInfo,
@@ -48,6 +49,7 @@ function isActivity(update: SessionUpdate): boolean {
   switch (update.sessionUpdate) {
     case "session_info_update":
     case "ls_config":
+    case "ls_goal":
     case "available_commands_update":
     case "usage_update":
     // What state a session is in and who drives it are said again whenever it
@@ -98,6 +100,7 @@ const CATCH_UP = { events: 800, bytes: 4 * 1024 * 1024 };
 
 /** State a client needs from before its window: the latest of each applies. */
 const STANDING: SessionUpdate["sessionUpdate"][] = [
+  "ls_goal",
   "ls_config",
   "available_commands_update",
   "current_mode_update",
@@ -1038,6 +1041,14 @@ export class SessionHub {
     const driver = this.requireDriver(summary.agent);
     if (!driver.reclaim) throw RpcError.app("not_supported", `${driver.label} has no desktop mode`);
     return driver.reclaim(summary.nativeId, { cwd: summary.cwd, ...context });
+  }
+
+  async goal(sessionId: string, change: GoalChange) {
+    const summary = this.getSession(sessionId);
+    const driver = this.requireDriver(summary.agent);
+    if (!driver.goal) throw RpcError.app("not_supported", "这个 Agent 通过 /goal 命令管理目标");
+    await this.ensureAttached(sessionId);
+    return { goal: await driver.goal(summary.nativeId, change) };
   }
 
   async setConfig(sessionId: string, optionId: string, value: string): Promise<void> {

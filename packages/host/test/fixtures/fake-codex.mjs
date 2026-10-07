@@ -322,7 +322,26 @@ function userItem(input, clientId) {
   return { item: { type: "userMessage", id: randomUUID(), clientId: clientId ?? null, content: input }, text };
 }
 
+const goals = new Map();
+let skillsChanged = false;
 const handlers = {
+  "test/changeSkills": () => { skillsChanged = true; broadcast("skills/changed", {}); return {}; },
+  "mcpServerStatus/list": (params) => ({ data: [{ name: params.cursor ? "second-server" : "first-server", tools: { check: {} }, authStatus: "notLoggedIn" }], nextCursor: params.cursor ? null : "next" }),
+  "app/list": () => ({ data: [{ name: "Test connector", isEnabled: true }], nextCursor: null }),
+  "thread/goal/get": (params) => ({ goal: goals.get(params.threadId) ?? null }),
+  "thread/goal/set": (params) => {
+    const previous = goals.get(params.threadId);
+    if (!params.objective && !previous) throw { code: -32602, message: "no goal" };
+    const goal = { threadId: params.threadId, objective: params.objective ?? previous.objective, status: params.status ?? "active", tokenBudget: params.tokenBudget ?? previous?.tokenBudget ?? null, tokensUsed: previous?.tokensUsed ?? 0, timeUsedSeconds: 0 };
+    goals.set(params.threadId, goal);
+    broadcast("thread/goal/updated", { threadId: params.threadId, goal });
+    return { goal };
+  },
+  "thread/goal/clear": (params) => {
+    const cleared = goals.delete(params.threadId);
+    broadcast("thread/goal/cleared", { threadId: params.threadId });
+    return { cleared };
+  },
   initialize: () => ({ userAgent: "fake-codex", codexHome: "/tmp/fake", platformFamily: "unix", platformOs: "macos" }),
   "thread/list": () => ({
     // Like Codex: a thread is only persisted (and listed) once it has a turn.
@@ -408,6 +427,12 @@ const handlers = {
     if (!thread?.loaded) throw { code: -32600, message: `thread not found: ${params.threadId}` };
     return { data: thread.background ?? [], nextCursor: null };
   },
+  "thread/backgroundTerminals/clean": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: "unknown thread" };
+    thread.background = [];
+    return {};
+  },
   "thread/queue/delete": (params) => {
     const entries = queued(params.threadId);
     const kept = entries.filter((entry) => entry.id !== params.queuedSubmissionId);
@@ -464,6 +489,7 @@ const handlers = {
       {
         cwd: params.cwds?.[0] ?? process.cwd(),
         skills: [
+          ...(skillsChanged ? [{ name: "new-skill", description: "Added while connected", path: "/skills/new/SKILL.md", enabled: true }] : []),
           { name: "tidy", description: "Tidy the project up", path: "/skills/tidy/SKILL.md", scope: "user", enabled: true },
           { name: "off", description: "Turned off", path: "/skills/off/SKILL.md", scope: "user", enabled: false },
         ],

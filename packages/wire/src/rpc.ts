@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { goalChangeSchema, sessionGoalSchema } from "./goal.js";
 import {
   gatewayStatusSchema,
   machineInfoSchema,
@@ -215,6 +216,10 @@ export const methods = {
   "sessions.answer": {
     params: z.object({ sessionId: z.string().min(1), requestId: z.string().min(1), answers: z.array(questionAnswerSchema).max(50) }),
     result: empty,
+  },
+  "sessions.goal": {
+    params: z.object({ sessionId: z.string(), change: goalChangeSchema }),
+    result: z.object({ goal: sessionGoalSchema.nullable() }),
   },
   "sessions.setConfig": {
     params: z.object({

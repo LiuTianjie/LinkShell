@@ -1,4 +1,5 @@
 import { unwrapShellCommand } from "@linkshell/wire";
+import { sessionGoalSchema } from "@linkshell/wire";
 import type {
   ContentBlock,
   PermissionOption,
@@ -569,6 +570,12 @@ export function mapNotification(
   const fromItsStart = (itemId: string): boolean => !state.midTurn || state.begun?.has(itemId) === true;
 
   switch (method) {
+    case "thread/goal/updated": {
+      const goal = sessionGoalSchema.safeParse(params.goal);
+      return goal.success ? [out({ sessionUpdate: "ls_goal", goal: goal.data })] : [];
+    }
+    case "thread/goal/cleared":
+      return [out({ sessionUpdate: "ls_goal", goal: null })];
     case "turn/started": {
       const turn = obj(params.turn);
       state.activeTurnId = str(turn?.id);

@@ -77,6 +77,14 @@ export default function RootLayout() {
                   }}
                 />
                 <Stack.Screen
+                  name="session/[id]/goal"
+                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.92], sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
+                />
+                <Stack.Screen
+                  name="session/[id]/settings"
+                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.7, 0.92], sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
+                />
+                <Stack.Screen
                   name="new"
                   options={{
                     presentation: "formSheet",

@@ -1,5 +1,7 @@
 import type {
   AgentAuth,
+  GoalChange,
+  SessionGoal,
   AgentCapabilities,
   AgentTier,
   ContentBlock,
@@ -149,6 +151,7 @@ export interface AgentDriver {
   /** Answers the questions of a pending request (an `ls_permission` with `questions`). */
   answerQuestion?(nativeId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>;
   setConfig?(nativeId: string, optionId: string, value: string): Promise<void>;
+  goal?(nativeId: string, change: GoalChange): Promise<SessionGoal | null>;
   /** Drops a message the driver holds in its queue; whether it was there. */
   unqueue?(nativeId: string, clientMessageId: string): boolean;
   /**
