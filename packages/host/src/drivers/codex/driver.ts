@@ -1,4 +1,5 @@
 import { statSync } from "node:fs";
+import { codexPreview } from "./computer-preview.js";
 import { ABANDON, RpcError, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
 import type { AgentAuth } from "@linkshell/wire";
 import { parseCodexLoginStatus, runStatusCommand } from "../auth.js";
@@ -780,6 +781,14 @@ export class CodexDriver implements AgentDriver {
 
   /** Nests each sub-agent's own history right after the call that spawned it. */
   private async withSubAgents(threadId: string, thread: CodexThread, history: HistoryItem[]): Promise<HistoryItem[]> {
+    // Restore the last surface across idle turns and history windows.
+    outer: for (const turn of [...(thread.turns ?? [])].reverse()) {
+      for (const item of [...turn.items].reverse()) {
+        const stamp = turn.completedAt ?? turn.startedAt ?? thread.updatedAt;
+        const frame = codexPreview(item, stamp < 1e12 ? stamp * 1000 : stamp);
+        if (frame) { this.host?.preview?.(this.id, threadId, frame); break outer; }
+      }
+    }
     const spawns = new Map<string, string[]>();
     for (const turn of thread.turns ?? []) {
       for (const item of turn.items) {
@@ -1215,6 +1224,10 @@ export class CodexDriver implements AgentDriver {
       return;
     }
     this.noteSpawns(params);
+    if (method === "item/completed" && typeof threadId === "string") {
+      const frame = codexPreview((params as { item?: unknown }).item);
+      if (frame) this.host?.preview?.(this.id, threadId, frame);
+    }
     for (const mapped of mapNotification(method, params, (id) => this.stateOf(id))) {
       const update =
         from === "shared" && mapped.update.sessionUpdate === "ls_permission_resolved"

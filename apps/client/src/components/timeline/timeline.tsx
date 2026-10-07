@@ -1,6 +1,7 @@
 import type { TimelineItem } from "@linkshell/client-core";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
@@ -12,6 +13,8 @@ import { Icon } from "../icon";
 import { AgentMessage, DriverChange, ErrorCard, Notice, PermissionResult, PlanCard, Thought, TimeSeparator, TurnEnd, UserMessage } from "./items";
 import { StepsSummary } from "./steps";
 import { ToolCall } from "./tool-call";
+import { FloatingComputerUse } from "../computer-use-preview";
+import { computerUseTopInset } from "@/lib/computer-use";
 
 /** How near the top (in screens) the page of history before it is asked for. */
 const EARLIER_SCREENS = 2;
@@ -49,6 +52,8 @@ function EarlierRow({ loading, onPress }: { loading: boolean; onPress: () => voi
 
 export interface TimelineProps {
   items: TimelineItem[];
+  computerPreview?: boolean;
+  previewHeaderConsumed?: boolean;
   planId?: string;
   turnActive: boolean;
   composerInset: SharedValue<number>;
@@ -65,9 +70,11 @@ export interface TimelineProps {
 }
 
 export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeline(
-  { items, planId, turnActive, composerInset, keyboardOffset, onFailedMessage, onScroll, header, earlier, anchorEnd = true, alignEnd = anchorEnd },
+  { items, computerPreview = false, previewHeaderConsumed = false, planId, turnActive, composerInset, keyboardOffset, onFailedMessage, onScroll, header, earlier, anchorEnd = true, alignEnd = anchorEnd },
   ref,
 ) {
+  const headerHeight = useHeaderHeight();
+  const [previewInset, setPreviewInset] = useState<number | null>(null);
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((key: string) => {
     setOpen((current) => {
@@ -237,6 +244,8 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement, contentInset } = event.nativeEvent;
+      // Use the list's resolved inset: embedded conversations don't have a native header to clear.
+      if (contentInset) setPreviewInset(Math.max(0, contentInset.top));
       const fromEnd = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height);
       // Android: opening a menu (a Modal over the screen) throws the list to its
       // top, as it did before there was earlier history to load. Nobody scrolled:
@@ -329,6 +338,7 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
   );
 
   return (
+    <View style={{ flex: 1 }}>
     <KeyboardAwareLegendList
       ref={list}
       data={rows}
@@ -387,5 +397,7 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
       scrollEventThrottle={32}
       style={{ flex: 1 }}
     />
+    {computerPreview ? <FloatingComputerUse top={computerUseTopInset(Platform.OS, headerHeight, previewInset, previewHeaderConsumed)} /> : null}
+    </View>
   );
 });

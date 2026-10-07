@@ -11,6 +11,7 @@ import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
 import { useTimelineFork } from "./context";
+import { userMessageText } from "@/lib/user-message";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
 
@@ -26,10 +27,7 @@ export const UserMessage = memo(function UserMessage({
   onFailedPress?: (item: Of<"user">) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const text = item.blocks
-    .map((block) => (block.type === "text" ? block.text : ""))
-    .join("")
-    .trim();
+  const text = userMessageText(item.blocks);
   const images = item.blocks.filter((block) => block.type === "image");
   const links = item.blocks.filter((block) => block.type === "resource_link");
   // A slash command or skill the user ran: `/review src`, `/pdf`.

@@ -30,6 +30,8 @@ import { PAGE, worktreeOf, type HostStore, type SessionPatch, type WorktreeRecor
 import { createWorktree, gitBranch, gitInfo, removeWorktree, worktreeState, type CreatedWorktree } from "./worktrees.js";
 import { conversationDigest, copied, isConversation } from "./carry.js";
 import { slimEvent } from "./slim.js";
+import { ComputerPreviews } from "./computer-preview.js";
+import { MacPreviewCapture } from "./computer-preview-capture.js";
 
 export interface Subscriber {
   event(event: SessionEvent): void;
@@ -166,8 +168,14 @@ export class SessionHub {
   private readonly branches = new Map<string, { at: number; branch: Promise<string | undefined> }>();
   private worktreeCache?: WorktreeRecord[];
   private authRefreshing?: Promise<void>;
+  readonly previews: ComputerPreviews;
 
   readonly driverHost: DriverHost = {
+    preview: (agent, nativeId, frame) => {
+      // Preview is optional: storage or capture failures must not break agent notifications.
+      try { void this.previews.put(sessionIdFor(agent, nativeId), frame).catch(() => this.log("[computer-preview] update failed")); }
+      catch { this.log("[computer-preview] update failed"); }
+    },
     sessionSeen: (agent, session) => this.recordDiscovered(agent, session),
     update: (agent, nativeId, update, itemId, ts) => this.ingest(sessionIdFor(agent, nativeId), update, itemId, ts),
     follow: (agent, nativeId) => {
@@ -205,6 +213,14 @@ export class SessionHub {
     /** Where the host keeps its own files: worktrees go under it. */
     private readonly home: string = join(homedir(), ".linkshell"),
   ) {
+    const capture = process.platform === "darwin" ? new MacPreviewCapture(log) : undefined;
+    this.previews = new ComputerPreviews({
+      load: (id) => store.getDriverState(id, "computer-preview"),
+      save: (id, value) => store.setDriverState(id, "computer-preview", value),
+      exists: (id) => !!store.getSession(id),
+      log,
+      capture: capture ? (target, frame, failed) => capture.capture(target, frame, failed) : undefined,
+    });
     for (const driver of drivers) this.drivers.set(driver.id, driver);
   }
 
@@ -248,6 +264,7 @@ export class SessionHub {
   async stop(): Promise<void> {
     if (this.discoveryTimer) clearInterval(this.discoveryTimer);
     await Promise.allSettled([...this.drivers.values()].map((driver) => driver.stop()));
+    await this.previews.stop();
   }
 
   agents(): AgentInfo[] {
@@ -913,6 +930,7 @@ export class SessionHub {
   private forget(sessionId: string): void {
     if (!this.store.getSession(sessionId)) return;
     this.live.delete(sessionId);
+    this.previews.forget(sessionId);
     this.store.removeSession(sessionId);
     for (const listener of this.removedListeners) {
       try {

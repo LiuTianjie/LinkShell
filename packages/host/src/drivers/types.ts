@@ -9,6 +9,8 @@ import type {
   SessionUpdate,
 } from "@linkshell/wire";
 
+import type { PreviewInput } from "../computer-preview.js";
+
 /** A session the agent knows about, however it was created. */
 export interface DiscoveredSession {
   nativeId: string;
@@ -49,6 +51,8 @@ export interface ForkOptions {
 
 /** Callbacks a driver uses to report to the host. */
 export interface DriverHost {
+  /** Independent computer-use surface; never a conversation image. */
+  preview?(agent: string, nativeId: string, frame: PreviewInput): void;
   /** A session was created or changed outside of any client request (e.g. in the desktop TUI). */
   sessionSeen(agent: string, session: DiscoveredSession): void;
   /**

@@ -55,6 +55,7 @@ export interface HelperStatus {
   app: string;
   /** The app can send the screen as a video track (it carries the media engine). */
   video: boolean;
+  preview: boolean;
 }
 
 /** A display as the app sees it. `screen` is its number in everything said to the app. */
@@ -202,6 +203,7 @@ function statusOf(message: Record<string, unknown>): HelperStatus {
     recording: message.recording === true,
     app: typeof message.app === "string" ? message.app : "",
     video: message.video === true,
+    preview: message.preview === true,
   };
 }
 
@@ -449,6 +451,16 @@ class HelperApp {
     await this.write({ t: "rtc.open", v: id, ...offer });
   }
 
+  async preview(id: string, target: { bundleId: string; title?: string; app?: boolean }, route: Route): Promise<void> {
+    this.routes.set(id, route);
+    await this.write({ t: "preview.open", v: id, ...target });
+  }
+
+  endPreview(id: string): void {
+    this.routes.delete(id);
+    if (this.socket && !this.socket.destroyed) this.socket.write(`${JSON.stringify({ t: "preview.close", v: id })}\n`);
+  }
+
   signal(id: string, signal: VideoSignal): void {
     if (this.socket && !this.socket.destroyed && this.routes.has(id)) this.socket.write(`${JSON.stringify({ ...signal, v: id })}\n`);
   }
@@ -500,6 +512,11 @@ export function closeInputApp(): void {
 export function inputApp(log: (message: string) => void): HelperApp | undefined {
   const app = shippedApp();
   return app ? helperApp(app, dryRunByDefault(), log) : undefined;
+}
+/** A separate process: preview failures must not terminate normal screen sharing or input. */
+export function previewApp(log: (message: string) => void): HelperApp | undefined {
+  const app = shippedApp();
+  return app ? new HelperApp(app, false, log) : undefined;
 }
 export type { HelperApp };
 

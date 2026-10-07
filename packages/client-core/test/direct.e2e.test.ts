@@ -5,8 +5,9 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { RTCPeerConnection } from "werift";
 import { afterEach, describe, expect, it } from "vitest";
-import { startHost, type RunningHost } from "@linkshell/host";
-import { DIRECT_LABEL } from "@linkshell/wire";
+import { connectHost, startHost, type RunningHost } from "@linkshell/host";
+import { ComputerPreviewSubscription } from "../src/computer-preview.js";
+import { DIRECT_LABEL, type PreviewFrame } from "@linkshell/wire";
 import { HostLink, type SocketLike } from "../src/host-link.js";
 import { HostStreams, type DirectConnector, type HostStream } from "../src/streams.js";
 
@@ -227,4 +228,54 @@ describe("streams to the computer's ports", () => {
     await waitFor(() => stream.received().toString() === "ok");
     expect(stream.stream.direct).toBe(false);
   });
+});
+
+
+describe("computer preview over existing bulk transports", () => {
+  it.each([false, true])("restores the independent frame across leaving and re-entering (direct=%s)", async (direct) => {
+    const { host, link, machine } = await setup(direct ? [] : false);
+    host.hub.driverHost.sessionSeen("preview", { nativeId: "one", cwd: "/tmp", title: "Preview", createdAt: 100, updatedAt: 100 });
+    host.hub.driverHost.sessionSeen("preview", { nativeId: "two", cwd: "/tmp", title: "Other", createdAt: 100, updatedAt: 100 });
+    const sessionId = "preview:one";
+    let shown = 0;
+    const unlisten = link.on("session.preview.show", event => { if (event.sessionId === sessionId) shown++; });
+    cleanups.push(unlisten);
+    const local = await connectHost(host.paths.hostSocket);
+    try { await local.call("desktop.preview.show", { sessionId }); } finally { local.close(); }
+    await waitFor(() => shown === 1);
+    const input = { sourceId: "first", target: "tab:one", capturedAt: 123, dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAgCAIAAAAt/+nTAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAYElEQVRYhe2SQQkAQRDD6qmezlPcroh7hIFCBKSh6cdpoht0A9ArdhfiLtENugHoFbsLcZfoBt0A9IrdhbhLdINuAHrF7kLcJbpBNwC9Ynch7hLdoBuAXrG7EHeJbvCTB6qEkIiV5vWDAAAAAElFTkSuQmCC" };
+    await host.hub.previews.put(sessionId, input);
+    await host.hub.previews.put("preview:two", { ...input, target: "tab:other" });
+    const streams = new HostStreams(link, { connector: direct ? connector() : undefined, iceServers: () => machine.direct?.iceServers });
+    cleanups.push(() => streams.stop());
+    if (direct) await waitFor(() => streams.path === "direct");
+    const received: PreviewFrame[] = [];
+    const echo = await listen(socket => socket.pipe(socket));
+    const normal = await opened(streams, echo.port);
+    const first = new ComputerPreviewSubscription(link, streams, sessionId, frame => received.push(frame));
+    cleanups.push(() => first.close());
+    await waitFor(() => received.length === 1);
+    expect(received[0]?.target).toBe("tab:one");
+    expect(streams.path).toBe(direct ? "direct" : "relay");
+    first.close();
+    normal.stream.write(Buffer.from("normal stream still works"));
+    await waitFor(() => normal.received().toString() === "normal stream still works");
+    expect((await link.call("machine.info", {})).hostVersion).toBe("test");
+    await host.hub.previews.put(sessionId, { ...input, sourceId: "second", target: "tab:two" });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(received).toHaveLength(1);
+    const second = new ComputerPreviewSubscription(link, streams, sessionId, frame => received.push(frame), received[0]!.id);
+    cleanups.push(() => second.close());
+    await waitFor(() => received.length === 2);
+    expect(received[1]?.target).toBe("tab:two");
+    await host.hub.previews.put(sessionId, { ...input, sourceId: "third", target: "tab:two" });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(received).toHaveLength(2);
+    normal.stream.close();
+    second.close();
+    const idle = new ComputerPreviewSubscription(link, streams, sessionId, frame => received.push(frame), received[1]!.id);
+    cleanups.push(() => idle.close());
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(received).toHaveLength(2);
+  }, 15_000);
 });

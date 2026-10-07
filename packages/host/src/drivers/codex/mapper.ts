@@ -225,6 +225,22 @@ function mcpOutput(item: Json): ToolCallContent[] {
   return texts.length > 0 ? [{ type: "content", content: { type: "text", text: texts.join("\n") } }, ...out] : out;
 }
 
+/** Dynamic tools return input-shaped blocks, unlike an MCP result's content. */
+function dynamicOutput(item: Json): ToolCallContent[] {
+  if (!Array.isArray(item.contentItems)) return mcpOutput(item);
+  return item.contentItems.flatMap((raw): ToolCallContent[] => {
+    const entry = obj(raw);
+    if (!entry) return [];
+    if (entry.type === "inputText" && str(entry.text)) return [{ type: "content", content: { type: "text", text: str(entry.text)! } }];
+    if (entry.type !== "inputImage") return [];
+    const url = str(entry.imageUrl);
+    // Keep the same size limit as MCP images; never fetch a tool-supplied URL on the host.
+    const match = url?.match(/^data:(image\/[\w.+-]+);base64,([\s\S]+)$/);
+    const image = match ? imageContent(match[2], match[1]!) : undefined;
+    return image ? [image] : [];
+  });
+}
+
 /** Drops the `/bin/zsh -lc '…'` wrapper Codex puts around every command. */
 export function unwrapShell(command: string): string {
   return unwrapShellCommand(command);
@@ -402,10 +418,16 @@ function toolFinish(
     case "fileChange":
       update.content = patchContent(item.changes);
       break;
-    case "mcpToolCall":
-    case "dynamicToolCall": {
+    case "mcpToolCall": {
       const content = mcpOutput(item);
       if (content.length > 0) update.content = content;
+      if (item.error || obj(item.result)?.isError === true) update.status = "failed";
+      break;
+    }
+    case "dynamicToolCall": {
+      const content = dynamicOutput(item);
+      if (content.length > 0) update.content = content;
+      if (item.success === false) update.status = "failed";
       break;
     }
     case "imageGeneration": {

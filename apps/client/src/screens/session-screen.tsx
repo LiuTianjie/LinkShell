@@ -380,6 +380,7 @@ export function SessionScreen() {
       <TimelineSession.Provider value={id}>
       <TimelineFork.Provider value={canFork ? askFork : undefined}>
       <Timeline
+        computerPreview
         ref={listRef}
         items={timelineItems}
         planId={view?.planId}

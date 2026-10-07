@@ -159,6 +159,16 @@ export const methods = {
     params: z.object({ sessionId: z.string().min(1), toolCallId: z.string().min(1), lazyImages: z.boolean().optional() }),
     result: z.object({ events: z.array(sessionEventSchema) }),
   },
+  /** Opens a read-only computer-use preview through the existing bulk-stream transport. */
+  "sessions.preview": {
+    params: z.object({ sessionId: z.string().min(1), direct: z.boolean().optional() }),
+    result: z.object({ port: z.number().int().positive(), token: z.string() }),
+  },
+  /** Explicit local user action; normal frame updates never reopen a dismissed preview. */
+  "desktop.preview.show": {
+    params: z.object({ sessionId: z.string().min(1) }),
+    result: empty,
+  },
   /** The picture behind a `linkshell-event:` uri. */
   "sessions.image": {
     params: z.object({ sessionId: z.string().min(1), uri: z.string().min(1) }),
@@ -541,6 +551,7 @@ export const notifications = {
   "session.summary": z.object({ session: sessionSummarySchema }),
   /** A session was deleted (from any device, or natively by the agent). */
   "session.removed": z.object({ sessionId: z.string() }),
+  "session.preview.show": z.object({ sessionId: z.string() }),
   /** To a desktop shim: a device is taking over; exit the native UI, then call desktop.yielded. */
   "desktop.yield": z.object({ sessionId: z.string() }),
   /** To a desktop shim: progress from the remote driver, to show in the terminal. */
