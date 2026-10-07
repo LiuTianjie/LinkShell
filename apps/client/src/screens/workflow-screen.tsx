@@ -1,8 +1,10 @@
 import { workflowIsLive, type WorkflowRecords } from "@linkshell/client-core";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Platform, Pressable, ScrollView, View } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { AdaptiveGrid, usePageInsets } from "@/components/adaptive-page";
+import { ScrollableState } from "@/components/scrollable-state";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { WorkflowCardContent, WorkflowPhaseSection, WorkflowSummary } from "@/components/workflow";
 import { useActions, useClient, useSessionSubscription } from "@/lib/client";
@@ -35,7 +37,7 @@ function useWorkflows(sessionId: string) {
 
 export function WorkflowScreen() {
   const { id, call } = useLocalSearchParams<{ id: string; call: string }>();
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
   const { records, loaded, error, online, reload } = useWorkflows(id);
   const record = records?.[call];
   const [taskOpen, setTaskOpen] = useState(false);
@@ -44,12 +46,12 @@ export function WorkflowScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Stack.Screen options={{ title: "工作流", headerShown: true, headerTransparent: false, headerShadowVisible: false, headerStyle: { backgroundColor: colors.background as string } }} />
       {!record ? (
-        <WorkflowMissing loaded={loaded} error={error} online={online} reload={reload} />
+        <ScrollableState><WorkflowMissing loaded={loaded} error={error} online={online} reload={reload} /></ScrollableState>
       ) : (
-        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 24, gap: 20 }}>
+        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 20, paddingBottom: 24 + (Platform.OS === "ios" ? 0 : insets.bottom), gap: 20 }}>
           <WorkflowSummary record={record} />
           {record.task && record.task !== record.workflow.name ? (
-            <Pressable onPress={() => setTaskOpen((value) => !value)} accessibilityRole="button" accessibilityState={{ expanded: taskOpen }} accessibilityLabel="工作流任务说明">
+            <Pressable onPress={() => setTaskOpen((value) => !value)} accessibilityRole="button" accessibilityState={{ expanded: taskOpen }} accessibilityLabel="工作流任务说明" style={{ minHeight: 44, justifyContent: "center" }}>
               <Text numberOfLines={taskOpen ? undefined : 3} selectable={taskOpen} style={[type.subhead, { color: colors.secondaryLabel }]}>{record.task}</Text>
             </Pressable>
           ) : null}
@@ -66,15 +68,15 @@ export function WorkflowScreen() {
 
 export function WorkflowsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
   const { records, loaded, error, online, reload } = useWorkflows(id);
   const runs = useMemo(() => Object.values(records ?? {}).sort((a, b) => Number(workflowIsLive(b.workflow)) - Number(workflowIsLive(a.workflow)) || b.startedAt - a.startedAt), [records]);
   return (
     <View style={{ flex: 1, backgroundColor: colors.plain }}>
       <Stack.Screen options={{ title: "工作流", headerShown: true, headerTransparent: false, headerShadowVisible: false }} />
-      {!runs.length ? <WorkflowMissing loaded={loaded} error={error} online={online} reload={reload} /> : (
-        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 14 }}>
-          {runs.map((record) => <WorkflowCardContent key={record.toolCallId} record={record} sessionId={id} />)}
+      {!runs.length ? <ScrollableState><WorkflowMissing loaded={loaded} error={error} online={online} reload={reload} /></ScrollableState> : (
+        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 16, paddingBottom: 24 + (Platform.OS === "ios" ? 0 : insets.bottom), gap: 14 }}>
+          <AdaptiveGrid>{runs.map((record) => <WorkflowCardContent key={record.toolCallId} record={record} sessionId={id} />)}</AdaptiveGrid>
         </ScrollView>
       )}
     </View>

@@ -3,13 +3,15 @@
     "name": "LinkShell",
     "slug": "linkshell-client",
     "version": "2.3.5",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.bd.linkshell",
       "infoPlist": {
+        "UIViewControllerBasedStatusBarAppearance": true,
+        "EXDevMenuShowFloatingActionButton": false,
         "NSLocalNetworkUsageDescription": "LinkShell connects to the LinkShell host on your computer.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
@@ -34,6 +36,14 @@
     },
     "scheme": "linkshell",
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ],
       [
         "expo-router",
         {

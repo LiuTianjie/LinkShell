@@ -1,4 +1,5 @@
-import { Alert, Pressable, Text } from "react-native";
+import { Alert, Pressable } from "react-native";
+import { Text } from "@/components/fixed-text";
 import Svg, { Circle } from "react-native-svg";
 import { compactNumber } from "@/lib/format";
 import { palette } from "@/theme/colors";
@@ -18,7 +19,8 @@ export function UsageRing({ used, window }: { used?: number; window?: number }) 
     // A gauge with its number, so it never reads as a loading spinner.
     <Pressable
       hitSlop={8}
-      style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+      style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, gap: 4 }}
+      accessibilityRole="button"
       accessibilityLabel={`上下文已用 ${Math.round(ratio * 100)}%`}
       onPress={() =>
         Alert.alert(

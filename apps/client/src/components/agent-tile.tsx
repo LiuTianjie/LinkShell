@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { Text, useColorScheme, View } from "react-native";
+import { useColorScheme, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { SvgXml } from "react-native-svg";
 import { agentLook } from "@/theme/agents";
 import { agentMarks } from "@/theme/agent-marks";

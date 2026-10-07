@@ -1,9 +1,12 @@
 import { subagentKey, type SessionView, type TimelineItem } from "@linkshell/client-core";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { useSharedValue } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePageInsets } from "@/components/adaptive-page";
+import { ScrollableState } from "@/components/scrollable-state";
+import { SheetHeader } from "@/components/sheet-header";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSession } from "@/components/timeline/context";
 import { StatusMark, SubagentGlyph, useSubagentProgress } from "@/components/timeline/subagent";
@@ -62,34 +65,40 @@ export function SubagentScreen({ fullScreen = false }: { fullScreen?: boolean } 
   const item = useMemo(() => findCall(own, call) ?? findCall(gallery ? galleryItems : items, call), [gallery, own, items, call]);
   if (!item) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.plain, justifyContent: "center" }}>
+      <>
+      {!fullScreen ? <SheetHeader title="Agent 详情" /> : null}
+      <View style={{ flex: 1, backgroundColor: colors.plain }}>
+        <ScrollableState>
         {gallery || missing ? (
           <EmptyState icon={{ sf: "square.stack.3d.up", md: "layers" }} title="找不到这个子 Agent" message="它可能属于一个已经关闭的会话。" />
         ) : (
           <LoadingState label="正在载入…" />
         )}
+        </ScrollableState>
       </View>
+      </>
     );
   }
   return (
     <TimelineSession.Provider value={id}>
+      {!fullScreen ? <SheetHeader title="Agent 详情" /> : null}
       <SubagentSheet item={item} fullScreen={fullScreen} />
     </TimelineSession.Provider>
   );
 }
 
 function SubagentSheet({ item, fullScreen }: { item: ToolItem; fullScreen: boolean }) {
-  const insets = useSafeAreaInsets();
-  const bottom = useSharedValue(insets.bottom + 16);
+  const insets = usePageInsets();
+  const bottom = useSharedValue(16 + (Platform.OS === "ios" ? 0 : insets.bottom));
   const [taskOpen, setTaskOpen] = useState(false);
+  const [height, setHeight] = useState(0);
+  // iOS adds the scroll view's safe bottom automatically; Android needs it explicitly.
+  useEffect(() => { bottom.set(16 + (Platform.OS === "ios" ? 0 : insets.bottom)); }, [bottom, insets.bottom]);
   const progress = useSubagentProgress(item);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.plain }}>
-      {!fullScreen && Platform.OS === "android" ? (
-        <View style={{ alignSelf: "center", width: 36, height: 4, borderRadius: 2, marginTop: 10, backgroundColor: colors.separator }} />
-      ) : null}
-      <View style={{ paddingTop: fullScreen ? 16 : Platform.OS === "android" ? 14 : 22, paddingHorizontal: 20, paddingBottom: 12, gap: 10 }}>
+    <View onLayout={(event) => setHeight(event.nativeEvent.layout.height)} style={{ flex: 1, backgroundColor: colors.plain }}>
+      <View style={{ paddingTop: Math.max(12, insets.top + 8), paddingHorizontal: 20, paddingBottom: 12, gap: 10 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <SubagentGlyph failed={progress.failed} size={40} />
           <View style={{ flex: 1, gap: 2 }}>
@@ -97,26 +106,30 @@ function SubagentSheet({ item, fullScreen }: { item: ToolItem; fullScreen: boole
               {progress.name}
             </Text>
             <Text numberOfLines={1} style={[type.footnote, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>
-              {[progress.model, progress.paused || progress.stopped || progress.unknown ? null : progress.running ? "运行中" : progress.failed ? null : "已完成", progress.summary].filter(Boolean).join(" · ")}
+              {Array.from(new Set([progress.model, progress.paused || progress.stopped || progress.unknown ? null : progress.running ? "运行中" : progress.failed ? null : "已完成", progress.summary].filter(Boolean))).join(" · ")}
             </Text>
           </View>
           <StatusMark running={progress.running && !progress.paused} failed={progress.failed} paused={progress.paused} stopped={progress.stopped} unknown={progress.unknown} />
         </View>
         {progress.task ? (
-          <Pressable onPress={() => setTaskOpen((open) => !open)} accessibilityRole="button" accessibilityState={{ expanded: taskOpen }}>
+          <ScrollView style={{ maxHeight: height ? Math.max(60, height * 0.3) : 120 }} nestedScrollEnabled>
+          <Pressable onPress={() => setTaskOpen((open) => !open)} accessibilityRole="button" accessibilityState={{ expanded: taskOpen }} accessibilityLabel="子 Agent 任务说明" style={{ minHeight: 44, justifyContent: "center" }}>
             <Text numberOfLines={taskOpen ? undefined : 3} style={[type.subhead, { color: colors.secondaryLabel }]}>
               {progress.task}
             </Text>
           </Pressable>
+          </ScrollView>
         ) : null}
       </View>
       <View style={{ height: 0.5, backgroundColor: colors.separator }} />
       {progress.children.length === 0 ? (
+        <ScrollableState>
         <EmptyState
           icon={{ sf: "hourglass", md: "hourglass_empty" }}
           title={progress.running ? "正在启动…" : "没有过程记录"}
           message={progress.running ? undefined : "这个 Agent 没有上报它的步骤。"}
         />
+        </ScrollableState>
       ) : (
         <Timeline
           items={progress.children}

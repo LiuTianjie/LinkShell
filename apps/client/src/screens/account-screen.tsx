@@ -1,12 +1,15 @@
+import { router, Stack } from "expo-router";
 import { Image } from "expo-image";
-import { router } from "expo-router";
-import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, TextInput, useColorScheme, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, useColorScheme, View } from "react-native";
+import { Text, TextInput } from "@/components/fixed-text";
+import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePageInsets } from "@/components/adaptive-page";
 import Svg, { Path } from "react-native-svg";
 import { Icon, type IconProps } from "@/components/icon";
 import { SIGN_UP_URL, useAccount, type OAuthProvider } from "@/lib/account";
+import { useContentWidth } from "@/lib/content-width";
 import { useConnection } from "@/lib/client";
 import { listComputers, useComputers, type Computer } from "@/lib/computers";
 import { haptics } from "@/lib/haptics";
@@ -63,6 +66,7 @@ function Row({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
       onLongPress={onLongPress}
       disabled={!onPress && !onLongPress}
       style={({ pressed }) => ({
@@ -80,12 +84,12 @@ function Row({
           <Icon {...icon} size={15} color={iconTint} weight="medium" />
         </View>
       ) : null}
-      <View style={{ flex: 1, gap: 1 }}>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
         <Text numberOfLines={1} style={[type.body, { fontSize: 16, color: tint }]}>
           {title}
         </Text>
         {detail ? (
-          <Text numberOfLines={1} style={[type.footnote, { color: colors.secondaryLabel }]}>
+          <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>
             {detail}
           </Text>
         ) : null}
@@ -118,10 +122,10 @@ function ProviderMark({ provider, color }: { provider: OAuthProvider; color: str
 
 function ProviderButton({ provider, busy, disabled, onPress }: { provider: OAuthProvider; busy: boolean; disabled: boolean; onPress: () => void }) {
   const dark = useColorScheme() === "dark";
-  // GitHub's own button is its mark on near-black (white in dark mode); Google's is plain.
+  // Keep the two providers equally weighted; their marks identify the service.
   const github = provider === "github";
-  const background = github ? (dark ? "#f3f3f6" : "#18181b") : colors.sheetCard;
-  const foreground = github ? (dark ? "#18181b" : "#ffffff") : (colors.label as string);
+  const background = colors.sheetCard;
+  const foreground = dark ? "#f3f3f6" : "#18181b";
   const title = github ? "使用 GitHub 登录" : "使用 Google 登录";
   return (
     <Pressable
@@ -131,11 +135,13 @@ function ProviderButton({ provider, busy, disabled, onPress }: { provider: OAuth
       accessibilityLabel={title}
       accessibilityState={{ disabled, busy }}
       style={({ pressed }) => ({
-        height: 50,
+        minHeight: 48,
+        paddingHorizontal: 14,
+        paddingVertical: 11,
         borderRadius: 14,
         borderCurve: "continuous",
         backgroundColor: background,
-        borderWidth: github ? 0 : StyleSheet.hairlineWidth,
+        borderWidth: StyleSheet.hairlineWidth,
         borderColor: colors.separator,
         flexDirection: "row",
         alignItems: "center",
@@ -145,15 +151,20 @@ function ProviderButton({ provider, busy, disabled, onPress }: { provider: OAuth
       })}
     >
       {busy ? <ActivityIndicator color={foreground} /> : <ProviderMark provider={provider} color={foreground} />}
-      <Text style={[type.headline, { color: foreground }]}>{title}</Text>
+      <Text style={[type.callout, { color: foreground, fontWeight: "600", flexShrink: 1, textAlign: "center" }]}>{github ? "GitHub" : "Google"}</Text>
     </Pressable>
   );
 }
 
-function SignInForm() {
+function SignInForm({ width }: { width: number }) {
+  const { fontScale } = useWindowDimensions();
+  const providersInline = width >= 320 * fontScale;
   const signIn = useAccount((state) => state.signIn);
   const signInWith = useAccount((state) => state.signInWith);
+  const [emailOpen, setEmailOpen] = useState(false);
   const [email, setEmail] = useState("");
+  const emailRef = useRef<TextInput>(null);
+  useEffect(() => { if (emailOpen) emailRef.current?.focus(); }, [emailOpen]);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState<OAuthProvider | null>(null);
@@ -161,6 +172,7 @@ function SignInForm() {
   const passwordRef = useRef<TextInput>(null);
   const working = busy || provider !== null;
   const ready = /\S+@\S+\.\S+/.test(email) && password.length > 0 && !working;
+  const loginDisabled = working || (emailOpen && !ready);
 
   const continueWith = async (next: OAuthProvider) => {
     if (working) return;
@@ -192,76 +204,86 @@ function SignInForm() {
     }
   };
 
-  const field = { fontSize: 17, color: colors.label, paddingHorizontal: 16, height: 50 };
+  const field = { fontSize: 17, color: colors.label, paddingHorizontal: 16, paddingVertical: 13, minHeight: 50 };
   return (
-    <View style={{ gap: 12 }}>
-      <View style={{ alignItems: "center", gap: 8, paddingVertical: 8 }}>
-        <Image source={require("../../assets/mark.png")} style={{ width: 68, height: 68 }} contentFit="contain" />
-        <Text style={[type.title3, { color: colors.label, marginTop: 4 }]}>登录 LinkShell</Text>
-        <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center", paddingHorizontal: 12 }]}>
-          iTool 账号。电脑上用同一账号运行 linkshell login，它就会自动出现，不用扫码配对
-        </Text>
+    <View style={{ gap: 24 }}>
+      <View style={{ alignItems: "center", gap: 12, paddingTop: 8, paddingBottom: 12 }}>
+        <Image source={require("../../assets/mark.png")} style={{ width: 72, height: 72 }} contentFit="contain" />
+        <View style={{ alignItems: "center", gap: 8 }}>
+          <Text style={{ fontSize: 28, lineHeight: 34, fontWeight: "700", letterSpacing: -0.5, color: colors.label }}>LinkShell</Text>
+          <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>电脑上的 Agent，随时跟进</Text>
+        </View>
       </View>
-      <View style={{ gap: 10 }}>
-        <ProviderButton provider="github" busy={provider === "github"} disabled={working} onPress={() => void continueWith("github")} />
-        <ProviderButton provider="google" busy={provider === "google"} disabled={working} onPress={() => void continueWith("google")} />
+      <View style={{ gap: 12 }}>
+        <View style={{ display: emailOpen ? "flex" : "none", backgroundColor: colors.sheetCard, borderRadius: 16, borderCurve: "continuous", overflow: "hidden" }}>
+          <TextInput
+            ref={emailRef}
+            value={email}
+            onChangeText={setEmail}
+            accessibilityLabel="邮箱"
+            placeholder="iTool 账号邮箱"
+            placeholderTextColor={colors.placeholder as string}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            textContentType="username"
+            autoComplete="email"
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            style={field}
+          />
+          <Separator />
+          <TextInput
+            ref={passwordRef}
+            value={password}
+            onChangeText={setPassword}
+            accessibilityLabel="密码"
+            placeholder="密码"
+            placeholderTextColor={colors.placeholder as string}
+            secureTextEntry
+            textContentType="password"
+            autoComplete="current-password"
+            returnKeyType="go"
+            onSubmitEditing={() => void submit()}
+            style={field}
+          />
+        </View>
+        {error ? <Text style={[type.footnote, { color: colors.danger, paddingHorizontal: 4 }]}>{error}</Text> : null}
+        <Pressable
+          onPress={() => emailOpen ? void submit() : setEmailOpen(true)}
+          disabled={loginDisabled}
+          accessibilityRole="button"
+          accessibilityLabel={emailOpen ? "使用邮箱登录" : "登录 LinkShell"}
+          accessibilityState={{ disabled: loginDisabled, busy }}
+          style={({ pressed }) => ({
+            minHeight: 52,
+            paddingHorizontal: 18,
+            paddingVertical: 14,
+            borderRadius: 16,
+            borderCurve: "continuous",
+            backgroundColor: loginDisabled && !busy ? colors.fillStrong : colors.accent,
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={[type.headline, { color: loginDisabled ? colors.secondaryLabel : colors.onAccent }]}>{emailOpen ? "登录" : "登录 LinkShell"}</Text>}
+        </Pressable>
       </View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 }}>
-        <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />
-        <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>或用邮箱登录</Text>
-        <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />
+      <View style={{ gap: 12 }}>
+        <Text style={[type.caption, { color: colors.tertiaryLabel, textAlign: "center" }]}>或使用以下方式登录</Text>
+        <View style={{ flexDirection: providersInline ? "row" : "column", gap: 10 }}>
+          <View style={providersInline ? { flex: 1 } : undefined}>
+            <ProviderButton provider="github" busy={provider === "github"} disabled={working} onPress={() => void continueWith("github")} />
+          </View>
+          <View style={providersInline ? { flex: 1 } : undefined}>
+            <ProviderButton provider="google" busy={provider === "google"} disabled={working} onPress={() => void continueWith("google")} />
+          </View>
+        </View>
       </View>
-      <View style={{ backgroundColor: colors.sheetCard, borderRadius: 16, borderCurve: "continuous", overflow: "hidden" }}>
-        <TextInput
-          value={email}
-          onChangeText={setEmail}
-          placeholder="邮箱"
-          placeholderTextColor={colors.placeholder as string}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="email-address"
-          textContentType="username"
-          autoComplete="email"
-          returnKeyType="next"
-          onSubmitEditing={() => passwordRef.current?.focus()}
-          style={field}
-        />
-        <Separator />
-        <TextInput
-          ref={passwordRef}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="密码"
-          placeholderTextColor={colors.placeholder as string}
-          secureTextEntry
-          textContentType="password"
-          autoComplete="current-password"
-          returnKeyType="go"
-          onSubmitEditing={() => void submit()}
-          style={field}
-        />
-      </View>
-      {error ? <Text style={[type.footnote, { color: colors.danger, paddingHorizontal: 16 }]}>{error}</Text> : null}
-      <Pressable
-        onPress={() => void submit()}
-        disabled={!ready}
-        style={({ pressed }) => ({
-          height: 50,
-          borderRadius: 14,
-          borderCurve: "continuous",
-          backgroundColor: colors.accent,
-          alignItems: "center",
-          justifyContent: "center",
-          opacity: !ready ? 0.4 : pressed ? 0.85 : 1,
-        })}
-      >
-        {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={[type.headline, { color: "#ffffff" }]}>登录</Text>}
-      </Pressable>
-      <Pressable onPress={() => void Linking.openURL(SIGN_UP_URL)} hitSlop={8} style={{ alignSelf: "center", paddingVertical: 4 }}>
-        <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
-          还没有账号？<Text style={{ color: colors.accent, fontWeight: "600" }}>在 iTool 注册</Text>，GitHub 和 Google 不用注册
-        </Text>
-      </Pressable>
+      {emailOpen ? <Pressable onPress={() => void Linking.openURL(SIGN_UP_URL)} accessibilityRole="link" accessibilityLabel="在 iTool 注册账号" style={{ alignSelf: "center", minHeight: 44, paddingHorizontal: 12, justifyContent: "center" }}>
+        <Text style={[type.footnote, { color: colors.secondaryLabel, textAlign: "center" }]}>还没有账号？<Text style={{ color: colors.accent }}>注册 iTool 账号</Text></Text>
+      </Pressable> : null}
     </View>
   );
 }
@@ -329,7 +351,7 @@ function ComputerRow({ computer, current }: { computer: Computer; current: boole
       onLongPress={
         removable
           ? () =>
-              Alert.alert(`移除「${name}」？`, viaAccount ? "它会从你的账号下移除。如果这台电脑以后重新上线并登录同一账号，会再次出现。" : "之后要重新配对才能连接。", [
+              Alert.alert(`移除「${name}」？`, viaAccount ? "它会从你的账号下移除。如果这台电脑以后重新上线并登录同一账号，会再次出现。" : computer.kind === "direct" ? "之后可以重新添加这台电脑的局域网地址。" : "之后要重新配对才能连接。", [
                 { text: "取消", style: "cancel" },
                 {
                   text: "移除",
@@ -350,42 +372,97 @@ function ComputerRow({ computer, current }: { computer: Computer; current: boole
 }
 
 export function AccountScreen() {
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
+  const parentWidth = useContentWidth();
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  const width = measuredWidth ?? parentWidth;
+  const { fontScale } = useWindowDimensions();
   const account = useAccount((state) => state.session);
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
   const computers = useMemo(() => listComputers({ saved, live }), [saved, live]);
   const { computer: current } = useConnection();
+  const showManagement = Boolean(account);
+  // Signed-out users enter through one login home, including when computers are already paired.
+  const columns = showManagement && width >= Math.max(760, 720 * fontScale);
+  const columnWidth = columns ? Math.min(440, (width - 64) / 2) : Math.min(account ? 440 : 420, width - 32);
 
   return (
-        <KeyboardAwareScrollView
-          bottomOffset={24}
-          keyboardShouldPersistTaps="handled"
-          // The scroll view is the screen's root, so the large title collapses with it.
-          contentInsetAdjustmentBehavior="automatic"
-          style={{ flex: 1, backgroundColor: colors.sheet }}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: insets.bottom + 24, gap: 28 }}
-        >
-          {account ? <SignedIn /> : <SignInForm />}
-
-          <Section title="我的电脑" footer="长按可以移除配对的电脑，或账号下已经离线的电脑。连接始终端到端加密，网关看不到内容。">
+    <KeyboardAwareScrollView
+      onLayout={(event) => setMeasuredWidth(event.nativeEvent.layout.width)}
+      bottomOffset={24}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      contentInsetAdjustmentBehavior="never"
+      style={{ flex: 1, backgroundColor: colors.sheet }}
+      contentContainerStyle={{ flexGrow: 1, justifyContent: showManagement ? "flex-start" : "center", paddingHorizontal: 16, paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24 }}
+    >
+      <Stack.Screen options={{ title: account ? "账号与电脑" : "", headerLargeTitleEnabled: false, headerTransparent: !account, headerShadowVisible: false }} />
+      <View style={{ flexDirection: columns ? "row" : "column", alignItems: columns ? "flex-start" : "center", justifyContent: "center", gap: columns ? 32 : 28 }}>
+        <View style={{ width: columnWidth, minWidth: 0, gap: 12 }}>
+          {account ? <SignedIn /> : <SignInForm width={columnWidth} />}
+          {!showManagement ? (
+            <Pressable onPress={() => router.push("/pair")} accessibilityRole="button" style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 })}>
+              <Text style={[type.footnote, { color: colors.secondaryLabel, textAlign: "center" }]}>手动连接电脑</Text>
+            </Pressable>
+          ) : null}
+          {!account && computers.length > 0 ? (
+            <View style={{ paddingTop: 12 }}>
+              <Section title="已添加电脑">
+                {computers.map((computer, index) => <View key={computer.key}>{index > 0 ? <Separator inset={58} /> : null}<ComputerRow computer={computer} current={computer.key === current.key} /></View>)}
+              </Section>
+            </View>
+          ) : null}
+        </View>
+        {showManagement ? <View style={{ width: columnWidth, minWidth: 0, gap: 16 }}>
+          <View style={{ gap: 6, paddingBottom: 4 }}>
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+              <Text style={[type.title3, { color: colors.label }]}>我的电脑</Text>
+              <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{computers.length}</Text>
+            </View>
+            <Text style={[type.footnote, { color: colors.secondaryLabel }]}>选择电脑后开始连接，也可以手动添加。</Text>
+          </View>
+          <Section footer={computers.length ? "长按可管理已添加的电脑。" : undefined}>
+            {computers.length === 0 ? (
+              <View style={{ paddingHorizontal: 20, paddingVertical: 24, gap: 6 }}>
+                <Text style={[type.headline, { color: colors.label }]}>暂无电脑</Text>
+                <Text style={[type.subhead, { color: colors.secondaryLabel }]}>在电脑上登录同一账号，或通过下方入口配对。</Text>
+              </View>
+            ) : null}
             {computers.map((computer, index) => (
               <View key={computer.key}>
                 {index > 0 ? <Separator inset={58} /> : null}
                 <ComputerRow computer={computer} current={computer.key === current.key} />
               </View>
             ))}
-            {computers.length > 0 ? <Separator inset={58} /> : null}
+          </Section>
+          <Section title="手动添加">
             <Row
-              icon={{ sf: "plus", md: "add" }}
+              icon={{ sf: "qrcode.viewfinder", md: "qr_code_scanner" }}
               iconTint={colors.accent}
               iconBackground={colors.accentSoft}
-              title="添加电脑"
-              tint={colors.accent}
-              accessory={<Icon sf="qrcode.viewfinder" md="qr_code_scanner" size={16} color={colors.tertiaryLabel} />}
+              title="配对电脑"
+              detail="扫描二维码或输入配对码"
+              accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}
               onPress={() => router.push("/pair")}
             />
+            <Separator inset={58} />
+            <Row
+              icon={{ sf: "wifi", md: "wifi" }}
+              iconTint={colors.accent}
+              iconBackground={colors.accentSoft}
+              title="局域网连接"
+              detail="通过本地地址连接"
+              accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}
+              onPress={() => router.push("/connect")}
+            />
           </Section>
-        </KeyboardAwareScrollView>
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 7, paddingHorizontal: 4 }}>
+            <Icon sf="lock.fill" md="lock" size={12} color={colors.tertiaryLabel} />
+            <Text style={[type.caption, { flex: 1, color: colors.tertiaryLabel }]}>通过账号或配对连接时，内容均端到端加密。</Text>
+          </View>
+        </View> : null}
+      </View>
+    </KeyboardAwareScrollView>
   );
 }

@@ -2,10 +2,11 @@ import type { AgentInfo } from "@linkshell/wire";
 import { router, useLocalSearchParams } from "expo-router";
 import Storage from "expo-sqlite/kv-store";
 import { useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
+import { Text, TextInput } from "@/components/fixed-text";
+import { usePageInsets } from "@/components/adaptive-page";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { AgentTile } from "@/components/agent-tile";
-import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
 import { openSession } from "@/components/session-row";
 import { useActions, useClient, useConnection } from "@/lib/client";
@@ -17,6 +18,7 @@ import { haptics } from "@/lib/haptics";
 import { BranchTag } from "@/components/branch-tag";
 import { branchLabel, branchOf, useGitInfo } from "@/lib/worktree";
 import { agentLook, tierCopy } from "@/theme/agents";
+import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 
@@ -89,6 +91,7 @@ function Label({ children }: { children: string }) {
 }
 
 export function NewSessionScreen() {
+  const insets = usePageInsets();
   const params = useLocalSearchParams<{ cwd?: string }>();
   const machine = useClient((state) => state.machine);
   const projects = useClient((state) => state.projects);
@@ -179,26 +182,16 @@ export function NewSessionScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 22, paddingBottom: 6 }}>
-        <Text style={[type.title, { flex: 1, color: colors.label }]}>新会话</Text>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="关闭"
-          hitSlop={10}
-          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="xmark" md="close" size={13} color={colors.secondaryLabel} weight="bold" />
-        </Pressable>
-      </View>
+      <SheetHeader title="新会话" actions={[{ key: "start", label: terminal ? "打开终端" : "开始", icon: { sf: "play.fill", md: "play_arrow" }, onPress: () => void start(), disabled: !ready, prominent: true }]} />
 
       {/* Wrapped: a sheet stretches a scroll view that's a direct child of the screen over the whole sheet. */}
       <View style={{ flex: 1, overflow: "hidden" }}>
       <KeyboardAwareScrollView
+        contentInsetAdjustmentBehavior="never"
         bottomOffset={24}
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24, gap: 22 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: insets.bottom + 24, gap: 22 }}
       >
         <View style={{ gap: 10 }}>
           <Label>用什么</Label>
@@ -364,12 +357,12 @@ export function NewSessionScreen() {
           />
         </View>
 
+        {busy ? <Text accessibilityLiveRegion="polite" style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>{terminal ? "正在打开终端…" : "正在创建会话…"}</Text> : null}
         {error ? (
           <Text selectable style={[type.footnote, { color: colors.danger, paddingHorizontal: 4 }]}>
             {error}
           </Text>
         ) : null}
-        <Button title={terminal ? "打开终端" : "开始"} variant="primary" size="large" wide busy={busy} disabled={!ready} onPress={() => void start()} />
       </KeyboardAwareScrollView>
       </View>
     </View>

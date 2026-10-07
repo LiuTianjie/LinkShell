@@ -6,6 +6,7 @@ import { Fragment } from "react";
 import { Platform, useColorScheme } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
+import { nativeStatusBar } from "@/lib/native-status-bar";
 import { ClientProvider } from "@/lib/client";
 import { colors, palette } from "@/theme/colors";
 
@@ -25,8 +26,8 @@ export default function RootLayout() {
             {/* Android's literal theme colors must reach memoized rows and native
                 views too; rebuild the tree when the system appearance changes. */}
             <Fragment key={Platform.OS === "android" ? (scheme ?? "light") : "tree"}>
-              <StatusBar style="auto" />
-              <Stack screenOptions={{ headerBackButtonDisplayMode: "minimal" }}>
+              {!nativeStatusBar ? <StatusBar style="auto" /> : null}
+              <Stack screenOptions={{ headerBackButtonDisplayMode: "minimal", ...(nativeStatusBar ? { statusBarStyle: "auto", statusBarHidden: false } as const : {}), headerStyle: { backgroundColor: colors.background as string } }}>
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 <Stack.Screen name="session/[id]/index" options={{ title: "", headerTransparent: true, headerShadowVisible: false }} />
                 <Stack.Screen name="session/[id]/workflow/[call]" options={{ title: "工作流" }} />
@@ -46,7 +47,7 @@ export default function RootLayout() {
                     sheetCornerRadius: 28,
                     sheetExpandsWhenScrolledToEdge: true,
                     contentStyle: sheetContent,
-                    headerShown: false,
+                    headerShown: true,
                   }}
                 />
                 <Stack.Screen
@@ -59,7 +60,7 @@ export default function RootLayout() {
                     sheetCornerRadius: 28,
                     sheetExpandsWhenScrolledToEdge: true,
                     contentStyle: sheetContent,
-                    headerShown: false,
+                    headerShown: true,
                   }}
                 />
                 <Stack.Screen
@@ -72,7 +73,7 @@ export default function RootLayout() {
                     sheetExpandsWhenScrolledToEdge: false,
                     sheetCornerRadius: 28,
                     contentStyle: sheetContent,
-                    headerShown: false,
+                    headerShown: true,
                   }}
                 />
                 <Stack.Screen
@@ -84,7 +85,7 @@ export default function RootLayout() {
                     sheetAllowedDetents: [0.92],
                     sheetCornerRadius: 28,
                     contentStyle: sheetContent,
-                    headerShown: false,
+                    headerShown: true,
                   }}
                 />
                 <Stack.Screen
@@ -97,7 +98,7 @@ export default function RootLayout() {
                     sheetExpandsWhenScrolledToEdge: false,
                     sheetCornerRadius: 28,
                     contentStyle: sheetContent,
-                    headerShown: false,
+                    headerShown: true,
                   }}
                 />
                 <Stack.Screen
@@ -109,7 +110,7 @@ export default function RootLayout() {
                     sheetAllowedDetents: [0.92],
                     sheetCornerRadius: 28,
                     contentStyle: sheetContent,
-                    headerShown: false,
+                    headerShown: true,
                   }}
                 />
                 <Stack.Screen name="preview" options={{ title: "预览" }} />
@@ -121,7 +122,7 @@ export default function RootLayout() {
                     sheetAllowedDetents: [0.42],
                     sheetCornerRadius: 28,
                     contentStyle: sheetContent,
-                    headerShown: false,
+                    headerShown: true,
                   }}
                 />
                 <Stack.Screen name="archived" options={{ title: "已归档" }} />
@@ -135,10 +136,10 @@ export default function RootLayout() {
                     sheetAllowedDetents: [0.7, 0.92],
                     sheetCornerRadius: 28,
                     contentStyle: sheetContent,
-                    headerShown: false,
+                    headerShown: true,
                   }}
                 />
-                <Stack.Screen name="account" options={{ title: "账号与电脑", headerLargeTitle: true, headerTransparent: Platform.OS === "ios", headerShadowVisible: false }} />
+                <Stack.Screen name="account" options={{ title: "账号与电脑", headerLargeTitleEnabled: false, headerTransparent: false, headerShadowVisible: false }} />
                 <Stack.Screen
                   name="connect"
                   options={{
@@ -147,7 +148,7 @@ export default function RootLayout() {
                     sheetGrabberVisible: true,
                     sheetAllowedDetents: [0.6, 0.92],
                     contentStyle: sheetContent,
-                    headerShown: false,
+                    headerShown: true,
                   }}
                 />
               </Stack>

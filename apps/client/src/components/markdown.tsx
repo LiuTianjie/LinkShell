@@ -82,6 +82,8 @@ export const Markdown = memo(function Markdown({
   const style = useMemo(() => markdownStyle(dark ? palette.dark : palette.light, dark, variant), [dark, variant]);
   return (
     <EnrichedMarkdownText
+      allowFontScaling={false}
+      maxFontSizeMultiplier={1}
       markdown={text}
       flavor="github"
       markdownStyle={style}

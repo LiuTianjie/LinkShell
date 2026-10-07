@@ -1,11 +1,18 @@
 import type { ContentBlock } from "@linkshell/wire";
 import { Image } from "expo-image";
 import { memo, useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, StatusBar, StyleSheet, View } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import { LayoutProbe } from "../../../modules/link-layout";
+import { useLayoutGeometry } from "@/lib/use-layout-geometry";
+import { safeContentInsets } from "@/lib/adaptive-insets";
+import { nativeStatusBar } from "@/lib/native-status-bar";
 import { useActions } from "@/lib/client";
+import { useContentWidth } from "@/lib/content-width";
 import { baseName } from "@/lib/format";
 import { openLink } from "@/lib/links";
 import { haptics } from "@/lib/haptics";
@@ -94,8 +101,7 @@ export function useImage(block: ImageBlock): LoadedImage {
 }
 
 /** Pinch, pan and double-tap zoom; a downward swipe at 1× dismisses. */
-function ZoomableImage({ block, onClose }: { block: ImageBlock; onClose: () => void }) {
-  const { width, height } = useWindowDimensions();
+function ZoomableImage({ block, onClose, width, height }: { block: ImageBlock; onClose: () => void; width: number; height: number }) {
   const image = useImage(block);
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -104,6 +110,14 @@ function ZoomableImage({ block, onClose }: { block: ImageBlock; onClose: () => v
   const savedX = useSharedValue(0);
   const savedY = useSharedValue(0);
   const spring = { damping: 22, stiffness: 240 };
+
+  // A folded or rotated viewport must not leave the zoomed picture off-screen.
+  useEffect(() => {
+    const limitX = width * Math.max(0, savedScale.value - 1) / 2;
+    const limitY = height * Math.max(0, savedScale.value - 1) / 2;
+    savedX.value = x.value = Math.max(-limitX, Math.min(limitX, x.value));
+    savedY.value = y.value = Math.max(-limitY, Math.min(limitY, y.value));
+  }, [width, height, savedScale, savedX, savedY, x, y]);
 
   const clamp = (value: number, limit: number) => {
     "worklet";
@@ -196,7 +210,7 @@ function ZoomableImage({ block, onClose }: { block: ImageBlock; onClose: () => v
 }
 
 /** Its own tap gesture: RN touchables don't reliably get touches beside the zoom gestures. */
-function CloseButton({ top, onClose }: { top: number; onClose: () => void }) {
+function CloseButton({ top, right, onClose }: { top: number; right: number; onClose: () => void }) {
   const tap = Gesture.Tap()
     .hitSlop(12)
     .onEnd(() => {
@@ -212,10 +226,10 @@ function CloseButton({ top, onClose }: { top: number; onClose: () => void }) {
         style={{
           position: "absolute",
           top,
-          right: 16,
-          width: 36,
-          height: 36,
-          borderRadius: 18,
+          right,
+          width: 44,
+          height: 44,
+          borderRadius: 22,
           backgroundColor: "rgba(255,255,255,0.16)",
           alignItems: "center",
           justifyContent: "center",
@@ -227,15 +241,25 @@ function CloseButton({ top, onClose }: { top: number; onClose: () => void }) {
   );
 }
 
-function Viewer({ block, onClose }: { block: ImageBlock; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
+function ViewerContent({ block, onClose }: { block: ImageBlock; onClose: () => void }) {
+  const fallback = useSafeAreaInsets();
+  const window = useWindowDimensions();
+  const geometry = useLayoutGeometry();
+  const insets = safeContentInsets(geometry.metrics, fallback);
   return (
-    <Modal visible animationType="fade" transparent statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
-      <StatusBar barStyle="light-content" />
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <ZoomableImage block={block} onClose={onClose} />
-        <CloseButton top={insets.top + 8} onClose={onClose} />
-      </GestureHandlerRootView>
+    <GestureHandlerRootView onLayout={geometry.onLayout} style={{ flex: 1 }}>
+      <LayoutProbe revision={geometry.revision} onMetrics={geometry.onMetrics} />
+      <ZoomableImage block={block} onClose={onClose} width={geometry.frame.width || window.width} height={geometry.frame.height || window.height} />
+      <CloseButton top={insets.top + 8} right={insets.right + 16} onClose={onClose} />
+    </GestureHandlerRootView>
+  );
+}
+
+function Viewer({ block, onClose }: { block: ImageBlock; onClose: () => void }) {
+  return (
+    <Modal visible animationType="fade" transparent supportedOrientations={["portrait", "portrait-upside-down", "landscape-left", "landscape-right"]} statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
+      {!nativeStatusBar ? <StatusBar barStyle="light-content" /> : null}
+      <SafeAreaProvider><ViewerContent block={block} onClose={onClose} /></SafeAreaProvider>
     </Modal>
   );
 }
@@ -341,6 +365,7 @@ export const LinkChip = memo(function LinkChip({ block, onBubble = false }: { bl
         gap: 6,
         alignSelf: "flex-start",
         maxWidth: "100%",
+        minHeight: 44,
         paddingHorizontal: 9,
         paddingVertical: 5,
         borderRadius: 10,
@@ -393,7 +418,7 @@ function SingleImage({ block, maxWidth: widest, maxHeight }: { block: ImageBlock
     },
     [known],
   );
-  const { width: screen } = useWindowDimensions();
+  const screen = useContentWidth();
   const maxWidth = Math.min(screen * 0.66, widest);
   // Fit inside maxWidth × maxHeight, but never narrower than a comfortable tap target.
   const width = Math.max(Math.min(maxWidth, maxHeight * ratio), 96);

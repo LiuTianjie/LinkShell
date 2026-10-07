@@ -19,6 +19,7 @@ import { deviceIdentity } from "./identity";
 import { DEFAULT_HOST_URL } from "./settings";
 import { createSocket } from "./socket";
 import { directConnector } from "./direct";
+import { createSessionSubscriptions } from "./session-subscriptions";
 
 type Client = ClientState & ClientActions;
 
@@ -32,6 +33,7 @@ interface Connection {
   store: ClientStore;
   /** Streams to the computer's ports (previews, the screen), peer to peer when that can be. */
   streams: HostStreams;
+  subscribeSession: (id: string) => () => void;
 }
 
 interface ConnectionContextValue {
@@ -72,7 +74,8 @@ function createConnection(computer: Computer): Connection {
     // The computer just said whether it can go direct, and how.
     streams.connect();
   });
-  return { key: computer.key, computer, url, link, store, streams };
+  const subscribeSession = createSessionSubscriptions((id) => store.getState().openSession(id), (id) => store.getState().closeSession(id));
+  return { key: computer.key, computer, url, link, store, streams, subscribeSession };
 }
 
 export function ClientProvider({ children }: { children: ReactNode }) {
@@ -175,10 +178,8 @@ export function useActions(): ClientActions {
 
 /** Detail routes also work when opened directly, without stealing the parent screen's subscription. */
 export function useSessionSubscription(sessionId: string, enabled = true) {
-  const { store } = useConnectionContext().connection;
+  const { subscribeSession } = useConnectionContext().connection;
   useEffect(() => {
-    if (!enabled || store.getState().open[sessionId]) return;
-    store.getState().openSession(sessionId);
-    return () => store.getState().closeSession(sessionId);
-  }, [store, sessionId, enabled]);
+    if (enabled) return subscribeSession(sessionId);
+  }, [subscribeSession, sessionId, enabled]);
 }

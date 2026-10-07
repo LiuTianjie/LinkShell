@@ -1,7 +1,8 @@
 import { BlurTargetView, BlurView } from "expo-blur";
 import { TabList, TabSlot, Tabs, TabTrigger, type TabTriggerSlotProps } from "expo-router/ui";
 import { forwardRef, useEffect, useRef, useState } from "react";
-import { Platform, Pressable, Text, useColorScheme, View, type View as RNView } from "react-native";
+import { Platform, Pressable, useColorScheme, View, type View as RNView } from "react-native";
+import { Text } from "@/components/fixed-text";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { haptics } from "@/lib/haptics";

@@ -1,7 +1,8 @@
 import { RpcError, type SessionSummary, type WorktreeEntry } from "@linkshell/wire";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { BranchTag } from "@/components/branch-tag";
 import { SessionRow } from "@/components/session-row";
 import { TerminalRow } from "@/components/terminal-row";
@@ -15,12 +16,14 @@ import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { useFloatingTabInset } from "@/components/floating-tabs";
 import { HeaderActions } from "@/components/header-actions";
+import { useContentWidth } from "@/lib/content-width";
 
 /**
  * Worktrees of this project that no session uses any more: what is still in
  * them, and a way to remove them. Nothing when there are none.
  */
 function UnusedWorktrees({ source, sessionCount }: { source: string; sessionCount: number }) {
+  const stacked = useContentWidth() < 480;
   const { listWorktrees, removeWorktree } = useActions();
   const online = useClient((state) => state.status === "online");
   const [worktrees, setWorktrees] = useState<WorktreeEntry[]>([]);
@@ -79,10 +82,11 @@ function UnusedWorktrees({ source, sessionCount }: { source: string; sessionCoun
             <View
               key={entry.path}
               style={{
-                flexDirection: "row",
-                alignItems: "center",
+                flexDirection: stacked ? "column" : "row",
+                alignItems: stacked ? "stretch" : "center",
                 gap: 8,
                 minHeight: 44,
+                paddingVertical: stacked ? 10 : 0,
                 paddingRight: 8,
                 opacity: removing === entry.path ? 0.4 : 1,
                 borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
@@ -90,7 +94,7 @@ function UnusedWorktrees({ source, sessionCount }: { source: string; sessionCoun
               }}
             >
               <BranchTag branch={entry.branch} size={14} max={26} color={colors.label} />
-              <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+              <Text numberOfLines={stacked ? 2 : 1} style={[type.footnote, { flex: stacked ? undefined : 1, color: colors.secondaryLabel }]}>
                 {state}
               </Text>
               <Pressable
@@ -98,7 +102,7 @@ function UnusedWorktrees({ source, sessionCount }: { source: string; sessionCoun
                 accessibilityRole="button"
                 accessibilityLabel={`删除 worktree ${entry.branch}`}
                 hitSlop={8}
-                style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 8, opacity: pressed ? 0.5 : 1 })}
+                style={({ pressed }) => ({ alignSelf: stacked ? "flex-end" : undefined, paddingHorizontal: 8, paddingVertical: 8, opacity: pressed ? 0.5 : 1 })}
               >
                 <Text style={[type.subhead, { color: colors.danger }]}>删除</Text>
               </Pressable>
@@ -111,6 +115,9 @@ function UnusedWorktrees({ source, sessionCount }: { source: string; sessionCoun
 }
 
 export function ProjectDetailScreen() {
+  const contentWidth = useContentWidth();
+  const wide = contentWidth >= 768;
+  const entryWidth = wide ? (contentWidth - 48) / 2 : "100%";
   const tabInset = useFloatingTabInset();
   const { cwd } = useLocalSearchParams<{ cwd: string }>();
   const sessionsById = useClient((state) => state.sessions);
@@ -149,12 +156,12 @@ export function ProjectDetailScreen() {
         style={{ flex: 1, backgroundColor: colors.background }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 + tabInset, paddingTop: 8, gap: 12 }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, paddingHorizontal: 4 }}>
           <Text selectable numberOfLines={1} style={[type.footnote, { flexShrink: 1, color: colors.secondaryLabel }]}>
             {shortPath(cwd ?? "")}
           </Text>
           {branch ? (
-            <View style={{ flexShrink: 0 }}>
+            <View style={{ flexShrink: 1, maxWidth: "100%" }}>
               <BranchTag branch={branch} size={13} max={20} />
             </View>
           ) : null}
@@ -166,13 +173,17 @@ export function ProjectDetailScreen() {
             action={{ title: "新建会话", onPress: () => router.push({ pathname: "/new", params: { cwd } }) }}
           />
         ) : (
-          <View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: wide ? 16 : 0 }}>
             {entries.map((entry, index) => {
-              const position = entries.length === 1 ? "only" : index === 0 ? "first" : index === entries.length - 1 ? "last" : "middle";
-              return "session" in entry ? (
-                <SessionRow key={entry.key} session={entry.session} showProject={false} now={now} position={position} />
-              ) : (
-                <TerminalRow key={entry.key} terminal={entry.terminal} showProject={false} now={now} position={position} />
+              const position = wide || entries.length === 1 ? "only" : index === 0 ? "first" : index === entries.length - 1 ? "last" : "middle";
+              return (
+                <View key={entry.key} style={{ width: entryWidth, minWidth: 0 }}>
+                  {"session" in entry ? (
+                    <SessionRow session={entry.session} showProject={false} now={now} position={position} />
+                  ) : (
+                    <TerminalRow terminal={entry.terminal} showProject={false} now={now} position={position} />
+                  )}
+                </View>
               );
             })}
           </View>

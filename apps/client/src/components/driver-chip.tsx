@@ -1,5 +1,6 @@
 import type { SessionDriver } from "@linkshell/wire";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "./icon";

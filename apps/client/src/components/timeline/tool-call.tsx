@@ -1,7 +1,8 @@
 import type { TimelineItem } from "@linkshell/client-core";
 import type { ContentBlock } from "@linkshell/wire";
 import { memo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import Animated, { cubicBezier } from "react-native-reanimated";
 import { describeTool, type FileChange } from "@/lib/describe";
 import { baseName, duration } from "@/lib/format";

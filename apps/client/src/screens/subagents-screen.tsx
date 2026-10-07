@@ -1,8 +1,10 @@
 import type { SubagentInfo } from "@linkshell/wire";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { AdaptiveGrid, usePageInsets } from "@/components/adaptive-page";
+import { SheetHeader } from "@/components/sheet-header";
 import { Icon } from "@/components/icon";
 import { PressableScale } from "@/components/pressable-scale";
 import { EmptyState, LoadingState } from "@/components/state-views";
@@ -71,7 +73,7 @@ function Row({ entry, last, now, onPress }: { entry: SubagentInfo; last: boolean
  */
 export function SubagentsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
   const { loadSubagents } = useActions();
   const listed = useClient((state) => state.subagents[id]);
   const workflows = useClient((state) => state.workflows[id]);
@@ -111,32 +113,16 @@ export function SubagentsScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      {Platform.OS === "android" ? (
-        <View style={{ alignSelf: "center", width: 36, height: 4, borderRadius: 2, marginTop: 10, backgroundColor: colors.separator }} />
+      <SheetHeader title={runs.length ? "Agent 与工作流" : "子 Agent"} />
+      {list?.length || runs.length ? (
+        <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 }]}>
+          {[list?.length ? `${list.length} 个子 Agent` : undefined, runs.length ? `${runs.length} 个工作流` : undefined].filter(Boolean).join(" · ")}
+        </Text>
       ) : null}
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: Platform.OS === "android" ? 12 : 22, paddingBottom: 10 }}>
-        <View style={{ flex: 1, gap: 1 }}>
-          <Text style={[type.title, { color: colors.label }]}>{runs.length ? "Agent 与工作流" : "子 Agent"}</Text>
-          {list?.length || runs.length ? (
-            <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
-              {[list?.length ? `${list.length} 个子 Agent` : undefined, runs.length ? `${runs.length} 个工作流` : undefined].filter(Boolean).join(" · ")}
-            </Text>
-          ) : null}
-        </View>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="关闭"
-          hitSlop={10}
-          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="xmark" md="close" size={13} color={colors.secondaryLabel} weight="bold" />
-        </Pressable>
-      </View>
       {/* Wrapped: a sheet stretches a scroll view that's a direct child of the screen over the whole sheet. */}
       <View style={{ flex: 1, overflow: "hidden" }}>
         <ScrollView contentInsetAdjustmentBehavior="never" style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: insets.bottom + 24 }}>
-          {runs.length ? <View style={{ gap: 12, marginBottom: list?.length ? 16 : 0 }}>{runs.map((record) => <WorkflowCardContent key={record.toolCallId} record={record} sessionId={id} />)}</View> : null}
+          {runs.length ? <View style={{ marginBottom: list?.length ? 16 : 0 }}><AdaptiveGrid>{runs.map((record) => <WorkflowCardContent key={record.toolCallId} record={record} sessionId={id} />)}</AdaptiveGrid></View> : null}
           {!list ? (
             error ? (
               <EmptyState icon={{ sf: "exclamationmark.triangle", md: "warning" }} title="读取失败" message={error} />

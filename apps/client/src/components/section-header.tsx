@@ -1,4 +1,5 @@
-import { Text, View, type ColorValue } from "react-native";
+import { View, type ColorValue } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { colors } from "@/theme/colors";
 
 export function SectionHeader({ title, count, tone }: { title: string; count?: number; tone?: ColorValue }) {

@@ -1,8 +1,11 @@
+import { nativeStatusBar } from "@/lib/native-status-bar";
 import { Stack, router, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, BackHandler, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ActivityIndicator, BackHandler, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { usePageInsets } from "@/components/adaptive-page";
+import { KeyboardAvoidingView, useKeyboardState } from "react-native-keyboard-controller";
 import { WebView, type WebViewNavigation } from "react-native-webview";
 import { Button } from "@/components/button";
 import { Glass } from "@/components/glass";
@@ -12,6 +15,7 @@ import { useConnection } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { openLink } from "@/lib/links";
 import { forwardPort, type Forward } from "@/lib/preview";
+import { revealPreviewFocus } from "@/lib/preview-focus";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
@@ -30,7 +34,7 @@ function ToolbarButton({ icon, label, disabled, onPress }: { icon: Pick<IconProp
       accessibilityLabel={label}
       hitSlop={6}
       android_ripple={{ color: colors.fill as string, borderless: true, radius: 22 }}
-      style={{ width: 44, height: 40, alignItems: "center", justifyContent: "center", opacity: disabled ? 0.3 : 1 }}
+      style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: disabled ? 0.3 : 1 }}
     >
       <Icon {...icon} size={20} color={colors.accent} weight="medium" />
     </Pressable>
@@ -43,11 +47,24 @@ function ToolbarButton({ icon, label, disabled, onPress }: { icon: Pick<IconProp
  */
 export function PreviewScreen() {
   const params = useLocalSearchParams<{ port: string; title?: string }>();
-  const port = Number(params.port);
+  return <PreviewContent key={params.port} port={Number(params.port)} initialTitle={params.title} />;
+}
+
+export function PreviewContent({ port, initialTitle, embedded = false }: { port: number; initialTitle?: string; embedded?: boolean }) {
   const { streams } = useConnection();
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
   const web = useRef<WebView>(null);
+  const keyboardOpen = useKeyboardState((state) => state.isVisible);
+  const focusRevealTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const revealEditor = useCallback(() => {
+    if (Platform.OS !== "ios" || !keyboardOpen) return;
+    clearTimeout(focusRevealTimer.current);
+    // Wait for the last keyboard/rotation frame, then let the page finish its own layout.
+    focusRevealTimer.current = setTimeout(() => web.current?.injectJavaScript(revealPreviewFocus), 80);
+  }, [keyboardOpen]);
+  useEffect(() => () => clearTimeout(focusRevealTimer.current), [keyboardOpen]);
   const [forward, setForward] = useState<Forward | null>(null);
+  const [connectionAttempt, setConnectionAttempt] = useState(0);
   const [failure, setFailure] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [nav, setNav] = useState<Pick<WebViewNavigation, "title" | "url" | "canGoBack" | "canGoForward"> | null>(null);
@@ -73,7 +90,7 @@ export function PreviewScreen() {
       cancelled = true;
       active?.stop();
     };
-  }, [streams, port]);
+  }, [streams, port, connectionAttempt]);
 
   // Shown as the computer's address, not the phone's loopback.
   const shown = (url: string | undefined) => {
@@ -81,7 +98,7 @@ export function PreviewScreen() {
     const path = url.replace(/^https?:\/\/(127\.0\.0\.1|localhost):\d+/, "");
     return `localhost:${port}${path === "/" ? "" : path}`;
   };
-  const title = nav?.title && !/^https?:\/\//.test(nav.title) && !nav.title.startsWith("127.0.0.1") ? nav.title : (params.title ?? `localhost:${port}`);
+  const title = nav?.title && !/^https?:\/\//.test(nav.title) && !nav.title.startsWith("127.0.0.1") ? nav.title : (initialTitle ?? `localhost:${port}`);
   const local = (url: string) => {
     if (!forward) return false;
     const origin = /^https?:\/\/([^/:]+):(\d+)/.exec(url);
@@ -100,17 +117,20 @@ export function PreviewScreen() {
   const retry = () => {
     setFailure(null);
     setProgress(0);
-    setGeneration((value) => value + 1);
+    if (forward) setGeneration((value) => value + 1);
+    else setConnectionAttempt((value) => value + 1);
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.plain, paddingTop: fullscreen ? insets.top : 0 }}>
-      <StatusBar hidden={fullscreen} animated />
+      {embedded ? keyboardOpen ? null : <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, paddingHorizontal: 16, paddingBottom: 10 }]}>{shown(nav?.url)}</Text> : <>
+      {!nativeStatusBar ? <StatusBar hidden={fullscreen} animated /> : null}
       <Stack.Screen
         options={{
           headerShown: !fullscreen,
+          ...(nativeStatusBar ? { statusBarHidden: fullscreen, statusBarStyle: "auto", statusBarAnimation: "fade" } as const : {}),
           title,
-          headerTitle: () => (
+          headerTitle: Platform.OS === "ios" ? undefined : () => (
             <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start", maxWidth: 240 }}>
               <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>
                 {title}
@@ -152,14 +172,18 @@ export function PreviewScreen() {
         ]}
       />
       )}
+      </>}
 
-      <View style={{ flex: 1 }}>
+      {!embedded && Platform.OS === "ios" && !fullscreen && !keyboardOpen ? <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, paddingHorizontal: 16, paddingBottom: 8 }]}>{shown(nav?.url)}</Text> : null}
+      {/* Padding remeasures on rotation with the keyboard open; the native header stays outside this frame. */}
+      <KeyboardAvoidingView behavior="padding" automaticOffset={Platform.OS === "ios"} enabled={Platform.OS === "ios"} style={{ flex: 1 }}>
         {forward && !failure ? (
           <WebView
             key={`${generation}-${desktop}`}
             ref={web}
             source={{ uri: forward.url }}
             userAgent={desktop ? DESKTOP_AGENT : undefined}
+            onLayout={revealEditor}
             onLoadProgress={({ nativeEvent }) => setProgress(nativeEvent.progress)}
             onNavigationStateChange={(state) => setNav(state)}
             onError={({ nativeEvent }) => setFailure(nativeEvent.description || "页面加载失败")}
@@ -178,15 +202,17 @@ export function PreviewScreen() {
             pullToRefreshEnabled
             setSupportMultipleWindows={false}
             domStorageEnabled
+            textZoom={100}
+            contentInsetAdjustmentBehavior={Platform.OS === "ios" && !embedded && !fullscreen ? "automatic" : "never"}
             style={{ flex: 1, backgroundColor: colors.plain }}
           />
         ) : failure ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 12 }}>
+          <ScrollView style={{ flex: 1 }} contentInsetAdjustmentBehavior="never" contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 12 }}>
             <Icon sf="network.slash" md="cloud_off" size={36} color={colors.tertiaryLabel} />
             <Text style={[type.headline, { color: colors.label }]}>打不开 localhost:{port}</Text>
             <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>电脑上这个端口可能没有在运行服务，启动后再试。</Text>
             <Button title="重试" variant="tonal" size="small" onPress={retry} />
-          </View>
+          </ScrollView>
         ) : (
           <ActivityIndicator style={{ marginTop: 48 }} color={colors.secondaryLabel} />
         )}
@@ -195,9 +221,9 @@ export function PreviewScreen() {
             <View style={{ width: `${progress * 100}%`, height: 2, backgroundColor: colors.accent }} />
           </View>
         ) : null}
-      </View>
+      </KeyboardAvoidingView>
 
-      {fullscreen ? (
+      {keyboardOpen ? null : fullscreen ? (
         <Pressable
           onPress={() => {
             haptics.selection();
@@ -206,12 +232,24 @@ export function PreviewScreen() {
           accessibilityRole="button"
           accessibilityLabel="退出全屏"
           hitSlop={10}
-          style={{ position: "absolute", right: 14, bottom: Math.max(insets.bottom, 12) + 6, opacity: 0.9 }}
+          style={{ position: "absolute", right: Math.max(insets.right, 0) + 14, bottom: Math.max(insets.bottom, 12) + 6, opacity: 0.9 }}
         >
-          <Glass interactive style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+          <Glass interactive style={{ width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" }}>
             <Icon sf="arrow.down.right.and.arrow.up.left" md="fullscreen_exit" size={16} color={colors.label} weight="semibold" />
           </Glass>
         </Pressable>
+      ) : Platform.OS === "ios" && !embedded ? (
+        <Stack.Toolbar placement="bottom">
+          <Stack.Toolbar.Button icon="chevron.left" accessibilityLabel="后退" disabled={!nav?.canGoBack} onPress={() => web.current?.goBack()}>后退</Stack.Toolbar.Button>
+          <Stack.Toolbar.Button icon="chevron.right" accessibilityLabel="前进" disabled={!nav?.canGoForward} onPress={() => web.current?.goForward()}>前进</Stack.Toolbar.Button>
+          <Stack.Toolbar.Button
+            icon={progress > 0 && progress < 1 ? "xmark" : "arrow.clockwise"}
+            accessibilityLabel={progress > 0 && progress < 1 ? "停止" : "刷新"}
+            onPress={() => (progress > 0 && progress < 1 ? web.current?.stopLoading() : failure ? retry() : web.current?.reload())}
+          >{progress > 0 && progress < 1 ? "停止" : "刷新"}</Stack.Toolbar.Button>
+          <Stack.Toolbar.Spacer />
+          <Stack.Toolbar.Button icon="arrow.up.left.and.arrow.down.right" accessibilityLabel="全屏" onPress={() => setFullscreen(true)}>全屏</Stack.Toolbar.Button>
+        </Stack.Toolbar>
       ) : (
       <View
         style={{
@@ -219,7 +257,7 @@ export function PreviewScreen() {
           justifyContent: "space-around",
           alignItems: "center",
           paddingTop: 4,
-          paddingBottom: Math.max(insets.bottom, 8),
+          paddingBottom: embedded ? 8 : Math.max(insets.bottom, 8),
           backgroundColor: colors.plain,
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: colors.separator,
@@ -232,7 +270,7 @@ export function PreviewScreen() {
           label={progress > 0 && progress < 1 ? "停止" : "刷新"}
           onPress={() => (progress > 0 && progress < 1 ? web.current?.stopLoading() : failure ? retry() : web.current?.reload())}
         />
-        <ToolbarButton icon={{ sf: "arrow.up.left.and.arrow.down.right", md: "fullscreen" }} label="全屏" onPress={() => setFullscreen(true)} />
+        {embedded ? null : <ToolbarButton icon={{ sf: "arrow.up.left.and.arrow.down.right", md: "fullscreen" }} label="全屏" onPress={() => setFullscreen(true)} />}
       </View>
       )}
     </View>

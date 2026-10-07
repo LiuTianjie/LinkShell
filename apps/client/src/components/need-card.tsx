@@ -1,6 +1,7 @@
 import type { SessionSummary } from "@linkshell/wire";
 import { memo } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { useActions, useClient } from "@/lib/client";
 import { sessionTitle } from "@/lib/describe";
 import { baseName, relativeTime } from "@/lib/format";
@@ -13,7 +14,7 @@ import { PermissionActions } from "./permission-actions";
 import { openSession, SessionAvatar } from "./session-row";
 
 /** A session waiting on the user, with its approval right on the card. */
-export const NeedCard = memo(function NeedCard({ session, now }: { session: SessionSummary; now: number }) {
+export const NeedCard = memo(function NeedCard({ session, now, onPress }: { session: SessionSummary; now: number; onPress?: () => void }) {
   const { respond } = useActions();
   const online = useClient((state) => state.status === "online");
   const permission = session.permission;
@@ -31,7 +32,7 @@ export const NeedCard = memo(function NeedCard({ session, now }: { session: Sess
       }}
     >
       <Pressable
-        onPress={() => openSession(session.id)}
+        onPress={onPress ?? (() => openSession(session.id))}
         accessibilityRole="button"
         accessibilityLabel={`打开 ${sessionTitle(session)}`}
         style={{ flexDirection: "row", gap: 12, alignItems: "center" }}
@@ -75,7 +76,7 @@ export const NeedCard = memo(function NeedCard({ session, now }: { session: Sess
 
       {permission?.questions ? (
         // Questions are answered in the session, where there is room for them.
-        <Button title="去回答" variant="primary" wide onPress={() => openSession(session.id)} />
+        <Button title="去回答" variant="primary" wide onPress={onPress ?? (() => openSession(session.id))} />
       ) : permission ? (
         <PermissionActions
           key={permission.requestId}

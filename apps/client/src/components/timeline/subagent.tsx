@@ -1,7 +1,8 @@
 import type { TimelineItem } from "@linkshell/client-core";
 import { router } from "expo-router";
 import { memo } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { useClient } from "@/lib/client";
 import { describeTool } from "@/lib/describe";
 import { compactNumber, duration } from "@/lib/format";

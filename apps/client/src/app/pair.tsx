@@ -1,1 +1,4 @@
-export { PairScreen as default } from "@/screens/pair-screen";
+import { adaptiveScreen } from "@/components/adaptive-page";
+import { PairScreen } from "@/screens/pair-screen";
+
+export default adaptiveScreen(PairScreen, { maxWidth: 600, surface: "sheet" });

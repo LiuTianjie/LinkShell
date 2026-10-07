@@ -7,7 +7,7 @@ import { useConnection } from "@/lib/client";
 const POLL_MS = 10_000;
 
 /** The computer's listening servers, refreshed while the screen is in view. */
-export function usePorts() {
+export function usePorts(enabled = true) {
   const { link } = useConnection();
   const [ports, setPorts] = useState<PortInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,10 +24,11 @@ export function usePorts() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!enabled) return;
       void refresh();
       const timer = setInterval(() => void refresh(), POLL_MS);
       return () => clearInterval(timer);
-    }, [refresh]),
+    }, [refresh, enabled]),
   );
 
   return { ports, error, refresh };

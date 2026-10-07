@@ -1,6 +1,7 @@
 import { AppMenu } from "@/components/app-menu";
 import { Stack } from "expo-router";
-import { Platform, Pressable, useWindowDimensions, View } from "react-native";
+import { Platform, Pressable, View } from "react-native";
+import { useContentWidth } from "@/lib/content-width";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { Icon, type IconProps } from "./icon";
@@ -38,16 +39,13 @@ export function HeaderActions({ actions }: { actions: HeaderAction[] }) {
       <Stack.Toolbar placement="right">
         {actions.map((action) =>
           action.kind === "button" ? (
-            action.live === undefined ? (
-              <Stack.Toolbar.Button key={action.key} icon={action.icon.sf} accessibilityLabel={action.label} onPress={action.onPress} />
-            ) : (
-              // The system's own badge is a count; the live dot is ours, so this one is drawn here, in the same capsule.
-              <Stack.Toolbar.View key={action.key}>
-                <LiveButton icon={action.icon} label={action.label} live={action.live} onPress={action.onPress} />
-              </Stack.Toolbar.View>
-            )
+            <Stack.Toolbar.Button key={action.key} icon={action.icon.sf} accessibilityLabel={action.label} onPress={action.onPress}>
+              <Stack.Toolbar.Label>{action.label}</Stack.Toolbar.Label>
+              {action.live ? <Stack.Toolbar.Badge>•</Stack.Toolbar.Badge> : null}
+            </Stack.Toolbar.Button>
           ) : (
-            <Stack.Toolbar.Menu key={action.key} icon={action.icon.sf}>
+            <Stack.Toolbar.Menu key={action.key} icon={action.icon.sf} accessibilityLabel={action.label}>
+              <Stack.Toolbar.Label>{action.label}</Stack.Toolbar.Label>
               {action.items.map((item) => (
                 <Stack.Toolbar.MenuAction key={item.title} icon={item.icon.sf} destructive={item.destructive} onPress={item.onPress}>
                   {item.title}
@@ -68,7 +66,7 @@ export function HeaderActions({ actions }: { actions: HeaderAction[] }) {
  * a wider one slides under the buttons.
  */
 export function useHeaderTitleWidth(count: number): number {
-  const { width } = useWindowDimensions();
+  const width = useContentWidth();
   // iOS 26: the back button is a 44pt circle 16 from the edge; the actions share
   // one capsule, 44 each and 14 apart. The bar keeps 12 between it and the title.
   // Android: the title starts 56 in, then 44 per icon button and a 16 margin.
@@ -76,27 +74,7 @@ export function useHeaderTitleWidth(count: number): number {
     Platform.OS === "ios"
       ? width - (16 + 44 + 12) - (12 + 44 * count + 14 * Math.max(count - 1, 0) + 16)
       : width - 56 - (12 + 44 * count + 16);
-  return Math.min(room, 320);
-}
-
-/** A toolbar button drawn to match the system's, with the same live dot as the session title's at its icon's corner. */
-function LiveButton({ icon, label, live, onPress }: { icon: Glyph; label: string; live: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      hitSlop={6}
-      style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
-    >
-      <Icon {...icon} size={21} color={colors.label} weight="semibold" />
-      {live ? (
-        <View pointerEvents="none" style={{ position: "absolute", top: 4, right: 2 }}>
-          <LiveDot size={5} />
-        </View>
-      ) : null}
-    </Pressable>
-  );
+  return Math.max(80, Math.min(room, 320));
 }
 
 function IconButton({ icon, label, live, onPress }: { icon: Glyph; label: string; live?: boolean; onPress?: () => void }) {

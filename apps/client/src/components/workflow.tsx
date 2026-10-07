@@ -2,7 +2,8 @@ import { workflowIsLive, type TimelineItem, type WorkflowRecord } from "@linkshe
 import type { Workflow, WorkflowAgent, WorkflowAgentState } from "@linkshell/wire";
 import { router } from "expo-router";
 import { memo, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { useClient } from "@/lib/client";
 import { compactNumber, duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";

@@ -1,10 +1,12 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text, TextInput } from "@/components/fixed-text";
+import { usePageInsets } from "@/components/adaptive-page";
+import { SheetHeader } from "@/components/sheet-header";
 import { Icon } from "@/components/icon";
-import { useClient } from "@/lib/client";
 import { pickCommand } from "@/lib/command-pick";
+import { useClient, useSessionSubscription } from "@/lib/client";
 import { commandDetail, matchCommands, type Command } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
@@ -19,7 +21,8 @@ const NONE: Command[] = [];
  */
 export function CommandsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const insets = useSafeAreaInsets();
+  useSessionSubscription(id);
+  const insets = usePageInsets();
   const commands = useClient((state) => state.views[id]?.commands) ?? NONE;
   const [query, setQuery] = useState("");
   const shown = useMemo(() => matchCommands(commands, query), [commands, query]);
@@ -32,28 +35,14 @@ export function CommandsScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      {Platform.OS === "android" ? (
-        <View style={{ alignSelf: "center", width: 36, height: 4, borderRadius: 2, marginTop: 10, backgroundColor: colors.separator }} />
-      ) : null}
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: Platform.OS === "android" ? 12 : 22, paddingBottom: 12 }}>
-        <Text style={[type.title, { flex: 1, color: colors.label }]}>命令</Text>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="关闭"
-          hitSlop={10}
-          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="xmark" md="close" size={13} color={colors.secondaryLabel} weight="bold" />
-        </Pressable>
-      </View>
-      <View style={{ paddingHorizontal: 16 }}>
+      <SheetHeader title="命令" />
+      <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
         <View
           style={{
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            height: 40,
+            minHeight: 44,
             paddingHorizontal: 12,
             borderRadius: 12,
             borderCurve: "continuous",
@@ -62,6 +51,7 @@ export function CommandsScreen() {
         >
           <Icon sf="magnifyingglass" md="search" size={15} color={colors.secondaryLabel} />
           <TextInput
+            accessibilityLabel="搜索命令"
             value={query}
             onChangeText={setQuery}
             placeholder="搜索命令"
@@ -70,7 +60,7 @@ export function CommandsScreen() {
             autoCorrect={false}
             returnKeyType="search"
             clearButtonMode="while-editing"
-            style={[type.body, { flex: 1, fontSize: 16, color: colors.label, paddingVertical: 0 }]}
+            style={[type.body, { flex: 1, fontSize: 16, color: colors.label, minHeight: 44, paddingVertical: 8 }]}
           />
         </View>
       </View>
@@ -78,6 +68,7 @@ export function CommandsScreen() {
       <View style={{ flex: 1, overflow: "hidden" }}>
         <ScrollView
           contentInsetAdjustmentBehavior="never"
+          automaticallyAdjustKeyboardInsets
           style={{ flex: 1 }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
