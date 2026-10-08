@@ -1,0 +1,5 @@
+ios/vendor/Frameworks/
+android/vendor/
+android/.cxx/
+android/build/
+android/.ghostty-build/

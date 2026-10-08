@@ -1,0 +1,27 @@
+LinkTerminal embeds Ghostty and native mobile adapters.
+
+Source pins and binary SHA-256 checksums: vendor-manifest.json.
+
+Ghostty: https://github.com/ghostty-org/ghostty (MIT).
+GhosttyTerminal/GhosttyKit: https://github.com/Lakr233/libghostty-spm (MIT).
+DisplayLink: https://github.com/Lakr233/DisplayLink (MIT).
+Android JNI, input, selection and row decoding were adapted from:
+https://github.com/arcboxlabs/expo-libghostty (MIT, ArcBox Inc.).
+Licenses are retained in ios/vendor/LICENSE-*.txt. The app supplies its existing LinkShellSymbols font.
+The Unicode placeholder diacritic table is specified by the Kitty graphics
+protocol and derived from Unicode 6.0 character data.
+
+Local integration changes:
+- CocoaPods resources replace Swift Package bundle resolution.
+- iOS file-provider hooks route imports to LinkShell's remote upload flow.
+- A replay grid-size API preserves terminal protocols during history recovery.
+- Android uses GPU display lists, smooth scroll overscan, Ghostty image storage,
+  PNG decoding through Android, Unicode placements and synchronized output.
+- Both platforms expose keys, paste, font changes and replay through LinkTerminal.
+
+Apple binary archives are fetched and SHA-256 checked during pod install.
+The Android static libraries are stored compressed under android/prebuilt/
+and verified/extracted by Gradle. scripts/build-android-cores.mjs rebuilds all
+three ABIs from the pinned source with the Android main-thread patch, preserving
+armv7 support and avoiding ELF TLS requirements on older Android versions.
+Downloaded archives, unpacked libraries and build outputs are ignored.

@@ -90,6 +90,16 @@ CREATE TABLE IF NOT EXISTS terminals (
   ended INTEGER NOT NULL DEFAULT 0,
   buffer TEXT NOT NULL DEFAULT ''
 );
+-- Original control sequences and geometry are needed to recover image and
+-- keyboard state that a text-only screen serializer cannot represent.
+CREATE TABLE IF NOT EXISTS terminal_frames (
+  terminal_id TEXT NOT NULL,
+  frame INTEGER NOT NULL,
+  cols INTEGER NOT NULL,
+  rows INTEGER NOT NULL,
+  data TEXT NOT NULL,
+  PRIMARY KEY (terminal_id, frame)
+) WITHOUT ROWID;
 `;
 
 export interface TerminalRecord {
@@ -325,7 +335,25 @@ export class HostStore {
     }));
   }
 
+  appendTerminalFrame(id: string, frame: number, cols: number, rows: number, data: string): void {
+    this.db.prepare("INSERT INTO terminal_frames (terminal_id, frame, cols, rows, data) VALUES (?, ?, ?, ?, ?)")
+      .run(id, frame, cols, rows, data);
+  }
+
+  lastTerminalFrame(id: string): number {
+    const row = this.db.prepare("SELECT MAX(frame) AS frame FROM terminal_frames WHERE terminal_id = ?").get(id) as { frame: number | null };
+    return row.frame ?? 0;
+  }
+
+  terminalFrames(id: string, after: number, through: number): { frame: number; cols: number; rows: number; data: string }[] {
+    // Each frame is at most 64K UTF-16 units; eight keep the RPC bounded even
+    // when escaping control characters expands the JSON payload.
+    return this.db.prepare("SELECT frame, cols, rows, data FROM terminal_frames WHERE terminal_id = ? AND frame > ? AND frame <= ? ORDER BY frame LIMIT 8")
+      .all(id, after, through) as { frame: number; cols: number; rows: number; data: string }[];
+  }
+
   deleteTerminal(id: string): void {
+    this.db.prepare("DELETE FROM terminal_frames WHERE terminal_id = ?").run(id);
     this.db.prepare("DELETE FROM terminals WHERE id = ?").run(id);
   }
 

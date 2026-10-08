@@ -454,7 +454,8 @@ export const methods = {
    * recent screen history to redraw from scratch.
    */
   "terminals.attach": {
-    params: z.object({ terminalId: z.string().min(1), fromSeq: z.number().int().min(0).optional() }),
+    params: z.object({ terminalId: z.string().min(1), fromSeq: z.number().int().min(0).optional(),
+      replayFormat: z.literal("frames-v1").optional(), fromFrame: z.number().int().min(0).optional() }),
     result: z.object({
       terminal: terminalInfoSchema,
       /** Output to write before any `terminal.output` that follows. */
@@ -463,6 +464,14 @@ export const methods = {
       reset: z.boolean(),
       /** The last output seq `replay` covers; later chunks arrive as `terminal.output`. */
       seq: z.number().int(),
+      recording: z.object({ afterFrame: z.number().int(), throughFrame: z.number().int() }).optional(),
+    }),
+  },
+  "terminals.replay": {
+    params: z.object({ terminalId: z.string().min(1), afterFrame: z.number().int().min(0), throughFrame: z.number().int().min(0) }),
+    result: z.object({
+      frames: z.array(z.object({ frame: z.number().int(), cols: z.number().int(), rows: z.number().int(), data: z.string() })),
+      nextFrame: z.number().int(), done: z.boolean(),
     }),
   },
   "terminals.detach": {
@@ -589,7 +598,8 @@ export const notifications = {
   "pairing.done": z.object({ device: z.object({ id: z.string(), name: z.string() }) }),
   "gateway.changed": gatewayStatusSchema,
   /** Output from an attached terminal, in order; `seq` increases by one per chunk. */
-  "terminal.output": z.object({ terminalId: z.string(), seq: z.number().int(), data: z.string() }),
+  "terminal.output": z.object({ terminalId: z.string(), seq: z.number().int(), data: z.string(),
+    frame: z.number().int().optional(), cols: z.number().int().optional(), rows: z.number().int().optional() }),
   /** A terminal's list entry changed (title, size, exit), or it was closed (`closed`). */
   "terminal.changed": z.object({ terminal: terminalInfoSchema, closed: z.boolean().optional() }),
   /** Bytes from the host's end of a `proxy.open` stream (base64), in order. */

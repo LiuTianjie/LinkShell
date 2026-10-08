@@ -1,8 +1,10 @@
+import { useTerminalFontSize, setTerminalFontSize, TERMINAL_FONT_MIN, TERMINAL_FONT_MAX, TERMINAL_FONT_DEFAULT } from "@/lib/terminal-preferences";
+import { File } from "expo-file-system";
+import { restoreTerminalRecording } from "@/lib/terminal-replay";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Platform, useColorScheme, View } from "react-native";
 import { Text } from "@/components/fixed-text";
-import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { usePageInsets } from "@/components/adaptive-page";
@@ -10,7 +12,7 @@ import { Button } from "@/components/button";
 import { BranchTag } from "@/components/branch-tag";
 import { HeaderActions } from "@/components/header-actions";
 import { Icon } from "@/components/icon";
-import { KeyBar, withCtrl } from "@/components/terminal/key-bar";
+import { KeyBar } from "@/components/terminal/key-bar";
 import { darkTerminal, lightTerminal } from "@/components/terminal/themes";
 import { NativeTerminal, type NativeTerminalHandle } from "../../modules/link-terminal/src";
 import { useContentWidth } from "@/lib/content-width";
@@ -22,8 +24,6 @@ import { terminalState, useTerminals } from "@/lib/terminals";
 import { pickFile, pickPhoto, shellQuote, upload, type Picked } from "@/lib/upload";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
-
-const FONT_SIZES = [11, 12, 13, 14, 16, 18];
 
 /**
  * One host terminal, full screen. Output streams in by seq; after a reconnect
@@ -38,7 +38,6 @@ export function TerminalScreen() {
   const branch = branchOf(useGitInfo(info?.cwd));
   const insets = usePageInsets();
   const contentWidth = useContentWidth();
-  const { fontScale } = useWindowDimensions();
   const terminalSize = useRef<{ id: string; cols: number; rows: number } | null>(null);
   const keyboardOpen = useKeyboardState((state) => state.isVisible);
   // Follow the keyboard frame by frame: the terminal shrinks with it, so the
@@ -47,69 +46,101 @@ export function TerminalScreen() {
   const lift = useAnimatedStyle(() => ({ paddingBottom: Math.max(-keyboardHeight.value, 0) }));
   const theme = useColorScheme() === "dark" ? darkTerminal : lightTerminal;
   const view = useRef<NativeTerminalHandle>(null);
-  const [fontSize, setFontSize] = useState(13);
+  const fontSize = useTerminalFontSize();
   const [ctrl, setCtrl] = useState(false);
-  const ctrlRef = useRef(false);
-  ctrlRef.current = ctrl;
-
-  // Output ordering: chunks that race the attach replay are held and filtered by seq.
-  const seq = useRef<number | undefined>(undefined);
+  const [restoring, setRestoring] = useState(true);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const attaching = useRef(true);
-  const held = useRef<{ seq: number; data: string }[]>([]);
-
-  const draw = useCallback((data: string, reset = false) => {
-    if (reset) view.current?.reset();
-    if (data) view.current?.write(data);
-  }, []);
-
-  const attach = useCallback(async () => {
-    attaching.current = true;
-    try {
-      const result = await link.call("terminals.attach", { terminalId: id, fromSeq: seq.current });
-      draw(result.replay, result.reset);
-      seq.current = result.seq;
-      for (const chunk of held.current) {
-        if (chunk.seq > result.seq) {
-          draw(chunk.data);
-          seq.current = chunk.seq;
-        }
-      }
-    } catch {
-      // Gone (closed elsewhere) or offline: the list and banner say so.
-    } finally {
-      held.current = [];
-      attaching.current = false;
-    }
-  }, [draw, id, link]);
 
   useEffect(() => {
+    let active = true;
+    let generation = 0;
+    let seq: number | undefined;
+    let frame: number | undefined;
+    let held: { seq: number; data: string; frame?: number }[] = [];
+    let heldBytes = 0;
+    let overflowed = false;
+    let chain = Promise.resolve();
+    attaching.current = true;
+    setRestoring(true);
+    setRestoreError(null);
+
+    const write = async (chunk: { seq: number; data: string; frame?: number }) => {
+      if (!active || (seq !== undefined && chunk.seq <= seq)) return;
+      const native = view.current;
+      if (!native) throw new Error("终端尚未就绪");
+      await native.write(chunk.data);
+      seq = chunk.seq;
+      frame = chunk.frame;
+    };
+    const attach = () => {
+      const attempt = ++generation;
+      attaching.current = true;
+      setRestoring(true);
+      setRestoreError(null);
+      chain = chain.catch(() => {}).then(async () => {
+        if (!active || attempt !== generation) return;
+        try {
+          const native = view.current;
+          if (!native) throw new Error("终端尚未就绪");
+          const result = await link.call("terminals.attach", { terminalId: id, fromSeq: seq, replayFormat: "frames-v1", fromFrame: frame });
+          if (!active || attempt !== generation) return;
+          if (result.recording) {
+            await restoreTerminalRecording(native, result.recording,
+              (afterFrame, throughFrame) => link.call("terminals.replay", { terminalId: id, afterFrame, throughFrame }),
+              () => active && attempt === generation);
+            frame = result.recording.throughFrame;
+          } else {
+            // Older hosts expose a text snapshot; mute its terminal queries too.
+            await native.beginReplay(result.reset);
+            try { await native.replay(result.replay, result.terminal.cols, result.terminal.rows); }
+            finally { await native.endReplay(); }
+            frame = undefined;
+          }
+          seq = result.seq;
+          if (overflowed) { overflowed = false; held = []; heldBytes = 0; attach(); return; }
+          heldBytes = 0;
+          while (held.length && active && attempt === generation) await write(held.shift()!);
+          if (!active || attempt !== generation) return;
+          attaching.current = false;
+          setRestoring(false);
+          const size = terminalSize.current;
+          if (size?.id === id) void link.call("terminals.resize", { terminalId: id, cols: size.cols, rows: size.rows }).catch(() => {});
+        } catch (error) {
+          seq = undefined; frame = undefined; held = [];
+          if (active && attempt === generation) {
+            setRestoring(false);
+            setRestoreError(error instanceof Error ? error.message : "终端恢复失败");
+          }
+        }
+      });
+    };
     const offOutput = link.on("terminal.output", (chunk) => {
       if (chunk.terminalId !== id) return;
       if (attaching.current) {
-        held.current.push(chunk);
+        if (!overflowed) {
+          heldBytes += chunk.data.length;
+          if (heldBytes > 4 * 1024 * 1024) { held = []; overflowed = true; }
+          else held.push(chunk);
+        }
         return;
       }
-      if (seq.current !== undefined && chunk.seq <= seq.current) return;
-      seq.current = chunk.seq;
-      draw(chunk.data);
+      chain = chain.then(() => write(chunk)).catch(() => { if (active) attach(); });
     });
-    void attach();
-    const offOnline = link.onOnline(() => void attach());
+    attach();
+    const offOnline = link.onOnline(attach);
     return () => {
-      offOutput();
-      offOnline();
+      active = false; generation++;
+      offOutput(); offOnline();
       void link.call("terminals.detach", { terminalId: id }).catch(() => {});
     };
-  }, [attach, draw, id, link]);
+  }, [id, link, retry]);
 
-  const send = useCallback(
-    (data: string) => {
-      const payload = ctrlRef.current ? withCtrl(data) : data;
-      if (ctrlRef.current) setCtrl(false);
-      void link.call("terminals.input", { terminalId: id, data: payload }).catch(() => {});
-    },
-    [id, link],
-  );
+  const send = useCallback((data: string) => {
+    if (attaching.current) return;
+    void link.call("terminals.input", { terminalId: id, data }).catch(() => {});
+  }, [id, link]);
 
   const state = info ? terminalState(info) : undefined;
   const ended = state?.ended ?? false;
@@ -131,21 +162,38 @@ export function TerminalScreen() {
   // A file from the phone lands in the terminal's directory, and its path is
   // typed at the prompt, the way dropping a file on a desktop terminal does.
   const [uploading, setUploading] = useState<string | null>(null);
+  const uploadQueue = useRef(Promise.resolve());
+  const uploadContext = useRef<string | null>(id);
+  useEffect(() => { uploadContext.current = id; return () => { uploadContext.current = null; }; }, [id]);
+  const sendPickedFile = (file: Picked, temporary = false) => {
+    const cleanup = () => {
+      if (temporary) { try { new File(file.uri).delete(); } catch { /* OS cache cleanup can race us. */ } }
+    };
+    if (!info || ended || !view.current) { cleanup(); return; }
+    const destination = view.current;
+    const cwd = info.cwd;
+    uploadQueue.current = uploadQueue.current.catch(() => {}).then(async () => {
+      if (uploadContext.current === id) setUploading(file.name);
+      try {
+        const path = await upload(link, file, cwd);
+        if (uploadContext.current !== id || view.current !== destination) return;
+        if (attaching.current) throw new Error("终端正在恢复，请恢复后再粘贴文件路径");
+        await destination.paste(`${shellQuote(path)} `);
+        haptics.success();
+      } catch (reason) {
+        if (uploadContext.current === id) {
+          haptics.error();
+          Alert.alert("上传失败", reason instanceof Error ? reason.message : String(reason));
+        }
+      } finally {
+        cleanup();
+        if (uploadContext.current === id) setUploading(null);
+      }
+    });
+  };
   const sendFile = async (pick: () => Promise<Picked | null>) => {
-    if (!info) return;
     const file = await pick().catch(() => null);
-    if (!file) return;
-    setUploading(file.name);
-    try {
-      const path = await upload(link, file, info.cwd);
-      haptics.success();
-      void link.call("terminals.input", { terminalId: id, data: `${shellQuote(path)} ` }).catch(() => {});
-    } catch (reason) {
-      haptics.error();
-      Alert.alert("上传失败", reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setUploading(null);
-    }
+    if (file) sendPickedFile(file);
   };
 
   const gone = loaded && !info;
@@ -196,14 +244,19 @@ export function TerminalScreen() {
             label: "更多",
             items: [
               {
-                title: "放大字号",
+                title: `放大字号（${fontSize}）`,
                 icon: { sf: "textformat.size.larger", md: "text_increase" },
-                onPress: () => setFontSize((size) => FONT_SIZES[Math.min(FONT_SIZES.indexOf(size) + 1, FONT_SIZES.length - 1)]!),
+                onPress: () => setTerminalFontSize(Math.min(fontSize + 1, TERMINAL_FONT_MAX)),
               },
               {
-                title: "缩小字号",
+                title: fontSize <= TERMINAL_FONT_MIN ? `已是最小字号（${TERMINAL_FONT_MIN}）` : `缩小字号（${fontSize}）`,
                 icon: { sf: "textformat.size.smaller", md: "text_decrease" },
-                onPress: () => setFontSize((size) => FONT_SIZES[Math.max(FONT_SIZES.indexOf(size) - 1, 0)]!),
+                onPress: () => setTerminalFontSize(Math.max(fontSize - 1, TERMINAL_FONT_MIN)),
+              },
+              {
+                title: `恢复默认字号（${TERMINAL_FONT_DEFAULT}）`,
+                icon: { sf: "arrow.counterclockwise", md: "restart_alt" },
+                onPress: () => setTerminalFontSize(TERMINAL_FONT_DEFAULT),
               },
               ...(info && !ended
                 ? [
@@ -235,16 +288,28 @@ export function TerminalScreen() {
           <NativeTerminal
             ref={view}
             theme={theme}
-            fontSize={fontSize * fontScale}
+            fontSize={fontSize}
             onInput={send}
+            onFile={(file) => sendPickedFile(file, true)}
+            onError={(message) => Alert.alert("终端", message)}
+            onFontSize={setTerminalFontSize}
+            onModifiers={({ ctrl: active }) => setCtrl(active)}
             onResize={(cols, rows) => {
               // Rotation and folding can briefly report an empty native surface. Keep the running PTY valid.
               if (cols < 2 || rows < 1 || (terminalSize.current?.id === id && terminalSize.current?.cols === cols && terminalSize.current?.rows === rows)) return;
-              terminalSize.current = { id, cols, rows };
-              void link.call("terminals.resize", { terminalId: id, cols, rows }).catch(() => { terminalSize.current = null; });
+              terminalSize.current = { id, cols: Math.max(10, cols), rows: Math.max(4, rows) };
+              if (attaching.current) return;
+              void link.call("terminals.resize", { terminalId: id, cols: Math.max(10, cols), rows: Math.max(4, rows) }).catch(() => { terminalSize.current = null; });
             }}
             style={{ flex: 1, backgroundColor: theme.background }}
           />
+          {restoring || restoreError ? (
+            <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: theme.background }}>
+              {restoring ? <ActivityIndicator color={colors.secondaryLabel} /> : null}
+              <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{restoreError || "正在恢复终端…"}</Text>
+              {restoreError ? <Button title="重试" onPress={() => setRetry((value) => value + 1)} /> : null}
+            </View>
+          ) : null}
           {uploading ? (
             <View pointerEvents="none" style={{ position: "absolute", top: 10, left: 0, right: 0, alignItems: "center" }}>
               <View
@@ -289,11 +354,13 @@ export function TerminalScreen() {
           ) : (
             <KeyBar
               ctrl={ctrl}
-              onToggleCtrl={() => setCtrl((value) => !value)}
-              onKey={send}
+              onToggleCtrl={() => { if (!attaching.current) void view.current?.toggleCtrl().catch(() => {}); }}
+              onKey={(name, modifiers) => { if (!attaching.current) void view.current?.key(name, modifiers).catch(() => {}); }}
+              onImage={() => { if (!attaching.current) void sendFile(pickPhoto); }}
+              onPaste={() => { if (!attaching.current) void view.current?.pasteClipboard().catch(() => {}); }}
               onHideKeyboard={() => {
                 haptics.selection();
-                view.current?.blur();
+                void view.current?.blur().catch(() => {});
               }}
             />
           )}

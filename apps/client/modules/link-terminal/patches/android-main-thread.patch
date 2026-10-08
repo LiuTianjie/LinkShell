@@ -1,0 +1,15 @@
+--- a/src/build/GhosttyLibVt.zig
++++ b/src/build/GhosttyLibVt.zig
+@@ -208,6 +208,12 @@
+         .root_module = zig.vt_c,
+         .version = zig.version,
+     });
++    // LinkShell serializes every VT/JNI call on Android's main thread.
++    // Avoid ELF TLS so the library also loads on pre-29 Android releases.
++    if (target.result.abi.isAndroid()) {
++        lib.root_module.single_threaded = true;
++        lib.linkLibC();
++    }
+     lib.installHeadersDirectory(
+         b.path("include/ghostty"),
+         "ghostty",

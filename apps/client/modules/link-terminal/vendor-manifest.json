@@ -1,0 +1,52 @@
+{
+  "libghostty-spm": {
+    "commit": "cffef22c16dd61d22ebef539ae2ff1624db77363",
+    "xcframework": {
+      "url": "https://github.com/Lakr233/libghostty-spm/releases/download/upstream.35a81a980bb9/GhosttyKit.xcframework.zip",
+      "sha256": "80e9bbfc89f5bd23ee028cff03024e3a788509f87812ab0bc9d697bf22a9472b"
+    }
+  },
+  "libghostty-vt": {
+    "repo": "https://github.com/ghostty-org/ghostty.git",
+    "commit": "b0947378349eff70f7030dda0e6d022fae1e6fbd",
+    "sourceArchiveSha256": "88b4ed23c7bda897e5e4fa2b1419912aab46e9d2b4ee8f4d2cd3503ff332e539",
+    "zig": "0.15.2",
+    "ndk": "27.1.12297006",
+    "libraries": {
+      "armeabi-v7a": {
+        "target": "arm-linux-androideabi",
+        "archive": "android/prebuilt/armeabi-v7a/libghostty-vt.a.gz",
+        "archiveSha256": "b6a252403512dcc561230cf4a99b985265aae3fbfba60eee936775f78414b164",
+        "librarySha256": "bc679105fce4f24c9e3a25dfcbf294ef9c45f3b337ddf606fc071b757342bbc1"
+      },
+      "arm64-v8a": {
+        "target": "aarch64-linux-android",
+        "archive": "android/prebuilt/arm64-v8a/libghostty-vt.a.gz",
+        "archiveSha256": "0bb0408c5fd440dc522956429e209554df2e048c341f508e8b680215176893c9",
+        "librarySha256": "27ea294edbbde63733bb881e1a7d61362aa322bc4770dd653b895e1d3f92c616"
+      },
+      "x86_64": {
+        "target": "x86_64-linux-android",
+        "archive": "android/prebuilt/x86_64/libghostty-vt.a.gz",
+        "archiveSha256": "540ee67787d5193feddd48c372d672e6dc813c4180920c4345470723d626822d",
+        "librarySha256": "a3730a974539fc3d1f037b76a5b34034181aecafb22ac681e182e309e1236f85"
+      }
+    }
+  },
+  "DisplayLink": {
+    "commit": "b8aa09201cb9bc10e23f00de0bcd729c0349d29e"
+  },
+  "expo-libghostty": {
+    "commit": "f53920f2bc6945706cff21abf21fd55dd333dc87"
+  },
+  "buildTools": {
+    "zig-aarch64-linux": {
+      "url": "https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz",
+      "sha256": "958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f"
+    },
+    "zig-x86_64-linux": {
+      "url": "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz",
+      "sha256": "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
+    }
+  }
+}

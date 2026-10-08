@@ -1,4 +1,4 @@
-import * as Clipboard from "expo-clipboard";
+import type { TerminalKeyModifiers } from "../../../modules/link-terminal/src";
 import { Pressable, ScrollView, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
@@ -10,18 +10,19 @@ import { Icon, type IconProps } from "../icon";
 // and the punctuation shells lean on.
 
 type Key =
-  | { label: string; send: string; wide?: boolean }
-  | { icon: Pick<IconProps, "sf" | "md">; send: string; label: string };
+  | { label: string; send: string; wide?: boolean; modifiers?: TerminalKeyModifiers }
+  | { icon: Pick<IconProps, "sf" | "md">; send: string; label: string; modifiers?: TerminalKeyModifiers };
 
 const KEYS: Key[] = [
   // Its own key: with a Chinese/Japanese keyboard, ctrl + c would go to the input method.
-  { label: "^C", send: "\x03", wide: true },
-  { label: "esc", send: "\x1b", wide: true },
-  { label: "tab", send: "\t", wide: true },
-  { icon: { sf: "arrow.up", md: "arrow_upward" }, send: "\x1b[A", label: "上" },
-  { icon: { sf: "arrow.down", md: "arrow_downward" }, send: "\x1b[B", label: "下" },
-  { icon: { sf: "arrow.left", md: "arrow_back" }, send: "\x1b[D", label: "左" },
-  { icon: { sf: "arrow.right", md: "arrow_forward" }, send: "\x1b[C", label: "右" },
+  { label: "^C", send: "c", modifiers: { ctrl: true }, wide: true },
+  { label: "esc", send: "escape", wide: true },
+  { label: "tab", send: "tab", wide: true },
+  { icon: { sf: "arrow.up", md: "arrow_upward" }, send: "up", label: "上" },
+  { icon: { sf: "arrow.down", md: "arrow_downward" }, send: "down", label: "下" },
+  { icon: { sf: "arrow.left", md: "arrow_back" }, send: "left", label: "左" },
+  { icon: { sf: "arrow.right", md: "arrow_forward" }, send: "right", label: "右" },
+  { label: "⇧↵", send: "enter", modifiers: { shift: true }, wide: true },
   { label: "/", send: "/" },
   { label: "-", send: "-" },
   { label: "|", send: "|" },
@@ -61,10 +62,14 @@ export function KeyBar({
   onToggleCtrl,
   onKey,
   onHideKeyboard,
+  onPaste,
+  onImage,
 }: {
   ctrl: boolean;
   onToggleCtrl: () => void;
-  onKey: (data: string) => void;
+  onKey: (key: string, modifiers?: TerminalKeyModifiers) => void;
+  onPaste: () => void;
+  onImage: () => void;
   onHideKeyboard: () => void;
 }) {
   return (
@@ -80,7 +85,7 @@ export function KeyBar({
           <Text style={{ fontFamily: mono, fontSize: 14, fontWeight: "600", color: ctrl ? colors.onAccent : colors.label }}>ctrl</Text>
         </KeyCap>
         {KEYS.map((key) => (
-          <KeyCap key={key.label} label={key.label} onPress={() => onKey(key.send)}>
+          <KeyCap key={key.label} label={key.label} onPress={() => onKey(key.send, key.modifiers)}>
             {"icon" in key ? (
               <Icon {...key.icon} size={14} color={colors.label} weight="semibold" />
             ) : (
@@ -90,15 +95,21 @@ export function KeyBar({
         ))}
         <KeyCap
           label="粘贴"
-          onPress={() => {
-            void Clipboard.getStringAsync().then((text) => {
-              if (text) onKey(text);
-            });
-          }}
+          onPress={onPaste}
         >
           <Icon sf="doc.on.clipboard" md="content_paste" size={14} color={colors.label} />
         </KeyCap>
       </ScrollView>
+      <Pressable
+        onPress={onImage}
+        accessibilityRole="button"
+        accessibilityLabel="插入图片"
+        hitSlop={6}
+        style={({ pressed }) => ({ width: 48, minHeight: 44, gap: 2, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.55 : 1 })}
+      >
+        <Icon sf="photo.badge.plus" md="add_photo_alternate" size={19} color={colors.label} />
+        <Text style={{ fontSize: 10, color: colors.secondaryLabel }}>图片</Text>
+      </Pressable>
       <View style={{ width: 0.5, height: 22, backgroundColor: colors.separator }} />
       <Pressable
         onPress={onHideKeyboard}
@@ -111,12 +122,4 @@ export function KeyBar({
       </Pressable>
     </View>
   );
-}
-
-/** Ctrl+<key> as the control character a terminal expects (Ctrl+C → \x03). */
-export function withCtrl(data: string): string {
-  if (data.length !== 1) return data;
-  if (data === " ") return "\x00";
-  const code = data.toUpperCase().charCodeAt(0);
-  return code >= 64 && code <= 95 ? String.fromCharCode(code & 0x1f) : data;
 }

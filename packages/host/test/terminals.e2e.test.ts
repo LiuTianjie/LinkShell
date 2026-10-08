@@ -176,10 +176,51 @@ describe("terminals", () => {
     expect(terminals.find((t) => t.id === done.id)).toMatchObject({ exitCode: 0 });
     expect(terminals.find((t) => t.id === running.id)).toMatchObject({ interrupted: true });
     expect((await c2.call("terminals.attach", { terminalId: running.id })).replay).toContain("still-running");
+    const recording = await c2.call("terminals.attach", { terminalId: running.id, replayFormat: "frames-v1" });
+    expect(recording.recording!.throughFrame).toBeGreaterThan(0);
+    const page = await c2.call("terminals.replay", { terminalId: running.id, afterFrame: 0, throughFrame: recording.recording!.throughFrame });
+    expect(page.frames.map((f) => f.data).join("")).toContain("still-running");
     await c2.call("terminals.close", { terminalId: done.id });
     expect((await c2.call("terminals.list", {})).terminals.map((t) => t.id)).toEqual([running.id]);
     c2.close();
     await second.stop();
     rmSync(home, { recursive: true, force: true });
   });
+  it("pages the original image and keyboard protocols with a stable attach boundary and original sizes", async () => {
+    const { connect } = await setup();
+    const a = await connect();
+    const { terminal } = await a.client.call("terminals.create", { cols: 80, rows: 24 });
+    await a.client.call("terminals.attach", { terminalId: terminal.id });
+    await a.client.call("terminals.input", { terminalId: terminal.id, data: "printf '\\033[>31u\\033_Ga=T,f=24,s=1,v=1;////\\033\\\\\\n'\n" });
+    await until(() => a.output().includes("\x1b_Ga=T"));
+    await a.client.call("terminals.resize", { terminalId: terminal.id, cols: 40, rows: 12 });
+    const snapshot = await a.client.call("terminals.attach", { terminalId: terminal.id, replayFormat: "frames-v1" });
+    expect(snapshot.reset).toBe(true);
+    expect(snapshot.replay).toBe("");
+    expect(snapshot.recording!.afterFrame).toBe(0);
+    await a.client.call("terminals.input", { terminalId: terminal.id, data: "printf 'l\\141ter-marker\\n'\n" });
+    await until(() => a.output().includes("later-marker"));
+    let afterFrame = 0;
+    const frames: { frame: number; cols: number; rows: number; data: string }[] = [];
+    while (afterFrame < snapshot.recording!.throughFrame) {
+      const page = await a.client.call("terminals.replay", { terminalId: terminal.id, afterFrame, throughFrame: snapshot.recording!.throughFrame });
+      frames.push(...page.frames); afterFrame = page.nextFrame;
+    }
+    expect(frames.map((f) => f.frame)).toEqual(frames.map((_, i) => i + 1));
+    expect(frames[0]).toMatchObject({ cols: 80, rows: 24, data: "" });
+    expect(frames.at(-1)).toMatchObject({ cols: 40, rows: 12 });
+    const raw = frames.map((f) => f.data).join("");
+    expect(raw).toContain("\x1b[>31u");
+    expect(raw).toContain("\x1b_Ga=T,f=24,s=1,v=1;////\x1b\\");
+    expect(raw).not.toContain("later-marker");
+    const resumed = await a.client.call("terminals.attach", { terminalId: terminal.id, replayFormat: "frames-v1", fromFrame: afterFrame });
+    expect(resumed.reset).toBe(false);
+    expect(resumed.recording!.afterFrame).toBe(afterFrame);
+    expect(resumed.recording!.throughFrame).toBeGreaterThan(afterFrame);
+    const page = await a.client.call("terminals.replay", { terminalId: terminal.id, afterFrame, throughFrame: resumed.recording!.throughFrame });
+    expect(page.frames.map((f) => f.data).join("")).toContain("later-marker");
+    await a.client.call("terminals.close", { terminalId: terminal.id });
+    await expect(a.client.call("terminals.replay", { terminalId: terminal.id, afterFrame: 0, throughFrame: 1 })).rejects.toThrow();
+  });
+
 });

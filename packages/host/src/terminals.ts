@@ -29,7 +29,7 @@ const SCROLLBACK = 2000;
 const SAVED_SCROLLBACK = 1000;
 const SAVE_EVERY_MS = 3000;
 /** Output is sent in slices at most this often, so a flood of small writes isn't a flood of messages. */
-const FLUSH_MS = 12;
+const FLUSH_MS = 8;
 const FLUSH_BYTES = 64 * 1024;
 const MAX_TERMINALS = 24;
 
@@ -38,7 +38,7 @@ interface Chunk {
   data: string;
 }
 
-export type OutputListener = (seq: number, data: string) => void;
+export type OutputListener = (seq: number, data: string, geometry?: { frame: number; cols: number; rows: number }) => void;
 
 class Terminal {
   readonly id = randomUUID();
@@ -51,6 +51,8 @@ class Terminal {
   private readonly chunks: Chunk[] = [];
   private bytes = 0;
   private seq = 0;
+  private frame = 0;
+  private closed = false;
   private pending = "";
   private flushTimer?: ReturnType<typeof setTimeout>;
   private readonly listeners = new Set<OutputListener>();
@@ -67,13 +69,16 @@ class Terminal {
     public rows: number,
     readonly command: string | undefined,
     private readonly changed: (terminal: Terminal) => void,
+    private readonly store?: HostStore,
   ) {
     this.title = basename(shell);
+    this.recordFrame("");
     this.mirror = new ScreenMirror({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true });
     // The addon's types are written against the browser's terminal; it only uses what the headless one has too.
     this.mirror.loadAddon(this.serializer as unknown as Parameters<InstanceType<typeof ScreenMirror>["loadAddon"]>[0]);
     pty.onData((data) => this.onData(data));
     pty.onExit(({ exitCode }) => {
+      if (this.closed) return;
       this.flush();
       this.exitCode = exitCode;
       this.changed(this);
@@ -162,13 +167,16 @@ class Terminal {
 
   resize(cols: number, rows: number): void {
     if (!this.running || (cols === this.cols && rows === this.rows)) return;
+    this.flush();
     this.cols = cols;
     this.rows = rows;
+    this.recordFrame("");
     this.pty.resize(cols, rows);
     this.mirror.resize(cols, rows);
   }
 
   close(): void {
+    this.closed = true;
     clearTimeout(this.flushTimer);
     this.listeners.clear();
     this.mirror.dispose();
@@ -182,6 +190,7 @@ class Terminal {
   }
 
   private onData(data: string): void {
+    if (this.closed) return;
     this.activeAt = Date.now();
     this.dirty = true;
     this.pending += data;
@@ -193,15 +202,25 @@ class Terminal {
     clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
     if (!this.pending) return;
-    const chunk = { seq: ++this.seq, data: this.pending };
+    let pending = this.pending;
     this.pending = "";
-    this.chunks.push(chunk);
-    this.mirror.write(chunk.data, () => {
-      this.parsedSeq = chunk.seq;
-    });
-    this.bytes += chunk.data.length;
-    while (this.bytes > BUFFER_BYTES && this.chunks.length > 1) this.bytes -= this.chunks.shift()!.data.length;
-    for (const listener of this.listeners) listener(chunk.seq, chunk.data);
+    while (pending) {
+      let end = Math.min(FLUSH_BYTES, pending.length);
+      // Splitting a surrogate pair would corrupt a character at the native boundary.
+      if (end < pending.length && /[\uD800-\uDBFF]/.test(pending[end - 1]!)) end--;
+      const chunk = { seq: ++this.seq, data: pending.slice(0, end) };
+      pending = pending.slice(end);
+      this.chunks.push(chunk);
+      this.recordFrame(chunk.data);
+      this.mirror.write(chunk.data, () => { this.parsedSeq = chunk.seq; });
+      this.bytes += chunk.data.length;
+      while (this.bytes > BUFFER_BYTES && this.chunks.length > 1) this.bytes -= this.chunks.shift()!.data.length;
+      for (const listener of this.listeners) listener(chunk.seq, chunk.data, { frame: this.frame, cols: this.cols, rows: this.rows });
+    }
+  }
+
+  private recordFrame(data: string): void {
+    this.store?.appendTerminalFrame(this.id, ++this.frame, this.cols, this.rows, data);
   }
 }
 
@@ -308,7 +327,7 @@ export class TerminalManager {
         t.close();
       }
       this.emit(t.info());
-    });
+    }, this.store);
     this.terminals.set(terminal.id, terminal);
     // Typed into the shell (not `-c`), so the shell stays for whatever comes next.
     // Once the shell has drawn its prompt: typed any earlier, the tty echoes the
@@ -331,7 +350,24 @@ export class TerminalManager {
     return terminal.info();
   }
 
-  attach(id: string, listener: OutputListener, fromSeq?: number) {
+  attach(id: string, listener: OutputListener, fromSeq?: number, replayFormat?: "frames-v1", fromFrame?: number) {
+    const attached = this.attachScreen(id, listener, fromSeq);
+    const throughFrame = replayFormat ? this.store?.lastTerminalFrame(id) ?? 0 : 0;
+    if (!throughFrame) return attached;
+    const afterFrame = fromFrame !== undefined && fromFrame >= 0 && fromFrame <= throughFrame ? fromFrame : 0;
+    return { ...attached, replay: "", reset: afterFrame === 0, recording: { afterFrame, throughFrame } };
+  }
+
+  replay(id: string, afterFrame: number, throughFrame: number) {
+    if (!this.terminals.has(id) && !this.history.has(id)) throw RpcError.app("not_found", "终端不存在");
+    const latest = this.store?.lastTerminalFrame(id) ?? 0;
+    if (throughFrame > latest || afterFrame > throughFrame) throw RpcError.app("invalid_params", "终端回放范围无效");
+    const frames = this.store?.terminalFrames(id, afterFrame, throughFrame) ?? [];
+    const nextFrame = frames.at(-1)?.frame ?? afterFrame;
+    return { frames, nextFrame, done: nextFrame >= throughFrame };
+  }
+
+  private attachScreen(id: string, listener: OutputListener, fromSeq?: number) {
     const live = this.terminals.get(id);
     if (live) return { terminal: live.info(), ...live.attach(listener, fromSeq) };
     const ended = this.history.get(id);

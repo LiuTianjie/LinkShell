@@ -1,9 +1,8 @@
 import { requireNativeView } from "expo";
-import { forwardRef, useImperativeHandle, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { NativeSyntheticEvent, ViewProps } from "react-native";
 
-// Native terminal: SwiftTerm on iOS, Termux's terminal view on Android. Both
-// render natively and take keyboard input (every IME, in place) themselves.
+// Ghostty owns protocol modes, key encoding, cell layout and native input.
 
 export interface TerminalTheme {
   background: string;
@@ -28,31 +27,35 @@ export interface TerminalTheme {
   brightWhite: string;
 }
 
+export interface TerminalFile { uri: string; name: string; size?: number }
+export interface TerminalKeyModifiers { shift?: boolean; ctrl?: boolean; alt?: boolean }
 export interface NativeTerminalHandle {
-  /** Output from the host. */
-  write(data: string): void;
-  /** Clear screen and state, before a full redraw. */
-  reset(): void;
-  /** Show the keyboard. */
-  focus(): void;
-  /** Hide the keyboard. */
-  blur(): void;
+  write(data: string): Promise<void>;
+  reset(): Promise<void>;
+  focus(): Promise<void>;
+  blur(): Promise<void>;
+  key(name: string, modifiers?: TerminalKeyModifiers): Promise<void>;
+  paste(text: string): Promise<void>;
+  pasteClipboard(): Promise<void>;
+  toggleCtrl(): Promise<void>;
+  beginReplay(reset: boolean): Promise<void>;
+  replay(data: string, cols: number, rows: number): Promise<void>;
+  endReplay(): Promise<void>;
 }
 
+type NativeViewRef = Omit<NativeTerminalHandle, "key"> & {
+  key(name: string, shift: boolean, ctrl: boolean, alt: boolean): Promise<void>;
+};
 interface NativeProps extends ViewProps {
   theme: TerminalTheme;
   fontSize: number;
   onInput: (event: NativeSyntheticEvent<{ data: string }>) => void;
   onResize: (event: NativeSyntheticEvent<{ cols: number; rows: number }>) => void;
+  onFontSize: (event: NativeSyntheticEvent<{ size: number }>) => void;
+  onFile: (event: NativeSyntheticEvent<TerminalFile>) => void;
+  onError: (event: NativeSyntheticEvent<{ message: string }>) => void;
+  onModifiers: (event: NativeSyntheticEvent<{ ctrl: boolean }>) => void;
 }
-
-type NativeViewRef = {
-  write(data: string): Promise<void>;
-  reset(): Promise<void>;
-  focus(): Promise<void>;
-  blur(): Promise<void>;
-};
-
 const NativeView = requireNativeView<NativeProps & { ref?: React.Ref<NativeViewRef> }>("LinkTerminal");
 
 export interface NativeTerminalProps extends ViewProps {
@@ -60,29 +63,52 @@ export interface NativeTerminalProps extends ViewProps {
   fontSize: number;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
+  onFontSize: (size: number) => void;
+  onFile: (file: TerminalFile) => void;
+  onError: (message: string) => void;
+  onModifiers: (modifiers: { ctrl: boolean }) => void;
 }
 
 export const NativeTerminal = forwardRef<NativeTerminalHandle, NativeTerminalProps>(function NativeTerminal(
-  { onInput, onResize, ...props },
-  ref,
+  { onInput, onResize, onFile, onError, onModifiers, onFontSize, ...props }, ref,
 ) {
   const view = useRef<NativeViewRef>(null);
-  useImperativeHandle(
-    ref,
-    () => ({
-      write: (data) => void view.current?.write(data),
-      reset: () => void view.current?.reset(),
-      focus: () => void view.current?.focus(),
-      blur: () => void view.current?.blur(),
-    }),
-    [],
-  );
-  return (
-    <NativeView
-      {...props}
-      ref={view}
-      onInput={(event) => onInput(event.nativeEvent.data)}
-      onResize={(event) => onResize(event.nativeEvent.cols, event.nativeEvent.rows)}
-    />
-  );
+  const mounted = useRef(true);
+  const ready = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null);
+  if (!ready.current) {
+    let resolve!: () => void;
+    ready.current = { promise: new Promise<void>((done) => { resolve = done; }), resolve: () => resolve() };
+  }
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; ready.current?.resolve(); };
+  }, []);
+  useImperativeHandle(ref, () => {
+    const call = async (run: (native: NativeViewRef) => Promise<void>) => {
+      await ready.current!.promise;
+      if (!mounted.current || !view.current) throw new Error("终端视图已关闭");
+      await run(view.current);
+    };
+    return {
+      write: (data) => call((native) => native.write(data)),
+      reset: () => call((native) => native.reset()),
+      focus: () => call((native) => native.focus()),
+      blur: () => call((native) => native.blur()),
+      key: (name, modifiers = {}) => call((native) => native.key(name, !!modifiers.shift, !!modifiers.ctrl, !!modifiers.alt)),
+      paste: (text) => call((native) => native.paste(text)),
+      pasteClipboard: () => call((native) => native.pasteClipboard()),
+      toggleCtrl: () => call((native) => native.toggleCtrl()),
+      beginReplay: (reset) => call((native) => native.beginReplay(reset)),
+      replay: (data, cols, rows) => call((native) => native.replay(data, cols, rows)),
+      endReplay: () => call((native) => native.endReplay()),
+    };
+  }, []);
+  return <NativeView {...props} ref={view}
+    onInput={(event) => onInput(event.nativeEvent.data)}
+    onResize={(event) => { ready.current?.resolve(); onResize(event.nativeEvent.cols, event.nativeEvent.rows); }}
+    onFontSize={(event) => onFontSize(event.nativeEvent.size)}
+    onFile={(event) => onFile(event.nativeEvent)}
+    onError={(event) => onError(event.nativeEvent.message)}
+    onModifiers={(event) => onModifiers(event.nativeEvent)}
+  />;
 });

@@ -1,171 +1,160 @@
 import ExpoModulesCore
+import GhosttyTerminal
 import UIKit
+import UniformTypeIdentifiers
 
-/// SwiftTerm's native terminal (UIKit rendering, full UITextInput so every
-/// input method works in place) wired to a remote shell: output arrives
-/// through `write`, keys leave through `onInput`.
-final class LinkTerminalView: ExpoView, TerminalViewDelegate {
+final class LinkTerminalView: ExpoView {
+  let onFontSize = EventDispatcher()
   let onInput = EventDispatcher()
   let onResize = EventDispatcher()
-
-  private let terminal: TerminalView
-  private var fontSize: CGFloat = 13
+  let onFile = EventDispatcher()
+  let onError = EventDispatcher()
+  let onModifiers = EventDispatcher()
+  private let terminal = TerminalView(frame: .zero)
+  private let controller = TerminalController()
+  private var session: InMemoryTerminalSession!
+  private let replayLock = NSLock()
+  private var restoring = false
+  private var fontSize: Float = 9
   private var theme: [String: String] = [:]
-  private var lastSize = ""
-  /// Output that arrived before the first layout: SwiftTerm sizes itself from
-  /// its frame, so text fed at zero width wraps every couple of columns.
-  private var pending: [String] = []
-  private var laidOut = false
+  private var liveSize: (UInt32, UInt32)?
 
   required init(appContext: AppContext? = nil) {
-    terminal = TerminalView(frame: .zero, font: LinkTerminalView.terminalFont(size: 13))
     super.init(appContext: appContext)
-    terminal.terminalDelegate = self
-    // The app draws its own key row above the keyboard.
-    terminal.inputAccessoryView = nil
-    terminal.optionAsMetaKey = true
-    terminal.allowMouseReporting = false
-    TerminalView.symbolFallbackFont = { size in UIFont(name: "LinkShellSymbols", size: size) }
+    clipsToBounds = true
+    if ProcessInfo.processInfo.environment["LINKSHELL_TERMINAL_DEBUG"] == "1" { TerminalDebugLog.enable([.metrics, .actions]) }
+    session = InMemoryTerminalSession(write: { [weak self] data in
+      guard let self else { return }
+      self.replayLock.lock()
+      let muted = self.restoring
+      self.replayLock.unlock()
+      if !muted { self.onInput(["data": String(decoding: data, as: UTF8.self)]) }
+    }, resize: { [weak self] size in
+      guard let self else { return }
+      self.replayLock.lock(); let muted = self.restoring; self.replayLock.unlock()
+      guard !muted else { return }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, !self.restoring else { return }
+        self.liveSize = (UInt32(size.columns), UInt32(size.rows))
+        self.onResize(["cols": size.columns, "rows": size.rows])
+      }
+    }, suppressesPixelOnlyResizes: true)
+    terminal.delegate = self
+    terminal.controller = controller
+    terminal.configuration = TerminalSurfaceOptions(backend: .inMemory(session), fontSize: fontSize)
+    terminal.inputAccessoryItems = []
+    terminal.isAccessibilityElement = true
+    terminal.accessibilityLabel = "终端"
+    terminal.accessibilityTraits = [.allowsDirectInteraction]
+    terminal.onImportProviders = { [weak self] providers in self?.importFiles(providers) }
+    terminal.setStickyModifierChangeHandler { [weak self] in
+      guard let self else { return }
+      self.onModifiers(["ctrl": self.terminal.stickyActivation(for: .ctrl) != .inactive])
+    }
     addSubview(terminal)
-    applyFont()
-  }
-
-  /// SF Mono for text; the bundled Nerd Font symbols for prompt icons
-  /// (starship, powerlevel10k: branch, language, OS glyphs), which would
-  /// otherwise draw as empty boxes. CoreText won't cascade from the system
-  /// monospaced font, so SwiftTerm hands those characters the symbols font itself.
-  static func terminalFont(size: CGFloat, weight: UIFont.Weight = .regular, italic: Bool = false) -> UIFont {
-    let base = UIFont.monospacedSystemFont(ofSize: size, weight: weight)
-    guard italic, let slanted = base.fontDescriptor.withSymbolicTraits(.traitItalic) else { return base }
-    return UIFont(descriptor: slanted, size: size)
-  }
-
-  private func applyFont() {
-    terminal.setFonts(
-      normal: LinkTerminalView.terminalFont(size: fontSize),
-      bold: LinkTerminalView.terminalFont(size: fontSize, weight: .bold),
-      italic: LinkTerminalView.terminalFont(size: fontSize, italic: true),
-      boldItalic: LinkTerminalView.terminalFont(size: fontSize, weight: .bold, italic: true)
-    )
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    // Same breathing room as the Android view; the container shares the theme's background.
     terminal.frame = bounds.insetBy(dx: 8, dy: 0)
-    if !laidOut && terminal.frame.width > 0 && terminal.frame.height > 0 {
-      laidOut = true
-      let held = pending
-      pending.removeAll()
-      for data in held { terminal.feed(text: data) }
+  }
+
+  func write(_ data: String) { session.receive(data) }
+  func reset() { session.receive("\u{1b}c") }
+  func focus() { _ = terminal.acquireProgrammaticFocus() }
+  func blur() { _ = terminal.resignFirstResponder() }
+  func paste(_ text: String) { _ = terminal.paste(text: text) }
+  func pasteClipboard() { terminal.paste(nil) }
+  func toggleCtrl() { terminal.toggleStickyModifier(.ctrl) }
+
+  func key(_ name: String, _ shift: Bool, _ ctrl: Bool, _ alt: Bool) {
+    var mods: TerminalInputModifiers = []
+    if shift { mods.insert(.shift) }
+    if ctrl { mods.insert(.ctrl) }
+    if alt { mods.insert(.alt) }
+    let keys: [String: TerminalKey] = ["enter": .enter, "escape": .escape, "tab": .tab,
+      "up": .arrowUp, "down": .arrowDown, "left": .arrowLeft, "right": .arrowRight,
+      "backspace": .backspace, "home": .home, "end": .end, "pageUp": .pageUp, "pageDown": .pageDown]
+    if let key = keys[name] { _ = terminal.sendKey(key, modifiers: mods) }
+    else if name.count == 1, let character = name.first, let press = TerminalKeyPress(typing: character, modifiers: mods) {
+      _ = terminal.sendKey(press)
     }
-  }
-
-  // MARK: JS API
-
-  func write(_ data: String) {
-    guard laidOut else {
-      pending.append(data)
-      return
-    }
-    terminal.feed(text: data)
-  }
-
-  func reset() {
-    pending.removeAll()
-    terminal.getTerminal().resetToInitialState()
-    applyTheme()
-  }
-
-  func focus() {
-    _ = terminal.becomeFirstResponder()
-  }
-
-  func blur() {
-    _ = terminal.resignFirstResponder()
   }
 
   func setFontSize(_ size: Double) {
-    fontSize = CGFloat(size)
-    applyFont()
+    fontSize = Float(min(32, max(6, size)))
+    if terminal.surface == nil {
+      terminal.configuration = TerminalSurfaceOptions(backend: .inMemory(session), fontSize: fontSize)
+    } else { _ = terminal.performBindingAction("set_font_size:\(fontSize)") }
   }
 
-  func setTheme(_ value: [String: String]) {
-    theme = value
-    applyTheme()
+  func setTheme(_ values: [String: String]) {
+    guard theme != values else { return }
+    theme = values
+    var config = TerminalConfiguration().fontSize(fontSize)
+    if let value = values["background"] { config = config.background(value); backgroundColor = UIColor(hex: value) }
+    if let value = values["foreground"] { config = config.foreground(value) }
+    if let value = values["cursor"] { config = config.cursorColor(value) }
+    if let value = values["selectionBackground"], value.hasPrefix("#") { config = config.selectionBackground(value) }
+    let names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"]
+    for (index, name) in names.enumerated() { if let value = values[name] { config = config.palette(index, color: value) } }
+    _ = controller.setTheme(TerminalTheme(light: config, dark: config))
   }
 
-  private static let ansiNames = [
-    "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
-    "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite",
-  ]
+  func beginReplay(_ reset: Bool) {
+    controller.suppressesExternalEffects = true
+    replayLock.lock(); restoring = true; replayLock.unlock()
+    if reset { session.receive("\u{1b}c\u{1b}[3J") }
+  }
+  func replay(_ data: String, _ cols: Int, _ rows: Int) {
+    session.resizeGrid(columns: UInt32(cols), rows: UInt32(rows))
+    session.receive(data)
+    session.waitForPendingOutput()
+  }
+  func endReplay() {
+    session.waitForPendingOutput()
+    if let (cols, rows) = liveSize { session.resizeGrid(columns: cols, rows: rows) }
+    session.waitForPendingOutput()
+    controller.suppressesExternalEffects = false
+    replayLock.lock(); restoring = false; replayLock.unlock()
+  }
 
-  private func applyTheme() {
-    if let background = UIColor(css: theme["background"]) {
-      backgroundColor = background
-      terminal.nativeBackgroundColor = background
-      terminal.backgroundColor = background
+  private func importFiles(_ providers: [NSItemProvider]) {
+    for provider in providers {
+      guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true })
+        ?? provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .data) == true }) else { continue }
+      provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] source, error in
+        guard let source else {
+          self?.onError(["message": "无法读取粘贴或拖入的文件"])
+          return
+        }
+        do {
+          let dir = FileManager.default.temporaryDirectory.appendingPathComponent("linkshell-imports", isDirectory: true)
+          try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+          let name = provider.suggestedName ?? source.lastPathComponent
+          let target = dir.appendingPathComponent(UUID().uuidString + "-" + source.lastPathComponent)
+          let size = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+          guard size <= 30 * 1024 * 1024 else { self?.onError(["message": "文件超过 30 MB"]); return }
+          try FileManager.default.copyItem(at: source, to: target)
+          self?.onFile(["uri": target.absoluteString, "name": name, "size": size])
+        } catch { self?.onError(["message": "无法暂存文件，请重试"] ) }
+      }
     }
-    if let foreground = UIColor(css: theme["foreground"]) {
-      terminal.nativeForegroundColor = foreground
-    }
-    if let cursor = UIColor(css: theme["cursor"]) {
-      terminal.caretColor = cursor
-    }
-    let ansi = Self.ansiNames.compactMap { UIColor(css: theme[$0])?.terminalColor }
-    if ansi.count == 16 { terminal.installColors(ansi) }
-    if let selection = UIColor(css: theme["selectionBackground"]) {
-      terminal.selectedTextBackgroundColor = selection
-    }
   }
-
-  // MARK: TerminalViewDelegate
-
-  func send(source: TerminalView, data: ArraySlice<UInt8>) {
-    onInput(["data": String(decoding: data, as: UTF8.self)])
-  }
-
-  func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-    let size = "\(newCols)x\(newRows)"
-    guard size != lastSize, newCols > 0, newRows > 0 else { return }
-    lastSize = size
-    onResize(["cols": newCols, "rows": newRows])
-  }
-
-  func setTerminalTitle(source: TerminalView, title: String) {}
-  func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-  func scrolled(source: TerminalView, position: Double) {}
-  func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
-    if let url = URL(string: link) { UIApplication.shared.open(url) }
-  }
-  func bell(source: TerminalView) {}
-  func clipboardCopy(source: TerminalView, content: Data) {
-    if let text = String(data: content, encoding: .utf8) { UIPasteboard.general.string = text }
-  }
-  func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
-  func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }
 
 private extension UIColor {
-  /// "#rrggbb" or "rgba(r,g,b,a)".
-  convenience init?(css: String?) {
-    guard let css = css?.trimmingCharacters(in: .whitespaces) else { return nil }
-    if css.hasPrefix("#"), css.count == 7, let value = Int(css.dropFirst(), radix: 16) {
-      self.init(red: CGFloat((value >> 16) & 0xff) / 255, green: CGFloat((value >> 8) & 0xff) / 255, blue: CGFloat(value & 0xff) / 255, alpha: 1)
-      return
-    }
-    if css.hasPrefix("rgb") {
-      let parts = css.drop { $0 != "(" }.dropFirst().prefix { $0 != ")" }.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-      guard parts.count >= 3 else { return nil }
-      self.init(red: parts[0] / 255, green: parts[1] / 255, blue: parts[2] / 255, alpha: parts.count > 3 ? parts[3] : 1)
-      return
-    }
-    return nil
+  convenience init?(hex: String) {
+    guard let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) else { return nil }
+    self.init(red: CGFloat(value >> 16 & 255) / 255, green: CGFloat(value >> 8 & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
   }
+}
 
-  var terminalColor: Color {
-    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-    getRed(&r, green: &g, blue: &b, alpha: &a)
-    return Color(red: UInt16(r * 65535), green: UInt16(g * 65535), blue: UInt16(b * 65535))
+extension LinkTerminalView: TerminalSurfaceFontSizeDelegate {
+  func terminalDidChangeFontSize(_ size: Float) {
+    let clamped = min(32, max(6, size))
+    if clamped != size { setFontSize(Double(clamped)); return }
+    fontSize = clamped
+    onFontSize(["size": clamped])
   }
 }

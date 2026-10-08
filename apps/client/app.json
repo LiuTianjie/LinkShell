@@ -16,7 +16,8 @@
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CADisableMinimumFrameDurationOnPhone": true
       },
       "buildNumber": "20308"
     },
@@ -41,6 +42,13 @@
         {
           "ios": {
             "enableSceneSupport": true
+          },
+          "android": {
+            "buildArchs": [
+              "arm64-v8a",
+              "armeabi-v7a",
+              "x86_64"
+            ]
           }
         }
       ],

@@ -9,11 +9,45 @@ version = '1.0.0'
 android {
   namespace "expo.modules.linkterminal"
   defaultConfig {
+    testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     versionCode 1
-    versionName '1.0.0'
+    versionName "1.0.0"
+    // Preserve the existing armv7 release channel as well as arm64 and simulators.
+    ndk {
+      abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+    }
+    externalNativeBuild {
+      cmake {
+        arguments "-DANDROID_STL=c++_static"
+      }
+    }
   }
+  externalNativeBuild {
+    cmake {
+      path "CMakeLists.txt"
+    }
+  }
+
 }
 
 dependencies {
-  implementation "androidx.annotation:annotation:1.9.1"
+  testImplementation 'junit:junit:4.13.2'
+  androidTestImplementation 'androidx.test:runner:1.6.2'
+  androidTestImplementation 'androidx.test:core:1.6.1'
+  androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+
+}
+
+// Both local builds and CI unpack the exact same checksummed core.
+def prepareGhostty = tasks.register('prepareGhostty', Exec) {
+  workingDir projectDir.parentFile
+  commandLine 'node', 'scripts/prepare-android-libs.mjs'
+  inputs.file(new File(projectDir.parentFile, 'scripts/prepare-android-libs.mjs'))
+  inputs.file(new File(projectDir.parentFile, 'vendor-manifest.json'))
+  inputs.dir(new File(projectDir, 'prebuilt'))
+  outputs.file(new File(projectDir, 'vendor/.checksum'))
+  outputs.files(['arm64-v8a', 'armeabi-v7a', 'x86_64'].collect { new File(projectDir, "vendor/${it}/libghostty-vt.a") })
+}
+tasks.configureEach { task ->
+  if (task.name == 'preBuild' || task.name.startsWith('configureCMake')) task.dependsOn(prepareGhostty)
 }
