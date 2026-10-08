@@ -39,6 +39,8 @@ export interface AcpAgentSpec {
   version?: { command: string; args: string[] };
   env?: Record<string, string>;
   authStatus?: (env: NodeJS.ProcessEnv) => Promise<AgentAuth>;
+  /** Non-interactive ACP method that reuses the agent's own saved login. */
+  cachedAuthMethod?: string;
   /**
    * Start the agent process with the host so its existing sessions show up
    * (needs ACP session/list). Otherwise it starts on first use.
@@ -121,6 +123,7 @@ export class AcpDriver implements AgentDriver {
   private restartDelay = 1000;
   private stopped = false;
   private nextPermissionId = 1;
+  private authenticating?: { connection: AcpConnection; promise: Promise<void> };
 
   constructor(
     protected readonly spec: AcpAgentSpec,
@@ -635,6 +638,36 @@ export class AcpDriver implements AgentDriver {
     if (!this.connection?.alive) {
       throw RpcError.app("agent_unavailable", this.current.problem ?? `${this.label} is not running`);
     }
-    return this.connection.request<T>(method, params, timeoutMs);
+    const connection = this.connection;
+    const opensSession = ["session/new", "session/load", "session/resume", "session/fork"].includes(method);
+    try {
+      const result = await connection.request<T>(method, params, timeoutMs);
+      if (opensSession) this.signedOut = undefined;
+      return result;
+    } catch (error) {
+      if (!opensSession) throw error;
+      const authRequired = error instanceof RpcError && error.code === -32000 && !error.appCode;
+      const methodId = this.spec.cachedAuthMethod;
+      if (!authRequired || !methodId || !connection.initializeResult.authMethods?.some((entry) => entry.id === methodId)) {
+        throw this.signInError(error);
+      }
+      // A long-lived agent may predate the user's login. Ask it to reread its
+      // own credentials; never choose an interactive sign-in method here.
+      try {
+        if (this.authenticating?.connection !== connection) {
+          const attempt = { connection, promise: connection.request<void>("authenticate", { methodId }) };
+          this.authenticating = attempt;
+          void attempt.promise.finally(() => {
+            if (this.authenticating === attempt) this.authenticating = undefined;
+          }).catch(() => {});
+        }
+        await this.authenticating.promise;
+        const result = await connection.request<T>(method, params, timeoutMs);
+        this.signedOut = undefined;
+        return result;
+      } catch (retryError) {
+        throw this.signInError(retryError);
+      }
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,7 @@ const spec: AcpAgentSpec = {
   args: [],
   version: { command: FAKE_ACP, args: ["--version"] },
   discover: true,
+  cachedAuthMethod: "cached_token",
 };
 
 const running: { host: RunningHost; home: string }[] = [];
@@ -36,11 +37,12 @@ const running: { host: RunningHost; home: string }[] = [];
 async function setup(env: Record<string, string> = {}, store?: Record<string, unknown>) {
   const home = mkdtempSync(join(tmpdir(), "lsh-acp-"));
   const storePath = join(home, "fake-acp-store.json");
+  const authLog = join(home, "auth.log");
   if (store) writeFileSync(storePath, JSON.stringify(store));
   const host = await startHost({
     home,
     version: "test",
-    drivers: () => [new AcpDriver(spec, { env: { ...process.env, FAKE_ACP_STORE: storePath, ...env }, hostVersion: "test" })],
+    drivers: () => [new AcpDriver(spec, { env: { ...process.env, FAKE_ACP_STORE: storePath, FAKE_ACP_AUTH_LOG: authLog, ...env }, hostVersion: "test" })],
     log: () => {},
   });
   running.push({ host, home });
@@ -55,7 +57,7 @@ async function setup(env: Record<string, string> = {}, store?: Record<string, un
       .map((e) => (e.update.sessionUpdate === kind && "content" in e.update && e.update.content.type === "text" ? e.update.content.text : ""))
       .join("");
   const ended = (id: string) => of(id).filter((e) => e.update.sessionUpdate === "ls_turn" && e.update.state === "ended");
-  return { host, client, events, summaries, of, text, ended, storePath };
+  return { host, client, events, summaries, of, text, ended, storePath, authLog };
 }
 
 afterEach(async () => {
@@ -405,7 +407,7 @@ describe("generic ACP driver (fake agent)", () => {
         ],
       },
     };
-    const t = await setup({}, store);
+    const t = await setup({ FAKE_ACP_CACHED_AUTH: "1" }, store);
     const { sessions } = await t.client.call("sessions.list", {});
     expect(sessions).toEqual([expect.objectContaining({ id: "fake:old", title: "Old task", cwd: "/w/old" })]);
     await t.client.call("sessions.subscribe", { sessionId: "fake:old", fromSeq: 0 });
@@ -429,6 +431,7 @@ describe("generic ACP driver (fake agent)", () => {
     const kinds = t.of("fake:old").slice(before).map((e) => e.update.sessionUpdate);
     expect(kinds.filter((k) => k.endsWith("_chunk"))).toEqual([]);
     expect(firstLoad).toBeGreaterThan(0);
+    expect(readFileSync(t.authLog, "utf8")).toBe("cached_token\ncached_token\n");
     again.close();
   }, 20_000);
 
@@ -463,5 +466,32 @@ describe("generic ACP driver (fake agent)", () => {
     expect(failure).toMatchObject({ message: expect.stringContaining("Fake 未登录：在电脑终端运行"), data: { code: "not_logged_in" } });
     const agents = t.host.hub.agents().find((agent) => agent.id === "fake");
     expect(agents?.auth).toMatchObject({ state: "missing", hint: expect.stringContaining("未登录") });
+    expect(existsSync(t.authLog)).toBe(false);
+  });
+
+  it("shares cached authentication across concurrent session opens", async () => {
+    const t = await setup({ FAKE_ACP_CACHED_AUTH: "1" });
+    const sessions = await Promise.all(["/w/a", "/w/b"].map((cwd) => t.client.call("sessions.create", { agent: "fake", cwd })));
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]!.session.id).not.toBe(sessions[1]!.session.id);
+    expect(readFileSync(t.authLog, "utf8")).toBe("cached_token\n");
+  });
+
+  it("shows a login error when cached authentication cannot load discovered history", async () => {
+    const t = await setup({ FAKE_ACP_CACHED_AUTH: "1", FAKE_ACP_SIGNED_OUT: "1" }, {
+      old: { cwd: "/w", title: "Old task", updatedAt: "2026-09-01T00:00:00.000Z", mode: "default", model: "fast",
+        history: [{ role: "user", id: "u", text: "hi" }] },
+    });
+    await t.client.call("sessions.subscribe", { sessionId: "fake:old", fromSeq: 0 });
+    expect(t.of("fake:old").find((event) => event.update.sessionUpdate === "ls_error")?.update)
+      .toMatchObject({ code: "not_logged_in", message: expect.stringContaining("Fake 未登录") });
+    expect(readFileSync(t.authLog, "utf8")).toBe("cached_token\n");
+  });
+
+  it("retries an auth-rejected session only once even if authenticate succeeds", async () => {
+    const t = await setup({ FAKE_ACP_CACHED_AUTH: "1", FAKE_ACP_REJECT_AUTH: "1" });
+    await expect(t.client.call("sessions.create", { agent: "fake", cwd: "/w" }))
+      .rejects.toMatchObject({ data: { code: "not_logged_in" } });
+    expect(readFileSync(t.authLog, "utf8")).toBe("cached_token\n");
   });
 });

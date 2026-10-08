@@ -576,6 +576,9 @@ export class SessionHub {
         // Serve the log we have; not_ready sessions attach once they get a turn.
         if (!(error instanceof RpcError && error.appCode === "not_ready")) {
           this.log(`[hub] attach ${sessionId} failed: ${error instanceof Error ? error.message : String(error)}`);
+          if (error instanceof RpcError && error.appCode === "not_logged_in") {
+            this.commit(sessionId, { sessionUpdate: "ls_error", code: error.appCode, message: error.message });
+          }
         }
       }
     }

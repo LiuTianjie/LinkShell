@@ -63,6 +63,13 @@ function claudeSessions() {
 /** sessionId -> { cwd, title, updatedAt, mode, model, history: [{role, id, text, tool?}] } */
 const sessions = storePath && existsSync(storePath) ? JSON.parse(readFileSync(storePath, "utf8")) : {};
 const loaded = new Set();
+let authenticated = false;
+function requireAuth() {
+  if (process.env.FAKE_ACP_SIGNED_OUT === "1" ||
+      (process.env.FAKE_ACP_CACHED_AUTH === "1" && (!authenticated || process.env.FAKE_ACP_REJECT_AUTH === "1"))) {
+    throw { code: -32000, message: "Authentication required", data: "no auth method id provided" };
+  }
+}
 const running = new Map(); // sessionId -> { cancelled, handedOff }
 const pendingClientRequests = new Map();
 let nextId = 1;
@@ -224,11 +231,21 @@ const handlers = {
       _meta: steering ? { claudeCode: { promptQueueing: true } } : {},
     },
     agentInfo: { name: "fake-acp", version: "1.2.3" },
+    authMethods: process.env.FAKE_ACP_CACHED_AUTH === "1"
+      ? [{ id: "cached_token", name: "Cached login" }, { id: "interactive", name: "Browser login" }]
+      : [{ id: "interactive", name: "Browser login" }],
   }); },
+  authenticate: async (params) => {
+    if (process.env.FAKE_ACP_AUTH_LOG) appendFileSync(process.env.FAKE_ACP_AUTH_LOG, `${params.methodId}\n`);
+    if (params.methodId !== "cached_token") throw { code: -32602, message: "Interactive login must not be started" };
+    await sleep(30);
+    if (process.env.FAKE_ACP_SIGNED_OUT === "1") throw { code: -32000, message: "Authentication required" };
+    authenticated = true;
+    return {};
+  },
   "session/new": (params) => {
     requireOpenArgs(params);
-    // Grok: no login, no session.
-    if (process.env.FAKE_ACP_SIGNED_OUT === "1") throw { code: -32000, message: "Authentication required", data: "no auth method id provided" };
+    requireAuth();
     const sessionId = randomUUID();
     sessions[sessionId] = { cwd: params.cwd, title: null, updatedAt: new Date().toISOString(), mode: "default", model: "fast", history: [] };
     loaded.add(sessionId);
@@ -251,6 +268,7 @@ const handlers = {
   }),
   "session/load": async (params) => {
     requireOpenArgs(params);
+    requireAuth();
     const session = requireSession(params);
     for (const entry of session.history) {
       if (entry.role === "user") update(params.sessionId, { ...chunk("user_message_chunk", entry.id, entry.text) });
@@ -264,6 +282,7 @@ const handlers = {
   },
   "session/resume": (params) => {
     requireOpenArgs(params);
+    requireAuth();
     if (claudeDir) {
       if (!existsSync(transcriptPath(params.sessionId, params.cwd) ?? "")) throw { code: -32002, message: `No conversation found with session ID: ${params.sessionId}` };
       sessions[params.sessionId] ??= { cwd: params.cwd, title: null, updatedAt: new Date().toISOString(), mode: "default", model: "fast", history: [] };

@@ -13,7 +13,7 @@ export const ACP_AGENTS: AcpAgentSpec[] = [
   { id: "gemini", label: "Gemini", tier: "remote", command: "gemini", args: ["--acp"] },
   // Lists sessions over ACP (including ones made in its own CLI).
   { id: "copilot", label: "Copilot", tier: "remote", command: "copilot", args: ["--acp"], discover: true },
-  { id: "grok", label: "Grok", tier: "remote", command: "grok", args: ["agent", "stdio"], discover: true },
+  { id: "grok", label: "Grok", tier: "remote", command: "grok", args: ["agent", "stdio"], discover: true, cachedAuthMethod: "cached_token" },
   { id: "opencode", label: "OpenCode", tier: "remote", command: "opencode", args: ["acp"] },
   { id: "cursor", label: "Cursor", tier: "remote", command: "cursor-agent", args: ["acp"] },
 ];
