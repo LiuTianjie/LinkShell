@@ -14,6 +14,7 @@ apps/*
 !apps/client/
 apps/client/*
 !apps/client/src/
+!apps/client/assets/
 !apps/client/package.json
 packages/gateway/web-client/
 

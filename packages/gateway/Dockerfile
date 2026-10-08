@@ -19,6 +19,7 @@ COPY tsconfig.base.json ./
 COPY packages/client-core/ packages/client-core/
 COPY apps/web/ apps/web/
 COPY apps/client/src/ apps/client/src/
+COPY apps/client/assets/ apps/client/assets/
 
 # The wire protocol first: the gateway runs against its built dist.
 RUN pnpm --filter @linkshell/wire build \
