@@ -1,8 +1,13 @@
 import type { AgentInfo, GatewayStatus } from "@linkshell/wire";
 import * as Clipboard from "expo-clipboard";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePageInsets } from "@/components/adaptive-page";
+import { HeaderActions } from "@/components/header-actions";
+import { hasSideToolbar } from "@/lib/home-layout";
+import { Text } from "@/components/fixed-text";
 import { AgentTile } from "@/components/agent-tile";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
@@ -22,7 +27,8 @@ import { AppMenu } from "@/components/app-menu";
 import { PortRow } from "@/components/port-row";
 import { ListRow } from "@/components/session-row";
 import { usePorts } from "@/lib/ports";
-import { PageHeader, StatusBarFade } from "@/components/page-header";
+import { PageActionButton, StatusBarFade, type PageAction } from "@/components/page-header";
+import { useContentWidth } from "@/lib/content-width";
 
 const authMethod: Record<string, string> = {
   "claude.ai": "Claude 账号",
@@ -321,6 +327,15 @@ function DevicesSection() {
 }
 
 export function ComputerScreen() {
+  const insets = usePageInsets();
+  const systemInsets = useSafeAreaInsets();
+  const inlineControls = Platform.OS !== "ios" || !hasSideToolbar(systemInsets);
+  const contentWidth = useContentWidth();
+  const [dashboardWidth, setDashboardWidth] = useState<number | null>(null);
+  const availableWidth = dashboardWidth ?? Math.max(0, contentWidth - 32);
+  const minimumColumn = 360;
+  const wide = availableWidth >= minimumColumn * 2 + 20;
+  const columnWidth = wide ? (availableWidth - 20) / 2 : "100%";
   const tabInset = useFloatingTabInset();
   const machine = useClient((state) => state.machine);
   const status = useClient((state) => state.status);
@@ -328,6 +343,12 @@ export function ComputerScreen() {
   const { refresh } = useActions();
   const { url, computer } = useConnection();
   const account = useAccount((state) => state.session);
+  const accountAction: PageAction = {
+    key: "account",
+    icon: account ? { sf: "person.crop.circle.fill", md: "account_circle" } : { sf: "person.crop.circle", md: "account_circle" },
+    label: "账号与电脑",
+    onPress: () => router.push("/account"),
+  };
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
   const relayStatus = useComputers((state) => state.relayStatus);
@@ -346,12 +367,14 @@ export function ComputerScreen() {
 
   return (
     <>
+      <Stack.Screen options={{ title: "", headerShown: !inlineControls, headerTransparent: true, headerLargeTitleEnabled: false }} />
       <ScrollView
-        contentInsetAdjustmentBehavior="never"
+        contentInsetAdjustmentBehavior={!inlineControls && Platform.OS === "ios" ? "automatic" : "never"}
         style={{ flex: 1, backgroundColor: colors.background }}
         contentContainerStyle={{
           paddingHorizontal: 16,
-          paddingBottom: 40 + tabInset,
+          paddingTop: inlineControls ? Math.max(insets.top, systemInsets.top) + 8 : 16,
+          paddingBottom: 40 + tabInset + (inlineControls && Platform.OS === "ios" ? Math.max(insets.bottom, systemInsets.bottom) : 0),
           gap: 20,
         }}
         refreshControl={
@@ -365,19 +388,13 @@ export function ComputerScreen() {
           />
         }
       >
-        <PageHeader
-          title="电脑"
-          actions={[
-            {
-              key: "account",
-              icon: account ? { sf: "person.crop.circle.fill", md: "account_circle" } : { sf: "person.crop.circle", md: "account_circle" },
-              label: "账号与电脑",
-              onPress: () => router.push("/account"),
-            },
-          ]}
-        />
+        {!inlineControls ? <HeaderActions actions={[{ ...accountAction, kind: "button" }]} /> : null}
         {hasComputer ? (
-        <>
+        <View
+          onLayout={(event) => setDashboardWidth(event.nativeEvent.layout.width)}
+          style={{ width: "100%", flexDirection: wide ? "row" : "column", alignItems: "flex-start", gap: 20 }}
+        >
+        <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 20 }}>
         <View
           style={{
             backgroundColor: colors.card,
@@ -387,7 +404,7 @@ export function ComputerScreen() {
             gap: 14,
           }}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
             <View
               style={{
                 width: 44,
@@ -401,7 +418,7 @@ export function ComputerScreen() {
             >
               <Icon sf={platform.sf} md="laptop_mac" size={22} color={colors.label} />
             </View>
-            <View style={{ flex: 1, gap: 3 }}>
+            <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
               <AppMenu
                 title="切换电脑"
                 actions={[
@@ -423,8 +440,8 @@ export function ComputerScreen() {
                   else useComputers.getState().select(nativeEvent.event);
                 }}
               >
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Text numberOfLines={1} style={[type.title3, { color: colors.label, flexShrink: 1 }]}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44 }}>
+                  <Text numberOfLines={1} style={[type.headline, { color: colors.label, flex: 1, minWidth: 0 }]}>
                     {machine ? machine.hostname.replace(/\.local$/, "") : computer.kind === "relay" ? computer.machine.name : "我的电脑"}
                   </Text>
                   <Icon sf="chevron.up.chevron.down" md="unfold_more" size={12} color={colors.tertiaryLabel} weight="semibold" />
@@ -432,12 +449,17 @@ export function ComputerScreen() {
               </AppMenu>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <LiveDot size={7} color={online ? colors.ok : colors.tertiaryLabel} live={online} />
-                <Text numberOfLines={1} style={[type.footnote, { color: colors.secondaryLabel, flexShrink: 1 }]}>
+                <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel, flexShrink: 1 }]}>
                   {online ? "在线" : status === "connecting" ? "正在连接…" : `连不上${detail ? ` · ${detail}` : ""}`}
-                  {machine ? ` · ${platform.label} · LinkShell ${machine.hostVersion}` : ""}
                 </Text>
               </View>
+              {machine ? (
+                <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>
+                  {platform.label} · LinkShell {machine.hostVersion}
+                </Text>
+              ) : null}
             </View>
+            {inlineControls ? <PageActionButton action={accountAction} /> : null}
           </View>
           <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
@@ -447,7 +469,7 @@ export function ComputerScreen() {
               size={12}
               color={computer.kind === "relay" ? colors.ok : colors.tertiaryLabel}
             />
-            <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+            <Text numberOfLines={2} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
               {computer.kind === "relay"
                 ? `端到端加密 · ${computer.machine.via === "account" ? "同一账号" : "已配对"} · ${hostOf(computer.gateway)}`
                 : `局域网直连 · ${url.replace(/^wss?:\/\//, "")}`}
@@ -456,7 +478,9 @@ export function ComputerScreen() {
         </View>
 
         {online ? <PreviewSection /> : null}
+        </View>
 
+        <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 20 }}>
         <View style={{ gap: 8 }}>
           <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: "600", color: colors.secondaryLabel, paddingHorizontal: 6 }}>Agent</Text>
           <View
@@ -468,7 +492,7 @@ export function ComputerScreen() {
               paddingVertical: 2,
             }}
           >
-            {agents.length === 0 ? (
+            {!agents.some((agent) => agent.installed) ? (
               <Text style={[type.subhead, { color: colors.secondaryLabel, paddingVertical: 14 }]}>
                 {online ? "这台电脑上还没有检测到 Agent" : "连上电脑后显示"}
               </Text>
@@ -488,12 +512,16 @@ export function ComputerScreen() {
         </View>
 
         {online ? <DevicesSection /> : null}
-        </>
+        </View>
+        </View>
         ) : (
-          <Welcome />
+          <View>
+            <Welcome />
+            {inlineControls ? <View style={{ position: "absolute", top: 0, right: 0 }}><PageActionButton action={accountAction} /></View> : null}
+          </View>
         )}
       </ScrollView>
-      <StatusBarFade />
+      {Platform.OS !== "ios" ? <StatusBarFade /> : null}
     </>
   );
 }

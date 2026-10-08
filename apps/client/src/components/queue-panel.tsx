@@ -1,7 +1,8 @@
 import type { MenuAction } from "@react-native-menu/menu";
 import type { QueueEntry } from "@linkshell/client-core";
-import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useState, type ReactNode } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
@@ -19,6 +20,7 @@ export interface QueuePanelProps {
   queue: QueueEntry[];
   /** Offline, or the composer can't take a message: the rows only show. */
   disabled?: boolean;
+  contained?: boolean;
   onSendNow: (clientMessageId: string) => Promise<void>;
   /** Takes the message back into the composer. */
   onEdit: (clientMessageId: string) => void;
@@ -95,7 +97,7 @@ function Row({
             accessibilityRole="button"
             accessibilityLabel="立即发送"
             hitSlop={4}
-            style={{ width: 36, height: 40, alignItems: "center", justifyContent: "center" }}
+            style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
           >
             <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
               {sending ? (
@@ -113,7 +115,7 @@ function Row({
             accessibilityRole="button"
             accessibilityLabel="编辑"
             hitSlop={4}
-            style={{ width: 34, height: 40, alignItems: "center", justifyContent: "center" }}
+            style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
           >
             <Icon sf="pencil" md="edit" size={15} color={colors.secondaryLabel} />
           </Pressable>
@@ -129,7 +131,7 @@ function Row({
               else if (id === "remove") onRemove();
             }}
           >
-            <View accessibilityRole="button" accessibilityLabel="更多" style={{ width: 36, height: 40, alignItems: "center", justifyContent: "center" }}>
+            <View accessibilityRole="button" accessibilityLabel="更多" style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
               <Icon sf="ellipsis" md="more_horiz" size={16} color={colors.secondaryLabel} />
             </View>
           </AppMenu>
@@ -144,7 +146,7 @@ function Row({
  * go now, come back to be edited, move up or down, or be dropped. The queue
  * lives on the computer, so every device looking at the session sees it.
  */
-export function QueuePanel({ queue, disabled = false, onSendNow, onEdit, onRemove, onReorder }: QueuePanelProps) {
+export function QueuePanel({ queue, disabled = false, contained = false, onSendNow, onEdit, onRemove, onReorder }: QueuePanelProps) {
   const move = (index: number, by: -1 | 1) => {
     // (Only what the computer holds has an order to change.)
     const ids = queue.filter((entry) => !entry.pending).map((entry) => entry.clientMessageId);
@@ -159,17 +161,7 @@ export function QueuePanel({ queue, disabled = false, onSendNow, onEdit, onRemov
 
   return (
     <Glass style={{ borderRadius: 22, paddingHorizontal: 4, overflow: "hidden" }}>
-      <ScrollView
-        style={{ maxHeight: ROW * SHOWN }}
-        scrollEnabled={queue.length > SHOWN}
-        nestedScrollEnabled
-        bounces={false}
-        // Whole rows: never half of one at the panel's edge.
-        snapToInterval={ROW}
-        decelerationRate="fast"
-        keyboardShouldPersistTaps="handled"
-        accessibilityLabel={`排队中的消息，${queue.length} 条`}
-      >
+      <QueueBody contained={contained} count={queue.length}>
         {queue.map((entry, index) => (
           <Row
             key={entry.clientMessageId}
@@ -187,7 +179,12 @@ export function QueuePanel({ queue, disabled = false, onSendNow, onEdit, onRemov
             onMove={(by) => move(index, by)}
           />
         ))}
-      </ScrollView>
+      </QueueBody>
     </Glass>
   );
+}
+
+function QueueBody({ children, contained, count }: { children: ReactNode; contained: boolean; count: number }) {
+  if (contained) return <View accessibilityLabel={`排队中的消息，${count} 条`}>{children}</View>;
+  return <ScrollView style={{ maxHeight: ROW * SHOWN }} scrollEnabled={count > SHOWN} nestedScrollEnabled bounces={false} snapToInterval={ROW} decelerationRate="fast" keyboardShouldPersistTaps="handled" accessibilityLabel={`排队中的消息，${count} 条`}>{children}</ScrollView>;
 }

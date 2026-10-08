@@ -1,4 +1,5 @@
 export * from "./model.js";
+export * from "./goal.js";
 export * from "./updates.js";
 export * from "./workflow.js";
 export * from "./rpc.js";
@@ -8,3 +9,4 @@ export * from "./crypto.js";
 export * from "./relay.js";
 export * from "./relay-client.js";
 export * from "./direct.js";
+export * from "./computer-preview.js";

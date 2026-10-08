@@ -2,7 +2,10 @@ import { LegendList } from "@legendapp/list/react-native";
 import type { DirectoryEntry } from "@linkshell/wire";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { memo, useEffect, useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
+import { ScrollableState } from "@/components/scrollable-state";
 import { BranchTag } from "@/components/branch-tag";
 import { HeaderActions, useHeaderTitleWidth } from "@/components/header-actions";
 import { Icon, type IconProps } from "@/components/icon";
@@ -14,6 +17,8 @@ import { baseName, fileSize, shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { openFile } from "@/lib/links";
 import { branchOf, useGitInfo } from "@/lib/worktree";
+import { ContentPane, useContentWidth } from "@/lib/content-width";
+import { FileContent } from "./file-screen";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
@@ -43,7 +48,7 @@ function fileGlyph(name: string): Glyph {
   return { sf: "doc", md: "draft" };
 }
 
-const Row = memo(function Row({ entry, position, onPress }: { entry: DirectoryEntry; position: RowPosition; onPress: (entry: DirectoryEntry) => void }) {
+const Row = memo(function Row({ entry, position, onPress, selected }: { entry: DirectoryEntry; position: RowPosition; selected?: boolean; onPress: (entry: DirectoryEntry) => void }) {
   const top = position === "first" || position === "only";
   const bottom = position === "last" || position === "only";
   const glyph: Glyph = entry.file ? fileGlyph(entry.name) : { sf: "folder.fill", md: "folder" };
@@ -52,6 +57,7 @@ const Row = memo(function Row({ entry, position, onPress }: { entry: DirectoryEn
       onPress={() => onPress(entry)}
       pressedScale={0.985}
       accessibilityRole="button"
+      accessibilityState={{ selected }}
       accessibilityLabel={entry.file ? `文件 ${entry.name}` : `文件夹 ${entry.name}`}
     >
       <View
@@ -60,7 +66,7 @@ const Row = memo(function Row({ entry, position, onPress }: { entry: DirectoryEn
           alignItems: "center",
           gap: 12,
           paddingLeft: 14,
-          backgroundColor: colors.card,
+          backgroundColor: selected ? colors.accentSoft : colors.card,
           borderTopLeftRadius: top ? 20 : 0,
           borderTopRightRadius: top ? 20 : 0,
           borderBottomLeftRadius: bottom ? 20 : 0,
@@ -100,8 +106,7 @@ const Row = memo(function Row({ entry, position, onPress }: { entry: DirectoryEn
   );
 });
 
-function HeaderTitle({ name, path, branch }: { name: string; path: string; branch?: string }) {
-  const maxWidth = useHeaderTitleWidth(1);
+function HeaderTitle({ name, path, maxWidth }: { name: string; path: string; maxWidth: number }) {
   return (
     <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start", maxWidth }}>
       <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>
@@ -112,11 +117,6 @@ function HeaderTitle({ name, path, branch }: { name: string; path: string; branc
           <Text numberOfLines={1} ellipsizeMode="head" style={[type.caption, { flexShrink: 1, color: colors.secondaryLabel }]}>
             {path}
           </Text>
-          {branch ? (
-            <View style={{ flexShrink: 0 }}>
-              <BranchTag branch={branch} max={16} />
-            </View>
-          ) : null}
         </View>
       ) : null}
     </View>
@@ -129,6 +129,16 @@ function HeaderTitle({ name, path, branch }: { name: string; path: string; branc
  * when it is opened.
  */
 export function FilesScreen() {
+  const parentWidth = useContentWidth();
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  const width = measuredWidth ?? parentWidth;
+  const { fontScale } = useWindowDimensions();
+  const wide = width >= Math.max(760, 720 * fontScale);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const headerTitleWidth = useHeaderTitleWidth(selected ? 2 : 1);
+  const showList = !selected || (wide && !collapsed);
+  const listWidth = wide ? Math.min(340, Math.round(width * 0.36)) : width;
   const params = useLocalSearchParams<{ path?: string; hidden?: string }>();
   const { link } = useConnection();
   const online = useClient((state) => state.status === "online");
@@ -158,7 +168,10 @@ export function FilesScreen() {
 
   const open = (entry: DirectoryEntry) => {
     haptics.selection();
-    if (entry.file) openFile({ path: entry.path });
+    if (entry.file) {
+      if (wide) setSelected(entry.path);
+      else openFile({ path: entry.path });
+    }
     else router.push({ pathname: "/files", params: { path: entry.path, ...(hidden ? { hidden: "1" } : {}) } });
   };
 
@@ -167,11 +180,12 @@ export function FilesScreen() {
       <Stack.Screen
         options={{
           title: path ? baseName(path) : "文件",
-          headerTitle: () => <HeaderTitle name={path ? baseName(path) : "文件"} path={path ? shortPath(path) : ""} branch={branch} />,
+          headerTitle: () => <HeaderTitle name={path ? baseName(path) : "文件"} path={path ? shortPath(path) : ""} maxWidth={headerTitleWidth} />,
         }}
       />
       <HeaderActions
         actions={[
+          ...(selected ? [{ kind: "button" as const, key: "files", icon: { sf: "sidebar.left" as const, md: "menu_open" as const }, label: showList ? "收起文件列表" : "显示文件列表", onPress: () => wide ? setCollapsed((value) => !value) : setSelected(null) }] : []),
           {
             kind: "menu",
             key: "more",
@@ -188,11 +202,14 @@ export function FilesScreen() {
           },
         ]}
       />
+      <View onLayout={(event) => setMeasuredWidth(event.nativeEvent.layout.width)} style={{ flex: 1, flexDirection: "row", minHeight: 0 }}>
+      <ContentPane style={{ width: wide ? listWidth : "100%", display: showList ? "flex" : "none", borderRightWidth: wide ? StyleSheet.hairlineWidth : 0, borderRightColor: colors.separator }}>
       <LegendList<DirectoryEntry>
         data={error ? [] : entries}
         keyExtractor={(entry) => entry.path}
-        renderItem={({ item, index }) => <Row entry={item} position={positionOf(index, entries.length)} onPress={open} />}
+        renderItem={({ item, index }) => <Row entry={item} position={positionOf(index, entries.length)} onPress={open} selected={selected === item.path} />}
         estimatedItemSize={46}
+        ListHeaderComponent={branch ? <View style={{ paddingBottom: 12 }}><BranchTag branch={branch} max={28} /></View> : null}
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ padding: 16 }}
         style={{ flex: 1, backgroundColor: colors.background }}
@@ -220,6 +237,13 @@ export function FilesScreen() {
           ) : null
         }
       />
+      </ContentPane>
+      <View style={{ flex: 1, minWidth: 0, display: wide || selected ? "flex" : "none", backgroundColor: colors.plain }}>
+        {selected ? <FileContent key={selected} path={selected} embedded backLabel={wide && showList ? "收起文件列表" : "显示文件列表"} onBack={() => wide ? setCollapsed((value) => !value) : setSelected(null)} /> : (
+          <ScrollableState><EmptyState icon={{ sf: "doc.text.magnifyingglass", md: "find_in_page" }} title="选择文件以预览" message="在左侧浏览目录，在这里查看代码、文档和图片。" /></ScrollableState>
+        )}
+      </View>
+      </View>
     </>
   );
 }

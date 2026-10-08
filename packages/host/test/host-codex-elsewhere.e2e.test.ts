@@ -256,6 +256,19 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
   const id = "codex:desk-thread";
   let desk: ReturnType<typeof deskCodex>;
 
+  it("reports a desktop-owned running turn correctly through /status", async () => {
+    const desktop = deskCodex(disk, "status-thread", "/desk/status");
+    desktop.hold();
+    desktop.startTurn("checking status");
+    await host.hub.refreshDiscovery();
+    const sessionId = "codex:status-thread";
+    await phone.client.call("sessions.subscribe", { sessionId, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId, clientMessageId: "desktop-status", content: [{ type: "text", text: "/status" }] });
+    expect(phone.of(sessionId).some((event) => event.update.sessionUpdate === "ls_notice" && event.update.title === "/status" && event.update.detail?.includes("运行中"))).toBe(true);
+    desktop.endTurn();
+    await phone.client.call("sessions.unsubscribe", { sessionId });
+  });
+
   it("imports desktop sub-agents and follows their files while the parent stays unchanged", async () => {
     const parent = deskCodex(disk, "agents-parent", "/desk/agents");
     const child = deskCodex(disk, "agents-child", "/desk/agents");
@@ -305,6 +318,9 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
     // The command still running there isn't shown half-done.
     expect(phone.tools(id)).toEqual([]);
     expect(host.hub.getSession(id)).toMatchObject({ state: "running", driver: "desktop" });
+    await waitFor(() => phone.of(id).some((event) => event.update.sessionUpdate === "available_commands_update" && event.update.availableCommands.some((command) => command.name === "goal")));
+    expect(await phone.client.call("sessions.goal", { sessionId: id, change: { action: "get" } })).toEqual({ goal: null });
+    await expect(phone.client.call("sessions.goal", { sessionId: id, change: { action: "set", objective: "不要接管桌面会话" } })).rejects.toMatchObject({ appCode: "busy" });
     const notice = phone.of(id).find((e) => e.update.sessionUpdate === "ls_notice")?.update;
     expect(notice).toMatchObject({ title: expect.stringContaining("另一个 Codex") });
     expect(logs.filter((line) => line.includes("attach"))).toEqual([]);

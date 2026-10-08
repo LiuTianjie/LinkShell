@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { permissionOptionSchema, questionAnswerSchema, questionSchema, sessionDriverSchema, sessionStateSchema, toolKindSchema } from "./model.js";
+import { sessionGoalSchema } from "./goal.js";
+import { backgroundTaskSchema, permissionOptionSchema, questionAnswerSchema, questionSchema, sessionDriverSchema, sessionStateSchema, toolKindSchema } from "./model.js";
 import { workflowAgentStateSchema, workflowSchema } from "./workflow.js";
 
 // Session updates mirror ACP's `SessionUpdate` shapes (discriminated by
@@ -153,6 +154,10 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
     entries: z.array(planEntrySchema),
   }),
   z.object({
+    sessionUpdate: z.literal("ls_goal"),
+    goal: sessionGoalSchema.nullable(),
+  }),
+  z.object({
     sessionUpdate: z.literal("available_commands_update"),
     availableCommands: z.array(
       z.object({ name: z.string(), description: z.string(), hint: z.string().optional() }),
@@ -227,6 +232,11 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
   z.object({
     sessionUpdate: z.literal("ls_status"),
     state: sessionStateSchema,
+  }),
+  /** A background task as it is now (the whole record each time: the latest for its id holds). */
+  z.object({
+    sessionUpdate: z.literal("ls_task"),
+    task: backgroundTaskSchema,
   }),
   z.object({
     sessionUpdate: z.literal("ls_error"),

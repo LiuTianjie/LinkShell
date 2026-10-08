@@ -32,7 +32,7 @@ class LinkTerminalView(context: Context, appContext: AppContext) : ExpoView(cont
 
   private val terminal = TerminalView(context, null)
   private var theme: Map<String, String> = emptyMap()
-  private var fontSizeSp = 13.0
+  private var fontSizeDp = 13.0
   private var lastSize = ""
 
   private val sessionClient = object : TerminalSessionClient {
@@ -146,7 +146,7 @@ class LinkTerminalView(context: Context, appContext: AppContext) : ExpoView(cont
   }
 
   fun setFontSize(size: Double) {
-    fontSizeSp = size
+    fontSizeDp = size
     applyFontSize()
   }
 
@@ -185,7 +185,8 @@ class LinkTerminalView(context: Context, appContext: AppContext) : ExpoView(cont
   }
 
   private fun applyFontSize() {
-    val px = (fontSizeSp * resources.displayMetrics.scaledDensity).roundToInt()
+    // Match the authored terminal size and its own font controls, independently of system text scaling.
+    val px = (fontSizeDp * resources.displayMetrics.density).roundToInt()
     terminal.setTextSize(px)
   }
 

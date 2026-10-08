@@ -166,6 +166,39 @@ export const subagentInfoSchema = z.object({
 });
 export type SubagentInfo = z.infer<typeof subagentInfoSchema>;
 
+/**
+ * A command the agent left running after its call returned (a background
+ * shell, a dev server, a watcher). Sub-agents and workflows are not tasks:
+ * they have their own records (`SubagentInfo`).
+ */
+export const backgroundTaskStateSchema = z.enum(["running", "completed", "failed", "stopped", "unknown"]);
+export type BackgroundTaskState = z.infer<typeof backgroundTaskStateSchema>;
+
+export const backgroundTaskSchema = z.object({
+  /** The agent's own id for it. */
+  id: z.string(),
+  /** shell: a command; monitor: a command whose output the agent is told about as it comes. */
+  kind: z.enum(["shell", "monitor"]),
+  /** The tool call that started it. */
+  toolCallId: z.string().optional(),
+  title: z.string(),
+  command: z.string().optional(),
+  /** `unknown`: it was running when the host lost track of it (its agent quit without saying how it ended). */
+  state: backgroundTaskStateSchema,
+  startedAt: z.number(),
+  endedAt: z.number().optional(),
+  /** How it ended, or the latest thing it reported, as the agent says it. */
+  summary: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  /** Its output can be read (`sessions.taskOutput`). */
+  output: z.boolean().optional(),
+  /** It can be stopped from here (`sessions.stopTask`). */
+  canStop: z.boolean().optional(),
+  /** Orders list snapshots against events arriving while the request is in flight. */
+  lastSeq: z.number().int().nonnegative().optional(),
+});
+export type BackgroundTask = z.infer<typeof backgroundTaskSchema>;
+
 export const sessionSummarySchema = z.object({
   /** `${agent}:${nativeId}` — stable across daemon restarts and rediscovery. */
   id: z.string().min(1),
@@ -198,6 +231,8 @@ export const sessionSummarySchema = z.object({
   worktree: z.object({ branch: z.string(), source: z.string() }).optional(),
   /** Live only, for sessions that started sub-agents: how many, and how many are working now (`sessions.subagents` lists them). */
   subagents: z.object({ total: z.number().int(), running: z.number().int() }).optional(),
+  /** Live only, for sessions that left commands running: how many, and how many still run (`sessions.tasks` lists them). */
+  tasks: z.object({ total: z.number().int(), running: z.number().int() }).optional(),
 });
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 

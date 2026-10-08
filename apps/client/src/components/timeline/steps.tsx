@@ -1,6 +1,7 @@
 import type { Step } from "@/lib/timeline-rows";
 import { memo } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import Animated, { cubicBezier } from "react-native-reanimated";
 import { fileChanges } from "@/lib/describe";
 import { duration } from "@/lib/format";

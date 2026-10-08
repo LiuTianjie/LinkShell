@@ -43,9 +43,9 @@ export function PlusMenu({ canAttachImages, hasCommands, onPickPhoto, onTakePhot
         accessibilityLabel="添加"
         pointerEvents={disabled ? "none" : "auto"}
         style={{
-          width: 32,
-          height: 32,
-          borderRadius: 16,
+          width: 44,
+          height: 44,
+          borderRadius: 22,
           backgroundColor: colors.fill,
           alignItems: "center",
           justifyContent: "center",

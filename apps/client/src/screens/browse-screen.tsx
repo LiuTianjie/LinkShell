@@ -1,14 +1,17 @@
 import type { DirectoryEntry } from "@linkshell/wire";
 import { router } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { Text, TextInput } from "@/components/fixed-text";
+import { KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
+import { usePageInsets } from "@/components/adaptive-page";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
 import { useConnection } from "@/lib/client";
 import { pickDirectory } from "@/lib/directory-pick";
-import { baseName, shortPath } from "@/lib/format";
+import { shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
@@ -86,17 +89,17 @@ function Row({ entry, detail, onPress, last }: { entry: DirectoryEntry; detail?:
   );
 }
 
-/** Browse or search the computer's directories; the bottom button picks the one you're in. */
+/** Browse or search directories, then confirm the current folder in the system toolbar. */
 export function BrowseScreen() {
   const { link } = useConnection();
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
   const [path, setPath] = useState<string | undefined>(undefined);
   const [listing, setListing] = useState<{ path: string; parent?: string; home: string; entries: DirectoryEntry[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ query: string; entries: DirectoryEntry[] } | null>(null);
   const [searching, setSearching] = useState(false);
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<KeyboardAwareScrollViewRef>(null);
   const crumbBar = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -139,7 +142,6 @@ export function BrowseScreen() {
   }, [link, query]);
 
   const trail = useMemo(() => (listing ? crumbs(listing.path, listing.home) : []), [listing]);
-  const home = listing?.home ?? "";
   const open = (target: string) => {
     haptics.selection();
     setQuery("");
@@ -175,40 +177,25 @@ export function BrowseScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.sheet }}>
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 22, paddingBottom: 12 }}>
-        <Text style={[type.title, { flex: 1, color: colors.label }]}>选择目录</Text>
-        {listing && !searchMode ? (
-          <Pressable
-            onPress={() => {
-              haptics.selection();
-              setNaming((value) => (value === null ? "" : null));
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="新建文件夹"
-            hitSlop={10}
-            style={{ width: 32, height: 32, borderRadius: 16, marginRight: 10, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-          >
-            <Icon sf="folder.badge.plus" md="create_new_folder" size={15} color={colors.accent} />
-          </Pressable>
-        ) : null}
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="关闭"
-          hitSlop={10}
-          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="xmark" md="close" size={13} color={colors.secondaryLabel} weight="bold" />
-        </Pressable>
-      </View>
+      <SheetHeader title="选择目录" actions={listing && !searchMode ? [{ key: "folder", label: "新建文件夹", icon: { sf: "folder.badge.plus", md: "create_new_folder" }, onPress: () => { haptics.selection(); setNaming((value) => value === null ? "" : null); } }, { key: "choose", label: "使用当前目录", icon: { sf: "checkmark", md: "check" }, onPress: () => choose(listing.path), disabled: making, prominent: true }] : []} />
 
+      <View style={{ flex: 1, overflow: "hidden" }}>
+      <KeyboardAwareScrollView
+        ref={scroll}
+        bottomOffset={24}
+        contentInsetAdjustmentBehavior="never"
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingTop: 12, paddingBottom: insets.bottom + 16 }}
+      >
       <View style={{ paddingHorizontal: 16, gap: 10 }}>
         <View
           style={{
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            height: 40,
+            minHeight: 44,
             paddingHorizontal: 12,
             borderRadius: 12,
             borderCurve: "continuous",
@@ -225,19 +212,20 @@ export function BrowseScreen() {
             autoCorrect={false}
             returnKeyType="search"
             clearButtonMode="while-editing"
-            style={[type.body, { flex: 1, fontSize: 16, color: colors.label, paddingVertical: 0 }]}
+            style={[type.body, { flex: 1, minHeight: 44, fontSize: 16, color: colors.label, paddingVertical: 10 }]}
           />
           {searching ? <ActivityIndicator size="small" color={colors.secondaryLabel} /> : null}
         </View>
 
         {!searchMode && trail.length ? (
-          <View style={{ height: 30, overflow: "hidden" }}>
+          <View style={{ minHeight: 44 }}>
             <ScrollView
               ref={crumbBar}
               horizontal
+              style={{ flexGrow: 0 }}
               showsHorizontalScrollIndicator={false}
               onContentSizeChange={() => crumbBar.current?.scrollToEnd({ animated: false })}
-              contentContainerStyle={{ alignItems: "center", gap: 2, paddingRight: 8 }}
+              contentContainerStyle={{ alignItems: "center", minHeight: 44, gap: 2, paddingRight: 8 }}
             >
               {trail.map((crumb, index) => {
                 const current = index === trail.length - 1;
@@ -249,10 +237,13 @@ export function BrowseScreen() {
                     <Pressable
                       disabled={current}
                       onPress={() => open(crumb.path)}
-                      hitSlop={6}
                       style={({ pressed }) => ({
+                        minWidth: 44,
+                        minHeight: 44,
+                        alignItems: "center",
+                        justifyContent: "center",
                         paddingHorizontal: 8,
-                        paddingVertical: 5,
+                        paddingVertical: 10,
                         borderRadius: 8,
                         backgroundColor: current ? colors.accentSoft : pressed ? colors.fill : undefined,
                       })}
@@ -274,16 +265,7 @@ export function BrowseScreen() {
         ) : null}
       </View>
 
-      {/* Wrapped: a sheet stretches a scroll view that's a direct child of the screen over the whole sheet. */}
-      <View style={{ flex: 1, overflow: "hidden" }}>
-        <ScrollView
-          ref={scroll}
-          contentInsetAdjustmentBehavior="never"
-          style={{ flex: 1 }}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 110 }}
-        >
+      <View style={{ padding: 16 }}>
           {naming !== null && !searchMode ? (
             <View
               style={{
@@ -293,7 +275,8 @@ export function BrowseScreen() {
                 marginBottom: 12,
                 paddingLeft: 14,
                 paddingRight: 6,
-                height: 52,
+                minHeight: 52,
+                paddingVertical: 4,
                 borderRadius: 18,
                 borderCurve: "continuous",
                 backgroundColor: colors.sheetCard,
@@ -310,7 +293,7 @@ export function BrowseScreen() {
                 autoCorrect={false}
                 returnKeyType="done"
                 onSubmitEditing={() => void makeFolder()}
-                style={[type.body, { flex: 1, fontSize: 16, color: colors.label, paddingVertical: 0 }]}
+                style={[type.body, { flex: 1, minHeight: 44, fontSize: 16, color: colors.label, paddingVertical: 10 }]}
               />
               <Button title="创建" variant="primary" size="small" disabled={!naming.trim() || making} onPress={() => void makeFolder()} />
             </View>
@@ -336,33 +319,11 @@ export function BrowseScreen() {
               ))}
             </View>
           )}
-        </ScrollView>
       </View>
 
-      {listing && !searchMode ? (
-        <View
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            paddingHorizontal: 16,
-            paddingTop: 12,
-            paddingBottom: insets.bottom + 12,
-            backgroundColor: colors.sheet,
-            borderTopWidth: 0.5,
-            borderTopColor: colors.separator,
-          }}
-        >
-          <Button
-            title={listing.path === home ? "使用主目录" : `使用「${baseName(listing.path)}」`}
-            variant="primary"
-            size="large"
-            wide
-            onPress={() => choose(listing.path)}
-          />
-        </View>
-      ) : null}
+
+      </KeyboardAwareScrollView>
+      </View>
     </View>
   );
 }

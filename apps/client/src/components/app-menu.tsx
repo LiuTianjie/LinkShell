@@ -1,6 +1,9 @@
 import { MenuView, type MenuAction, type NativeActionEvent } from "@react-native-menu/menu";
-import { useImperativeHandle, useRef, useState, type Ref } from "react";
-import { Modal, Platform, Pressable, ScrollView, Text, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { Modal, Platform, Pressable, ScrollView, View, type StyleProp, type ViewStyle } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, FadeIn, FadeOut } from "react-native-reanimated";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
@@ -53,6 +56,7 @@ export function AppMenu(props: AppMenuProps) {
 }
 
 interface Anchor {
+  geometry: string;
   x: number;
   y: number;
   width: number;
@@ -73,21 +77,33 @@ function FloatingMenu({
   handle,
 }: AppMenuProps & { handle?: Ref<FloatingMenuHandle> }) {
   const anchorRef = useRef<View>(null);
+  const measurement = useRef(0);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
   // Submenus push onto this stack.
   const [stack, setStack] = useState<{ title?: string; actions: MenuAction[] }[]>([]);
   const window = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const geometry = [window.width, window.height, insets.top, insets.right, insets.bottom, insets.left].join(":");
+  // Native measurement can finish after rotation, dismissal, or unmount.
+  useEffect(() => {
+    measurement.current += 1;
+    setAnchor(null);
+    return () => { measurement.current += 1; };
+  }, [geometry]);
 
   const open = () => {
+    const request = ++measurement.current;
     anchorRef.current?.measureInWindow((x, y, width, height) => {
+      if (request !== measurement.current || width <= 0 || height <= 0) return;
       haptics.selection();
       onOpenMenu?.();
       setStack([{ title, actions }]);
-      setAnchor({ x, y, width, height });
+      setAnchor({ geometry, x, y, width, height });
     });
   };
   useImperativeHandle(handle, () => ({ open }));
-  const close = () => setAnchor(null);
+  const close = () => { measurement.current += 1; setAnchor(null); };
   const choose = (action: MenuAction) => {
     if (action.subactions?.length) {
       haptics.selection();
@@ -99,13 +115,18 @@ function FloatingMenu({
   };
 
   const level = stack[stack.length - 1];
-  // As wide as what opened it (a field), at least a comfortable minimum (an icon button).
-  const width = anchor ? Math.min(window.width - GUTTER * 2, Math.max(CARD_MIN, anchor.width)) : CARD_MIN;
-  const left = anchor ? Math.min(Math.max(anchor.x, GUTTER), window.width - width - GUTTER) : 0;
-  const below = anchor ? window.height - (anchor.y + anchor.height) : 0;
-  const above = anchor ? anchor.y : 0;
+  const safeLeft = insets.left + GUTTER;
+  const safeRight = window.width - insets.right - GUTTER;
+  const safeTop = insets.top + GUTTER;
+  const safeBottom = window.height - insets.bottom - GUTTER;
+  const width = Math.max(0, Math.min(safeRight - safeLeft, Math.max(CARD_MIN, anchor?.width ?? CARD_MIN)));
+  const left = Math.max(safeLeft, Math.min(anchor?.x ?? safeLeft, safeRight - width));
+  const anchorTop = Math.max(safeTop, Math.min(anchor?.y ?? safeTop, safeBottom));
+  const anchorBottom = Math.max(safeTop, Math.min((anchor?.y ?? safeTop) + (anchor?.height ?? 0), safeBottom));
+  const below = Math.max(0, safeBottom - anchorBottom - 6);
+  const above = Math.max(0, anchorTop - safeTop - 6);
   const openUp = below < 280 && above > below;
-  const maxHeight = Math.max(160, (openUp ? above : below) - GUTTER * 3);
+  const maxHeight = openUp ? above : below;
 
   return (
     <>
@@ -123,7 +144,7 @@ function FloatingMenu({
           {children}
         </Pressable>
       )}
-      {anchor && level ? (
+      {anchor && anchor.geometry === geometry && level ? (
         <Modal visible transparent statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={close}>
           <Pressable onPress={close} style={{ flex: 1 }} accessibilityLabel="关闭菜单">
             <Animated.View
@@ -134,7 +155,7 @@ function FloatingMenu({
                 left,
                 width,
                 maxHeight,
-                ...(openUp ? { bottom: window.height - anchor.y + 6 } : { top: anchor.y + anchor.height + 6 }),
+                ...(openUp ? { bottom: window.height - anchorTop + 6 } : { top: anchorBottom + 6 }),
                 borderRadius: 18,
                 backgroundColor: colors.cardRaised,
                 boxShadow: "0 12px 36px rgba(12,14,30,0.22), 0 2px 6px rgba(12,14,30,0.08)",
@@ -143,9 +164,9 @@ function FloatingMenu({
             >
               <Pressable>
                 {stack.length > 1 || level.title ? (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6 }}>
+                  <View onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6 }}>
                     {stack.length > 1 ? (
-                      <Pressable onPress={() => setStack((current) => current.slice(0, -1))} hitSlop={10} accessibilityLabel="返回">
+                      <Pressable onPress={() => setStack((current) => current.slice(0, -1))} accessibilityRole="button" accessibilityLabel="返回" style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
                         <Icon sf="chevron.left" md="arrow_back" size={16} color={colors.secondaryLabel} />
                       </Pressable>
                     ) : null}
@@ -155,7 +176,7 @@ function FloatingMenu({
                     </Text>
                   </View>
                 ) : null}
-                <ScrollView bounces={false} showsVerticalScrollIndicator={false} style={{ maxHeight: maxHeight - 40 }} contentContainerStyle={{ paddingVertical: 6 }}>
+                <ScrollView bounces={false} showsVerticalScrollIndicator={false} style={{ maxHeight: Math.max(0, maxHeight - (stack.length > 1 || level.title ? headerHeight : 0)) }} contentContainerStyle={{ paddingVertical: 6 }}>
                   {level.actions.map((action, index) => {
                     const disabled = action.attributes?.disabled === true;
                     const destructive = action.attributes?.destructive === true;
@@ -164,6 +185,8 @@ function FloatingMenu({
                       <Pressable
                         key={action.id ?? index}
                         disabled={disabled}
+                        accessibilityRole="menuitem"
+                        accessibilityState={{ disabled, selected: checked }}
                         onPress={() => choose(action)}
                         android_ripple={{ color: colors.fill as string }}
                         style={{
@@ -178,7 +201,7 @@ function FloatingMenu({
                       >
                         <View style={{ flex: 1, gap: 1 }}>
                           <Text
-                            numberOfLines={1}
+                            numberOfLines={2}
                             style={[
                               type.body,
                               { fontSize: 16, color: destructive ? colors.danger : colors.label, fontWeight: checked ? "600" : "400" },

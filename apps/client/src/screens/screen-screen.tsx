@@ -1,15 +1,22 @@
+import { nativeStatusBar } from "@/lib/native-status-bar";
 import * as Clipboard from "expo-clipboard";
 import * as Device from "expo-device";
 import { useKeepAwake } from "expo-keep-awake";
 import { Stack } from "expo-router";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, BackHandler, Platform, Text, View } from "react-native";
+import { ActivityIndicator, BackHandler, Platform, ScrollView, View } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
+import { LayoutProbe } from "../../modules/link-layout";
+import { useLayoutGeometry } from "@/lib/use-layout-geometry";
+import { safeContentInsets } from "@/lib/adaptive-insets";
 import { Button } from "@/components/button";
 import { HeaderActions } from "@/components/header-actions";
 import { Icon } from "@/components/icon";
@@ -25,8 +32,9 @@ interface Viewer {
   displays: { index: number; name: string }[];
 }
 
-// A tablet turns with the hand holding it; a phone's screen is turned from the viewer's toolbar.
-const canRotate = Device.deviceType !== Device.DeviceType.TABLET;
+// Resizable iOS windows follow their actual geometry; older phones retain the toolbar rotation control.
+const resizableIOS = Platform.OS === "ios" && Number.parseInt(String(Platform.Version), 10) >= 27;
+const canRotate = !resizableIOS && Device.deviceType !== Device.DeviceType.TABLET;
 // An iPhone lies down one way, its camera to the left: the page then knows which side is all screen, and
 // keeps its toolbar there (the system can't be asked which way a phone was turned until it has been).
 // Android reports the camera's side as the larger inset, so either way will do.
@@ -48,19 +56,27 @@ export function ScreenScreen() {
   const [display, setDisplay] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
   const web = useRef<WebView>(null);
+  const headerHeight = useHeaderHeight();
   // Watching is not touching: the phone must not lock while the screen is being watched.
   useKeepAwake("screen");
-  const insets = useSafeAreaInsets();
+  const safeArea = useSafeAreaInsets();
+  const geometry = useLayoutGeometry();
+  const layout = geometry.metrics;
+  // The native header overlays a stable WebView frame; safe areas reserve its controls.
+  const insets = safeContentInsets(layout, safeArea);
   // The mode the page opens in is the one last chosen; after that the page reports its own.
   const [initialMode] = useState(loadScreenMode);
   const [mode, setMode] = useState<ScreenMode>(initialMode);
   // The user's own shortcuts: the page shows and edits them, and they are kept here.
   const [shortcuts, setShortcuts] = useState(loadScreenShortcuts);
   const [fullscreen, setFullscreen] = useState(false);
-  const [landscape, setLandscape] = useState(false);
+  const window = useWindowDimensions();
+  const [turned, setLandscape] = useState(false);
+  const landscape = resizableIOS ? window.width > window.height : turned;
   // Landscape has no room for a header, so it is always the full screen; leaving the full screen stands the phone up again.
   const present = useCallback((full: boolean, turned: boolean) => {
     const land = canRotate && turned;
+    web.current?.injectJavaScript(`window.linkshellPresent && window.linkshellPresent(${full || land}); true;`);
     setFullscreen(full || land);
     setLandscape(land);
   }, []);
@@ -71,10 +87,10 @@ export function ScreenScreen() {
     turnedOnce.current = true;
     void ScreenOrientation.lockAsync(landscape ? LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
   }, [landscape]);
-  // The rest of the app is upright.
+  // Restore the app's adaptive orientation when leaving the viewer.
   useEffect(
     () => () => {
-      if (turnedOnce.current) void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      if (turnedOnce.current) void ScreenOrientation.unlockAsync().catch(() => {});
     },
     [],
   );
@@ -106,18 +122,20 @@ export function ScreenScreen() {
         fullscreen,
         landscape,
         canRotate,
+        fontScale: window.fontScale,
         // This app lets the page play video in place: the page may take the picture as a video track.
         video: true,
         // Lying down that way, the right is the side without the camera.
-        clear: landscape && Platform.OS === "ios" ? "right" : null,
+        clear: landscape && Platform.OS === "ios" && !resizableIOS ? "right" : null,
         // Whether the keyboard is on the screen: the system tells the app, and a page only its field's focus,
         // which a phone leaves standing when it takes the keyboard away.
         keyboard: keyboardOpen,
         shortcuts,
+        divisions: layout?.divisions ?? [],
         // The keyboard covers the bottom edge while it is up.
-        insets: { top: fullscreen ? insets.top : 0, right: insets.right, bottom: keyboardOpen ? 0 : insets.bottom, left: insets.left },
+        insets: { top: fullscreen ? insets.top : Math.max(insets.top, headerHeight), right: insets.right, bottom: keyboardOpen ? 0 : insets.bottom, left: insets.left },
       }),
-    [fullscreen, landscape, keyboardOpen, shortcuts, insets.top, insets.right, insets.bottom, insets.left],
+    [fullscreen, landscape, window.fontScale, headerHeight, keyboardOpen, shortcuts, layout?.divisions, insets.top, insets.right, insets.bottom, insets.left],
   );
   const tellPage = useCallback((state: string) => web.current?.injectJavaScript(`window.linkshellChrome && window.linkshellChrome(${state}); true;`), []);
   useEffect(() => tellPage(chrome), [chrome, tellPage]);
@@ -210,16 +228,18 @@ export function ScreenScreen() {
   const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}&mode=${initialMode}&video=1` : null;
 
   return (
-    <Animated.View style={[{ flex: 1, backgroundColor: "#000000" }, lift]}>
-      <StatusBar style="light" hidden={fullscreen} animated />
+    <Animated.View onLayout={geometry.onLayout} style={[{ flex: 1, backgroundColor: "#000000" }, lift]}>
+      <LayoutProbe onMetrics={geometry.onMetrics} revision={geometry.revision} />
+      {!nativeStatusBar ? <StatusBar style="light" hidden={fullscreen} animated /> : null}
       <Stack.Screen
         options={{
-          title: "屏幕",
-          headerTitle: () => (
-            <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start" }}>
+          title: "电脑屏幕",
+          ...(nativeStatusBar ? { statusBarHidden: fullscreen, statusBarStyle: "light", statusBarAnimation: "fade" } as const : {}),
+          headerTitle: Platform.OS === "ios" ? undefined : () => (
+            <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start", maxWidth: Math.max(120, Math.min(360, window.width - insets.left - insets.right - 144)) }}>
               <Text style={[type.headline, { color: "#ffffff" }]}>电脑屏幕</Text>
               {viewer ? (
-                <Text style={[type.caption, { color: "rgba(255,255,255,0.6)" }]}>
+                <Text numberOfLines={1} style={[type.caption, { color: "rgba(255,255,255,0.6)" }]}>
                   {[current && viewer.displays.length > 1 ? current.name : null, via === "direct" ? "直连" : "经网关中转"].filter(Boolean).join(" · ")}
                 </Text>
               ) : null}
@@ -228,7 +248,8 @@ export function ScreenScreen() {
           headerTintColor: "#ffffff",
           headerStyle: { backgroundColor: "#000000" },
           headerShadowVisible: false,
-          headerTransparent: false,
+          // Keep the live surface in one coordinate space while the system controls come and go.
+          headerTransparent: true,
           headerShown: !fullscreen,
           navigationBarHidden: fullscreen,
           autoHideHomeIndicator: fullscreen,
@@ -255,11 +276,11 @@ export function ScreenScreen() {
         />
       ) : null}
       {failure ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 12 }}>
+        <ScrollView style={{ flex: 1 }} contentInsetAdjustmentBehavior="never" contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", paddingTop: Math.max(insets.top, fullscreen ? 0 : headerHeight) + 24, paddingBottom: insets.bottom + 24, paddingLeft: insets.left + 24, paddingRight: insets.right + 24, gap: 12 }}>
           <Icon sf="display" md="desktop_access_disabled" size={36} color="rgba(255,255,255,0.45)" />
           <Text style={[type.subhead, { color: "rgba(255,255,255,0.75)", textAlign: "center" }]}>{failure}</Text>
           <Button title="重试" variant="tonal" size="small" onPress={() => setAttempt((value) => value + 1)} />
-        </View>
+        </ScrollView>
       ) : uri ? (
         <WebView
           key={uri}
@@ -267,6 +288,7 @@ export function ScreenScreen() {
           source={{ uri }}
           originWhitelist={["http://127.0.0.1*"]}
           onMessage={onMessage}
+          onError={({ nativeEvent }) => setFailure(nativeEvent.description || "屏幕页面加载失败，请重试")}
           injectedJavaScriptBeforeContentLoaded={`window.__linkshellChrome = ${chrome}; true;`}
           // The page moves and zooms the picture itself, and puts its own keys above the keyboard.
           bounces={false}

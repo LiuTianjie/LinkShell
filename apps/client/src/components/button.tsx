@@ -1,4 +1,5 @@
-import { ActivityIndicator, Text, View, type ColorValue, type StyleProp, type ViewStyle } from "react-native";
+import { ActivityIndicator, View, type ColorValue, type StyleProp, type ViewStyle } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon, type IconProps } from "./icon";
@@ -58,13 +59,14 @@ export function Button({
       accessibilityState={{ disabled: inactive, busy }}
       hitSlop={size === "small" ? 6 : 0}
       // Sharing a row equally is the pressable's own layout; what is inside fills it.
-      outerStyle={wide ? { flex: 1 } : undefined}
+      outerStyle={{ maxWidth: "100%", flexShrink: 1, ...(wide ? { flex: 1 } : {}) }}
       style={style}
     >
       <View
         style={{
-          height: metrics.height,
+          minHeight: Math.max(44, metrics.height),
           paddingHorizontal: metrics.paddingHorizontal,
+          paddingVertical: size === "small" ? 6 : size === "large" ? 12 : 8,
           borderRadius: metrics.radius,
           borderCurve: "continuous",
           backgroundColor: fill.background,
@@ -80,7 +82,7 @@ export function Button({
         ) : icon ? (
           <Icon {...icon} size={metrics.icon} color={fill.foreground} weight="semibold" />
         ) : null}
-        <Text numberOfLines={1} style={[metrics.font, { color: fill.foreground, fontWeight: "600" }]}>
+        <Text style={[metrics.font, { flexShrink: 1, color: fill.foreground, fontWeight: "600", textAlign: "center" }]}>
           {title}
         </Text>
       </View>

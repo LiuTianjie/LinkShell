@@ -1,16 +1,19 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, View } from "react-native";
+import { Text, TextInput } from "@/components/fixed-text";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePageInsets } from "@/components/adaptive-page";
 import { pairByCode, pairByLink } from "@linkshell/client-core";
 import { decodePairingLink, type PairingLink } from "@linkshell/wire";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
 import { DEFAULT_GATEWAY, relayFor, useComputers } from "@/lib/computers";
+import { useContentWidth } from "@/lib/content-width";
 import { haptics } from "@/lib/haptics";
 import { deviceIdentity } from "@/lib/identity";
+import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 
@@ -39,7 +42,11 @@ function friendly(error: unknown): string {
  */
 export function PairScreen() {
   const params = useLocalSearchParams<{ g?: string; k?: string; s?: string; c?: string }>();
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
+  const parentWidth = useContentWidth();
+  const [viewport, setViewport] = useState<{ width: number; height: number } | null>(null);
+  // A form sheet can be much shorter than the physical screen after rotation.
+  const cameraSize = Math.max(1, Math.min((viewport?.width ?? parentWidth) - 32, 320, Math.max(150, (viewport?.height ?? 500) * 0.45)));
   const [permission, requestPermission] = useCameraPermissions();
   const [code, setCode] = useState("");
   const [gateway, setGateway] = useState(DEFAULT_GATEWAY);
@@ -99,22 +106,15 @@ export function PairScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.sheet }}>
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 22, paddingBottom: 6 }}>
-        <Text style={[type.title, { flex: 1, color: colors.label }]}>添加电脑</Text>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="关闭"
-          hitSlop={10}
-          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="xmark" md="close" size={13} color={colors.secondaryLabel} weight="bold" />
-        </Pressable>
-      </View>
+      <SheetHeader title="添加电脑" />
 
       <KeyboardAwareScrollView
+        contentInsetAdjustmentBehavior="never"
+        onLayout={(event) => { const { width, height } = event.nativeEvent.layout; setViewport({ width, height }); }}
         bottomOffset={24}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: insets.bottom + 24, gap: 18 }}
       >
         <Text style={[type.subhead, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>
@@ -124,7 +124,9 @@ export function PairScreen() {
         {/* A live viewfinder when the camera is ours; otherwise a quiet card, not a black void. */}
         <View
           style={{
-            aspectRatio: permission?.granted ? 1 : undefined,
+            width: permission?.granted ? cameraSize : "100%",
+            height: permission?.granted ? cameraSize : undefined,
+            alignSelf: "center",
             borderRadius: permission?.granted ? 28 : 20,
             borderCurve: "continuous",
             overflow: "hidden",
@@ -243,8 +245,8 @@ export function PairScreen() {
               style={[type.subhead, { fontFamily: mono, color: colors.label, backgroundColor: colors.sheetCard, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }]}
             />
           ) : (
-            <Pressable onPress={() => setEditingGateway(true)} hitSlop={6} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 }}>
-              <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>网关 {hostOf(gateway)}</Text>
+            <Pressable onPress={() => setEditingGateway(true)} accessibilityRole="button" accessibilityLabel="更改配对网关" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", minHeight: 44, gap: 6, paddingHorizontal: 4, paddingVertical: 10 }}>
+              <Text style={[type.footnote, { flexShrink: 1, color: colors.tertiaryLabel }]}>网关 {hostOf(gateway)}</Text>
               <Text style={[type.footnote, { color: colors.accent, fontWeight: "600" }]}>更改</Text>
             </Pressable>
           )}
@@ -252,11 +254,12 @@ export function PairScreen() {
 
         <Pressable
           onPress={() => router.push("/connect")}
-          hitSlop={6}
-          style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 6 }}
+          accessibilityRole="button"
+          accessibilityLabel="通过局域网直接连接电脑"
+          style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", minHeight: 44, gap: 6, paddingVertical: 10 }}
         >
           <Icon sf="wifi" md="wifi" size={13} color={colors.secondaryLabel} />
-          <Text style={[type.footnote, { color: colors.secondaryLabel }]}>在同一个局域网里？直接连接</Text>
+          <Text style={[type.footnote, { flexShrink: 1, color: colors.secondaryLabel, textAlign: "center" }]}>在同一个局域网里？直接连接</Text>
         </Pressable>
       </KeyboardAwareScrollView>
     </View>

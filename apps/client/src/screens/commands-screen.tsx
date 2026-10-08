@@ -1,16 +1,17 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text, TextInput } from "@/components/fixed-text";
+import { usePageInsets } from "@/components/adaptive-page";
+import { SheetHeader } from "@/components/sheet-header";
 import { Icon } from "@/components/icon";
-import { useClient } from "@/lib/client";
-import { pickCommand } from "@/lib/command-pick";
+import { useSessionCommands } from "@/lib/use-session-commands";
+import { useComposerDraft } from "@/lib/use-composer-draft";
+import { useActions, useClient, useSessionSubscription } from "@/lib/client";
 import { commandDetail, matchCommands, type Command } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
-
-const NONE: Command[] = [];
 
 /**
  * The agent's slash commands, searchable: the common ones first (compact,
@@ -19,41 +20,42 @@ const NONE: Command[] = [];
  */
 export function CommandsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const insets = useSafeAreaInsets();
-  const commands = useClient((state) => state.views[id]?.commands) ?? NONE;
+  useSessionSubscription(id);
+  const insets = usePageInsets();
+  const { commands } = useSessionCommands(id);
+  const { setText } = useComposerDraft(id);
   const [query, setQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const actions = useActions();
+  const online = useClient((state) => state.status === "online");
   const shown = useMemo(() => matchCommands(commands, query), [commands, query]);
 
   const pick = (command: Command) => {
     haptics.selection();
-    pickCommand(id, command.name);
+    if (command.action === "goal") { router.replace({ pathname: "/session/[id]/goal", params: { id } }); return; }
+    if (command.action === "settings") { router.replace({ pathname: "/session/[id]/settings", params: { id, option: command.optionId } }); return; }
+    if (command.action === "commands") { setQuery(""); return; }
+    // The composer can unmount in adaptive layouts; write its persistent draft
+    // instead of depending on a live event listener behind this sheet.
+    setText(`/${command.name} `);
     router.back();
   };
 
   return (
     <View style={{ flex: 1 }}>
-      {Platform.OS === "android" ? (
-        <View style={{ alignSelf: "center", width: 36, height: 4, borderRadius: 2, marginTop: 10, backgroundColor: colors.separator }} />
-      ) : null}
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: Platform.OS === "android" ? 12 : 22, paddingBottom: 12 }}>
-        <Text style={[type.title, { flex: 1, color: colors.label }]}>命令</Text>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="关闭"
-          hitSlop={10}
-          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="xmark" md="close" size={13} color={colors.secondaryLabel} weight="bold" />
-        </Pressable>
-      </View>
-      <View style={{ paddingHorizontal: 16 }}>
+      <SheetHeader title="命令" actions={commands.some((command) => command.name === "reload-skills") ? [{ key: "refresh", label: "刷新命令", icon: { sf: "arrow.clockwise", md: "refresh" }, disabled: !online || refreshing, onPress: () => {
+        setRefreshing(true);
+        void actions.send(id, [{ type: "text", text: "/reload-skills" }], { now: true }).then((delivery) => {
+          if (delivery === "failed") Alert.alert("刷新失败", "请在会话中查看原因后重试");
+        }).finally(() => setRefreshing(false));
+      } }] : []} />
+      <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
         <View
           style={{
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            height: 40,
+            minHeight: 44,
             paddingHorizontal: 12,
             borderRadius: 12,
             borderCurve: "continuous",
@@ -62,6 +64,7 @@ export function CommandsScreen() {
         >
           <Icon sf="magnifyingglass" md="search" size={15} color={colors.secondaryLabel} />
           <TextInput
+            accessibilityLabel="搜索命令"
             value={query}
             onChangeText={setQuery}
             placeholder="搜索命令"
@@ -70,7 +73,7 @@ export function CommandsScreen() {
             autoCorrect={false}
             returnKeyType="search"
             clearButtonMode="while-editing"
-            style={[type.body, { flex: 1, fontSize: 16, color: colors.label, paddingVertical: 0 }]}
+            style={[type.body, { flex: 1, fontSize: 16, color: colors.label, minHeight: 44, paddingVertical: 8 }]}
           />
         </View>
       </View>
@@ -78,6 +81,7 @@ export function CommandsScreen() {
       <View style={{ flex: 1, overflow: "hidden" }}>
         <ScrollView
           contentInsetAdjustmentBehavior="never"
+          automaticallyAdjustKeyboardInsets
           style={{ flex: 1 }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"

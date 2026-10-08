@@ -1,1 +1,4 @@
-export { FilesScreen as default } from "@/screens/files-screen";
+import { adaptiveScreen } from "@/components/adaptive-page";
+import { FilesScreen } from "@/screens/files-screen";
+
+export default adaptiveScreen(FilesScreen, { surface: "background" });

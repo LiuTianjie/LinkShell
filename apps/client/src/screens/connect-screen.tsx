@@ -1,19 +1,24 @@
 import * as Clipboard from "expo-clipboard";
 import { router } from "expo-router";
 import { useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
-import { Button } from "@/components/button";
+import { Pressable, View } from "react-native";
+import { Text, TextInput } from "@/components/fixed-text";
+import { usePageInsets } from "@/components/adaptive-page";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Icon } from "@/components/icon";
 import { LiveDot } from "@/components/status";
 import { useClient, useConnection } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
+import { useComputers } from "@/lib/computers";
 import { normalizeHostUrl } from "@/lib/settings";
+import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 
 const HOST_COMMAND = "linkshell host --dev-port 7878";
 
 export function ConnectScreen() {
+  const insets = usePageInsets();
   const { url, setUrl, link } = useConnection();
   const status = useClient((state) => state.status);
   const detail = useClient((state) => state.statusDetail);
@@ -31,25 +36,14 @@ export function ConnectScreen() {
       return;
     }
     haptics.medium();
-    if (normalized === url) link.reconnectNow();
+    if (normalized === url && useComputers.getState().saved.direct.some((entry) => entry.url === normalized)) link.reconnectNow();
     else setUrl(normalized);
     router.back();
   };
 
   return (
-    <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 22, gap: 18 }}>
-      <View style={{ flexDirection: "row", alignItems: "center" }}>
-        <Text style={[type.title, { flex: 1, color: colors.label }]}>连接电脑</Text>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="关闭"
-          hitSlop={10}
-          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="xmark" md="close" size={13} color={colors.secondaryLabel} weight="bold" />
-        </Pressable>
-      </View>
+    <KeyboardAwareScrollView contentInsetAdjustmentBehavior="never" style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: insets.bottom + 24, gap: 18 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" bottomOffset={20}>
+      <SheetHeader title="连接电脑" actions={[{ key: "connect", label: changed ? "连接" : "重新连接", icon: { sf: "link", md: "link" }, onPress: connect, prominent: true }]} />
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <LiveDot size={8} color={online ? colors.ok : status === "connecting" ? colors.running : colors.waiting} live={status !== "stopped"} />
@@ -93,7 +87,6 @@ export function ConnectScreen() {
         {invalid ? <Text style={[type.footnote, { color: colors.danger }]}>地址格式不对，例如 192.168.1.10:7878</Text> : null}
       </View>
 
-      <Button title={changed ? "连接" : "重新连接"} variant="primary" size="large" onPress={connect} />
 
       <View style={{ gap: 8, paddingTop: 4 }}>
         <Text style={[type.footnote, { color: colors.secondaryLabel }]}>在电脑终端里运行下面的命令，保持它在运行：</Text>
@@ -120,6 +113,6 @@ export function ConnectScreen() {
           <Icon sf="doc.on.doc" md="content_copy" size={14} color={colors.secondaryLabel} />
         </Pressable>
       </View>
-    </View>
+    </KeyboardAwareScrollView>
   );
 }

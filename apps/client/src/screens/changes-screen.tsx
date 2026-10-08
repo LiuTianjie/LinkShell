@@ -1,6 +1,7 @@
 import { useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { Icon } from "@/components/icon";
 import { EmptyState } from "@/components/state-views";
 import { DiffView } from "@/components/timeline/tool-call";
@@ -96,15 +97,19 @@ function FileRow({ entry, first, cwd }: { entry: FileEntry; first: boolean; cwd?
 
 export function ChangesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const items = useItems(id);
-  const cwd = useClient((state) => state.sessions[id]?.cwd);
+  return <ChangesContent sessionId={id} />;
+}
+
+export function ChangesContent({ sessionId, embedded = false }: { sessionId: string; embedded?: boolean }) {
+  const items = useItems(sessionId);
+  const cwd = useClient((state) => state.sessions[sessionId]?.cwd);
   const files = useMemo(() => collect(items), [items]);
   const added = files.reduce((sum, file) => sum + file.added, 0);
   const removed = files.reduce((sum, file) => sum + file.removed, 0);
 
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
+      contentInsetAdjustmentBehavior={embedded ? "never" : "automatic"}
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: 16, gap: 12 }}
     >

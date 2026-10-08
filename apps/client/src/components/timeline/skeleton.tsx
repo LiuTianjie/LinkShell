@@ -1,4 +1,5 @@
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import Animated, { FadeOut, useReducedMotion } from "react-native-reanimated";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
@@ -14,13 +15,13 @@ function Bar({ width, height = 14, align = "flex-start", radius = 7 }: { width: 
 }
 
 /** Placeholder conversation shown while a session's history loads. */
-export function TimelineSkeleton({ label }: { label: string }) {
+export function TimelineSkeleton({ label, top = 16 }: { label: string; top?: number }) {
   const reduceMotion = useReducedMotion();
   return (
     <Animated.View
       exiting={FadeOut.duration(200)}
       pointerEvents="none"
-      style={{ position: "absolute", left: 0, right: 0, top: 120, paddingHorizontal: 16, gap: 22 }}
+      style={{ position: "absolute", left: 0, right: 0, top, paddingHorizontal: 16, gap: 22 }}
     >
       <Animated.View
         style={[

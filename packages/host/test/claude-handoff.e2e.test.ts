@@ -133,6 +133,31 @@ async function terminal(host: RunningHost, e: Env, sessionId?: string) {
 const text = (t: string) => [{ type: "text" as const, text: t }];
 
 describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
+  it("follows shell tasks after the remote turn, reconciles restart history and marks an exited holder unknown", async () => {
+    const e = makeEnv(); e.env.FAKE_ACP_EXPECT_RAW_GOAL = "1"; const host = await boot(e, 60_000, 100); const p = await phone(host);
+    const { session } = await p.client.call("sessions.create", { agent: "claude", cwd: e.workDir });
+    await p.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await p.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "prepare", content: text("prepare") });
+    await waitFor(() => p.agentTexts(session.id).includes("echo: prepare"));
+    const native = session.nativeId;
+    const dir = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"));
+    const transcript = join(dir, `${native}.jsonl`);
+    const write = (entry: object) => appendFileSync(transcript, JSON.stringify({ uuid: randomUUID(), timestamp: new Date().toISOString(), sessionId: native, cwd: e.workDir, entrypoint: "sdk-ts", ...entry }) + "\n");
+    const start = (id: string) => {
+      write({ type: "assistant", message: { content: [{ type: "tool_use", id: `call-${id}`, name: "Bash", input: { command: "sleep 60", description: "same task" } }] } });
+      write({ type: "user", toolUseResult: { backgroundTaskId: id }, message: { content: [{ type: "tool_result", tool_use_id: `call-${id}`, content: "background" }] } });
+    };
+    start("b1"); start("b2");
+    await waitFor(() => host.hub.tasks(session.id).filter((task) => task.state === "running").length === 2);
+    expect(host.hub.tasks(session.id).every((task) => !task.canStop)).toBe(true);
+    write({ type: "attachment", attachment: { type: "queued_command", prompt: "<task-notification><task-id>b1</task-id><status>failed</status><summary>exit code 144</summary></task-notification>" } });
+    await waitFor(() => host.hub.tasks(session.id).find((task) => task.id === "b1")?.state === "failed");
+    await host.stop();
+    const restarted = await boot(e, 60_000, 100); const p2 = await phone(restarted);
+    await p2.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await waitFor(() => restarted.hub.tasks(session.id).find((task) => task.id === "b2")?.state === "unknown");
+    expect(restarted.hub.tasks(session.id).find((task) => task.id === "b1")).toMatchObject({ state: "failed", exitCode: 144 });
+  });
   it("streams new child files and workflow workers while the desktop's main conversation is idle", async () => {
     const e = makeEnv();
     const host = await boot(e);

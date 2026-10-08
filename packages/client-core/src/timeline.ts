@@ -104,6 +104,7 @@ export interface SessionView {
   permissions: PendingPermission[];
   config: SessionConfigOption[];
   commands: { name: string; description: string; hint?: string }[];
+  goal?: import("@linkshell/wire").SessionGoal | null;
   modeId?: string;
   usage?: { usedTokens?: number; contextWindow?: number };
   state: SessionState;
@@ -338,6 +339,8 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
     }
     case "available_commands_update":
       return { ...view, commands: update.availableCommands };
+    case "ls_goal":
+      return { ...view, goal: update.goal };
     case "current_mode_update":
       return {
         ...view,

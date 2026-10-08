@@ -26,6 +26,12 @@ describe("toConfigOptions", () => {
 });
 
 describe("available commands", () => {
+  it("maps Claude's native Goal extension, including clearing and invalid payloads", () => {
+    const update = (goal: unknown) => ({ sessionUpdate: "session_info_update", _meta: { jetbrains: { air: { version: 1, goal } } } });
+    expect(normalizeAcpUpdate(update({ objective: "完成测试", status: "active", iterations: 3, lastReason: "还有一个失败" }))).toMatchObject({ sessionUpdate: "ls_goal", goal: { objective: "完成测试", iterations: 3 } });
+    expect(normalizeAcpUpdate(update(null))).toEqual({ sessionUpdate: "ls_goal", goal: null });
+    expect(normalizeAcpUpdate(update({ objective: "bad", status: "unknown" }))).toBeUndefined();
+  });
   it("keeps each command once, with a line about it rather than the skill's whole description", () => {
     const update = normalizeAcpUpdate({
       sessionUpdate: "available_commands_update",

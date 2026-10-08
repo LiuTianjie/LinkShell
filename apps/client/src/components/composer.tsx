@@ -2,11 +2,16 @@ import type { PendingPermission, QueueEntry } from "@linkshell/client-core";
 import type { AgentInfo, ContentBlock, QuestionAnswer, SessionConfigOption, SessionDriver } from "@linkshell/wire";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
-import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
-import { onCommandPicked } from "@/lib/command-pick";
-import { commandDetail, matchCommands, offeredCommands } from "@/lib/commands";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ActivityIndicator, Alert, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
+import { Text, TextInput } from "@/components/fixed-text";
+import { KeyboardAwareScrollView, useKeyboardState, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
+import { useContentHeight } from "@/lib/content-height";
+import { composerCardsHeight, composerCardsKeyboardOffset, composerViewport } from "@/lib/composer-layout";
+import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
+import { useComposerDraft } from "@/lib/use-composer-draft";
+import { useIsFocused } from "expo-router/react-navigation";
+import { commandDetail, commandQuery, matchCommands, normalizeCommandText } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
@@ -20,12 +25,6 @@ import { PlusMenu } from "./plus-menu";
 import { QueuePanel } from "./queue-panel";
 import { QuestionCard } from "./question-card";
 import { UsageRing } from "./usage-ring";
-
-interface Attachment {
-  uri: string;
-  mimeType: string;
-  data: string;
-}
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -42,8 +41,12 @@ export interface ComposerProps {
   commands: { name: string; description: string; hint?: string }[];
   usage?: { usedTokens?: number; contextWindow?: number };
   bottomInset: number;
+  accessoryHeight?: number;
+  keyboardOffset?: number;
+  autoFocusOnPoseEntry?: boolean;
+  leadingContent?: ReactNode;
   onLayout?: (event: LayoutChangeEvent) => void;
-  onSend: (content: ContentBlock[]) => Promise<"started" | "steered" | "queued" | "duplicate" | "failed">;
+  onSend: (content: ContentBlock[]) => Promise<"started" | "steered" | "queued" | "duplicate" | "failed" | "handled">;
   onStop: () => Promise<void>;
   onRespond: (requestId: string, optionId: string) => Promise<void>;
   /** Answers the questions of a pending request. */
@@ -75,10 +78,18 @@ function blockedReason(props: ComposerProps): Blocked {
 
 export function Composer(props: ComposerProps) {
   const { agent, turnActive, driver, permission, permissionCount, config, bottomInset } = props;
-  const [text, setText] = useState("");
+  const height = useContentHeight();
+  const keyboardHeight = useKeyboardState((state) => state.height);
+  const viewport = composerViewport(height, keyboardHeight, bottomInset, props.accessoryHeight ?? 0, props.keyboardOffset ?? bottomInset);
+  const { compact, textMaxHeight } = viewport;
+  const [inputHeight, setInputHeight] = useState<number | null>(null);
+  const measuredInputHeight = inputHeight ?? (compact ? 56 : 100);
+  const cardsHeight = composerCardsHeight(viewport.available, measuredInputHeight, bottomInset, keyboardHeight);
+  const cardsScroll = useRef<KeyboardAwareScrollViewRef>(null);
+  const { text, setText, attachments, setAttachments } = useComposerDraft(props.sessionId);
+  const focused = useIsFocused();
   const [flash, setFlash] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const name = agentLook(agent).short;
   const blocked = blockedReason(props);
   const tier = props.agentInfo?.tier;
@@ -87,22 +98,19 @@ export function Composer(props: ComposerProps) {
   const canAttachImages = props.agentInfo?.capabilities.images ?? false;
   const hasContent = trimmed.length > 0 || attachments.length > 0;
   const input = useRef<TextInput>(null);
-  const slashQuery = /^\/(\S*)$/.exec(text)?.[1];
+  const poseFocused = useRef(false);
+  const slashQuery = commandQuery(text);
   // Names that start with what's typed, then names that contain it; the common built-ins lead.
   const suggestions = useMemo(() => (slashQuery === undefined ? [] : matchCommands(props.commands, slashQuery)), [props.commands, slashQuery]);
-  const hasCommands = useMemo(() => offeredCommands(props.commands).length > 0, [props.commands]);
+  const hasCommands = tier !== "terminal";
 
-  // A command picked in the sheet: into the input, ready for its arguments.
-  useEffect(
-    () =>
-      onCommandPicked((sessionId, command) => {
-        if (sessionId !== props.sessionId) return;
-        setText(`/${command} `);
-        // The sheet is still on its way out; focus once the input can take it.
-        setTimeout(() => input.current?.focus(), 350);
-      }),
-    [props.sessionId],
-  );
+  const commandPicked = /^\s*\/[\S]+ $/.test(text);
+  useEffect(() => {
+    if (!focused || !commandPicked) return;
+    // Wait for the sheet to finish dismissing before restoring the keyboard.
+    const timer = setTimeout(() => input.current?.focus(), 350);
+    return () => clearTimeout(timer);
+  }, [focused, commandPicked]);
 
   const addImage = async (camera: boolean) => {
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], base64: true, quality: 0.8, allowsMultipleSelection: !camera, selectionLimit: 4 };
@@ -127,6 +135,16 @@ export function Composer(props: ComposerProps) {
     }
   };
   const inputDisabled = !!blocked || desktopDriving;
+  useEffect(() => {
+    if (!props.autoFocusOnPoseEntry) { poseFocused.current = false; return; }
+    if (!focused || inputDisabled || poseFocused.current) return;
+    const frame = requestAnimationFrame(() => {
+      if (!input.current) return;
+      poseFocused.current = true;
+      input.current.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [props.autoFocusOnPoseEntry, focused, inputDisabled]);
 
   const showFlash = (message: string) => {
     setFlash(message);
@@ -138,13 +156,19 @@ export function Composer(props: ComposerProps) {
     haptics.light();
     const content: ContentBlock[] = [
       ...attachments.map((image) => ({ type: "image" as const, mimeType: image.mimeType, data: image.data })),
-      ...(trimmed ? [{ type: "text" as const, text: trimmed }] : []),
+      ...(trimmed ? [{ type: "text" as const, text: normalizeCommandText(trimmed) }] : []),
     ];
     setText("");
     setAttachments([]);
-    const delivery = await props.onSend(content);
-    if (delivery === "steered") showFlash("已插话，正在调整方向");
-    else if (delivery === "failed") haptics.error();
+    try {
+      const delivery = await props.onSend(content);
+      if (delivery === "steered") showFlash("已插话，正在调整方向");
+      else if (delivery === "failed") haptics.error();
+    } catch (error) {
+      setText((current) => current || text);
+      setAttachments((current) => current.length ? current : attachments);
+      Alert.alert("命令未执行", error instanceof Error ? error.message : String(error));
+    }
   };
 
   // A queued message comes back to be edited: its text ahead of what's being typed, its pictures beside the others.
@@ -189,12 +213,73 @@ export function Composer(props: ComposerProps) {
     .sort((a, b) => order[a.category] - order[b.category])
     .slice(0, 4);
 
+  const hasInputExtras = !!(flash || attachments.length || blocked?.detail || compact && configShown.length);
+  const hasCards = !!(slashQuery !== undefined || props.leadingContent || permission || props.queue?.length || hasInputExtras);
+
   return (
-    <View onLayout={props.onLayout} style={{ paddingHorizontal: 10, paddingBottom: bottomInset + 8, paddingTop: 6, gap: 8 }}>
+    <View onLayout={props.onLayout} style={{ paddingHorizontal: 10, paddingBottom: bottomInset + 8, paddingTop: 6, gap: hasCards && cardsHeight > 0 ? 8 : 0 }}>
+      {hasCards ? <KeyboardAwareScrollView
+        ref={cardsScroll}
+        style={{ maxHeight: cardsHeight, flexGrow: 0 }}
+        contentContainerStyle={{ gap: 8, paddingBottom: 12 }}
+        bottomOffset={composerCardsKeyboardOffset(measuredInputHeight)}
+        // The sticky parent already sits above the keyboard; reserve only the pinned input when scrolling.
+        extraKeyboardSpace={-keyboardHeight}
+        onLayout={() => { if (keyboardHeight > 0) cardsScroll.current?.assureFocusedInputVisible(); }}
+        contentInsetAdjustmentBehavior="never"
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets={false}
+        nestedScrollEnabled
+        bounces={false}
+      >
+      {slashQuery !== undefined ? <Glass style={{ borderRadius: 22, padding: 8 }}>
+          {suggestions.length ? (
+            // Keep a bounded list so suggestions do not take over the conversation.
+            <ScrollView
+              style={{ maxHeight: 220, marginTop: 6 }}
+              contentContainerStyle={{ paddingHorizontal: 4 }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={suggestions.length > 5}
+            >
+              {suggestions.map((command) => (
+                <Pressable
+                  key={command.name}
+                  accessibilityRole="button"
+                  accessibilityLabel={`使用命令 /${command.name}`}
+                  onPress={() => {
+                    haptics.selection();
+                    setText(`/${command.name} `);
+                  }}
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    minHeight: 44,
+                    paddingVertical: 8,
+                    paddingHorizontal: 8,
+                    borderRadius: 10,
+                    backgroundColor: pressed ? colors.fill : "transparent",
+                  })}
+                >
+                  <Text numberOfLines={1} style={{ flexShrink: 1, maxWidth: "55%", fontFamily: mono, fontSize: 14, color: colors.accent, fontWeight: "600" }}>/{command.name}</Text>
+                  <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+                    {commandDetail(command)}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : null}
+{!suggestions.length ? <Text style={[type.footnote, { padding: 12, color: colors.secondaryLabel }]}>{props.commands.length ? "没有匹配的命令 · 可以打开命令面板查看全部" : "Agent 尚未报告命令 · 连接或接管后会自动更新"}</Text> : null}
+</Glass> : null}
+      {props.leadingContent}
       {permission ? (
-        <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(220)}>
+        <View collapsable={false} style={{ flexShrink: 0 }}>
           {permission.questions?.length ? (
             <QuestionCard
+              sessionId={props.sessionId}
+              contained
               key={permission.requestId}
               request={permission}
               count={permissionCount}
@@ -227,11 +312,7 @@ export function Composer(props: ComposerProps) {
                 ) : null}
               </View>
               {permission.detail ? (
-                <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", padding: 10 }}>
-                  <Text selectable numberOfLines={6} style={{ fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.codeText }}>
-                    {permission.detail}
-                  </Text>
-                </View>
+                <PermissionDetail key={`detail:${permission.requestId}`} detail={permission.detail} />
               ) : null}
               <PermissionActions
                 key={permission.requestId}
@@ -245,12 +326,13 @@ export function Composer(props: ComposerProps) {
               ) : null}
             </Glass>
           )}
-        </Animated.View>
+        </View>
       ) : null}
 
       {props.queue?.length ? (
-        <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(220)}>
+        <View collapsable={false} style={{ flexShrink: 0 }}>
           <QueuePanel
+            contained
             queue={props.queue}
             disabled={inputDisabled}
             onSendNow={props.onSendQueuedNow}
@@ -258,57 +340,21 @@ export function Composer(props: ComposerProps) {
             onRemove={props.onUnqueue}
             onReorder={props.onReorderQueue}
           />
-        </Animated.View>
+        </View>
       ) : null}
 
-      {desktopDriving && !blocked ? (
-        <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)}>
-          <TakeoverPanel onTakeover={props.onTakeover} onStop={turnActive ? stop : undefined} stopping={stopping} />
-        </Animated.View>
-      ) : (
-        <Glass style={{ borderRadius: 26, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 }}>
+      {hasInputExtras ? (
+        <Glass style={{ borderRadius: 22, paddingHorizontal: 8, paddingVertical: 8 }}>
           {flash ? (
             <Animated.Text
+              allowFontScaling={false}
+              maxFontSizeMultiplier={1}
               entering={FadeIn.duration(180)}
               exiting={FadeOut.duration(180)}
               style={[type.caption, { color: colors.accent, paddingHorizontal: 8, paddingTop: 6, fontWeight: "600" }]}
             >
               {flash}
             </Animated.Text>
-          ) : null}
-          {suggestions.length ? (
-            // Five rows in view; the rest scroll.
-            <ScrollView
-              style={{ maxHeight: 34 * 5, marginTop: 6 }}
-              contentContainerStyle={{ paddingHorizontal: 4 }}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={suggestions.length > 5}
-            >
-              {suggestions.map((command) => (
-                <Pressable
-                  key={command.name}
-                  onPress={() => {
-                    haptics.selection();
-                    setText(`/${command.name} `);
-                  }}
-                  style={({ pressed }) => ({
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
-                    height: 34,
-                    paddingHorizontal: 8,
-                    borderRadius: 10,
-                    backgroundColor: pressed ? colors.fill : "transparent",
-                  })}
-                >
-                  <Text style={{ fontFamily: mono, fontSize: 14, color: colors.accent, fontWeight: "600" }}>/{command.name}</Text>
-                  <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
-                    {commandDetail(command)}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
           ) : null}
           {attachments.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 6, paddingTop: 8 }}>
@@ -317,26 +363,46 @@ export function Composer(props: ComposerProps) {
                   <Image source={{ uri: image.uri }} style={{ width: 64, height: 64, borderRadius: 14 }} contentFit="cover" />
                   <Pressable
                     onPress={() => setAttachments((current) => current.filter((_, i) => i !== index))}
-                    accessibilityLabel="移除图片"
-                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`移除第 ${index + 1} 张图片`}
                     style={{
                       position: "absolute",
-                      top: -5,
-                      right: -5,
-                      width: 20,
-                      height: 20,
-                      borderRadius: 10,
-                      backgroundColor: "rgba(0,0,0,0.65)",
-                      alignItems: "center",
-                      justifyContent: "center",
+                      top: 0,
+                      right: 0,
+                      width: 44,
+                      height: 44,
+                      alignItems: "flex-end",
+                      justifyContent: "flex-start",
                     }}
                   >
+                    <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.65)", alignItems: "center", justifyContent: "center" }}>
                     <Icon sf="xmark" md="close" size={9} color="#ffffff" weight="bold" />
+                    </View>
                   </Pressable>
                 </View>
               ))}
             </ScrollView>
           ) : null}
+          {blocked?.detail ? (
+            <Text numberOfLines={2} style={[type.caption, { color: colors.secondaryLabel, paddingHorizontal: 8, paddingBottom: 4 }]}>
+              {blocked.detail}
+            </Text>
+          ) : null}
+          {compact && configShown.length ? <ScrollView horizontal keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6, alignItems: "center", paddingHorizontal: 4 }}><ConfigMenus options={configShown} disabled={!props.online || !!blocked} onChange={props.onConfig} /><UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} /></ScrollView> : null}
+        </Glass>
+      ) : null}
+      </KeyboardAwareScrollView> : null}
+
+      <View onLayout={(event) => setInputHeight(event.nativeEvent.layout.height)}>
+      {desktopDriving && !blocked ? (
+        <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)}>
+          <ScrollView style={{ maxHeight: Math.max(0, viewport.available - bottomInset - 14) }} keyboardShouldPersistTaps="handled" bounces={false}>
+            <TakeoverPanel onTakeover={props.onTakeover} onStop={turnActive ? stop : undefined} stopping={stopping} />
+          </ScrollView>
+        </Animated.View>
+      ) : (
+        <Glass style={{ borderRadius: 26, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 }}>
+          <View style={{ flexDirection: compact ? "row" : "column", alignItems: compact ? "center" : "stretch", gap: compact ? 4 : 0 }}>
           <TextInput
             ref={input}
             value={text}
@@ -346,16 +412,11 @@ export function Composer(props: ComposerProps) {
             placeholder={blocked ? blocked.title : placeholder}
             placeholderTextColor={colors.placeholder as string}
             selectionColor={colors.accent}
-            style={[type.callout, { color: colors.label, maxHeight: 150, minHeight: 40, paddingHorizontal: 8, paddingTop: 10, paddingBottom: 6 }]}
+            style={[type.callout, { color: colors.label, maxHeight: textMaxHeight, minHeight: 44, flex: compact ? 1 : undefined, minWidth: 0, paddingHorizontal: 8, paddingTop: 10, paddingBottom: 6 }]}
             accessibilityLabel="消息"
             submitBehavior="newline"
           />
-          {blocked?.detail ? (
-            <Text numberOfLines={2} style={[type.caption, { color: colors.secondaryLabel, paddingHorizontal: 8, paddingBottom: 4 }]}>
-              {blocked.detail}
-            </Text>
-          ) : null}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 36, paddingLeft: 2 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: compact ? 4 : 6, minHeight: 44, paddingLeft: 2 }}>
             <PlusMenu
               canAttachImages={canAttachImages}
               hasCommands={hasCommands}
@@ -364,23 +425,58 @@ export function Composer(props: ComposerProps) {
               onTakePhoto={() => void addImage(true)}
               onCommands={props.onCommands}
             />
-            <ScrollView
+            {hasCommands ? <Pressable accessibilityRole="button" accessibilityLabel="打开命令面板" onPress={props.onCommands} disabled={inputDisabled} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: inputDisabled ? 0.5 : 1 }}><Icon sf="command" md="terminal" size={17} color={colors.secondaryLabel} /></Pressable> : null}
+            {!compact ? <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 0 }}
               contentContainerStyle={{ gap: 6, alignItems: "center" }}
             >
               <ConfigMenus options={configShown} disabled={!props.online || !!blocked} onChange={props.onConfig} />
-            </ScrollView>
-            <UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} />
+            </ScrollView> : null}
+            {!compact ? <UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} /> : null}
             {/* Stop stays within reach for as long as a turn runs, whoever drives it. */}
             {turnActive ? <RoundButton label="停止" onPress={() => void stop()} busy={stopping} tone="stop" /> : null}
             {turnActive && !hasContent ? null : (
-              <RoundButton label={turnActive ? "排队" : "发送"} wide={turnActive} onPress={() => void send()} disabled={!hasContent || inputDisabled} tone="send" />
+              <RoundButton label={turnActive ? "排队" : "发送"} wide={turnActive && !compact} onPress={() => void send()} disabled={!hasContent || inputDisabled} tone="send" />
             )}
+          </View>
           </View>
         </Glass>
       )}
+      </View>
+    </View>
+  );
+}
+
+function PermissionDetail({ detail }: { detail: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const textStyle = { fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.codeText };
+  return (
+    <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", padding: 10, overflow: "hidden" }}>
+      {/* Measure the full text at the same width so wrapped lines also offer expansion. */}
+      <Text
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        pointerEvents="none"
+        onTextLayout={(event) => setOverflows(event.nativeEvent.lines.length > 6)}
+        style={[textStyle, { position: "absolute", top: 10, left: 10, right: 10, opacity: 0 }]}
+      >
+        {detail}
+      </Text>
+      <Text selectable numberOfLines={expanded ? undefined : 6} style={textStyle}>{detail}</Text>
+      {overflows ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          onPress={() => setExpanded((value) => !value)}
+          style={{ minHeight: 44, justifyContent: "center", alignSelf: "flex-start" }}
+        >
+          <Text style={[type.footnote, { color: colors.accent, fontWeight: "600" }]}>{expanded ? "收起" : "展开完整内容"}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -410,10 +506,11 @@ function RoundButton({
       accessibilityLabel={label}
       hitSlop={8}
       style={({ pressed }) => ({
-        height: 34,
-        minWidth: 34,
+        minHeight: 44,
+        minWidth: 44,
+        paddingVertical: 6,
         paddingHorizontal: wide ? 12 : 0,
-        borderRadius: 17,
+        borderRadius: 22,
         backgroundColor: background,
         flexDirection: "row",
         alignItems: "center",
@@ -453,7 +550,7 @@ function TakeoverPanel({ onTakeover, onStop, stopping = false }: { onTakeover: (
   };
   return (
     <Glass style={{ borderRadius: 26, padding: 14, gap: 12 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
         <View
           style={{
             width: 40,
@@ -467,7 +564,7 @@ function TakeoverPanel({ onTakeover, onStop, stopping = false }: { onTakeover: (
         >
           <Icon sf="laptopcomputer" md="laptop_mac" size={20} color={colors.label} />
         </View>
-        <View style={{ flex: 1, gap: 2 }}>
+        <View style={{ flex: 1, minWidth: 120, gap: 2 }}>
           <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>电脑正在操作这个会话</Text>
           <Text style={[type.footnote, { color: colors.secondaryLabel }]}>接管后在手机上继续，电脑随时能收回</Text>
         </View>

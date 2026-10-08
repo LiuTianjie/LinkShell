@@ -1,5 +1,6 @@
 import * as Clipboard from "expo-clipboard";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { mono } from "@/theme/type";
@@ -39,8 +40,9 @@ function KeyCap({ children, onPress, active = false, label }: { children: React.
       accessibilityLabel={label}
       accessibilityState={{ selected: active }}
       style={({ pressed }) => ({
-        minWidth: 38,
-        height: 34,
+        minWidth: 44,
+        minHeight: 44,
+        paddingVertical: 7,
         paddingHorizontal: 10,
         borderRadius: 9,
         borderCurve: "continuous",
@@ -103,7 +105,7 @@ export function KeyBar({
         accessibilityRole="button"
         accessibilityLabel="收起键盘"
         hitSlop={6}
-        style={{ width: 46, height: 34, alignItems: "center", justifyContent: "center" }}
+        style={{ width: 46, minHeight: 44, alignItems: "center", justifyContent: "center" }}
       >
         <Icon sf="keyboard.chevron.compact.down" md="keyboard_hide" size={18} color={colors.secondaryLabel} />
       </Pressable>

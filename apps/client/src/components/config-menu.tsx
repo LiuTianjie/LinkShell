@@ -1,7 +1,8 @@
 import type { MenuAction } from "@react-native-menu/menu";
 import { AppMenu } from "@/components/app-menu";
 import type { SessionConfigOption } from "@linkshell/wire";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import { chipLabel, isRisky, isToggle, modelChipLabel, optionLabel, valueHint, valueLabel } from "@/lib/labels";
 import { colors } from "@/theme/colors";
@@ -43,9 +44,9 @@ export function ConfigMenu({
           accessibilityRole="button"
           accessibilityLabel={`${optionLabel(option)}：${valueLabel(option, option.current)}`}
           style={{
-            width: 30,
-            height: 30,
-            borderRadius: 15,
+            width: 44,
+            height: 44,
+            borderRadius: 22,
             backgroundColor: risky ? colors.waitingSoft : undefined,
             alignItems: "center",
             justifyContent: "center",
@@ -63,7 +64,7 @@ export function ConfigMenu({
         <View
           accessibilityRole="button"
           accessibilityLabel={`${optionLabel(option)}：${valueLabel(option, option.current)}`}
-          style={{ height: 30, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", gap: 3, opacity: disabled ? 0.5 : 1 }}
+          style={{ minHeight: 44, paddingVertical: 7, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", gap: 3, opacity: disabled ? 0.5 : 1 }}
         >
           <Text numberOfLines={1} style={[type.footnote, { color: tint, fontWeight: option.category === "model" ? "600" : "500", maxWidth: 150 }]}>
             {option.category === "model" ? modelChipLabel(option) : chipLabel(option)}
@@ -132,9 +133,10 @@ function ToggleChip({ option, onChange, disabled }: { option: SessionConfigOptio
         accessibilityLabel={`${optionLabel(option)}：${valueLabel(option, option.current)}`}
         accessibilityHint={hint}
         style={{
-          height: 30,
+          minHeight: 44,
+          paddingVertical: 7,
           paddingHorizontal: on ? 8 : 6,
-          borderRadius: 15,
+          borderRadius: 22,
           flexDirection: "row",
           alignItems: "center",
           gap: 3,

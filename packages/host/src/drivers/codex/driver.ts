@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
-import { ABANDON, RpcError, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
-import type { AgentAuth } from "@linkshell/wire";
+import { codexPreview } from "./computer-preview.js";
+import { ABANDON, RpcError, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
+import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
 import { parseCodexLoginStatus, runStatusCommand } from "../auth.js";
 import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
 import { CodexAppServer, CodexSharedServer, detectCodex, sharedServerSocket } from "./app-server.js";
@@ -57,6 +58,8 @@ type Home = "own" | "shared";
 
 /** A thread another Codex process holds and doesn't share: read from disk for as long as a device has it open. */
 interface Observed {
+  goalCheckedAt?: number;
+  goalReading?: boolean;
   /** The thread's file and how it looked when last read: unchanged means nothing new. */
   path?: string;
   stamp?: string;
@@ -169,6 +172,9 @@ export class CodexDriver implements AgentDriver {
   /** Each thread's working directory: where its skills are looked up. */
   private readonly cwds = new Map<string, string>();
   private readonly skills = new Map<string, Promise<CodexSkill[]>>();
+  private readonly goalAvailable = new Set<string>();
+  private readonly goalRevision = new Map<string, number>();
+  private skillsRevision = 0;
   private models?: Promise<CodexModel[]>;
   private restartTimer?: ReturnType<typeof setTimeout>;
   private restartDelay: number;
@@ -183,6 +189,11 @@ export class CodexDriver implements AgentDriver {
   /** Notifications for a thread being joined, held until its history has been read. */
   private readonly joining = new Map<string, { method: string; params: unknown; from: Home }[]>();
   /** Threads a device has open. */
+  private readonly taskProcesses = new Map<string, Map<string, string>>();
+  private readonly taskPolls = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly taskSyncs = new Map<string, Promise<void>>();
+  private readonly stoppingTasks = new Set<string>();
+  private readonly taskRevisions = new Map<string, number>();
   private readonly watching = new Set<string>();
   /** Threads another client of this host's app-server opened (`linkshell codex`): followed for as long as the host runs. */
   private readonly kept = new Set<string>();
@@ -228,6 +239,8 @@ export class CodexDriver implements AgentDriver {
   }
 
   async stop(): Promise<void> {
+    for (const timer of this.taskPolls.values()) clearTimeout(timer);
+    this.taskPolls.clear();
     this.stopped = true;
     if (this.restartTimer) clearTimeout(this.restartTimer);
     for (const timer of this.followRetries.values()) clearTimeout(timer);
@@ -315,6 +328,7 @@ export class CodexDriver implements AgentDriver {
       // rollout yet, so thread/resume would fail. Nothing to import either.
       void this.announceConfig(nativeId);
       void this.announceCommands(nativeId);
+      void this.announceGoal(nativeId);
       return [];
     }
     let joined: Joined;
@@ -337,6 +351,7 @@ export class CodexDriver implements AgentDriver {
     this.reportHeld(nativeId, false);
     void this.announceConfig(nativeId);
     void this.announceCommands(nativeId);
+    void this.announceGoal(nativeId);
     if (this.waiting.has(nativeId)) void this.syncWaiting(nativeId);
     this.considerRelease(nativeId);
     return history;
@@ -400,6 +415,7 @@ export class CodexDriver implements AgentDriver {
 
   /** Says where the joined thread stands, then lets through what arrived while it was being read. */
   private goLive(threadId: string, { thread, underWay }: Joined): void {
+    void this.syncTasks(threadId);
     const state = this.stateOf(threadId);
     const active = thread.turns?.find((turn) => turn.status === "inProgress");
     state.activeTurnId = active?.id;
@@ -449,6 +465,8 @@ export class CodexDriver implements AgentDriver {
     if (thread.cwd) this.cwds.set(threadId, thread.cwd);
     this.host?.update(this.id, threadId, { sessionUpdate: "ls_status", state: running ? "running" : "idle" });
     this.reportHeld(threadId, true);
+    void this.announceCommands(threadId);
+    void this.announceGoal(threadId);
     // What was queued for it before this host last started is still waiting.
     void this.syncWaiting(threadId);
     this.considerRelease(threadId);
@@ -459,6 +477,12 @@ export class CodexDriver implements AgentDriver {
   private async refresh(threadId: string): Promise<void> {
     const watch = this.observed.get(threadId);
     if (!watch || watch.reading) return;
+    if (!watch.goalReading && this.goalAvailable.has(threadId) && Date.now() - (watch.goalCheckedAt ?? 0) >= 5000) {
+      watch.goalCheckedAt = Date.now();
+      watch.goalReading = true;
+      // Goal changes live in SQLite and need not change the rollout file.
+      void this.goal(threadId, { action: "get" }).catch(() => {}).finally(() => { watch.goalReading = false; });
+    }
     if (this.waiting.has(threadId)) void this.syncWaiting(threadId);
     const stamp = watch.path ? fileStamp(watch.path) : undefined;
     // A parent waiting for its agents may not write anything while their own
@@ -537,6 +561,7 @@ export class CodexDriver implements AgentDriver {
         this.reportHeld(threadId, false);
         void this.announceConfig(threadId);
         void this.announceCommands(threadId);
+        void this.announceGoal(threadId);
         // What still waits in Codex's queue is started by this host's app-server now.
         void this.syncWaiting(threadId);
       })().finally(() => this.takingUp.delete(threadId));
@@ -718,11 +743,83 @@ export class CodexDriver implements AgentDriver {
   watched(nativeId: string, open: boolean): void {
     if (open) {
       this.watching.add(nativeId);
+      void this.syncTasks(nativeId);
       this.cancelRelease(nativeId);
     } else {
       this.watching.delete(nativeId);
       this.considerRelease(nativeId);
     }
+  }
+
+  private publishTask(threadId: string, task: BackgroundTask): void {
+    const { lastSeq: _, ...record } = task;
+    this.host?.update(this.id, threadId, { sessionUpdate: "ls_task", task: record });
+  }
+
+  private loseTasks(threadId: string): void {
+    clearTimeout(this.taskPolls.get(threadId));
+    this.taskPolls.delete(threadId);
+    this.taskProcesses.delete(threadId);
+    this.taskRevisions.set(threadId, (this.taskRevisions.get(threadId) ?? 0) + 1);
+    for (const task of this.host?.tasks(this.id, threadId) ?? []) {
+      if (task.state === "running") this.publishTask(threadId, { ...task, state: "unknown", endedAt: Date.now(), canStop: false });
+    }
+  }
+
+  private syncTasks(threadId: string): Promise<void> {
+    const pending = this.taskSyncs.get(threadId);
+    if (pending) return pending;
+    if (!this.attached.has(threadId) || this.observed.has(threadId)) return Promise.resolve();
+    const sync = this.readTasks(threadId).catch(() => {}).finally(() => {
+      this.taskSyncs.delete(threadId);
+      clearTimeout(this.taskPolls.get(threadId));
+      this.taskPolls.delete(threadId);
+      if (this.attached.has(threadId) && this.watching.has(threadId) && this.host?.tasks(this.id, threadId).some((task) => task.state === "running")) {
+        const timer = setTimeout(() => void this.syncTasks(threadId), 5000);
+        timer.unref?.();
+        this.taskPolls.set(threadId, timer);
+      }
+    });
+    this.taskSyncs.set(threadId, sync);
+    return sync;
+  }
+
+  private async readTasks(threadId: string): Promise<void> {
+    const revision = this.taskRevisions.get(threadId) ?? 0;
+    const entries: { itemId: string; processId: string; command: string }[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.rpcFor<{ data: typeof entries; nextCursor?: string | null }>(threadId, "thread/backgroundTerminals/list", { threadId, limit: 100, ...(cursor ? { cursor } : {}) });
+      entries.push(...page.data);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    if (!this.attached.has(threadId) || revision !== (this.taskRevisions.get(threadId) ?? 0)) return;
+    const previous = new Map((this.host?.tasks(this.id, threadId) ?? []).map((task) => [task.id, task]));
+    const processes = new Map<string, string>();
+    for (const entry of entries) {
+      processes.set(entry.itemId, entry.processId);
+      const old = previous.get(entry.itemId);
+      if (old?.state === "running") continue;
+      this.publishTask(threadId, { id: entry.itemId, kind: "shell", toolCallId: entry.itemId, title: this.toolTitles.get(entry.itemId) ?? entry.command, command: entry.command, state: "running", startedAt: old?.startedAt ?? Date.now(), output: true, canStop: true });
+    }
+    this.taskProcesses.set(threadId, processes);
+    for (const task of previous.values()) {
+      if (task.state === "running" && !processes.has(task.id)) this.publishTask(threadId, { ...task, state: "unknown", endedAt: Date.now(), canStop: false });
+    }
+  }
+
+  async stopTask(nativeId: string, taskId: string): Promise<void> {
+    await this.syncTasks(nativeId);
+    const processId = this.taskProcesses.get(nativeId)?.get(taskId);
+    if (!processId) throw RpcError.app("not_found", "这个后台任务已经不在运行列表里");
+    const key = `${nativeId}:${taskId}`;
+    this.stoppingTasks.add(key);
+    try {
+      const result = await this.rpcFor<{ terminated: boolean }>(nativeId, "thread/backgroundTerminals/terminate", { threadId: nativeId, processId });
+      if (!result.terminated) throw RpcError.app("busy", "没能停止这个后台任务");
+      const task = this.host?.tasks(this.id, nativeId).find((task) => task.id === taskId);
+      if (task?.state === "running") this.publishTask(nativeId, { ...task, state: "stopped", endedAt: Date.now(), canStop: false });
+    } finally { this.stoppingTasks.delete(key); }
   }
 
   private cancelRelease(threadId: string): void {
@@ -780,6 +877,14 @@ export class CodexDriver implements AgentDriver {
 
   /** Nests each sub-agent's own history right after the call that spawned it. */
   private async withSubAgents(threadId: string, thread: CodexThread, history: HistoryItem[]): Promise<HistoryItem[]> {
+    // Restore the last surface across idle turns and history windows.
+    outer: for (const turn of [...(thread.turns ?? [])].reverse()) {
+      for (const item of [...turn.items].reverse()) {
+        const stamp = turn.completedAt ?? turn.startedAt ?? thread.updatedAt;
+        const frame = codexPreview(item, stamp < 1e12 ? stamp * 1000 : stamp);
+        if (frame) { this.host?.preview?.(this.id, threadId, frame); break outer; }
+      }
+    }
     const spawns = new Map<string, string[]>();
     for (const turn of thread.turns ?? []) {
       for (const item of turn.items) {
@@ -824,6 +929,9 @@ export class CodexDriver implements AgentDriver {
   }
 
   async detach(nativeId: string): Promise<void> {
+    clearTimeout(this.taskPolls.get(nativeId));
+    this.taskPolls.delete(nativeId);
+    this.taskProcesses.delete(nativeId);
     this.cancelRelease(nativeId);
     this.stopObserving(nativeId);
     if (!this.attached.delete(nativeId)) return;
@@ -856,6 +964,55 @@ export class CodexDriver implements AgentDriver {
         { sessionUpdate: "user_message_chunk", messageId: `local-${clientMessageId}`, content: { type: "text", text: command.text } },
         `command:${clientMessageId}`,
       );
+    if (command.name === "goal") {
+      const args = command.args;
+      const change: GoalChange = !args ? { action: "get" }
+        : args === "pause" || args === "resume" || args === "clear" ? { action: args }
+        : { action: "set", objective: args.replace(/^edit\s+/, "") };
+      if (args === "edit") throw RpcError.app("invalid_params", "请在 /goal edit 后写上新的目标，或打开目标面板编辑");
+      const goal = await this.goal(nativeId, change);
+      echo();
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_notice", level: "info", title: goal ? `目标：${goal.objective}` : "当前没有目标" });
+      return "started";
+    }
+    if (command.name === "reload-skills") {
+      this.skillsRevision++;
+      this.skills.delete(this.cwds.get(nativeId) ?? "");
+      await this.loadSkills(this.cwds.get(nativeId), true);
+      await this.announceCommands(nativeId);
+      echo();
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_notice", level: "info", title: "已刷新可用技能" });
+      return "started";
+    }
+    if (["status", "mcp", "apps", "ps", "stop"].includes(command.name)) {
+      if (command.args) throw RpcError.app("invalid_params", `/${command.name} 暂不接受参数`);
+      const lines: string[] = [];
+      if (command.name === "status") {
+        const { thread } = await this.rpcFor<{ thread: CodexThread }>(nativeId, "thread/read", { threadId: nativeId, includeTurns: false });
+        const current = effective(this.settings.get(nativeId) ?? {}, this.overrides.get(nativeId) ?? {}, await this.loadModels());
+        const running = this.observed.get(nativeId)?.running ?? Boolean(this.stateOf(nativeId).activeTurnId);
+        lines.push(`目录：${thread.cwd}`, `模型：${current.model ?? "默认"}`, `推理强度：${current.effort ?? "默认"}`, `状态：${running ? "运行中" : "空闲"}`);
+      } else if (command.name === "stop") {
+        await this.rpcFor(nativeId, "thread/backgroundTerminals/clean", { threadId: nativeId });
+        lines.push("已停止当前会话的后台终端");
+      } else {
+        const method = command.name === "mcp" ? "mcpServerStatus/list" : command.name === "apps" ? "app/list" : "thread/backgroundTerminals/list";
+        let cursor: string | undefined;
+        const seen = new Set<string>();
+        do {
+          const page = await this.rpcFor<{ data: { name?: string; command?: string; processId?: string; authStatus?: string; isEnabled?: boolean; tools?: Record<string, unknown> }[]; nextCursor?: string | null }>(nativeId, method, { threadId: nativeId, limit: 100, ...(cursor ? { cursor } : {}) });
+          for (const entry of page.data) {
+            lines.push(command.name === "ps" ? `${entry.processId ?? ""} · ${entry.command ?? "后台终端"}` : command.name === "mcp" ? `${entry.name ?? "MCP"} · ${Object.keys(entry.tools ?? {}).length} 个工具 · ${entry.authStatus ?? ""}` : `${entry.name ?? "应用"} · ${entry.isEnabled ? "已启用" : "未启用"}`);
+          }
+          cursor = page.nextCursor ?? undefined;
+          if (cursor && seen.has(cursor)) throw RpcError.app("invalid_params", "Agent 返回了重复的分页游标，请重试");
+          if (cursor) seen.add(cursor);
+        } while (cursor);
+      }
+      echo();
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_notice", level: "info", title: `/${command.name}`, detail: lines.join("\n") || "当前没有记录" });
+      return "started";
+    }
     if (command.name === "compact" || command.name === "review") {
       // Not something a queue can carry: they run in the app-server that has the thread.
       if (this.observed.has(nativeId)) throw this.refused(nativeId, `会话开在电脑的另一个 Codex 里 · 这里不能${command.name === "compact" ? "压缩上下文" : "开始审查"}`, HELD_COMMAND);
@@ -879,7 +1036,7 @@ export class CodexDriver implements AgentDriver {
       return this.send(nativeId, [{ type: "text", text, text_elements: [] }], clientMessageId);
     }
     const skill = (await this.loadSkills(this.cwds.get(nativeId))).find((entry) => entry.name === command.name);
-    if (!skill) return undefined;
+    if (!skill) throw RpcError.app("not_supported", `当前 Codex 未提供 /${command.name}。请从命令面板选择可用命令。`);
     // The way the TUI sends a skill: the skill itself, and `$name` in the text.
     return this.send(
       nativeId,
@@ -917,6 +1074,39 @@ export class CodexDriver implements AgentDriver {
       ...turnOverrides(overrides, overrides.plan === undefined ? {} : effective(this.settings.get(nativeId) ?? {}, overrides, await this.loadModels())),
     });
     return "started";
+  }
+
+  async goal(nativeId: string, change: GoalChange): Promise<SessionGoal | null> {
+    if (this.observed.has(nativeId) && change.action !== "get") throw this.refused(nativeId, "会话开在电脑的另一个 Codex 里 · 暂时只能查看目标", HELD_COMMAND);
+    const method = change.action === "get" ? "thread/goal/get" : change.action === "clear" ? "thread/goal/clear" : "thread/goal/set";
+    let status: SessionGoal["status"] = "active";
+    if (change.action === "set") {
+      const current = await this.rpcFor<{ goal: SessionGoal | null }>(nativeId, "thread/goal/get", { threadId: nativeId });
+      // Editing a paused goal must not silently restart work. This matches the
+      // native editor; finished or exhausted goals start afresh when edited.
+      if (current.goal && ["paused", "blocked", "usageLimited"].includes(current.goal.status)) status = current.goal.status;
+    }
+    const params = change.action === "set"
+      ? { threadId: nativeId, objective: change.objective, status, ...(change.tokenBudget === undefined ? {} : { tokenBudget: change.tokenBudget }) }
+      : { threadId: nativeId, ...(change.action === "pause" ? { status: "paused" } : change.action === "resume" ? { status: "active" } : {}) };
+    const revision = this.goalRevision.get(nativeId) ?? 0;
+    const result = await this.rpcFor<{ goal?: unknown }>(nativeId, method, params);
+    const goal = change.action === "clear" || result.goal == null ? null : sessionGoalSchema.parse(result.goal);
+    this.goalAvailable.add(nativeId);
+    // A live update can overtake a snapshot request. Never overwrite it with
+    // the older response (especially a null read from just before /goal set).
+    if ((this.goalRevision.get(nativeId) ?? 0) === revision && this.isNews(`goal:${nativeId}`, goal)) this.host?.update(this.id, nativeId, { sessionUpdate: "ls_goal", goal });
+    return goal;
+  }
+
+  private async announceGoal(nativeId: string): Promise<void> {
+    try {
+      await this.goal(nativeId, { action: "get" });
+      await this.announceCommands(nativeId);
+    } catch (error) {
+      // Older Codex builds do not implement Goals; ordinary sessions still work.
+      this.host?.log(`[codex] goal unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /** Model, reasoning effort and permissions apply from the next turn on. */
@@ -974,15 +1164,16 @@ export class CodexDriver implements AgentDriver {
     return true;
   }
 
-  private loadSkills(cwd: string | undefined): Promise<CodexSkill[]> {
+  private loadSkills(cwd: string | undefined, forceReload = false): Promise<CodexSkill[]> {
     const key = cwd ?? "";
     let loading = this.skills.get(key);
     if (!loading) {
-      loading = this.rpc<{ data: { skills?: CodexSkill[] }[] }>("skills/list", cwd ? { cwds: [cwd] } : {})
+      loading = this.rpc<{ data: { skills?: CodexSkill[] }[] }>("skills/list", { ...(cwd ? { cwds: [cwd] } : {}), ...(forceReload ? { forceReload } : {}) })
         .then((result) => result.data.flatMap((entry) => entry.skills ?? []).filter((skill) => skill.enabled !== false && skill.name && skill.path))
         .catch((error: unknown) => {
-          this.skills.delete(key);
+          if (this.skills.get(key) === loading) this.skills.delete(key);
           this.host?.log(`[codex] skills/list failed: ${error instanceof Error ? error.message : String(error)}`);
+          if (forceReload) throw error;
           return [];
         });
       this.skills.set(key, loading);
@@ -992,10 +1183,18 @@ export class CodexDriver implements AgentDriver {
 
   /** What `/` offers on a device: the commands above, then the skills this project can use. */
   private async announceCommands(nativeId: string): Promise<void> {
+    // Built-ins must be usable even while skill discovery is slow or unavailable.
+    if (!this.announced.has(`commands:${nativeId}`)) {
+      this.isNews(`commands:${nativeId}`, COMMANDS);
+      this.host?.update(this.id, nativeId, { sessionUpdate: "available_commands_update", availableCommands: COMMANDS });
+    }
+    const revision = this.skillsRevision;
     const skills = await this.loadSkills(this.cwds.get(nativeId));
+    if (revision !== this.skillsRevision) return;
     const taken = new Set(COMMANDS.map((command) => command.name));
     const availableCommands = [
       ...COMMANDS,
+      ...(this.goalAvailable.has(nativeId) ? [{ name: "goal", description: "设置、查看、暂停、继续或清除持续目标", hint: "目标 / pause / resume / clear" }] : []),
       ...skills
         .filter((skill) => !taken.has(skill.name))
         .map((skill) => ({
@@ -1139,6 +1338,7 @@ export class CodexDriver implements AgentDriver {
     for (const threadId of [...this.attached]) {
       // (What is joined in Codex's background server is still there.)
       if (this.inShared.has(threadId)) continue;
+      this.loseTasks(threadId);
       this.attached.delete(threadId);
       this.threads.delete(threadId);
       this.host?.update(this.id, threadId, { sessionUpdate: "ls_status", state: "offline" });
@@ -1178,6 +1378,22 @@ export class CodexDriver implements AgentDriver {
   }
 
   private onNotification(method: string, params: unknown, from: Home): void {
+    if (method === "skills/changed") {
+      this.skillsRevision++;
+      this.skills.clear();
+      for (const id of this.attached) void this.announceCommands(id);
+      return;
+    }
+    if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
+      const id = (params as { threadId?: string } | undefined)?.threadId;
+      if (id) {
+        this.goalRevision.set(id, (this.goalRevision.get(id) ?? 0) + 1);
+        if (this.attached.has(id) && !this.goalAvailable.has(id)) {
+          this.goalAvailable.add(id);
+          void this.announceCommands(id);
+        }
+      }
+    }
     if (method === "thread/deleted") {
       // Deleted in the TUI or another client.
       const threadId = (params as { threadId?: string } | undefined)?.threadId;
@@ -1215,11 +1431,25 @@ export class CodexDriver implements AgentDriver {
       return;
     }
     this.noteSpawns(params);
+    if (method === "item/completed" && typeof threadId === "string") {
+      const item = (params as { item?: { id?: string; exitCode?: number | null; status?: string } }).item;
+      const task = this.host?.tasks(this.id, threadId).find((task) => task.id === item?.id);
+      if (task && task.state === "running") {
+        this.taskRevisions.set(threadId, (this.taskRevisions.get(threadId) ?? 0) + 1);
+        const stopped = this.stoppingTasks.delete(`${threadId}:${task.id}`);
+        this.publishTask(threadId, { ...task, state: stopped ? "stopped" : item?.exitCode === 0 ? "completed" : item?.exitCode != null || item?.status === "failed" ? "failed" : "unknown", endedAt: Date.now(), exitCode: item?.exitCode ?? undefined, canStop: false });
+      }
+    }
+    if (method === "item/completed" && typeof threadId === "string") {
+      const frame = codexPreview((params as { item?: unknown }).item);
+      if (frame) this.host?.preview?.(this.id, threadId, frame);
+    }
     for (const mapped of mapNotification(method, params, (id) => this.stateOf(id))) {
       const update =
         from === "shared" && mapped.update.sessionUpdate === "ls_permission_resolved"
           ? { ...mapped.update, requestId: sharedRequestId(mapped.update.requestId) }
           : mapped.update;
+      if (update.sessionUpdate === "ls_goal" && !this.isNews(`goal:${mapped.threadId}`, update.goal)) continue;
       if (update.sessionUpdate === "tool_call") this.rememberTitle(update.toolCallId, update.title);
       if (update.sessionUpdate === "ls_permission_resolved") {
         const pending = this.approvals.get(update.requestId);
@@ -1243,7 +1473,7 @@ export class CodexDriver implements AgentDriver {
       if (update.sessionUpdate === "user_message_chunk" && this.waiting.has(mapped.threadId)) void this.syncWaiting(mapped.threadId);
       if (update.sessionUpdate !== "ls_turn") continue;
       if (update.state === "started") this.fresh.delete(mapped.threadId);
-      else this.considerRelease(mapped.threadId);
+      else { void this.syncTasks(mapped.threadId); this.considerRelease(mapped.threadId); }
     }
   }
 
@@ -1316,6 +1546,7 @@ export class CodexDriver implements AgentDriver {
     const joined = [...this.inShared].filter((threadId) => this.attached.delete(threadId));
     this.inShared.clear();
     for (const threadId of joined) {
+      this.loseTasks(threadId);
       const turnId = this.stateOf(threadId).activeTurnId;
       this.threads.delete(threadId);
       // Whether the turn goes on is told again when the thread is joined again.

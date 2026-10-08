@@ -102,13 +102,27 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
   </tr>
 </table>
 
-And the rest:
+### Computer Use, from your phone
+
+Ask Codex to use the browser or desktop apps on your computer, right from your phone, and preview what it is doing live in the conversation. Keep chatting and steering as you watch—no need to return to your desk.
+
+Drag the floating preview aside, tap to enlarge it, or collapse it to an icon. The last frame stays after the turn, and the preview returns when you reopen the session. If you close it, choose “Show computer preview” from the session menu to bring it back.
+
+Currently supports Codex on macOS with compatible Computer Use tools. See [setup and support](https://liutianjie.github.io/LinkShell/docs/#d-computer-use).
+
+<p align="center">
+  <img src="docs/site/assets/promo/computer-use.png" alt="Computer Use on the phone: a live preview floats above the Codex conversation" width="340" />
+</p>
+
+### More features
 
 - **Answer its questions.** When an agent asks you to choose or to type something — Claude's questions, Codex's, an MCP server's form — the question arrives with its options: pick, write your own answer, or skip.
 - **Straight to your computer.** The screen and port previews travel peer to peer whenever a direct path exists (the same network, or through NAT); the gateway then only helps the two sides find each other. A Mac's screen then comes as real-time video (WebRTC, hardware encoded, the pointer drawn on the phone), a few tens of milliseconds behind. Without a direct path it is relayed, with a lighter picture that keeps up rather than falls behind.
 - **Forks and worktrees.** Fork a session from any reply to try another direction — in the same directory or in a new git worktree that leaves your working tree alone.
 - **Sub-agents, Claude Workflows and long sessions.** Follow a Workflow by phase, open each Agent's conversation and tool results, and return to a background run from the bar above the composer. The main conversation keeps a compact summary; Workflow agents stay in their run's details instead of repeating as conversation cards. Consecutive finished Agent steps fold together. The button beside the session title lists its Workflows and sub-agents. Long sessions open at their latest turns; project files are there to browse and read.
-- **Slash commands.** `/` lists the agent's commands and your skills, with search. `/compact` and `/review` work for Codex from the phone too.
+- **Commands and persistent goals.** Type `/`, tap the command button beside the composer, or open Commands from the session menu to search commands and skills without losing an unsent draft. Codex and Claude Code support `/goal` and a dedicated goal screen. Codex can pause, resume and set a token budget; Claude can set or clear a completion condition. Available controls depend on the agent installed on your computer.
+- **Background tasks.** `/tasks` and the session header show commands that outlive a reply, including output, duration and exit code. Stop one Codex task independently; Claude Bash / Monitor tasks are viewable, with stopping handled on the computer. Tasks stay separate from sub-agents and Workflows and recover after reconnecting.
+- **Different screen sizes.** Adaptive layouts support iPhone Duo and standard iPhones, adjusting the conversation, composer and controls to the available space.
 - **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app.
 - **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
 - **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
@@ -139,6 +153,8 @@ What each agent supports from the phone:
 | Slash commands | `/compact`, `/review`, `/init`, your skills | Claude's own list and your skills | whatever the agent offers |
 | Questions for you (choices, free text) | yes, in plan mode and outside it | yes | when the agent asks through ACP forms |
 | Plan mode | a setting on the phone | a permission mode | whatever modes the agent offers |
+| Persistent goals | set, pause, resume, clear, token budget | set and clear, when `/goal` is available | not integrated |
+| Background commands | status, output, stop one task | Bash / Monitor status and output | not integrated |
 
 ## Run your own gateway
 

@@ -1,0 +1,20 @@
+diff --git a/ios/ScreenOrientationViewController.swift b/ios/ScreenOrientationViewController.swift
+index 52b60e428d903c7d18335a171e3cb9eb9c260b09..7df0d240ffacd852489ddc7db9b8f055e2558de2 100644
+--- a/ios/ScreenOrientationViewController.swift
++++ b/ios/ScreenOrientationViewController.swift
+@@ -5,6 +5,15 @@ let supportedOrientationsKey = "UISupportedInterfaceOrientations"
+ let ipadSupportedOrientationsKey = "UISupportedInterfaceOrientations~ipad"
+ 
+ class ScreenOrientationViewController: UIViewController {
++  // A development launcher can sit between this root and the navigation controller.
++  // Forward system chrome through that container as UIKit does for navigation stacks.
++  override var childForStatusBarHidden: UIViewController? { children.last }
++  override var childForStatusBarStyle: UIViewController? { children.last }
++  override var childForHomeIndicatorAutoHidden: UIViewController? { children.last }
++  override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
++    children.last?.preferredStatusBarUpdateAnimation ?? .fade
++  }
++
+   let screenOrientationRegistry = ScreenOrientationRegistry.shared
+   private var defaultOrientationMask: UIInterfaceOrientationMask
+   private var previousInterfaceOrientation: UIInterfaceOrientation = .unknown

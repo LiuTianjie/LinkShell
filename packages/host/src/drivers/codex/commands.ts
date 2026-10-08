@@ -17,6 +17,12 @@ export const COMMANDS = [
   { name: "compact", description: "压缩上下文：把之前的对话总结一下，腾出空间继续" },
   { name: "review", description: "审查还没提交的改动", hint: "也可以写上要审查什么" },
   { name: "init", description: "为这个项目生成 AGENTS.md" },
+  { name: "reload-skills", description: "重新加载项目可用的技能" },
+  { name: "status", description: "查看当前会话状态与模型" },
+  { name: "mcp", description: "查看当前会话的 MCP 服务" },
+  { name: "apps", description: "查看可用的应用与连接器" },
+  { name: "ps", description: "查看当前会话的后台终端" },
+  { name: "stop", description: "停止当前会话的所有后台终端" },
 ];
 
 export const INIT_PROMPT = [
@@ -33,6 +39,6 @@ export function commandOf(content: ContentBlock[]): { name: string; args: string
     .map((block) => (block.type === "text" ? block.text : ""))
     .join("")
     .trim();
-  const match = /^\/([\w:.-]+)(?:\s+([\s\S]*))?$/.exec(text);
+  const match = /^[／/]([^\s/／]+)(?:\s+([\s\S]*))?$/.exec(text);
   return match ? { name: match[1]!, args: match[2]?.trim() ?? "", text } : undefined;
 }

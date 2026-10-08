@@ -1,6 +1,7 @@
 import * as Clipboard from "expo-clipboard";
 import { router } from "expo-router";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
@@ -50,7 +51,7 @@ export function Welcome() {
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
           <Icon sf="doc.on.doc" md="content_copy" size={12} color={colors.tertiaryLabel} />
-          <Text style={[type.caption, { color: colors.tertiaryLabel }]}>轻点复制 · 需要 Node.js 22.13 或更新版本</Text>
+          <Text style={[type.caption, { flex: 1, color: colors.tertiaryLabel }]}>轻点复制 · 需要 Node.js 22.13 或更新版本</Text>
         </View>
       </Pressable>
 

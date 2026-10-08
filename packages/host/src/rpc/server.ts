@@ -21,6 +21,7 @@ import { listDirectory, makeDirectory, readFile, searchDirectories, uploadFile }
 import { listPorts, ProxyStreams } from "../ports.js";
 import { ScreenShare } from "../screen.js";
 import { DirectPeer } from "../direct.js";
+import { ComputerPreviewServer } from "../computer-preview.js";
 import { imageOf, parseImageUri, slimEvent } from "../slim.js";
 import type { OutputListener, TerminalManager } from "../terminals.js";
 
@@ -94,11 +95,13 @@ export class HostRpcServer {
   private gateway?: GatewayLink;
   private refreshGateway?: () => GatewayStatus;
   private readonly screen: ScreenShare;
+  private readonly computerPreview: ComputerPreviewServer;
   private readonly handlers: { [M in MethodName]: (params: never, context: ConnectionContext) => Promise<MethodResult<M>> | MethodResult<M> };
 
   constructor(private readonly options: HostRpcServerOptions) {
     this.screen = new ScreenShare(options.log, () => options.machineInfo().direct?.iceServers ?? []);
     const hub = options.hub;
+    this.computerPreview = new ComputerPreviewServer(hub.previews);
     const terminals = options.terminals;
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;
     this.handlers = {
@@ -131,10 +134,22 @@ export class HostRpcServer {
         const page = hub.history(params.sessionId, params.beforeSeq);
         return { startSeq: page.startSeq, events: page.events.map((event) => slimEvent(event, { lazyImages: params.lazyImages })) };
       },
+      "sessions.tasks": (params: P<"sessions.tasks">) => ({ tasks: hub.tasks(params.sessionId) }),
+      "sessions.taskOutput": (params: P<"sessions.taskOutput">) => hub.taskOutput(params.sessionId, params.taskId, params.before, params.limit),
+      "sessions.stopTask": (params: P<"sessions.stopTask">) => hub.stopTask(params.sessionId, params.taskId).then(() => ({})),
       "sessions.subagents": (params: P<"sessions.subagents">) => ({ subagents: hub.subagents(params.sessionId) }),
       "sessions.subagent": (params: P<"sessions.subagent">) => ({
         events: hub.subagent(params.sessionId, params.toolCallId).map((event) => slimEvent(event, { lazyImages: params.lazyImages })),
       }),
+      "sessions.preview": (params: P<"sessions.preview">, context) => {
+        hub.getSession(params.sessionId);
+        return this.computerPreview.open(params.sessionId, params.direct === true && context.direct.open);
+      },
+      "desktop.preview.show": (params: P<"desktop.preview.show">) => {
+        hub.getSession(params.sessionId);
+        this.broadcast("session.preview.show", params);
+        return {};
+      },
       "sessions.image": (params: P<"sessions.image">) => {
         const ref = parseImageUri(params.uri);
         const event = ref && hub.readEvent(params.sessionId, ref.seq);
@@ -178,6 +193,7 @@ export class HostRpcServer {
         await hub.delete(params.sessionId, params.worktree);
         return {};
       },
+      "sessions.goal": (params: P<"sessions.goal">) => hub.goal(params.sessionId, params.change),
       "sessions.setConfig": async (params: P<"sessions.setConfig">) => {
         await hub.setConfig(params.sessionId, params.optionId, params.value);
         return {};
@@ -276,6 +292,7 @@ export class HostRpcServer {
 
   async stop(): Promise<void> {
     this.screen.stop();
+    this.computerPreview.stop();
     // A connection tidies up after itself when its socket closes, and that reaches into the hub. The close
     // comes a moment after terminate(): waited for here, so that it isn't still to come when the hub and
     // its database are gone.

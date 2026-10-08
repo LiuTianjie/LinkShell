@@ -282,7 +282,21 @@ async function runTurn(thread, turn, text) {
     notifyThread(thread, "item/agentMessage/delta", { threadId, turnId: turn.id, itemId: messageId, delta: chunk });
   }
   // "BACKGROUND": the turn leaves a command running after it ends, like a dev server.
-  if (text.includes("BACKGROUND")) thread.background = [{ itemId: randomUUID(), processId: "1", command: "npm run dev", cwd: thread.meta.cwd, osPid: null, cpuPercent: null, rssKb: null }];
+  if (text.includes("BACKGROUND")) {
+    thread.background = [1, 2].map((n) => ({ itemId: randomUUID(), processId: String(n), command: "npm run dev", cwd: thread.meta.cwd, osPid: null, cpuPercent: null, rssKb: null }));
+    for (const task of thread.background) {
+      notifyThread(thread, "item/started", { threadId, turnId: turn.id, item: { type: "commandExecution", id: task.itemId, command: task.command, status: "inProgress" } });
+      notifyThread(thread, "item/commandExecution/outputDelta", { threadId, turnId: turn.id, itemId: task.itemId, delta: "started\n" });
+    }
+    if (text.includes("BACKGROUND_FAIL")) {
+      const task = thread.background[0];
+      setTimeout(() => {
+        thread.background = thread.background.filter((entry) => entry !== task);
+        notifyThread(thread, "item/commandExecution/outputDelta", { threadId, turnId: turn.id, itemId: task.itemId, delta: "after turn\n" });
+        notifyThread(thread, "item/completed", { threadId, turnId: turn.id, item: { type: "commandExecution", id: task.itemId, command: task.command, status: "failed", exitCode: 3, aggregatedOutput: "initial output\nstarted\nafter turn\n" } });
+      }, 300);
+    }
+  }
   const message = { type: "agentMessage", id: messageId, text: accumulated };
   turn.items.push(message);
   save(thread);
@@ -322,7 +336,26 @@ function userItem(input, clientId) {
   return { item: { type: "userMessage", id: randomUUID(), clientId: clientId ?? null, content: input }, text };
 }
 
+const goals = new Map();
+let skillsChanged = false;
 const handlers = {
+  "test/changeSkills": () => { skillsChanged = true; broadcast("skills/changed", {}); return {}; },
+  "mcpServerStatus/list": (params) => ({ data: [{ name: params.cursor ? "second-server" : "first-server", tools: { check: {} }, authStatus: "notLoggedIn" }], nextCursor: params.cursor ? null : "next" }),
+  "app/list": () => ({ data: [{ name: "Test connector", isEnabled: true }], nextCursor: null }),
+  "thread/goal/get": (params) => ({ goal: goals.get(params.threadId) ?? null }),
+  "thread/goal/set": (params) => {
+    const previous = goals.get(params.threadId);
+    if (!params.objective && !previous) throw { code: -32602, message: "no goal" };
+    const goal = { threadId: params.threadId, objective: params.objective ?? previous.objective, status: params.status ?? "active", tokenBudget: params.tokenBudget ?? previous?.tokenBudget ?? null, tokensUsed: previous?.tokensUsed ?? 0, timeUsedSeconds: 0 };
+    goals.set(params.threadId, goal);
+    broadcast("thread/goal/updated", { threadId: params.threadId, goal });
+    return { goal };
+  },
+  "thread/goal/clear": (params) => {
+    const cleared = goals.delete(params.threadId);
+    broadcast("thread/goal/cleared", { threadId: params.threadId });
+    return { cleared };
+  },
   initialize: () => ({ userAgent: "fake-codex", codexHome: "/tmp/fake", platformFamily: "unix", platformOs: "macos" }),
   "thread/list": () => ({
     // Like Codex: a thread is only persisted (and listed) once it has a turn.
@@ -408,6 +441,20 @@ const handlers = {
     if (!thread?.loaded) throw { code: -32600, message: `thread not found: ${params.threadId}` };
     return { data: thread.background ?? [], nextCursor: null };
   },
+  "thread/backgroundTerminals/terminate": (params) => {
+    const thread = threads.get(params.threadId);
+    const task = thread?.background?.find((entry) => entry.processId === params.processId);
+    if (!task) return { terminated: false };
+    thread.background = thread.background.filter((entry) => entry !== task);
+    notifyThread(thread, "item/completed", { threadId: params.threadId, item: { type: "commandExecution", id: task.itemId, command: task.command, status: "failed", exitCode: 143, aggregatedOutput: "started\n" } });
+    return { terminated: true };
+  },
+  "thread/backgroundTerminals/clean": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: "unknown thread" };
+    thread.background = [];
+    return {};
+  },
   "thread/queue/delete": (params) => {
     const entries = queued(params.threadId);
     const kept = entries.filter((entry) => entry.id !== params.queuedSubmissionId);
@@ -464,6 +511,7 @@ const handlers = {
       {
         cwd: params.cwds?.[0] ?? process.cwd(),
         skills: [
+          ...(skillsChanged ? [{ name: "new-skill", description: "Added while connected", path: "/skills/new/SKILL.md", enabled: true }] : []),
           { name: "tidy", description: "Tidy the project up", path: "/skills/tidy/SKILL.md", scope: "user", enabled: true },
           { name: "off", description: "Turned off", path: "/skills/off/SKILL.md", scope: "user", enabled: false },
         ],

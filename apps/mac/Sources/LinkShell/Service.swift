@@ -17,6 +17,7 @@ final class Service {
   private var controls: [String: Control] = [:]
   private var session: ScreenSession?
   private var streams: [String: StreamSession] = [:]
+  private var previews: [String: ComputerPreview] = [:]
   private var watch: Watch?
 
   init(link: Link, options: ScreenSession.Options) {
@@ -32,6 +33,7 @@ final class Service {
       // goes too. Its captures and encoders end with it.
       for control in controls.values { control.releaseAll() }
       session?.close()
+      for preview in previews.values { preview.close() }
       InputSource.restoreNow()
       watch?.cancel()
       exit(0)
@@ -40,6 +42,7 @@ final class Service {
 
   private func status() -> [String: Any] {
     var status = Permissions.status()
+    status["preview"] = true
     if options.clock { status["clock"] = ClockStrip.timing }
     return status
   }
@@ -53,6 +56,15 @@ final class Service {
     }
     guard let id = command["v"] as? String else { return }
     switch kind {
+    case "preview.open":
+      previews.removeValue(forKey: id)?.close()
+      guard previews.count < 8, let preview = ComputerPreview(viewer: id, command: command, link: link) else {
+        return link.emit(["t": "preview.paused", "v": id, "error": "无法识别预览窗口"])
+      }
+      previews[id] = preview
+      preview.start()
+    case "preview.close":
+      previews.removeValue(forKey: id)?.close()
     case "open":
       controls[id]?.releaseAll()
       let control = Control(id: id, link: link, screen: (command["screen"] as? Int) ?? 0)

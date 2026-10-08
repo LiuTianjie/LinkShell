@@ -20,9 +20,6 @@ const OPT_OUT_NOTIFICATIONS = [
   "rawResponse/completed",
   "rawResponseItem/completed",
   "remoteControl/status/changed",
-  "skills/changed",
-  "thread/goal/cleared",
-  "thread/goal/updated",
 ];
 
 export interface CodexConnectionOptions {

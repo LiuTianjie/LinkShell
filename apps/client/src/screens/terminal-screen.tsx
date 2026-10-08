@@ -1,9 +1,11 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Text, useColorScheme, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, useColorScheme, View } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePageInsets } from "@/components/adaptive-page";
 import { Button } from "@/components/button";
 import { BranchTag } from "@/components/branch-tag";
 import { HeaderActions } from "@/components/header-actions";
@@ -11,6 +13,7 @@ import { Icon } from "@/components/icon";
 import { KeyBar, withCtrl } from "@/components/terminal/key-bar";
 import { darkTerminal, lightTerminal } from "@/components/terminal/themes";
 import { NativeTerminal, type NativeTerminalHandle } from "../../modules/link-terminal/src";
+import { useContentWidth } from "@/lib/content-width";
 import { useConnection } from "@/lib/client";
 import { shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -33,7 +36,10 @@ export function TerminalScreen() {
   const info = terminals.find((terminal) => terminal.id === id);
   // Where the terminal started: its branch, when that's a git repository.
   const branch = branchOf(useGitInfo(info?.cwd));
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
+  const contentWidth = useContentWidth();
+  const { fontScale } = useWindowDimensions();
+  const terminalSize = useRef<{ id: string; cols: number; rows: number } | null>(null);
   const keyboardOpen = useKeyboardState((state) => state.isVisible);
   // Follow the keyboard frame by frame: the terminal shrinks with it, so the
   // prompt and the key bar stay just above the keys.
@@ -152,12 +158,12 @@ export function TerminalScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background }}>
+    <View style={{ flex: 1, backgroundColor: theme.background, paddingTop: insets.top }}>
       <Stack.Screen
         options={{
           title: state?.title ?? "终端",
-          headerTitle: () => (
-            <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start" }}>
+          headerTitle: Platform.OS === "ios" ? undefined : () => (
+            <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start", maxWidth: Math.max(100, Math.min(360, contentWidth - 144)) }}>
               <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>
                 {state?.title ?? "终端"}
               </Text>
@@ -218,15 +224,24 @@ export function TerminalScreen() {
           },
         ]}
       />
+      {Platform.OS === "ios" && info ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
+          <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, flex: 1 }]}>{shortPath(info.cwd)}</Text>
+          {branch ? <BranchTag branch={branch} max={16} /> : null}
+        </View>
+      ) : null}
       <Animated.View style={[{ flex: 1 }, lift]}>
         <View style={{ flex: 1 }}>
           <NativeTerminal
             ref={view}
             theme={theme}
-            fontSize={fontSize}
+            fontSize={fontSize * fontScale}
             onInput={send}
             onResize={(cols, rows) => {
-              void link.call("terminals.resize", { terminalId: id, cols, rows }).catch(() => {});
+              // Rotation and folding can briefly report an empty native surface. Keep the running PTY valid.
+              if (cols < 2 || rows < 1 || (terminalSize.current?.id === id && terminalSize.current?.cols === cols && terminalSize.current?.rows === rows)) return;
+              terminalSize.current = { id, cols, rows };
+              void link.call("terminals.resize", { terminalId: id, cols, rows }).catch(() => { terminalSize.current = null; });
             }}
             style={{ flex: 1, backgroundColor: theme.background }}
           />

@@ -1,6 +1,6 @@
 import { Platform, type TextStyle } from "react-native";
 
-// iOS text styles (Dynamic Type sizes at the default setting).
+// Fixed point sizes shared by the app's text styles.
 export const type = {
   title: { fontSize: 22, lineHeight: 28, fontWeight: "700" },
   title3: { fontSize: 20, lineHeight: 25, fontWeight: "600" },

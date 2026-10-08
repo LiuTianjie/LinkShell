@@ -1,7 +1,9 @@
 import type { SessionSummary } from "@linkshell/wire";
 import { Link, router, type Href } from "expo-router";
 import { memo, useRef } from "react";
-import { Platform, StyleSheet, Text, View, type ColorValue } from "react-native";
+import { Platform, StyleSheet, View, type ColorValue } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { activityText, plainPreview, sessionTitle } from "@/lib/describe";
 import { baseName, relativeTime } from "@/lib/format";
 import { BranchTag } from "./branch-tag";
@@ -93,6 +95,7 @@ export function ListRow({
   href,
   accessibilityLabel,
   menu,
+  selected = false,
 }: {
   leading: React.ReactNode;
   title: string;
@@ -114,24 +117,28 @@ export function ListRow({
   accessibilityLabel: string;
   /** Long-press actions. */
   menu?: RowMenuItem[];
+  selected?: boolean;
 }) {
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale >= 1.3;
   const floating = useRef<FloatingMenuHandle>(null);
   const iosMenu = Platform.OS === "ios" && !!menu?.length && !!href;
-  const androidMenu = Platform.OS !== "ios" && !!menu?.length;
+  const floatingMenu = !iosMenu && !!menu?.length;
   const top = position === "first" || position === "only";
   const bottom = position === "last" || position === "only";
   const row = (
     <PressableScale
       // Under a Link, the link presses.
       onPress={iosMenu ? undefined : onPress}
-      onLongPress={androidMenu ? () => floating.current?.open() : undefined}
+      onLongPress={floatingMenu ? () => floating.current?.open() : undefined}
       pressedScale={0.985}
       accessibilityRole="button"
+      accessibilityState={{ selected }}
       accessibilityLabel={accessibilityLabel}
     >
       <View
         style={{
-          backgroundColor: colors.card,
+          backgroundColor: selected ? colors.accentSoft : colors.card,
           borderTopLeftRadius: top ? 20 : 0,
           borderTopRightRadius: top ? 20 : 0,
           borderBottomLeftRadius: bottom ? 20 : 0,
@@ -144,9 +151,10 @@ export function ListRow({
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             {leading}
             <Text
-              numberOfLines={1}
+              numberOfLines={largeText ? 2 : 1}
               style={{
-                ...(titleTag ? { flexShrink: 1 } : { flex: 1 }),
+                flex: 1,
+                minWidth: 0,
                 fontSize: titleMono ? 14.5 : 16,
                 lineHeight: 21,
                 fontWeight: titleMono ? "400" : "600",
@@ -156,18 +164,19 @@ export function ListRow({
             >
               {title}
             </Text>
-            {titleTag ? <View style={{ flex: 1, flexDirection: "row", minWidth: 48 }}>{titleTag}</View> : null}
+            {titleTag && !largeText ? <View style={{ flexShrink: 1, flexDirection: "row", minWidth: 0, maxWidth: "35%" }}>{titleTag}</View> : null}
             {accessory}
-            <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{time}</Text>
+            {!largeText && time ? <Text numberOfLines={1} style={[type.footnote, { maxWidth: "30%", color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{time}</Text> : null}
           </View>
+          {titleTag && largeText ? <View style={{ flexDirection: "row", paddingLeft: ICON + 8 }}>{titleTag}</View> : null}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingLeft: ICON + 8 }}>
             {warn ? <Icon sf="exclamationmark.triangle.fill" md="warning" size={12} color={colors.danger} /> : null}
             {branch ? (
               // Project, then the branch as a chip: on the line the project already has.
               <>
-                {project ? <Text style={{ fontSize: 14, lineHeight: 19, color: colors.secondaryLabel, fontWeight: "500" }}>{project}</Text> : null}
+                {project ? <Text numberOfLines={1} style={{ flexShrink: 1, maxWidth: "35%", fontSize: 14, lineHeight: 19, color: colors.secondaryLabel, fontWeight: "500" }}>{project}</Text> : null}
                 <BranchTag branch={branch} size={12} own />
-                <Text numberOfLines={1} style={{ flex: 1, minWidth: 40, fontSize: 14, lineHeight: 19, color: detailColor }}>
+                <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 19, color: detailColor }}>
                   {detail ? <Text style={{ color: colors.tertiaryLabel }}>{"· "}</Text> : null}
                   {detail}
                 </Text>
@@ -180,6 +189,7 @@ export function ListRow({
               </Text>
             )}
           </View>
+          {largeText && time ? <Text style={[type.footnote, { paddingLeft: ICON + 8, color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{time}</Text> : null}
         </View>
         {bottom ? null : (
           // Rows rarely end on a whole pixel; the card runs a pixel under the next row so
@@ -209,7 +219,7 @@ export function ListRow({
       </Link>
     );
   }
-  if (!androidMenu) return row;
+  if (!floatingMenu) return row;
   return (
     <OwnedFloatingMenu
       handle={floating}
@@ -234,11 +244,15 @@ export const SessionRow = memo(function SessionRow({
   position = "only",
   showProject = true,
   now,
+  onPress,
+  selected = false,
 }: {
   session: SessionSummary;
   position?: RowPosition;
   showProject?: boolean;
   now: number;
+  onPress?: () => void;
+  selected?: boolean;
 }) {
   const look = agentLook(session.agent);
   const running = session.state === "running";
@@ -268,6 +282,7 @@ export const SessionRow = memo(function SessionRow({
         : undefined;
   return (
     <ListRow
+      selected={selected}
       leading={<SessionAvatar session={session} size={ICON} />}
       title={title}
       time={relativeTime(session.updatedAt, now)}
@@ -278,8 +293,8 @@ export const SessionRow = memo(function SessionRow({
       detailColor={running ? colors.running : failed ? colors.danger : colors.secondaryLabel}
       warn={failed}
       position={position}
-      onPress={() => openSession(session.id)}
-      href={{ pathname: "/session/[id]", params: { id: session.id } }}
+      onPress={onPress ?? (() => openSession(session.id))}
+      href={onPress ? undefined : { pathname: "/session/[id]", params: { id: session.id } }}
       accessibilityLabel={[title, project, look.name, detail].filter(Boolean).join("，")}
       menu={menu}
     />

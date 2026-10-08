@@ -1,6 +1,8 @@
 import type { PermissionOption } from "@linkshell/wire";
 import { useState } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { permissionChoices, type PermissionChoice } from "@/lib/describe";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
@@ -25,6 +27,9 @@ export function PermissionActions({
   size?: "medium" | "large";
   maxExtra?: number;
 }) {
+  const [width, setWidth] = useState(0);
+  const { fontScale } = useWindowDimensions();
+  const stacked = width > 0 && (width < 300 || fontScale > 1.3);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const choices = permissionChoices(options);
@@ -49,15 +54,16 @@ export function PermissionActions({
   };
 
   return (
-    <View style={{ gap: 8 }}>
-      <View style={{ flexDirection: "row", gap: 8 }}>
+    <View onLayout={(event) => setWidth(event.nativeEvent.layout.width)} style={{ gap: 8 }}>
+      <View style={{ flexDirection: stacked ? "column" : "row", gap: 8 }}>
         {main.map((choice) => (
           <Button
             key={choice.option.optionId}
             title={choice.label}
             variant={choice.role === "allow" ? "primary" : "tonal"}
             size={size}
-            wide
+            style={{ minHeight: 44, justifyContent: "center" }}
+            wide={!stacked}
             busy={busy === choice.option.optionId}
             disabled={disabled || (busy !== null && busy !== choice.option.optionId)}
             onPress={() => void choose(choice)}
@@ -65,13 +71,14 @@ export function PermissionActions({
         ))}
       </View>
       {extra.length ? (
-        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+        <View style={{ gap: 4, alignItems: "stretch" }}>
           {extra.map((choice) => (
             <Button
               key={choice.option.optionId}
               title={choice.label}
               variant={choice.role === "stop" ? "destructive" : "plain"}
               size="small"
+              style={{ minHeight: 44, justifyContent: "center" }}
               busy={busy === choice.option.optionId}
               disabled={disabled || (busy !== null && busy !== choice.option.optionId)}
               onPress={() => void choose(choice)}

@@ -602,6 +602,11 @@ export class HostStore {
     return rows.map((row) => ({ sessionId, seq: row.seq, ts: row.ts, update: JSON.parse(row.body) as SessionUpdate }));
   }
 
+  /** Every background-task record the session logged, oldest first (each is a whole record: the last per task holds). */
+  taskEvents(sessionId: string): SessionEvent[] {
+    return this.joined("m.session_id = ? AND m.kind = 'ls_task' ORDER BY m.seq ASC", [sessionId]);
+  }
+
   /** The latest event of `kind` at or before `seq`. */
   latestOfKind(sessionId: string, kind: SessionUpdate["sessionUpdate"], seq: number, limit = 1): SessionEvent[] {
     const rows = this.db

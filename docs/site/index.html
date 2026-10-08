@@ -418,6 +418,16 @@
           </figure>
         </article>
 
+        <article class="feature" id="computer-use">
+          <div class="text">
+            <h2><span lang="zh">手机上也能用 Computer Use，实时预览</span><span lang="en">Computer Use, from your phone. Watch it live.</span></h2>
+            <p><span lang="zh">在手机上直接让 Codex 操作电脑里的浏览器和桌面应用，操作画面在会话浮窗中实时预览。边看边聊，随时补充要求，不用回到电脑前。小窗可以拖动、放大或收起。（目前支持 macOS 上的 Codex）<a href="docs/#d-computer-use">了解用法</a>。</span><span lang="en">Ask Codex to use the browser or desktop apps on your computer, right from your phone. Preview its actions live in a floating window while you keep chatting and steering. Drag it aside, enlarge it or collapse it. Currently supports Codex on macOS. <a href="docs/#d-computer-use">How to use it</a>.</span></p>
+          </div>
+          <figure class="phone">
+            <img src="assets/promo/computer-use.png" width="1206" height="2622" style="aspect-ratio: 1206 / 2622" loading="lazy" alt="手机端 Computer Use：Codex 会话上方的实时画面浮窗 / Computer Use live preview in a Codex conversation" />
+          </figure>
+        </article>
+
         <article class="feature">
           <div class="text">
             <h2><span lang="zh"><span class="nb">需要时，</span><span class="nb">直接看电脑屏幕</span></span><span lang="en">When you need it, <span class="nb">the computer&#39;s screen</span></span></h2>
@@ -567,6 +577,7 @@
         <a href="#d-gateway"><span lang="zh">自建网关</span><span lang="en">Self-host a gateway</span></a>
         <a href="#d-terminal"><span lang="zh">在电脑终端里用</span><span lang="en">From your terminal</span></a>
         <a href="#d-phone"><span lang="zh">在手机上用</span><span lang="en">On your phone</span></a>
+        <a href="#d-computer-use">Computer Use</a>
         <a href="#d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></a>
         <a href="#d-faq"><span lang="zh">常见问题</span><span lang="en">FAQ</span></a>
       </aside>
@@ -619,12 +630,23 @@
           <li><span lang="zh"><b>新建会话</b>：选 Agent 和项目目录，直接开始。</span><span lang="en"><b>New session</b>: pick an agent and a project folder and go.</span></li>
           <li><span lang="zh"><b>忙的时候发消息</b>：消息在输入框上方排队，可以调整顺序、取回编辑、立即发送（Codex 和 Claude 直接插进当前这一轮，其他 Agent 先停下当前这一轮）；停止时排队的文字会放回输入框。</span><span lang="en"><b>Messages while busy</b>: they queue above the composer, where you can reorder them, take one back to edit, or send it now (into the running turn for Codex and Claude; other agents stop the turn first). Stopping puts queued text back in the composer.</span></li>
           <li><span lang="zh"><b>分叉与 worktree</b>：每条回复下方可以「从这里分叉」，会话菜单里可以分叉整个会话；新建会话或分叉时可以选择放进新的 git worktree（在 <code>~/.linkshell/worktrees/</code> 下，独立分支），删除会话时没有改动的 worktree 会一起清掉。</span><span lang="en"><b>Fork and worktrees</b>: fork from under any reply, or the whole session from its menu; a new session or a fork can go into a new git worktree (under <code>~/.linkshell/worktrees/</code>, on its own branch). A worktree without changes is removed with its session.</span></li>
-          <li><span lang="zh"><b>斜杠命令</b>：输入 <code>/</code> 或点「+ → 命令」，列出 Agent 的命令和你的 skills。</span><span lang="en"><b>Slash commands</b>: type <code>/</code> or tap + → Commands for the agent's commands and your skills.</span></li>
+          <li><span lang="zh"><b>命令面板</b>：输入 <code>/</code>、点击输入框的命令按钮，或从会话菜单打开命令面板，搜索 Agent 的命令与 skills；草稿会保留。</span><span lang="en"><b>Command palette</b>: type <code>/</code>, tap the composer’s command button, or choose Commands from the session menu. Search commands and skills without losing your draft.</span></li>
+          <li><span lang="zh"><b>持续目标</b>：Codex 和 Claude Code 支持 <code>/goal</code>，也可从菜单进入目标页面。Codex 可设置预算、暂停和继续；Claude 可设置或清除完成条件。需电脑上的 Agent 支持相应能力。</span><span lang="en"><b>Persistent goals</b>: use <code>/goal</code> with Codex or Claude Code, or open the goal screen from the menu. Codex supports token budgets, pause and resume; Claude supports setting and clearing completion conditions. Requires support from the installed agent.</span></li>
+          <li><span lang="zh"><b>后台任务</b>：<code>/tasks</code> 或标题旁的入口可查看回复结束后仍运行的命令、输出和退出码。Codex 支持单任务停止；Claude Bash / Monitor 目前只支持查看，停止请在电脑端操作。</span><span lang="en"><b>Background tasks</b>: <code>/tasks</code> or the session header shows commands that keep running after a reply, their output and exit codes. Stop individual Codex tasks; Claude Bash / Monitor tasks are viewable, with stopping handled on the computer.</span></li>
+          <li><span lang="zh"><b>屏幕适配</b>：iPhone Duo 和普通 iPhone 都会根据可用空间调整聊天、输入框和操作区。</span><span lang="en"><b>Adaptive layouts</b>: the conversation, composer and controls adapt to the available space on iPhone Duo and standard iPhones.</span></li>
           <li><span lang="zh"><b>工作流、子 Agent 与文件</b>：会话标题旁的按钮列出工作流和子 Agent；输入框上方可回到后台工作流；会话和终端的菜单里可以浏览项目文件。</span><span lang="en"><b>Workflows, sub-agents and files</b>: the button beside a session's title lists its Workflows and sub-agents; return to background runs above the composer, and browse project files from a session's or a terminal's menu.</span></li>
           <li><span lang="zh"><b>设置</b>：输入框下方可以换模型、思考强度、权限模式（取决于 Agent 提供了哪些）。</span><span lang="en"><b>Settings</b>: under the composer, change model, effort and permission mode (whatever the agent offers).</span></li>
           <li><span lang="zh"><b>整理</b>：长按会话可以重命名、归档、删除；归档的会话在首页底部。不再使用的电脑，在账号页的「我的电脑」里长按移除。</span><span lang="en"><b>Tidying</b>: long-press a session to rename, archive or delete it; archived sessions are at the bottom of Home. A computer you no longer use: long-press it under My computers on the account page.</span></li>
           <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它。屏幕工具条上有快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）和「发送文字」（写好一段再发，可以带上手机剪贴板）。需要 Apple 芯片的 Mac；两项权限由 <code>linkshell setup</code> 带你打开，单独设置用 <code>linkshell screen</code>。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen and control it with a trackpad and keyboard. The screen&#39;s toolbar has one-tap shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own) and a text box to write in and send, with the phone&#39;s clipboard. Needs a Mac with Apple silicon; <code>linkshell setup</code> takes you through its two permissions, <code>linkshell screen</code> does just that part.</span></li>
         </ul>
+
+        <h2 id="d-computer-use"><span lang="zh">在手机上用 Computer Use</span><span lang="en">Use Computer Use from your phone</span></h2>
+        <p><span lang="zh">在手机会话里告诉 Codex 你想做什么，让它操作电脑上的浏览器或桌面应用。操作画面会在浮窗中实时预览，你可以边看边补充要求，继续推进任务。</span><span lang="en">Tell Codex what you want done in the phone conversation and let it work in your computer's browser or desktop apps. Watch its actions live in a floating preview and keep giving instructions as it works.</span></p>
+        <ul>
+          <li><span lang="zh"><b>边聊边看</b>：小窗不随聊天滚动，可以拖到一边、点击放大，也可以收起成图标或关闭；关闭后在会话菜单点「显示电脑画面」恢复。</span><span lang="en"><b>Watch while chatting</b>: the preview stays in place as you scroll. Drag it aside, tap to enlarge it, collapse it to an icon or close it. Reopen it with “Show computer preview” in the session menu.</span></li>
+          <li><span lang="zh"><b>回来接着看</b>：回合结束后保留最后画面，重新进入会话会恢复预览状态。</span><span lang="en"><b>Pick up where you left off</b>: the last frame stays after the turn, and reopening the session restores the preview state.</span></li>
+        </ul>
+        <p class="note"><span lang="zh">目前支持 macOS 上的 Codex，需已配置兼容的 Computer Use 工具，并使用支持此功能的电脑端和手机 App。请在 Mac 上允许 LinkShell 录制屏幕，可运行 <code>linkshell screen</code> 完成设置。</span><span lang="en">Currently supports Codex on macOS with compatible Computer Use tools configured, and versions of the computer and phone apps that support this feature. Allow LinkShell to record the Mac's screen; run <code>linkshell screen</code> to set it up.</span></p>
 
         <h2 id="d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></h2>
         <dl>

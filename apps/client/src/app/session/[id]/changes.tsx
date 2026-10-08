@@ -1,1 +1,4 @@
-export { ChangesScreen as default } from "@/screens/changes-screen";
+import { adaptiveScreen } from "@/components/adaptive-page";
+import { ChangesScreen } from "@/screens/changes-screen";
+
+export default adaptiveScreen(ChangesScreen, { maxWidth: 1000, surface: "background" });

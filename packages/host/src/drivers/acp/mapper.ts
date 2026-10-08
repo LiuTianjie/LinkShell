@@ -1,3 +1,4 @@
+import { sessionGoalSchema } from "@linkshell/wire";
 import type {
   ContentBlock,
   PermissionOption,
@@ -246,8 +247,15 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
       const options = toConfigOptions({ configOptions: update.configOptions }).map(({ source: _source, ...option }) => option);
       return options.length > 0 ? { sessionUpdate: "ls_config", options } : undefined;
     }
-    case "session_info_update":
+    case "session_info_update": {
+      const air = obj(obj(obj(update._meta)?.jetbrains)?.air);
+      if (air && Object.hasOwn(air, "goal")) {
+        if (air.goal === null) return { sessionUpdate: "ls_goal", goal: null };
+        const goal = sessionGoalSchema.safeParse(air.goal);
+        if (goal.success) return { sessionUpdate: "ls_goal", goal: goal.data };
+      }
       return str(update.title) ? { sessionUpdate: "session_info_update", title: str(update.title) } : undefined;
+    }
     case "usage_update":
       return {
         sessionUpdate: "usage_update",

@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { goalChangeSchema, sessionGoalSchema } from "./goal.js";
 import {
+  backgroundTaskSchema,
   gatewayStatusSchema,
   machineInfoSchema,
   portInfoSchema,
@@ -159,6 +161,40 @@ export const methods = {
     params: z.object({ sessionId: z.string().min(1), toolCallId: z.string().min(1), lazyImages: z.boolean().optional() }),
     result: z.object({ events: z.array(sessionEventSchema) }),
   },
+  /** The commands this session left running in the background, and the ones that have ended; newest first. */
+  "sessions.tasks": {
+    params: z.object({ sessionId: z.string().min(1) }),
+    result: z.object({ tasks: z.array(backgroundTaskSchema) }),
+  },
+  /**
+   * A background task's output, a piece at a time from the end: the text
+   * before byte `before` (default: the end), at most `limit` bytes. `start` is
+   * where that text begins (0: the beginning); `size` is the whole output's.
+   */
+  "sessions.taskOutput": {
+    params: z.object({
+      sessionId: z.string().min(1),
+      taskId: z.string().min(1),
+      before: z.number().int().nonnegative().optional(),
+      limit: z.number().int().positive().max(256 * 1024).optional(),
+    }),
+    result: z.object({ text: z.string(), start: z.number().int().nonnegative(), size: z.number().int().nonnegative() }),
+  },
+  /** Stops one background task, leaving the session's turn and its other tasks alone. */
+  "sessions.stopTask": {
+    params: z.object({ sessionId: z.string().min(1), taskId: z.string().min(1) }),
+    result: empty,
+  },
+  /** Opens a read-only computer-use preview through the existing bulk-stream transport. */
+  "sessions.preview": {
+    params: z.object({ sessionId: z.string().min(1), direct: z.boolean().optional() }),
+    result: z.object({ port: z.number().int().positive(), token: z.string() }),
+  },
+  /** Explicit local user action; normal frame updates never reopen a dismissed preview. */
+  "desktop.preview.show": {
+    params: z.object({ sessionId: z.string().min(1) }),
+    result: empty,
+  },
   /** The picture behind a `linkshell-event:` uri. */
   "sessions.image": {
     params: z.object({ sessionId: z.string().min(1), uri: z.string().min(1) }),
@@ -205,6 +241,10 @@ export const methods = {
   "sessions.answer": {
     params: z.object({ sessionId: z.string().min(1), requestId: z.string().min(1), answers: z.array(questionAnswerSchema).max(50) }),
     result: empty,
+  },
+  "sessions.goal": {
+    params: z.object({ sessionId: z.string(), change: goalChangeSchema }),
+    result: z.object({ goal: sessionGoalSchema.nullable() }),
   },
   "sessions.setConfig": {
     params: z.object({
@@ -541,6 +581,7 @@ export const notifications = {
   "session.summary": z.object({ session: sessionSummarySchema }),
   /** A session was deleted (from any device, or natively by the agent). */
   "session.removed": z.object({ sessionId: z.string() }),
+  "session.preview.show": z.object({ sessionId: z.string() }),
   /** To a desktop shim: a device is taking over; exit the native UI, then call desktop.yielded. */
   "desktop.yield": z.object({ sessionId: z.string() }),
   /** To a desktop shim: progress from the remote driver, to show in the terminal. */

@@ -1,7 +1,8 @@
 import type { TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { memo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import Animated, { cubicBezier } from "react-native-reanimated";
 import { duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -11,6 +12,7 @@ import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
 import { useTimelineFork } from "./context";
+import { userMessageText } from "@/lib/user-message";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
 
@@ -26,10 +28,7 @@ export const UserMessage = memo(function UserMessage({
   onFailedPress?: (item: Of<"user">) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const text = item.blocks
-    .map((block) => (block.type === "text" ? block.text : ""))
-    .join("")
-    .trim();
+  const text = userMessageText(item.blocks);
   const images = item.blocks.filter((block) => block.type === "image");
   const links = item.blocks.filter((block) => block.type === "resource_link");
   // A slash command or skill the user ran: `/review src`, `/pdf`.
@@ -116,7 +115,7 @@ function ReplyActions({ item }: { item: Of<"agent"> }) {
         accessibilityRole="button"
         accessibilityLabel="复制这条回复"
         hitSlop={4}
-        style={({ pressed }) => ({ width: 32, height: 30, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
+        style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
       >
         <Icon sf={copied ? "checkmark" : "doc.on.doc"} md={copied ? "check" : "content_copy"} size={14} color={copied ? colors.ok : colors.tertiaryLabel} />
       </Pressable>
@@ -129,7 +128,7 @@ function ReplyActions({ item }: { item: Of<"agent"> }) {
           accessibilityRole="button"
           accessibilityLabel="从这里分叉"
           hitSlop={4}
-          style={({ pressed }) => ({ width: 32, height: 30, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
+          style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
         >
           <Icon sf="arrow.triangle.branch" md="fork_right" size={14} color={colors.tertiaryLabel} />
         </Pressable>
@@ -154,7 +153,7 @@ export const Thought = memo(function Thought({ item }: { item: Of<"thought"> }) 
         }}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", minHeight: 28 }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", minHeight: 44 }}
       >
         {/* One glyph: a spinner while it thinks, the sparkle once it's done. */}
         {item.streaming ? (
@@ -162,7 +161,7 @@ export const Thought = memo(function Thought({ item }: { item: Of<"thought"> }) 
         ) : (
           <Icon sf="sparkles" md="auto_awesome" size={13} color={colors.tertiaryLabel} />
         )}
-        <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{label}</Text>
+        <Text style={[type.subhead, { flexShrink: 1, color: colors.secondaryLabel }]}>{label}</Text>
         {item.streaming ? null : (
           <Animated.View
             style={{

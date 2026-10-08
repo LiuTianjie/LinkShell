@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, s
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { ContentBlock, PlanEntry, SessionUpdate, ToolCallContent, ToolDetail, ToolKind } from "@linkshell/wire";
+import { sessionGoalSchema, type ContentBlock, type PlanEntry, type SessionUpdate, type ToolCallContent, type ToolDetail, type ToolKind } from "@linkshell/wire";
 import { inlineImage } from "../images.js";
 import { nestUnder } from "../nesting.js";
 
@@ -327,8 +327,24 @@ export function transcriptLine(
     case "user":
     case "assistant":
       break;
-    case "attachment":
+    case "attachment": {
+      const attachment = obj(line.attachment);
+      // Claude persists the same Goal check that the runtime reports live.
+      // Sub-agent goals belong to their own session, never to the parent's card.
+      if (!line.isSidechain && attachment?.type === "goal_status" && typeof attachment.met === "boolean") {
+        if (attachment.met && attachment.sentinel === true) return { updates: [{ sessionUpdate: "ls_goal", goal: null }] };
+        const goal = sessionGoalSchema.safeParse({
+          objective: attachment.condition,
+          status: attachment.met ? "complete" : "active",
+          iterations: attachment.iterations,
+          lastReason: attachment.reason,
+          tokensUsed: attachment.tokens,
+          timeUsedSeconds: typeof attachment.durationMs === "number" ? attachment.durationMs / 1000 : undefined,
+        });
+        if (goal.success) return { updates: [{ sessionUpdate: "ls_goal", goal: goal.data }] };
+      }
       return queuedPrompt(line, options.agents);
+    }
     case "system":
       return { updates: compaction(line) };
     default:

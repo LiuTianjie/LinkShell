@@ -10,6 +10,7 @@ import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } 
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
 import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
 import { descendsFrom, sessionHolders, type SessionHolder } from "./holders.js";
+import { ClaudeTasks } from "./tasks.js";
 import { ClaudeActivity } from "./activity.js";
 import {
   claudeConfigDir,
@@ -134,6 +135,7 @@ export interface ClaudeDriverOptions {
 export class ClaudeDriver extends AcpDriver {
   private readonly modes = new Map<string, Mode>();
   private readonly tails = new Map<string, TranscriptTail>();
+  private readonly tasks = new Map<string, ClaudeTasks>();
   private readonly activity = new Map<string, ClaudeActivity>();
   /**
    * The settings Claude offers (model, effort, permission mode…), as the
@@ -215,6 +217,7 @@ export class ClaudeDriver extends AcpDriver {
     this.tails.clear();
     for (const follower of this.activity.values()) follower.stop();
     this.activity.clear();
+    this.tasks.clear();
     await super.stop();
   }
 
@@ -226,8 +229,11 @@ export class ClaudeDriver extends AcpDriver {
     this.activity.get(nativeId)?.stop();
     let importing = true;
     const nested: SessionUpdate[] = [];
+    const tasks = new ClaudeTasks((task) => { if (!importing) this.emit(nativeId, { sessionUpdate: "ls_task", task }); });
+    this.tasks.set(nativeId, tasks);
     const activity = new ClaudeActivity({
       locate: () => findTranscript(this.configDir, nativeId, context.cwd),
+      onLine: (raw) => tasks.observe(raw),
       desktop: () => importing || this.modes.get(nativeId) !== "remote",
       onUpdate: (update, ts) => {
         if (importing) {
@@ -271,7 +277,13 @@ export class ClaudeDriver extends AcpDriver {
       this.observed.set(nativeId, transcript.settings);
       if (transcript.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: transcript.title });
     }
+    if (!(this.modes.get(nativeId) === "remote" && state.loaded) && sessionHolders(this.configDir, nativeId).length === 0) tasks.lostHolder();
     importing = false;
+    const storedTasks = new Map((this.host?.tasks(this.id, nativeId) ?? []).map(({ lastSeq: _, ...task }) => [task.id, task]));
+    for (const task of tasks.records.values()) {
+      if (JSON.stringify(storedTasks.get(task.id)) !== JSON.stringify(task)) this.emit(nativeId, { sessionUpdate: "ls_task", task });
+    }
+    this.startWatch();
     activity.followFrom(offset);
     this.startTail(nativeId, context.cwd, offset);
     activity.start();
@@ -290,7 +302,7 @@ export class ClaudeDriver extends AcpDriver {
     if (this.template) return Promise.resolve(this.template);
     this.templateLoading ??= (async () => {
       try {
-        const response = await this.rpc<Record<string, unknown>>("session/new", { cwd, mcpServers: [] });
+        const response = await this.rpc<Record<string, unknown>>("session/new", { cwd, mcpServers: [], ...this.sessionMeta() });
         const options = toConfigOptions(response);
         if (options.length > 0) this.template ??= options;
         if (typeof response.sessionId === "string" && this.connection?.capabilities.sessionCapabilities?.close) {
@@ -406,6 +418,8 @@ export class ClaudeDriver extends AcpDriver {
     this.backgroundAgents.delete(nativeId);
     this.activity.get(nativeId)?.stop();
     this.activity.delete(nativeId);
+    this.tasks.get(nativeId)?.lostHolder();
+    this.tasks.delete(nativeId);
     if (transcript) sweepTranscript(transcript);
   }
 
@@ -659,7 +673,7 @@ export class ClaudeDriver extends AcpDriver {
     }
     const target = this.stateFor(nativeId, cwd);
     if (!target.loaded) {
-      const response = await this.rpc<Record<string, unknown>>("session/resume", { sessionId: nativeId, cwd, mcpServers: [] });
+      const response = await this.rpc<Record<string, unknown>>("session/resume", { sessionId: nativeId, cwd, mcpServers: [], ...this.sessionMeta() });
       target.config = toConfigOptions(response);
       target.loaded = true;
     }
@@ -716,7 +730,16 @@ export class ClaudeDriver extends AcpDriver {
    * app, or a `claude` in a terminal, continued it): that process has the
    * conversation now, so stop writing to it and follow what it does instead.
    */
+  taskOutput(nativeId: string, taskId: string, before: number | undefined, limit: number) {
+    return this.tasks.get(nativeId)?.output(nativeId, taskId, before, limit);
+  }
+
   private async watchRemoteSessions(): Promise<void> {
+    for (const [nativeId, tasks] of this.tasks) {
+      if (![...tasks.records.values()].some((task) => task.state === "running")) continue;
+      if (this.modes.get(nativeId) === "remote" && this.sessions.get(nativeId)?.loaded) continue;
+      if (sessionHolders(this.configDir, nativeId).length === 0) tasks.lostHolder();
+    }
     for (const nativeId of [...this.waiting.keys()]) await this.sendWaiting(nativeId).catch(() => {});
     for (const [nativeId, mode] of this.modes) {
       if (mode !== "remote" || this.host?.desktop(this.id, nativeId)) continue;

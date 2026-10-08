@@ -1,26 +1,27 @@
+import { setComputerPreviewMode } from "@/lib/use-computer-preview";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import { shownQueue, type TimelineItem } from "@linkshell/client-core";
+import { shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
-import { useHeaderHeight } from "expo-router/react-navigation";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
 import { AgentTile } from "@/components/agent-tile";
 import { Composer } from "@/components/composer";
 import { Glass } from "@/components/glass";
 import { Icon } from "@/components/icon";
-import { TopFade } from "@/components/top-fade";
 import { LiveDot } from "@/components/status";
+import { ScrollableState } from "@/components/scrollable-state";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
 import { Timeline } from "@/components/timeline/timeline";
 import { TimelineFork, TimelineSession } from "@/components/timeline/context";
 import { LinkBase } from "@/lib/links";
-import { useActions, useClient } from "@/lib/client";
+import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
 import { fileChanges, sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -29,9 +30,16 @@ import { branchOf, useGitInfo } from "@/lib/worktree";
 import { agentLook, tierCopy } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
-import { HeaderActions, useHeaderTitleWidth } from "@/components/header-actions";
+import { HeaderActions, useHeaderTitleWidth, type HeaderAction } from "@/components/header-actions";
 import { LiveWorkflowsBar } from "@/components/workflow";
 import { sessionTimelineItems } from "@/lib/workflows";
+import { SessionWorkspace, useSessionWorkspace } from "@/components/session-workspace";
+import { AdaptivePage, usePageInsets } from "@/components/adaptive-page";
+import { useSessionFoldLayout } from "@/lib/session-fold-layout";
+import { ContentHeight } from "@/lib/content-height";
+import { useHasComposerDraft } from "@/lib/use-composer-draft";
+import { useSessionCommands } from "@/lib/use-session-commands";
+import { GoalCard } from "@/components/goal-card";
 
 // One array for "nothing yet": a new one on every render would make everything computed from the items run again.
 const NO_ITEMS: TimelineItem[] = [];
@@ -95,7 +103,21 @@ function countChanges(items: TimelineItem[]): number {
 }
 
 export function SessionScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, panel } = useLocalSearchParams<{ id: string; panel?: string }>();
+  return <AdaptivePage surface="plain"><SessionWorkspace key={id} sessionId={id} initialPanel={panel === "preview" || panel === "changes" ? panel : undefined}><SessionContent sessionId={id} /></SessionWorkspace></AdaptivePage>;
+}
+
+export function SessionContent({ sessionId: id, embedded = false, navigation = !embedded, toolbarActions = [], onOpenPanel, navigationTitle, consumedBottomInset = 0 }: {
+  sessionId: string;
+  embedded?: boolean;
+  navigation?: boolean;
+  navigationTitle?: string;
+  consumedBottomInset?: number;
+  toolbarActions?: HeaderAction[];
+  onOpenPanel?: (panel: "changes" | "preview") => void;
+}) {
+  const workspace = useSessionWorkspace();
+  const folded = useSessionFoldLayout();
   const summary = useClient((state) => state.sessions[id]);
   const view = useClient((state) => state.views[id]);
   const loaded = useClient((state) => state.sessionsLoaded);
@@ -105,30 +127,40 @@ export function SessionScreen() {
   const queueing = useClient((state) => state.queueing[id]);
   const subagents = useClient((state) => state.subagents[id]);
   const workflows = useClient((state) => state.workflows[id]);
+  const tasks = useClient((state) => state.tasks[id]);
+  const taskCount = Object.keys(tasks ?? {}).length;
+  const tasksRunning = Object.values(tasks ?? {}).filter((task) => task.state === "running").length;
   const subagentsListed = subagents?.length ?? 0;
   const hasWorkflows = Object.keys(workflows ?? {}).length > 0;
   const subagentsTotal = summary?.subagents?.total ?? 0;
   const subagentsRunning = summary?.subagents?.running ?? 0;
-  const hasSubagents = hasWorkflows || subagentsTotal > 0 || subagentsListed > 0;
+  const hasSubagents = taskCount > 0 || (summary?.tasks?.total ?? 0) > 0 || hasWorkflows || subagentsTotal > 0 || subagentsListed > 0;
   const agentInfo = useClient((state) => state.machine?.agents.find((agent) => agent.id === summary?.agent));
   const actions = useActions();
-  const insets = useSafeAreaInsets();
+  const commandControls = useSessionCommands(id);
+  const hasDraft = useHasComposerDraft(id);
+  const { computer } = useConnection();
+  const insets = usePageInsets();
+  const focused = useIsFocused();
+  // Some panes already stop above native tabs. Padding and keyboard travel use the same physical edge.
+  const reservedBottom = folded?.bottomReserved ?? consumedBottomInset;
+  const bottomInset = Math.max(0, insets.bottom - reservedBottom);
+  const keyboardOffset = reservedBottom + bottomInset;
+  const [contentHeight, setContentHeight] = useState<number | null>(null);
   const composerInset = useSharedValue(0);
   const headerHeight = useHeaderHeight();
-  // The space between the header and the composer, for the empty-session intro.
-  const introFrame = useAnimatedStyle(() => ({ bottom: composerInset.get(), paddingTop: headerHeight }));
+  // The workspace already places the pane below the native bar.
+  const headerConsumed = embedded || workspace !== null;
+  const introFrame = useAnimatedStyle(() => ({ bottom: composerInset.get(), paddingTop: headerConsumed ? 0 : headerHeight }));
   const listRef = useRef<LegendListRef>(null);
   const [atEnd, setAtEnd] = useState(true);
 
-  useEffect(() => {
-    actions.openSession(id);
-    return () => actions.closeSession(id);
-  }, [actions, id]);
+  useSessionSubscription(id);
   // The sub-agents' own records (running, failed, when they ended): asked for once the
   // session is open, and again whenever one starts or finishes.
   useEffect(() => {
-    if (ready) void actions.loadSubagents(id).catch(() => {});
-  }, [actions, id, ready, subagentsTotal, subagentsRunning]);
+    if (ready && focused) void actions.loadSubagents(id).catch(() => {});
+  }, [actions, id, ready, focused, subagentsTotal, subagentsRunning]);
 
   const items = view?.items ?? NO_ITEMS;
   const timelineItems = useMemo(() => sessionTimelineItems(items, workflows, subagents), [items, workflows, subagents]);
@@ -223,8 +255,9 @@ export function SessionScreen() {
 
   if (!summary) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.plain, justifyContent: "center" }}>
-        <Stack.Screen options={{ title: "" }} />
+      <View style={{ flex: 1, backgroundColor: colors.plain }}>
+        {navigation ? <Stack.Screen options={{ title: "" }} /> : null}
+        <ScrollableState>
         {loaded ? (
           <EmptyState
             icon={{ sf: "questionmark.bubble", md: "help" }}
@@ -235,6 +268,7 @@ export function SessionScreen() {
         ) : (
           <LoadingState label="正在连接电脑…" />
         )}
+        </ScrollableState>
       </View>
     );
   }
@@ -257,7 +291,7 @@ export function SessionScreen() {
   // Nor is it the start while earlier history is still to load.
   const started = hasEarlier || items.some((item) => item.kind === "user" || item.kind === "agent" || item.kind === "tool" || item.kind === "thought" || item.kind === "plan");
   const intro =
-    loading || started ? null : (
+    loading || started || hasDraft || view?.goal ? null : (
       <View style={{ alignItems: "center", gap: 10, paddingHorizontal: 32 }}>
         <AgentTile agent={summary.agent} size={56} />
         <Text style={[type.headline, { color: colors.label }]}>{look.name}</Text>
@@ -268,14 +302,17 @@ export function SessionScreen() {
     );
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.plain }}>
+    <ContentHeight value={contentHeight}>
+    <View onLayout={(event) => setContentHeight(event.nativeEvent.layout.height)} style={{ flex: 1, backgroundColor: colors.plain }}>
+      {!navigation ? null : <>
       <Stack.Screen
         options={{
           scrollEdgeEffects: { top: "soft" },
           ...(Platform.OS === "ios"
             ? {}
             : { headerTransparent: false, headerStyle: { backgroundColor: colors.plain as string }, headerShadowVisible: false }),
-          headerTitle: () => (
+          title: navigationTitle ?? sessionTitle(view?.title ? { title: view.title } : summary),
+          headerTitle: Platform.OS === "ios" ? undefined : () => (
             <HeaderTitle
               agent={summary.agent}
               title={sessionTitle(view?.title ? { title: view.title } : summary)}
@@ -290,6 +327,7 @@ export function SessionScreen() {
       />
       <HeaderActions
         actions={[
+          ...toolbarActions,
           // Every sub-agent the session started, a tap away: the ones still working (counted on the button) and the finished ones.
           ...(hasSubagents
             ? [
@@ -297,8 +335,8 @@ export function SessionScreen() {
                   kind: "button" as const,
                   key: "subagents",
                   icon: { sf: "square.stack.3d.up", md: "layers" } as const,
-                  label: hasWorkflows ? "Agent 与工作流" : subagentsRunning ? `子 Agent，${subagentsRunning} 个运行中` : "子 Agent",
-                  live: subagentsRunning > 0,
+                  label: taskCount ? `后台任务，${tasksRunning} 个运行中` : hasWorkflows ? "Agent 与工作流" : subagentsRunning ? `子 Agent，${subagentsRunning} 个运行中` : "子 Agent",
+                  live: subagentsRunning > 0 || tasksRunning > 0,
                   onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
                 },
               ]
@@ -309,6 +347,10 @@ export function SessionScreen() {
             icon: { sf: "ellipsis", md: "more_vert" },
             label: "更多",
             items: [
+              { title: "命令", icon: { sf: "command", md: "terminal" }, onPress: () => router.push({ pathname: "/session/[id]/commands", params: { id } }) },
+              { title: "会话设置", icon: { sf: "slider.horizontal.3", md: "tune" }, onPress: () => router.push({ pathname: "/session/[id]/settings", params: { id } }) },
+              ...(commandControls.commands.some((command) => command.name === "goal") || view?.goal ? [{ title: "持续目标", icon: { sf: "target", md: "flag" } as const, onPress: () => router.push({ pathname: "/session/[id]/goal", params: { id } }) }] : []),
+              { title: "显示电脑画面", icon: { sf: "desktopcomputer", md: "desktop_windows" }, onPress: () => setComputerPreviewMode(JSON.stringify([computer.key, id]), "shown") },
               ...(turnActive
                 ? [{ title: "停止这一轮", icon: { sf: "stop.circle", md: "stop_circle" } as const, destructive: true, onPress: () => void guard(() => actions.cancel(id), "停止失败") }]
                 : []),
@@ -320,7 +362,7 @@ export function SessionScreen() {
                     {
                       title: `查看改动（${changeCount} 个文件）`,
                       icon: { sf: "plus.forwardslash.minus", md: "difference" } as const,
-                      onPress: () => router.push({ pathname: "/session/[id]/changes", params: { id } }),
+                      onPress: () => onOpenPanel ? onOpenPanel("changes") : workspace ? workspace.show("changes") : router.push({ pathname: "/session/[id]/changes", params: { id } }),
                     },
                   ]
                 : []),
@@ -330,7 +372,7 @@ export function SessionScreen() {
               {
                 title: "预览网页",
                 icon: { sf: "globe", md: "language" },
-                onPress: () => router.push({ pathname: "/ports", params: { cwd: summary.cwd } }),
+                onPress: () => onOpenPanel ? onOpenPanel("preview") : workspace ? workspace.show("preview") : router.push({ pathname: "/ports", params: { cwd: summary.cwd } }),
               },
               {
                 title: "项目文件",
@@ -374,18 +416,21 @@ export function SessionScreen() {
         ]}
       />
 
+      </>}
       {/* Mount the list once history is in, so it lays out and opens at the latest message. */}
       {loading ? null : (
       <LinkBase value={summary.cwd}>
       <TimelineSession.Provider value={id}>
       <TimelineFork.Provider value={canFork ? askFork : undefined}>
       <Timeline
+        computerPreview
+        previewHeaderConsumed={headerConsumed}
         ref={listRef}
         items={timelineItems}
         planId={view?.planId}
         turnActive={turnActive}
         composerInset={composerInset}
-        keyboardOffset={0}
+        keyboardOffset={keyboardOffset}
         onFailedMessage={onFailedMessage}
         onScroll={onScroll}
         earlier={earlier}
@@ -400,7 +445,7 @@ export function SessionScreen() {
           {intro}
         </Animated.View>
       ) : null}
-      {loading ? <TimelineSkeleton label="正在载入对话…" /> : null}
+      {loading ? <TimelineSkeleton label="正在载入对话…" top={headerConsumed ? 16 : headerHeight + 16} /> : null}
       {/* A fork takes a few seconds (a worktree to make, an agent to start): nothing else can be tapped meanwhile. */}
       {forking ? (
         <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center" }} accessibilityViewIsModal>
@@ -410,11 +455,10 @@ export function SessionScreen() {
           </Glass>
         </View>
       ) : null}
-      {Platform.OS === "ios" ? <TopFade height={insets.top + 60} /> : null}
 
 
       <KeyboardStickyView
-        offset={{ closed: 0, opened: insets.bottom }}
+        offset={{ closed: 0, opened: keyboardOffset }}
         pointerEvents="box-none"
         style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}
       >
@@ -433,7 +477,6 @@ export function SessionScreen() {
           </Animated.View>
         ) : null}
         <View onLayout={(event) => composerInset.set(event.nativeEvent.layout.height)}>
-        <LiveWorkflowsBar sessionId={id} />
         <Composer
           sessionId={id}
           agent={summary.agent}
@@ -444,10 +487,14 @@ export function SessionScreen() {
           permission={view?.permissions[0]}
           permissionCount={view?.permissions.length ?? 0}
           config={view?.config ?? []}
-          commands={view?.commands ?? []}
+          commands={commandControls.commands}
           usage={view?.usage}
-          bottomInset={insets.bottom}
-          onSend={(content) => actions.send(id, content)}
+          bottomInset={bottomInset}
+          keyboardOffset={keyboardOffset}
+          autoFocusOnPoseEntry={folded !== null}
+          accessoryHeight={(!atEnd && items.length > 0 ? 42 : 0) + (embedded ? 0 : insets.top)}
+          leadingContent={view?.goal || tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <>{view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}{tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} /> : null}</> : undefined}
+          onSend={commandControls.send}
           onStop={() => guard(() => actions.cancel(id), "停止失败")}
           queue={shownQueue(summary.queue, queueing)}
           onUnqueue={(clientMessageId) => void guard(() => actions.unqueue(id, clientMessageId).then(() => {}), "取消失败")}
@@ -463,5 +510,6 @@ export function SessionScreen() {
         </View>
       </KeyboardStickyView>
     </View>
+    </ContentHeight>
   );
 }

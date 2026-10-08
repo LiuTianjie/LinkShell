@@ -2,7 +2,8 @@ import { workflowIsLive, type TimelineItem, type WorkflowRecord } from "@linkshe
 import type { Workflow, WorkflowAgent, WorkflowAgentState } from "@linkshell/wire";
 import { router } from "expo-router";
 import { memo, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { useClient } from "@/lib/client";
 import { compactNumber, duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -209,6 +210,13 @@ export function WorkflowCardContent({ record, sessionId }: { record: WorkflowRec
 export function LiveWorkflowsBar({ sessionId }: { sessionId: string }) {
   const records = useClient((state) => state.workflows[sessionId]);
   const live = useMemo(() => Object.values(records ?? {}).filter((record) => workflowIsLive(record.workflow)), [records]);
+  const taskRecords = useClient((state) => state.tasks[sessionId]);
+  const taskCount = Object.values(taskRecords ?? {}).filter((task) => task.state === "running").length;
+  if (taskCount) return <PressableScale accessibilityRole="button" accessibilityLabel={`${taskCount} 个后台任务运行中`} onPress={() => router.push({ pathname: "/session/[id]/agents", params: { id: sessionId } })} outerStyle={{ marginHorizontal: 12, marginBottom: 2 }} style={{ padding: 12, borderRadius: 14, backgroundColor: colors.inset, flexDirection: "row", alignItems: "center", gap: 10 }}>
+    <Icon sf="terminal" md="terminal" size={18} color={colors.running} />
+    <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.label, fontWeight: "600" }]}>{taskCount} 个后台任务运行中{live.length ? ` · ${live.length} 个工作流` : ""}</Text>
+    <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} />
+  </PressableScale>;
   if (!live.length) return null;
   const first = live[0]!;
   const counts = workflowCounts(first.workflow);

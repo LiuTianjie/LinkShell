@@ -1,13 +1,15 @@
 import type { PortInfo } from "@linkshell/wire";
 import { router, useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
+import { Text, TextInput } from "@/components/fixed-text";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePageInsets } from "@/components/adaptive-page";
 import { Icon } from "@/components/icon";
 import { openPreview, PortRow } from "@/components/port-row";
 import { positionOf } from "@/components/session-row";
 import { usePorts } from "@/lib/ports";
+import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 
@@ -23,7 +25,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 /** The computer's servers to preview; `cwd` (from a session) puts that project's first. */
 export function PortsScreen() {
   const { cwd } = useLocalSearchParams<{ cwd?: string }>();
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
   const { ports, error } = usePorts();
   const [typed, setTyped] = useState("");
   const typedPort = Number(typed);
@@ -42,22 +44,13 @@ export function PortsScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 22, paddingBottom: 6 }}>
-        <Text style={[type.title, { flex: 1, color: colors.label }]}>预览</Text>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="关闭"
-          hitSlop={10}
-          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="xmark" md="close" size={13} color={colors.secondaryLabel} weight="bold" />
-        </Pressable>
-      </View>
+      <SheetHeader title="预览" />
       <View style={{ flex: 1, overflow: "hidden" }}>
         <KeyboardAwareScrollView
+        contentInsetAdjustmentBehavior="never"
           bottomOffset={24}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: insets.bottom + 24, gap: 24 }}
         >
@@ -95,13 +88,15 @@ export function PortsScreen() {
                 gap: 10,
                 paddingLeft: 16,
                 paddingRight: 6,
-                height: 52,
+                minHeight: 52,
+                paddingVertical: 4,
+                flexWrap: "wrap",
                 borderRadius: 18,
                 borderCurve: "continuous",
                 backgroundColor: colors.sheetCard,
               }}
             >
-              <Text style={{ fontFamily: mono, fontSize: 16, color: colors.secondaryLabel }}>localhost:</Text>
+              <Text style={{ flexShrink: 1, fontFamily: mono, fontSize: 16, color: colors.secondaryLabel }}>localhost:</Text>
               <TextInput
                 value={typed}
                 onChangeText={(text) => setTyped(text.replace(/\D/g, "").slice(0, 5))}
@@ -110,7 +105,7 @@ export function PortsScreen() {
                 keyboardType="number-pad"
                 returnKeyType="go"
                 onSubmitEditing={open}
-                style={{ flex: 1, fontFamily: mono, fontSize: 16, color: colors.label, paddingVertical: 0 }}
+                style={{ flex: 1, minWidth: 72, minHeight: 44, fontFamily: mono, fontSize: 16, color: colors.label, paddingVertical: 10 }}
               />
               <Pressable
                 onPress={open}
@@ -118,7 +113,8 @@ export function PortsScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="打开"
                 style={{
-                  height: 40,
+                  minHeight: 44,
+                  paddingVertical: 10,
                   paddingHorizontal: 16,
                   borderRadius: 14,
                   backgroundColor: colors.accent,

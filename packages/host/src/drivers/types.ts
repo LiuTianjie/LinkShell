@@ -1,13 +1,17 @@
 import type {
   AgentAuth,
+  GoalChange,
+  SessionGoal,
   AgentCapabilities,
   AgentTier,
+  BackgroundTask,
   ContentBlock,
   QueuedMessage,
   QuestionAnswer,
   SessionState,
   SessionUpdate,
 } from "@linkshell/wire";
+import type { PreviewInput } from "../computer-preview.js";
 
 /** A session the agent knows about, however it was created. */
 export interface DiscoveredSession {
@@ -33,6 +37,15 @@ export interface HistoryItem {
   ts?: number;
 }
 
+/** A piece of a background task's output (see `sessions.taskOutput`). */
+export interface TaskOutput {
+  text: string;
+  /** Where `text` begins, in bytes of the whole output. */
+  start: number;
+  /** The whole output's size in bytes. */
+  size: number;
+}
+
 export interface ForkOptions {
   /** Where the new session works. */
   cwd: string;
@@ -49,6 +62,8 @@ export interface ForkOptions {
 
 /** Callbacks a driver uses to report to the host. */
 export interface DriverHost {
+  /** Independent computer-use surface; never a conversation image. */
+  preview?(agent: string, nativeId: string, frame: PreviewInput): void;
   /** A session was created or changed outside of any client request (e.g. in the desktop TUI). */
   sessionSeen(agent: string, session: DiscoveredSession): void;
   /**
@@ -65,6 +80,8 @@ export interface DriverHost {
   queue(agent: string, nativeId: string, items: QueuedMessage[]): void;
   /** The agent deleted a session itself (e.g. from its own UI). */
   removed(agent: string, nativeId: string): void;
+  /** The background tasks the host has on record for the session (from `ls_task` updates), to reconcile with what the agent says now. */
+  tasks(agent: string, nativeId: string): BackgroundTask[];
   /** The terminal currently driving a handoff session, if any. */
   desktop(agent: string, nativeId: string): DesktopController | undefined;
   /** Durable per-session values for the driver (survive host restarts). */
@@ -145,6 +162,7 @@ export interface AgentDriver {
   /** Answers the questions of a pending request (an `ls_permission` with `questions`). */
   answerQuestion?(nativeId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>;
   setConfig?(nativeId: string, optionId: string, value: string): Promise<void>;
+  goal?(nativeId: string, change: GoalChange): Promise<SessionGoal | null>;
   /** Drops a message the driver holds in its queue; whether it was there. */
   unqueue?(nativeId: string, clientMessageId: string): boolean;
   /**
@@ -156,6 +174,14 @@ export interface AgentDriver {
   sendQueuedNow?(nativeId: string, clientMessageId?: string): Promise<void>;
   /** Puts the driver's queue in the order of `clientMessageIds`. */
   reorderQueue?(nativeId: string, clientMessageIds: string[]): void;
+  /**
+   * A background task's output, from the agent's own record of it: the text
+   * before byte `before` (the end when undefined), at most `limit` bytes.
+   * Undefined when the driver has none (the host then reads the call's output from the log).
+   */
+  taskOutput?(nativeId: string, taskId: string, before: number | undefined, limit: number): TaskOutput | undefined;
+  /** Stops one background task (one whose record says `canStop`), leaving the turn and the other tasks alone. */
+  stopTask?(nativeId: string, taskId: string): Promise<void>;
 
   // Housekeeping, where the agent keeps its own record. Without these the host
   // archives, names and forgets sessions on its side only.

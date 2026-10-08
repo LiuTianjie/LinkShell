@@ -103,7 +103,7 @@ describe("host + Codex driver (fake app-server)", () => {
     expect(seeded).toMatchObject({ agent: "codex", cwd: "/seed/project", preview: "what is 2+2" });
 
     await phone.client.call("sessions.subscribe", { sessionId: seeded!.id, fromSeq: 0 });
-    await waitFor(() => phone.of(seeded!.id).some((e) => e.update.sessionUpdate === "available_commands_update"));
+    await waitFor(() => phone.of(seeded!.id).some((e) => e.update.sessionUpdate === "available_commands_update" && e.update.availableCommands.some((command) => command.name === "goal")));
     expect(phone.of(seeded!.id).map((e) => e.update.sessionUpdate).slice(0, 4)).toEqual([
       "user_message_chunk",
       "agent_message_chunk",
@@ -111,11 +111,18 @@ describe("host + Codex driver (fake app-server)", () => {
       "ls_status",
     ]);
     // What `/` offers: the commands the app-server can run, then the project's skills that are on.
-    const commands = phone.of(seeded!.id).find((e) => e.update.sessionUpdate === "available_commands_update")?.update;
+    const commands = phone.of(seeded!.id).filter((e) => e.update.sessionUpdate === "available_commands_update").at(-1)?.update;
     expect(commands?.sessionUpdate === "available_commands_update" && commands.availableCommands.map((c) => c.name)).toEqual([
       "compact",
       "review",
       "init",
+      "reload-skills",
+      "status",
+      "mcp",
+      "apps",
+      "ps",
+      "stop",
+      "goal",
       "tidy",
     ]);
     const config = phone.of(seeded!.id).find((e) => e.update.sessionUpdate === "ls_config")?.update;
@@ -136,6 +143,64 @@ describe("host + Codex driver (fake app-server)", () => {
     const user = phone.of(sessionId).find((e) => e.update.sessionUpdate === "user_message_chunk");
     expect(user?.update).toMatchObject({ content: { type: "text", text: "hello world" } });
     expect(host.hub.getSession(sessionId)).toMatchObject({ state: "idle", title: "hello world", preview: "echo: hello world" });
+  });
+
+  it("tracks output after turn completion and stops only one of two identical background commands", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    const sessionId = session.id;
+    await phone.client.call("sessions.subscribe", { sessionId, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId, clientMessageId: "background", content: text("BACKGROUND_FAIL") });
+    await waitFor(() => phone.of(sessionId).some((event) => event.update.sessionUpdate === "ls_task" && event.update.task.state === "failed"));
+    const { tasks } = await phone.client.call("sessions.tasks", { sessionId });
+    expect(tasks).toHaveLength(2);
+    const failed = tasks.find((task) => task.state === "failed")!;
+    const live = tasks.find((task) => task.state === "running")!;
+    expect(failed.exitCode).toBe(3);
+    expect((await phone.client.call("sessions.taskOutput", { sessionId, taskId: failed.id })).text).toBe("initial output\nstarted\nafter turn\n");
+    await phone.client.call("sessions.stopTask", { sessionId, taskId: live.id });
+    expect((await phone.client.call("sessions.tasks", { sessionId })).tasks.find((task) => task.id === live.id)?.state).toBe("stopped");
+    await phone.client.call("sessions.prompt", { sessionId, clientMessageId: "background-two", content: text("BACKGROUND") });
+    await waitFor(() => phone.of(sessionId).filter((event) => event.update.sessionUpdate === "ls_task" && event.update.task.state === "running").length >= 4);
+    const remaining = (await phone.client.call("sessions.tasks", { sessionId })).tasks.filter((task) => task.state === "running");
+    await phone.client.call("sessions.stopTask", { sessionId, taskId: remaining[0]!.id });
+    expect((await phone.client.call("sessions.tasks", { sessionId })).tasks.find((task) => task.id === remaining[1]!.id)?.state).toBe("running");
+    await phone.client.call("sessions.stopTask", { sessionId, taskId: remaining[1]!.id });
+  });
+
+  it("manages goals through RPC and slash commands and restores state for another client", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    const id = session.id;
+    await phone.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "goal-set", content: text("/goal 完成回归验证") });
+    expect((await phone.client.call("sessions.goal", { sessionId: id, change: { action: "get" } })).goal).toMatchObject({ objective: "完成回归验证", status: "active" });
+    await phone.client.call("sessions.goal", { sessionId: id, change: { action: "set", objective: "完成回归验证", tokenBudget: 2000 } });
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "goal-pause", content: text("/goal pause") });
+    expect((await phone.client.call("sessions.goal", { sessionId: id, change: { action: "set", objective: "补齐验证结果", tokenBudget: 2000 } })).goal?.status).toBe("paused");
+    await laptop.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+    expect(laptop.of(id).filter((event) => event.update.sessionUpdate === "ls_goal").at(-1)?.update).toMatchObject({ goal: { status: "paused", tokenBudget: 2000 } });
+    expect((await phone.client.call("sessions.goal", { sessionId: id, change: { action: "resume" } })).goal?.status).toBe("active");
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "goal-clear", content: text("/goal clear") });
+    expect((await phone.client.call("sessions.goal", { sessionId: id, change: { action: "get" } })).goal).toBeNull();
+    await expect(phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "unknown-command", content: text("/does-not-exist") })).rejects.toMatchObject({ appCode: "not_supported" });
+    expect(phone.agentText(id)).toBe("");
+  });
+
+  it("executes native inventory commands without an LLM turn and refreshes skills live", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    const id = session.id;
+    await phone.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+    for (const name of ["status", "mcp", "apps", "ps", "stop", "reload-skills"]) {
+      await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: `inventory-${name}`, content: text(`/${name}`) });
+    }
+    const details = phone.of(id).flatMap((event) => event.update.sessionUpdate === "ls_notice" ? [event.update.detail ?? ""] : []).join("\n");
+    expect(details).toContain("first-server");
+    expect(details).toContain("second-server");
+    expect(details).toContain("Test connector");
+    expect(phone.turnsEnded(id)).toHaveLength(0);
+    const native = await rawCodexClient(host.paths.codexSocket);
+    try { await native.peer.request("test/changeSkills", {}); }
+    finally { native.close(); }
+    await waitFor(() => phone.of(id).some((event) => event.update.sessionUpdate === "available_commands_update" && event.update.availableCommands.some((command) => command.name === "new-skill")));
   });
 
   it("runs /compact, /review and a skill from the phone the way the TUI does", async () => {

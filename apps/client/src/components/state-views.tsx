@@ -1,4 +1,5 @@
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Button } from "./button";

@@ -29,6 +29,8 @@ export interface AcpConnectionOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   clientVersion: string;
+  /** Namespace extensions implemented by this client for this adapter. */
+  clientMeta?: Record<string, unknown>;
   onUpdate: (sessionId: string, update: unknown) => void;
   /** Agent → client requests (session/request_permission, …). */
   onRequest: (method: string, params: unknown, id: RpcId) => unknown;
@@ -69,6 +71,18 @@ export class AcpConnection {
         if (child.stdin?.writable) child.stdin.write(`${text}\n`);
       },
       onNotification: (method, params) => {
+        if (method === "_claude/sdkMessage") {
+          const raw = params as { sessionId?: string; message?: { type?: string; value?: { condition?: string; iterations?: number; last_reason?: string } | null } };
+          if (raw?.sessionId && raw.message?.type === "active_goal") {
+            const value = raw.message.value;
+            if (value === null || typeof value?.condition === "string") this.options.onUpdate(raw.sessionId, {
+              sessionUpdate: "session_info_update", _meta: { jetbrains: { air: { goal: value === null ? null : {
+                objective: value.condition!.trim(), status: "active", iterations: value.iterations, lastReason: value.last_reason,
+              } } } },
+            });
+          }
+          return;
+        }
         if (method !== "session/update") return;
         const payload = params as { sessionId?: unknown; update?: unknown } | undefined;
         if (typeof payload?.sessionId === "string") this.options.onUpdate(payload.sessionId, payload.update);
@@ -119,7 +133,7 @@ export class AcpConnection {
             elicitation: { form: {} },
             // Ask adapters that support it (Claude's) to stream sub-agents' own
             // messages and tool calls, each stamped with the spawning call.
-            _meta: { "subagent-transcript": true },
+            _meta: { "subagent-transcript": true, ...this.options.clientMeta },
           },
           clientInfo: { name: "linkshell", title: "LinkShell", version: this.options.clientVersion },
         },

@@ -1,7 +1,7 @@
 {
   "name": "linkshell",
   "private": true,
-  "version": "0.10.7",
+  "version": "0.10.8",
   "packageManager": "pnpm@10.18.3",
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -10,7 +10,8 @@
       "react-native-enriched-markdown"
     ],
     "patchedDependencies": {
-      "react-native-enriched-markdown@1.0.2": "patches/react-native-enriched-markdown@1.0.2.patch"
+      "react-native-enriched-markdown@1.0.2": "patches/react-native-enriched-markdown@1.0.2.patch",
+      "expo-screen-orientation@57.0.2": "patches/expo-screen-orientation@57.0.2.patch"
     }
   },
   "scripts": {

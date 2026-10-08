@@ -11,7 +11,7 @@ export function openPreview(port: number, title?: string) {
 }
 
 /** A server on the computer: its page title (or address), project and process. */
-export const PortRow = memo(function PortRow({ entry, position }: { entry: PortInfo; position: RowPosition }) {
+export const PortRow = memo(function PortRow({ entry, position, onPress }: { entry: PortInfo; position: RowPosition; onPress?: () => void }) {
   const project = entry.cwd ? baseName(entry.cwd) : undefined;
   const address = `localhost:${entry.port}`;
   return (
@@ -22,7 +22,7 @@ export const PortRow = memo(function PortRow({ entry, position }: { entry: PortI
       project={project}
       detail={entry.process}
       position={position}
-      onPress={() => openPreview(entry.port, entry.title)}
+      onPress={onPress ?? (() => openPreview(entry.port, entry.title))}
       accessibilityLabel={[entry.title ?? address, project, entry.process].filter(Boolean).join("，")}
     />
   );

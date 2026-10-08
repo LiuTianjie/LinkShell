@@ -3,9 +3,14 @@ import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { HeaderActions } from "@/components/header-actions";
+import { ActivityIndicator, FlatList, Platform, Pressable, ScrollView, View } from "react-native";
+import { Text } from "@/components/fixed-text";
+import { usePageInsets } from "@/components/adaptive-page";
+import { AppMenu } from "@/components/app-menu";
+import { Icon } from "@/components/icon";
+import { ContentWidth, useContentWidth } from "@/lib/content-width";
+import { HeaderActions, useHeaderTitleWidth, type HeaderMenuItem } from "@/components/header-actions";
+import { ScrollableState } from "@/components/scrollable-state";
 import { Markdown } from "@/components/markdown";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { useConnection } from "@/lib/client";
@@ -43,12 +48,12 @@ function atLimit(file: Loaded): boolean {
 
 /** The end of a file that goes on: load the next part, or say why there is no more. */
 function MoreRow({ file, state, onPress }: { file: Loaded; state: "idle" | "loading" | "failed"; onPress: () => void }) {
-  const { width } = useWindowDimensions();
+  const width = useContentWidth();
   if (!file.truncated) return null;
   const note = { color: colors.secondaryLabel, textAlign: "center" } as const;
   if (atLimit(file)) {
     return (
-      // As wide as the screen, so it stays in view beside lines that run past it.
+      // Stay within the current pane beside lines that run past it.
       <View style={{ width, paddingHorizontal: 16, paddingVertical: 14 }}>
         <Text style={[type.footnote, note]}>文件较大，只显示前 2 MB（共 {fileSize(file.size)}）</Text>
       </View>
@@ -77,7 +82,8 @@ function MoreRow({ file, state, onPress }: { file: Loaded; state: "idle" | "load
 
 /** Code and logs: line numbers, no wrapping, the linked line highlighted and scrolled to. */
 function CodeView({ text, line, wrap, footer }: { text: string; line?: number; wrap: boolean; footer?: React.ReactElement }) {
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
+  const width = useContentWidth();
   const lines = useMemo(() => text.replace(/\n$/, "").split("\n"), [text]);
   const gutter = String(lines.length).length * 8 + 18;
   const list = useRef<FlatList<string>>(null);
@@ -104,7 +110,7 @@ function CodeView({ text, line, wrap, footer }: { text: string; line?: number; w
         initialNumToRender={80}
         windowSize={15}
         contentContainerStyle={{ paddingVertical: 10, paddingBottom: insets.bottom + 24 }}
-        style={{ minWidth: "100%" }}
+        style={{ minWidth: width, ...(wrap ? { flex: 1 } : {}) }}
         ListFooterComponent={footer}
         renderItem={({ item, index }) => {
           const current = index + 1 === line;
@@ -155,8 +161,15 @@ const WRAPS = /\.(log|txt|out|err|csv|tsv|rst|adoc|org)$|^[^.]+$/i;
 /** A file on the computer, opened from a link in a message or from the project's files. */
 export function FileScreen() {
   const { path, line } = useLocalSearchParams<{ path: string; line?: string }>();
+  return <FileContent key={path} path={path} line={line} />;
+}
+
+/** A pane keeps the same reader mounted while the directory column is hidden. */
+export function FileContent({ path, line, embedded = false, onBack, backLabel = "返回文件列表" }: { path: string; line?: string; embedded?: boolean; onBack?: () => void; backLabel?: string }) {
+  const [paneWidth, setPaneWidth] = useState<number | null>(null);
+  const headerTitleWidth = useHeaderTitleWidth(1);
   const { link } = useConnection();
-  const insets = useSafeAreaInsets();
+  const insets = usePageInsets();
   const [file, setFile] = useState<Loaded | null>(null);
   const [error, setError] = useState<{ message: string; tooLarge: boolean } | null>(null);
   const [more, setMore] = useState<"idle" | "loading" | "failed">("idle");
@@ -213,13 +226,55 @@ export function FileScreen() {
   const directory = path.slice(0, path.length - name.length).replace(/\/$/, "");
   const footer = file ? <MoreRow file={file} state={more} onPress={loadMore} /> : undefined;
 
+  const items: HeaderMenuItem[] = [
+    ...(file?.text !== undefined
+      ? [
+          {
+            title: "复制内容",
+            icon: { sf: "doc.on.doc", md: "content_copy" } as const,
+            onPress: () => {
+              void Clipboard.setStringAsync(file.text ?? "");
+              haptics.success();
+            },
+          },
+        ]
+      : []),
+    ...(!markdown && file?.kind === "text"
+      ? [{ title: wrap ? "不换行" : "自动换行", icon: { sf: "text.word.spacing", md: "wrap_text" } as const, onPress: () => setWrap((value) => !value) }]
+      : []),
+    {
+      title: "复制路径",
+      icon: { sf: "link", md: "link" },
+      onPress: () => {
+        void Clipboard.setStringAsync(path);
+        haptics.success();
+      },
+    },
+  ];
+
   return (
-    <View style={{ flex: 1, backgroundColor: markdown ? colors.plain : colors.code }}>
+    <View onLayout={(event) => setPaneWidth(event.nativeEvent.layout.width)} style={{ flex: 1, minWidth: 0, backgroundColor: markdown ? colors.plain : colors.code }}>
+      <ContentWidth value={paneWidth}>
+      {embedded ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, minHeight: 58, borderBottomWidth: 0.5, borderBottomColor: colors.separator }}>
+          <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={backLabel} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+            <Icon sf="sidebar.left" md="menu_open" size={20} color={colors.accent} />
+          </Pressable>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>{name}</Text>
+            <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>{file ? `${fileSize(file.size)} · ${relativeTime(file.modifiedAt)}` : shortPath(directory)}</Text>
+          </View>
+          <AppMenu actions={items.map((item, index) => ({ id: String(index), title: item.title, image: item.icon.sf }))} onPressAction={({ nativeEvent }) => items[Number(nativeEvent.event)]?.onPress()}>
+            <View accessibilityRole="button" accessibilityLabel="文件操作" style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><Icon sf="ellipsis" md="more_vert" size={20} color={colors.accent} /></View>
+          </AppMenu>
+        </View>
+      ) : <>
+
       <Stack.Screen
         options={{
           title: name,
           headerTitle: () => (
-            <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start", maxWidth: 240 }}>
+            <View style={{ alignItems: Platform.OS === "ios" ? "center" : "flex-start", maxWidth: Math.min(240, headerTitleWidth) }}>
               <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>
                 {name}
               </Text>
@@ -240,50 +295,27 @@ export function FileScreen() {
             key: "more",
             icon: { sf: "ellipsis", md: "more_vert" },
             label: "更多",
-            items: [
-              ...(file?.text !== undefined
-                ? [
-                    {
-                      title: "复制内容",
-                      icon: { sf: "doc.on.doc", md: "content_copy" } as const,
-                      onPress: () => {
-                        void Clipboard.setStringAsync(file.text ?? "");
-                        haptics.success();
-                      },
-                    },
-                  ]
-                : []),
-              ...(!markdown && file?.kind === "text"
-                ? [{ title: wrap ? "不换行" : "自动换行", icon: { sf: "text.word.spacing", md: "wrap_text" } as const, onPress: () => setWrap((value) => !value) }]
-                : []),
-              {
-                title: "复制路径",
-                icon: { sf: "link", md: "link" },
-                onPress: () => {
-                  void Clipboard.setStringAsync(path);
-                  haptics.success();
-                },
-              },
-            ],
+            items,
           },
         ]}
       />
+      </>}
       {error ? (
-        <View style={{ flex: 1, justifyContent: "center" }}>
+        <ScrollableState>
           {error.tooLarge ? (
             <EmptyState icon={{ sf: "doc.badge.ellipsis", md: "draft" }} title={error.message} message="可以在电脑上打开它。" />
           ) : (
             <EmptyState icon={{ sf: "doc.questionmark", md: "draft" }} title="打不开这个文件" message={error.message} />
           )}
-        </View>
+        </ScrollableState>
       ) : !file ? (
-        <LoadingState />
+        <ScrollableState><LoadingState /></ScrollableState>
       ) : file.kind === "image" ? (
         <Image source={{ uri: `data:${file.mimeType};base64,${file.data}` }} style={{ flex: 1, margin: 16 }} contentFit="contain" />
       ) : file.kind === "binary" ? (
-        <View style={{ flex: 1, justifyContent: "center" }}>
+        <ScrollableState>
           <EmptyState icon={{ sf: "doc", md: "description" }} title="这是二进制文件，无法预览" message={fileSize(file.size)} />
-        </View>
+        </ScrollableState>
       ) : markdown ? (
         <LinkBase value={directory}>
           <ScrollView contentContainerStyle={{ paddingVertical: 18, paddingBottom: insets.bottom + 32 }}>
@@ -294,8 +326,9 @@ export function FileScreen() {
           </ScrollView>
         </LinkBase>
       ) : (
-        <CodeView text={file.text ?? ""} line={target} wrap={wrap} footer={footer} />
+        <CodeView key={path} text={file.text ?? ""} line={target} wrap={wrap} footer={footer} />
       )}
+      </ContentWidth>
     </View>
   );
 }

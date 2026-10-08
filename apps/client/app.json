@@ -2,21 +2,23 @@
   "expo": {
     "name": "LinkShell",
     "slug": "linkshell-client",
-    "version": "2.3.5",
-    "orientation": "portrait",
+    "version": "2.3.7",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.bd.linkshell",
       "infoPlist": {
+        "UIViewControllerBasedStatusBarAppearance": true,
+        "EXDevMenuShowFloatingActionButton": false,
         "NSLocalNetworkUsageDescription": "LinkShell connects to the LinkShell host on your computer.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "20305"
+      "buildNumber": "20307"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,13 +29,21 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.bd.linkshell",
-      "versionCode": 20305
+      "versionCode": 20307
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "scheme": "linkshell",
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ],
       [
         "expo-router",
         {

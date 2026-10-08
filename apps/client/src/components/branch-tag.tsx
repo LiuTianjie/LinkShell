@@ -1,4 +1,5 @@
-import { Text, View, type ColorValue } from "react-native";
+import { View, type ColorValue } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { branchLabel } from "@/lib/worktree";
 import { colors } from "@/theme/colors";
 import { Icon } from "./icon";

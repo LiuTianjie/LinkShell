@@ -1,5 +1,6 @@
 import { router } from "expo-router";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
+import { Text } from "@/components/fixed-text";
 import { useClient, useConnection } from "@/lib/client";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";

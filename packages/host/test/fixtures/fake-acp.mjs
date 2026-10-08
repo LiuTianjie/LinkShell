@@ -117,6 +117,7 @@ function requireSession(params) {
   return session;
 }
 function requireOpenArgs(params) {
+  if (process.env.FAKE_ACP_EXPECT_RAW_GOAL === "1" && !params._meta?.claudeCode?.emitRawSDKMessages?.some((filter) => filter.type === "active_goal")) throw { code: -32602, message: "missing Goal SDK filter" };
   if (!Array.isArray(params.mcpServers)) throw { code: -32602, message: "Invalid params: mcpServers is required" };
   if (typeof params.cwd !== "string") throw { code: -32602, message: "Invalid params: cwd is required" };
 }
@@ -131,6 +132,9 @@ async function runPrompt(sessionId, text) {
   if (process.env.FAKE_ACP_FAIL_AUTH === "1") {
     running.delete(sessionId);
     throw { code: -32000, message: "Authentication required: please run /login" };
+  }
+  if (text === "RAW_GOAL") {
+    send({ jsonrpc: "2.0", method: "_claude/sdkMessage", params: { sessionId, message: { type: "active_goal", value: { condition: "完整验证", iterations: 2, last_reason: "还在运行" } } } });
   }
   if (text.includes("ASK")) {
     // Like Claude's adapter presents AskUserQuestion: a form, each question with a field for an answer of the user's own.
@@ -209,7 +213,9 @@ async function runPrompt(sessionId, text) {
 }
 
 const handlers = {
-  initialize: () => ({
+  initialize: (params) => {
+    if (params.clientCapabilities?._meta?.jetbrains?.air) throw { code: -32602, message: "AIR would break native sub-agent metadata" };
+    return ({
     protocolVersion: 1,
     agentCapabilities: {
       loadSession: true,
@@ -218,7 +224,7 @@ const handlers = {
       _meta: steering ? { claudeCode: { promptQueueing: true } } : {},
     },
     agentInfo: { name: "fake-acp", version: "1.2.3" },
-  }),
+  }); },
   "session/new": (params) => {
     requireOpenArgs(params);
     // Grok: no login, no session.
