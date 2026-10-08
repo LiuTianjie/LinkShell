@@ -1,0 +1,44 @@
+[
+  {
+    "@states": [
+      "ic"
+    ],
+    "weights_main:VariantWeightsMixer": {
+      "mix": [
+        {
+          "startValue": null,
+          "endValue": 0,
+          "easeFunction": [
+            0.25,
+            0,
+            0.75,
+            1
+          ],
+          "start": 0,
+          "end": 0.01
+        }
+      ]
+    }
+  },
+  {
+    "@states": [
+      "pt"
+    ],
+    "weights_main:VariantWeightsMixer": {
+      "mix": [
+        {
+          "startValue": null,
+          "endValue": 1,
+          "easeFunction": [
+            0.25,
+            0,
+            0.75,
+            1
+          ],
+          "start": 0,
+          "end": 0.01
+        }
+      ]
+    }
+  }
+]

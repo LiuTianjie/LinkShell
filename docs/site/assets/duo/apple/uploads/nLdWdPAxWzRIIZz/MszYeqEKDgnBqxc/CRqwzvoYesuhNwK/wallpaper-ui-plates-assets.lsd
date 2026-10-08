@@ -1,0 +1,35 @@
+[
+  {
+    "id": "lockscreenUiInner",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/lockscreen_ui_inner-wallpaper_png.avif",
+    "properties": {
+      "colorSpace": "srgb",
+      "flipY": false,
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "lockscreenUiOuter",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/lockscreen_ui_outer-wallpaper_png.avif",
+    "properties": {
+      "colorSpace": "srgb",
+      "flipY": false,
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "wallpaperUiPlatesMap",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/wallpaper-ui-plates-map.lsd",
+    "type": "lsd"
+  }
+]

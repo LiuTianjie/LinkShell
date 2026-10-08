@@ -1,0 +1,1901 @@
+[
+  {
+    "@states": [
+      "PT_SliderClosed"
+    ],
+    "bqjgzNBcRsbXpui": {
+      "rotationX": 0.0,
+      "rotationY": 3.14159,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "YVlLJpMagdlQRKj": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "icRIoUeRPJBhWQe": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 30.0
+    },
+    "aWPLIVPwjLijYXf": {
+      "centerOfInterest": 83.2779,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "PdCqlruJeqUDJGT": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "JpSUNQDozMfDblA": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "ICfPxMhCLeZvhMl": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 28.0
+    },
+    "gwBqaRPWYtbhjSA": {
+      "centerOfInterest": 362.86442,
+      "fov": 36.24372,
+      "focus": 5.0
+    },
+    "JVDwnioPKJgvCwW": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "jpdkPOkGUpKKFXd": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": -0.0,
+      "positionZ": 32.0
+    },
+    "XdkBOQxFfqNzHWm": {
+      "centerOfInterest": 417.54811,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "QuENXqfLwDLiCDd": {
+      "rotationX": 0.09787,
+      "rotationY": -0.85398,
+      "rotationZ": 0.06885,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.18881,
+      "positionY": 3.56061,
+      "positionZ": -0.21628
+    },
+    "EikphKzeAPWSmAa": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "yeUzhuZTiRNOzXf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.60589,
+      "positionZ": 20.88864
+    },
+    "EVMtbARxwNHCjmg": {
+      "rotationX": -0.15763,
+      "rotationY": 0.74623,
+      "rotationZ": 0.10749,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 36.32002,
+      "positionY": 0.32389,
+      "positionZ": 18.33116
+    },
+    "XCHuSFZhVwDSIEF": {
+      "centerOfInterest": 53.3547,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "sBRxeWGsstkhiXi": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 21.0
+    },
+    "QSBbPnwRqqzDVBf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 24.61536
+    },
+    "GIJPqPHYxQsxXIv": {
+      "centerOfInterest": 224.14369,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "AxtOyiwsXbmeRqr": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 26.0
+    },
+    "VJKjTGnvXVuCVQw": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "cqCdloaPiyjrjiT": {
+      "centerOfInterest": 199.52833,
+      "fov": 26.99147,
+      "focus": 5.0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderLanding"
+    ],
+    "bqjgzNBcRsbXpui": {
+      "rotationX": 0.0,
+      "rotationY": 3.14159,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "YVlLJpMagdlQRKj": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "icRIoUeRPJBhWQe": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 30.0
+    },
+    "aWPLIVPwjLijYXf": {
+      "centerOfInterest": 83.2779,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "PdCqlruJeqUDJGT": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "JpSUNQDozMfDblA": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "ICfPxMhCLeZvhMl": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 28.0
+    },
+    "gwBqaRPWYtbhjSA": {
+      "centerOfInterest": 362.86442,
+      "fov": 36.24372,
+      "focus": 5.0
+    },
+    "JVDwnioPKJgvCwW": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "jpdkPOkGUpKKFXd": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": -0.0,
+      "positionZ": 35.0
+    },
+    "XdkBOQxFfqNzHWm": {
+      "centerOfInterest": 417.54811,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "QuENXqfLwDLiCDd": {
+      "rotationX": 0.09787,
+      "rotationY": -0.85398,
+      "rotationZ": 0.06885,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.18881,
+      "positionY": 3.56061,
+      "positionZ": -0.21628
+    },
+    "EikphKzeAPWSmAa": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "yeUzhuZTiRNOzXf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.60589,
+      "positionZ": 20.88864
+    },
+    "EVMtbARxwNHCjmg": {
+      "rotationX": -0.15763,
+      "rotationY": 0.74623,
+      "rotationZ": 0.10749,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 36.32002,
+      "positionY": 0.32389,
+      "positionZ": 18.33116
+    },
+    "XCHuSFZhVwDSIEF": {
+      "centerOfInterest": 53.3547,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "sBRxeWGsstkhiXi": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 21.0
+    },
+    "QSBbPnwRqqzDVBf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 24.61536
+    },
+    "GIJPqPHYxQsxXIv": {
+      "centerOfInterest": 224.14369,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "AxtOyiwsXbmeRqr": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 26.0
+    },
+    "VJKjTGnvXVuCVQw": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "cqCdloaPiyjrjiT": {
+      "centerOfInterest": 199.52833,
+      "fov": 26.99147,
+      "focus": 5.0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderOpen"
+    ],
+    "bqjgzNBcRsbXpui": {
+      "rotationX": 0.0,
+      "rotationY": 3.14159,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "YVlLJpMagdlQRKj": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "icRIoUeRPJBhWQe": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 30.0
+    },
+    "aWPLIVPwjLijYXf": {
+      "centerOfInterest": 83.2779,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "PdCqlruJeqUDJGT": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "JpSUNQDozMfDblA": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "ICfPxMhCLeZvhMl": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 28.0
+    },
+    "gwBqaRPWYtbhjSA": {
+      "centerOfInterest": 362.86442,
+      "fov": 36.24372,
+      "focus": 5.0
+    },
+    "JVDwnioPKJgvCwW": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "jpdkPOkGUpKKFXd": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": -0.0,
+      "positionZ": 42.0
+    },
+    "XdkBOQxFfqNzHWm": {
+      "centerOfInterest": 417.54811,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "QuENXqfLwDLiCDd": {
+      "rotationX": 0.09787,
+      "rotationY": -0.85398,
+      "rotationZ": 0.06885,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.18881,
+      "positionY": 3.56061,
+      "positionZ": -0.21628
+    },
+    "EikphKzeAPWSmAa": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "yeUzhuZTiRNOzXf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.60589,
+      "positionZ": 20.88864
+    },
+    "EVMtbARxwNHCjmg": {
+      "rotationX": -0.15763,
+      "rotationY": 0.74623,
+      "rotationZ": 0.10749,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 36.32002,
+      "positionY": 0.32389,
+      "positionZ": 18.33116
+    },
+    "XCHuSFZhVwDSIEF": {
+      "centerOfInterest": 53.3547,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "sBRxeWGsstkhiXi": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 21.0
+    },
+    "QSBbPnwRqqzDVBf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 24.61536
+    },
+    "GIJPqPHYxQsxXIv": {
+      "centerOfInterest": 224.14369,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "AxtOyiwsXbmeRqr": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 26.0
+    },
+    "VJKjTGnvXVuCVQw": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "cqCdloaPiyjrjiT": {
+      "centerOfInterest": 199.52833,
+      "fov": 26.99147,
+      "focus": 5.0
+    }
+  },
+  {
+    "@states": [
+      "PT_Portrait"
+    ],
+    "bqjgzNBcRsbXpui": {
+      "rotationX": 0.0,
+      "rotationY": 3.14159,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "YVlLJpMagdlQRKj": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "icRIoUeRPJBhWQe": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 30.0
+    },
+    "aWPLIVPwjLijYXf": {
+      "centerOfInterest": 83.2779,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "PdCqlruJeqUDJGT": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "JpSUNQDozMfDblA": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "ICfPxMhCLeZvhMl": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 28.0
+    },
+    "gwBqaRPWYtbhjSA": {
+      "centerOfInterest": 362.86442,
+      "fov": 36.24372,
+      "focus": 5.0
+    },
+    "JVDwnioPKJgvCwW": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "jpdkPOkGUpKKFXd": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": -0.0,
+      "positionZ": 36.0
+    },
+    "XdkBOQxFfqNzHWm": {
+      "centerOfInterest": 417.54811,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "QuENXqfLwDLiCDd": {
+      "rotationX": 0.09787,
+      "rotationY": -0.85398,
+      "rotationZ": 0.06885,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.18881,
+      "positionY": 3.56061,
+      "positionZ": -0.21628
+    },
+    "EikphKzeAPWSmAa": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "yeUzhuZTiRNOzXf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.60589,
+      "positionZ": 20.88864
+    },
+    "EVMtbARxwNHCjmg": {
+      "rotationX": -0.15763,
+      "rotationY": 0.74623,
+      "rotationZ": 0.10749,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 36.32002,
+      "positionY": 0.32389,
+      "positionZ": 18.33116
+    },
+    "XCHuSFZhVwDSIEF": {
+      "centerOfInterest": 53.3547,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "sBRxeWGsstkhiXi": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 21.0
+    },
+    "QSBbPnwRqqzDVBf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 24.61536
+    },
+    "GIJPqPHYxQsxXIv": {
+      "centerOfInterest": 224.14369,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "AxtOyiwsXbmeRqr": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 26.0
+    },
+    "VJKjTGnvXVuCVQw": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "cqCdloaPiyjrjiT": {
+      "centerOfInterest": 199.52833,
+      "fov": 26.99147,
+      "focus": 5.0
+    }
+  },
+  {
+    "@states": [
+      "PT_Laptop"
+    ],
+    "bqjgzNBcRsbXpui": {
+      "rotationX": 0.0,
+      "rotationY": 3.14159,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 0.0
+    },
+    "YVlLJpMagdlQRKj": {
+      "rotationX": -0.05236,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "icRIoUeRPJBhWQe": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": -0.65,
+      "positionZ": 50.0
+    },
+    "aWPLIVPwjLijYXf": {
+      "centerOfInterest": 83.2779,
+      "fov": 23.91317,
+      "focus": 5.0
+    },
+    "PdCqlruJeqUDJGT": {
+      "rotationX": -0.05236,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "JpSUNQDozMfDblA": {
+      "rotationX": -0.05236,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "ICfPxMhCLeZvhMl": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.8,
+      "positionZ": 39.25
+    },
+    "gwBqaRPWYtbhjSA": {
+      "centerOfInterest": 362.86442,
+      "fov": 23.91317,
+      "focus": 5.0
+    },
+    "JVDwnioPKJgvCwW": {
+      "rotationX": 0.0,
+      "rotationY": 1.56905,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "jpdkPOkGUpKKFXd": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": -0.75,
+      "positionZ": 48.0
+    },
+    "XdkBOQxFfqNzHWm": {
+      "centerOfInterest": 417.54811,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "QuENXqfLwDLiCDd": {
+      "rotationX": 0.09787,
+      "rotationY": -0.85398,
+      "rotationZ": 0.06885,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.18881,
+      "positionY": 3.56061,
+      "positionZ": -0.21628
+    },
+    "EikphKzeAPWSmAa": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "yeUzhuZTiRNOzXf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.60589,
+      "positionZ": 20.88864
+    },
+    "EVMtbARxwNHCjmg": {
+      "rotationX": -0.15763,
+      "rotationY": 0.74623,
+      "rotationZ": 0.10749,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 36.32002,
+      "positionY": 0.32389,
+      "positionZ": 18.33116
+    },
+    "XCHuSFZhVwDSIEF": {
+      "centerOfInterest": 53.3547,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "sBRxeWGsstkhiXi": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 21.0
+    },
+    "QSBbPnwRqqzDVBf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 24.61536
+    },
+    "GIJPqPHYxQsxXIv": {
+      "centerOfInterest": 224.14369,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "AxtOyiwsXbmeRqr": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 26.0
+    },
+    "VJKjTGnvXVuCVQw": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "cqCdloaPiyjrjiT": {
+      "centerOfInterest": 199.52833,
+      "fov": 26.99147,
+      "focus": 5.0
+    }
+  },
+  {
+    "@states": [
+      "PT_Tent"
+    ],
+    "bqjgzNBcRsbXpui": {
+      "rotationX": 0.0,
+      "rotationY": 3.14159,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 0.0
+    },
+    "YVlLJpMagdlQRKj": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "icRIoUeRPJBhWQe": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.25,
+      "positionZ": 115.0
+    },
+    "aWPLIVPwjLijYXf": {
+      "centerOfInterest": 83.2779,
+      "fov": 10.28553,
+      "focus": 5.0
+    },
+    "PdCqlruJeqUDJGT": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "JpSUNQDozMfDblA": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "ICfPxMhCLeZvhMl": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.25,
+      "positionZ": 100.0
+    },
+    "gwBqaRPWYtbhjSA": {
+      "centerOfInterest": 362.86442,
+      "fov": 10.28553,
+      "focus": 5.0
+    },
+    "JVDwnioPKJgvCwW": {
+      "rotationX": 0.0,
+      "rotationY": -0.61087,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "jpdkPOkGUpKKFXd": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.25,
+      "positionZ": 132.0
+    },
+    "XdkBOQxFfqNzHWm": {
+      "centerOfInterest": 417.54811,
+      "fov": 10.28553,
+      "focus": 5.0
+    },
+    "QuENXqfLwDLiCDd": {
+      "rotationX": 0.09787,
+      "rotationY": -0.85398,
+      "rotationZ": 0.06885,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.18881,
+      "positionY": 3.56061,
+      "positionZ": -0.21628
+    },
+    "EikphKzeAPWSmAa": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "yeUzhuZTiRNOzXf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.60589,
+      "positionZ": 20.88864
+    },
+    "EVMtbARxwNHCjmg": {
+      "rotationX": -0.15763,
+      "rotationY": 0.74623,
+      "rotationZ": 0.10749,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 36.32002,
+      "positionY": 0.32389,
+      "positionZ": 18.33116
+    },
+    "XCHuSFZhVwDSIEF": {
+      "centerOfInterest": 53.3547,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "sBRxeWGsstkhiXi": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 21.0
+    },
+    "QSBbPnwRqqzDVBf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 24.61536
+    },
+    "GIJPqPHYxQsxXIv": {
+      "centerOfInterest": 224.14369,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "AxtOyiwsXbmeRqr": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 26.0
+    },
+    "VJKjTGnvXVuCVQw": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "cqCdloaPiyjrjiT": {
+      "centerOfInterest": 199.52833,
+      "fov": 26.99147,
+      "focus": 5.0
+    }
+  },
+  {
+    "@states": [
+      "PT_Durability"
+    ],
+    "bqjgzNBcRsbXpui": {
+      "rotationX": -0.0,
+      "rotationY": 3.14159,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 0.0
+    },
+    "YVlLJpMagdlQRKj": {
+      "rotationX": -0.43633,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "icRIoUeRPJBhWQe": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.7,
+      "positionZ": 170.0
+    },
+    "aWPLIVPwjLijYXf": {
+      "centerOfInterest": 83.2779,
+      "fov": 3.43672,
+      "focus": 5.0
+    },
+    "PdCqlruJeqUDJGT": {
+      "rotationX": -0.43633,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "JpSUNQDozMfDblA": {
+      "rotationX": -0.43633,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "ICfPxMhCLeZvhMl": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.9,
+      "positionZ": 155.0
+    },
+    "gwBqaRPWYtbhjSA": {
+      "centerOfInterest": 362.86442,
+      "fov": 3.43672,
+      "focus": 5.0
+    },
+    "JVDwnioPKJgvCwW": {
+      "rotationX": 0.0,
+      "rotationY": -1.5708,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "jpdkPOkGUpKKFXd": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 1.0,
+      "positionZ": 284.0
+    },
+    "XdkBOQxFfqNzHWm": {
+      "centerOfInterest": 417.54811,
+      "fov": 3.43672,
+      "focus": 5.0
+    },
+    "QuENXqfLwDLiCDd": {
+      "rotationX": 0.09787,
+      "rotationY": -0.85398,
+      "rotationZ": 0.06885,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.18881,
+      "positionY": 3.56061,
+      "positionZ": -0.21628
+    },
+    "EikphKzeAPWSmAa": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "yeUzhuZTiRNOzXf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.60589,
+      "positionZ": 20.88864
+    },
+    "EVMtbARxwNHCjmg": {
+      "rotationX": -0.15763,
+      "rotationY": 0.74623,
+      "rotationZ": 0.10749,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 36.32002,
+      "positionY": 0.32389,
+      "positionZ": 18.33116
+    },
+    "XCHuSFZhVwDSIEF": {
+      "centerOfInterest": 53.3547,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "sBRxeWGsstkhiXi": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 21.0
+    },
+    "QSBbPnwRqqzDVBf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 24.61536
+    },
+    "GIJPqPHYxQsxXIv": {
+      "centerOfInterest": 224.14369,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "AxtOyiwsXbmeRqr": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 26.0
+    },
+    "VJKjTGnvXVuCVQw": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "cqCdloaPiyjrjiT": {
+      "centerOfInterest": 199.52833,
+      "fov": 26.99147,
+      "focus": 5.0
+    }
+  },
+  {
+    "@states": [
+      "PT_Closed"
+    ],
+    "bqjgzNBcRsbXpui": {
+      "rotationX": 0.0,
+      "rotationY": 3.14159,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "YVlLJpMagdlQRKj": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "icRIoUeRPJBhWQe": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 30.0
+    },
+    "aWPLIVPwjLijYXf": {
+      "centerOfInterest": 83.2779,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "PdCqlruJeqUDJGT": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "JpSUNQDozMfDblA": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "ICfPxMhCLeZvhMl": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 28.0
+    },
+    "gwBqaRPWYtbhjSA": {
+      "centerOfInterest": 362.86442,
+      "fov": 36.24372,
+      "focus": 5.0
+    },
+    "JVDwnioPKJgvCwW": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "jpdkPOkGUpKKFXd": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": -0.0,
+      "positionZ": 32.0
+    },
+    "XdkBOQxFfqNzHWm": {
+      "centerOfInterest": 417.54811,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "QuENXqfLwDLiCDd": {
+      "rotationX": 0.09787,
+      "rotationY": -0.85398,
+      "rotationZ": 0.06885,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.18881,
+      "positionY": 3.56061,
+      "positionZ": -0.21628
+    },
+    "EikphKzeAPWSmAa": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "yeUzhuZTiRNOzXf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.60589,
+      "positionZ": 20.88864
+    },
+    "EVMtbARxwNHCjmg": {
+      "rotationX": -0.15763,
+      "rotationY": 0.74623,
+      "rotationZ": 0.10749,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 36.32002,
+      "positionY": 0.32389,
+      "positionZ": 18.33116
+    },
+    "XCHuSFZhVwDSIEF": {
+      "centerOfInterest": 53.3547,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "sBRxeWGsstkhiXi": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 21.0
+    },
+    "QSBbPnwRqqzDVBf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 24.61536
+    },
+    "GIJPqPHYxQsxXIv": {
+      "centerOfInterest": 224.14369,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "AxtOyiwsXbmeRqr": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 26.0
+    },
+    "VJKjTGnvXVuCVQw": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "cqCdloaPiyjrjiT": {
+      "centerOfInterest": 199.52833,
+      "fov": 26.99147,
+      "focus": 5.0
+    }
+  },
+  {
+    "@states": [
+      "PT_Landscape"
+    ],
+    "bqjgzNBcRsbXpui": {
+      "rotationX": 0.0,
+      "rotationY": 3.14159,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "YVlLJpMagdlQRKj": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "icRIoUeRPJBhWQe": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 30.0
+    },
+    "aWPLIVPwjLijYXf": {
+      "centerOfInterest": 83.2779,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "PdCqlruJeqUDJGT": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "JpSUNQDozMfDblA": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "ICfPxMhCLeZvhMl": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 28.0
+    },
+    "gwBqaRPWYtbhjSA": {
+      "centerOfInterest": 362.86442,
+      "fov": 36.24372,
+      "focus": 5.0
+    },
+    "JVDwnioPKJgvCwW": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "jpdkPOkGUpKKFXd": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": -0.0,
+      "positionZ": 42.0
+    },
+    "XdkBOQxFfqNzHWm": {
+      "centerOfInterest": 417.54811,
+      "fov": 39.59775,
+      "focus": 5.0
+    },
+    "QuENXqfLwDLiCDd": {
+      "rotationX": 0.09787,
+      "rotationY": -0.85398,
+      "rotationZ": 0.06885,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.18881,
+      "positionY": 3.56061,
+      "positionZ": -0.21628
+    },
+    "EikphKzeAPWSmAa": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "yeUzhuZTiRNOzXf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 2.60589,
+      "positionZ": 20.88864
+    },
+    "EVMtbARxwNHCjmg": {
+      "rotationX": -0.15763,
+      "rotationY": 0.74623,
+      "rotationZ": 0.10749,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 36.32002,
+      "positionY": 0.32389,
+      "positionZ": 18.33116
+    },
+    "XCHuSFZhVwDSIEF": {
+      "centerOfInterest": 53.3547,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "sBRxeWGsstkhiXi": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 21.0
+    },
+    "QSBbPnwRqqzDVBf": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": -0.0,
+      "positionZ": 24.61536
+    },
+    "GIJPqPHYxQsxXIv": {
+      "centerOfInterest": 224.14369,
+      "fov": 26.99147,
+      "focus": 5.0
+    },
+    "AxtOyiwsXbmeRqr": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": -0.0,
+      "positionY": 0.0,
+      "positionZ": 26.0
+    },
+    "VJKjTGnvXVuCVQw": {
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "rotationZ": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "positionX": 0.0,
+      "positionY": 0.0,
+      "positionZ": 0.0
+    },
+    "cqCdloaPiyjrjiT": {
+      "centerOfInterest": 199.52833,
+      "fov": 26.99147,
+      "focus": 5.0
+    }
+  }
+]

@@ -87,6 +87,7 @@
       root.classList.add('js');
     })();
   </script>
+  <link rel="stylesheet" href="assets/duo/viewer.css?v=20261008-poster-fit" />
   <style>
     :root {
       --bg: #050607;
@@ -412,8 +413,28 @@
             <p><span lang="zh">LinkShell 2.3.7 为 iPhone Duo 适配了会话、输入和工具面板。展开时，把对话与改动或预览放在一起；折叠时，界面根据可用区域重新安排内容，继续当前会话。</span><span lang="en">LinkShell 2.3.7 adapts its conversation, composer and tool panels to iPhone Duo. Expanded, see chat beside changes or a preview. Folded, the interface respects the available screen regions while you continue the same session.</span></p>
           </div>
           <figure class="duo-figure">
-            <a href="assets/promo/iphone-duo-expanded-dark.png" target="_blank" rel="noopener"><img src="assets/promo/iphone-duo-expanded-dark.png" width="2853" height="2007" loading="lazy" alt="LinkShell 夜间模式实际截图：iPhone Duo 展开时的会话与代码改动双栏 / LinkShell dark-mode screenshot: chat and code changes side by side on iPhone Duo" /></a>
-            <figcaption><span lang="zh">App 实际运行截图 · iPhone Duo 模拟器 · 夜间模式。<a href="docs/#d-iphone-duo">查看适配说明 ↗</a></span><span lang="en">Running app screenshot · iPhone Duo simulator · Dark mode. <a href="docs/#d-iphone-duo">How it works ↗</a></span></figcaption>
+            <div class="duo-viewer" id="duo-viewer" data-state="idle">
+              <div class="duo-controls" role="group" aria-label="iPhone Duo">
+                <p class="duo-controls-title"><span lang="zh">换个角度看看</span><span lang="en">Take a closer look</span></p>
+                  <button type="button" data-pose="PT_Landscape" aria-pressed="true" disabled><span lang="zh">横屏</span><span lang="en">Wide</span></button>
+                  <button type="button" data-pose="PT_Portrait" aria-pressed="false" disabled><span lang="zh">竖屏</span><span lang="en">Tall</span></button>
+                  <button type="button" data-pose="PT_Closed" aria-pressed="false" disabled><span lang="zh">闭合</span><span lang="en">Closed</span></button>
+                  <button type="button" data-pose="PT_Laptop" aria-pressed="false" disabled><span lang="zh">坐立</span><span lang="en">Seated</span></button>
+                  <button type="button" data-pose="PT_Tent" aria-pressed="false" disabled><span lang="zh">站立</span><span lang="en">Standing</span></button>
+                <label class="duo-fold" for="duo-fold">
+                  <span class="duo-fold-head"><span lang="zh">折叠程度</span><span lang="en">Fold</span><output id="duo-angle">100%</output></span>
+                  <input id="duo-fold" class="control-detent-slider--input" data-slider-aria='{"0":"Closed","1":"Open","default":"Fold"}' type="range" min="0" max="1" value="1" step="0.001" disabled />
+                </label>
+              </div>
+              <div class="duo-stage" id="duo-stage" role="group" aria-label="iPhone Duo 3D · LinkShell">
+                <div class="duo-poster">
+                  <img src="assets/promo/iphone-duo-expanded-dark.png" width="2853" height="2007" loading="lazy" alt="LinkShell 夜间模式实际截图：iPhone Duo 展开时的会话与代码改动双栏 / LinkShell dark-mode screenshot: chat and code changes side by side on iPhone Duo" />
+                  <button class="duo-start" type="button"><span lang="zh">打开 3D 预览</span><span lang="en">Explore in 3D</span></button>
+                </div>
+              </div>
+              <p class="duo-hint" id="duo-status" aria-live="polite"><span lang="zh">点选姿态，拖动模型自由旋转</span><span lang="en">Choose a pose. Drag to rotate.</span></p>
+            </div>
+            <figcaption><span lang="zh">屏幕内容来自 App 实际运行截图 · iPhone Duo 模拟器。</span><span lang="en">Screen content captured from the running app · iPhone Duo simulator.</span></figcaption>
           </figure>
           <ul class="duo-points">
             <li><b><span lang="zh">对话与工具并排</span><span lang="en">Chat beside your tools</span></b><p><span lang="zh">空间足够时，直接在会话旁看改动或预览。</span><span lang="en">With enough room, review changes or a preview beside the conversation.</span></p></li>
@@ -793,6 +814,7 @@
     </div>
   </footer>
 
+  <script src="assets/duo/viewer.js?v=20261008-large-model" defer></script>
   <script>
     // ── Language ──
     let currentLang = 'zh';

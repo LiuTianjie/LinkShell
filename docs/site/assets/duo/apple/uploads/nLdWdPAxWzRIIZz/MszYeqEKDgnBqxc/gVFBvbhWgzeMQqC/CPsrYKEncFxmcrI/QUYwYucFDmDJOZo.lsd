@@ -1,0 +1,316 @@
+[
+  {
+    "@states": [
+      "back",
+      "backLeft",
+      "left",
+      "frontLeft",
+      "front",
+      "frontRight",
+      "right",
+      "backRight"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "brightness": 0,
+      "wipeFactor": -1.2,
+      "wipeOffset": 1.2
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 1.2,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "back_Open",
+      "backLeft_Open",
+      "left_Open",
+      "frontLeft_Open",
+      "front_Open",
+      "frontRight_Open",
+      "right_Open",
+      "backRight_Open"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "brightness": 1,
+      "wipeFactor": -1.2,
+      "wipeOffset": 1.2
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderClosed"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "wipeFactor": -1.2,
+      "wipeOffset": 1.2
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 1.2,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderLanding"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "wipeFactor": -1.2,
+      "wipeOffset": 1.2
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 1.2,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderOpen"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "wipeFactor": -1.2,
+      "wipeOffset": 1.2
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 1.2,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_Portrait"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_Laptop"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_Tent"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_Durability"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_Closed"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_Landscape"
+    ],
+    "pkUBCyCvYJYVzTr:Wallpaper": {},
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wallpaper": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "wipeFactor": 0,
+      "wipeOffset": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderClosed",
+      "PT_SliderLanding"
+    ],
+    "pkUBCyCvYJYVzTr:Wipe": {}
+  },
+  {
+    "@states": [
+      "PT_SliderOpen",
+      "PT_SliderPortrait"
+    ],
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "brightness": 1
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderClosed"
+    ],
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "brightness": 0.15
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {}
+  },
+  {
+    "@states": [
+      "PT_SliderLanding"
+    ],
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "brightness": 0.25
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {}
+  },
+  {
+    "@states": [
+      "PT_SliderClosed",
+      "PT_SliderLanding",
+      "PT_SliderOpen"
+    ],
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "transitionToCameraRest": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderClosed",
+      "PT_SliderLanding"
+    ],
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "transitionToCameraRest": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_Closed",
+      "PT_Portrait",
+      "PT_Landscape",
+      "PT_Laptop",
+      "PT_Tent",
+      "PT_Durability"
+    ],
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "transitionToCameraRest": 1
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "transitionToCameraRest": 1
+    }
+  },
+  {
+    "@states": [
+      "PT_Laptop"
+    ],
+    "pkUBCyCvYJYVzTr:Wipe": {},
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {}
+  },
+  {
+    "@states": [
+      "PT_SliderOpen"
+    ],
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {}
+  },
+  {
+    "@states": [
+      "PT_SliderClosed",
+      "PT_SliderLanding",
+      "PT_SliderOpen"
+    ],
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "screenTexture_usd_shd_lts": 0,
+      "transitionToCameraRest": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_Closed",
+      "PT_Portrait",
+      "PT_Landscape",
+      "PT_Laptop",
+      "PT_Tent",
+      "PT_Durability",
+      "back",
+      "backLeft",
+      "left",
+      "frontLeft",
+      "front",
+      "frontRight",
+      "right",
+      "backRight",
+      "back_Open",
+      "backLeft_Open",
+      "left_Open",
+      "frontLeft_Open",
+      "front_Open",
+      "frontRight_Open",
+      "right_Open",
+      "backRight_Open"
+    ],
+    "pkUBCyCvYJYVzTr:Wipe": {
+      "transitionToCameraRest": 1
+    },
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "transitionToCameraRest": 1
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderOpen"
+    ],
+    "screenTextureOuterDisplay_usd_shd_lts:Wipe": {
+      "transitionToCameraRest": 1
+    }
+  }
+]

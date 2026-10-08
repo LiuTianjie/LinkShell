@@ -1,0 +1,102 @@
+{
+  "PT_SliderClosed": [
+    "wp",
+    "wp"
+  ],
+  "PT_SliderLanding": [
+    "wp",
+    "wp"
+  ],
+  "PT_SliderOpen": [
+    "wp",
+    "wp"
+  ],
+  "PT_Closed": [
+    "chXcmJILZBdVbSF",
+    "NqqQPGHpHcQDhJp"
+  ],
+  "PT_Portrait": [
+    "zDlNKMoTVfSQJgX",
+    "chXcmJILZBdVbSF"
+  ],
+  "PT_Landscape": [
+    "nQNNCnZOZSsSiUe",
+    "chXcmJILZBdVbSF"
+  ],
+  "PT_Laptop": [
+    "GbTVLjkwBEDPeJt",
+    "chXcmJILZBdVbSF"
+  ],
+  "PT_Tent": [
+    "chXcmJILZBdVbSF",
+    "NOffPBTJaXSVsiS"
+  ],
+  "PT_Durability": [
+    "chXcmJILZBdVbSF",
+    "aHbysYyIDlgYobQ"
+  ],
+  "left": [
+    "wp",
+    "wp"
+  ],
+  "left_Open": [
+    "wp",
+    "wp"
+  ],
+  "right": [
+    "wp",
+    "wp"
+  ],
+  "right_Open": [
+    "wp",
+    "wp"
+  ],
+  "front": [
+    "wp",
+    "wp"
+  ],
+  "front_Open": [
+    "wp",
+    "wp"
+  ],
+  "frontRight": [
+    "wp",
+    "wp"
+  ],
+  "frontRight_Open": [
+    "wp",
+    "wp"
+  ],
+  "frontLeft": [
+    "wp",
+    "wp"
+  ],
+  "frontLeft_Open": [
+    "wp",
+    "wp"
+  ],
+  "back": [
+    "wp",
+    "wp"
+  ],
+  "back_Open": [
+    "wp",
+    "wp"
+  ],
+  "backRight": [
+    "wp",
+    "wp"
+  ],
+  "backRight_Open": [
+    "wp",
+    "wp"
+  ],
+  "backLeft": [
+    "wp",
+    "wp"
+  ],
+  "backLeft_Open": [
+    "wp",
+    "wp"
+  ]
+}

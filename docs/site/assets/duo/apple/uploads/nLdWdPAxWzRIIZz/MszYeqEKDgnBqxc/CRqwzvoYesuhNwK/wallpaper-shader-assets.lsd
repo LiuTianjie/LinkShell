@@ -1,0 +1,174 @@
+[
+  {
+    "id": "sky_color_ramp_lut",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/sky_color_ramp_lut-wallpaper.exr",
+    "properties": {
+      "colorSpace": "srgb-linear",
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "sky_3k_cropped",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/sky_3k_cropped-wallpaper_png.avif",
+    "properties": {
+      "colorSpace": "srgb",
+      "flipY": false,
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1002,
+      "wrapT": 1002
+    },
+    "type": "texture"
+  },
+  {
+    "id": "stars_color_ramp_lut",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/stars_color_ramp_lut-wallpaper.exr",
+    "properties": {
+      "colorSpace": "srgb-linear",
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "hills_color_ramp_lut",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/hills_color_ramp_lut-wallpaper.exr",
+    "properties": {
+      "colorSpace": "srgb-linear",
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "hills_curve_float_lut",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/hills_curve_float_lut-wallpaper.exr",
+    "properties": {
+      "colorSpace": "srgb-linear",
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "hash",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/hash-wallpaper.exr",
+    "properties": {
+      "colorSpace": "srgb-linear",
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1000,
+      "wrapT": 1000
+    },
+    "type": "texture"
+  },
+  {
+    "id": "hills_5k_cropped",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/hills_5k_cropped-wallpaper_png.avif",
+    "properties": {
+      "colorSpace": "srgb",
+      "flipY": false,
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "dune_far_color_ramp_lut",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/dune_far_color_ramp_lut-wallpaper.exr",
+    "properties": {
+      "colorSpace": "srgb-linear",
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "dune_far_3k_cropped",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/dune_far_3k_cropped-wallpaper_png.avif",
+    "properties": {
+      "colorSpace": "srgb",
+      "flipY": false,
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "dune_close_color_ramp_lut",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/dune_close_color_ramp_lut-wallpaper.exr",
+    "properties": {
+      "colorSpace": "srgb-linear",
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "dune_close_curve_float_lut",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/dune_close_curve_float_lut-wallpaper.exr",
+    "properties": {
+      "colorSpace": "srgb-linear",
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1001,
+      "wrapT": 1001
+    },
+    "type": "texture"
+  },
+  {
+    "id": "dune_close_3k_cropped",
+    "path": "/uploads/nLdWdPAxWzRIIZz/MszYeqEKDgnBqxc/CRqwzvoYesuhNwK/dune_close_3k_cropped-wallpaper_png.avif",
+    "properties": {
+      "colorSpace": "srgb",
+      "flipY": false,
+      "generateMipmaps": false,
+      "magFilter": 1006,
+      "mapping": 300,
+      "minFilter": 1006,
+      "wrapS": 1002,
+      "wrapT": 1002
+    },
+    "type": "texture"
+  }
+]

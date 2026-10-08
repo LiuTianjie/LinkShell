@@ -1,0 +1,20 @@
+[
+  {
+    "@states": [
+      "lgVjhXPTPlhJHWH"
+    ],
+    "clampWhenFinished": false,
+    "delay": 0.0,
+    "loop": 2201,
+    "name": "Intro"
+  },
+  {
+    "@states": [
+      "BUUqNguOBiRBCcI"
+    ],
+    "clampWhenFinished": false,
+    "delay": 0.0,
+    "loop": 2201,
+    "name": "Slider"
+  }
+]

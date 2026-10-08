@@ -1,0 +1,37 @@
+[
+  {
+    "@states": [
+      "back",
+      "backLeft",
+      "left",
+      "frontLeft",
+      "front",
+      "frontRight",
+      "right",
+      "backRight"
+    ],
+    "PmXBCDJLdsHMqUk:CameraMixerOffset": {
+      "mix": 0,
+      "offsetX": 0,
+      "offsetY": 0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderClosed",
+      "PT_SliderLanding",
+      "PT_SliderOpen",
+      "PT_Landscape",
+      "PT_Portrait",
+      "PT_Closed",
+      "PT_Laptop",
+      "PT_Tent",
+      "PT_Durability"
+    ],
+    "PmXBCDJLdsHMqUk:CameraMixerOffset": {
+      "mix": 1,
+      "offsetX": 0,
+      "offsetY": 0.156
+    }
+  }
+]

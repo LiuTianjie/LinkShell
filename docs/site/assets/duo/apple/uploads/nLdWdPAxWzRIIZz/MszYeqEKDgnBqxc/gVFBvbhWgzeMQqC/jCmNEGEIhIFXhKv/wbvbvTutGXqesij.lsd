@@ -1,0 +1,843 @@
+[
+  {
+    "@states": [
+      "right"
+    ],
+    "MZiYIrcFSqDDBWG:AoMap": {
+      "aoMap": "NPiVFNkrgBPKGvj",
+      "aoMapIntensity": 0.0
+    },
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.84
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.93
+    },
+    "ZoizrWFccovSVQl:AoMap": {
+      "aoMap": "KRcrYydTIJZPkJj",
+      "aoMapIntensity": 0.0
+    },
+    "OwqobJiNTlvAFyj:Exposure": {
+      "exposure": -0.6
+    },
+    "xHXZphlQnPqfbqz:Exposure": {
+      "exposure": 3.601
+    },
+    "XVBEVNwvEGGqQcm:Exposure": {
+      "exposure": 0.67
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 0.6
+    },
+    "lFNhyYOSsoUwnXK:Exposure": {
+      "exposure": 0.01
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": -2.7,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "right_Open"
+    ],
+    "MZiYIrcFSqDDBWG:AoMap": {
+      "aoMap": "NPiVFNkrgBPKGvj",
+      "aoMapIntensity": 0.0
+    },
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.84
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.93
+    },
+    "ZoizrWFccovSVQl:AoMap": {
+      "aoMap": "KRcrYydTIJZPkJj",
+      "aoMapIntensity": 0.0
+    },
+    "OwqobJiNTlvAFyj:Exposure": {
+      "exposure": -0.6
+    },
+    "xHXZphlQnPqfbqz:Exposure": {
+      "exposure": 3.601
+    },
+    "XVBEVNwvEGGqQcm:Exposure": {
+      "exposure": 0.67
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 0.6
+    },
+    "lFNhyYOSsoUwnXK:Exposure": {
+      "exposure": 0.01
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": -2.7,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "backRight"
+    ],
+    "MZiYIrcFSqDDBWG:AoMap": {
+      "aoMap": "NPiVFNkrgBPKGvj",
+      "aoMapIntensity": 0.75
+    },
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.0
+    },
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "JWGvWwQrhTkdFxv",
+      "aoMapIntensity": 0.99
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "JWGvWwQrhTkdFxv",
+      "aoMapIntensity": 0.9
+    },
+    "ZoizrWFccovSVQl:AoMap": {
+      "aoMap": "KRcrYydTIJZPkJj",
+      "aoMapIntensity": 0.25
+    },
+    "MRYUabTVLFtJJce:Exposure": {
+      "exposure": -0.55
+    },
+    "ZoizrWFccovSVQl:Exposure": {
+      "exposure": -0.33
+    },
+    "xHXZphlQnPqfbqz:Exposure": {
+      "exposure": 2.2
+    },
+    "XVBEVNwvEGGqQcm:Exposure": {
+      "exposure": 0.67
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 0.6
+    },
+    "ZgMnqnyPATyacDv:Exposure": {
+      "exposure": -0.65
+    },
+    "OwqobJiNTlvAFyj:Exposure": {
+      "exposure": 1.3
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": -1.7,
+      "envMapIntensity": 1.0
+    },
+    "vtjueXlfRBsZEPj:Environment": {
+      "envMapRotationY": 1.98,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "backRight_Open"
+    ],
+    "MZiYIrcFSqDDBWG:AoMap": {
+      "aoMap": "NPiVFNkrgBPKGvj",
+      "aoMapIntensity": 0.3
+    },
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.0
+    },
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "JWGvWwQrhTkdFxv",
+      "aoMapIntensity": 0.0
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.0
+    },
+    "ZoizrWFccovSVQl:AoMap": {
+      "aoMap": "KRcrYydTIJZPkJj",
+      "aoMapIntensity": 0.24
+    },
+    "MRYUabTVLFtJJce:Exposure": {
+      "exposure": -0.7
+    },
+    "ZoizrWFccovSVQl:Exposure": {
+      "exposure": -0.33
+    },
+    "xHXZphlQnPqfbqz:Exposure": {
+      "exposure": 2.2
+    },
+    "XVBEVNwvEGGqQcm:Exposure": {
+      "exposure": 0.67
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 0.6
+    },
+    "ZgMnqnyPATyacDv:Exposure": {
+      "exposure": -0.65
+    },
+    "OwqobJiNTlvAFyj:Exposure": {
+      "exposure": 1.6
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": -1.7,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "back",
+      "back_Open"
+    ],
+    "MZiYIrcFSqDDBWG:AoMap": {
+      "aoMap": "QaYyFlpOMuOlTuL",
+      "aoMapIntensity": 0.7
+    },
+    "ZoizrWFccovSVQl:AoMap": {
+      "aoMap": "sLRETQoEwUnGPFa",
+      "aoMapIntensity": 0.9
+    },
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.51
+    },
+    "JRALZsZxDTbYuSh:LightMap": {
+      "lightMap": "uERgyIFvhnxFrhD",
+      "lightMapIntensity": 30.0
+    },
+    "iTNCmaWpishTbty:AoMap": {
+      "aoMap": "bCLtbSKTDmkehrH",
+      "aoMapIntensity": 0.01
+    },
+    "ZoizrWFccovSVQl:Exposure": {
+      "exposure": -0.33
+    },
+    "cUdgsgllIYGDtIW:Exposure": {
+      "exposure": -1.0
+    },
+    "MRYUabTVLFtJJce:Exposure": {
+      "exposure": -0.7
+    },
+    "RpkZhagqzTewXLC:Transparency": {
+      "opacity": 0.5
+    },
+    "xHXZphlQnPqfbqz:Exposure": {
+      "exposure": 1.601
+    },
+    "XVBEVNwvEGGqQcm:Exposure": {
+      "exposure": 1.0
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 0.6
+    },
+    "ZgMnqnyPATyacDv:Exposure": {
+      "exposure": -0.65
+    },
+    "mtroOsiABnVpBDZ:Exposure": {
+      "exposure": 1.5
+    },
+    "OwqobJiNTlvAFyj:Exposure": {
+      "exposure": 0.3
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": -0.6,
+      "envMapIntensity": 1.0
+    },
+    "vtjueXlfRBsZEPj:Environment": {
+      "envMapRotationY": 1.175,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "backLeft"
+    ],
+    "MZiYIrcFSqDDBWG:AoMap": {
+      "aoMap": "NPiVFNkrgBPKGvj",
+      "aoMapIntensity": 0.7
+    },
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.6
+    },
+    "ZoizrWFccovSVQl:AoMap": {
+      "aoMap": "KRcrYydTIJZPkJj",
+      "aoMapIntensity": 0.2
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.0
+    },
+    "ZoizrWFccovSVQl:Exposure": {
+      "exposure": -0.13
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.8
+    },
+    "cUdgsgllIYGDtIW:Exposure": {
+      "exposure": 0.0
+    },
+    "MRYUabTVLFtJJce:Exposure": {
+      "exposure": -0.55
+    },
+    "xHXZphlQnPqfbqz:Exposure": {
+      "exposure": 1.0
+    },
+    "XVBEVNwvEGGqQcm:Exposure": {
+      "exposure": 1.9
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 0.75
+    },
+    "OwqobJiNTlvAFyj:Exposure": {
+      "exposure": 0.0
+    },
+    "ZgMnqnyPATyacDv:Exposure": {
+      "exposure": -0.5
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": 0.1,
+      "envMapIntensity": 0.55
+    },
+    "vtjueXlfRBsZEPj:Environment": {
+      "envMapRotationY": 1.98,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "backLeft_Open"
+    ],
+    "MZiYIrcFSqDDBWG:AoMap": {
+      "aoMap": "NPiVFNkrgBPKGvj",
+      "aoMapIntensity": 0.7
+    },
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.01
+    },
+    "ZoizrWFccovSVQl:AoMap": {
+      "aoMap": "KRcrYydTIJZPkJj",
+      "aoMapIntensity": 0.0
+    },
+    "ZoizrWFccovSVQl:Exposure": {
+      "exposure": -0.13
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.8
+    },
+    "cUdgsgllIYGDtIW:Exposure": {
+      "exposure": 0.0
+    },
+    "MRYUabTVLFtJJce:Exposure": {
+      "exposure": -0.55
+    },
+    "xHXZphlQnPqfbqz:Exposure": {
+      "exposure": 1.0
+    },
+    "XVBEVNwvEGGqQcm:Exposure": {
+      "exposure": 3.2
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 0.75
+    },
+    "OwqobJiNTlvAFyj:Exposure": {
+      "exposure": 0.0
+    },
+    "ZgMnqnyPATyacDv:Exposure": {
+      "exposure": -0.5
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": 0.1,
+      "envMapIntensity": 0.62
+    }
+  },
+  {
+    "@states": [
+      "left",
+      "left_Open"
+    ],
+    "MZiYIrcFSqDDBWG:AoMap": {
+      "aoMap": "NPiVFNkrgBPKGvj",
+      "aoMapIntensity": 0.0
+    },
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.6
+    },
+    "ZoizrWFccovSVQl:AoMap": {
+      "aoMap": "KRcrYydTIJZPkJj",
+      "aoMapIntensity": 0.2
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "aLwbjSbpnANhToZ",
+      "aoMapIntensity": 0.98
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.1
+    },
+    "cUdgsgllIYGDtIW:Exposure": {
+      "exposure": 0.1
+    },
+    "ZgMnqnyPATyacDv:Exposure": {
+      "exposure": -0.5
+    }
+  },
+  {
+    "@states": [
+      "frontLeft"
+    ],
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.5
+    },
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "JWGvWwQrhTkdFxv",
+      "aoMapIntensity": 0.0
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.0
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.46
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": -5.001
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": 1.2,
+      "envMapIntensity": 1.0
+    },
+    "vtjueXlfRBsZEPj:Environment": {
+      "envMapRotationY": 1.96,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "frontLeft_Open"
+    ],
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.24
+    },
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "JWGvWwQrhTkdFxv",
+      "aoMapIntensity": 0.0
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.0
+    },
+    "FoAbzXGuCEeVRQW:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.01
+    },
+    "iVzCHFKAaRqjQhl:Exposure": {
+      "exposure": 0.01
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.46
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": -5.001
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": 1.2,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "front"
+    ],
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.0
+    },
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "yVvcBpEYgCxzvdI",
+      "aoMapIntensity": 0.99
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.0
+    },
+    "ZoizrWFccovSVQl:Exposure": {
+      "exposure": -0.3
+    },
+    "iVzCHFKAaRqjQhl:Exposure": {
+      "exposure": -0.3
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 1.001
+    },
+    "ulZXFnTVkOsnIjC:Exposure": {
+      "exposure": 0.01
+    },
+    "ZgMnqnyPATyacDv:Exposure": {
+      "exposure": -0.65
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 1.0,
+      "envMapRotationY": 0.6,
+      "envMapIntensity": 1.0
+    },
+    "vtjueXlfRBsZEPj:Environment": {
+      "envMapRotationY": 2.09,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderClosed",
+      "PT_Closed"
+    ],
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.0
+    },
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "yVvcBpEYgCxzvdI",
+      "aoMapIntensity": 0.99
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "yVvcBpEYgCxzvdI",
+      "aoMapIntensity": 0.99
+    },
+    "ZoizrWFccovSVQl:Exposure": {
+      "exposure": -0.3
+    },
+    "iVzCHFKAaRqjQhl:Exposure": {
+      "exposure": -0.3
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 1.001
+    },
+    "ulZXFnTVkOsnIjC:Exposure": {
+      "exposure": 2.1
+    },
+    "ZgMnqnyPATyacDv:Exposure": {
+      "exposure": -0.65
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 1.0,
+      "envMapRotationY": 0.6,
+      "envMapIntensity": 1.0
+    },
+    "vtjueXlfRBsZEPj:Environment": {
+      "envMapRotationY": 2.09,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "front_Open"
+    ],
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.0
+    },
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "yVvcBpEYgCxzvdI",
+      "aoMapIntensity": 0.99
+    },
+    "FoAbzXGuCEeVRQW:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.01
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "ORgyAPAjhDMdBzH",
+      "aoMapIntensity": 0.0
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 1.001
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 0.0,
+      "envMapRotationY": 0.6,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "frontRight",
+      "frontRight_Open"
+    ],
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "JWGvWwQrhTkdFxv",
+      "aoMapIntensity": 0.7
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "cHYVTTsOKcOErks",
+      "aoMapIntensity": 0.9
+    },
+    "FoAbzXGuCEeVRQW:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.01
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.46
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 1.0,
+      "envMapRotationY": 1.4,
+      "envMapIntensity": 1.3
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderLanding"
+    ],
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.99
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "JWGvWwQrhTkdFxv",
+      "aoMapIntensity": 0.99
+    },
+    "FoAbzXGuCEeVRQW:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.19
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.46
+    },
+    "lFNhyYOSsoUwnXK:Exposure": {
+      "exposure": 6.01
+    },
+    "ulZXFnTVkOsnIjC:Exposure": {
+      "exposure": 4.2
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 1.0,
+      "envMapRotationY": -0.36,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "PT_SliderOpen"
+    ],
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.99
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "VKBsgXfWIihfxWO",
+      "aoMapIntensity": 0.99
+    },
+    "FoAbzXGuCEeVRQW:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.19
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.46
+    },
+    "lFNhyYOSsoUwnXK:Exposure": {
+      "exposure": 6.01
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 3.0,
+      "envMapRotationY": 2.8,
+      "envMapIntensity": 0.6
+    }
+  },
+  {
+    "@states": [
+      "PT_Landscape"
+    ],
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.99
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "VKBsgXfWIihfxWO",
+      "aoMapIntensity": 0.99
+    },
+    "FoAbzXGuCEeVRQW:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.19
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.46
+    },
+    "lFNhyYOSsoUwnXK:Exposure": {
+      "exposure": 6.01
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 3.0,
+      "envMapRotationY": 2.8,
+      "envMapIntensity": 0.6
+    }
+  },
+  {
+    "@states": [
+      "PT_Portrait"
+    ],
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.99
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "VKBsgXfWIihfxWO",
+      "aoMapIntensity": 0.0
+    },
+    "FoAbzXGuCEeVRQW:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.19
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.46
+    },
+    "lFNhyYOSsoUwnXK:Exposure": {
+      "exposure": 6.01
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 3.0,
+      "envMapRotationY": 2.8,
+      "envMapIntensity": 0.6
+    }
+  },
+  {
+    "@states": [
+      "PT_Laptop"
+    ],
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "rmbtiCKMcdkeWlF",
+      "aoMapIntensity": 0.99
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "oqHmQoyxbpYpawp",
+      "aoMapIntensity": 0.99
+    },
+    "FoAbzXGuCEeVRQW:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.46
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": -0.9
+    },
+    "lFNhyYOSsoUwnXK:Exposure": {
+      "exposure": 6.01
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 3.0,
+      "envMapRotationY": 2.8,
+      "envMapIntensity": 0.6
+    },
+    "vtjueXlfRBsZEPj:Environment": {
+      "envMapRotationY": 3.9,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "PT_Tent"
+    ],
+    "jeFtQmHBLCfgIkY:AoMap": {
+      "aoMap": "rmbtiCKMcdkeWlF",
+      "aoMapIntensity": 0.99
+    },
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "VKBsgXfWIihfxWO",
+      "aoMapIntensity": 0.99
+    },
+    "FoAbzXGuCEeVRQW:AoMap": {
+      "aoMap": "chXcmJILZBdVbSF",
+      "aoMapIntensity": 0.19
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.46
+    },
+    "lFNhyYOSsoUwnXK:Exposure": {
+      "exposure": 6.01
+    },
+    "ulZXFnTVkOsnIjC:Exposure": {
+      "exposure": 3.0
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 3.0,
+      "envMapRotationY": 2.7,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "PT_Durability"
+    ],
+    "lrXfpZcYrByzvym:AoMap": {
+      "aoMap": "eOjQCAEZDRqrRkm",
+      "aoMapIntensity": 0.99
+    },
+    "MZiYIrcFSqDDBWG:AoMap": {
+      "aoMap": "uNuhMidnbevZLvm",
+      "aoMapIntensity": 0.7
+    },
+    "mAvfMvCzYIPKaNG:AoMap": {
+      "aoMap": "wCcqvmHcnLQGJPI",
+      "aoMapIntensity": 0.84
+    },
+    "ZoizrWFccovSVQl:AoMap": {
+      "aoMap": "KRcrYydTIJZPkJj",
+      "aoMapIntensity": 0.2
+    },
+    "ZoizrWFccovSVQl:Exposure": {
+      "exposure": -0.3
+    },
+    "NtNSwEIIFmIbXaY:Exposure": {
+      "exposure": 0.8
+    },
+    "cUdgsgllIYGDtIW:Exposure": {
+      "exposure": 0.0
+    },
+    "MRYUabTVLFtJJce:Exposure": {
+      "exposure": -0.3
+    },
+    "xHXZphlQnPqfbqz:Exposure": {
+      "exposure": -1.6
+    },
+    "XVBEVNwvEGGqQcm:Exposure": {
+      "exposure": 0.6
+    },
+    "FVyIOhmektXDyZR:Exposure": {
+      "exposure": 0.18
+    },
+    "OwqobJiNTlvAFyj:Exposure": {
+      "exposure": -0.2
+    },
+    "ZgMnqnyPATyacDv:Exposure": {
+      "exposure": -0.65
+    },
+    "ulZXFnTVkOsnIjC:Exposure": {
+      "exposure": 5.6
+    },
+    "UNMckLTQnzvpqVY:Environment": {
+      "envMapRotationX": 5.0,
+      "envMapRotationY": 3.1,
+      "envMapIntensity": 0.3
+    },
+    "vtjueXlfRBsZEPj:Environment": {
+      "envMapRotationY": 2.08,
+      "envMapIntensity": 1.0
+    }
+  },
+  {
+    "@states": [
+      "Dark+right"
+    ],
+    "ZoizrWFccovSVQl:Exposure": {
+      "exposure": -0.85
+    }
+  }
+]

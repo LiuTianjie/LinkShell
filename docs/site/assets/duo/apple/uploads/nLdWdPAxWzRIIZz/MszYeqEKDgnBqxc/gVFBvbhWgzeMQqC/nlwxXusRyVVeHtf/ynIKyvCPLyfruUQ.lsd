@@ -1,0 +1,71 @@
+{
+  "start": [
+    {
+      "phi": 1.5707963267948966,
+      "theta": 3.141592653589793
+    },
+    {
+      "phi": 1.5707963267948966,
+      "theta": 3.141592653589793
+    },
+    {
+      "phi": 1.5707963267948966,
+      "theta": 3.141592653589793
+    }
+  ],
+  "angles": [
+    {
+      "phi": 1.5707963267948966,
+      "theta": 0,
+      "label": "back_Open",
+      "threshold": 25
+    },
+    {
+      "phi": 1.5707963267948966,
+      "theta": 6.283185307179586,
+      "threshold": 25
+    },
+    {
+      "phi": 1.5707963267948966,
+      "theta": 0.7853981633974483,
+      "label": "backRight_Open",
+      "threshold": 25
+    },
+    {
+      "phi": 1.41,
+      "theta": 1.56,
+      "label": "right_Open",
+      "threshold": 25
+    },
+    {
+      "phi": 1.5707963267948966,
+      "theta": 2.356194490192345,
+      "label": "frontRight_Open",
+      "threshold": 25
+    },
+    {
+      "phi": 1.5707963267948966,
+      "theta": 3.141592653589793,
+      "label": "front_Open",
+      "threshold": 25
+    },
+    {
+      "phi": 1.5707963267948966,
+      "theta": 3.926990816987674,
+      "label": "frontLeft_Open",
+      "threshold": 25
+    },
+    {
+      "phi": 1.45,
+      "theta": 4.716,
+      "label": "left_Open",
+      "threshold": 25
+    },
+    {
+      "phi": 1.5707963267948966,
+      "theta": 5.4,
+      "label": "backLeft_Open",
+      "threshold": 25
+    }
+  ]
+}
