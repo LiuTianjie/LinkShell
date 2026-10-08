@@ -2,7 +2,7 @@ name: Prepare release artifacts
 
 on:
   push:
-    branches: ['codex/prepare-commands-goals-tasks']
+    branches: ['codex/prepare-commands-goals-tasks', 'codex/prepare-linkshell-2.3.9']
   workflow_dispatch:
     inputs:
       mobile_only:
@@ -38,6 +38,21 @@ jobs:
             pnpm --dir "packages/$package" pack --pack-destination "$GITHUB_WORKSPACE/artifacts/npm"
           done
           python3 scripts/check-release-packages.py artifacts/npm
+      - name: Build web client
+        run: |
+          pnpm --filter @linkshell/web build
+          mkdir -p artifacts/web
+          tar -czf artifacts/web/linkshell-web-0.1.0.tar.gz -C apps/web/dist .
+      - name: Prepare and verify gateway image without pushing
+        run: |
+          VERSION=$(node -p "require('./packages/gateway/package.json').version")
+          docker build -f packages/gateway/Dockerfile -t "linkshell-gateway:$VERSION" .
+          docker run -d --rm --name linkshell-gateway-check -p 127.0.0.1:18787:8787 --tmpfs /data:rw,mode=1777 "linkshell-gateway:$VERSION"
+          trap 'docker stop linkshell-gateway-check || true' EXIT
+          curl --retry 15 --retry-delay 2 --retry-connrefused -fsS http://127.0.0.1:18787/healthz > artifacts/gateway-health.json
+          node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('artifacts/gateway-health.json')); if(!h.ok||h.version!==require('./packages/gateway/package.json').version) process.exit(1)"
+          mkdir -p artifacts/docker
+          docker save "linkshell-gateway:$VERSION" | gzip > "artifacts/docker/linkshell-gateway-$VERSION.tar.gz"
       - name: Export mobile JavaScript bundles
         working-directory: apps/client
         run: |
@@ -48,9 +63,12 @@ jobs:
           name: linkshell-prepared-${{ github.sha }}
           path: |
             artifacts/npm/*.tgz
+            artifacts/web/
+            artifacts/docker/
+            artifacts/gateway-health.json
             apps/client/build/release-js/
             docs/site/
-            docs/releases/2.3.7.md
+            docs/releases/2.3.9.md
           if-no-files-found: error
           retention-days: 30
 

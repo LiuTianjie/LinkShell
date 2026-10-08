@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/gateway",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "LinkShell gateway: relays end-to-end encrypted frames between computers and devices, and brokers pairing.",
   "license": "MIT",
   "repository": {

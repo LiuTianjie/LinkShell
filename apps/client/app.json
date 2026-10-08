@@ -2,7 +2,7 @@
   "expo": {
     "name": "LinkShell",
     "slug": "linkshell-client",
-    "version": "2.3.8",
+    "version": "2.3.9",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -19,7 +19,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CADisableMinimumFrameDurationOnPhone": true
       },
-      "buildNumber": "20308"
+      "buildNumber": "20309"
     },
     "android": {
       "adaptiveIcon": {
@@ -30,7 +30,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.bd.linkshell",
-      "versionCode": 20308
+      "versionCode": 20309
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -71,8 +71,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "LinkShell 需要访问你的照片，才能把图片发给 Agent。",
-          "cameraPermission": "LinkShell 需要使用相机，才能拍照发给 Agent。"
+          "photosPermission": "LinkShell \u9700\u8981\u8bbf\u95ee\u4f60\u7684\u7167\u7247\uff0c\u624d\u80fd\u628a\u56fe\u7247\u53d1\u7ed9 Agent\u3002",
+          "cameraPermission": "LinkShell \u9700\u8981\u4f7f\u7528\u76f8\u673a\uff0c\u624d\u80fd\u62cd\u7167\u53d1\u7ed9 Agent\u3002"
         }
       ],
       "./plugins/with-brand-colors.js",
@@ -80,7 +80,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "用于扫描电脑上的配对二维码",
+          "cameraPermission": "\u7528\u4e8e\u626b\u63cf\u7535\u8111\u4e0a\u7684\u914d\u5bf9\u4e8c\u7ef4\u7801",
           "recordAudioAndroid": false
         }
       ],
