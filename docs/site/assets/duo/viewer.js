@@ -83,7 +83,7 @@
     }));
     const textures = Object.fromEntries(entries);
     let screenKeys = ['landscape', 'closed'];
-    let zoom = 1.84;
+    let zoom = 2.00;
 
     class ScreenWipe extends chunks.Wipe {
       constructor(args) {
@@ -136,7 +136,7 @@
       onLoop() {
         super.onLoop();
         if (!this.ready) return;
-        const target = stage.clientWidth < 500 ? Math.min(zoom, 1.08) : zoom;
+        const target = stage.clientWidth < 500 ? Math.min(zoom, 1.25) : zoom;
         this.camera.zoom += (target - this.camera.zoom) * .15;
         if (Math.abs(target - this.camera.zoom) < .001) this.camera.zoom = target;
         else Lotus.tryRequestAnimationFrame();
@@ -159,7 +159,7 @@
         if (!this.mainWeights || this.freeOrbit) return;
         this.freeOrbit = true;
         root.dataset.pose = 'free';
-        zoom = 1.50;
+        zoom = 1.65;
         const camera = this.getComponentsByName('camera_360')[0].scripts.get('InteractiveCamera');
         const open = this.getComponentByName('YvVAegQhHvoGyyp:Hinge').target > .6;
         camera.data.angles = open ? 'uKtkkwyBlvwChQg' : 'aPrkGWufFevjiao';
@@ -170,7 +170,7 @@
       }
       pose(label) {
         root.dataset.pose = label;
-        zoom = { PT_Landscape: 1.84, PT_Portrait: 1.26, PT_Closed: 1.70, PT_Laptop: 1.80, PT_Tent: 2.20 }[label];
+        zoom = { PT_Landscape: 2.00, PT_Portrait: 1.25, PT_Closed: 1.82, PT_Laptop: 2.00, PT_Tent: 2.40 }[label];
         this.freeOrbit = false;
         screenKeys = [label === 'PT_Portrait' ? 'portrait' : label === 'PT_Laptop' ? 'laptop' : 'landscape', label === 'PT_Tent' ? 'standing' : 'closed'];
         this.mainWeights.mixSpring.targetValue = 1;
@@ -179,7 +179,7 @@
       }
       fold(value) {
         root.dataset.pose = 'fold';
-        zoom = 1.84;
+        zoom = 2.00;
         this.freeOrbit = false;
         // Slider poses unfold the inner display in landscape; the closed outer display stays portrait.
         screenKeys = ['landscape', 'closed'];
@@ -193,7 +193,7 @@
     const response = await fetch(url('assets/duo/apple/scenes/iPhoneDuo_US_M_avif.lsd'));
     if (!response.ok) throw new Error('Model unavailable');
     const data = await response.json();
-    data.renderer.background = [.012, .014, .018, 1];
+    data.renderer.background = [1, 1, 1, 1];
     scene = await api.instance().loadScene({ data, element: stage, SceneClass: DuoScene, assetsPath: url('assets/duo/apple/') });
     await new Promise(resolve => {
       if (scene.created) return resolve();

@@ -1,30 +1,30 @@
-.duo-viewer { position: relative; display: grid; grid-template-columns: 128px minmax(0,1fr); gap: 4px; width: 100%; max-width: 900px; padding: 16px; background: #030405; color: #f5f5f7; border: 1px solid var(--border-strong); border-radius: 28px; overflow: hidden; }
+.duo-viewer { position: relative; display: grid; grid-template-columns: 128px minmax(0,1fr); gap: 4px; width: 100%; max-width: 1000px; padding: 16px; background: #fff; color: #1d1d1f; border: 1px solid #e5e5e7; border-radius: 28px; overflow: hidden; }
 .duo-controls { display: flex; flex-direction: column; justify-content: center; gap: 6px; z-index: 1; }
-.duo-controls-title { font-size: 13px; color: #a1a1a8; margin-bottom: 8px; }
-.duo-controls button { font: inherit; font-size: 14px; border: 1px solid transparent; border-radius: 24px; padding: 8px 10px; color: #e9e9ed; background: #222227; cursor: pointer; transition: background .2s, color .2s; }
-.duo-controls button:hover { background: #35353b; }
-.duo-controls button[aria-pressed="true"] { background: #f5f5f7; color: #18181c; }
+.duo-controls-title { font-size: 13px; color: #6e6e73; margin-bottom: 8px; }
+.duo-controls button { font: inherit; font-size: 14px; border: 1px solid transparent; border-radius: 24px; padding: 8px 10px; color: #343438; background: #f0f0f2; cursor: pointer; transition: background .2s, color .2s; }
+.duo-controls button:hover { background: #e3e3e7; }
+.duo-controls button[aria-pressed="true"] { background: #1d1d1f; color: #fff; }
 .duo-controls button:disabled { opacity: .45; cursor: default; }
 .duo-viewer :focus-visible { outline: 3px solid #7eaafa; outline-offset: 4px; }
-.duo-fold { margin-top: 12px; font-size: 12px; color: #a1a1a8; }
+.duo-fold { margin-top: 12px; font-size: 12px; color: #6e6e73; }
 .duo-fold-head { display: flex; justify-content: space-between; margin-bottom: 8px; }
-.duo-fold input { display: block; width: 100%; height: 30px; margin: 0; accent-color: #dce5fa; cursor: ew-resize; }
-.duo-stage { position: relative; min-width: 0; width: 100%; height: 410px; touch-action: pan-y; cursor: grab; }
+.duo-fold input { display: block; width: 100%; height: 30px; margin: 0; accent-color: #3b3b40; cursor: ew-resize; }
+.duo-stage { position: relative; min-width: 0; width: 100%; height: 480px; touch-action: pan-y; cursor: grab; }
 .duo-stage:active { cursor: grabbing; }
 .duo-stage canvas { display: block; width: 100%; height: 100%; }
-.duo-poster { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 24px; background: #030405; z-index: 2; }
-.duo-figure .duo-poster img { display: block; width: 100%; height: 100%; max-height: calc(100% - 62px); min-height: 0; flex: 0 1 auto; object-fit: contain; border: 0; border-radius: 0; }
+.duo-poster { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 24px; background: #fff; z-index: 2; }
+.duo-figure .duo-poster img { display: block; width: 100%; height: 100%; max-height: calc(100% - 62px); min-height: 0; flex: 0 1 auto; object-fit: contain; border: 0; border-radius: 0; background: transparent; }
 .duo-viewer[data-state="loading"] .duo-start { display: none; }
 .duo-viewer[data-state="loading"] .duo-poster img, .duo-viewer[data-state="error"] .duo-poster img { max-height: 100%; }
-.duo-start { font: inherit; font-size: 14px; border: 1px solid #56565e; border-radius: 24px; padding: 10px 22px; background: #222227; color: #f5f5f7; cursor: pointer; }
+.duo-start { font: inherit; font-size: 14px; border: 1px solid #d2d2d7; border-radius: 24px; padding: 10px 22px; background: #f0f0f2; color: #1d1d1f; cursor: pointer; }
 .duo-viewer[data-state="ready"] .duo-poster { display: none; }
-.duo-hint { grid-column: 2; text-align: center; font-size: 12px; color: #a1a1a8; min-height: 18px; margin: 0; }
+.duo-hint { grid-column: 2; text-align: center; font-size: 12px; color: #6e6e73; min-height: 18px; margin: 0; }
 @media (min-width: 701px) {
-  .duo-viewer[data-pose="PT_Portrait"] .duo-stage { height: 480px; }
+  .duo-viewer[data-pose="PT_Portrait"] .duo-stage { height: 560px; }
 }
 @media (max-width: 700px) {
   .duo-viewer { grid-template-columns: minmax(0,1fr); padding: 16px 12px; gap: 0; border-radius: 22px; }
-  .duo-stage { grid-row: 1; height: min(100vw,420px); }
+  .duo-stage { grid-row: 1; height: min(106vw,460px); }
   .duo-controls { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 5px; padding: 10px 4px 0; }
   .duo-controls-title { display: none; }
   .duo-controls button { padding: 10px 1px; font-size: 12px; }
