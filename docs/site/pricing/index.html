@@ -225,6 +225,16 @@
     .hero .btns { margin-top: 28px; }
     .hero .cmd { margin-top: 14px; }
     .hero .media { margin-top: 44px; }
+    .duo-pill { display: inline-flex; align-items: center; gap: 10px; margin-top: 20px; padding: 7px 12px; color: var(--accent); border: 1px solid var(--border-strong); border-radius: 6px; font-size: 14px; }
+    .duo-pill::before { content: ""; width: 17px; height: 13px; border: 1.5px solid currentColor; border-radius: 3px; background: linear-gradient(90deg, transparent 47%, currentColor 47%, currentColor 53%, transparent 53%); }
+    .duo-figure { margin: 32px 0 0; }
+    .duo-figure img { width: 100%; height: auto; border-radius: 16px; }
+    .duo-figure figcaption { margin-top: 12px; color: var(--text-sec); font-size: 13px; }
+    .duo-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin: 26px 0 0; padding: 0; list-style: none; }
+    .duo-points li { padding-top: 16px; border-top: 1px solid var(--border-strong); }
+    .duo-points b { display: block; margin-bottom: 5px; font-size: 16px; }
+    .duo-points p { color: var(--text-sec); font-size: 15px; }
+    @media (max-width: 700px) { .duo-points { grid-template-columns: 1fr; gap: 14px; } }
 
     .sec { padding-block: 128px 0; }
     .sec h2 { font-size: clamp(27px, 3.3vw, 34px); margin-bottom: 20px; }
@@ -370,6 +380,7 @@
           <span lang="zh">Claude Code、Codex 这些编程 Agent 留在你的电脑上跑。你在手机上看它干活、点一下批准、随时插话，需要时直接看电脑屏幕。代码不离开你的电脑。</span>
           <span lang="en">Claude Code, Codex and other coding agents keep running on your computer. On your phone you watch them work, approve with a tap, cut in any time, and look at the computer&#39;s screen when you need to. Your code never leaves your machine.</span>
         </p>
+        <a class="duo-pill" href="#iphone-duo"><span lang="zh">已适配 iPhone Duo · 了解折叠体验</span><span lang="en">Now adapted for iPhone Duo · Explore the layout</span> ↗</a>
         <div class="btns">
           <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
@@ -396,6 +407,22 @@
 
     <section class="sec" id="features">
       <div class="wrap">
+        <article class="feature" id="iphone-duo">
+          <div class="text">
+            <h2><span lang="zh">iPhone Duo，<br />展开你的工作区。</span><span lang="en">iPhone Duo.<br />Room to do more.</span></h2>
+            <p><span lang="zh">LinkShell 2.3.7 为 iPhone Duo 适配了会话、输入和工具面板。展开时，把对话与改动或预览放在一起；折叠时，界面根据可用区域重新安排内容，继续当前会话。</span><span lang="en">LinkShell 2.3.7 adapts its conversation, composer and tool panels to iPhone Duo. Expanded, see chat beside changes or a preview. Folded, the interface respects the available screen regions while you continue the same session.</span></p>
+          </div>
+          <figure class="duo-figure">
+            <picture><source media="(max-width: 700px)" srcset="assets/promo/iphone-duo-layout-mobile.svg" width="440" height="752" /><img src="assets/promo/iphone-duo-layout.svg" width="1040" height="480" loading="lazy" alt="iPhone Duo adaptive workspace: expanded side-by-side panels and fold-aware controls / 展开双栏与折叠感知布局示意" /></picture>
+            <figcaption><span lang="zh">布局示意；实际排列随屏幕尺寸、姿态和面板状态调整。<a href="docs/#d-iphone-duo">查看适配说明 ↗</a></span><span lang="en">Layout illustration; arrangement adapts to screen size, posture and open panels. <a href="docs/#d-iphone-duo">How it works ↗</a></span></figcaption>
+          </figure>
+          <ul class="duo-points">
+            <li><b><span lang="zh">对话与工具并排</span><span lang="en">Chat beside your tools</span></b><p><span lang="zh">空间足够时，直接在会话旁看改动或预览。</span><span lang="en">With enough room, review changes or a preview beside the conversation.</span></p></li>
+            <li><b><span lang="zh">识别折叠区域</span><span lang="en">Aware of the fold</span></b><p><span lang="zh">随姿态和方向调整，给输入和操作保留可用空间。</span><span lang="en">Adapt to posture and orientation, preserving usable space for input and controls.</span></p></li>
+            <li><b><span lang="zh">普通 iPhone 同样顺手</span><span lang="en">Still at home on iPhone</span></b><p><span lang="zh">较窄的屏幕使用合适的单栏布局，操作保持一致。</span><span lang="en">Narrower screens use an appropriate single-column layout with familiar controls.</span></p></li>
+          </ul>
+        </article>
+
         <article class="feature">
           <div class="text">
             <h2><span lang="zh"><span class="nb">它在电脑上干活，</span><span class="nb">你在手机上看着</span></span><span lang="en">It works on your computer. <span class="nb">You watch from your phone.</span></span></h2>
@@ -578,6 +605,7 @@
         <a href="#d-gateway"><span lang="zh">自建网关</span><span lang="en">Self-host a gateway</span></a>
         <a href="#d-terminal"><span lang="zh">在电脑终端里用</span><span lang="en">From your terminal</span></a>
         <a href="#d-phone"><span lang="zh">在手机上用</span><span lang="en">On your phone</span></a>
+        <a href="#d-iphone-duo">iPhone Duo</a>
         <a href="#d-computer-use">Computer Use</a>
         <a href="#d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></a>
         <a href="#d-faq"><span lang="zh">常见问题</span><span lang="en">FAQ</span></a>
@@ -640,6 +668,10 @@
           <li><span lang="zh"><b>整理</b>：长按会话可以重命名、归档、删除；归档的会话在首页底部。不再使用的电脑，在账号页的「我的电脑」里长按移除。</span><span lang="en"><b>Tidying</b>: long-press a session to rename, archive or delete it; archived sessions are at the bottom of Home. A computer you no longer use: long-press it under My computers on the account page.</span></li>
           <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它。屏幕工具条上有快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）和「发送文字」（写好一段再发，可以带上手机剪贴板）。需要 Apple 芯片的 Mac；两项权限由 <code>linkshell setup</code> 带你打开，单独设置用 <code>linkshell screen</code>。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen and control it with a trackpad and keyboard. The screen&#39;s toolbar has one-tap shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own) and a text box to write in and send, with the phone&#39;s clipboard. Needs a Mac with Apple silicon; <code>linkshell setup</code> takes you through its two permissions, <code>linkshell screen</code> does just that part.</span></li>
         </ul>
+
+        <h2 id="d-iphone-duo"><span lang="zh">iPhone Duo 与自适应布局</span><span lang="en">iPhone Duo and adaptive layouts</span></h2>
+        <p><span lang="zh">从 App 2.3.7 起，LinkShell 支持 iPhone Duo 的可用区域和折叠信息。宽度足够时，打开「改动」或「预览」可以与对话并排；折叠区域会参与内容与操作区的布局计算。较窄的窗口与普通 iPhone 使用单栏布局。布局变化时保留会话和工具面板的状态。</span><span lang="en">From app 2.3.7, LinkShell uses iPhone Duo’s available regions and fold information. With sufficient width, Changes or Preview can sit beside the conversation. Fold regions inform the layout of content and controls; narrower windows and standard iPhones use one column. Session and tool-panel state is preserved as the layout changes.</span></p>
+        <p class="note"><span lang="zh">Duo 布局已通过模拟器交互验证；实际显示取决于系统报告的尺寸和姿态。</span><span lang="en">Duo layouts have been checked in the simulator; actual presentation depends on the size and posture reported by the system.</span></p>
 
         <h2 id="d-computer-use"><span lang="zh">在手机上用 Computer Use</span><span lang="en">Use Computer Use from your phone</span></h2>
         <p><span lang="zh">在手机会话里告诉 Codex 你想做什么，让它操作电脑上的浏览器或桌面应用。操作画面会在浮窗中实时预览，你可以边看边补充要求，继续推进任务。</span><span lang="en">Tell Codex what you want done in the phone conversation and let it work in your computer's browser or desktop apps. Watch its actions live in a floating preview and keep giving instructions as it works.</span></p>

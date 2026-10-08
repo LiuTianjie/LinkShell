@@ -32,7 +32,19 @@
   <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">Watch the 40-second film</a></sub>
 </p>
 
-Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, send a message any time, approve what they ask for, and hand the session back to your terminal when you sit down again. Your code and the agent processes never leave your machine, and the connection is end-to-end encrypted.
+Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, send a message any time, approve what they ask for, and hand the session back to your terminal when you sit down again. Your code and the agent processes never leave your machine, and the connection is end-to-end encrypted. **Supports iPhone Duo, standard iPhones and Android.**
+
+## Made to adapt to iPhone Duo
+
+**Open up your workspace. Fold it and keep going.** LinkShell 2.3.7 supports iPhone Duo alongside standard iPhones.
+
+<p align="center"><img src="docs/site/assets/promo/iphone-duo-layout.svg" alt="iPhone Duo layout illustration: conversation and changes side by side when expanded; fold-aware controls in the available screen regions" width="960" /></p>
+
+- **Expanded, work side by side.** With enough space, keep the conversation beside Changes or Preview without leaving the session.
+- **Folded, keep controls within reach.** The interface recognizes fold regions and adjusts to posture and orientation, reserving space for the composer and controls.
+- **A standard iPhone, the same workflow.** The layout returns to an appropriate single column as space changes, keeping the current session in place.
+
+<sub>Layout illustration; the actual arrangement depends on screen size, posture and the open panels. [Read about adaptive layouts](https://liutianjie.github.io/LinkShell/docs/#d-iphone-duo).</sub>
 
 ## Get started
 

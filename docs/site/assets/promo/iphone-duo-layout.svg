@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="480" viewBox="0 0 1040 480" role="img" aria-labelledby="title desc">
+<title id="title">LinkShell adaptive workspace on iPhone Duo</title>
+<desc id="desc">Layout illustration: an expanded workspace places conversation beside changes; a partially folded workspace keeps controls clear of the fold.</desc>
+<rect width="1040" height="480" rx="24" fill="#eef3f1"/>
+<g font-family="ui-sans-serif, -apple-system, sans-serif">
+<text x="38" y="43" fill="#42574f" font-size="12" font-weight="600" letter-spacing="2">IPHONE DUO / ADAPTIVE WORKSPACE</text>
+<text x="1002" y="43" text-anchor="end" fill="#65736e" font-size="11">LAYOUT ILLUSTRATION</text>
+<rect x="36" y="76" width="620" height="318" rx="24" fill="#202927"/>
+<rect x="44" y="84" width="604" height="302" rx="18" fill="#fafcfb"/>
+<path d="M44 125H648" stroke="#dce5e0"/>
+<circle cx="67" cy="104" r="5" fill="#109c76"/><text x="83" y="109" font-size="13" fill="#26382f" font-weight="600">LinkShell</text>
+<text x="504" y="109" font-size="11" fill="#65736e">Codex · connected</text>
+<path d="M357 126V368" stroke="#dce5e0"/>
+<text x="66" y="152" font-size="11" fill="#65736e">CONVERSATION</text>
+<rect x="128" y="169" width="209" height="38" rx="12" fill="#e7ece9"/><text x="141" y="193" fill="#36463e" font-size="12">Review the latest changes.</text>
+<circle cx="73" cy="233" r="7" fill="#09896b"/><text x="90" y="237" fill="#1c3329" font-size="12" font-weight="600">The changes are ready.</text>
+<path d="M66 258H304M66 272H290M66 286H224" stroke="#c6d0cb" stroke-width="5" stroke-linecap="round"/>
+<rect x="62" y="321" width="278" height="46" rx="15" fill="#eef3f0" stroke="#dce5e0"/><text x="78" y="349" font-size="12" fill="#7b8781">Keep the conversation going…</text><circle cx="319" cy="344" r="11" fill="#087e61"/><path d="M319 349V339M315 343L319 339L323 343" stroke="white" stroke-width="1.5" fill="none"/>
+<rect x="376" y="141" width="106" height="28" rx="8" fill="#e0ede6"/><text x="393" y="159" fill="#187456" font-size="11" font-weight="600">Changes</text><text x="501" y="159" fill="#718079" font-size="11">Preview</text>
+<text x="379" y="196" fill="#30483b" font-size="12" font-family="ui-monospace, monospace">session-screen.tsx</text>
+<rect x="374" y="215" width="254" height="47" rx="6" fill="#e4f1e8"/><path d="M390 230H570M390 245H538" stroke="#6daa84" stroke-width="4" stroke-linecap="round"/>
+<path d="M391 283H600M391 300H539M391 317H574" stroke="#c8d3cc" stroke-width="4" stroke-linecap="round"/>
+<text x="378" y="353" fill="#188658" font-size="11">+24  −8</text><text x="446" y="353" fill="#65736e" font-size="11">Review without leaving chat</text>
+<text x="37" y="434" fill="#223e30" font-size="18" font-weight="600">Expanded. Side by side.</text>
+<text x="37" y="457" fill="#65736e" font-size="12">Conversation + changes or a live preview</text>
+<rect x="714" y="76" width="288" height="318" rx="24" fill="#202927"/>
+<rect x="722" y="84" width="272" height="145" rx="18" fill="#fafcfb"/>
+<text x="741" y="112" fill="#26382f" font-size="12" font-weight="600">Your conversation</text>
+<path d="M742 140H964M742 157H940M742 174H951" stroke="#c8d3cc" stroke-width="5" stroke-linecap="round"/>
+<rect x="740" y="194" width="116" height="20" rx="6" fill="#e0ede6"/><text x="750" y="208" fill="#187456" font-size="10">Task running</text>
+<rect x="722" y="239" width="272" height="147" rx="18" fill="#fafcfb"/>
+<text x="741" y="267" fill="#65736e" font-size="10" letter-spacing="1">ROOM FOR YOUR NEXT STEP</text>
+<rect x="737" y="280" width="242" height="66" rx="13" fill="#eef3f0" stroke="#dce5e0"/><text x="751" y="304" font-size="12" fill="#7b8781">Add an instruction…</text>
+<circle cx="759" cy="328" r="9" fill="#dde6e0"/><path d="M755 328H763M759 324V332" stroke="#526c5d" stroke-width="1.2"/><circle cx="958" cy="328" r="10" fill="#087e61"/><path d="M958 333V323M954 327L958 323L962 327" stroke="white" stroke-width="1.5" fill="none"/>
+<rect x="817" y="368" width="84" height="3" rx="1.5" fill="#91a198"/>
+<text x="715" y="434" fill="#223e30" font-size="18" font-weight="600">Fold aware. Stay in flow.</text>
+<text x="715" y="457" fill="#65736e" font-size="12">Controls respect the available screen regions</text>
+</g></svg>
