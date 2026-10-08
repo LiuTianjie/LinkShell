@@ -193,7 +193,9 @@
     const response = await fetch(url('assets/duo/apple/scenes/iPhoneDuo_US_M_avif.lsd'));
     if (!response.ok) throw new Error('Model unavailable');
     const data = await response.json();
-    data.renderer.background = [1, 1, 1, 1];
+    // Let the page theme show through the WebGL canvas.
+    data.renderer.alpha = true;
+    data.renderer.background = [0, 0, 0, 0];
     scene = await api.instance().loadScene({ data, element: stage, SceneClass: DuoScene, assetsPath: url('assets/duo/apple/') });
     await new Promise(resolve => {
       if (scene.created) return resolve();
