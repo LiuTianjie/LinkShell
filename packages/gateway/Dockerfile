@@ -26,8 +26,9 @@ RUN pnpm --filter @linkshell/wire build \
   && pnpm --filter @linkshell/gateway build \
   && pnpm --filter @linkshell/gateway build:web
 
-# Prune to production deps only (the app's patches don't apply to the gateway).
-RUN pnpm --filter @linkshell/gateway deploy --legacy --prod --config.allow-unused-patches=true /app/pruned
+# The browser is now static. Limit runtime dependency resolution to the relay workspace.
+RUN rm apps/web/package.json packages/client-core/package.json \
+  && pnpm --filter @linkshell/gateway deploy --legacy --prod --config.allow-unused-patches=true /app/pruned
 
 # ── Runtime ──────────────────────────────────────────────────────────
 
