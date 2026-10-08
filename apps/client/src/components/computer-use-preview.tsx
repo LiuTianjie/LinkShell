@@ -37,12 +37,20 @@ function SessionComputerUse({ sessionId, bounds }: { sessionId: string; bounds: 
         <Pressable accessibilityRole="imagebutton" accessibilityLabel="放大电脑画面" onPress={() => setExpanded(true)} style={{ height, borderRadius: 14, overflow: "hidden" }}>
           <Image source={{ uri: frame.uri }} style={{ width: "100%", height: "100%" }} contentFit="contain" cachePolicy="none" />
         </Pressable>
-        <View style={{ position: "absolute", top: 4, right: 4, flexDirection: "row", gap: 4 }}>
-          <Pressable accessibilityRole="button" accessibilityLabel="收起电脑画面" onPress={() => setMode("collapsed")} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.card, alignItems: "center", justifyContent: "center", opacity: 0.9 }}>
-            <Icon sf="chevron.down" md="expand_more" size={14} color={colors.secondaryLabel} />
+        <View style={{ position: "absolute", top: 0, right: 0, flexDirection: "row" }}>
+          <Pressable accessibilityRole="button" accessibilityLabel="收起电脑画面" onPress={() => setMode("collapsed")} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+            {({ pressed }) => (
+              <View pointerEvents="none" style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: pressed ? "rgba(0,0,0,0.58)" : "rgba(0,0,0,0.28)", alignItems: "center", justifyContent: "center" }}>
+                <Icon sf="chevron.down" md="expand_more" size={12} color="rgba(255,255,255,0.85)" />
+              </View>
+            )}
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="关闭电脑画面" onPress={() => setMode("hidden")} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.card, alignItems: "center", justifyContent: "center", opacity: 0.9 }}>
-            <Icon sf="xmark" md="close" size={14} color={colors.secondaryLabel} />
+          <Pressable accessibilityRole="button" accessibilityLabel="关闭电脑画面" onPress={() => setMode("hidden")} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+            {({ pressed }) => (
+              <View pointerEvents="none" style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: pressed ? "rgba(0,0,0,0.58)" : "rgba(0,0,0,0.28)", alignItems: "center", justifyContent: "center" }}>
+                <Icon sf="xmark" md="close" size={12} color="rgba(255,255,255,0.85)" />
+              </View>
+            )}
           </Pressable>
         </View>
       </View>

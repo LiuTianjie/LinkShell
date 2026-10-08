@@ -4,12 +4,18 @@ on:
   push:
     branches: ['codex/prepare-commands-goals-tasks']
   workflow_dispatch:
+    inputs:
+      mobile_only:
+        description: Build signed mobile artifacts only, without tests or publication
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   prepare:
+    if: ${{ !inputs.mobile_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -45,5 +51,37 @@ jobs:
             apps/client/build/release-js/
             docs/site/
             docs/releases/2.3.7.md
+          if-no-files-found: error
+          retention-days: 30
+
+  mobile:
+    if: ${{ inputs.mobile_only }}
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        platform: [ios, android]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build workspace dependencies
+        run: pnpm -r --filter './packages/*' build
+      - name: Prepare native app without publishing
+        working-directory: apps/client
+        run: node scripts/release.mjs "${{ matrix.platform }}" --prepare-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linkshell-mobile-${{ matrix.platform }}-${{ github.sha }}
+          path: |
+            apps/client/build/release/export/*.ipa
+            apps/client/build/release/*.apk
+            apps/client/build/release/*.aab
           if-no-files-found: error
           retention-days: 30
