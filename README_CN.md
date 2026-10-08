@@ -38,13 +38,13 @@ Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手�
 
 **展开看全局，折叠继续做。** LinkShell 2.3.7 已适配 iPhone Duo，同时继续支持普通 iPhone。
 
-<p align="center"><img src="docs/site/assets/promo/iphone-duo-layout.svg" alt="iPhone Duo 布局示意：展开时对话与改动并排，折叠时输入与操作区避开折叠区域" width="960" /></p>
+<p align="center"><img src="docs/site/assets/promo/iphone-duo-expanded-dark.png" alt="LinkShell 夜间模式实际截图：iPhone Duo 展开时的会话与代码改动双栏" width="960" /></p>
 
 - **展开，用双栏工作。** 空间足够时，对话与「改动」或「预览」面板并排显示，不用反复离开会话。
 - **折叠，让操作留在可用区域。** 界面识别折叠区域，随姿态和方向调整布局，给输入框与控制区保留空间。
 - **换回普通 iPhone，继续同一套操作。** 根据窗口尺寸回到合适的单栏布局，保留正在进行的会话。
 
-<sub>上图为布局示意；实际排列取决于屏幕尺寸、姿态和打开的面板。[查看适配说明](https://liutianjie.github.io/LinkShell/docs/#d-iphone-duo)。</sub>
+<sub>上图为 iPhone Duo 模拟器中的 App 实际运行截图，使用夜间模式。[查看适配说明](https://liutianjie.github.io/LinkShell/docs/#d-iphone-duo)。</sub>
 
 ## 开始使用
 

@@ -38,13 +38,13 @@ Claude Code, Codex and other coding agents keep running on your computer. From y
 
 **Open up your workspace. Fold it and keep going.** LinkShell 2.3.7 supports iPhone Duo alongside standard iPhones.
 
-<p align="center"><img src="docs/site/assets/promo/iphone-duo-layout.svg" alt="iPhone Duo layout illustration: conversation and changes side by side when expanded; fold-aware controls in the available screen regions" width="960" /></p>
+<p align="center"><img src="docs/site/assets/promo/iphone-duo-expanded-dark.png" alt="LinkShell in dark mode on the iPhone Duo simulator: conversation and code changes side by side" width="960" /></p>
 
 - **Expanded, work side by side.** With enough space, keep the conversation beside Changes or Preview without leaving the session.
 - **Folded, keep controls within reach.** The interface recognizes fold regions and adjusts to posture and orientation, reserving space for the composer and controls.
 - **A standard iPhone, the same workflow.** The layout returns to an appropriate single column as space changes, keeping the current session in place.
 
-<sub>Layout illustration; the actual arrangement depends on screen size, posture and the open panels. [Read about adaptive layouts](https://liutianjie.github.io/LinkShell/docs/#d-iphone-duo).</sub>
+<sub>Running app screenshot from the iPhone Duo simulator, in dark mode. [Read about adaptive layouts](https://liutianjie.github.io/LinkShell/docs/#d-iphone-duo).</sub>
 
 ## Get started
 
