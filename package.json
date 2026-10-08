@@ -28,6 +28,7 @@
     "dev:gateway": "pnpm --filter @linkshell/gateway dev",
     "dev:cli": "pnpm --filter linkshell-cli dev",
     "dev:app": "pnpm --filter @linkshell/client start",
+    "dev:web": "pnpm --filter @linkshell/web dev",
     "dev:ios": "pnpm --filter @linkshell/client ios",
     "dev:android": "pnpm --filter @linkshell/client android",
     "lint": "eslint .",

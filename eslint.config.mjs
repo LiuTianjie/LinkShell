@@ -42,7 +42,7 @@ export default tseslint.config(
   {
     // The rules that need types: the ones that find real bugs in asynchronous code.
     // Sources only: tests and scripts are outside the packages' tsconfig projects.
-    files: ["packages/*/src/**/*.ts", "apps/client/src/**/*.{ts,tsx}"],
+    files: ["packages/*/src/**/*.ts", "apps/client/src/**/*.{ts,tsx}", "apps/web/src/**/*.{ts,tsx}"],
     languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
     rules: {
       "@typescript-eslint/no-floating-promises": "error",
@@ -51,7 +51,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/client/src/**/*.{ts,tsx}"],
+    files: ["apps/client/src/**/*.{ts,tsx}", "apps/web/src/**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
     rules: {
       "react-hooks/rules-of-hooks": "error",
@@ -59,6 +59,10 @@ export default tseslint.config(
       // How React Native takes an image, and how a development-only module stays out of release bundles.
       "@typescript-eslint/no-require-imports": "off",
     },
+  },
+  {
+    files: ["apps/web/**/*.{ts,tsx,js}"],
+    languageOptions: { globals: globals.browser },
   },
   {
     files: ["**/*.cjs", "apps/client/*.js", "apps/client/plugins/**/*.js"],
