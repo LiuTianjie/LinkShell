@@ -21,7 +21,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts/postinstall.mjs"
   ],
   "engines": {
     "node": ">=22.13"
@@ -32,7 +33,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "live:codex": "tsx scripts/live-codex-check.ts",
-    "live:claude": "tsx scripts/live-claude-check.ts"
+    "live:claude": "tsx scripts/live-claude-check.ts",
+    "postinstall": "node scripts/postinstall.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.84.0",
