@@ -48,8 +48,8 @@ jobs:
           VERSION=$(node -p "require('./packages/gateway/package.json').version")
           docker build -f packages/gateway/Dockerfile -t "linkshell-gateway:$VERSION" .
           docker run -d --rm --name linkshell-gateway-check -p 127.0.0.1:18787:8787 --tmpfs /data:rw,mode=1777 "linkshell-gateway:$VERSION"
-          trap 'docker stop linkshell-gateway-check || true' EXIT
-          curl --retry 15 --retry-delay 2 --retry-connrefused -fsS http://127.0.0.1:18787/healthz > artifacts/gateway-health.json
+          trap 'docker logs linkshell-gateway-check; docker stop linkshell-gateway-check || true' EXIT
+          curl --retry 15 --retry-delay 2 --retry-all-errors -fsS http://127.0.0.1:18787/healthz > artifacts/gateway-health.json
           node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('artifacts/gateway-health.json')); if(!h.ok||h.version!==require('./packages/gateway/package.json').version) process.exit(1)"
           curl -fsS http://127.0.0.1:18787/ | grep -q 'id="root"'
           curl -fsS http://127.0.0.1:18787/config.js | grep -q '"deployment":"self-hosted"'
