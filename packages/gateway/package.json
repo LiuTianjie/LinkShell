@@ -23,17 +23,20 @@
     "dist",
     "README.md",
     "LICENSE",
-    "Dockerfile"
+    "Dockerfile",
+    "web-client",
+    "scripts"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
     "build": "rm -rf dist *.tsbuildinfo && tsc -p tsconfig.json",
-    "prepack": "pnpm run build",
+    "prepack": "pnpm run build && pnpm run build:web",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/main.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:web": "node scripts/build-web.mjs"
   },
   "dependencies": {
     "@linkshell/wire": "workspace:*",

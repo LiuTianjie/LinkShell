@@ -44,3 +44,5 @@ Thumbs.db
 
 # The promo film's sources and renders (docs/site/assets/promo has what the site uses)
 /promo/
+
+/packages/gateway/web-client/

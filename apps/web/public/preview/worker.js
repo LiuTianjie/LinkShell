@@ -167,7 +167,7 @@ self.addEventListener("fetch", (event) => {
         }
         let output = stream;
         if (headers.get("content-type")?.includes("text/html")) {
-          const script = `<script>(${session.bootstrap})(${JSON.stringify(token)});(${navigationBootstrap.toString()})(${JSON.stringify(prefix)});<\/script>`;
+          const script = `<script>(${session.bootstrap})(${JSON.stringify(token)});(${navigationBootstrap.toString()})(${JSON.stringify(prefix)});</script>`;
           const text = await new Response(stream).text();
           output = new TextEncoder().encode(
             /<head(?:\s[^>]*)?>/i.test(text)

@@ -266,3 +266,5 @@ pnpm dev:app
 ## 许可证
 
 [MIT](LICENSE)。
+
+网关根地址也提供网页客户端。自托管直接配对，无需 Supabase；官方网关支持账号登录。详见[网页客户端](apps/web/README.md)。

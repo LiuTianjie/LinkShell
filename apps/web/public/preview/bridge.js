@@ -30,9 +30,8 @@ window.addEventListener("message", async (event) => {
           const changed = () => {
             if (next.state === "activated" || next.state === "redundant") {
               next.removeEventListener("statechange", changed);
-              next.state === "activated"
-                ? resolve()
-                : reject(new Error("预览服务更新失败"));
+              if (next.state === "activated") resolve();
+              else reject(new Error("预览服务更新失败"));
             }
           };
           next.addEventListener("statechange", changed);

@@ -10,6 +10,7 @@ export default tseslint.config(
     ignores: [
       "**/node_modules/**",
       "**/dist/**",
+      "packages/gateway/web-client/**",
       "**/build/**",
       "tmp/**",
       "temp/**",

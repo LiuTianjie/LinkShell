@@ -32,6 +32,10 @@ const gateway = await startGateway({
   port,
   databasePath,
   version,
+  web: {
+    account: supabase.url && supabase.anonKey ? { url: supabase.url, anonKey: supabase.anonKey } : undefined,
+    previewOrigin: process.env.WEB_PREVIEW_ORIGIN,
+  },
   log: (message) => log("info", `[relay] ${message}`),
   verifyToken: supabase.url && supabase.anonKey ? supabaseVerifier(supabase.url, supabase.anonKey) : undefined,
   admit:

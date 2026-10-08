@@ -7,7 +7,7 @@ const SUPABASE_ANON_KEY =
 
 let client: SupabaseClient | undefined;
 export function accountClient() {
-  return (client ??= createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  return (client ??= createClient(window.__LINKSHELL_CONFIG__?.account?.url ?? SUPABASE_URL, window.__LINKSHELL_CONFIG__?.account?.anonKey ?? SUPABASE_ANON_KEY, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,

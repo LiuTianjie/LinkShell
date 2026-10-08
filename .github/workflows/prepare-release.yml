@@ -51,6 +51,8 @@ jobs:
           trap 'docker stop linkshell-gateway-check || true' EXIT
           curl --retry 15 --retry-delay 2 --retry-connrefused -fsS http://127.0.0.1:18787/healthz > artifacts/gateway-health.json
           node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('artifacts/gateway-health.json')); if(!h.ok||h.version!==require('./packages/gateway/package.json').version) process.exit(1)"
+          curl -fsS http://127.0.0.1:18787/ | grep -q 'id="root"'
+          curl -fsS http://127.0.0.1:18787/config.js | grep -q '"deployment":"self-hosted"'
           mkdir -p artifacts/docker
           docker save "linkshell-gateway:$VERSION" | gzip > "artifacts/docker/linkshell-gateway-$VERSION.tar.gz"
       - name: Export mobile JavaScript bundles

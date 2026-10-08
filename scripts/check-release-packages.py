@@ -13,6 +13,8 @@ for path in paths:
         manifest = json.load(archive.extractfile("package/package.json"))
         assert "workspace:" not in json.dumps(manifest), f"workspace dependency leaked: {path}"
         assert not any(name.startswith("package/web/") for name in archive.getnames()), f"legacy console: {path}"
+        if manifest["name"] == "@linkshell/gateway":
+            assert "package/web-client/index.html" in archive.getnames(), "missing gateway browser client"
         entries = [manifest["main"]] if manifest.get("main") else []
         bins = manifest.get("bin", {})
         entries.extend(bins.values() if isinstance(bins, dict) else [bins])

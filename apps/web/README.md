@@ -12,7 +12,7 @@ pnpm --filter @linkshell/web lint
 pnpm --filter @linkshell/web test
 ```
 
-Output: `apps/web/dist`. Serve the complete directory at an HTTPS origin's root. The website and gateway are separate deployments; the gateway still only serves `/v2/connect` and `/healthz`.
+Output: `apps/web/dist`. The gateway Docker image and npm package bundle this client at `/`, alongside `/v2/connect` and `/healthz`. Run `pnpm --filter @linkshell/gateway build:web` when running the gateway from a checkout. Production uses `https://gateway.itool.tech`. No separate web deployment is required.
 
 ## Functions
 
@@ -37,9 +37,9 @@ Browser UI does not independently reimplement authorization, agent execution or 
 | Account/subscription | Same iTool account; an active Pro subscription for the computer connecting to the official gateway | No official account or subscription |
 | Credentials | Account tokens only to the official account service and fixed official gateway | Never send iTool account tokens to a custom gateway |
 
-The official website can also connect to a custom gateway. Serving the website privately does not itself create a gateway or expose a host.
+The official website can also connect to a custom gateway. The gateway generates `/config.js` at runtime: without Supabase configuration it selects pairing-only mode and the current origin as its gateway; `SUPABASE_URL` and `SUPABASE_ANON_KEY` enable account mode. Only these public account settings reach the browser. Set `WEB_PREVIEW_ORIGIN` for isolated port previews. A self-hosted gateway requires no Supabase setup.
 
-Replace `dist/config.js` without rebuilding (or edit `public/config.js` before building):
+For a separately hosted static copy, replace `dist/config.js` without rebuilding (or edit `public/config.js` before building):
 
 ```js
 window.__LINKSHELL_CONFIG__ = {

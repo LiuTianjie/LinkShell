@@ -98,7 +98,7 @@ Agents run as the user with the login shell's environment; LinkShell never handl
 
 ### Gateway (`packages/gateway`)
 
-- Two endpoints: WebSocket `/v2/connect` and `GET /healthz` → `{ ok, version, relay, memoryMb }` (`relay`: connected peers). Everything else is 404.
+- WebSocket `/v2/connect`, `GET /healthz` → `{ ok, version, relay, memoryMb }` (`relay`: connected peers), and the bundled current-protocol web client at `/`. `/config.js` selects account or pairing-only mode from gateway settings; unknown paths remain 404.
 - Data: one SQLite file (peers' public keys and account, machine↔device links). `RELAY_DATA_PATH`, default `./data/relay.db`; the Docker image uses `/data/relay.db`; `linkshell gateway` uses `~/.linkshell/relay.db`. Losing it unpairs every phone.
 - Env: `PORT` (8787), `LOG_LEVEL`, `RELAY_DATA_PATH`, `TRUSTED_PROXIES` (IPs or IPv4 ranges whose `X-Forwarded-For` is believed), `WS_CONNECT_RATE_LIMIT_MAX` / `WS_CONNECT_RATE_LIMIT_WINDOW_MS` (20 connects a minute per IP, loopback exempt), `SUPABASE_URL` + `SUPABASE_ANON_KEY` (account tokens are verified), `AUTH_REQUIRED` + `SUPABASE_SERVICE_ROLE_KEY` (a computer needs an active Pro account).
 - Official vs self-hosted: the same code. A self-hosted gateway has no Supabase variables: pairing only. The official one (`gateway.itool.tech`, `luma-gateway.yml`) adds account verification and, through `admit`, the Pro check for computers — at connect only; a failed lookup admits.

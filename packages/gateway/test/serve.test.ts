@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { connect as connectTcp } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,13 +96,48 @@ describe("startGateway", () => {
     expect(await (await fetch(`${http}/healthz`)).json()).toMatchObject({ relay: 1 });
   });
 
+  it("serves bundled web assets with pairing-only runtime config and no filesystem fallback", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-web-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "assets"));
+    writeFileSync(join(dir, "index.html"), "<html>LinkShell</html>");
+    writeFileSync(join(dir, "assets", "index-abc.js"), "console.log('web')");
+    const { http, ws } = await gateway({ web: { directory: dir }, verifyToken: undefined });
+    expect(await (await fetch(http)).text()).toBe("<html>LinkShell</html>");
+    const config = await fetch(http + "/config.js");
+    expect(config.headers.get("cache-control")).toBe("no-store");
+    expect(await config.text()).toContain('"deployment":"self-hosted"');
+    const asset = await fetch(http + "/assets/index-abc.js");
+    expect(asset.headers.get("content-type")).toContain("javascript");
+    expect(asset.headers.get("cache-control")).toContain("immutable");
+    expect(await (await fetch(http, { method: "HEAD" })).text()).toBe("");
+    for (const path of ["/package.json", "/%2e%2e%2fpackage.json", "/assets/missing.js", "/sessions"]) {
+      expect((await fetch(http + path)).status).toBe(404);
+    }
+    expect(await peer(ws, "device").relay.waitOnline(5000)).toBe(true);
+  });
+
+  it("exposes only selected public account settings", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-web-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, "index.html"), "web");
+    const account = { url: "https://account.example", anonKey: "public", serviceRoleKey: "secret" };
+    const { http } = await gateway({ web: { directory: dir, account, previewOrigin: "https://preview.example" } });
+    const config = await (await fetch(http + "/config.js")).text();
+    expect(config).toContain('"deployment":"official"');
+    expect(config).toContain('"anonKey":"public"');
+    expect(config).toContain('"previewOrigin":"https://preview.example"');
+    expect(config).not.toContain("secret");
+    expect(config).not.toContain("serviceRoleKey");
+  });
+
   it("reports the version it is given", async () => {
     const { http } = await gateway({ version: "9.9.9" });
     expect(await (await fetch(`${http}/healthz`)).json()).toMatchObject({ version: "9.9.9" });
   });
 
-  it("serves nothing else", async () => {
-    const { http } = await gateway();
+  it("keeps removed APIs unavailable when web is disabled", async () => {
+    const { http } = await gateway({ web: { directory: false } });
     // What 1.x served here, and the health check by any other method.
     for (const [method, path] of [
       ["GET", "/"],

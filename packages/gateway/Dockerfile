@@ -8,16 +8,22 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY patches/ patches/
 COPY packages/wire/package.json packages/wire/
 COPY packages/gateway/package.json packages/gateway/
+COPY packages/client-core/package.json packages/client-core/
+COPY apps/web/package.json apps/web/
 
-RUN pnpm install --frozen-lockfile --filter @linkshell/gateway --filter @linkshell/wire
+RUN pnpm install --frozen-lockfile --filter @linkshell/gateway --filter @linkshell/wire --filter @linkshell/client-core --filter @linkshell/web
 
 COPY packages/wire/ packages/wire/
 COPY packages/gateway/ packages/gateway/
 COPY tsconfig.base.json ./
+COPY packages/client-core/ packages/client-core/
+COPY apps/web/ apps/web/
+COPY apps/client/src/ apps/client/src/
 
 # The wire protocol first: the gateway runs against its built dist.
 RUN pnpm --filter @linkshell/wire build \
-  && pnpm --filter @linkshell/gateway build
+  && pnpm --filter @linkshell/gateway build \
+  && pnpm --filter @linkshell/gateway build:web
 
 # Prune to production deps only (the app's patches don't apply to the gateway).
 RUN pnpm --filter @linkshell/gateway deploy --legacy --prod --config.allow-unused-patches=true /app/pruned
@@ -36,6 +42,7 @@ WORKDIR /app
 # Copy pruned production node_modules + built dist
 COPY --from=builder /app/pruned/node_modules node_modules/
 COPY --from=builder /app/packages/gateway/dist packages/gateway/dist/
+COPY --from=builder /app/packages/gateway/web-client packages/gateway/web-client/
 # Also where /healthz reads the version from.
 COPY --from=builder /app/packages/gateway/package.json packages/gateway/
 

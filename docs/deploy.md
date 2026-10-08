@@ -141,3 +141,7 @@ curl http://localhost:8787/healthz
 ## 从旧版本升级
 
 网关 0.6（CLI 0.10）起只服务 2.x 的 App 和 `linkshell host`；1.x 的 App、`linkshell start` 和网页控制台不再支持。数据文件没有变：升级后沿用原来的 `relay.db`（Docker 沿用原来的卷），已配对的手机不受影响。
+
+## 网页客户端
+
+同一个网关镜像在根路径提供新版网页，官方入口为 `https://gateway.itool.tech`。自托管无需 Supabase，打开自己的网关域名即可使用设备配对。账号入口由网关的公开 Supabase 配置决定。端口预览需要独立来源，可将另一个域名路由到同一容器并设置 `WEB_PREVIEW_ORIGIN=https://preview.example.net`；主网页与预览不能同源。

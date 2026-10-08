@@ -6,6 +6,7 @@ declare global {
       deployment?: Source;
       gatewayUrl?: string;
       previewOrigin?: string;
+      account?: { url: string; anonKey: string };
     };
   }
 }
@@ -14,8 +15,9 @@ const settings = window.__LINKSHELL_CONFIG__;
 export const deployment: Source =
   settings?.deployment === "self-hosted" ? "self-hosted" : "official";
 export const officialGateway = "wss://gateway.itool.tech";
+const sameOriginGateway = window.location.origin.replace(/^http/, "ws");
 export const initialGateway =
-  deployment === "self-hosted" ? (settings?.gatewayUrl ?? "") : officialGateway;
+  deployment === "self-hosted" ? (settings?.gatewayUrl || sameOriginGateway) : officialGateway;
 
 export function validateGateway(value: string): string {
   let url: URL;

@@ -97,7 +97,7 @@ SUPABASE_SERVICE_ROLE_KEY=...
 | `WS` | `/v2/connect` | 电脑（host）和手机 App 的连接 |
 | `GET` | `/healthz` | 健康检查 |
 
-其他路径一律返回 404。
+`/` 提供新版网页客户端，`/assets/*` 提供静态资源，`/config.js` 返回公开部署配置。未配置 Supabase 时自动使用当前网关配对；官方配置启用账号入口。`WEB_PREVIEW_ORIGIN` 可指定独立端口预览来源。其他路径返回 404。
 
 ```bash
 curl http://localhost:8787/healthz

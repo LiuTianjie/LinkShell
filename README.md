@@ -266,3 +266,5 @@ Sponsored by [AI18N](https://ai18n.chat/), an AI API gateway with OpenAI- and An
 ## License
 
 [MIT](LICENSE).
+
+The gateway also serves the browser client at its root URL. Self-hosted gateways use pairing without Supabase; the official gateway enables account access. See [Web client](apps/web/README.md).

@@ -3,12 +3,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { RELAY_PATH } from "@linkshell/wire";
+import { webHandler, type WebOptions } from "./web.js";
 import type { VerifyToken } from "./accounts.js";
 import { clientIp, isLoopback, normalizeIp, RateLimiter, trustedProxySet } from "./rate-limit.js";
 import { Gateway, type GatewayOptions } from "./relay.js";
 
 export interface StartGatewayOptions {
   port: number;
+  web?: WebOptions;
   /** The interface to listen on; all of them when omitted. */
   host?: string;
   /** SQLite file holding pairings and peers' public keys. Losing it unpairs every phone. */
@@ -33,7 +35,7 @@ export interface RunningGateway {
 
 /**
  * The gateway as it is deployed: one HTTP server with the relay on
- * `RELAY_PATH` and a health check on `/healthz`. Nothing else is served.
+ * `RELAY_PATH`, a health check on `/healthz`, and the bundled browser client.
  */
 export async function startGateway(options: StartGatewayOptions): Promise<RunningGateway> {
   mkdirSync(dirname(options.databasePath), { recursive: true });
@@ -61,12 +63,14 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
     options.log?.(`a connection from ${peer} carries X-Forwarded-For, which is ignored: if ${peer} is your reverse proxy, add it to TRUSTED_PROXIES so each user gets their own connection limit`);
   };
 
+  const serveWeb = webHandler(options.web);
   const server = createServer((request, response) => {
     if (request.method === "GET" && pathOf(request) === "/healthz") {
       // memoryMb: what the process holds, to watch against the container's limit.
       json(response, 200, { ok: true, version, relay: relay.connected, memoryMb: Math.round(process.memoryUsage.rss() / 1048576) });
       return;
     }
+    if (serveWeb(request, response, pathOf(request))) return;
     json(response, 404, { error: "not_found" });
   });
 

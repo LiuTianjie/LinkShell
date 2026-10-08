@@ -8,8 +8,14 @@ tmp/
 temp/
 *.tsbuildinfo
 
-# The apps: the gateway image is built from packages/ only.
-apps/
+# Include only the browser client and shared mobile source modules.
+apps/*
+!apps/web/
+!apps/client/
+apps/client/*
+!apps/client/src/
+!apps/client/package.json
+packages/gateway/web-client/
 
 # Expo / RN
 .expo/
