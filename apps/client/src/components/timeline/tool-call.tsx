@@ -24,6 +24,12 @@ function mediaOf(item: ToolItem): ContentBlock[] {
   );
 }
 
+/** CUA screenshots stay available in history without duplicating the floating preview. */
+function isComputerUse(item: ToolItem): boolean {
+  if (item.detail?.type === "mcp") return ["cua_repl", "computer-use", "computer_use"].includes(item.detail.server);
+  return /^(?:mcp__)?(?:cua_repl|computer[-_]use)(?:__|[. ·])/.test(item.title);
+}
+
 /** Tool inputs worth showing when the row's subject doesn't already say it all. */
 function paramsOf(item: ToolItem, subject: string): [string, string][] {
   if (item.toolKind === "execute" || item.toolKind === "edit" || item.toolKind === "delete" || item.toolKind === "move") return [];
@@ -139,10 +145,11 @@ function ToolRow({ item }: { item: ToolItem }) {
   const media = mediaOf(item);
   const images = media.filter((block) => block.type === "image");
   const links = media.filter((block) => block.type === "resource_link");
+  const collapsedImages = isComputerUse(item);
   const params = paramsOf(item, described.subject);
   const terminal = item.content.some((entry) => entry.type === "terminal");
   const exitCode = exitCodeOf(item);
-  const hasBody = described.changes.length > 0 || !!output || links.length > 0 || params.length > 0 || (terminal && !output);
+  const hasBody = (collapsedImages && images.length > 0) || described.changes.length > 0 || !!output || links.length > 0 || params.length > 0 || (terminal && !output);
   const added = described.changes.reduce((sum, c) => sum + c.added, 0);
   const removed = described.changes.reduce((sum, c) => sum + c.removed, 0);
   const tone = failed ? colors.danger : running ? colors.running : colors.secondaryLabel;
@@ -200,7 +207,7 @@ function ToolRow({ item }: { item: ToolItem }) {
         ) : null}
       </Pressable>
 
-      {images.length ? (
+      {images.length > 0 && (!collapsedImages || open) ? (
         <View style={{ marginLeft: GLYPH + 8 }}>
           <Attachments blocks={images} thumb={96} />
         </View>
