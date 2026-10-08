@@ -120,6 +120,8 @@ Every paired phone and every installed host depends on these. Changing one silen
 
 Checklist: [docs/release-sop.md](docs/release-sop.md).
 
+When the user asks to release LinkShell, execute the full release workflow, including publication and deployment. The user explicitly exempts LinkShell from the preparation-only rule used for other projects. Use the preparation-only lane only when the user explicitly requests it.
+
 - npm, always `pnpm publish` (it rewrites `workspace:*`), in dependency order: wire → mac → host → gateway → cli; skip what didn't change.
 - `@linkshell/mac` must be published from a Mac with the Developer ID Application certificate (`prepack` refuses to build unsigned).
 - Tag `gateway-vX.Y.Z` → CI builds and pushes `nickname4th/linkshell-gateway` (`.github/workflows/docker-publish.yml`). That only builds: the official gateway is deployed by bumping the image in `luma-gateway.yml`.
