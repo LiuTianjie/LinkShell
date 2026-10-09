@@ -28,7 +28,7 @@ import Foundation
 //   --loopback            Answer each offer inside the app and report what was received.
 //   --no-playout-delay    Don't ask the receiver for a zero playout delay (to measure its worth).
 //   --encoder own|stock   The video track's H.264 encoder: this app's low-latency one, or
-//                         libwebrtc's (the default).
+//                         libwebrtc's. Default: own, with automatic fallback to stock.
 //   --no-low-latency      Encode as a Mac without the low-latency rate control does.
 //   --trial <name>=<value>  A libwebrtc field trial, beside those of `Tuning` (to try one out).
 //   --rtc-log             libwebrtc's own log, as `log` messages.
@@ -47,7 +47,7 @@ if Launch.has("--setup") || (Launch.arguments.isEmpty && getppid() == 1) {
 if let path = Launch.value(after: "--connect") {
   guard let link = Link(path: path) else { exit(1) }
   Engine.playoutDelay = !Launch.has("--no-playout-delay")
-  Engine.ownEncoder = Launch.value(after: "--encoder") == "own"
+  Engine.ownEncoder = Launch.value(after: "--encoder") != "stock"
   Engine.report = { link.log($0) }
   if Launch.has("--rtc-log") { Engine.forwardLog(to: link) }
   // With no window and no place in the Dock.

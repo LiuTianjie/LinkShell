@@ -2,6 +2,16 @@ import CoreMedia
 import Foundation
 import WebRTC
 
+/// The compression session can fail after it starts; kept separate so that the takeover can
+/// be checked without depending on a particular Mac's hardware failing during a test.
+protocol ScreenCompression: AnyObject {
+  var mode: String { get }
+  func setRates(bitrate: Int, ceiling: Int?, fps: Int)
+  func encode(_ buffer: CVPixelBuffer, at time: CMTime, key: Bool, done: @escaping (Result<VideoCompressor.Frame?, VideoCompressor.Failure>) -> Void)
+}
+
+extension VideoCompressor: ScreenCompression {}
+
 /// The video track's H.264 encoder on this app's own compression session (`VideoCompressor`) in
 /// place of libwebrtc's: the low-latency rate control, which libwebrtc's doesn't ask for, takes
 /// about half the time over a frame and keeps closer to the rate the bandwidth estimate sets.
@@ -33,14 +43,22 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   private var callback: RTCVideoEncoderCallback?
   private var settings: RTCVideoEncoderSettings?
   private var cores: Int32 = 1
-  private var compressor: VideoCompressor?
-  private var stock: H264ScreenEncoder?
+  private let makeCompressor: (VideoCompressor.Setup) throws -> ScreenCompression
+  private let makeStock: (RTCVideoCodecInfo, Int) -> RTCVideoEncoder
+  private var compressor: ScreenCompression?
+  private var stock: RTCVideoEncoder?
+  private var latestRates: (bitrate: UInt32, framerate: UInt32)?
   /// Set on the encoder's thread when a frame fails; read on libwebrtc's before the next.
-  private let broken = Locked<String?>(nil)
+  /// Old callbacks must not break a replacement session or publish its stale pictures.
+  private let state = Locked((generation: 0, failure: String?.none))
 
-  init(info: RTCVideoCodecInfo, maximumFrameRate: Int = Tuning.fullFps) {
+  init(info: RTCVideoCodecInfo, maximumFrameRate: Int = Tuning.fullFps,
+       makeCompressor: @escaping (VideoCompressor.Setup) throws -> ScreenCompression = { try VideoCompressor($0) },
+       makeStock: @escaping (RTCVideoCodecInfo, Int) -> RTCVideoEncoder = { H264ScreenEncoder(info: $0, maximumFrameRate: $1) }) {
     self.info = info
     self.maximumFrameRate = maximumFrameRate
+    self.makeCompressor = makeCompressor
+    self.makeStock = makeStock
     // 42…: (Constrained) Baseline; anything else offered is Constrained High.
     profile = (info.parameters["profile-level-id"] ?? "").lowercased().hasPrefix("42") ? .baseline : .high
     packetization = info.parameters["packetization-mode"] == "1" ? .nonInterleaved : .singleNalUnit
@@ -53,12 +71,14 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   }
 
   func startEncode(with settings: RTCVideoEncoderSettings, numberOfCores: Int32) -> Int {
+    invalidateCallbacks()
     self.settings = settings
     cores = numberOfCores
+    latestRates = nil
     compressor = nil
     if let stock { return stock.startEncode(with: settings, numberOfCores: numberOfCores) }
     do {
-      let made = try VideoCompressor(.init(
+      let made = try makeCompressor(.init(
         width: Int(settings.width),
         height: Int(settings.height),
         fps: Int(settings.maxFramerate),
@@ -76,17 +96,24 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   }
 
   func release() -> Int {
+    invalidateCallbacks()
     compressor = nil
     return stock?.release() ?? Code.ok
   }
 
   func encode(_ frame: RTCVideoFrame, codecSpecificInfo info: RTCCodecSpecificInfo?, frameTypes: [NSNumber]) -> Int {
     let key = frameTypes.contains { $0.uintValue == RTCFrameType.videoFrameKey.rawValue }
-    if stock == nil, let reason = broken.withLock({ $0 }) { _ = fallBack(reason) }
+    if stock == nil, let reason = state.withLock({ $0.failure }) {
+      let result = fallBack(reason)
+      if result != Code.ok { return result }
+    }
     // A frame that is not a whole pixel buffer (cropped, or not from the screen) is libwebrtc's
     // encoder's to copy and convert.
     let native = frame.buffer as? RTCCVPixelBuffer
-    if stock == nil, compressor != nil, native == nil || native?.requiresCropping() == true { _ = fallBack("a frame that is not a whole pixel buffer") }
+    if stock == nil, compressor != nil, native == nil || native?.requiresCropping() == true {
+      let result = fallBack("a frame that is not a whole pixel buffer")
+      if result != Code.ok { return result }
+    }
     if let stock {
       // A change of encoder begins with a key frame, whatever was asked for.
       let types = switched ? [NSNumber(value: RTCFrameType.videoFrameKey.rawValue)] : frameTypes
@@ -102,15 +129,20 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     let captured = frame.timeStampNs / 1_000_000
     let rotation = frame.rotation
     let packetization = self.packetization
-    compressor.encode(native.pixelBuffer, at: CMTime(value: frame.timeStampNs, timescale: 1_000_000_000), key: key) { [broken] result in
+    let generation = state.withLock { $0.generation }
+    compressor.encode(native.pixelBuffer, at: CMTime(value: frame.timeStampNs, timescale: 1_000_000_000), key: key) { [state] result in
+      guard state.withLock({ $0.generation == generation }) else { return }
       switch result {
       case .failure(let failure):
-        broken.withLock { $0 = "\(failure)" }
+        state.withLock { if $0.generation == generation { $0.failure = "\(failure)" } }
       case .success(nil):
         // Dropped to keep to the rate: libwebrtc hears of no frame, as from its own encoder.
         break
       case .success(let encoded?):
-        guard let data = encoded.accessUnit() else { return }
+        guard let data = encoded.accessUnit() else {
+          state.withLock { if $0.generation == generation { $0.failure = "an encoded frame had no H.264 access unit" } }
+          return
+        }
         let image = RTCEncodedImage()
         image.buffer = data
         image.encodedWidth = width
@@ -132,6 +164,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   }
 
   func setBitrate(_ bitrateKbit: UInt32, framerate: UInt32) -> Int32 {
+    latestRates = (bitrateKbit, framerate)
     if let stock { return stock.setBitrate(bitrateKbit, framerate: framerate) }
     compressor?.setRates(bitrate: Int(bitrateKbit) * 1000, ceiling: nil, fps: Int(framerate))
     return Int32(Code.ok)
@@ -156,15 +189,26 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
 
   private var switched = false
 
+  private func invalidateCallbacks() {
+    state.withLock {
+      $0.generation += 1
+      $0.failure = nil
+    }
+  }
+
   private func fallBack(_ reason: String) -> Int {
     Engine.report("the low-latency encoder is not used (\(reason)): libwebrtc's VideoToolbox encoder takes over")
+    invalidateCallbacks()
     compressor = nil
     LowLatencyH264Encoder.tookOver.withLock { $0 = true }
-    let stock = H264ScreenEncoder(info: info, maximumFrameRate: maximumFrameRate)
+    let stock = makeStock(info, maximumFrameRate)
     stock.setCallback(callback)
     self.stock = stock
     switched = true
     guard let settings else { return Code.uninitialized }
-    return stock.startEncode(with: settings, numberOfCores: cores)
+    let result = stock.startEncode(with: settings, numberOfCores: cores)
+    guard result == Code.ok else { return result }
+    if let latestRates { return Int(stock.setBitrate(latestRates.bitrate, framerate: latestRates.framerate)) }
+    return Code.ok
   }
 }

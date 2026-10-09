@@ -7,8 +7,8 @@ enum Engine {
   static var playoutDelay = true
 
   /// H.264 from this app's own low-latency encoder (`LowLatencyH264Encoder`) or from libwebrtc's
-  /// (`--encoder own|stock`).
-  static var ownEncoder = false
+  /// (`--encoder stock` keeps the upstream encoder available for comparisons).
+  static var ownEncoder = true
 
   /// Where the engine says what the host should know (its log).
   static var report: (String) -> Void = { _ in }
