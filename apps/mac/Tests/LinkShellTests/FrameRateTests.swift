@@ -18,8 +18,8 @@ final class FrameRateTests: XCTestCase {
   }
 
   /// libwebrtc's first step down from 1920×1080: 1280×720.
-  private func shrunk(_ fps: Double, because limitation: String = "bandwidth") -> FrameRate.Second {
-    .init(captured: fps + 1, encoded: fps, sentShare: 4.0 / 9, limitation: limitation, available: 1_500_000)
+  private func shrunk(_ fps: Double, because limitation: String = "bandwidth", available: Double = 1_500_000) -> FrameRate.Second {
+    .init(captured: fps + 1, encoded: fps, sentShare: 4.0 / 9, limitation: limitation, available: available)
   }
 
   /// The same second again and again, until the rate changes: how many it took and what was
@@ -62,10 +62,19 @@ final class FrameRateTests: XCTestCase {
     XCTAssertNil(seconds(of: unknown, to: &rate))
   }
 
-  func testALowEstimateAloneKeepsTheFullRate() {
+  func testAnEstimateBelowTheRoomButAboveTheNarrowLineKeepsTheFullRate() {
     var rate = rate()
-    // The picture is whole: what is on the screen fits in what there is.
-    XCTAssertNil(seconds(of: carried(60, available: 800_000), to: &rate))
+    // A session's first estimate: under what it takes to go back up, over what ends the full rate.
+    XCTAssertNil(seconds(of: carried(60, available: (rate.narrow + rate.room) / 2), to: &rate))
+  }
+
+  func testANarrowNetworkEndsTheFullRateWhileThePictureIsWhole() {
+    var rate = rate()
+    settle(&rate, at: 60)
+    let change = seconds(of: carried(60, available: 800_000), to: &rate)
+    XCTAssertEqual(change?.count, Tuning.frameRateDownAfter)
+    XCTAssertEqual(change?.verdict, .down("the network was estimated at 0.8 Mbit/s for 3 s"))
+    XCTAssertEqual(rate.current, 30)
   }
 
   func testAnEncoderThatCropsARowHasNotShrunkThePicture() {
@@ -80,7 +89,7 @@ final class FrameRateTests: XCTestCase {
   func testAPictureShrunkForThreeSecondsEndsTheFullRate() {
     var rate = rate()
     settle(&rate, at: 60)
-    let change = seconds(of: shrunk(60), to: &rate)
+    let change = seconds(of: shrunk(60, available: 6_000_000), to: &rate)
     XCTAssertEqual(change?.count, Tuning.frameRateDownAfter)
     XCTAssertEqual(change?.verdict, .down("the picture was being shrunk for 3 s (bandwidth)"))
     XCTAssertEqual(rate.current, 30)
@@ -89,7 +98,7 @@ final class FrameRateTests: XCTestCase {
   func testThePictureShrunkForTheProcessorIsSaidSo() {
     var rate = rate()
     settle(&rate, at: 60)
-    XCTAssertEqual(seconds(of: shrunk(60, because: "cpu"), to: &rate)?.verdict, .down("the picture was being shrunk for 3 s (cpu)"))
+    XCTAssertEqual(seconds(of: shrunk(60, because: "cpu", available: 6_000_000), to: &rate)?.verdict, .down("the picture was being shrunk for 3 s (cpu)"))
   }
 
   func testNothingIsConcludedWhileTheSessionSettles() {

@@ -10,13 +10,6 @@ enum Engine {
   /// (`--encoder own|stock`).
   static var ownEncoder = false
 
-  /// While this is set the track's encoder gives libwebrtc no quantizers to resize the picture
-  /// by (`ScreenEncoderFactory.scaling`). libwebrtc looks at every frame: it stops resizing, and
-  /// what it had taken off the picture is given back at once
-  /// (video_stream_encoder_resource_manager.cc, `UpdateQualityScalerSettings`); when this is
-  /// cleared it starts again, from the whole picture. Set by the one video session there is.
-  static let wholePicture = Locked(false)
-
   /// Where the engine says what the host should know (its log).
   static var report: (String) -> Void = { _ in }
 

@@ -106,9 +106,6 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   /// The most the track may send for now, in bits a second, where that is not the frame rate's
   /// ceiling: the second after the rate went up (`change`).
   private var eased: Int?
-  /// Seconds still to go in which libwebrtc may not make the picture smaller
-  /// (`Engine.wholePicture`): after the rate went down (`change`).
-  private var wholeFor = 0
 
   init(request: ScreenRequest, options: Options, link: Link) {
     self.request = request
@@ -223,7 +220,6 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     guard !closed else { return }
     closed = true
     awake = nil
-    Engine.wholePicture.withLock { $0 = false }
     statsTimer?.cancel()
     cursorTimer?.cancel()
     shapeTimer?.cancel()
@@ -311,29 +307,15 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   }
 
   /// Another frame rate, and the ceiling that goes with it, from the next frame on: the capture
-  /// goes on, the encoder stays as it is, and nothing is negotiated. `shrunk`: libwebrtc is
-  /// sending the picture smaller than it is captured; `sending`: the bits a second it sends.
-  private func change(to rate: Int, because reason: String, shrunk: Bool, sending: Double?) {
+  /// goes on, the encoder stays as it is, and nothing is negotiated. `sending`: the bits a
+  /// second it sends.
+  private func change(to rate: Int, because reason: String, sending: Double?) {
     link.log("frame rate \(frameRate) → \(rate): \(reason)")
     let lower = rate < frameRate
     frameRate = rate
     frameRateReason = reason
     if lower {
       eased = nil
-      // The lower rate starts with the whole picture, if the higher one had it made smaller.
-      // Left to itself libwebrtc keeps it small: it grows a picture back only once its
-      // quantizer is under 24, and half the frames don't bring it there from the 37 that shrank
-      // it (20 seconds at 1280 wide, measured, on a network that carries 1920 at the lower
-      // rate). An encoder that stops giving it quantizers to go by makes it forget what it did
-      // (`Engine.wholePicture`), and gets the whole picture from the next frame. That lasts a
-      // few seconds (`reportStats` ends it): the first frames at the new size are coarse
-      // whatever the network, and judged on those the picture was shrunk again two seconds
-      // later. If the lower rate can't carry the whole picture either, libwebrtc shrinks it
-      // once it may, on that rate's own account.
-      if shrunk {
-        wholeFor = Tuning.frameRateWhole
-        Engine.wholePicture.withLock { $0 = true }
-      }
     } else {
       // The higher rate starts on half of what the lower one was sending, for a second. The
       // encoder is told the frame rate libwebrtc has counted over the last second, so for that
@@ -575,17 +557,12 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
           self.eased = nil
           self.setParameters()
         }
-        if self.wholeFor > 0 {
-          self.wholeFor -= 1
-          if self.wholeFor == 0 { Engine.wholePicture.withLock { $0 = false } }
-        }
         // Only a connection that is up says anything about a rate: while one is being made, or
         // is lost, no frame is sent at any.
         guard connection.connectionState == .connected else { return }
         switch self.steps?.judge(second) {
         case .down(let reason), .up(let reason):
-          let shrunk = second.sentShare.map { $0 < Tuning.frameRateShrunk } ?? false
-          if let rate = self.steps?.current { self.change(to: rate, because: reason, shrunk: shrunk, sending: bitrate) }
+          if let rate = self.steps?.current { self.change(to: rate, because: reason, sending: bitrate) }
         case .keep, nil:
           break
         }

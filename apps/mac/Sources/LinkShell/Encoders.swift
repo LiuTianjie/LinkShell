@@ -22,10 +22,17 @@ final class ScreenEncoderFactory: NSObject, RTCVideoEncoderFactory {
     return Engine.ownEncoder ? LowLatencyH264Encoder(info: info) : H264ScreenEncoder(info: info)
   }
 
-  /// An encoder's quantizer thresholds as libwebrtc is told them: none while the picture is
-  /// being kept whole.
+  /// An encoder's quantizer thresholds as libwebrtc is told them: none. With them libwebrtc
+  /// shrinks the picture whenever its quantizer is over 37 (its own H.264 thresholds take
+  /// precedence on macOS: quality_scaling_experiment.cc), and grows it back only under 24. A
+  /// busy screen at 60 frames sits at 37 to 40 however many bits there are: a 2560-wide picture
+  /// was 1920 wide two seconds into a session on a path with 25 Mbit/s to spare, and stayed
+  /// so, and on a network that was narrow for a while it stayed 1280 wide after the network
+  /// came back (`tools/loopback.mjs --motion`, `--narrow`). Without them the picture keeps
+  /// its pixels, and a network that doesn't carry it costs frames instead (`FrameRate`):
+  /// libwebrtc still makes it smaller on its own account where even those bits aren't there.
   static func scaling(_ thresholds: RTCVideoEncoderQpThresholds?) -> RTCVideoEncoderQpThresholds? {
-    Engine.wholePicture.withLock { $0 } ? nil : thresholds
+    nil
   }
 }
 

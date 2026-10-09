@@ -3,15 +3,16 @@ import Foundation
 /// Which of two frame rates a video session runs at: the full one while the network and this Mac
 /// carry it, the reduced one while they don't.
 ///
-/// At the full rate with too little to send it with, libwebrtc keeps the rate and makes the
-/// picture smaller (`Tuning.degradation`). Once that lasts it is the wrong way round for a
-/// desktop: text with half the frames and all its pixels reads better than text with all the
-/// frames and half its pixels. So a picture that stays smaller, or frames that don't come out of
-/// the encoder, for a few seconds running is the end of the full rate. Packets being lost is
-/// not: half the frames lose the same share of theirs. Nor is a low estimate, while the picture
-/// is whole: what is on the screen fits. Nor the time the encoder takes over a frame: it is the
-/// hardware's own (11 ms here at 30 frames and at 60), and when it is too long frames don't
-/// come out, which is counted.
+/// Text with half the frames and all its pixels reads better than text with all the frames and
+/// half its pixels, so a network that doesn't carry the full rate costs frames, not pixels: the
+/// encoder gives libwebrtc no quantizers to shrink the picture by (`ScreenEncoderFactory.scaling`).
+/// What ends the full rate is a bandwidth estimate under `Tuning.frameRateNarrow` of its
+/// ceiling, a picture libwebrtc made smaller anyway (on its own account, when even the bits for
+/// a smaller one are short), or frames that don't come out of the encoder, for a few seconds
+/// running. A session's first estimate is low and climbs: it stays above the narrow line. Packets
+/// being lost is not trouble: half the frames lose the same share of theirs. Nor the time the
+/// encoder takes over a frame: it is the hardware's own (11 ms here at 30 frames and at 60),
+/// and when it is too long frames don't come out, which is counted.
 ///
 /// The way back asks for more and takes longer: nothing limiting the reduced rate, and a
 /// bandwidth estimate with room for the full one, for a time that doubles whenever the full rate
@@ -49,6 +50,8 @@ struct FrameRate {
   let reduced: Int
   /// The bandwidth estimate there has to be before the full rate is tried again, in bits a second.
   let room: Double
+  /// The estimate below which the network does not carry the full rate, in bits a second.
+  let narrow: Double
   /// The rate in force.
   private(set) var current: Int
 
@@ -68,6 +71,7 @@ struct FrameRate {
     self.full = full
     self.reduced = reduced
     room = Double(ceiling) * Tuning.frameRateRoom
+    narrow = Double(ceiling) * Tuning.frameRateNarrow
     current = full
   }
 
@@ -118,6 +122,7 @@ struct FrameRate {
 
   /// What says the full rate is not being carried, if anything does.
   private func trouble(_ second: Second) -> String? {
+    if let available = second.available, available < narrow { return String(format: "the network was estimated at %.1f Mbit/s", available / 1e6) }
     if let share = second.sentShare, share < Tuning.frameRateShrunk { return "the picture was being shrunk" }
     if let encoded = second.encoded, dropping(encoded, of: second.captured, at: full) {
       return String(format: "only %.0f of %.0f frames a second were sent", encoded, min(second.captured, Double(full)))

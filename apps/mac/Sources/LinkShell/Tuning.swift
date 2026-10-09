@@ -83,15 +83,17 @@ enum Tuning {
   /// 0.4 of the ceiling is 4.8 Mbit/s for a 1920-wide picture: the moving picture the tools show
   /// (`MotionWindow`) kept all its pixels at 60 frames on an estimate of 2 Mbit/s and lost them
   /// on 1.75, so it is more than twice what a busy screen needed.
+  /// The full rate is not carried while the estimate is under this share of its ceiling: 3.2
+  /// Mbit/s for a 2560-wide picture. A session starts at about 6 and climbs, so the start never
+  /// counts; the moving picture at 1.5 Mbit/s does. Between this and `frameRateRoom` the rate in
+  /// force stays.
+  static let frameRateNarrow = 0.2
+
   static let frameRateCalm = 10
   static let frameRateCalmMax = 160
   static let frameRateHeld = 30
   static let frameRateRoom = 0.4
 
-  /// The reduced rate has the whole picture for this many seconds whatever its quantizer, before
-  /// libwebrtc may shrink it again (`ScreenSession.change`): time for one key frame of the whole
-  /// picture and for the frames after it to find their rate.
-  static let frameRateWhole = 4
 
   /// For its first second the full rate may send this share of what the reduced rate was
   /// sending, and never less than this many bits a second (`ScreenSession.change`): twice the
