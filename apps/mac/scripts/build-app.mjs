@@ -65,13 +65,18 @@ if (adHoc && process.env.LINKSHELL_REQUIRE_SIGNED === "1") fail("no Developer ID
 const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 
 console.log(`[build-app] swift build (${ARCH})`);
-const built = spawnSync("/usr/bin/swift", ["build", "-c", "release", "--arch", ARCH, "--package-path", root, "--scratch-path", scratch], { encoding: "utf8", timeout: 900_000, maxBuffer: 64 * 1024 * 1024 });
+const buildArgs = ["build", "-c", "release", "--arch", ARCH, "--package-path", root, "--scratch-path", scratch];
+const built = spawnSync("/usr/bin/swift", buildArgs, { encoding: "utf8", timeout: 900_000, maxBuffer: 64 * 1024 * 1024 });
 const said = `${built.stdout ?? ""}${built.stderr ?? ""}`;
 if (built.status !== 0) fail(`swift build failed:\n${said}`);
 // A build that passes says nothing else: the compiler's warnings are worth reading.
 const warnings = said.split("\n").filter((line) => line.includes("warning:"));
 if (warnings.length) console.log(`[build-app] the compiler warns:\n${warnings.join("\n")}`);
-const program = join(scratch, `${ARCH}-apple-macosx`, "release", "LinkShell");
+// Xcode 27's SwiftPM writes to out/Products/Release; older toolchains use the target triple.
+// Asking the toolchain prevents a successful new build from silently packaging an old binary.
+const program = join(run("/usr/bin/swift", [...buildArgs, "--show-bin-path"]).trim(), "LinkShell");
+if (!existsSync(program)) fail(`the built program is missing: ${program}`);
+console.log(`[build-app] program: ${program}`);
 // SwiftPM leaves the build's own search paths in the binary (this Mac's Xcode among them).
 // In the app there is one place to look: Contents/Frameworks.
 for (const [, path] of run("/usr/bin/otool", ["-l", program]).matchAll(/cmd LC_RPATH\n\s+cmdsize \d+\n\s+path (.+) \(offset \d+\)/g)) {
