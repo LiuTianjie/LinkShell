@@ -58,6 +58,29 @@ export function saveScreenMode(mode: ScreenMode): void {
   }
 }
 
+const SCREEN_WIDTH_KEY = "screen.width";
+
+/** How wide the screen's video may be, in pixels; "native" is the display's own width. 1920 unless chosen. */
+export type ScreenWidth = "1280" | "1920" | "2560" | "native";
+const SCREEN_WIDTHS: readonly ScreenWidth[] = ["1280", "1920", "2560", "native"];
+
+export function isScreenWidth(value: unknown): value is ScreenWidth {
+  return SCREEN_WIDTHS.includes(value as ScreenWidth);
+}
+
+export function loadScreenWidth(): ScreenWidth {
+  const stored = read(SCREEN_WIDTH_KEY);
+  return isScreenWidth(stored) ? stored : "1920";
+}
+
+export function saveScreenWidth(width: ScreenWidth): void {
+  try {
+    Storage.setItemSync(SCREEN_WIDTH_KEY, width);
+  } catch {
+    // The viewer then starts at 1920.
+  }
+}
+
 const SCREEN_SHORTCUTS_KEY = "screen.shortcuts";
 const SHORTCUT_MODIFIERS = ["ctrl", "alt", "shift", "cmd"] as const;
 // The keys the computer knows by name (apps/mac, Keys.swift).

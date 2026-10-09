@@ -23,7 +23,7 @@ import { Icon } from "@/components/icon";
 import { useConnection, useStreamPath } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { forwardPort, type Forward } from "@/lib/preview";
-import { loadScreenMode, loadScreenShortcuts, saveScreenMode, saveScreenShortcuts, screenShortcuts, type ScreenMode } from "@/lib/settings";
+import { isScreenWidth, loadScreenMode, loadScreenShortcuts, loadScreenWidth, saveScreenMode, saveScreenShortcuts, saveScreenWidth, screenShortcuts, type ScreenMode } from "@/lib/settings";
 import { type } from "@/theme/type";
 
 interface Viewer {
@@ -69,6 +69,9 @@ export function ScreenScreen() {
   const [mode, setMode] = useState<ScreenMode>(initialMode);
   // The user's own shortcuts: the page shows and edits them, and they are kept here.
   const [shortcuts, setShortcuts] = useState(loadScreenShortcuts);
+  // How wide the video may be. The page changes it itself (it loads again with the new one); it is kept here
+  // for the next time, when the page is at another address and has forgotten.
+  const [width] = useState(loadScreenWidth);
   const [fullscreen, setFullscreen] = useState(false);
   const window = useWindowDimensions();
   const [turned, setLandscape] = useState(false);
@@ -142,7 +145,7 @@ export function ScreenScreen() {
 
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
-      let message: { type?: string; on?: boolean; mode?: string; kind?: string; list?: unknown };
+      let message: { type?: string; on?: boolean; mode?: string; kind?: string; list?: unknown; width?: unknown };
       try {
         message = JSON.parse(event.nativeEvent.data);
       } catch {
@@ -169,6 +172,8 @@ export function ScreenScreen() {
         void Clipboard.getStringAsync()
           .catch(() => "")
           .then((text) => web.current?.injectJavaScript(`window.linkshellClipboard && window.linkshellClipboard(${JSON.stringify(text.slice(0, 20_000))}); true;`));
+      } else if (message.type === "width") {
+        if (isScreenWidth(message.width)) saveScreenWidth(message.width);
       } else if (message.type === "ready" || message.type === "mode") {
         if (message.mode === "view" || message.mode === "trackpad" || message.mode === "touch") {
           setMode(message.mode);
@@ -225,7 +230,7 @@ export function ScreenScreen() {
   // Through a gateway the picture is lighter: it is someone's relay, not a wire between the two devices.
   const quality = via === "relay" && computer.kind !== "direct" ? "&q=low" : "";
   // video=1: this app plays video in place. Said here as well as in `chrome`, which on Android can reach the page after its script has run.
-  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}&mode=${initialMode}&video=1` : null;
+  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}&mode=${initialMode}&video=1&width=${width}` : null;
 
   return (
     <Animated.View onLayout={geometry.onLayout} style={[{ flex: 1, backgroundColor: "#000000" }, lift]}>

@@ -92,6 +92,8 @@ export interface VideoOffer {
   iceServers: { urls: string[] }[];
   /** Frames a second; the app's own choice when left out. */
   fps?: number;
+  /** The widest the picture may be, in pixels; the app's own choice (1920) when left out. */
+  maxWidth?: number;
 }
 
 /** What a viewer answers the app's offer with, and the candidates it finds. */

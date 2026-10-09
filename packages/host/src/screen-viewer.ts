@@ -81,6 +81,8 @@ const STYLE = String.raw`
   .choice.on { background: rgba(255,255,255,0.16); }
   .choice b { display: block; font-weight: 600; font-size: calc(15px * var(--text-scale, 1)); }
   .choice span { display: block; font-size: calc(12.5px * var(--text-scale, 1)); color: rgba(255,255,255,0.62); }
+  #widths { padding: 0 6px 6px; }
+  #widths .group { padding-top: 4px; }
   #status { padding: 2px 10px 10px; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5;
     color: rgba(255,255,255,0.5); white-space: pre-line; font-variant-numeric: tabular-nums; }
   #toast { position: absolute; left: 50%; max-width: min(86vw, 420px); width: max-content; transform: translateX(-50%); padding: 10px 16px; border-radius: 18px;
@@ -481,6 +483,13 @@ let lighterAt = -Infinity, failures = 0;
 const asked = new URLSearchParams(location.search);
 asked.delete("video");
 if (wantVideo) asked.set("video", "1");
+// How wide the video track may be (the socket's picture has its own ladder). The app says it in the address;
+// a plain browser remembers its own. A new choice loads the page again with it: the track is offered anew.
+const WIDTHS = ["1280", "1920", "2560", "native"];
+let keptWidth = null;
+try { keptWidth = localStorage.getItem("linkshell.screen.width"); } catch {}
+const width = WIDTHS.includes(query.get("width")) ? query.get("width") : WIDTHS.includes(keptWidth) ? keptWidth : "1920";
+asked.set("width", width);
 const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream?" + asked);
 ws.binaryType = "arraybuffer";
 const send = (message) => { if (ws.readyState === 1) ws.send(JSON.stringify(message)); };
@@ -1950,6 +1959,11 @@ async function status() {
     line.textContent = text;
     layout();
   };
+  // The choice is the track's: the socket's picture follows its own ladder.
+  if ($("widths").classList.contains("gone") === live) {
+    $("widths").classList.toggle("gone", !live);
+    layout();
+  }
   const way = !content.w ? "正在连接…" : live ? "直连 · 视频" : (relayed ? "中继" : "直连") + " · 兼容\n" + content.w + "×" + content.h;
   const pc = live && rtc && rtc.pc;
   if (!pc || !line.textContent.startsWith(way)) put(way);
@@ -1986,6 +2000,20 @@ pressable($("keyboard"), () => (coarse ? raiseKeys() : toggleKeys()));
 pressable($("quick"), openSheet);
 pressable($("fit"), () => zoomTo(1, { x: area.x + area.w / 2, y: area.y + area.h / 2 }));
 pressable($("rotate"), () => tellApp({ type: "landscape", on: !chrome.landscape }));
+for (const tile of $("widths").querySelectorAll(".tile")) {
+  tile.classList.toggle("on", tile.dataset.width === width);
+  tile.setAttribute("aria-pressed", String(tile.dataset.width === width));
+  pressable(tile, () => {
+    const chosen = tile.dataset.width;
+    if (chosen === width) return;
+    try { localStorage.setItem("linkshell.screen.width", chosen); } catch {}
+    tellApp({ type: "width", width: chosen });
+    const next = new URLSearchParams(location.search);
+    next.set("width", chosen);
+    next.set("mode", mode);
+    location.replace(location.pathname + "?" + next);
+  });
+}
 pressable($("full"), () => {
   beginPresentation(app ? !chrome.fullscreen : !document.fullscreenElement);
   if (app) return tellApp({ type: "fullscreen", on: !chrome.fullscreen });
@@ -2464,6 +2492,15 @@ export function viewerPage(): string {
 <div id="connection" class="glass gone">
   <div id="connectionhead"><span>连接信息</span><div class="tool" id="closeinfo" role="button" aria-label="关闭连接信息">${ICONS.close}</div></div>
   <div id="status"></div>
+  <div id="widths" class="gone">
+    <div class="group"><span>清晰度（直连视频）</span></div>
+    <div class="tiles">
+      <div class="tile" role="button" aria-label="流畅，1280 宽" data-width="1280"><b>流畅</b><span>1280</span></div>
+      <div class="tile" role="button" aria-label="标准，1920 宽" data-width="1920"><b>标准</b><span>1920</span></div>
+      <div class="tile" role="button" aria-label="高清，2560 宽" data-width="2560"><b>高清</b><span>2560</span></div>
+      <div class="tile" role="button" aria-label="原生，屏幕本身的分辨率" data-width="native"><b>原生</b><span>最高 4K</span></div>
+    </div>
+  </div>
 </div>
 <div id="control-shell" class="glass" aria-hidden="true"></div>
 <div id="bar">

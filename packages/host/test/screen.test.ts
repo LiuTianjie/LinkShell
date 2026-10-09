@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { closeInputApp, shippedApp } from "../src/input.js";
-import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture } from "../src/screen.js";
+import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture, videoWidth } from "../src/screen.js";
 
 const nal = (type: number, ...body: number[]) => [0, 0, 0, 1, type, ...body];
 const aud = () => nal(9, 0xf0);
@@ -74,5 +74,18 @@ describe.skipIf(!shippedApp())("screen viewer server", () => {
     const second = await screen.start();
     expect(second.port).toBe(first.port);
     expect((await fetch(`${base}?token=${first.token}`)).status).toBe(403);
+  });
+});
+
+describe("the width a viewer asks the video track for", () => {
+  it("is a number of pixels, or the display's own, held to 4K", () => {
+    expect(videoWidth("2560")).toBe(2560);
+    expect(videoWidth("1280")).toBe(1280);
+    expect(videoWidth("native")).toBe(3840);
+    expect(videoWidth("99999")).toBe(3840);
+  });
+
+  it("is the app's own choice when it says nothing that makes sense", () => {
+    for (const asked of [null, "", "auto", "12", "1920.5", "-1"]) expect(videoWidth(asked)).toBeUndefined();
   });
 });

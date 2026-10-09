@@ -33,12 +33,18 @@ enum Tuning {
   /// content is the opposite, maintain-resolution, which drops to a few frames a second.)
   static let degradation = RTCDegradationPreference.maintainFramerate
 
-  /// 8 Mbit/s for a 1920-wide picture at 30 frames, in proportion to the pixels, half as much
-  /// again at 60. The bandwidth estimate decides what is actually sent; this is the ceiling.
+  /// The widest picture a viewer may ask for (`rtc.open`'s `maxWidth`): a 5K display's whole
+  /// width at 60 frames is more than the encoder and a phone's decoder carry.
+  static let widestPicture = 3840
+
+  /// 8 Mbit/s for a 1920-wide picture at 30 frames, half as much again at 60. Above that the
+  /// ceiling grows with the square root of the pixels, not in proportion: the more pixels a
+  /// screen has, the more of them are the same as their neighbours. The bandwidth estimate
+  /// decides what is actually sent; this is the ceiling.
   static func maxBitrate(width: Int, height: Int, fps: Int) -> Int {
     let pixels = Double(width * height) / Double(1920 * 1080)
-    let rate = 8_000_000 * pixels * (fps > 30 ? 1.5 : 1)
-    return Int(min(max(rate, 2_000_000), 16_000_000))
+    let rate = 8_000_000 * (pixels > 1 ? pixels.squareRoot() : pixels) * (fps > 30 ? 1.5 : 1)
+    return Int(min(max(rate, 2_000_000), 30_000_000))
   }
 
   /// Where the bandwidth estimate starts. libwebrtc's default (300 kbit/s) makes the first

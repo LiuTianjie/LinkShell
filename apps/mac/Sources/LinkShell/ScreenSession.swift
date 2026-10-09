@@ -24,7 +24,7 @@ struct ScreenRequest {
       return RTCIceServer(urlStrings: urls, username: server["username"] as? String, credential: server["credential"] as? String)
     }
     screen = (message["screen"] as? Int) ?? 0
-    maxWidth = max((message["maxWidth"] as? Int) ?? Tuning.defaultMaxWidth, Tuning.narrowestPicture)
+    maxWidth = min(max((message["maxWidth"] as? Int) ?? Tuning.defaultMaxWidth, Tuning.narrowestPicture), Tuning.widestPicture)
     fps = (message["fps"] as? Int).map { min(max($0, Tuning.fpsRange.lowerBound), Tuning.fpsRange.upperBound) }
     codec = (message["codec"] as? String) == "hevc" ? "hevc" : "h264"
   }
