@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/wire",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Wire protocol for LinkShell v2: session model, JSON-RPC methods, end-to-end encryption and the relay client.",
   "license": "MIT",
   "repository": {

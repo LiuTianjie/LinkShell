@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/host",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "description": "LinkShell v2 host daemon: owns agent sessions and terminals on your computer, serves them to your devices.",
   "license": "MIT",
   "repository": {
