@@ -12,7 +12,13 @@ enum Tuning {
   /// (`FrameRate`, and its numbers below). A viewer that names a rate gets that one and no other.
   static let fullFps = 60
   static let reducedFps = 30
-  static let fpsRange = 1...60
+  static let fpsRange = 1...120
+
+  /// High refresh is opt-in and bounded by both displays, not just a sender preference.
+  static func fullRate(viewer: Int, display: Int) -> Int {
+    let maximum = min(viewer, display)
+    return maximum >= 120 ? 120 : maximum >= 60 ? 60 : max(1, min(30, maximum))
+  }
   /// No picture is asked to be narrower than this, in pixels.
   static let narrowestPicture = 160
 
@@ -43,7 +49,8 @@ enum Tuning {
   /// decides what is actually sent; this is the ceiling.
   static func maxBitrate(width: Int, height: Int, fps: Int) -> Int {
     let pixels = Double(width * height) / Double(1920 * 1080)
-    let rate = 8_000_000 * (pixels > 1 ? pixels.squareRoot() : pixels) * (fps > 30 ? 1.5 : 1)
+    let frameFactor = fps > 60 ? 1.5 * Double(fps) / 60 : fps > 30 ? 1.5 : 1
+    let rate = 8_000_000 * (pixels > 1 ? pixels.squareRoot() : pixels) * frameFactor
     return Int(min(max(rate, 2_000_000), 30_000_000))
   }
 

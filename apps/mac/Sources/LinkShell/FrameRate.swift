@@ -1,6 +1,6 @@
 import Foundation
 
-/// Which of two frame rates a video session runs at: the full one while the network and this Mac
+/// Which frame rate a video session runs at: the full one while the network and this Mac
 /// carry it, the reduced one while they don't.
 ///
 /// Text with half the frames and all its pixels reads better than text with all the frames and
@@ -48,6 +48,7 @@ struct FrameRate {
 
   let full: Int
   let reduced: Int
+  let lowest: Int
   /// The bandwidth estimate there has to be before the full rate is tried again, in bits a second.
   let room: Double
   /// The estimate below which the network does not carry the full rate, in bits a second.
@@ -67,9 +68,10 @@ struct FrameRate {
   private var sinceRaised: Int?
 
   /// `ceiling`: the most the full rate may send, in bits a second (`Tuning.maxBitrate`).
-  init(full: Int = Tuning.fullFps, reduced: Int = Tuning.reducedFps, ceiling: Int) {
+  init(full: Int = Tuning.fullFps, reduced: Int = Tuning.reducedFps, lowest: Int? = nil, ceiling: Int) {
     self.full = full
     self.reduced = reduced
+    self.lowest = lowest ?? reduced
     room = Double(ceiling) * Tuning.frameRateRoom
     narrow = Double(ceiling) * Tuning.frameRateNarrow
     current = full
@@ -81,10 +83,13 @@ struct FrameRate {
       settling -= 1
       return .keep
     }
-    return current == full ? judgeFull(second) : judgeReduced(second)
+    if current > lowest, trouble(second) != nil { return judgeFull(second) }
+    troubled = 0
+    return current < full ? judgeReduced(second) : .keep
   }
 
   private mutating func judgeFull(_ second: Second) -> Verdict {
+    calm = 0
     guard let trouble = trouble(second) else {
       troubled = 0
       return .keep
@@ -96,7 +101,8 @@ struct FrameRate {
     // Tried, and lost again this soon: the next try waits twice as long.
     if let sinceRaised, sinceRaised < Tuning.frameRateHeld { wait = min(wait * 2, Tuning.frameRateCalmMax) }
     sinceRaised = nil
-    change(to: reduced)
+    calm = 0
+    change(to: current > reduced ? reduced : lowest)
     return .down(reason)
   }
 
@@ -109,7 +115,7 @@ struct FrameRate {
     guard calm >= wait else { return .keep }
     let reason = String(format: "nothing limited the picture for \(calm) s, and the network is estimated at %.1f Mbit/s", available / 1e6)
     sinceRaised = 0
-    change(to: full)
+    change(to: nextHigher)
     return .up(reason)
   }
 
@@ -122,20 +128,22 @@ struct FrameRate {
 
   /// What says the full rate is not being carried, if anything does.
   private func trouble(_ second: Second) -> String? {
-    if let available = second.available, available < narrow { return String(format: "the network was estimated at %.1f Mbit/s", available / 1e6) }
+    if let available = second.available, available < narrow * Double(current) / Double(full) { return String(format: "the network was estimated at %.1f Mbit/s", available / 1e6) }
     if let share = second.sentShare, share < Tuning.frameRateShrunk { return "the picture was being shrunk" }
-    if let encoded = second.encoded, dropping(encoded, of: second.captured, at: full) {
-      return String(format: "only %.0f of %.0f frames a second were sent", encoded, min(second.captured, Double(full)))
+    if let encoded = second.encoded, dropping(encoded, of: second.captured, at: current) {
+      return String(format: "only %.0f of %.0f frames a second were sent", encoded, min(second.captured, Double(current)))
     }
     return nil
   }
 
   /// The reduced rate whole and unhindered, and an estimate that has the bits for the full one.
   private func hasRoom(_ second: Second, _ available: Double) -> Bool {
-    guard let share = second.sentShare, share >= Tuning.frameRateShrunk, second.limitation == "none", available >= room else { return false }
-    if let encoded = second.encoded, dropping(encoded, of: second.captured, at: reduced) { return false }
+    guard let share = second.sentShare, share >= Tuning.frameRateShrunk, second.limitation == "none", available >= room * Double(nextHigher) / Double(full) else { return false }
+    if let encoded = second.encoded, dropping(encoded, of: second.captured, at: current) { return false }
     return true
   }
+
+  private var nextHigher: Int { current < reduced ? reduced : full }
 
   /// The screen is giving the rate (or near it), and a good part of what it gives is not encoded.
   /// A still screen gives nothing, and says nothing about the rate.

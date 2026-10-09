@@ -8,6 +8,20 @@ final class TuningTests: XCTestCase {
     XCTAssertEqual(Tuning.maxBitrate(width: 1920, height: 1080, fps: 60), 12_000_000)
   }
 
+  func testHighRefreshRequiresBothDisplaysAndKeepsAdaptationEnabled() {
+    let native = ScreenRequest(viewer: "v", ["maxFps": 120])
+    XCTAssertNil(native.fps)
+    XCTAssertEqual(native.maxFps, 120)
+    XCTAssertEqual(ScreenRequest(viewer: "v", [:]).maxFps, 60)
+    XCTAssertEqual(ScreenRequest(viewer: "v", ["maxFps": 1000]).maxFps, 60)
+    XCTAssertEqual(Tuning.fullRate(viewer: 120, display: 120), 120)
+    XCTAssertEqual(Tuning.fullRate(viewer: 120, display: 60), 60)
+    XCTAssertEqual(Tuning.fullRate(viewer: 60, display: 144), 60)
+    XCTAssertEqual(Tuning.fullRate(viewer: 30, display: 120), 30)
+    XCTAssertEqual(Tuning.fullRate(viewer: 120, display: 24), 24)
+    XCTAssertEqual(Tuning.maxBitrate(width: 1920, height: 1080, fps: 120), 24_000_000)
+  }
+
   func testLargerPicturesGetMoreButLessThanInProportion() {
     let p1920 = Tuning.maxBitrate(width: 1920, height: 1080, fps: 60)
     let p2560 = Tuning.maxBitrate(width: 2560, height: 1440, fps: 60)

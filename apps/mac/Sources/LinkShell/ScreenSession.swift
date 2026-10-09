@@ -14,6 +14,7 @@ struct ScreenRequest {
   /// The one frame rate to send at; nil for the app's own choice, which follows what the
   /// network carries (`FrameRate`).
   let fps: Int?
+  let maxFps: Int
   let codec: String
 
   init(viewer: String, _ message: [String: Any]) {
@@ -26,6 +27,8 @@ struct ScreenRequest {
     screen = (message["screen"] as? Int) ?? 0
     maxWidth = min(max((message["maxWidth"] as? Int) ?? Tuning.defaultMaxWidth, Tuning.narrowestPicture), Tuning.widestPicture)
     fps = (message["fps"] as? Int).map { min(max($0, Tuning.fpsRange.lowerBound), Tuning.fpsRange.upperBound) }
+    let ceiling = (message["maxFps"] as? Int) ?? Tuning.fullFps
+    maxFps = [30, 60, 120].contains(ceiling) ? ceiling : Tuning.fullFps
     codec = (message["codec"] as? String) == "hevc" ? "hevc" : "h264"
   }
 }
@@ -63,6 +66,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   private let link: Link
   private var display = Display.main
   private var connection: RTCPeerConnection?
+  private var peerFactory: RTCPeerConnectionFactory?
   private var transceiver: RTCRtpTransceiver?
   /// Kept here: the capturer's hold on the source is weak, and libwebrtc's own is on the C++
   /// object behind it — let go of this one and the frames go nowhere.
@@ -124,11 +128,18 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     self.display = display
     awake = Awake()
     size = display.pictureSize(maxWidth: request.maxWidth)
-    if request.fps == nil { steps = FrameRate(ceiling: Tuning.maxBitrate(width: size.width, height: size.height, fps: Tuning.fullFps)) }
+    if request.fps == nil {
+      frameRate = Tuning.fullRate(viewer: request.maxFps, display: display.screen?.maximumFramesPerSecond ?? 60)
+      if frameRate > 30 {
+        steps = FrameRate(full: frameRate, reduced: frameRate > 60 ? 60 : 30, lowest: 30,
+                          ceiling: Tuning.maxBitrate(width: size.width, height: size.height, fps: frameRate))
+      }
+    }
     // The viewer's hands are on the display it is shown, wherever that display is moved to.
     control = Control(id: viewer, link: link, bounds: { CGDisplayBounds(display.id) }, everyPosition: { [weak self] x, y in self?.sendCursor(x, y) })
 
-    let factory = Engine.factory
+    let factory = Engine.screenFactory(maximumFrameRate: frameRate)
+    peerFactory = factory
     let configuration = RTCConfiguration()
     configuration.sdpSemantics = .unifiedPlan
     configuration.iceServers = request.iceServers
@@ -234,6 +245,13 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     connection?.delegate = nil
     connection?.close()
     connection = nil
+    channels.removeAll()
+    cursor = nil
+    shape = nil
+    transceiver = nil
+    capturer = nil
+    loopback = nil
+    peerFactory = nil
   }
 
   // MARK: Signalling

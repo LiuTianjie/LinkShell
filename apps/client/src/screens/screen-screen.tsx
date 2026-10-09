@@ -19,11 +19,13 @@ import { useLayoutGeometry } from "@/lib/use-layout-geometry";
 import { safeContentInsets } from "@/lib/adaptive-insets";
 import { Button } from "@/components/button";
 import { HeaderActions } from "@/components/header-actions";
+import { NativeScreenPane } from "@/components/native-screen-pane";
+import { nativeScreenAvailable } from "../../modules/link-screen";
 import { Icon } from "@/components/icon";
 import { useConnection, useStreamPath } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { forwardPort, type Forward } from "@/lib/preview";
-import { isScreenWidth, loadScreenMode, loadScreenShortcuts, loadScreenWidth, saveScreenMode, saveScreenShortcuts, saveScreenWidth, screenShortcuts, type ScreenMode } from "@/lib/settings";
+import { isScreenWidth, loadScreenMode, loadScreenEngine, loadScreenShortcuts, loadScreenWidth, saveScreenMode, saveScreenEngine, saveScreenShortcuts, saveScreenWidth, screenShortcuts, type ScreenMode, type ScreenEngine } from "@/lib/settings";
 import { type } from "@/theme/type";
 
 interface Viewer {
@@ -71,7 +73,9 @@ export function ScreenScreen() {
   const [shortcuts, setShortcuts] = useState(loadScreenShortcuts);
   // How wide the video may be. The page changes it itself (it loads again with the new one); it is kept here
   // for the next time, when the page is at another address and has forgotten.
-  const [width] = useState(loadScreenWidth);
+  const [width, setWidth] = useState(loadScreenWidth);
+  const [engine, setEngine] = useState<ScreenEngine>(() => nativeScreenAvailable ? loadScreenEngine() : "web");
+  const chooseEngine = (next: ScreenEngine) => { setEngine(next); saveScreenEngine(next); };
   const [fullscreen, setFullscreen] = useState(false);
   const window = useWindowDimensions();
   const [turned, setLandscape] = useState(false);
@@ -264,20 +268,30 @@ export function ScreenScreen() {
         }}
       />
       {/* The header's buttons keep the header: they go with it. */}
-      {!fullscreen && (viewer?.displays.length ?? 0) > 1 ? (
+      {!fullscreen && ((viewer?.displays.length ?? 0) > 1 || nativeScreenAvailable) ? (
         <HeaderActions
           actions={[
-            {
-              kind: "menu",
+            ...((viewer?.displays.length ?? 0) > 1 ? [{
+              kind: "menu" as const,
               key: "display",
-              icon: { sf: "rectangle.on.rectangle", md: "screenshot_monitor" },
+              icon: { sf: "rectangle.on.rectangle" as const, md: "screenshot_monitor" as const },
               label: "切换屏幕",
               items: viewer!.displays.map((entry) => ({
                 title: entry.index === display ? `${entry.name} ✓` : entry.name,
-                icon: { sf: "display", md: "desktop_windows" },
+                icon: { sf: "display" as const, md: "desktop_windows" as const },
                 onPress: () => setDisplay(entry.index),
               })),
-            },
+            }] : []),
+            ...(nativeScreenAvailable ? [{
+              kind: "menu" as const,
+              key: "engine",
+              icon: { sf: "slider.horizontal.3" as const, md: "tune" as const },
+              label: "屏幕模式",
+              items: [
+                { title: `低延迟预览${engine === "native" ? " ✓" : ""}`, icon: { sf: "bolt" as const, md: "bolt" as const }, onPress: () => chooseEngine("native") },
+                { title: `兼容模式${engine === "web" ? " ✓" : ""}`, icon: { sf: "display" as const, md: "desktop_windows" as const }, onPress: () => chooseEngine("web") },
+              ],
+            }] : []),
           ]}
         />
       ) : null}
@@ -287,6 +301,11 @@ export function ScreenScreen() {
           <Text style={[type.subhead, { color: "rgba(255,255,255,0.75)", textAlign: "center" }]}>{failure}</Text>
           <Button title="重试" variant="tonal" size="small" onPress={() => setAttempt((value) => value + 1)} />
         </ScrollView>
+      ) : uri && engine === "native" ? (
+        <NativeScreenPane key={uri} url={uri} mode={mode} onMode={(next) => { setMode(next); saveScreenMode(next); }}
+          width={width} onWidth={(next) => { setWidth(next); saveScreenWidth(next); }} shortcuts={shortcuts}
+          fullscreen={fullscreen} onFullscreen={() => present(!fullscreen, !fullscreen)} canRotate={canRotate} onRotate={() => present(fullscreen, !landscape)}
+          onCompatibility={() => chooseEngine("web")} top={Math.max(insets.top, fullscreen ? 0 : headerHeight)} bottom={insets.bottom} left={insets.left} right={insets.right} />
       ) : uri ? (
         <WebView
           key={uri}

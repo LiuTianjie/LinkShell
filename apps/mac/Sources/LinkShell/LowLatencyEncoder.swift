@@ -27,6 +27,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   }
 
   private let info: RTCVideoCodecInfo
+  private let maximumFrameRate: Int
   private let profile: VideoCompressor.Profile
   private let packetization: RTCH264PacketizationMode
   private var callback: RTCVideoEncoderCallback?
@@ -37,8 +38,9 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   /// Set on the encoder's thread when a frame fails; read on libwebrtc's before the next.
   private let broken = Locked<String?>(nil)
 
-  init(info: RTCVideoCodecInfo) {
+  init(info: RTCVideoCodecInfo, maximumFrameRate: Int = Tuning.fullFps) {
     self.info = info
+    self.maximumFrameRate = maximumFrameRate
     // 42…: (Constrained) Baseline; anything else offered is Constrained High.
     profile = (info.parameters["profile-level-id"] ?? "").lowercased().hasPrefix("42") ? .baseline : .high
     packetization = info.parameters["packetization-mode"] == "1" ? .nonInterleaved : .singleNalUnit
@@ -158,7 +160,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     Engine.report("the low-latency encoder is not used (\(reason)): libwebrtc's VideoToolbox encoder takes over")
     compressor = nil
     LowLatencyH264Encoder.tookOver.withLock { $0 = true }
-    let stock = H264ScreenEncoder(info: info)
+    let stock = H264ScreenEncoder(info: info, maximumFrameRate: maximumFrameRate)
     stock.setCallback(callback)
     self.stock = stock
     switched = true

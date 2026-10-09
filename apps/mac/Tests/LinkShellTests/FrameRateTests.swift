@@ -44,6 +44,28 @@ final class FrameRateTests: XCTestCase {
     XCTAssertEqual(rate.current, 60)
   }
 
+  func testHighRefreshFallsBackInStagesAndRecoversInStages() {
+    var rate = FrameRate(full: 120, reduced: 60, lowest: 30, ceiling: 24_000_000)
+    XCTAssertEqual(rate.current, 120)
+    XCTAssertNotNil(seconds(of: shrunk(120), to: &rate))
+    XCTAssertEqual(rate.current, 60)
+    XCTAssertNotNil(seconds(of: shrunk(60), to: &rate))
+    XCTAssertEqual(rate.current, 30)
+    XCTAssertNil(seconds(of: shrunk(30), to: &rate, limit: 30))
+    XCTAssertNotNil(seconds(of: carried(30), to: &rate))
+    XCTAssertEqual(rate.current, 60)
+    XCTAssertNotNil(seconds(of: carried(60), to: &rate))
+    XCTAssertEqual(rate.current, 120)
+  }
+
+  func testHighRefreshDoesNotOscillateWhenOnlySixtyFramesFit() {
+    var rate = FrameRate(full: 120, reduced: 60, lowest: 30, ceiling: 24_000_000)
+    XCTAssertNotNil(seconds(of: shrunk(120), to: &rate))
+    XCTAssertEqual(rate.current, 60)
+    XCTAssertNil(seconds(of: carried(60, available: 6_000_000), to: &rate, limit: 180))
+    XCTAssertEqual(rate.current, 60)
+  }
+
   func testAStillScreenSaysNothingAgainstTheFullRate() {
     var rate = rate()
     let still = FrameRate.Second(captured: 0, encoded: 2, sentShare: 1, limitation: "none", available: 3_000_000)

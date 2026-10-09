@@ -12,6 +12,12 @@ import WebRTC
 /// encoder use the level the picture needs.
 final class ScreenEncoderFactory: NSObject, RTCVideoEncoderFactory {
   private let standard = RTCDefaultVideoEncoderFactory()
+  private let maximumFrameRate: Int
+
+  init(maximumFrameRate: Int = Tuning.fullFps) {
+    self.maximumFrameRate = maximumFrameRate
+    super.init()
+  }
 
   func supportedCodecs() -> [RTCVideoCodecInfo] {
     standard.supportedCodecs()
@@ -19,7 +25,7 @@ final class ScreenEncoderFactory: NSObject, RTCVideoEncoderFactory {
 
   func createEncoder(_ info: RTCVideoCodecInfo) -> RTCVideoEncoder? {
     guard info.name == kRTCVideoCodecH264Name else { return standard.createEncoder(info) }
-    return Engine.ownEncoder ? LowLatencyH264Encoder(info: info) : H264ScreenEncoder(info: info)
+    return Engine.ownEncoder ? LowLatencyH264Encoder(info: info, maximumFrameRate: maximumFrameRate) : H264ScreenEncoder(info: info, maximumFrameRate: maximumFrameRate)
   }
 
   /// An encoder's quantizer thresholds as libwebrtc is told them: none. With them libwebrtc
@@ -65,11 +71,13 @@ enum H264Level {
 /// `RTCVideoEncoderH264`, made anew when the size of the picture is known.
 final class H264ScreenEncoder: NSObject, RTCVideoEncoder {
   private let info: RTCVideoCodecInfo
+  private let maximumFrameRate: Int
   private var encoder: RTCVideoEncoderH264
   private var callback: RTCVideoEncoderCallback?
 
-  init(info: RTCVideoCodecInfo) {
+  init(info: RTCVideoCodecInfo, maximumFrameRate: Int = Tuning.fullFps) {
     self.info = info
+    self.maximumFrameRate = maximumFrameRate
     encoder = RTCVideoEncoderH264(codecInfo: info)
   }
 
@@ -83,7 +91,7 @@ final class H264ScreenEncoder: NSObject, RTCVideoEncoder {
     if let id = parameters["profile-level-id"] {
       // For the fastest the track may become: its rate changes (`FrameRate`) without the encoder
       // being started again.
-      let level = H264Level.fitting(width: Int(settings.width), height: Int(settings.height), fps: max(Int(settings.maxFramerate), Tuning.fullFps))
+      let level = H264Level.fitting(width: Int(settings.width), height: Int(settings.height), fps: max(Int(settings.maxFramerate), maximumFrameRate))
       parameters["profile-level-id"] = H264Level.raise(id, to: level)
     }
     _ = encoder.release()

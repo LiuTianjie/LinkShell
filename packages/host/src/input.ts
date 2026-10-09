@@ -92,6 +92,8 @@ export interface VideoOffer {
   iceServers: { urls: string[] }[];
   /** Frames a second; the app's own choice when left out. */
   fps?: number;
+  /** Receiver ceiling; adaptation remains enabled. Older helpers safely ignore it. */
+  maxFps?: number;
   /** The widest the picture may be, in pixels; the app's own choice (1920) when left out. */
   maxWidth?: number;
 }

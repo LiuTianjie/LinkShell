@@ -30,6 +30,13 @@ enum Engine {
     return RTCPeerConnectionFactory(encoderFactory: ScreenEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory())
   }()
 
+  /// Codec level must fit this session's eventual rate, without raising old receivers' level.
+  static func screenFactory(maximumFrameRate: Int) -> RTCPeerConnectionFactory {
+    let standard = factory // Initialises SSL and field trials exactly once.
+    guard maximumFrameRate > Tuning.fullFps else { return standard }
+    return RTCPeerConnectionFactory(encoderFactory: ScreenEncoderFactory(maximumFrameRate: maximumFrameRate), decoderFactory: RTCDefaultVideoDecoderFactory())
+  }
+
   private static func initFieldTrials(_ trials: [String: String]) {
     // Through a protocol, so that the one deprecated call doesn't warn at every build.
     (Trials() as FieldTrialSetting).set(trials)

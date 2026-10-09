@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { closeInputApp, shippedApp } from "../src/input.js";
-import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture, videoWidth } from "../src/screen.js";
+import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture, videoWidth, videoMaxFps } from "../src/screen.js";
 
 const nal = (type: number, ...body: number[]) => [0, 0, 0, 1, type, ...body];
 const aud = () => nal(9, 0xf0);
@@ -87,5 +87,14 @@ describe("the width a viewer asks the video track for", () => {
 
   it("is the app's own choice when it says nothing that makes sense", () => {
     for (const asked of [null, "", "auto", "12", "1920.5", "-1"]) expect(videoWidth(asked)).toBeUndefined();
+  });
+});
+
+describe("receiver frame-rate capabilities", () => {
+  it("only admits supported ceilings and leaves older viewers unchanged", () => {
+    expect(videoMaxFps("120")).toBe(120);
+    expect(videoMaxFps("60")).toBe(60);
+    expect(videoMaxFps("30")).toBe(30);
+    for (const value of [null, "", "0", "240", "120.0", "NaN", "-1"]) expect(videoMaxFps(value)).toBeUndefined();
   });
 });
