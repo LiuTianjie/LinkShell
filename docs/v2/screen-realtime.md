@@ -216,8 +216,8 @@ macOS 15 起，直接录屏的程序会被系统定期询问（“…requesting 
 | 环节 | 当前代码 | 下一步要证明的事 |
 |---|---|---|
 | 采集与发送 | `ScreenCapturer.swift`、`ScreenSession.swift`：ScreenCaptureKit → libwebrtc 视频轨道，已有带宽估计、发送节奏控制和帧率自适应 | 公网丢包、突发抖动、带宽骤降时的发送排队和恢复时间 |
-| 编码 | `Encoders.swift` 默认用上游 H.264；`LowLatencyEncoder.swift` 通过 `--encoder own` 选择自有 `VideoCompressor`，后者已有运行时码率调整和禁止帧重排 | 自有编码器在弱网下是否改善 p95，而不仅是单帧编码耗时；尚无 LTR token 反馈链路 |
-| 接收 | `screen-screen.tsx` 加载观看页；`screen-viewer.ts` 用 WKWebView 的 WebRTC 视频接收 | 原生 iOS 接收能否改善尾延迟、冻结和恢复，同时保持手势、键盘、旋转和显示器切换 |
+| 编码 | 默认使用 `LowLatencyEncoder.swift` 的低延迟 `VideoCompressor`，失败回退到上游 H.264；`--encoder stock` 保留对照 | 自有编码器在弱网下是否改善 p95，而不仅是单帧编码耗时；高分辨率下的吞吐取舍；尚无 LTR token 反馈链路 |
+| 接收 | 默认仍为 `screen-viewer.ts` 的 WKWebView；iOS 可选 `link-screen` 原生预览，默认 60 帧上限，120 需主动选择 | 原生 iOS 接收能否改善尾延迟、冻结和恢复，同时保持手势、键盘、旋转和显示器切换 |
 | 播放缓冲 | `Tuning.swift` 发送 playout-delay 的 0/0 提示，观看页在支持的浏览器请求零缓冲 | 对照零缓冲和小幅自适应缓冲；提示值不等于公网下始终没有排队 |
 | 观测 | `ScreenSession.swift` 已报告码率、带宽估计、发送等待、编码、NACK/PLI；观看页已报告 RTT、解码、缓冲、冻结、路径和时间码 | 汇总同一轮测试的两端指标，补足突发丢包、恢复时间和网络切换数据 |
 
@@ -292,7 +292,7 @@ WKWebView 当前使用的 JS 接收接口不能完成上述逐帧确认；仅改
 | 操作到结果 | 手机收到输入 → 主机应用改变内容 → 手机显示该变化 | 本地指针先动不能算远程应用已响应 |
 | 恢复与持续性 | 丢包后的恢复时间、带宽恢复后的收敛、持续运行的热状态与功耗 | 只跑十秒的高帧率不代表持续流畅 |
 
-源端和接收端的真实能力共同决定档位。现有 `Tuning.fullFps = 60`、`fpsRange = 1...60`、`FrameRate` 的 60/30 两档，是需要改造的明确限制，但不是已经测出的唯一瓶颈。120 Hz 手机上显示 60 个不同源帧仍只有 60 fps 的内容。ScreenCaptureKit 可随 120 Hz 的源内容输出到 120 fps；必须一起验证采集、编码吞吐、码率预算、解码吞吐与呈现。[Apple ScreenCaptureKit](https://developer.apple.com/videos/play/wwdc2022/10155/)
+源端和接收端的真实能力共同决定档位。首版已将 `fpsRange` 扩至 120，并按双方能力提供 120/60/30 档位；`Tuning.fullFps = 60` 和旧接收端的 60/30 行为保留。协商上限不代表实际吞吐。120 Hz 手机上显示 60 个不同源帧仍只有 60 fps 的内容。ScreenCaptureKit 可随 120 Hz 的源内容输出到 120 fps；必须一起验证采集、编码吞吐、码率预算、解码吞吐与呈现。[Apple ScreenCaptureKit](https://developer.apple.com/videos/play/wwdc2022/10155/)
 
 默认优先保持设备能持续承载的高帧率，调整码率、内容编码方式和分辨率时遵守文字可读性底线；资源不足时稳定切换到可持续档位，并有迟滞，避免反复跳档。120/60 是待测的首要档位，不能硬编码假定所有 iPhone、显示器和温控状态都支持 120 Hz。[Apple ProMotion](https://developer.apple.com/documentation/quartzcore/optimizing-iphone-and-ipad-apps-to-support-promotion-displays)
 
@@ -340,6 +340,21 @@ iOS 原生触控 → 本地指针 / 视口反馈
 4. 自动化构建、单元测试和可执行的功能检查先完成，再把开发包、版本和短验收步骤交给用户。高速摄影、dirty rects、输入线程重构、LTR/HEVC 不作为本轮交付的前置条件，也不在拿到原生对照结果前继续铺开。
 
 即使第一阶段通过，也只能证明指定条件下达到已测性能边界。每个剩余瓶颈应标成系统/硬件、网络、算法或尚未消除的实现开销，为下一轮优化提供证据。
+
+2026-10-10 的阶段检查：完整 workspace build/typecheck/lint、Mac 47 条测试、host 屏幕 7 条测试、原生调度 3 条测试通过。开发签名的 iPhone Release 包已安装并启动于 iPhone Air（iOS 27.0），不依赖 Metro；原生画面与 WKWebView 的最终真机对照仍待用户验收。Mac 的 Xcode 27 打包路径已修正，交付包的 Mach-O UUID 和全部文件内 section 与实测程序一致。
+
+同一 M3 Max 的短时回环结果如下；后台仍有其他任务，不能作为硬件极限、手机显示帧率或端到端延迟。`own` 为低延迟编码器，`stock` 为上游编码器。
+
+| 实际画面 / 请求帧率 | 编码器 | 平均编码耗时 | 解码帧率 |
+|---|---|---|---|
+| 2560×1440 / 60 | stock → own | 18.4 → 11.1 ms | 60.0 → 59.8 fps |
+| 3840×2160 / 60 | stock → own | 71.9 → 19.5 ms | 59.3 → 49.9 fps |
+| 内屏 2560×1662 / 固定 120 | own | 56.0 ms | 87.4 fps |
+| 内屏 2560×1662 / 自动上限 120 | own | 54.3 ms | 89.9 fps |
+
+120 档实际采集约 119 fps、无应用重复帧；自动档短跑仍停留在 120，并未稳定输出 120。4K 的吞吐和稳定 120 **均不判通过**，原生预览默认 60 帧上限。低延迟编码会话不支持 `MaxFrameDelayCount` 设置/读取，本轮未更改排队或降档策略。
+
+FlexFEC 的 M154 回环夹具在双向各 60 ms、视频包丢失 5% 时确认协商并收到 5569 个保护包；模拟接收端拒绝后保护包为零、视频仍可解码。公共统计未提供恢复数量，这些检查不证明手机端恢复效果或更低卡顿。原始统计与产物证据保存在本次本地产物的 `screen-sender-validation-20261010.json`。
 
 ## 参考
 
