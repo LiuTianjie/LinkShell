@@ -151,7 +151,8 @@ export function ScreenScreen() {
       } catch {
         return;
       }
-      if (message.type === "fullscreen") present(message.on === true, message.on === true && landscape);
+      // Full screen is lying down: a computer's screen is wide. The rotate button still stands it up again.
+      if (message.type === "fullscreen") present(message.on === true, message.on === true);
       else if (message.type === "landscape") present(fullscreen, message.on === true);
       else if (message.type === "haptic") (message.kind === "medium" ? haptics.medium : haptics.light)();
       else if (message.type === "keyboard") {
@@ -188,7 +189,7 @@ export function ScreenScreen() {
         }
       }
     },
-    [present, landscape, fullscreen, tellPage, chrome],
+    [present, fullscreen, tellPage, chrome],
   );
 
   // The page ends above the keyboard, frame by frame, so its key bar sits on the keys.
