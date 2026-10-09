@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { SessionEvent, SessionUpdate } from "@linkshell/wire";
 import {
   addOptimisticMessage,
+  answeredQuestionIds,
   applyEvent,
+  asyncQuestionReply,
   applyEvents,
   emptyView,
   findTool,
@@ -354,5 +356,27 @@ describe("history in pages", () => {
     expect(startWindow(view, view.lastSeq)).toBe(view);
     // One that starts before it: the host's log is behind the view (its state was reset), so the view starts over too.
     expect(startWindow(view, 3)).toMatchObject({ lastSeq: 0, startSeq: 3 });
+  });
+});
+
+describe("async questions", () => {
+  const question = { id: JSON.stringify(["request_user_input_async", "call_06bc", 0]), title: "文字是否还会明显先于背景变化？", options: ["已经同步", "仍然文字先变"] };
+
+  it("stay on the agent's message once it is done", () => {
+    seq = 0;
+    const view = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "agent_message_chunk", messageId: "call_06bc", content: text("文字是否还会明显先于背景变化？") }),
+      ev({ sessionUpdate: "ls_message_done", messageId: "call_06bc", role: "agent", questions: [question] }),
+    ]);
+    expect(view.items[0]).toMatchObject({ kind: "agent", streaming: false, questions: [question] });
+  });
+
+  it("are answered in the very words Codex Desktop writes, and the answer names them", () => {
+    // Desktop's own reply in the same thread, byte for byte.
+    const desktop = '<send_user_message_question_reply>\n[{"questionItemId":"[\\"request_user_input_async\\",\\"call_06bc\\",0]","question":"文字是否还会明显先于背景变化？","answer":"已经同步"}]\n</send_user_message_question_reply>\n';
+    expect(asyncQuestionReply([{ question, answer: "已经同步" }])).toBe(desktop);
+    expect(answeredQuestionIds(desktop)).toEqual([question.id]);
+    expect(answeredQuestionIds("已经同步")).toEqual([]);
+    expect(answeredQuestionIds("<send_user_message_question_reply>\nnot json\n</send_user_message_question_reply>")).toEqual([]);
   });
 });

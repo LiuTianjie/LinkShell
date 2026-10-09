@@ -21,6 +21,36 @@ import type {
 // each event returns a new view, and only the items it touched are new objects,
 // so a streamed token re-renders one row.
 
+/** A question an agent's message asks without stopping its turn; `id` is what the answer quotes. */
+export interface AsyncQuestion {
+  id: string;
+  title: string;
+  options: string[];
+}
+
+/**
+ * The message that answers async questions, as Codex Desktop writes it: the
+ * agent reads it as the answer, and Desktop (and this app) shows it as one.
+ */
+export function asyncQuestionReply(answers: { question: AsyncQuestion; answer: string }[]): string {
+  const entries = answers.map(({ question, answer }) => ({ questionItemId: question.id, question: question.title, answer }));
+  return `<send_user_message_question_reply>\n${JSON.stringify(entries)}\n</send_user_message_question_reply>\n`;
+}
+
+/** The question ids a message answers, if it is such a reply. */
+export function answeredQuestionIds(text: string): string[] {
+  const match = /^<send_user_message_question_reply>\n([\s\S]+)\n<\/send_user_message_question_reply>$/.exec(text.replace(/\r\n/g, "\n").trim());
+  if (!match) return [];
+  try {
+    const parsed: unknown = JSON.parse(match[1]!);
+    return Array.isArray(parsed)
+      ? parsed.flatMap((entry) => (entry && typeof entry === "object" && typeof (entry as { questionItemId?: unknown }).questionItemId === "string" ? [(entry as { questionItemId: string }).questionItemId] : []))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export type TimelineItem =
   | {
       kind: "user";
@@ -39,6 +69,8 @@ export type TimelineItem =
       text: string;
       /** Images and links the agent sent alongside its text. */
       attachments?: ContentBlock[];
+      /** Questions it asks without stopping (Codex Desktop): answered with `asyncQuestionReply`. */
+      questions?: AsyncQuestion[];
       streaming: boolean;
       ts: number;
     }
@@ -280,7 +312,7 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
     case "ls_message_done": {
       const id = update.role === "thought" ? `thought:${update.messageId}` : update.messageId;
       const agent = get(view, id, "agent");
-      if (agent) return upsert(view, { ...agent, streaming: false });
+      if (agent) return upsert(view, { ...agent, streaming: false, ...(update.questions?.length ? { questions: update.questions } : {}) });
       const thought = get(view, id, "thought");
       if (thought) return upsert(view, { ...thought, streaming: false, endedTs: thought.endedTs ?? ts });
       return view;

@@ -183,6 +183,12 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
     parentToolCallId: z.string().optional(),
     messageId: z.string(),
     role: z.enum(["agent", "thought", "user"]),
+    /**
+     * Questions the message asks without stopping the turn (Codex Desktop's
+     * `request_user_input_async`): answered by an ordinary message that quotes
+     * them (`asyncQuestionReply`). An app that predates them shows the text only.
+     */
+    questions: z.array(z.object({ id: z.string(), title: z.string(), options: z.array(z.string()) })).optional(),
   }),
   /** Selectable session settings (model, permission mode, effort…) as the agent reports them. */
   z.object({

@@ -11,7 +11,7 @@ import { type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
-import { useTimelineFork } from "./context";
+import { useTimelineFork, useTimelineQuestions } from "./context";
 import { questionReplies, userMessageText } from "@/lib/user-message";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
@@ -101,10 +101,64 @@ export const AgentMessage = memo(function AgentMessage({ item, last = false }: {
     <View style={{ gap: 8 }}>
       {hasText ? <Markdown text={item.text} streaming={item.streaming} /> : null}
       {item.attachments?.length ? <Attachments blocks={item.attachments} /> : null}
+      {item.questions?.length && !item.streaming ? <AsyncQuestions questions={item.questions} /> : null}
       {last && hasText && !item.streaming ? <ReplyActions item={item} /> : null}
     </View>
   );
 });
+
+/**
+ * The questions a message asks without stopping its turn (Codex Desktop): each option sends the answer as a
+ * message, as Desktop does. Answered ones (here or on the computer) show what was picked.
+ */
+function AsyncQuestions({ questions }: { questions: NonNullable<Of<"agent">["questions"]> }) {
+  const context = useTimelineQuestions();
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  if (!context) return null;
+  return (
+    <View style={{ gap: 12 }}>
+      {questions.map((question) => {
+        const done = context.answered.has(question.id) || question.id in picked;
+        if (question.options.length === 0) return null;
+        return (
+          <View key={question.id} style={{ gap: 8 }}>
+            {questions.length > 1 ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{question.title}</Text> : null}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {question.options.map((option) => {
+                const chosen = picked[question.id] === option;
+                return (
+                  <Pressable
+                    key={option}
+                    disabled={done}
+                    onPress={() => {
+                      haptics.selection();
+                      setPicked((current) => ({ ...current, [question.id]: option }));
+                      context.answer(question, option);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`回答：${option}`}
+                    accessibilityState={{ disabled: done, selected: chosen }}
+                    style={({ pressed }) => ({
+                      minHeight: 44,
+                      justifyContent: "center",
+                      paddingHorizontal: 14,
+                      borderRadius: 22,
+                      borderCurve: "continuous",
+                      backgroundColor: chosen ? colors.accent : colors.fill,
+                      opacity: done && !chosen ? 0.45 : pressed ? 0.6 : 1,
+                    })}
+                  >
+                    <Text style={[type.subhead, { color: chosen ? "#ffffff" : colors.label }]}>{option}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
 
 /** Under the reply that ends a turn: copy it, or fork the session from here. */
 function ReplyActions({ item }: { item: Of<"agent"> }) {

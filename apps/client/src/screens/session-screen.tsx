@@ -1,6 +1,6 @@
 import { setComputerPreviewMode } from "@/lib/use-computer-preview";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import { shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
+import { answeredQuestionIds, asyncQuestionReply, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
@@ -19,7 +19,7 @@ import { ScrollableState } from "@/components/scrollable-state";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
 import { Timeline } from "@/components/timeline/timeline";
-import { TimelineFork, TimelineSession } from "@/components/timeline/context";
+import { TimelineFork, TimelineQuestions, TimelineSession } from "@/components/timeline/context";
 import { LinkBase } from "@/lib/links";
 import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
 import { fileChanges, sessionTitle } from "@/lib/describe";
@@ -164,6 +164,16 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
 
   const items = view?.items ?? NO_ITEMS;
   const timelineItems = useMemo(() => sessionTimelineItems(items, workflows, subagents), [items, workflows, subagents]);
+  // The agent's async questions (Codex Desktop) are answered by a message quoting them, from here or the computer.
+  const questions = useMemo(() => {
+    const answered = new Set(items.flatMap((item) => (item.kind === "user" ? item.blocks.flatMap((block) => (block.type === "text" ? answeredQuestionIds(block.text) : [])) : [])));
+    return {
+      answered,
+      // Sent like any message: a failed one shows in the timeline with its retry.
+      answer: (question: Parameters<typeof asyncQuestionReply>[0][number]["question"], answer: string) =>
+        void actions.send(id, [{ type: "text", text: asyncQuestionReply([{ question, answer }]) }]),
+    };
+  }, [items, actions, id]);
   // The session opens at its latest turns; what came before loads a page at a time.
   const hasEarlier = (view?.startSeq ?? 0) > 0;
   const earlier = useMemo(
@@ -422,6 +432,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       <LinkBase value={summary.cwd}>
       <TimelineSession.Provider value={id}>
       <TimelineFork.Provider value={canFork ? askFork : undefined}>
+      <TimelineQuestions.Provider value={questions}>
       <Timeline
         computerPreview
         previewHeaderConsumed={headerConsumed}
@@ -435,6 +446,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         onScroll={onScroll}
         earlier={earlier}
       />
+      </TimelineQuestions.Provider>
       </TimelineFork.Provider>
       </TimelineSession.Provider>
       </LinkBase>

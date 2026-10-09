@@ -336,3 +336,33 @@ describe("client message ids", () => {
     });
   });
 });
+
+describe("Codex Desktop's async questions", () => {
+  // As thread/read returns them (Codex Desktop 26.x, `request_user_input_async`).
+  const asked = {
+    type: "agentMessage",
+    id: "call_06bc",
+    text: "文字是否还会明显先于背景变化？\n- 已经同步\n- 仍然文字先变",
+    phase: "final_answer",
+    delivery: "async",
+    questions: [{ title: "文字是否还会明显先于背景变化？", options: ["已经同步", "仍然文字先变"] }],
+  };
+  const expected = [{ id: JSON.stringify(["request_user_input_async", "call_06bc", 0]), title: "文字是否还会明显先于背景变化？", options: ["已经同步", "仍然文字先变"] }];
+
+  it("come with the message in history, quoted by the id Desktop's answer uses", () => {
+    expect(itemToHistory(asked)?.updates.at(-1)).toEqual({ sessionUpdate: "ls_message_done", messageId: "call_06bc", role: "agent", questions: expected });
+  });
+
+  it("come with the message live, whether its start was seen or not", () => {
+    const { map } = mapper();
+    const updates = map("item/completed", { threadId: "t", turnId: "u", item: asked }).map((entry) => entry.update);
+    expect(updates.at(-1)).toMatchObject({ sessionUpdate: "ls_message_done", questions: expected });
+  });
+
+  it("are left out of an ordinary message, and an entry without a title keeps the others' places", () => {
+    expect(itemToHistory({ type: "agentMessage", id: "m", text: "hi" })?.updates.at(-1)).not.toHaveProperty("questions");
+    expect(itemToHistory({ ...asked, delivery: "inline" })?.updates.at(-1)).not.toHaveProperty("questions");
+    const second = itemToHistory({ ...asked, questions: [{ options: ["x"] }, { title: "Second?", options: ["a", 3, ""] }] })?.updates.at(-1);
+    expect(second).toMatchObject({ questions: [{ id: JSON.stringify(["request_user_input_async", "call_06bc", 1]), title: "Second?", options: ["a"] }] });
+  });
+});

@@ -461,11 +461,12 @@ export function itemToHistory(raw: Json): HistoryItem | undefined {
     case "plan": {
       const text = str(raw.text) ?? "";
       if (!text) return undefined;
+      const questions = asyncQuestions(raw);
       return {
         itemId: id,
         updates: [
           { sessionUpdate: "agent_message_chunk", messageId: id, content: { type: "text", text } },
-          { sessionUpdate: "ls_message_done", messageId: id, role: "agent" },
+          { sessionUpdate: "ls_message_done", messageId: id, role: "agent", ...(questions ? { questions } : {}) },
         ],
       };
     }
@@ -713,7 +714,8 @@ export function mapNotification(
           return [];
         case "agentMessage":
         case "plan": {
-          const done = out({ sessionUpdate: "ls_message_done", messageId: itemId, role: "agent" }, itemId);
+          const questions = asyncQuestions(item);
+          const done = out({ sessionUpdate: "ls_message_done", messageId: itemId, role: "agent", ...(questions ? { questions } : {}) }, itemId);
           // A review's findings arrive whole, not written out bit by bit.
           const text = state.streamed?.delete(itemId) ? undefined : str(item.text);
           return text ? [out({ sessionUpdate: "agent_message_chunk", messageId: itemId, content: { type: "text", text } }), done] : [done];
@@ -830,6 +832,24 @@ export function toCodexInput(content: ContentBlock[]): Json[] {
 // ── Questions ────────────────────────────────────────────────────────
 
 /** Requests that ask the user something instead of asking for permission. */
+/**
+ * The questions Codex Desktop's `request_user_input_async` puts on a message
+ * (`delivery: "async"`): the turn goes on, and the user answers whenever with a
+ * message that quotes each by its id, `["request_user_input_async", <item id>, <index>]`.
+ */
+export function asyncQuestions(item: Record<string, unknown>): { id: string; title: string; options: string[] }[] | undefined {
+  const id = str(item.id);
+  if (!id || item.delivery !== "async") return undefined;
+  const questions = arr(item.questions).flatMap((entry, index) => {
+    const question = obj(entry);
+    const title = str(question?.title);
+    if (!title) return [];
+    const options = arr(question?.options).filter((option): option is string => typeof option === "string" && option.length > 0);
+    return [{ id: JSON.stringify(["request_user_input_async", id, index]), title, options }];
+  });
+  return questions.length > 0 ? questions : undefined;
+}
+
 export const QUESTION_METHODS = new Set(["item/tool/requestUserInput", "mcpServer/elicitation/request"]);
 
 /**
