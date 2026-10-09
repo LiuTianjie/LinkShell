@@ -37,6 +37,7 @@ export interface NativeScreenHandle {
 interface Props extends ViewProps {
   url: string;
   mode: "view" | "trackpad" | "touch";
+  maxFps: 60 | 120;
   diagnostics: boolean;
   onState: (state: ScreenState) => void;
   onMetrics: (metrics: ScreenMetrics) => void;
@@ -55,7 +56,10 @@ export const NativeScreen = forwardRef<NativeScreenHandle, Props>(function Nativ
   const view = useRef<NativeScreenHandle>(null);
   useImperativeHandle(ref, () => ({
     fit: async () => { await view.current?.fit(); },
-    sendText: async (text) => { await view.current?.sendText(text); },
+    sendText: async (text) => {
+      if (!view.current) throw new Error("控制连接尚未就绪，文字已保留");
+      await view.current.sendText(text);
+    },
     sendKey: async (key, modifiers) => { await view.current?.sendKey(key, modifiers); },
     requestPermission: async () => { await view.current?.requestPermission(); },
   }), []);

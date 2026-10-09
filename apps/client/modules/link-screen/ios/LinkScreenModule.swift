@@ -8,6 +8,7 @@ public class LinkScreenModule: Module {
       Events("onState", "onMetrics")
       Prop("url") { (view: LinkScreenView, value: String) in view.setURL(value) }
       Prop("mode") { (view: LinkScreenView, value: String) in view.setMode(value) }
+      Prop("maxFps") { (view: LinkScreenView, value: Int) in view.setMaxFps(value) }
       Prop("diagnostics") { (view: LinkScreenView, value: Bool) in view.setDiagnostics(value) }
       AsyncFunction("fit") { (view: LinkScreenView) in view.fit() }.runOnQueue(.main)
       AsyncFunction("sendText") { (view: LinkScreenView, text: String) in try view.sendText(text) }.runOnQueue(.main)
@@ -25,6 +26,7 @@ final class LinkScreenView: ExpoView, UIGestureRecognizerDelegate {
   private var url = ""
   private var mode = "view"
   private var diagnostics = false
+  private var maxFps = 60
   private var active = true
   private var trusted = false
   private var dragging = false
@@ -86,6 +88,11 @@ final class LinkScreenView: ExpoView, UIGestureRecognizerDelegate {
     disconnect(); diagnostics = value; connect()
   }
 
+  func setMaxFps(_ value: Int) {
+    guard [60, 120].contains(value), maxFps != value else { return }
+    disconnect(); maxFps = value; connect()
+  }
+
   func setMode(_ value: String) {
     guard ["view", "trackpad", "touch"].contains(value) else { return }
     releasePointer()
@@ -107,7 +114,7 @@ final class LinkScreenView: ExpoView, UIGestureRecognizerDelegate {
   private var receiverRate: Int {
     let screen = window?.screen ?? UIScreen.main
     let constrained = ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical
-    return !constrained && screen.maximumFramesPerSecond >= 120 ? 120 : 60
+    return min(maxFps, !constrained && screen.maximumFramesPerSecond >= 120 ? 120 : 60)
   }
 
   private func connect() {

@@ -48,6 +48,7 @@ export function NativeScreenPane(props: Props) {
   const [trusted, setTrusted] = useState(false);
   const [permission, setPermission] = useState("");
   const [diagnostics, setDiagnostics] = useState(false);
+  const [maxFps, setMaxFps] = useState<60 | 120>(60);
   const [metrics, setMetrics] = useState<ScreenMetrics | null>(null);
   const [keyboard, setKeyboard] = useState(false);
   const [draft, setDraft] = useState("");
@@ -59,7 +60,8 @@ export function NativeScreenPane(props: Props) {
   const send = async () => {
     if (!draft || !trusted) return;
     try {
-      await screen.current?.sendText(draft);
+      if (!screen.current) throw new Error("控制连接尚未就绪");
+      await screen.current.sendText(draft);
       setDraft("");
     } catch { setPermission("控制连接尚未就绪，文字已保留"); setTrusted(false); }
   };
@@ -67,7 +69,7 @@ export function NativeScreenPane(props: Props) {
   return (
     <View style={{ flex: 1, paddingTop: props.top, paddingBottom: props.bottom, paddingLeft: props.left, paddingRight: props.right }}>
       <View style={{ flex: 1, minHeight: 80 }}>
-        <NativeScreen key={`${props.url}:${attempt}:${diagnostics}`} ref={screen} url={props.url} mode={props.mode} diagnostics={diagnostics} onState={receive} onMetrics={setMetrics} style={{ flex: 1 }} />
+        <NativeScreen key={`${props.url}:${attempt}:${diagnostics}`} ref={screen} url={props.url} mode={props.mode} maxFps={maxFps} diagnostics={diagnostics} onState={receive} onMetrics={setMetrics} style={{ flex: 1 }} />
         {state.state === "connecting" ? <View pointerEvents="none" style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", gap: 10 }}><ActivityIndicator color="#fff" /><Text style={textStyle}>正在连接屏幕…</Text></View> : null}
         {state.state === "failed" ? (
           <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", padding: 24, gap: 12, backgroundColor: "#000" }}>
@@ -85,9 +87,11 @@ export function NativeScreenPane(props: Props) {
       ) : null}
       {diagnostics ? (
         <View style={{ paddingHorizontal: 12, paddingVertical: 6, gap: 2 }}>
-          <Text style={textStyle}>诊断抽样 · 每 5 秒更新 · 开启期间的性能仅作诊断参考</Text>
+          <Text style={textStyle}>诊断抽样 · 切换会重连 · 每 5 秒更新 · 性能仅作诊断参考</Text>
           {metrics ? <Text style={textStyle}>{[
             metrics.decodedFps == null ? null : `${Math.round(metrics.decodedFps)} 解码帧/秒`,
+            metrics.sender?.frameRate == null ? null : `${Math.round(metrics.sender.frameRate)} 发送帧/秒`,
+            metrics.sender?.encodeMs == null ? null : `编码 ${metrics.sender.encodeMs.toFixed(1)} ms`,
             metrics.rttMs == null ? null : `往返 ${metrics.rttMs.toFixed(1)} ms`,
             metrics.decodeP95Ms == null ? null : `解码 p95 ${metrics.decodeP95Ms.toFixed(1)} ms`,
             metrics.decodeToPresentP95Ms == null ? null : `解码后到显示 p95 ${metrics.decodeToPresentP95Ms.toFixed(1)} ms`,
@@ -117,6 +121,7 @@ export function NativeScreenPane(props: Props) {
         </View>
       </> : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 6, gap: 6 }}>
+        {([60, 120] as const).map((fps) => <Button key={fps} title={`${fps} 帧上限`} size="small" variant={maxFps === fps ? "primary" : "tonal"} onPress={() => setMaxFps(fps)} />)}
         {(["1280", "1920", "2560", "native"] as const).map((width) => <Button key={width} title={width === "native" ? "原始尺寸" : width} size="small" variant={props.width === width ? "primary" : "tonal"} onPress={() => props.onWidth(width)} />)}
       </ScrollView>
     </View>

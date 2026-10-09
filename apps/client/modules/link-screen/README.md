@@ -11,6 +11,12 @@ The preview is opt-in until device and network comparisons pass. It does not
 change Android's receiver. Rebuild the iOS app after adding the module; a Metro
 reload cannot install native code.
 
+The preview starts with a **60 帧上限** for a like-for-like comparison with the
+web viewer. **120 帧上限** requests a higher ceiling; source/receiver refresh rate,
+thermal state and transport adaptation still determine the actual frame rate.
+Switching this ceiling or diagnostics reconnects the stream. Diagnostics report
+sender and decoder output separately; neither is a physical display-rate result.
+
 ## Pipeline
 
 - The host accepts `maxFps=30|60|120` as a receiver ceiling, leaving adaptation
