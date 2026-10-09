@@ -18,7 +18,7 @@ interface Props {
   onFullscreen: () => void;
   canRotate: boolean;
   onRotate: () => void;
-  onCompatibility: () => void;
+  onUnavailable: () => void;
   top: number;
   bottom: number;
   left: number;
@@ -48,12 +48,11 @@ export function NativeScreenPane(props: Props) {
   const [trusted, setTrusted] = useState(false);
   const [permission, setPermission] = useState("");
   const [diagnostics, setDiagnostics] = useState(false);
-  const [maxFps, setMaxFps] = useState<60 | 120>(60);
   const [metrics, setMetrics] = useState<ScreenMetrics | null>(null);
   const [keyboard, setKeyboard] = useState(false);
   const [draft, setDraft] = useState("");
-  const [attempt, setAttempt] = useState(0);
   const receive = (next: ScreenState) => {
+    if (next.state === "failed") { props.onUnavailable(); return; }
     if (next.state === "control") { setTrusted(next.trusted === true); setPermission(next.message ?? ""); }
     else { setState(next); if (next.state === "connecting") { setTrusted(false); setMetrics(null); } }
   };
@@ -69,15 +68,8 @@ export function NativeScreenPane(props: Props) {
   return (
     <View style={{ flex: 1, paddingTop: props.top, paddingBottom: props.bottom, paddingLeft: props.left, paddingRight: props.right }}>
       <View style={{ flex: 1, minHeight: 80 }}>
-        <NativeScreen key={`${props.url}:${attempt}:${diagnostics}`} ref={screen} url={props.url} mode={props.mode} maxFps={maxFps} diagnostics={diagnostics} onState={receive} onMetrics={setMetrics} style={{ flex: 1 }} />
+        <NativeScreen key={`${props.url}:${diagnostics}`} ref={screen} url={props.url} mode={props.mode} maxFps={120} diagnostics={diagnostics} onState={receive} onMetrics={setMetrics} style={{ flex: 1 }} />
         {state.state === "connecting" ? <View pointerEvents="none" style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", gap: 10 }}><ActivityIndicator color="#fff" /><Text style={textStyle}>正在连接屏幕…</Text></View> : null}
-        {state.state === "failed" ? (
-          <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", padding: 24, gap: 12, backgroundColor: "#000" }}>
-            <Text style={{ ...textStyle, textAlign: "center" }}>{state.message}</Text>
-            <Button title="重试" size="small" variant="tonal" onPress={() => setAttempt((value) => value + 1)} />
-            <Button title="使用兼容模式" size="small" variant="tonal" onPress={props.onCompatibility} />
-          </View>
-        ) : null}
       </View>
       {props.mode !== "view" && !trusted && permission ? (
         <View style={{ padding: 10, gap: 6 }}>
@@ -106,7 +98,6 @@ export function NativeScreenPane(props: Props) {
         <Button title={props.fullscreen ? "退出全屏" : "全屏"} size="small" variant="tonal" onPress={props.onFullscreen} />
         {props.canRotate ? <Button title="旋转" size="small" variant="tonal" onPress={props.onRotate} /> : null}
         <Button title={diagnostics ? "关闭诊断" : "诊断信息"} size="small" variant="tonal" onPress={() => setDiagnostics((value) => !value)} />
-        <Button title="兼容模式" size="small" variant="tonal" onPress={props.onCompatibility} />
       </ScrollView>
       {keyboard ? <>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 8, gap: 6 }}>
@@ -121,7 +112,6 @@ export function NativeScreenPane(props: Props) {
         </View>
       </> : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 6, gap: 6 }}>
-        {([60, 120] as const).map((fps) => <Button key={fps} title={`${fps} 帧上限`} size="small" variant={maxFps === fps ? "primary" : "tonal"} onPress={() => setMaxFps(fps)} />)}
         {(["1280", "1920", "2560", "native"] as const).map((width) => <Button key={width} title={width === "native" ? "原始尺寸" : width} size="small" variant={props.width === width ? "primary" : "tonal"} onPress={() => props.onWidth(width)} />)}
       </ScrollView>
     </View>

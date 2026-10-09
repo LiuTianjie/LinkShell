@@ -1,21 +1,24 @@
-# Native iOS screen preview
+# Native iOS screen receiver
 
 This local Expo module owns the WebRTC receiver, decoded-frame mailbox, Metal
 presentation and screen gestures. It shares the installed JitsiWebRTC framework
 with `react-native-webrtc`. The existing host forwarder carries authenticated
 signalling; the media track remains DTLS-SRTP peer to peer.
 
-The screen header offers **低延迟预览** when this module is in the installed iOS
-build. **兼容模式** retains the existing viewer, including its shortcut editor.
-The preview is opt-in until device and network comparisons pass. It does not
-change Android's receiver. Rebuild the iOS app after adding the module; a Metro
-reload cannot install native code.
+iOS starts with this receiver automatically and requests a **120 fps ceiling**.
+The source display, receiver display, thermal state, Low Power Mode and transport
+adaptation bound the actual frame rate. No playback-mode or frame-rate switch is
+required. If the native receiver cannot start or loses its connection, the app
+tries the standard WebRTC viewer, then the socket viewer through the encrypted
+RPC/relay channel. The last step bypasses the direct data channel for this screen
+only. A retry or a new screen visit starts with the native receiver again.
+Android continues to use the standard viewer and its existing fallback.
 
-The preview starts with a **60 帧上限** for a like-for-like comparison with the
-web viewer. **120 帧上限** requests a higher ceiling; source/receiver refresh rate,
-thermal state and transport adaptation still determine the actual frame rate.
-Switching this ceiling or diagnostics reconnects the stream. Diagnostics report
-sender and decoder output separately; neither is a physical display-rate result.
+This module ships in the normal LinkShell app (`com.bd.linkshell`) through the
+regular TestFlight/App release workflow. There is no separate preview route or
+acceptance app. A new native binary is required; a Metro reload cannot add it.
+Diagnostics report sender and decoder output separately; neither is a physical
+display-rate result.
 
 ## Pipeline
 
@@ -68,32 +71,32 @@ pnpm build
 ```
 
 The Swift package checks scheduling primitives without Expo, a screen or WebRTC.
-On 2026-10-10, the current receiver built for arm64 iPhone with Xcode 27.1, passed
-code-signature verification, and installed/launched on an iPhone Air. This is a
-development-signed Release configuration with its JS bundle included, named
-**LinkShell Dev** (`com.bd.linkshell.v2`); it does not need Metro. Build/install/
-launch evidence does not establish screen performance or interaction correctness.
+The playback-state tests cover automatic fallback order and stale callbacks;
+viewer tests exercise standard WebRTC failure and the relay request. The stream
+integration test checks that a forced RPC stream coexists with direct streams.
+On 2026-10-10, the receiver built for arm64 iPhone with Xcode 27.1 and passed
+code-signature verification. Build evidence does not establish screen performance
+or interaction correctness.
 
-Current acceptance issue: the user reports a short periodic stutter roughly once
-per second or faster in both native and web modes. A native diagnostic snapshot
-showed 120 encoded / 116 decoded fps and decode-to-presentation p95 of 30.6 ms.
-The cause has not been established or fixed; average throughput is not a pass for
-frame pacing. Further diagnosis is deferred while this build is handed over.
+Known issue: the user reports a short periodic stutter roughly once per second
+or faster in both native and web receivers. A native diagnostic snapshot showed
+120 encoded / 116 decoded fps and decode-to-presentation p95 of 30.6 ms. The cause
+has not been established or fixed; average throughput is not a frame-pacing pass.
+Further diagnosis is deferred at the user's request.
 
-Final device acceptance stays separate:
+Device checks use the regular release app:
 
-1. On the same Mac build and Wi-Fi, select a moving text/window scene and **2560**.
-   Compare **兼容模式** with **低延迟预览 → 60 帧上限**. Leave diagnostics off while
-   judging responsiveness, readability and stutter; repeat in both orders.
-2. In the native preview, choose **2560** first, then **120 帧上限**. Use a 120 Hz
-   source display. Temporarily enable diagnostics to distinguish actual encoded
-   and decoded FPS from the requested ceiling. Repeated or decoded frames do not
-   by themselves prove 120 different pictures physically presented each second.
-3. Check pointer/drag, scroll, keyboard, zoom, rotation, screen selection and
-   reconnect/backgrounding. Run for 30 minutes to check heat and sustained cadence.
+1. Enter the screen and verify automatic native playback with diagnostics off.
+   A 120 Hz source and receiver allow the highest ceiling; diagnostics can briefly
+   distinguish actual encoded/decoded FPS from the request.
+2. Check pointer/drag, scroll, keyboard, zoom, rotation, screen selection and
+   reconnect/backgrounding. Run for 30 minutes to assess heat and sustained cadence.
+3. Test networks where direct video is unavailable and confirm the automatic
+   standard-video and relay fallbacks, with usable input after the transition.
 
 Diagnostics reconnect the stream; allow the connection to settle before sampling.
 Compare diagnostics off/on separately. Input-to-result, actual display cadence,
-and impaired/public-network behaviour still require device measurement. LTR
-feedback, content-adaptive tile transport and cross-device presentation-deadline
-feedback are later stages; they are not implemented by this preview.
+and impaired/public-network behaviour still require device measurement. Stable
+120 fps and stable 4K/60 were not demonstrated by the initial Mac loopback tests.
+LTR feedback, content-adaptive tile transport and cross-device presentation-deadline
+feedback remain later stages.

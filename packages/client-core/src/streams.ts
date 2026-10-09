@@ -152,8 +152,8 @@ export class HostStreams {
       });
   }
 
-  async open(port: number, handlers: StreamHandlers): Promise<HostStream> {
-    const connection = this.pathValue === "direct" ? this.connection : undefined;
+  async open(port: number, handlers: StreamHandlers, options: { direct?: boolean } = {}): Promise<HostStream> {
+    const connection = options.direct !== false && this.pathValue === "direct" ? this.connection : undefined;
     const result = await this.link.call("proxy.open", { port, direct: connection ? true : undefined });
     const { streamId } = result;
     if (result.channel !== undefined && connection && this.connection === connection) {

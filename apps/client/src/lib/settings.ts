@@ -44,17 +44,6 @@ const SCREEN_MODE_KEY = "screen.mode";
 /** How the screen viewer treats touches: watching only, or moving the computer's pointer. */
 export type ScreenMode = "view" | "trackpad" | "touch";
 
-export type ScreenEngine = "web" | "native";
-
-/** Keep the established viewer until the user opts into the measurable native preview. */
-export function loadScreenEngine(): ScreenEngine {
-  return read("screen.engine") === "native" ? "native" : "web";
-}
-
-export function saveScreenEngine(engine: ScreenEngine): void {
-  try { Storage.setItemSync("screen.engine", engine); } catch { /* A preference is optional. */ }
-}
-
 /** The mode last chosen in the screen viewer; watching only until one is. */
 export function loadScreenMode(): ScreenMode {
   const stored = read(SCREEN_MODE_KEY);

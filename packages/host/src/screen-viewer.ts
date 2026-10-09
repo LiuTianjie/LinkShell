@@ -464,6 +464,8 @@ function sps(unit) {
 // page as it loads can arrive after this script has run. ?video=0 keeps to the socket, to try that way out.
 const relayed = query.get("q") === "low";
 const wantVideo = "RTCPeerConnection" in window && (!app || chrome.video === true || query.get("video") === "1") && query.get("video") !== "0";
+// The iOS app owns the final transport fallback, so it can bypass a failed direct data channel.
+const relayFallback = !!app && (chrome.relayFallback === true || query.get("fallback") === "relay") && query.get("video") !== "0";
 const unseeable = () => say("这个系统版本的浏览器内核不支持视频解码，请升级系统后再试。");
 if (!wantVideo && !("VideoDecoder" in window)) unseeable();
 let decoder, skipping = false, skipped = 0, arrived = 0, keyAsked = -Infinity;
@@ -544,6 +546,7 @@ ws.onmessage = (event) => {
 ws.onclose = () => {
   // A video track is this socket's: without the one there is no finding the other again, and no hands.
   drop();
+  if (requestRelay()) return;
   if (blocked || note.classList.contains("gone") || note.textContent.startsWith("正在")) say("屏幕连接已断开");
   blocked = false;
 };
@@ -580,7 +583,7 @@ function heard(message) {
 // says so (rtc "off"): there is no app to send a track, or this end said the track didn't get across.
 // rtc is the connection while there is one; live, that the picture on show is the track's. A socket that
 // has given the track up does not try again.
-let rtc = null, live = false, tried = false, gaveUp = false, blocked = false, patience = 0;
+let rtc = null, live = false, tried = false, gaveUp = false, blocked = false, patience = 0, relayRequested = false;
 // For trying the way back out: ?failAfter=5 gives the track up 5 s after it was offered.
 const failAfter = Number(query.get("failAfter")) || 0;
 
@@ -608,7 +611,9 @@ function signal(message) {
 
 function connect(iceServers) {
   drop();
-  const pc = new RTCPeerConnection({ iceServers });
+  let pc;
+  try { pc = new RTCPeerConnection({ iceServers }); }
+  catch (error) { return giveUp("the receiver could not start: " + error.message); }
   const mine = (rtc = { pc, channels: {}, described: Promise.resolve(), up: false, away: 0 });
   pc.onicecandidate = ({ candidate }) => {
     // The empty one only says there are no more.
@@ -661,10 +666,20 @@ function frameless() {
 
 /** The track is not getting across: the host is asked for the picture down the socket instead. */
 function giveUp(reason) {
-  if (gaveUp || !rtc) return;
+  if (gaveUp) return;
   gaveUp = true;
-  send({ t: "rtc.failed", reason });
   drop();
+  if (!requestRelay()) send({ t: "rtc.failed", reason });
+}
+
+function requestRelay() {
+  if (!relayFallback) return false;
+  if (!relayRequested) {
+    relayRequested = true;
+    tellApp({ type: "screenFallback" });
+    say("正在连接电脑屏幕…");
+  }
+  return true;
 }
 
 function drop() {
@@ -681,11 +696,14 @@ function drop() {
 function fallBack() {
   gaveUp = true;
   drop();
+  if (requestRelay()) return;
   if (blocked) say("正在连接电脑屏幕…");
   blocked = false;
   if (!("VideoDecoder" in window)) return unseeable();
   if (tried) hint(live ? "直连断开了：已改用兼容方式传画面，延迟会高一些" : "没能和电脑直连：已改用兼容方式传画面，延迟会高一些", 5000);
 }
+
+if (!wantVideo) requestRelay();
 
 function play() {
   const started = video.play();

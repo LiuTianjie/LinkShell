@@ -6,7 +6,7 @@ import { Stack } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ActivityIndicator, BackHandler, Platform, ScrollView, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
@@ -25,7 +25,8 @@ import { Icon } from "@/components/icon";
 import { useConnection, useStreamPath } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { forwardPort, type Forward } from "@/lib/preview";
-import { isScreenWidth, loadScreenMode, loadScreenEngine, loadScreenShortcuts, loadScreenWidth, saveScreenMode, saveScreenEngine, saveScreenShortcuts, saveScreenWidth, screenShortcuts, type ScreenMode, type ScreenEngine } from "@/lib/settings";
+import { isScreenWidth, loadScreenMode, loadScreenShortcuts, loadScreenWidth, saveScreenMode, saveScreenShortcuts, saveScreenWidth, screenShortcuts, type ScreenMode } from "@/lib/settings";
+import { initialScreenPlayback, screenPlayback } from "@/lib/screen-playback";
 import { type } from "@/theme/type";
 
 interface Viewer {
@@ -74,8 +75,15 @@ export function ScreenScreen() {
   // How wide the video may be. The page changes it itself (it loads again with the new one); it is kept here
   // for the next time, when the page is at another address and has forgotten.
   const [width, setWidth] = useState(loadScreenWidth);
-  const [engine, setEngine] = useState<ScreenEngine>(() => nativeScreenAvailable ? loadScreenEngine() : "web");
-  const chooseEngine = (next: ScreenEngine) => { setEngine(next); saveScreenEngine(next); };
+  const [playback, updatePlayback] = useReducer(screenPlayback, nativeScreenAvailable, initialScreenPlayback);
+  const relayOnly = playback.mode === "relay";
+  const previousLink = useRef(link);
+  useEffect(() => {
+    if (previousLink.current === link) return;
+    previousLink.current = link;
+    setDisplay(null);
+    updatePlayback({ type: "restart", nativeAvailable: nativeScreenAvailable });
+  }, [link]);
   const [fullscreen, setFullscreen] = useState(false);
   const window = useWindowDimensions();
   const [turned, setLandscape] = useState(false);
@@ -131,7 +139,8 @@ export function ScreenScreen() {
         canRotate,
         fontScale: window.fontScale,
         // This app lets the page play video in place: the page may take the picture as a video track.
-        video: true,
+        video: !relayOnly,
+        relayFallback: Platform.OS === "ios" && !relayOnly,
         // Lying down that way, the right is the side without the camera.
         clear: landscape && Platform.OS === "ios" && !resizableIOS ? "right" : null,
         // Whether the keyboard is on the screen: the system tells the app, and a page only its field's focus,
@@ -142,7 +151,7 @@ export function ScreenScreen() {
         // The keyboard covers the bottom edge while it is up.
         insets: { top: fullscreen ? insets.top : Math.max(insets.top, headerHeight), right: insets.right, bottom: keyboardOpen ? 0 : insets.bottom, left: insets.left },
       }),
-    [fullscreen, landscape, window.fontScale, headerHeight, keyboardOpen, shortcuts, layout?.divisions, insets.top, insets.right, insets.bottom, insets.left],
+    [fullscreen, landscape, window.fontScale, headerHeight, keyboardOpen, shortcuts, layout?.divisions, insets.top, insets.right, insets.bottom, insets.left, relayOnly],
   );
   const tellPage = useCallback((state: string) => web.current?.injectJavaScript(`window.linkshellChrome && window.linkshellChrome(${state}); true;`), []);
   useEffect(() => tellPage(chrome), [chrome, tellPage]);
@@ -156,7 +165,9 @@ export function ScreenScreen() {
         return;
       }
       // Full screen is lying down: a computer's screen is wide. The rotate button still stands it up again.
-      if (message.type === "fullscreen") present(message.on === true, message.on === true);
+      if (message.type === "screenFallback" && Platform.OS === "ios") {
+        updatePlayback({ type: "unavailable", mode: "standard", generation: playback.generation });
+      } else if (message.type === "fullscreen") present(message.on === true, message.on === true);
       else if (message.type === "landscape") present(fullscreen, message.on === true);
       else if (message.type === "haptic") (message.kind === "medium" ? haptics.medium : haptics.light)();
       else if (message.type === "keyboard") {
@@ -193,7 +204,7 @@ export function ScreenScreen() {
         }
       }
     },
-    [present, fullscreen, tellPage, chrome],
+    [present, fullscreen, tellPage, chrome, playback.generation],
   );
 
   // The page ends above the keyboard, frame by frame, so its key bar sits on the keys.
@@ -208,9 +219,10 @@ export function ScreenScreen() {
     const timer = setTimeout(() => setVia((current) => current ?? "relay"), 3000);
     return () => clearTimeout(timer);
   }, [path]);
+  const streamVia = relayOnly ? "relay" : via;
 
   useEffect(() => {
-    if (!via) return;
+    if (!streamVia) return;
     let started: Forward | undefined;
     let cancelled = false;
     setFailure(null);
@@ -218,7 +230,7 @@ export function ScreenScreen() {
     link
       .call("screen.start", {}, 20_000)
       .then(async ({ port, token, displays }) => {
-        const forward = await forwardPort(streams, port);
+        const forward = await forwardPort(streams, port, { direct: !relayOnly });
         if (cancelled) return forward.stop();
         started = forward;
         setViewer({ forward, token, displays });
@@ -229,13 +241,14 @@ export function ScreenScreen() {
       cancelled = true;
       started?.stop();
     };
-  }, [link, streams, attempt, via]);
+  }, [link, streams, attempt, streamVia, relayOnly]);
 
   const current = viewer?.displays.find((entry) => entry.index === display);
   // Through a gateway the picture is lighter: it is someone's relay, not a wire between the two devices.
-  const quality = via === "relay" && computer.kind !== "direct" ? "&q=low" : "";
+  const quality = streamVia === "relay" && computer.kind !== "direct" ? "&q=low" : "";
   // video=1: this app plays video in place. Said here as well as in `chrome`, which on Android can reach the page after its script has run.
-  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}&mode=${initialMode}&video=1&width=${width}` : null;
+  const fallback = Platform.OS === "ios" && !relayOnly ? "&fallback=relay" : "";
+  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}&mode=${initialMode}&video=${relayOnly ? 0 : 1}&width=${width}${fallback}` : null;
 
   return (
     <Animated.View onLayout={geometry.onLayout} style={[{ flex: 1, backgroundColor: "#000000" }, lift]}>
@@ -250,7 +263,7 @@ export function ScreenScreen() {
               <Text style={[type.headline, { color: "#ffffff" }]}>电脑屏幕</Text>
               {viewer ? (
                 <Text numberOfLines={1} style={[type.caption, { color: "rgba(255,255,255,0.6)" }]}>
-                  {[current && viewer.displays.length > 1 ? current.name : null, via === "direct" ? "直连" : "经网关中转"].filter(Boolean).join(" · ")}
+                  {[current && viewer.displays.length > 1 ? current.name : null, streamVia === "direct" || computer.kind === "direct" ? "直连" : "经网关中转"].filter(Boolean).join(" · ")}
                 </Text>
               ) : null}
             </View>
@@ -268,7 +281,7 @@ export function ScreenScreen() {
         }}
       />
       {/* The header's buttons keep the header: they go with it. */}
-      {!fullscreen && ((viewer?.displays.length ?? 0) > 1 || nativeScreenAvailable) ? (
+      {!fullscreen && (viewer?.displays.length ?? 0) > 1 ? (
         <HeaderActions
           actions={[
             ...((viewer?.displays.length ?? 0) > 1 ? [{
@@ -282,16 +295,6 @@ export function ScreenScreen() {
                 onPress: () => setDisplay(entry.index),
               })),
             }] : []),
-            ...(nativeScreenAvailable ? [{
-              kind: "menu" as const,
-              key: "engine",
-              icon: { sf: "slider.horizontal.3" as const, md: "tune" as const },
-              label: "屏幕模式",
-              items: [
-                { title: `低延迟预览${engine === "native" ? " ✓" : ""}`, icon: { sf: "bolt" as const, md: "bolt" as const }, onPress: () => chooseEngine("native") },
-                { title: `兼容模式${engine === "web" ? " ✓" : ""}`, icon: { sf: "display" as const, md: "desktop_windows" as const }, onPress: () => chooseEngine("web") },
-              ],
-            }] : []),
           ]}
         />
       ) : null}
@@ -299,13 +302,13 @@ export function ScreenScreen() {
         <ScrollView style={{ flex: 1 }} contentInsetAdjustmentBehavior="never" contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", paddingTop: Math.max(insets.top, fullscreen ? 0 : headerHeight) + 24, paddingBottom: insets.bottom + 24, paddingLeft: insets.left + 24, paddingRight: insets.right + 24, gap: 12 }}>
           <Icon sf="display" md="desktop_access_disabled" size={36} color="rgba(255,255,255,0.45)" />
           <Text style={[type.subhead, { color: "rgba(255,255,255,0.75)", textAlign: "center" }]}>{failure}</Text>
-          <Button title="重试" variant="tonal" size="small" onPress={() => setAttempt((value) => value + 1)} />
+          <Button title="重试" variant="tonal" size="small" onPress={() => { updatePlayback({ type: "restart", nativeAvailable: nativeScreenAvailable }); setAttempt((value) => value + 1); }} />
         </ScrollView>
-      ) : uri && engine === "native" ? (
+      ) : uri && playback.mode === "native" ? (
         <NativeScreenPane key={uri} url={uri} mode={mode} onMode={(next) => { setMode(next); saveScreenMode(next); }}
           width={width} onWidth={(next) => { setWidth(next); saveScreenWidth(next); }} shortcuts={shortcuts}
           fullscreen={fullscreen} onFullscreen={() => present(!fullscreen, !fullscreen)} canRotate={canRotate} onRotate={() => present(fullscreen, !landscape)}
-          onCompatibility={() => chooseEngine("web")} top={Math.max(insets.top, fullscreen ? 0 : headerHeight)} bottom={insets.bottom} left={insets.left} right={insets.right} />
+          onUnavailable={() => updatePlayback({ type: "unavailable", mode: "native", generation: playback.generation })} top={Math.max(insets.top, fullscreen ? 0 : headerHeight)} bottom={insets.bottom} left={insets.left} right={insets.right} />
       ) : uri ? (
         <WebView
           key={uri}
@@ -313,7 +316,14 @@ export function ScreenScreen() {
           source={{ uri }}
           originWhitelist={["http://127.0.0.1*"]}
           onMessage={onMessage}
-          onError={({ nativeEvent }) => setFailure(nativeEvent.description || "屏幕页面加载失败，请重试")}
+          onError={({ nativeEvent }) => {
+            if (Platform.OS === "ios" && !relayOnly) updatePlayback({ type: "unavailable", mode: "standard", generation: playback.generation });
+            else setFailure(nativeEvent.description || "屏幕页面加载失败，请重试");
+          }}
+          onContentProcessDidTerminate={() => {
+            if (!relayOnly) updatePlayback({ type: "unavailable", mode: "standard", generation: playback.generation });
+            else setFailure("屏幕显示已中断，请重新连接");
+          }}
           injectedJavaScriptBeforeContentLoaded={`window.__linkshellChrome = ${chrome}; true;`}
           // The page moves and zooms the picture itself, and puts its own keys above the keyboard.
           bounces={false}

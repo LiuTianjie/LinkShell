@@ -39,7 +39,7 @@ function listen(server: Server, port: number): Promise<number> {
  * peer to peer when the computer can be reached directly, through the
  * gateway otherwise.
  */
-export async function forwardPort(streams: HostStreams, port: number): Promise<Forward> {
+export async function forwardPort(streams: HostStreams, port: number, options: { direct?: boolean } = {}): Promise<Forward> {
   const sockets = new Set<Socket>();
 
   const server = TcpSocket.createServer((socket) => {
@@ -80,7 +80,7 @@ export async function forwardPort(streams: HostStreams, port: number): Promise<F
             socket.destroy();
           }
         },
-      })
+      }, options)
       .then((opened) => {
         if (ended) return opened.close();
         stream = opened;

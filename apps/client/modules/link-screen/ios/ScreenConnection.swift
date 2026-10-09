@@ -66,7 +66,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
           self.ready = true
           if self.controlRequested { self.signal(["t": "control"]) }
           self.receive()
-        case .failed: self.fail("屏幕连接失败，可切换兼容模式重试")
+        case .failed: self.fail("屏幕连接失败")
         default: break
         }
       }
@@ -149,7 +149,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
       if error != nil { self.fail("屏幕连接已中断"); return }
       let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
       if metadata?.opcode == .close { self.fail("屏幕连接已结束"); return }
-      if metadata?.opcode == .binary { self.fail("当前链路需要兼容模式"); return }
+      if metadata?.opcode == .binary { self.fail("当前链路不支持原生视频"); return }
       if let data, let message = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] { self.message(message) }
       if !self.closed { self.receive() }
     }
@@ -210,7 +210,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
       if let peer, peer.remoteDescription != nil { peer.add(candidate) { _ in } }
       else if candidates.count < 256 { candidates.append(candidate) }
     case "stats": senderStats = rtc
-    case "off": fail("当前网络无法建立视频直连，请使用兼容模式")
+    case "off": fail("当前网络无法建立视频直连")
     default: break
     }
   }
@@ -225,7 +225,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   private func report() {
     guard !closed else { return }
     let now = CACurrentMediaTime()
-    if !receivedPicture, now - startedAt > 12 { return fail("视频直连超时，请使用兼容模式") }
+    if !receivedPicture, now - startedAt > 12 { return fail("视频直连超时") }
     if let disconnectedAt, now - disconnectedAt > 4 { return fail("视频直连已中断，请重新连接") }
     guard metrics.enabled, !statsPending, now - previousAt >= 5, let peer else { return }
     statsPending = true
@@ -282,7 +282,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
       switch newState {
       case .connected, .completed: self.disconnectedAt = nil; self.attachTrack(peerConnection)
       case .disconnected: if self.disconnectedAt == nil { self.disconnectedAt = CACurrentMediaTime() }
-      case .failed: self.fail("当前网络无法建立视频直连，请使用兼容模式")
+      case .failed: self.fail("当前网络无法建立视频直连")
       default: break
       }
     }

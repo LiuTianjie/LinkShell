@@ -26,7 +26,7 @@ final class LinkScreenView: ExpoView, UIGestureRecognizerDelegate {
   private var url = ""
   private var mode = "view"
   private var diagnostics = false
-  private var maxFps = 60
+  private var maxFps = 120
   private var active = true
   private var trusted = false
   private var dragging = false

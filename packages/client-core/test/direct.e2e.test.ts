@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { RTCPeerConnection } from "werift";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { connectHost, startHost, type RunningHost } from "@linkshell/host";
 import { ComputerPreviewSubscription } from "../src/computer-preview.js";
 import { DIRECT_LABEL, type PreviewFrame } from "@linkshell/wire";
@@ -13,6 +13,23 @@ import { HostStreams, type DirectConnector, type HostStream } from "../src/strea
 
 // Streams to the computer's ports, peer to peer: a real host, and werift
 // playing the phone's WebRTC stack.
+// Both peers run here; use loopback so VPN routing cannot change this transport test.
+vi.mock("werift", async (original) => {
+  const implementation = await original<typeof import("werift")>();
+  return {
+    ...implementation,
+    RTCPeerConnection: class extends implementation.RTCPeerConnection {
+      constructor(config: Partial<import("werift").PeerConfig>) {
+        super({ ...config, iceAdditionalHostAddresses: ["127.0.0.1"], iceInterfaceAddresses: { udp4: "127.0.0.1" }, iceUseIpv6: false });
+      }
+      override setLocalDescription(...args: Parameters<import("werift").RTCPeerConnection["setLocalDescription"]>) {
+        // werift adds public Google STUN even for iceServers: []; local tests need none.
+        for (const transport of this.iceTransports) transport.connection.stunServer = undefined;
+        return super.setLocalDescription(...args);
+      }
+    },
+  };
+});
 
 async function waitFor<T>(probe: () => T | undefined | false, timeoutMs = 8000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -96,17 +113,36 @@ async function setup(iceServers: string[] | false = []) {
 }
 
 /** A stream with what came back on it. */
-async function opened(streams: HostStreams, port: number) {
+async function opened(streams: HostStreams, port: number, options: { direct?: boolean } = {}) {
   const chunks: Uint8Array[] = [];
   const state: { closed?: string | true } = {};
   const stream: HostStream = await streams.open(port, {
     data: (bytes) => chunks.push(bytes.slice()),
     closed: (error) => (state.closed = error ?? true),
-  });
+  }, options);
   return { stream, state, received: () => Buffer.concat(chunks) };
 }
 
 describe("streams to the computer's ports", () => {
+  it("can keep one fallback stream on the RPC channel without disturbing other direct streams", async () => {
+    const { link, machine } = await setup();
+    const echo = await listen((socket) => socket.pipe(socket));
+    const streams = new HostStreams(link, { connector: connector(), iceServers: () => machine.direct?.iceServers });
+    cleanups.push(() => streams.stop());
+    await waitFor(() => streams.path === "direct");
+    const fallback = await opened(streams, echo.port, { direct: false });
+    const direct = await opened(streams, echo.port);
+    expect(fallback.stream.direct).toBe(false);
+    expect(direct.stream.direct).toBe(true);
+    fallback.stream.write(Buffer.from("screen relay"));
+    direct.stream.write(Buffer.from("other preview"));
+    await waitFor(() => fallback.received().toString() === "screen relay" && direct.received().toString() === "other preview");
+    fallback.stream.close();
+    direct.stream.write(Buffer.from(" still direct"));
+    await waitFor(() => direct.received().toString() === "other preview still direct");
+    expect(streams.path).toBe("direct");
+  });
+
   it("go peer to peer when a direct channel can be made, in both directions and in order", async () => {
     const { link, machine, logs } = await setup();
     expect(machine.direct).toEqual({ iceServers: [] });
