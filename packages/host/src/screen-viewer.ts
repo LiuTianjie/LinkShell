@@ -490,6 +490,11 @@ let keptWidth = null;
 try { keptWidth = localStorage.getItem("linkshell.screen.width"); } catch {}
 const width = WIDTHS.includes(query.get("width")) ? query.get("width") : WIDTHS.includes(keptWidth) ? keptWidth : "1920";
 asked.set("width", width);
+// A page that is a srcdoc (the gateway's web client puts it in one) has no address of its own to load again:
+// it asks the page around it to, where that page says it can, and offers no choice where it can't.
+const framed = document.URL === "about:srcdoc";
+const reloadVia = framed && typeof window.__linkshellReload === "function" ? window.__linkshellReload : null;
+const canChooseWidth = !framed || !!reloadVia;
 const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream?" + asked);
 ws.binaryType = "arraybuffer";
 const send = (message) => { if (ws.readyState === 1) ws.send(JSON.stringify(message)); };
@@ -1960,8 +1965,9 @@ async function status() {
     layout();
   };
   // The choice is the track's: the socket's picture follows its own ladder.
-  if ($("widths").classList.contains("gone") === live) {
-    $("widths").classList.toggle("gone", !live);
+  const choosing = live && canChooseWidth;
+  if ($("widths").classList.contains("gone") === choosing) {
+    $("widths").classList.toggle("gone", !choosing);
     layout();
   }
   const way = !content.w ? "正在连接…" : live ? "直连 · 视频" : (relayed ? "中继" : "直连") + " · 兼容\n" + content.w + "×" + content.h;
@@ -2008,6 +2014,7 @@ for (const tile of $("widths").querySelectorAll(".tile")) {
     if (chosen === width) return;
     try { localStorage.setItem("linkshell.screen.width", chosen); } catch {}
     tellApp({ type: "width", width: chosen });
+    if (reloadVia) return reloadVia({ width: chosen, mode });
     const next = new URLSearchParams(location.search);
     next.set("width", chosen);
     next.set("mode", mode);

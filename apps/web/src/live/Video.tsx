@@ -140,12 +140,38 @@ export function socketBootstrap(channel: string) {
     }
   }
   window.WebSocket = BridgeSocket as unknown as typeof WebSocket;
+  // The page has no address of its own to load again with another width: this page does it.
+  (
+    window as unknown as {
+      __linkshellReload: (to: { width?: string; mode?: string }) => void;
+    }
+  ).__linkshellReload = (to) =>
+    parent.postMessage(
+      { channel, type: "reload", width: to.width, mode: to.mode },
+      "*",
+    );
   window.addEventListener("message", (event) => {
     if (event.source === parent && event.data?.channel === channel)
       sockets
         .get(event.data.id)
         ?.receive(event.data.type, event.data.data, event.data.reason);
   });
+}
+
+function readStored(key: string): string | undefined {
+  try {
+    return localStorage.getItem(key) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStored(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Not kept: the next visit starts at the page's own choice.
+  }
 }
 
 export function Screen() {
@@ -155,6 +181,11 @@ export function Screen() {
   const [started, setStarted] = useState(false);
   const [display, setDisplay] = useState(0);
   const [retry, setRetry] = useState(0);
+  // What the viewer page last chose (its own storage is not its own in a sandboxed srcdoc): kept here.
+  const [view, setView] = useState(() => ({
+    width: readStored("linkshell.screen.width"),
+    mode: readStored("linkshell.screen.mode"),
+  }));
   const [displays, setDisplays] = useState<{ index: number; name: string }[]>(
     [],
   );
@@ -186,7 +217,25 @@ export function Screen() {
         url?: string;
         protocols?: string[];
         data?: string | ArrayBuffer;
+        width?: unknown;
+        mode?: unknown;
       };
+      if (message.type === "reload") {
+        const width =
+          typeof message.width === "string" &&
+          /^(\d{3,4}|native)$/.test(message.width)
+            ? message.width
+            : undefined;
+        const mode =
+          typeof message.mode === "string" &&
+          /^(view|trackpad|touch)$/.test(message.mode)
+            ? message.mode
+            : undefined;
+        if (width) writeStored("linkshell.screen.width", width);
+        if (mode) writeStored("linkshell.screen.mode", mode);
+        setView({ width, mode });
+        return;
+      }
       if (message.type === "ws-open") {
         if (
           sockets.has(message.id) ||
@@ -250,7 +299,10 @@ export function Screen() {
       .then(async (viewer) => {
         port = viewer.port;
         if (alive) setDisplays(viewer.displays);
-        const query = `?token=${encodeURIComponent(viewer.token)}&display=${display}`;
+        const query =
+          `?token=${encodeURIComponent(viewer.token)}&display=${display}` +
+          (view.width ? `&width=${view.width}` : "") +
+          (view.mode ? `&mode=${view.mode}` : "");
         const response = await httpRequest(streams, port, "/" + query);
         if (response.status !== 200)
           throw new Error(`屏幕页面返回 ${response.status}`);
@@ -275,7 +327,7 @@ export function Screen() {
       sockets.clear();
       pending.clear();
     };
-  }, [started, display, retry, link, streams]);
+  }, [started, display, retry, link, streams, view]);
   return (
     <section className="screen-page">
       <div className="browser-toolbar">
