@@ -60,6 +60,10 @@ const CLAUDE_SESSION_VARIABLES = [
   "CLAUDE_CODE_OAUTH_SCOPES",
   "CLAUDE_CODE_ORGANIZATION_UUID",
   "CLAUDE_CODE_ACCOUNT_UUID",
+  // A parent host's auth routing prevents standalone Claude from using the
+  // user's own credentials (including providers configured by CC Switch).
+  "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+  "CLAUDE_CODE_HOST_AUTH_ENV_VAR",
   "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH",
   "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
   "CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL",

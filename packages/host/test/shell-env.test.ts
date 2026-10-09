@@ -21,4 +21,23 @@ describe("withoutClaudeSession", () => {
     const outside = { PATH: "/usr/bin", CLAUDE_EFFORT: "high" };
     expect(withoutClaudeSession(outside)).toBe(outside);
   });
+
+  it("lets standalone Claude use the user's provider instead of a parent host's auth", () => {
+    const provider = {
+      CLAUDE_CONFIG_DIR: "/me/.claude",
+      ANTHROPIC_AUTH_TOKEN: "user-token",
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:15721",
+      ANTHROPIC_MODEL: "user-model",
+    };
+    const inherited = {
+      ...provider,
+      CLAUDECODE: "1",
+      CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: "1",
+      CLAUDE_CODE_HOST_AUTH_ENV_VAR: "PARENT_HOST_TOKEN",
+    };
+
+    expect(withoutClaudeSession(inherited)).toEqual(provider);
+    expect(inherited.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST).toBe("1");
+    expect(inherited.CLAUDE_CODE_HOST_AUTH_ENV_VAR).toBe("PARENT_HOST_TOKEN");
+  });
 });
