@@ -1,6 +1,6 @@
 import { setComputerPreviewMode } from "@/lib/use-computer-preview";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import { answeredQuestionIds, asyncQuestionReply, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
+import { answeredQuestions, asyncQuestionReply, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
@@ -166,7 +166,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const timelineItems = useMemo(() => sessionTimelineItems(items, workflows, subagents), [items, workflows, subagents]);
   // The agent's async questions (Codex Desktop) are answered by a message quoting them, from here or the computer.
   const questions = useMemo(() => {
-    const answered = new Set(items.flatMap((item) => (item.kind === "user" ? item.blocks.flatMap((block) => (block.type === "text" ? answeredQuestionIds(block.text) : [])) : [])));
+    const answered = new Map(items.flatMap((item) => (item.kind === "user" ? item.blocks.flatMap((block) => (block.type === "text" ? answeredQuestions(block.text) : [])) : [])));
     return {
       answered,
       // Sent like any message: a failed one shows in the timeline with its retry.

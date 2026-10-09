@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionEvent, SessionUpdate } from "@linkshell/wire";
 import {
   addOptimisticMessage,
-  answeredQuestionIds,
+  answeredQuestions,
   applyEvent,
   asyncQuestionReply,
   applyEvents,
@@ -375,8 +375,8 @@ describe("async questions", () => {
     // Desktop's own reply in the same thread, byte for byte.
     const desktop = '<send_user_message_question_reply>\n[{"questionItemId":"[\\"request_user_input_async\\",\\"call_06bc\\",0]","question":"文字是否还会明显先于背景变化？","answer":"已经同步"}]\n</send_user_message_question_reply>\n';
     expect(asyncQuestionReply([{ question, answer: "已经同步" }])).toBe(desktop);
-    expect(answeredQuestionIds(desktop)).toEqual([question.id]);
-    expect(answeredQuestionIds("已经同步")).toEqual([]);
-    expect(answeredQuestionIds("<send_user_message_question_reply>\nnot json\n</send_user_message_question_reply>")).toEqual([]);
+    expect(answeredQuestions(desktop)).toEqual([[question.id, "已经同步"]]);
+    expect(answeredQuestions("已经同步")).toEqual([]);
+    expect(answeredQuestions("<send_user_message_question_reply>\nnot json\n</send_user_message_question_reply>")).toEqual([]);
   });
 });

@@ -37,18 +37,40 @@ export function asyncQuestionReply(answers: { question: AsyncQuestion; answer: s
   return `<send_user_message_question_reply>\n${JSON.stringify(entries)}\n</send_user_message_question_reply>\n`;
 }
 
-/** The question ids a message answers, if it is such a reply. */
-export function answeredQuestionIds(text: string): string[] {
+export interface QuestionReply {
+  /** The question's id, where the reply names it. */
+  id?: string;
+  question: string;
+  answer: string;
+}
+
+/**
+ * The answers in a reply to async questions, as Codex Desktop writes one (and shows it: each question with
+ * its answer). Anything that isn't exactly the envelope is not a reply.
+ */
+export function questionReplies(text: string): QuestionReply[] | undefined {
   const match = /^<send_user_message_question_reply>\n([\s\S]+)\n<\/send_user_message_question_reply>$/.exec(text.replace(/\r\n/g, "\n").trim());
-  if (!match) return [];
+  if (!match) return undefined;
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(match[1]!);
-    return Array.isArray(parsed)
-      ? parsed.flatMap((entry) => (entry && typeof entry === "object" && typeof (entry as { questionItemId?: unknown }).questionItemId === "string" ? [(entry as { questionItemId: string }).questionItemId] : []))
-      : [];
+    parsed = JSON.parse(match[1]!);
   } catch {
-    return [];
+    return undefined;
   }
+  if (!Array.isArray(parsed) || parsed.length === 0) return undefined;
+  const replies: QuestionReply[] = [];
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== "object") return undefined;
+    const { questionItemId, question, answer } = entry as Record<string, unknown>;
+    if (typeof question !== "string" || typeof answer !== "string") return undefined;
+    replies.push({ ...(typeof questionItemId === "string" ? { id: questionItemId } : {}), question: question.trim(), answer: answer.trim() });
+  }
+  return replies;
+}
+
+/** What a message answers, by question id, if it is such a reply. */
+export function answeredQuestions(text: string): [id: string, answer: string][] {
+  return (questionReplies(text) ?? []).flatMap((reply): [string, string][] => (reply.id ? [[reply.id, reply.answer]] : []));
 }
 
 export type TimelineItem =

@@ -1052,6 +1052,41 @@
     max-width: 800px;
     margin: 0 auto;
   }
+  .async-questions {
+    display: grid;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .async-questions small,
+  .question-reply small {
+    display: block;
+    font-size: 12px;
+    color: var(--secondaryLabel);
+    margin-bottom: 6px;
+  }
+  .async-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .async-options button {
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: 20px;
+    background: var(--fill);
+    color: var(--label);
+    font-size: 14px;
+  }
+  .async-options button:disabled:not(.chosen) {
+    opacity: 0.45;
+  }
+  .async-options button.chosen {
+    background: var(--accent);
+    color: #fff;
+  }
+  .question-reply + .question-reply {
+    margin-top: 10px;
+  }
   .message-author {
     display: flex;
     align-items: center;

@@ -118,14 +118,15 @@ function AsyncQuestions({ questions }: { questions: NonNullable<Of<"agent">["que
   return (
     <View style={{ gap: 12 }}>
       {questions.map((question) => {
-        const done = context.answered.has(question.id) || question.id in picked;
+        const given = picked[question.id] ?? context.answered.get(question.id);
+        const done = given !== undefined;
         if (question.options.length === 0) return null;
         return (
           <View key={question.id} style={{ gap: 8 }}>
             {questions.length > 1 ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{question.title}</Text> : null}
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {question.options.map((option) => {
-                const chosen = picked[question.id] === option;
+                const chosen = given === option;
                 return (
                   <Pressable
                     key={option}

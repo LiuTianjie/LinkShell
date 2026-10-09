@@ -3,7 +3,13 @@ import Markdown, { defaultUrlTransform } from "react-markdown";
 import { fileTarget } from "./file-target";
 import remarkGfm from "remark-gfm";
 import type { ContentBlock, ToolCallContent } from "@linkshell/wire";
-import type { TimelineItem } from "@linkshell/client-core";
+import {
+  answeredQuestions,
+  asyncQuestionReply,
+  questionReplies,
+  type AsyncQuestion,
+  type TimelineItem,
+} from "@linkshell/client-core";
 import { AgentMark, ErrorNotice, useActions, useJob } from "./common";
 
 export const TimelineNavigation = createContext<{
@@ -204,6 +210,82 @@ export function Diff({
     </details>
   );
 }
+/** A user message, with a reply to async questions shown as each question and its answer. */
+function UserBlocks({
+  blocks,
+  sessionId,
+  onFile,
+}: {
+  blocks: ContentBlock[];
+  sessionId: string;
+  onFile: (path: string) => void;
+}) {
+  const text =
+    blocks.length === 1 && blocks[0]!.type === "text"
+      ? blocks[0]!.text
+      : undefined;
+  const replies = text === undefined ? undefined : questionReplies(text);
+  if (!replies)
+    return <Blocks blocks={blocks} sessionId={sessionId} onFile={onFile} />;
+  return (
+    <>
+      {replies.map((reply, index) => (
+        <div className="question-reply" key={index}>
+          <small>{reply.question}</small>
+          <p>{reply.answer}</p>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Questions a message asks without stopping its turn: each option sends the answer as a message, as Codex Desktop does. */
+function AsyncQuestions({
+  questions,
+  answered,
+  onAnswer,
+}: {
+  questions: AsyncQuestion[];
+  answered: ReadonlyMap<string, string>;
+  onAnswer: (question: AsyncQuestion, answer: string) => void;
+}) {
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  return (
+    <div className="async-questions">
+      {questions.map((question) => {
+        if (question.options.length === 0) return null;
+        const given = picked[question.id] ?? answered.get(question.id);
+        const done = given !== undefined;
+        return (
+          <div key={question.id}>
+            {questions.length > 1 && <small>{question.title}</small>}
+            <div className="async-options">
+              {question.options.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  disabled={done}
+                  aria-pressed={given === option}
+                  className={given === option ? "chosen" : undefined}
+                  onClick={() => {
+                    setPicked((current) => ({
+                      ...current,
+                      [question.id]: option,
+                    }));
+                    onAnswer(question, option);
+                  }}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Timeline({
   items,
   sessionId,
@@ -224,6 +306,25 @@ export function Timeline({
   const tail = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const shown = expanded ? items : items.slice(-180);
+  // The agent's async questions (Codex Desktop) are answered by a message quoting them, here or on the computer.
+  const answered = new Map(
+    items.flatMap((item) =>
+      item.kind === "user"
+        ? item.blocks.flatMap((block) =>
+            block.type === "text" ? answeredQuestions(block.text) : [],
+          )
+        : [],
+    ),
+  );
+  const answer = (question: AsyncQuestion, value: string) =>
+    void job.run(() =>
+      actions.send(sessionId, [
+        {
+          type: "text",
+          text: asyncQuestionReply([{ question, answer: value }]),
+        },
+      ]),
+    );
   return (
     <div className="live-timeline">
       {items.length > shown.length && (
@@ -257,7 +358,7 @@ export function Timeline({
                   {item.pending ? " · 发送中" : ""}
                 </small>
               </span>
-              <Blocks
+              <UserBlocks
                 blocks={item.blocks}
                 sessionId={sessionId}
                 onFile={onFile}
@@ -298,6 +399,13 @@ export function Timeline({
                 {item.streaming && <span>正在回复…</span>}
               </div>
               <RichText text={item.text} />
+              {item.questions && !item.streaming && (
+                <AsyncQuestions
+                  questions={item.questions}
+                  answered={answered}
+                  onAnswer={answer}
+                />
+              )}
               {item.attachments && (
                 <Blocks
                   blocks={item.attachments}

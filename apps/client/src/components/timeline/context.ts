@@ -20,7 +20,8 @@ export function useTimelineFork(): ((itemId: string) => void) | undefined {
  * sent to). Without it the questions show as text, the way an older host's do.
  */
 export interface TimelineQuestions {
-  answered: ReadonlySet<string>;
+  /** The answer given to each question answered so far, by its id. */
+  answered: ReadonlyMap<string, string>;
   answer: (question: AsyncQuestion, answer: string) => void;
 }
 export const TimelineQuestions = createContext<TimelineQuestions | undefined>(undefined);
