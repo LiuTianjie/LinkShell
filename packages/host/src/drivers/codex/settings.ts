@@ -86,6 +86,22 @@ export function settingsFrom(response: Record<string, unknown>): CodexSettings {
   };
 }
 
+/**
+ * The settings of a thread another Codex process holds, from the latest
+ * `turn_context` in its rollout file: model, effort, approvals and sandbox, as
+ * that process last ran a turn with them. The file spells sandbox types in
+ * kebab case (`danger-full-access`).
+ */
+export function settingsFromTurnContext(context: Record<string, unknown>): CodexSettings {
+  const sandbox = context.sandbox_policy && typeof context.sandbox_policy === "object" ? (context.sandbox_policy as SandboxPolicy) : undefined;
+  return {
+    model: typeof context.model === "string" ? context.model : undefined,
+    effort: typeof context.effort === "string" ? context.effort : null,
+    approvalPolicy: context.approval_policy,
+    sandbox: sandbox ? { ...sandbox, type: sandbox.type.replace(/-(\w)/g, (_, letter: string) => letter.toUpperCase()) } : undefined,
+  };
+}
+
 function findModel(models: CodexModel[], id: string | undefined): CodexModel | undefined {
   if (!id) return undefined;
   return models.find((m) => m.model === id || m.id === id);

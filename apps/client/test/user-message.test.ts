@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ContentBlock } from "@linkshell/wire";
-import { userMessageText } from "../src/lib/user-message";
+import { questionReplies, userMessageText } from "../src/lib/user-message";
 
 const image: ContentBlock = { type: "image", mimeType: "image/png", uri: "linkshell-event:1" };
 const entry = "## screenshot.png: /var/folders/example/screenshot.png\nImage attachment: true";
@@ -28,5 +28,25 @@ describe("user image message presentation", () => {
   });
   it("allows image-only messages and leaves the attachment visible", () => {
     expect(userMessageText(blocks(envelope("")))).toBe("");
+  });
+});
+
+describe("Codex Desktop question replies", () => {
+  const reply = (entries: unknown) => `<send_user_message_question_reply>\n${JSON.stringify(entries)}\n</send_user_message_question_reply>`;
+  it("reads the question and the answer from the envelope", () => {
+    const text = reply([{ questionItemId: '["request_user_input_async","call_1",0]', question: "保留 #53 还是复用 #55？", answer: "这两个有啥区别？" }]);
+    expect(questionReplies(text)).toEqual([{ question: "保留 #53 还是复用 #55？", answer: "这两个有啥区别？" }]);
+    expect(questionReplies(text.replace(/\n/g, "\r\n"))).toHaveLength(1);
+  });
+  it("leaves anything else as plain text", () => {
+    for (const value of [
+      "普通消息",
+      `说明：${reply([{ question: "q", answer: "a" }])}`,
+      "<send_user_message_question_reply>\nnot json\n</send_user_message_question_reply>",
+      reply([]),
+      reply([{ question: "q" }]),
+    ]) {
+      expect(questionReplies(value)).toBeUndefined();
+    }
   });
 });

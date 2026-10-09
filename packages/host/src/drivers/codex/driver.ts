@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import { codexPreview } from "./computer-preview.js";
 import { ABANDON, RpcError, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
 import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
@@ -24,7 +24,7 @@ import {
   type CodexThreadState,
 } from "./mapper.js";
 import { nestHistory, nestUnder } from "../nesting.js";
-import { configOptions, effective, settingsFrom, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
+import { configOptions, effective, settingsFrom, settingsFromTurnContext, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
 import { COMMANDS, INIT_PROMPT, commandOf, type CodexSkill } from "./commands.js";
 import { DesktopUnconfirmed, desktopBusSocket, interruptThroughDesktop, startThroughDesktop, steerThroughDesktop } from "./desktop-ipc.js";
 
@@ -93,6 +93,49 @@ function heldElsewhere(error: unknown): boolean {
   return error instanceof Error && /already has an active writer/i.test(error.message);
 }
 
+/**
+ * The last `turn_context` in a rollout file. Read from the end a piece at a
+ * time: the files run to many megabytes, and every turn begins with one.
+ */
+export function lastTurnContext(path: string, chunk = 256 * 1024, limit = 8 * 1024 * 1024): Record<string, unknown> | undefined {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return undefined;
+  }
+  try {
+    const size = fstatSync(fd).size;
+    let end = size;
+    let tail = "";
+    while (end > 0 && size - end < limit) {
+      const start = Math.max(0, end - chunk);
+      const buffer = Buffer.alloc(end - start);
+      readSync(fd, buffer, 0, buffer.length, start);
+      tail = buffer.toString("utf8") + tail;
+      end = start;
+      const lines = tail.split("\n");
+      // The first line may be cut off, unless the read reached the start of the file.
+      for (let index = lines.length - 1; index >= (start === 0 ? 0 : 1); index--) {
+        const line = lines[index]!;
+        if (!line.includes('"turn_context"')) continue;
+        try {
+          const entry = JSON.parse(line) as { type?: unknown; payload?: unknown };
+          if (entry.type === "turn_context" && entry.payload && typeof entry.payload === "object") return entry.payload as Record<string, unknown>;
+        } catch {
+          // Not a whole line: keep looking.
+        }
+      }
+      if (start > 0) tail = lines[0]!;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function fileStamp(path: string): string | undefined {
   try {
     const stat = statSync(path);
@@ -117,6 +160,7 @@ const HELD_SEND = "会话开在电脑的另一个 Codex 里，这条消息没能
 const HELD_STOP = "这一轮跑在电脑的 Codex 桌面 App（或 IDE 插件）里，这次没能从手机停下它。请在电脑上停止；一直这样的话，重启一下 Codex 桌面 App。";
 const HELD_NOW =
   "这一轮跑在电脑的 Codex 桌面 App（或 IDE 插件）里，这次没能从手机插进去。它结束后这条消息会自动发送；想现在就插入，在电脑上对这条排队消息点 Steer。一直这样的话，重启一下 Codex 桌面 App。";
+const HELD_CONFIG = "会话开在电脑的另一个 Codex 里，模型、推理强度和权限要在那边改。";
 const HELD_COMMAND = "会话开在电脑的另一个 Codex 里，要在那边关掉它之后才能从手机做。";
 
 interface PendingApproval {
@@ -465,6 +509,7 @@ export class CodexDriver implements AgentDriver {
     if (thread.cwd) this.cwds.set(threadId, thread.cwd);
     this.host?.update(this.id, threadId, { sessionUpdate: "ls_status", state: running ? "running" : "idle" });
     this.reportHeld(threadId, true);
+    this.readHeldSettings(threadId, thread.path ?? undefined);
     void this.announceCommands(threadId);
     void this.announceGoal(threadId);
     // What was queued for it before this host last started is still waiting.
@@ -498,6 +543,7 @@ export class CodexDriver implements AgentDriver {
       if (this.observed.get(threadId) !== watch) return;
       watch.stamp = stamp;
       watch.path = thread.path ?? undefined;
+      this.readHeldSettings(threadId, watch.path);
       for (const item of history) {
         if (watch.seen.has(item.itemId)) continue;
         watch.seen.add(item.itemId);
@@ -522,7 +568,19 @@ export class CodexDriver implements AgentDriver {
     }
   }
 
-  private report(threadId: string, item: HistoryItem): void {
+  /**
+   * The model, effort and permissions the other process runs the thread with,
+   * from its rollout file: a thread that can only be read has no
+   * `thread/resume` response to say so.
+   */
+  private readHeldSettings(threadId: string, path: string | undefined): void {
+    const context = path ? lastTurnContext(path) : undefined;
+    if (!context) return;
+    this.settings.set(threadId, settingsFromTurnContext(context));
+    void this.announceConfig(threadId);
+  }
+
+    private report(threadId: string, item: HistoryItem): void {
     item.updates.forEach((update, index) => this.host?.update(this.id, threadId, update, index === item.updates.length - 1 ? item.itemId : undefined));
   }
 
@@ -1111,6 +1169,8 @@ export class CodexDriver implements AgentDriver {
 
   /** Model, reasoning effort and permissions apply from the next turn on. */
   async setConfig(nativeId: string, optionId: string, value: string): Promise<void> {
+    // The process that holds it starts its turns with its own settings.
+    if (this.observed.has(nativeId)) throw RpcError.app("busy", HELD_CONFIG);
     const models = await this.loadModels();
     const current = effective(this.settings.get(nativeId) ?? {}, this.overrides.get(nativeId) ?? {}, models);
     const next: CodexOverrides = { ...this.overrides.get(nativeId) };

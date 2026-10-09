@@ -17,7 +17,7 @@ import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 import { Button } from "./button";
-import { ConfigMenus } from "./config-menu";
+import { ConfigSummary } from "./config-menu";
 import { Glass } from "./glass";
 import { Icon } from "./icon";
 import { PermissionActions } from "./permission-actions";
@@ -52,7 +52,8 @@ export interface ComposerProps {
   /** Answers the questions of a pending request. */
   onAnswer: (requestId: string, answers: QuestionAnswer[]) => Promise<void>;
   onTakeover: () => Promise<void>;
-  onConfig: (optionId: string, value: string) => void;
+  /** Opens the sheet with every session setting. */
+  onSettings: () => void;
   /** Messages the computer holds until the current turn ends. */
   queue?: QueueEntry[];
   onUnqueue: (clientMessageId: string) => void;
@@ -388,7 +389,7 @@ export function Composer(props: ComposerProps) {
               {blocked.detail}
             </Text>
           ) : null}
-          {compact && configShown.length ? <ScrollView horizontal keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6, alignItems: "center", paddingHorizontal: 4 }}><ConfigMenus options={configShown} disabled={!props.online || !!blocked} onChange={props.onConfig} /><UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} /></ScrollView> : null}
+          {compact && configShown.length ? <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 }}><ConfigSummary options={configShown} disabled={!props.online || !!blocked} onPress={props.onSettings} /><UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} /></View> : null}
         </Glass>
       ) : null}
       </KeyboardAwareScrollView> : null}
@@ -425,15 +426,10 @@ export function Composer(props: ComposerProps) {
               onTakePhoto={() => void addImage(true)}
               onCommands={props.onCommands}
             />
-            {hasCommands ? <Pressable accessibilityRole="button" accessibilityLabel="打开命令面板" onPress={props.onCommands} disabled={inputDisabled} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: inputDisabled ? 0.5 : 1 }}><Icon sf="command" md="terminal" size={17} color={colors.secondaryLabel} /></Pressable> : null}
-            {!compact ? <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ flex: 1, minWidth: 0 }}
-              contentContainerStyle={{ gap: 6, alignItems: "center" }}
-            >
-              <ConfigMenus options={configShown} disabled={!props.online || !!blocked} onChange={props.onConfig} />
-            </ScrollView> : null}
+            {/* (Commands: the + menu, or `/` in the input.) */}
+            {!compact ? <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>
+              {configShown.length ? <ConfigSummary options={configShown} disabled={!props.online || !!blocked} onPress={props.onSettings} /> : null}
+            </View> : null}
             {!compact ? <UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} /> : null}
             {/* Stop stays within reach for as long as a turn runs, whoever drives it. */}
             {turnActive ? <RoundButton label="停止" onPress={() => void stop()} busy={stopping} tone="stop" /> : null}

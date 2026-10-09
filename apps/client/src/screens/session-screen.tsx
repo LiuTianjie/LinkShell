@@ -505,7 +505,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
           onRespond={(requestId, optionId) => actions.respond(id, requestId, optionId)}
           onAnswer={(requestId, answers) => actions.answer(id, requestId, answers)}
           onTakeover={() => actions.takeover(id)}
-          onConfig={(optionId, value) => void guard(() => actions.setConfig(id, optionId, value), "切换失败")}
+          onSettings={() => router.push({ pathname: "/session/[id]/settings", params: { id } })}
         />
         </View>
       </KeyboardStickyView>

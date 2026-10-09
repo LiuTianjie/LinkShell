@@ -12,7 +12,7 @@ import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
 import { useTimelineFork } from "./context";
-import { userMessageText } from "@/lib/user-message";
+import { questionReplies, userMessageText } from "@/lib/user-message";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
 
@@ -28,7 +28,9 @@ export const UserMessage = memo(function UserMessage({
   onFailedPress?: (item: Of<"user">) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const text = userMessageText(item.blocks);
+  const raw = userMessageText(item.blocks);
+  const replies = questionReplies(raw);
+  const text = replies ? replies.map((reply) => reply.answer).join("\n\n") : raw;
   const images = item.blocks.filter((block) => block.type === "image");
   const links = item.blocks.filter((block) => block.type === "resource_link");
   // A slash command or skill the user ran: `/review src`, `/pdf`.
@@ -64,6 +66,11 @@ export const UserMessage = memo(function UserMessage({
             }}
           >
             {links.map((link, index) => (link.type === "resource_link" ? <LinkChip key={index} block={link} onBubble /> : null))}
+            {replies?.map((reply, index) => (
+              <Text key={index} numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>
+                {reply.question}
+              </Text>
+            ))}
             {text ? (
               <Text selectable={!long || expanded} numberOfLines={long && !expanded ? LONG_MESSAGE_LINES : undefined} style={[type.chat, { color: colors.label }]}>
                 {command ? (

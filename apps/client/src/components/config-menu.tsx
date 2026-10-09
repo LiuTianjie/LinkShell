@@ -1,10 +1,10 @@
 import type { MenuAction } from "@react-native-menu/menu";
 import { AppMenu } from "@/components/app-menu";
 import type { SessionConfigOption } from "@linkshell/wire";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
-import { chipLabel, isRisky, isToggle, modelChipLabel, optionLabel, valueHint, valueLabel } from "@/lib/labels";
+import { chipLabel, isRisky, isToggle, modelChipLabel, optionLabel, valueLabel } from "@/lib/labels";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "./icon";
@@ -77,77 +77,36 @@ export function ConfigMenu({
 }
 
 /**
- * Every session setting as its own chip: model, reasoning effort, permissions,
- * fast mode. Effort used to hide inside the model's menu, where nobody found it.
+ * All of a session's settings as one chip beside the input: the model and its
+ * effort, a shield when the agent can do anything, and what's switched on.
+ * One tap opens the settings sheet with every option, rather than a row of
+ * chips that has to be scrolled sideways.
  */
-export function ConfigMenus({
-  options,
-  onChange,
-  disabled,
-}: {
-  options: SessionConfigOption[];
-  onChange: (optionId: string, value: string) => void;
-  disabled?: boolean;
-}) {
+export function ConfigSummary({ options, onPress, disabled = false }: { options: SessionConfigOption[]; onPress: () => void; disabled?: boolean }) {
+  const model = options.find((option) => option.category === "model");
+  const effort = options.find((option) => option.category === "effort");
+  const mode = options.find((option) => option.category === "mode" && !isToggle(option));
+  const risky = !!mode && isRisky(mode.current);
+  const on = options.filter((option) => isToggle(option) && option.current === "on");
+  const words = [model ? modelChipLabel(model) : mode ? valueLabel(mode, mode.current) : undefined, effort ? valueLabel(effort, effort.current) : undefined].filter(Boolean).join(" · ");
+  const label = options.map((option) => `${optionLabel(option)}：${valueLabel(option, option.current)}`).join("，");
   return (
-    <>
-      {options.map((option) =>
-        isToggle(option) ? (
-          <ToggleChip key={option.id} option={option} disabled={disabled} onChange={(value) => onChange(option.id, value)} />
-        ) : (
-          <ConfigMenu key={option.id} option={option} disabled={disabled} onChange={(value) => onChange(option.id, value)} />
-        ),
-      )}
-    </>
-  );
-}
-
-/**
- * An on/off setting (the agent's fast mode): a chip like its neighbours, lit
- * when on, that opens a two-line menu saying what it does. Off looks like any
- * other chip, not like something that can't be used.
- */
-function ToggleChip({ option, onChange, disabled }: { option: SessionConfigOption; onChange: (value: string) => void; disabled?: boolean }) {
-  const on = option.current === "on";
-  const label = optionLabel(option).replace(/模式$/, "");
-  const hint = option.id === "fast" ? "输出更快，可能消耗更多额度" : valueHint(option, "on");
-  const glyph = option.id === "plan" ? ({ sf: "list.bullet.clipboard", md: "checklist" } as const) : ({ sf: on ? "bolt.fill" : "bolt", md: "bolt" } as const);
-  const actions: MenuAction[] = (["off", "on"] as const).map((value) => ({
-    id: value,
-    title: valueLabel(option, value),
-    state: value === option.current ? "on" : "off",
-    attributes: { disabled },
-  }));
-  return (
-    <AppMenu
-      title={hint ? `${optionLabel(option)} · ${hint}` : optionLabel(option)}
-      actions={actions}
-      shouldOpenOnLongPress={false}
-      onOpenMenu={() => haptics.selection()}
-      onPressAction={({ nativeEvent }) => {
-        if (nativeEvent.event !== option.current) onChange(nativeEvent.event);
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`会话设置，${label}`}
+      onPress={() => {
+        haptics.selection();
+        onPress();
       }}
+      disabled={disabled}
+      style={{ minHeight: 44, minWidth: 0, flexShrink: 1, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", gap: 5, opacity: disabled ? 0.5 : 1 }}
     >
-      <View
-        accessibilityRole="button"
-        accessibilityLabel={`${optionLabel(option)}：${valueLabel(option, option.current)}`}
-        accessibilityHint={hint}
-        style={{
-          minHeight: 44,
-          paddingVertical: 7,
-          paddingHorizontal: on ? 8 : 6,
-          borderRadius: 22,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 3,
-          backgroundColor: on ? colors.accentSoft : undefined,
-          opacity: disabled ? 0.5 : 1,
-        }}
-      >
-        <Icon sf={glyph.sf} md={glyph.md} size={12} color={on ? colors.accent : colors.secondaryLabel} />
-        <Text style={[type.footnote, { color: on ? colors.accent : colors.label, fontWeight: on ? "600" : "500" }]}>{label}</Text>
-        {on ? null : <Icon sf="chevron.down" md="expand_more" size={8} color={colors.tertiaryLabel} weight="bold" />}
-      </View>
-    </AppMenu>
+      {risky ? <Icon sf="exclamationmark.shield.fill" md="gpp_maybe" size={14} color={colors.waiting} /> : null}
+      {on.map((option) => (
+        <Icon key={option.id} sf={option.id === "plan" ? "list.bullet.clipboard" : "bolt.fill"} md={option.id === "plan" ? "checklist" : "bolt"} size={13} color={colors.accent} />
+      ))}
+      <Text numberOfLines={1} style={[type.footnote, { flexShrink: 1, color: colors.label, fontWeight: "600" }]}>{words || "会话设置"}</Text>
+      <Icon sf="chevron.down" md="expand_more" size={8} color={colors.tertiaryLabel} weight="bold" />
+    </Pressable>
   );
 }
