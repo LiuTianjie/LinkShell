@@ -53,6 +53,12 @@ final class Loopback: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegat
     guard let connection else { return }
     connection.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: offer)) { [weak self] error in
       if let error { self?.link.log("loopback: the offer was not taken: \(error.localizedDescription)") }
+      if Launch.has("--loopback-no-flexfec"), let video = connection.transceivers.first(where: { $0.mediaType == .video }) {
+        // Real negotiation, without editing SDP: models a viewer whose receiver has no FlexFEC.
+        let codecs = Engine.factory.rtpReceiverCapabilities(forKind: kRTCMediaStreamTrackKindVideo).codecs.filter { $0.name.lowercased() != "flexfec-03" }
+        do { try video.setCodecPreferences(codecs, error: ()) }
+        catch { self?.link.log("loopback: FlexFEC could not be removed from codec preferences: \(error)") }
+      }
       connection.answer(for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)) { description, error in
         guard let description else {
           self?.link.log("loopback: no answer: \(error?.localizedDescription ?? "unknown")")
@@ -231,6 +237,8 @@ final class Loopback: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegat
           // The longest the receiving end went without a decoded frame.
           "gapMs": (longest * 1000).rounded(),
           "packetsLost": json(number(inbound, "packetsLost")),
+          "fecPacketsReceived": json(number(inbound, "fecPacketsReceived")),
+          "fecBytesReceived": json(number(inbound, "fecBytesReceived")),
           "nack": json(number(inbound, "nackCount")),
           "pli": json(number(inbound, "pliCount")),
           // Messages that came down each channel (the pointer's place, on `cursor`).

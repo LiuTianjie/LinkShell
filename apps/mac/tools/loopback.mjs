@@ -3,13 +3,14 @@
 // (`--loopback`: a second peer connection in the same process receives and decodes the track)
 // and reports both ends' numbers.
 //
-//   node tools/loopback.mjs [--fps 30,60] [--seconds 10] [--maxWidth 1920] [--screen 0] [--codec h264]
+//   node tools/loopback.mjs [--fps 30,60] [--maxFps 60] [--seconds 10] [--maxWidth 1920] [--screen 0] [--codec h264]
 //                           [--still] [--motion] [--encoder own|stock] [--no-low-latency] [--trial <name>=<value>]
 //                           [--narrow <bit/s>:<from second>:<for seconds>] [--timeline]
-//                           [--no-playout-delay] [--rtc-log] [--json <file>]
+//                           [--no-playout-delay] [--no-flexfec] [--loopback-no-flexfec] [--rtc-log] [--json <file>]
 //
 // Without --fps it is one run at the app's own choice of frame rate: 60, and 30 while 60 is not
-// carried. --fps names rates to hold, one run each ("auto" among them is the app's own choice).
+// carried. --maxFps 120 opts into the 120/60/30 ladder on a display that supports 120 Hz.
+// --fps names rates to hold, one run each ("auto" among them is the app's own choice).
 //
 // --narrow holds the bandwidth estimate down for a while, as a narrow network does (without its
 // loss and delay): `--narrow 1500000:8:25` is 1.5 Mbit/s from the 8th second for 25. It prints
@@ -40,7 +41,7 @@ const still = args.includes("--still");
 const flags = [
   "--loopback",
   ...(still ? [] : ["--clock"]),
-  ...["--rtc-log", "--no-playout-delay", "--motion", "--no-low-latency"].filter((flag) => args.includes(flag)),
+  ...["--rtc-log", "--no-playout-delay", "--motion", "--no-low-latency", "--no-flexfec", "--loopback-no-flexfec"].filter((flag) => args.includes(flag)),
   ...(value("--encoder") ? ["--encoder", value("--encoder")] : []),
   ...(value("--trial") ? ["--trial", value("--trial")] : []),
 ];
@@ -92,7 +93,7 @@ async function run(fps) {
     console.log(`  status ${JSON.stringify(status)}   (pid ${app.pid})`);
     if (!status.recording) throw new Error("recording is false: Screen Recording is not allowed for this LinkShell.app — not asking again");
     app.cpu();
-    app.send({ t: "rtc.open", v: "loop", iceServers: [], fps, maxWidth: Number(value("--maxWidth", "1920")), screen: Number(value("--screen", "0")), codec: value("--codec", "h264") });
+    app.send({ t: "rtc.open", v: "loop", iceServers: [], fps, maxFps: Number(value("--maxFps", "60")), maxWidth: Number(value("--maxWidth", "1920")), screen: Number(value("--screen", "0")), codec: value("--codec", "h264") });
     await app.next("rtc.offer", 10_000);
     for (let second = 0; second < seconds + WARM_UP && !error; second += 1) {
       if (narrow && second === narrow[1]) {
@@ -114,6 +115,9 @@ async function run(fps) {
     const latencies = got.map((sample) => sample.latency).filter((latency) => latency?.n > 0);
     result = {
       fps: fps ?? "auto",
+      screen: Number(value("--screen", "0")),
+      maxWidth: Number(value("--maxWidth", "1920")),
+      maxFps: Number(value("--maxFps", "60")),
       seconds: sent.length,
       // Each change of frame rate, with the longest wait for a frame in the two seconds after it
       // was said, the worst second's median from the glass to a decoded frame in the three after
@@ -139,6 +143,7 @@ async function run(fps) {
         repeated: mean(sent.map((sample) => sample.repeated)),
         encodedFps: mean(sent.map((sample) => sample.fps)),
         encoder: last.encoder,
+        flexfec: last.flexfec,
         hardware: last.hardware,
         codec: last.codec,
         fmtp: last.fmtp,
@@ -168,6 +173,8 @@ async function run(fps) {
         jitterBufferMs: mean(got.map((sample) => sample.jitterBufferMs)),
         decodeMs: mean(got.map((sample) => sample.decodeMs)),
         framesDropped: lastGot.framesDropped,
+        fecPacketsReceived: lastGot.fecPacketsReceived,
+        fecBytesReceived: lastGot.fecBytesReceived,
         freezes: lastGot.freezes,
         gapMs: Math.max(...got.map((sample) => sample.gapMs ?? 0)),
         keyFrames: lastGot.keyFrames,
@@ -219,6 +226,7 @@ for (const fps of rates) {
   console.log(`            key frames ${sender.keyFrames}, limited by ${sender.qualityLimitation}, rtt ${show(sender.rttMs, 1)} ms, lost ${sender.packetsLost}, nack ${sender.nack}, pli ${sender.pli}`);
   console.log(`  receiver  ${receiver.framesReceived} frames received, ${receiver.framesDecoded} decoded (${receiver.decoder}), ${show(receiver.fps, 1)} fps, ${receiver.width}×${receiver.height}, ${megabits(receiver.bitrate)}`);
   console.log(`            jitter buffer ${show(receiver.jitterBufferMs, 1)} ms, decode ${show(receiver.decodeMs, 1)} ms/frame, dropped ${receiver.framesDropped}, freezes ${receiver.freezes}, longest wait for a frame ${show(receiver.gapMs)} ms`);
+  console.log(`  FlexFEC   ${sender.flexfec?.state ?? "unknown"}; receiver counted ${show(receiver.fecPacketsReceived)} protection packets, ${show(receiver.fecBytesReceived)} bytes (not a recovery count)`);
   if (receiver.latency) console.log(`            glass → decoded: p50 ${show(receiver.latency.p50)} ms, p95 ${show(receiver.latency.p95)} ms (min ${receiver.latency.min}, max ${receiver.latency.max}, ${receiver.latency.n} frames, ${receiver.unreadable} unreadable)`);
   if (result.strip) console.log(`            the strip as captured − the time the capture says it was displayed: median ${show(result.strip.median, 1)} ms (min ${result.strip.min}, max ${result.strip.max}, ${result.strip.n} frames)`);
   console.log(`  channels  the receiving end got ${receiver.cursorMessages} cursor messages (they are sent when the pointer moves); input-check.mjs proves the other channels`);

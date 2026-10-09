@@ -29,6 +29,9 @@ import Foundation
 //   --no-playout-delay    Don't ask the receiver for a zero playout delay (to measure its worth).
 //   --encoder own|stock   The video track's H.264 encoder: this app's low-latency one, or
 //                         libwebrtc's. Default: own, with automatic fallback to stock.
+//   --no-flexfec          Don't advertise or send FlexFEC (for a comparison).
+//   --loopback-no-flexfec Have the test receiver decline FlexFEC, like an unsupported viewer.
+//   --loopback-network    Pass the test receiver's ICE candidates to tools/flexfec-check.mjs.
 //   --no-low-latency      Encode as a Mac without the low-latency rate control does.
 //   --trial <name>=<value>  A libwebrtc field trial, beside those of `Tuning` (to try one out).
 //   --rtc-log             libwebrtc's own log, as `log` messages.
@@ -48,6 +51,7 @@ if let path = Launch.value(after: "--connect") {
   guard let link = Link(path: path) else { exit(1) }
   Engine.playoutDelay = !Launch.has("--no-playout-delay")
   Engine.ownEncoder = Launch.value(after: "--encoder") != "stock"
+  Engine.flexfec = !Launch.has("--no-flexfec")
   Engine.report = { link.log($0) }
   if Launch.has("--rtc-log") { Engine.forwardLog(to: link) }
   // With no window and no place in the Dock.

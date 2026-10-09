@@ -208,7 +208,12 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     }
     if options.loopback {
       loopback = Loopback(viewer: viewer, link: link, readClock: options.clock) { [weak self] candidate in
-        self?.connection?.add(candidate) { _ in }
+        guard let self else { return }
+        if Launch.has("--loopback-network") {
+          self.link.emit(["t": "rtc.loopback.ice", "v": self.viewer, "candidate": candidate.sdp, "sdpMid": candidate.sdpMid ?? NSNull(), "sdpMLineIndex": Int(candidate.sdpMLineIndex)])
+        } else {
+          self.connection?.add(candidate) { _ in }
+        }
       }
     }
 
@@ -274,6 +279,12 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     }
   }
 
+  /// The FlexFEC tool supplies candidates for its local UDP proxy instead of the direct path.
+  func candidateForLoopback(_ message: [String: Any]) {
+    guard options.loopback, Launch.has("--loopback-network"), let sdp = message["candidate"] as? String else { return }
+    loopback?.add(RTCIceCandidate(sdp: sdp, sdpMLineIndex: Int32((message["sdpMLineIndex"] as? Int) ?? 0), sdpMid: message["sdpMid"] as? String))
+  }
+
   private func offer() {
     guard let connection else { return }
     let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
@@ -302,10 +313,12 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     let codec = parameters.codecs.first
     let encoding = parameters.encodings.first
     let degradation = parameters.degradationPreference.flatMap { RTCDegradationPreference(rawValue: $0.intValue) }
+    let fec = FlexFEC.negotiation(offer: connection?.localDescription?.sdp, answer: connection?.remoteDescription?.sdp)
     link.log(
       "agreed: \(codec?.name ?? "?") \(codec?.parameters["profile-level-id"] as? String ?? ""), playout-delay extension \(playout ? "kept" : "dropped by the answer")"
         + (Engine.playoutDelay ? "" : " (not sent: --no-playout-delay)")
         + ", max \(encoding?.maxBitrateBps?.intValue ?? 0) bit/s, max \(encoding?.maxFramerate?.intValue ?? 0) fps, degradation \(degradation.map(Self.name) ?? "default")"
+        + ", FlexFEC \(fec.state)\(fec.repairSSRC.map { " (repair SSRC \($0))" } ?? "")"
     )
   }
 
@@ -370,7 +383,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     DispatchQueue.main.async {
       guard !self.closed else { return }
       self.link.emit(["t": "rtc.ice", "v": self.viewer, "candidate": candidate.sdp, "sdpMid": candidate.sdpMid ?? NSNull(), "sdpMLineIndex": Int(candidate.sdpMLineIndex)])
-      self.loopback?.add(candidate)
+      if !Launch.has("--loopback-network") { self.loopback?.add(candidate) }
     }
   }
 
@@ -548,6 +561,9 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
           "width": json(number(outbound, "frameWidth")),
           "height": json(number(outbound, "frameHeight")),
           "encoder": json(encoder),
+          // Negotiation is not proof of protection packets or recovery: see the receiver's
+          // fecPacketsReceived counter in the loopback tool (null where it is not reported).
+          "flexfec": FlexFEC.negotiation(offer: connection.localDescription?.sdp, answer: connection.remoteDescription?.sdp).json,
           "codec": json(text(codec, "mimeType").map { $0.replacingOccurrences(of: "video/", with: "") }),
           "keyFrames": json(number(outbound, "keyFramesEncoded")),
           "qualityLimitation": json(second.limitation),

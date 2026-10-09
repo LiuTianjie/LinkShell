@@ -32,6 +32,10 @@ enum Tuning {
   /// way to say so to a receiver without `jitterBufferTarget` (Safari, WKWebView).
   static let fieldTrials: [String: String] = [
     "WebRTC-ForceSendPlayoutDelay": "min_ms:0,max_ms:0",
+    // M154 needs both: one exposes the send codec, the other creates the FEC-FR SSRC and
+    // permits the sender. A receiver which drops flexfec-03 keeps the usual NACK/RTX path.
+    "WebRTC-FlexFEC-03-Advertised": "Enabled",
+    "WebRTC-FlexFEC-03": "Enabled",
   ]
 
   /// When the network or the encoder can't keep up, the picture gets smaller, not jerkier: a

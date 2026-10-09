@@ -90,6 +90,8 @@ final class Service {
       watched(by: id)?.sendFromLoopback(events, on: channel)
     case "rtc.loopback.limit":
       watched(by: id)?.limitFromLoopback(command["bitrate"] as? Int)
+    case "rtc.loopback.ice":
+      watched(by: id)?.candidateForLoopback(command)
     case "stream.open":
       // One stream an id; streams of different ids run side by side.
       streams.removeValue(forKey: id)?.close()

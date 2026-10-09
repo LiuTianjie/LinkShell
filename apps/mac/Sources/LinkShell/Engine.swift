@@ -10,6 +10,9 @@ enum Engine {
   /// (`--encoder stock` keeps the upstream encoder available for comparisons).
   static var ownEncoder = true
 
+  /// Off only for a comparison with the previous sender (`--no-flexfec`).
+  static var flexfec = true
+
   /// Where the engine says what the host should know (its log).
   static var report: (String) -> Void = { _ in }
 
@@ -19,6 +22,10 @@ enum Engine {
     // deprecated call; it has to come before anything else in the library.
     var trials = Tuning.fieldTrials
     if !playoutDelay { trials["WebRTC-ForceSendPlayoutDelay"] = nil }
+    if !flexfec {
+      trials["WebRTC-FlexFEC-03-Advertised"] = "Disabled"
+      trials["WebRTC-FlexFEC-03"] = "Disabled"
+    }
     // `--trial Name=value`, to try one out.
     for trial in Launch.values(after: "--trial") {
       let parts = trial.split(separator: "=", maxSplits: 1).map(String.init)

@@ -147,6 +147,7 @@ already, and stop if it is not rather than have the system ask.
 | `stream-check.mjs` | The stream for the host's socket: record format, rates, key frames, change of size, beside a video track; decoded by ffmpeg where installed, and by Chrome's WebCodecs unless `--no-chrome`. Part of `check`. |
 | `app-smoke.mjs` | Opens the app, asks for an offer, says what it holds. Part of `check`. |
 | `loopback.mjs` | The video track with no viewer: the app answers its own offer, and both ends' numbers are printed. Without `--fps`, at the app's own choice of frame rate; `--fps 30,60` holds each of those. `--narrow <bit/s>:<from second>:<for seconds>` holds the bandwidth estimate down for a while, prints every second, and says what each change of frame rate cost; `--timeline`, `--seconds 10`, `--motion`, `--still`, `--encoder own\|stock`, `--json <file>`; the rest in its header. |
+| `flexfec-check.mjs` | A short functional check over its own loopback UDP proxy: 60 ms each way, every twentieth original video packet dropped. Checks real FlexFEC packet receipt, then successful video without FlexFEC when the test receiver declines it. `--json <file>` saves the evidence. No system network changes or latency claims. |
 | `setup-shots.mjs` | The setup window drawn into PNG files in every state, light and dark, Chinese and English (24 of them, in `build/setup-shots` or the directory named), with nothing shown and nothing asked of the system. For looking at the window after changing it. |
 | `app.mjs`, `h264.mjs`, `pointer-shapes.swift` | Shared by the above: opening the app, reading H.264, changing the pointer's picture. |
 
@@ -168,9 +169,12 @@ The host's own tests run its real code against this app: `packages/host/test/app
 | `--clock` | Shows the clock strip on a display while it is sent (see Measuring). `status` gains `clock`. |
 | `--motion` | Shows a window of scrolling text and a sliding block on a display while it is sent: a busy screen's work for the encoder, the same every run. |
 | `--loopback` | Each `rtc.open` is answered inside the app by a second connection that decodes the track. Adds `rtc.loopback*` (below). |
-| `--encoder own\|stock` | The video track's H.264 encoder: the app's low-latency one (`LowLatencyEncoder.swift`), or libwebrtc's VideoToolbox encoder with the level fixed (`Encoders.swift`). Default `stock`. |
+| `--encoder own\|stock` | The video track's H.264 encoder: the app's low-latency one (`LowLatencyEncoder.swift`), or libwebrtc's VideoToolbox encoder with the level fixed (`Encoders.swift`). Default `own`; initialization or encoding failures switch to stock for the rest of that encoder's lifetime. |
 | `--no-low-latency` | Never asks VideoToolbox for the low-latency rate control: encodes as a Mac without it does. |
 | `--no-playout-delay` | Leaves out the field trial that sends playout-delay 0. |
+| `--no-flexfec` | Disables FlexFEC advertisement and sending for an explicit comparison. |
+| `--loopback-no-flexfec` | Makes the test receiver decline FlexFEC through codec preferences, to check an unsupported viewer's path. |
+| `--loopback-network` | Only with `--loopback`: passes its ICE candidates to `flexfec-check.mjs`, which supplies proxy candidates. The proxy exists only while that tool runs. |
 | `--trial <name>=<value>` | Another libwebrtc field trial (repeatable). |
 | `--rtc-log` | libwebrtc's log, as `log` messages. |
 
@@ -247,15 +251,42 @@ be made`, `the video could not be added`, `no offer: …`, `the offer was not se
 The picture has no pointer in it; the viewer draws one from `cursor` and `shape`. A failed
 connection does not end the session: the host closes it.
 
+`rtc.stats.flexfec` reports SDP evidence: `{state, payloadType, mediaSSRC, repairSSRC}`. The
+state is `not-offered`, `awaiting-answer`, `declined`, `missing-ssrc` or `negotiated`. The last
+means the answer accepted the codec and the offer has an FEC-FR protection group; it does not
+claim that protection packets have been needed or that a loss was repaired.
+
 With `--loopback`: `← {t:"rtc.loopback", v, …}` once a second (the receiving end's numbers,
 among them `gapMs`, the longest it went without a decoded frame, and with `--clock` `latency`
-`{n, min, p50, p95, max}`: glass to decoded, ms),
+`{n, min, p50, p95, max}`: glass to decoded, ms). `fecPacketsReceived` and `fecBytesReceived`
+are the receiver's protection counters (`null` when unavailable), not recovery counts.
+The test control messages are
 `→ {t:"rtc.loopback.limit", v, bitrate?}` to hold the sender's bandwidth estimate to so many
 bits a second, as a narrow network does (without its loss and delay), or without `bitrate` to
 let it go,
 `← {t:"rtc.loopback.channel", v, channel}` when a channel opens there,
 `→ {t:"rtc.loopback.send", v, channel, events:[…]}` to send messages up one, and
 `← {t:"rtc.loopback.heard", v, channel, bytes, message}` for each that came down one.
+With `--loopback-network`, `↔ {t:"rtc.loopback.ice", v, candidate, sdpMid, sdpMLineIndex}`
+exchanges the test receiver's ICE candidates with the tool. Normal viewers never use it.
+
+**FlexFEC.** M154 needs both `WebRTC-FlexFEC-03-Advertised=Enabled` (send codec) and
+`WebRTC-FlexFEC-03=Enabled` (protection SSRC and sending). They are on by default. Codec
+preferences retain `flexfec-03`; libwebrtc negotiates it normally and produces the FEC-FR
+group for our single video stream. A viewer which declines it continues with H.264 and
+NACK/RTX. There is no SDP rewriting to pretend a viewer supports it. See M154's
+[video engine](https://webrtc.googlesource.com/src/+/refs/branch-heads/8037/media/engine/webrtc_video_engine.cc),
+[stream negotiation](https://webrtc.googlesource.com/src/+/refs/branch-heads/8037/pc/media_session.cc), and
+[FEC sender creation](https://webrtc.googlesource.com/src/+/refs/branch-heads/8037/call/rtp_video_sender.cc).
+
+Upstream [M124](https://webrtc.googlesource.com/src/+/refs/branch-heads/6367/media/engine/webrtc_video_engine.cc)
+already exposes FlexFEC receive support unless explicitly disabled; the installed Jitsi build
+and WKWebView still have to prove their capability in their actual answers. A clean network
+can negotiate FlexFEC and send no repair packets, because M154's protection controller uses
+loss and RTT to choose redundancy. The advertised `repair-window=10000000` is a required
+format parameter which this upstream implementation does not use as a ten-second playback
+wait. `flexfec-check.mjs` checks actual packet receipt under injected loss; it does not measure
+real-device recovery, visual stalls or latency. Those remain phone acceptance checks.
 
 ### The data channels
 
