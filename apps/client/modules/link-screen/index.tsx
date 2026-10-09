@@ -24,7 +24,7 @@ export interface ScreenMetrics {
   sampleEvery?: number;
   width?: number;
   height?: number;
-  sender?: { encodeMs?: number; sendDelayMs?: number; frameRate?: number };
+  sender?: { encodeMs?: number; sendDelayMs?: number; fps?: number; frameRate?: number };
 }
 
 export interface NativeScreenHandle {

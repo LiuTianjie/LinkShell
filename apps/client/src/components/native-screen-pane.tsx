@@ -90,7 +90,7 @@ export function NativeScreenPane(props: Props) {
           <Text style={textStyle}>诊断抽样 · 切换会重连 · 每 5 秒更新 · 性能仅作诊断参考</Text>
           {metrics ? <Text style={textStyle}>{[
             metrics.decodedFps == null ? null : `${Math.round(metrics.decodedFps)} 解码帧/秒`,
-            metrics.sender?.frameRate == null ? null : `${Math.round(metrics.sender.frameRate)} 发送帧/秒`,
+            metrics.sender?.fps == null ? null : `${Math.round(metrics.sender.fps)} 编码帧/秒`,
             metrics.sender?.encodeMs == null ? null : `编码 ${metrics.sender.encodeMs.toFixed(1)} ms`,
             metrics.rttMs == null ? null : `往返 ${metrics.rttMs.toFixed(1)} ms`,
             metrics.decodeP95Ms == null ? null : `解码 p95 ${metrics.decodeP95Ms.toFixed(1)} ms`,
