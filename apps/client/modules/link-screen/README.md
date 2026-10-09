@@ -68,9 +68,26 @@ pnpm build
 ```
 
 The Swift package checks scheduling primitives without Expo, a screen or WebRTC.
-An iOS native build and runtime checks are still required: video, colour, gestures,
-keyboard, rotation, screen selection, teardown/reconnect and diagnostic switching.
-Measure sustained 120 fps, actual display cadence, input-to-result, thermal
-stability and impaired/public networks separately. LTR feedback, content-adaptive
-tile transport and cross-device presentation-deadline feedback are later stages;
-they are not implemented by this preview.
+On 2026-10-10, the current receiver built for arm64 iPhone with Xcode 27.1, passed
+code-signature verification, and installed/launched on an iPhone Air. This is a
+development-signed Release configuration with its JS bundle included, named
+**LinkShell Dev** (`com.bd.linkshell.v2`); it does not need Metro. Build/install/
+launch evidence does not establish screen performance or interaction correctness.
+
+Final device acceptance stays separate:
+
+1. On the same Mac build and Wi-Fi, select a moving text/window scene and **2560**.
+   Compare **兼容模式** with **低延迟预览 → 60 帧上限**. Leave diagnostics off while
+   judging responsiveness, readability and stutter; repeat in both orders.
+2. In the native preview, choose **2560** first, then **120 帧上限**. Use a 120 Hz
+   source display. Temporarily enable diagnostics to distinguish actual encoded
+   and decoded FPS from the requested ceiling. Repeated or decoded frames do not
+   by themselves prove 120 different pictures physically presented each second.
+3. Check pointer/drag, scroll, keyboard, zoom, rotation, screen selection and
+   reconnect/backgrounding. Run for 30 minutes to check heat and sustained cadence.
+
+Diagnostics reconnect the stream; allow the connection to settle before sampling.
+Compare diagnostics off/on separately. Input-to-result, actual display cadence,
+and impaired/public-network behaviour still require device measurement. LTR
+feedback, content-adaptive tile transport and cross-device presentation-deadline
+feedback are later stages; they are not implemented by this preview.
