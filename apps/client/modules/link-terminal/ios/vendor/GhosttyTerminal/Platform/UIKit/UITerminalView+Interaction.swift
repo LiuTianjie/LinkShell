@@ -37,7 +37,7 @@
             #if targetEnvironment(macCatalyst)
                 becomeFirstResponder()
             #else
-                if momentumScroll.displayLink != nil {
+                if isScrollbackDecelerating {
                     // A touch during momentum is a scroll-stop, not a tap.
                     stopMomentumScrolling()
                     softwareKeyboard.tapCandidateArmed = false
@@ -241,7 +241,7 @@
             }
             if usesInlineTextSelection, gestureRecognizer === touchSelection.tapRecognizers.first {
                 touchSelection.tapBeganWithMenu = isTouchMenuVisible
-                touchSelection.tapStopsMomentum = momentumScroll.displayLink != nil
+                touchSelection.tapStopsMomentum = isScrollbackDecelerating
                 if touchSelection.tapStopsMomentum {
                     stopMomentumScrolling()
                 }
@@ -256,6 +256,14 @@
         override open func gestureRecognizerShouldBegin(
             _ gestureRecognizer: UIGestureRecognizer,
         ) -> Bool {
+            if let systemScrollback, let pan = gestureRecognizer as? UIPanGestureRecognizer {
+                if pan === systemScrollback.panGestureRecognizer {
+                    return systemScrollback.accepts(pan)
+                }
+                if pan === touchSelection.scrollGesture, systemScrollback.accepts(pan) {
+                    return false
+                }
+            }
             if gestureRecognizer is UILongPressGestureRecognizer {
                 return usesInlineTextSelection
             }

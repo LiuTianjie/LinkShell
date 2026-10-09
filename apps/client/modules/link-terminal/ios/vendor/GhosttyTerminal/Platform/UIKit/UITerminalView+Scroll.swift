@@ -204,6 +204,7 @@
         }
 
         func stopMomentumScrolling(sendTerminalEndEvent: Bool = true) {
+            systemScrollback?.stop()
             guard momentumScroll.displayLink != nil else { return }
             TerminalDebugLog.log(.input, "momentum stop")
 
@@ -215,5 +216,129 @@
             momentumScroll.displayLink = nil
             momentumScroll.velocity = .zero
         }
+    }
+
+    extension UITerminalView {
+        var isScrollbackDecelerating: Bool {
+            momentumScroll.displayLink != nil || systemScrollback?.isDecelerating == true
+        }
+
+        func configureSystemScrollback() {
+            guard usesSystemScrollback else {
+                if let driver = systemScrollback {
+                    driver.stop()
+                    removeGestureRecognizer(driver.panGestureRecognizer)
+                    driver.removeFromSuperview()
+                }
+                systemScrollback = nil
+                return
+            }
+            guard systemScrollback == nil else { return }
+            let driver = TerminalScrollbackDriver(terminal: self)
+            systemScrollback = driver
+            insertSubview(driver, at: 0)
+            // Keep input, selection and Metal on the terminal. Only UIKit's
+            // scroll physics use this transparent, bounded content surface.
+            addGestureRecognizer(driver.panGestureRecognizer)
+            driver.synchronize()
+        }
+    }
+
+    @MainActor
+    final class TerminalScrollbackDriver: UIScrollView, UIScrollViewDelegate {
+        private weak var terminal: UITerminalView?
+        private var synchronizing = false
+        private var cellHeight: CGFloat = 0
+        private var maximumRow: UInt64 = 0
+        private var observedRow: UInt64?
+        private var requestedRow: UInt64?
+
+        init(terminal: UITerminalView) {
+            self.terminal = terminal
+            super.init(frame: .zero)
+            delegate = self
+            contentInsetAdjustmentBehavior = .never
+            decelerationRate = .normal
+            bounces = false
+            scrollsToTop = false
+            showsHorizontalScrollIndicator = false
+            showsVerticalScrollIndicator = false
+            isAccessibilityElement = false
+            accessibilityElementsHidden = true
+            panGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            panGestureRecognizer.maximumNumberOfTouches = 2
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        // Do not intercept the terminal's taps, keyboard or selection handles.
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
+
+        func accepts(_ pan: UIPanGestureRecognizer) -> Bool {
+            guard let terminal, terminal.pointer.session.reported == nil,
+                  terminal.surface != nil, maximumRow > 0 else { return false }
+            if let overlay = terminal.touchSelection.overlay,
+               overlay.hitTest(pan.location(in: overlay), with: nil) != nil { return false }
+            let twoFingers = pan.numberOfTouches == 2 && terminal.usesInlineTextSelection
+            if terminal.touchSelection.range != nil && !twoFingers { return false }
+            if terminal.surface?.isMouseCaptured == true && !twoFingers { return false }
+            let velocity = pan.velocity(in: terminal)
+            return abs(velocity.y) > abs(velocity.x)
+        }
+
+        func stop() {
+            guard isDecelerating else { return }
+            setContentOffset(contentOffset, animated: false)
+        }
+
+        func synchronize() {
+            guard let terminal, let metrics = terminal.surface?.size(),
+                  let bar = terminal.core.bridge.scrollbar else { return }
+            let height = CGFloat(metrics.cellHeightPixels) / terminal.resolvedDisplayScale()
+            guard height > 0, terminal.bounds.height > 0 else { return }
+            let geometryChanged = frame.size != terminal.bounds.size || height != cellHeight
+            if geometryChanged { stop() }
+            synchronizing = true
+            defer { synchronizing = false }
+            if frame != terminal.bounds { frame = terminal.bounds }
+            cellHeight = height
+            maximumRow = bar.total > bar.len ? bar.total - bar.len : 0
+            let size = CGSize(width: bounds.width, height: bounds.height + CGFloat(maximumRow) * height)
+            if contentSize != size { contentSize = size }
+            // Our own row acknowledgement must not erase UIKit's fractional
+            // offset. Output, wheel input and jumps can independently move it.
+            if geometryChanged || observedRow == nil ||
+                (!isTracking && !isDecelerating && bar.offset != observedRow && bar.offset != requestedRow) {
+                setContentOffset(CGPoint(x: 0, y: CGFloat(min(bar.offset, maximumRow)) * height), animated: false)
+                requestedRow = nil
+            }
+            observedRow = bar.offset
+        }
+
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            guard let terminal else { return }
+            #if !targetEnvironment(macCatalyst)
+                terminal.softwareKeyboard.tapCandidateArmed = false
+            #endif
+            terminal.momentumScroll.displayLink?.invalidate()
+            terminal.momentumScroll.displayLink = nil
+            requestedRow = nil
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            guard !synchronizing, cellHeight > 0, let terminal else { return }
+            let offset = min(CGFloat(maximumRow) * cellHeight, max(0, contentOffset.y))
+            let row = UInt64(floor(offset / cellHeight))
+            if row != requestedRow {
+                requestedRow = row
+                _ = terminal.surface?.scrollToRow(UInt(row))
+            }
+            terminal.surface?.applySubRowScrollOffset(
+                pixelsBelowRow: (offset - CGFloat(row) * cellHeight) * terminal.resolvedDisplayScale()
+            )
+            terminal.core.requestImmediateTick()
+        }
+
     }
 #endif

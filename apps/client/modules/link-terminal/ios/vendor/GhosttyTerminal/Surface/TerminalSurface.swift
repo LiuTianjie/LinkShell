@@ -17,6 +17,9 @@ import GhosttyKit
 public final class TerminalSurface {
     private var surface: ghostty_surface_t?
     private var hasBeenFreed = false
+    // Macterm's mirror of the core accumulator; LinkShell pins the multipliers
+    // to precision:1, discrete:3 in its terminal theme.
+    private var scrollAccumulator = ScrollAccumulator()
     /// Told about every font-size action this surface performed, whichever
     /// path it came by: a host's binding action, a pinch, Cmd+=/-/0 on a
     /// hardware keyboard, a host's `sendKey`. Ghostty cannot report the
@@ -136,7 +139,23 @@ public final class TerminalSurface {
             .input,
             "surface scroll x=\(String(format: "%.2f", x)) y=\(String(format: "%.2f", y)) mods=0x\(String(mods, radix: 16))",
         )
+        let cell = CGFloat(ghostty_surface_size(s).cell_height_px)
+        if y != 0 {
+            let pixels = mods & 1 != 0 ? y : (y > 0 ? max(y, 1) : min(y, -1)) * Double(cell) * 3
+            scrollAccumulator.advance(pixels: CGFloat(pixels), cellHeight: cell)
+        }
         ghostty_surface_mouse_scroll(s, x, y, mods)
+    }
+
+    /// Macterm's sub-row scroller adapter, expressed in backing pixels for UIKit.
+    func applySubRowScrollOffset(pixelsBelowRow pixels: CGFloat) {
+        guard let s = surface, !isMouseCaptured else { return }
+        let cell = CGFloat(ghostty_surface_size(s).cell_height_px)
+        guard cell > 0 else { return }
+        let remainder = max(-cell + 1, min(0, -pixels))
+        let delta = scrollAccumulator.nudge(toward: remainder, multiplier: 1)
+        // Even zero republishes the remainder after scroll_to_row cleared it.
+        sendMouseScroll(x: 0, y: Double(delta), mods: 1)
     }
 
     /// Whether the application currently owns the mouse (DEC 1000/1002/1003).

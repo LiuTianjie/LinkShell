@@ -13,13 +13,20 @@ struct TerminalSelectionGrid: Equatable {
     let rows: Int
     let cellSize: CGSize
     let origin: CGPoint
+    private let viewportHeight: CGFloat
+    private let totalRows: Int
+    private let includesOverscan: Bool
 
-    init?(metrics: TerminalGridMetrics, scale: CGFloat, firstBaseline: CGPoint, imeBottom: CGFloat) {
+    init?(metrics: TerminalGridMetrics, scale: CGFloat, firstBaseline: CGPoint, imeBottom: CGFloat,
+          totalRows: Int? = nil, includesOverscan: Bool = false) {
         guard metrics.columns > 0, metrics.rows > 0,
               metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0, scale > 0
         else { return nil }
         columns = Int(metrics.columns)
         rows = Int(metrics.rows)
+        self.totalRows = totalRows ?? rows
+        self.includesOverscan = includesOverscan
+        viewportHeight = CGFloat(metrics.heightPixels) / scale
         cellSize = CGSize(
             width: CGFloat(metrics.cellWidthPixels) / scale,
             height: CGFloat(metrics.cellHeightPixels) / scale,
@@ -34,8 +41,19 @@ struct TerminalSelectionGrid: Equatable {
 
     func cell(at point: CGPoint, viewportOffset: Int) -> Int {
         let column = min(columns - 1, max(0, Int(floor((point.x - origin.x) / cellSize.width))))
-        let row = min(rows - 1, max(0, Int(floor((point.y - origin.y) / cellSize.height))))
-        return (row + viewportOffset) * columns + column
+        let visible = visibleRows(viewportOffset: viewportOffset)
+        let row = min(visible.upperBound - 1, max(visible.lowerBound,
+            Int(floor((point.y - origin.y) / cellSize.height)) + viewportOffset))
+        return row * columns + column
+    }
+
+    func visibleRows(viewportOffset: Int) -> Range<Int> {
+        guard includesOverscan else { return viewportOffset ..< (viewportOffset + rows) }
+        // Macterm can draw a partial row above and below the nominal grid.
+        // The UIKit copy overlay must hit and highlight those same cells.
+        let first = max(0, viewportOffset + Int(floor(-origin.y / cellSize.height)))
+        let last = min(totalRows, viewportOffset + Int(ceil((viewportHeight - origin.y) / cellSize.height)))
+        return first ..< max(first + 1, last)
     }
 
     func rect(for cell: Int, viewportOffset: Int) -> CGRect {
@@ -47,8 +65,9 @@ struct TerminalSelectionGrid: Equatable {
     }
 
     func rects(for range: ClosedRange<Int>, viewportOffset: Int) -> [CGRect] {
-        let first = max(range.lowerBound, viewportOffset * columns)
-        let last = min(range.upperBound, (viewportOffset + rows) * columns - 1)
+        let visible = visibleRows(viewportOffset: viewportOffset)
+        let first = max(range.lowerBound, visible.lowerBound * columns)
+        let last = min(range.upperBound, visible.upperBound * columns - 1)
         guard first <= last else { return [] }
         return (first / columns ... last / columns).map { row in
             let start = max(first, row * columns)

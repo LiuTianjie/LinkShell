@@ -51,6 +51,8 @@
             return TerminalSelectionGrid(
                 metrics: metrics, scale: resolvedDisplayScale(),
                 firstBaseline: first.firstBaseline, imeBottom: surface.imePoint().y,
+                totalRows: Int(core.bridge.scrollbar?.total ?? UInt64(metrics.rows)),
+                includesOverscan: usesSystemScrollback,
             )
         }
 
@@ -73,7 +75,7 @@
                 {
                     range = word
                 } else {
-                    let visibleRows = touchViewportOffset ..< min(total, touchViewportOffset + grid.rows)
+                    let visibleRows = grid.visibleRows(viewportOffset: touchViewportOffset)
                     guard let row = surface.nearestTextRow(
                         to: cell / grid.columns, in: visibleRows, columns: grid.columns,
                     ), let textCells = surface.textCells(inRow: row, columns: grid.columns) else { return }

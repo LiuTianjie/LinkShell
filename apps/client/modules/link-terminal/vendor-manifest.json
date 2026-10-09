@@ -4,6 +4,20 @@
     "xcframework": {
       "url": "https://github.com/Lakr233/libghostty-spm/releases/download/upstream.35a81a980bb9/GhosttyKit.xcframework.zip",
       "sha256": "80e9bbfc89f5bd23ee028cff03024e3a788509f87812ab0bc9d697bf22a9472b"
+    },
+    "smoothScroll": {
+      "ghosttyCommit": "35a81a980bb9fce09a1ea762a68b55f8eb3477ed",
+      "ghosttySourceSha256": "74e35433cfab6832f385a3e0c3a2a628a1bcd1bb8e736a19723da78315d01ebe",
+      "spmSourceSha256": "5ccf2e91db750102dc770db76b1efbf90e1d0527a710378b46c35be4162d251f",
+      "communityRepo": "https://github.com/thdxg/ghostty",
+      "communityCommit": "f1a7901a3a2c1fbede8a433dc815bf0e77681ad8",
+      "patch": "patches/ios-macterm-smooth-scroll.patch",
+      "patchSha256": "160eefb9ab8c9f00980b1a8ef7f9a0c792fc97604577ae3c4cc2d2a63383b0db",
+      "zig": {
+        "version": "0.16.0",
+        "url": "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz",
+        "sha256": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489"
+      }
     }
   },
   "libghostty-vt": {

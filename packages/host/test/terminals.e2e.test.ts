@@ -46,6 +46,32 @@ async function until(check: () => boolean | Promise<boolean>, ms = 5000) {
 }
 
 describe("terminals", () => {
+  it("reattaches to the same foreground process and its in-memory state after leaving the page", async () => {
+    const { connect, home } = await setup();
+    const a = await connect();
+    const { terminal } = await a.client.call("terminals.create", { cwd: home, cols: 80, rows: 24 });
+    await a.client.call("terminals.attach", { terminalId: terminal.id, replayFormat: "frames-v1" });
+    // A persistent foreground program catches both killing the PTY and silently
+    // replacing it with a new shell/program during display restoration.
+    const source = "let count=0;console.log('APP_READY:'+process.pid);process.stdin.on('data',()=>console.log('APP_REPLY:'+process.pid+':'+ ++count))";
+    const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+    await a.client.call("terminals.input", { terminalId: terminal.id, data: `${quote(process.execPath)} -e ${quote(source)}\n` });
+    await until(() => /APP_READY:(\d+)/.test(a.output()));
+    const pid = a.output().match(/APP_READY:(\d+)/)![1];
+    await a.client.call("terminals.input", { terminalId: terminal.id, data: "before\n" });
+    await until(() => a.output().includes(`APP_REPLY:${pid}:1`));
+    await a.client.call("terminals.detach", { terminalId: terminal.id });
+    a.client.close();
+
+    const b = await connect();
+    const attached = await b.client.call("terminals.attach", { terminalId: terminal.id, replayFormat: "frames-v1" });
+    expect(attached.terminal.id).toBe(terminal.id);
+    expect(attached.terminal.exitCode).toBeUndefined();
+    await b.client.call("terminals.input", { terminalId: terminal.id, data: "after\n" });
+    await until(() => b.output().includes(`APP_REPLY:${pid}:2`));
+    expect((await b.client.call("terminals.list", {})).terminals).toHaveLength(1);
+  });
+
   it("runs any command and streams its output", async () => {
     const { connect, home } = await setup();
     const a = await connect();

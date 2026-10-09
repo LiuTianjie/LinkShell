@@ -192,6 +192,7 @@
             updateSublayerFrames()
             core.fitToSize()
             refreshTouchSelection()
+            systemScrollback?.synchronize()
         }
 
         /// The scale used when neither the window nor the trait collection can

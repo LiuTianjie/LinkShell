@@ -85,7 +85,7 @@
                 (range.upperBound, endHandle, endMark, false),
             ] {
                 let rect = grid.rect(for: cell, viewportOffset: offset)
-                handle.isHidden = cell / grid.columns < offset || cell / grid.columns >= offset + grid.rows
+                handle.isHidden = !grid.visibleRows(viewportOffset: offset).contains(cell / grid.columns)
                 let x = isStart ? rect.minX : rect.maxX
                 handle.frame = CGRect(x: x - 22, y: rect.midY - 22, width: 44, height: 44)
                 let stem = CGRect(x: 21, y: 22 - rect.height / 2, width: 2, height: rect.height)

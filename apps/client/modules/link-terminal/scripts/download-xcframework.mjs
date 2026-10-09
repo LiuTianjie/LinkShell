@@ -11,6 +11,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const manifest = JSON.parse(await readFile(join(root, 'vendor-manifest.json'), 'utf8'));
+if (manifest['libghostty-spm'].smoothScroll) {
+  execFileSync(process.execPath, [join(root, 'scripts/build-ios-core.mjs')], { stdio: 'inherit' });
+  process.exit(0);
+}
 const { url, sha256 } = manifest['libghostty-spm'].xcframework;
 
 const frameworksDir = join(root, 'ios', 'vendor', 'Frameworks');

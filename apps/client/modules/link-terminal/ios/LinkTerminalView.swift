@@ -40,6 +40,7 @@ final class LinkTerminalView: ExpoView {
       }
     }, suppressesPixelOnlyResizes: true)
     terminal.delegate = self
+    terminal.usesSystemScrollback = true
     terminal.controller = controller
     terminal.configuration = TerminalSurfaceOptions(backend: .inMemory(session), fontSize: fontSize)
     terminal.inputAccessoryItems = []
@@ -52,6 +53,7 @@ final class LinkTerminalView: ExpoView {
       self.onModifiers(["ctrl": self.terminal.stickyActivation(for: .ctrl) != .inactive])
     }
     addSubview(terminal)
+    applyTheme()
   }
 
   override func layoutSubviews() {
@@ -91,7 +93,14 @@ final class LinkTerminalView: ExpoView {
   func setTheme(_ values: [String: String]) {
     guard theme != values else { return }
     theme = values
+    applyTheme()
+  }
+
+  private func applyTheme() {
+    let values = theme
     var config = TerminalConfiguration().fontSize(fontSize)
+      .custom("smooth-scroll", "true")
+      .custom("mouse-scroll-multiplier", "precision:1,discrete:3")
     if let value = values["background"] { config = config.background(value); backgroundColor = UIColor(hex: value) }
     if let value = values["foreground"] { config = config.foreground(value) }
     if let value = values["cursor"] { config = config.cursorColor(value) }

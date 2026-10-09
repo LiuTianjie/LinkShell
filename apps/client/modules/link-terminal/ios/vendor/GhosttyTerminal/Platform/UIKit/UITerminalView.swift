@@ -25,6 +25,13 @@
         var hardwareKeyboard: HardwareKeyboardState = .init()
         var pointer: PointerInteractionState = .init()
         var momentumScroll: MomentumScrollState = .init()
+        var systemScrollback: TerminalScrollbackDriver?
+
+        /// UIKit owns touch momentum for local history; applications that capture
+        /// the mouse still receive the terminal's original scroll events.
+        public var usesSystemScrollback = false {
+            didSet { configureSystemScrollback() }
+        }
         var focusBridge: FocusBridgeState = .init()
         var textInputBridge: TextInputBridgeState = .init()
         var touchSelection: TouchSelectionState = .init()
@@ -229,6 +236,7 @@
             core.onPostRender = { [weak self] in
                 self?.enforceSublayerScale()
                 self?.refreshTouchSelection()
+                self?.systemScrollback?.synchronize()
             }
 
             setupApplicationLifecycleObservers()
