@@ -74,6 +74,12 @@ development-signed Release configuration with its JS bundle included, named
 **LinkShell Dev** (`com.bd.linkshell.v2`); it does not need Metro. Build/install/
 launch evidence does not establish screen performance or interaction correctness.
 
+Current acceptance issue: the user reports a short periodic stutter roughly once
+per second or faster in both native and web modes. A native diagnostic snapshot
+showed 120 encoded / 116 decoded fps and decode-to-presentation p95 of 30.6 ms.
+The cause has not been established or fixed; average throughput is not a pass for
+frame pacing. Further diagnosis is deferred while this build is handed over.
+
 Final device acceptance stays separate:
 
 1. On the same Mac build and Wi-Fi, select a moving text/window scene and **2560**.

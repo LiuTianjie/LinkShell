@@ -356,6 +356,8 @@ iOS 原生触控 → 本地指针 / 视口反馈
 
 FlexFEC 的 M154 回环夹具在双向各 60 ms、视频包丢失 5% 时确认协商并收到 5569 个保护包；模拟接收端拒绝后保护包为零、视频仍可解码。公共统计未提供恢复数量，这些检查不证明手机端恢复效果或更低卡顿。原始统计与产物证据保存在本次本地产物的 `screen-sender-validation-20261010.json`。
 
+真机验收中用户另报告：原生与兼容模式都有约每秒或更短间隔的短暂停顿。原生诊断截图为 120 编码帧/秒、116 解码帧/秒、解码后到显示 p95 30.6 ms；这些平均数不能证明显示节奏平稳。该问题尚未定位或修复，按用户要求先完成本轮交付，后续单独排查。
+
 ## 参考
 
 - WebRTC playout-delay 扩展头：https://webrtc.googlesource.com/src/+/main/docs/native-code/rtp-hdrext/playout-delay/README.md
