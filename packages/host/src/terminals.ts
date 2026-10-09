@@ -8,6 +8,7 @@ import xtermHeadless from "@xterm/headless";
 import { spawn, type IPty } from "node-pty";
 import { RpcError, type TerminalInfo } from "@linkshell/wire";
 import type { HostStore, TerminalRecord } from "./store.js";
+import { TerminalState } from "./terminal-state.js";
 
 // Plain shells on the host, kept open while devices come and go: any command,
 // like an SSH session that survives the phone locking.
@@ -60,6 +61,8 @@ class Terminal {
   private readonly serializer = new SerializeAddon();
   /** The last chunk the mirror has parsed (it parses asynchronously). */
   private parsedSeq = 0;
+  private state?: TerminalState;
+  private stateSnapshot?: { frame: number; cols: number; rows: number; data: string };
 
   constructor(
     private readonly pty: IPty,
@@ -72,6 +75,8 @@ class Terminal {
     private readonly store?: HostStore,
   ) {
     this.title = basename(shell);
+    try { this.state = new TerminalState(cols, rows); }
+    catch (error) { console.warn("Terminal snapshot mirror unavailable:", error instanceof Error ? error.message : error); }
     this.recordFrame("");
     this.mirror = new ScreenMirror({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true });
     // The addon's types are written against the browser's terminal; it only uses what the headless one has too.
@@ -126,6 +131,18 @@ class Terminal {
     };
   }
 
+  captureState(): { frame: number; cols: number; rows: number; data: string } | undefined {
+    this.flush();
+    if (!this.state) return undefined;
+    if (this.stateSnapshot?.frame === this.frame) return this.stateSnapshot;
+    try {
+      return this.stateSnapshot = { frame: this.frame, cols: this.cols, rows: this.rows, data: this.state.snapshot() };
+    } catch {
+      // An unsupported state must use exact recordings, never a damaged screen.
+      return undefined;
+    }
+  }
+
   get running(): boolean {
     return this.exitCode === undefined;
   }
@@ -173,6 +190,8 @@ class Terminal {
     this.recordFrame("");
     this.pty.resize(cols, rows);
     this.mirror.resize(cols, rows);
+    try { this.state?.resize(cols, rows); }
+    catch { this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined; }
   }
 
   close(): void {
@@ -180,6 +199,7 @@ class Terminal {
     clearTimeout(this.flushTimer);
     this.listeners.clear();
     this.mirror.dispose();
+    this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined;
     if (this.running) {
       try {
         this.pty.kill("SIGHUP");
@@ -212,6 +232,11 @@ class Terminal {
       pending = pending.slice(end);
       this.chunks.push(chunk);
       this.recordFrame(chunk.data);
+      try { this.state?.write(chunk.data); }
+      catch (error) {
+        console.warn("Terminal snapshot mirror unavailable:", error instanceof Error ? error.message : error);
+        this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined;
+      }
       this.mirror.write(chunk.data, () => { this.parsedSeq = chunk.seq; });
       this.bytes += chunk.data.length;
       while (this.bytes > BUFFER_BYTES && this.chunks.length > 1) this.bytes -= this.chunks.shift()!.data.length;
@@ -253,6 +278,7 @@ export class TerminalManager {
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly changeListeners = new Set<TerminalChangeListener>();
   private stopped = false;
+  private readonly snapshots = new Map<string, { terminalId: string; data: string; expires: number }>();
 
   /** @param env The user's login-shell environment. */
   constructor(
@@ -266,6 +292,7 @@ export class TerminalManager {
       this.history.set(record.id, { record: { ...record, ended: true }, interrupted });
     }
     this.timer = setInterval(() => {
+      for (const [key, value] of this.snapshots) if (value.expires < Date.now()) this.snapshots.delete(key);
       for (const terminal of this.terminals.values()) {
         // The foreground process ("vim", "npm") is the most useful name for a terminal.
         if (terminal.refreshTitle()) this.emit(terminal.info());
@@ -288,6 +315,8 @@ export class TerminalManager {
     if (this.stopped) return;
     terminal.dirty = false;
     this.store?.saveTerminal(terminal.record());
+    const snapshot = terminal.captureState();
+    if (snapshot) this.store?.saveTerminalSnapshot(terminal.id, snapshot);
   }
 
   list(): TerminalInfo[] {
@@ -350,12 +379,67 @@ export class TerminalManager {
     return terminal.info();
   }
 
-  attach(id: string, listener: OutputListener, fromSeq?: number, replayFormat?: "frames-v1", fromFrame?: number) {
+  attach(id: string, listener: OutputListener, fromSeq?: number, replayFormat?: "frames-v1", fromFrame?: number, snapshot = false) {
     const attached = this.attachScreen(id, listener, fromSeq);
+    if (snapshot && attached.reset) {
+      const state = this.terminals.has(id) ? this.terminals.get(id)!.captureState() : this.savedState(id);
+      if (state) {
+        const snapshotId = randomUUID();
+        // Keep immutable transfers briefly, bounded across all devices. A
+        // second attach cannot change a first client's half-received snapshot.
+        let bytes = state.data.length * 2;
+        for (const [key, value] of this.snapshots) {
+          if (value.expires < Date.now()) this.snapshots.delete(key);
+          else bytes += value.data.length * 2;
+        }
+        while (bytes > 256 * 1024 * 1024 && this.snapshots.size) {
+          const oldest = this.snapshots.keys().next().value!;
+          bytes -= this.snapshots.get(oldest)!.data.length * 2; this.snapshots.delete(oldest);
+        }
+        this.snapshots.set(snapshotId, { terminalId: id, data: state.data, expires: Date.now() + 120_000 });
+        return { ...attached, replay: "", state: { snapshotId, length: state.data.length, frame: state.frame, cols: state.cols, rows: state.rows } };
+      }
+    }
     const throughFrame = replayFormat ? this.store?.lastTerminalFrame(id) ?? 0 : 0;
     if (!throughFrame) return attached;
     const afterFrame = fromFrame !== undefined && fromFrame >= 0 && fromFrame <= throughFrame ? fromFrame : 0;
     return { ...attached, replay: "", reset: afterFrame === 0, recording: { afterFrame, throughFrame } };
+  }
+
+  private savedState(id: string) {
+    if (!this.history.has(id)) return undefined;
+    const saved = this.store?.terminalSnapshot(id);
+    const record = this.history.get(id)!.record;
+    const latest = this.store?.lastTerminalFrame(id) ?? 0;
+    if (saved?.frame === latest) return saved;
+    if (!latest) return undefined;
+    let state: TerminalState | undefined;
+    try {
+      state = new TerminalState(saved?.cols ?? record.cols, saved?.rows ?? record.rows);
+      if (saved) state.write(saved.data);
+      let after = saved?.frame ?? 0;
+      // Older recordings are compacted once on the host; subsequent opens use
+      // the checkpoint, without moving the old journal over the network.
+      while (after < latest) {
+        const frames = this.store!.terminalFrames(id, after, latest);
+        if (!frames.length) throw new Error("终端检查点后的记录不完整");
+        for (const frame of frames) { state.resize(frame.cols, frame.rows); state.write(frame.data); after = frame.frame; }
+      }
+      const updated = { frame: latest, cols: state.cols, rows: state.rows, data: state.snapshot() };
+      this.store?.saveTerminalSnapshot(id, updated);
+      return updated;
+    } catch { return undefined; }
+    finally { state?.dispose(); }
+  }
+
+  state(id: string, snapshotId: string, offset: number) {
+    const snapshot = this.snapshots.get(snapshotId);
+    if (!snapshot || snapshot.terminalId !== id || snapshot.expires < Date.now()) throw RpcError.app("not_found", "终端恢复状态已过期，请重试");
+    if (offset > snapshot.data.length) throw RpcError.app("invalid_params", "终端恢复位置无效");
+    snapshot.expires = Date.now() + 120_000;
+    let end = Math.min(snapshot.data.length, offset + 256 * 1024);
+    if (end < snapshot.data.length && /[\uD800-\uDBFF]/.test(snapshot.data[end - 1]!)) end--;
+    return { data: snapshot.data.slice(offset, end), nextOffset: end, done: end === snapshot.data.length };
   }
 
   replay(id: string, afterFrame: number, throughFrame: number) {
@@ -401,16 +485,18 @@ export class TerminalManager {
     this.terminals.delete(id);
     this.history.delete(id);
     this.store?.deleteTerminal(id);
+    for (const [key, value] of this.snapshots) if (value.terminalId === id) this.snapshots.delete(key);
     this.emit(info, true);
   }
 
   stop(): void {
     clearInterval(this.timer);
     // Saved as still running: next start lists them as interrupted.
-    for (const terminal of this.terminals.values()) this.store?.saveTerminal(terminal.record());
+    for (const terminal of this.terminals.values()) this.save(terminal);
     this.stopped = true;
     for (const terminal of this.terminals.values()) terminal.close();
     this.terminals.clear();
+    this.snapshots.clear();
   }
 
   private live(id: string): Terminal {

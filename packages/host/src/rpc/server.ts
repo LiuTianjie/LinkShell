@@ -237,11 +237,12 @@ export class HostRpcServer {
         if (previous) terminals.detach(params.terminalId, previous);
         const listener: OutputListener = (seq, data, geometry) =>
           context.peer.notify("terminal.output", { terminalId: params.terminalId, seq, data, ...geometry });
-        const attached = terminals.attach(params.terminalId, listener, params.fromSeq, params.replayFormat, params.fromFrame);
+        const attached = terminals.attach(params.terminalId, listener, params.fromSeq, params.replayFormat, params.fromFrame, params.snapshot);
         context.terminals.set(params.terminalId, listener);
         return attached;
       },
       "terminals.replay": (params: P<"terminals.replay">) => terminals.replay(params.terminalId, params.afterFrame, params.throughFrame),
+      "terminals.state": (params: P<"terminals.state">) => terminals.state(params.terminalId, params.snapshotId, params.offset),
       "terminals.detach": (params: P<"terminals.detach">, context) => {
         const listener = context.terminals.get(params.terminalId);
         if (listener) terminals.detach(params.terminalId, listener);

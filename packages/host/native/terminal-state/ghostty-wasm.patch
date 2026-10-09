@@ -1,0 +1,28 @@
+--- a/src/terminal/build_options.zig
++++ b/src/terminal/build_options.zig
+@@ -64,11 +64,11 @@
+         // We disable it on wasm32-freestanding because we at the least
+         // require the ability to get timestamps and there is no way to
+         // do that with freestanding targets.
+-        const target = m.resolved_target.?.result;
++
+         opts.addOption(
+             bool,
+             "kitty_graphics",
+-            !(target.cpu.arch == .wasm32 and target.os.tag == .freestanding),
++            true,
+         );
+ 
+         // These are synthesized based on other options.
+--- a/src/terminal/kitty/graphics_image.zig
++++ b/src/terminal/kitty/graphics_image.zig
+@@ -120,6 +120,9 @@
+             }
+         }
+ 
++        // A host-managed mirror only accepts inline image payloads.
++        if (comptime builtin.os.tag == .freestanding) return error.UnsupportedMedium;
++
+         // Otherwise, the payload data is guaranteed to be a path.
+ 
+         if (comptime builtin.os.tag != .windows) {

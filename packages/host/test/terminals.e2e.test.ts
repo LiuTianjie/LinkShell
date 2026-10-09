@@ -64,13 +64,45 @@ describe("terminals", () => {
     a.client.close();
 
     const b = await connect();
-    const attached = await b.client.call("terminals.attach", { terminalId: terminal.id, replayFormat: "frames-v1" });
+    const attached = await b.client.call("terminals.attach", { terminalId: terminal.id, replayFormat: "frames-v1", snapshot: true });
+    expect(attached.state).toBeDefined();
+    const restored = await b.client.call("terminals.state", { terminalId: terminal.id, snapshotId: attached.state!.snapshotId, offset: 0 });
+    expect(restored.data).toContain(`APP_REPLY:${pid}:1`);
     expect(attached.terminal.id).toBe(terminal.id);
     expect(attached.terminal.exitCode).toBeUndefined();
     await b.client.call("terminals.input", { terminalId: terminal.id, data: "after\n" });
     await until(() => b.output().includes(`APP_REPLY:${pid}:2`));
     expect((await b.client.call("terminals.list", {})).terminals).toHaveLength(1);
   });
+
+  it("opens a 100,000-line journal with bounded history, a stable boundary, and incremental reconnect", async () => {
+    const { connect, home } = await setup();
+    const a = await connect();
+    const { terminal } = await a.client.call("terminals.create", { cwd: home, cols: 80, rows: 24 });
+    await a.client.call("terminals.attach", { terminalId: terminal.id });
+    const source = "process.stdout.write(Array.from({length:100000},(_,i)=>'bulk-'+i+'\\n').join(''))";
+    await a.client.call("terminals.input", { terminalId: terminal.id, data: `'${process.execPath}' -e "${source}"\n` });
+    await until(() => a.output().includes("bulk-99999"), 15000);
+    const attached = await a.client.call("terminals.attach", { terminalId: terminal.id, snapshot: true, replayFormat: "frames-v1" });
+    expect(attached.recording).toBeUndefined();
+    expect(attached.state!.length).toBeLessThan(100000);
+    expect(attached.replay).toBe("");
+    const params = { terminalId: terminal.id, snapshotId: attached.state!.snapshotId, offset: 0 };
+    const page = await a.client.call("terminals.state", params);
+    expect(page.done).toBe(true);
+    expect(page.data).toContain("bulk-99999");
+    expect(page.data).not.toContain("bulk-100\r");
+    await a.client.call("terminals.input", { terminalId: terminal.id, data: "printf 'af\\164er-snapshot\\n'\n" });
+    await until(() => a.output().includes("after-snapshot"));
+    expect(await a.client.call("terminals.state", params)).toEqual(page);
+    const resumed = await a.client.call("terminals.attach", { terminalId: terminal.id, snapshot: true, replayFormat: "frames-v1", fromSeq: attached.seq, fromFrame: attached.state!.frame });
+    expect(resumed.reset).toBe(false);
+    expect(resumed.state).toBeUndefined();
+    expect(resumed.recording!.afterFrame).toBe(attached.state!.frame);
+    const delta = await a.client.call("terminals.replay", { terminalId: terminal.id, afterFrame: resumed.recording!.afterFrame, throughFrame: resumed.recording!.throughFrame });
+    expect(delta.frames.map(f => f.data).join("")).toContain("after-snapshot");
+    await expect(a.client.call("terminals.state", { ...params, terminalId: "wrong-terminal" })).rejects.toThrow();
+  }, 20000);
 
   it("runs any command and streams its output", async () => {
     const { connect, home } = await setup();
@@ -202,6 +234,9 @@ describe("terminals", () => {
     expect(terminals.find((t) => t.id === done.id)).toMatchObject({ exitCode: 0 });
     expect(terminals.find((t) => t.id === running.id)).toMatchObject({ interrupted: true });
     expect((await c2.call("terminals.attach", { terminalId: running.id })).replay).toContain("still-running");
+    const checkpoint = await c2.call("terminals.attach", { terminalId: running.id, snapshot: true, replayFormat: "frames-v1" });
+    expect(checkpoint.recording).toBeUndefined();
+    expect((await c2.call("terminals.state", { terminalId: running.id, snapshotId: checkpoint.state!.snapshotId, offset: 0 })).data).toContain("still-running");
     const recording = await c2.call("terminals.attach", { terminalId: running.id, replayFormat: "frames-v1" });
     expect(recording.recording!.throughFrame).toBeGreaterThan(0);
     const page = await c2.call("terminals.replay", { terminalId: running.id, afterFrame: 0, throughFrame: recording.recording!.throughFrame });

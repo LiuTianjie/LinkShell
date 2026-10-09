@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { restoreTerminalRecording, type TerminalReplayTarget } from "../src/lib/terminal-replay";
+import { restoreTerminalState, restoreTerminalRecording, type TerminalReplayTarget } from "../src/lib/terminal-replay";
 
 function target() {
   const actions: unknown[] = [];
@@ -55,5 +55,32 @@ describe("terminal protocol recovery", () => {
       return { frames: [{ frame: 1, cols: 80, rows: 24, data: "stale" }], nextFrame: 1, done: true };
     }, () => current)).rejects.toThrow("取消");
     expect(actions).toEqual([["begin", true], ["drain-and-unmute"]]);
+  });
+});
+
+describe("terminal state recovery", () => {
+  it("feeds one immutable state across chunks and drains before unmuting", async () => {
+    const { native, actions } = target();
+    await restoreTerminalState(native, { length: 4, cols: 80, rows: 24 }, async (offset) => ({ data: offset === 0 ? "ab" : "cd", nextOffset: offset + 2, done: offset === 2 }));
+    expect(actions).toEqual([["begin", true], ["write", "ab", 80, 24], ["write", "cd", 80, 24], ["drain-and-unmute"]]);
+  });
+  it("rejects a truncated state and still releases replay mode", async () => {
+    const { native, actions } = target();
+    await expect(restoreTerminalState(native, { length: 4, cols: 80, rows: 24 }, async () => ({ data: "ab", nextOffset: 2, done: true }))).rejects.toThrow("不完整");
+    expect(actions).toEqual([["begin", true], ["drain-and-unmute"]]);
+  });
+  it("discards responses after the view is replaced", async () => {
+    const { native, actions } = target(); let current = true;
+    await expect(restoreTerminalState(native, { length: 2, cols: 80, rows: 24 }, async () => {
+      current = false; return { data: "ab", nextOffset: 2, done: true };
+    }, () => current)).rejects.toThrow("取消");
+    expect(actions).toEqual([["begin", true], ["drain-and-unmute"]]);
+  });
+  it("batches tiny journal writes but keeps geometry changes", async () => {
+    const { native, actions } = target();
+    await restoreTerminalRecording(native, { afterFrame: 0, throughFrame: 3 }, async () => ({
+      frames: [{ frame: 1, cols: 80, rows: 24, data: "a" }, { frame: 2, cols: 80, rows: 24, data: "b" }, { frame: 3, cols: 40, rows: 12, data: "c" }], nextFrame: 3, done: true,
+    }));
+    expect(actions).toEqual([["begin", true], ["write", "ab", 80, 24], ["write", "c", 40, 12], ["drain-and-unmute"]]);
   });
 });

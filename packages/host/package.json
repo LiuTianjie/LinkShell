@@ -22,13 +22,14 @@
     "dist",
     "README.md",
     "LICENSE",
-    "scripts/postinstall.mjs"
+    "scripts/postinstall.mjs",
+    "THIRD_PARTY_NOTICES"
   ],
   "engines": {
     "node": ">=22.13"
   },
   "scripts": {
-    "build": "rm -rf dist *.tsbuildinfo && tsc -p tsconfig.json",
+    "build": "rm -rf dist *.tsbuildinfo && tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
@@ -43,6 +44,7 @@
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
     "node-pty": "^1.1.0",
+    "pngjs": "7.0.0",
     "sharp": "^0.35.5",
     "werift": "^0.22.9",
     "ws": "^8.21.0",
@@ -52,6 +54,7 @@
     "@linkshell/mac": "workspace:*"
   },
   "devDependencies": {
+    "@types/pngjs": "6.0.5",
     "@types/ws": "^8.5.14",
     "tsx": "^4.19.3",
     "vitest": "^3.2.1"

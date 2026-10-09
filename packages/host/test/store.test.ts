@@ -81,3 +81,21 @@ describe("HostStore", () => {
     expect(store.isItemLogged("codex:a", "item-1")).toBe(true);
   });
 });
+
+describe("terminal recording storage", () => {
+  it("batches small frames by bytes and keeps oversized individual frames intact", () => {
+    for (let i=1;i<=300;i++) store.appendTerminalFrame("tiny",i,80,24,"x");
+    expect(store.terminalFrames("tiny",0,300)).toHaveLength(256);
+    store.appendTerminalFrame("large",1,80,24,"a".repeat(400000));
+    store.appendTerminalFrame("large",2,80,24,"b".repeat(400000));
+    expect(store.terminalFrames("large",0,2).map(f=>f.frame)).toEqual([1]);
+    store.appendTerminalFrame("oversize",1,80,24,"a".repeat(600000));
+    expect(store.terminalFrames("oversize",0,1)[0]!.data).toHaveLength(600000);
+  });
+  it("persists and removes a bounded checkpoint with its recording", () => {
+    const snapshot = { frame: 100, cols: 80, rows: 24, data: "state" };
+    store.saveTerminalSnapshot("terminal",snapshot); store.close(); store = new HostStore(join(dir,"state.db"));
+    expect(store.terminalSnapshot("terminal")).toEqual(snapshot);
+    store.deleteTerminal("terminal"); expect(store.terminalSnapshot("terminal")).toBeUndefined();
+  });
+});

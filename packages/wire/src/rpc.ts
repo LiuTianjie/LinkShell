@@ -455,7 +455,8 @@ export const methods = {
    */
   "terminals.attach": {
     params: z.object({ terminalId: z.string().min(1), fromSeq: z.number().int().min(0).optional(),
-      replayFormat: z.literal("frames-v1").optional(), fromFrame: z.number().int().min(0).optional() }),
+      replayFormat: z.literal("frames-v1").optional(), fromFrame: z.number().int().min(0).optional(),
+      snapshot: z.boolean().optional() }),
     result: z.object({
       terminal: terminalInfoSchema,
       /** Output to write before any `terminal.output` that follows. */
@@ -465,7 +466,12 @@ export const methods = {
       /** The last output seq `replay` covers; later chunks arrive as `terminal.output`. */
       seq: z.number().int(),
       recording: z.object({ afterFrame: z.number().int(), throughFrame: z.number().int() }).optional(),
+      state: z.object({ snapshotId: z.string(), length: z.number().int().min(0), frame: z.number().int().min(0), cols: z.number().int().min(1), rows: z.number().int().min(1) }).optional(),
     }),
+  },
+  "terminals.state": {
+    params: z.object({ terminalId: z.string().min(1), snapshotId: z.string().min(1), offset: z.number().int().min(0) }),
+    result: z.object({ data: z.string(), nextOffset: z.number().int().min(0), done: z.boolean() }),
   },
   "terminals.replay": {
     params: z.object({ terminalId: z.string().min(1), afterFrame: z.number().int().min(0), throughFrame: z.number().int().min(0) }),

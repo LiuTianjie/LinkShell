@@ -100,6 +100,13 @@ CREATE TABLE IF NOT EXISTS terminal_frames (
   data TEXT NOT NULL,
   PRIMARY KEY (terminal_id, frame)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS terminal_snapshots (
+  terminal_id TEXT PRIMARY KEY,
+  frame INTEGER NOT NULL,
+  cols INTEGER NOT NULL,
+  rows INTEGER NOT NULL,
+  data TEXT NOT NULL
+) WITHOUT ROWID;
 `;
 
 export interface TerminalRecord {
@@ -345,14 +352,33 @@ export class HostStore {
     return row.frame ?? 0;
   }
 
+  saveTerminalSnapshot(id: string, snapshot: { frame: number; cols: number; rows: number; data: string }): void {
+    this.db.prepare("INSERT OR REPLACE INTO terminal_snapshots (terminal_id, frame, cols, rows, data) VALUES (?, ?, ?, ?, ?)")
+      .run(id, snapshot.frame, snapshot.cols, snapshot.rows, snapshot.data);
+  }
+
+  terminalSnapshot(id: string): { frame: number; cols: number; rows: number; data: string } | undefined {
+    return this.db.prepare("SELECT frame, cols, rows, data FROM terminal_snapshots WHERE terminal_id = ?")
+      .get(id) as { frame: number; cols: number; rows: number; data: string } | undefined;
+  }
+
   terminalFrames(id: string, after: number, through: number): { frame: number; cols: number; rows: number; data: string }[] {
-    // Each frame is at most 64K UTF-16 units; eight keep the RPC bounded even
-    // when escaping control characters expands the JSON payload.
-    return this.db.prepare("SELECT frame, cols, rows, data FROM terminal_frames WHERE terminal_id = ? AND frame > ? AND frame <= ? ORDER BY frame LIMIT 8")
-      .all(id, after, through) as { frame: number; cols: number; rows: number; data: string }[];
+    // Tiny PTY writes must not cost one network round trip per eight frames.
+    // Read lengths first so large frames don't inflate the database read just
+    // to decide where the bounded response ends.
+    const candidates = this.db.prepare("SELECT frame, octet_length(data) AS bytes FROM terminal_frames WHERE terminal_id = ? AND frame > ? AND frame <= ? ORDER BY frame LIMIT 256")
+      .all(id, after, through) as { frame: number; bytes: number }[];
+    let end = after, bytes = 0;
+    for (const candidate of candidates) {
+      if (end > after && bytes + candidate.bytes > 512 * 1024) break;
+      bytes += candidate.bytes; end = candidate.frame;
+    }
+    return this.db.prepare("SELECT frame, cols, rows, data FROM terminal_frames WHERE terminal_id = ? AND frame > ? AND frame <= ? ORDER BY frame")
+      .all(id, after, end) as { frame: number; cols: number; rows: number; data: string }[];
   }
 
   deleteTerminal(id: string): void {
+    this.db.prepare("DELETE FROM terminal_snapshots WHERE terminal_id = ?").run(id);
     this.db.prepare("DELETE FROM terminal_frames WHERE terminal_id = ?").run(id);
     this.db.prepare("DELETE FROM terminals WHERE id = ?").run(id);
   }

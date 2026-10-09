@@ -1,6 +1,6 @@
 import { useTerminalFontSize, setTerminalFontSize, TERMINAL_FONT_MIN, TERMINAL_FONT_MAX, TERMINAL_FONT_DEFAULT } from "@/lib/terminal-preferences";
 import { File } from "expo-file-system";
-import { restoreTerminalRecording } from "@/lib/terminal-replay";
+import { restoreTerminalRecording, restoreTerminalState } from "@/lib/terminal-replay";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Platform, useColorScheme, View } from "react-native";
@@ -84,9 +84,15 @@ export function TerminalScreen() {
         try {
           const native = view.current;
           if (!native) throw new Error("终端尚未就绪");
-          const result = await link.call("terminals.attach", { terminalId: id, fromSeq: seq, replayFormat: "frames-v1", fromFrame: frame });
+          const result = await link.call("terminals.attach", { terminalId: id, fromSeq: seq, replayFormat: "frames-v1", fromFrame: frame, snapshot: true });
           if (!active || attempt !== generation) return;
-          if (result.recording) {
+          if (result.state) {
+            const state = result.state;
+            await restoreTerminalState(native, state,
+              (offset) => link.call("terminals.state", { terminalId: id, snapshotId: state.snapshotId, offset }),
+              () => active && attempt === generation);
+            frame = state.frame;
+          } else if (result.recording) {
             await restoreTerminalRecording(native, result.recording,
               (afterFrame, throughFrame) => link.call("terminals.replay", { terminalId: id, afterFrame, throughFrame }),
               () => active && attempt === generation);
