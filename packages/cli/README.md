@@ -40,8 +40,9 @@ computer-side CLI and a host restart; no mobile app, gateway or screen-helper up
 
 ## Remote screen
 
-On Apple silicon Macs with macOS 13+, the CLI includes the signed LinkShell.app for screen
-capture, low-latency H.264 encoding and input. `linkshell screen` sets up Screen Recording and
+On Apple silicon and Intel Macs with macOS 13+, the CLI includes the signed universal LinkShell.app.
+macOS selects the native architecture automatically for screen capture, H.264 encoding and input;
+low-latency encoding is used where available. `linkshell screen` sets up Screen Recording and
 Accessibility; `--check` reports permissions and availability, not media performance. Linux
 viewing requires ffmpeg and an X11 display and has no input control.
 

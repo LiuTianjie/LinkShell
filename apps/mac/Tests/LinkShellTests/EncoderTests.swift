@@ -18,6 +18,17 @@ final class EncoderTests: XCTestCase {
     XCTAssertEqual(encoder.implementationName(), "test-stock")
   }
 
+  func testUnavailableLowLatencyModeUsesStockAndKeepsTheCallback() {
+    let compression = Compression(mode: "real-time")
+    let stock = Stock()
+    let encoder = LowLatencyH264Encoder(info: info, makeCompressor: { _ in compression }, makeStock: { _, _ in stock })
+    encoder.setCallback { _, _ in true }
+    XCTAssertEqual(encoder.startEncode(with: settings(), numberOfCores: 2), 0)
+    XCTAssertEqual(stock.starts, 1)
+    XCTAssertNotNil(stock.callback)
+    XCTAssertEqual(encoder.implementationName(), "test-stock")
+  }
+
   func testRuntimeFailureTakesOverWithAKeyFrameAndTheCurrentBitrate() throws {
     let compression = Compression()
     let stock = Stock()
@@ -86,7 +97,8 @@ final class EncoderTests: XCTestCase {
   }
 
   private final class Compression: ScreenCompression {
-    let mode = "low-latency"
+    let mode: String
+    init(mode: String = "low-latency") { self.mode = mode }
     var done: ((Result<VideoCompressor.Frame?, VideoCompressor.Failure>) -> Void)?
     func setRates(bitrate: Int, ceiling: Int?, fps: Int) {}
     func encode(_ buffer: CVPixelBuffer, at time: CMTime, key: Bool, done: @escaping (Result<VideoCompressor.Frame?, VideoCompressor.Failure>) -> Void) {

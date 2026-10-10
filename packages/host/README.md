@@ -30,8 +30,8 @@ See [question support and validation boundaries](../../docs/v2/agent-questions.m
 ## Remote screen
 
 `screen.start` returns a token-protected loopback viewer port and display list. The phone
-forwards the port; the web client hosts the same page in an isolated iframe. On Apple silicon
-Macs, LinkShell.app captures and encodes with ScreenCaptureKit/VideoToolbox. The host passes
+forwards the port; the web client hosts the same page in an isolated iframe. On Apple silicon and Intel
+Macs running macOS 13+, the universal LinkShell.app captures and encodes with ScreenCaptureKit/VideoToolbox. The host passes
 SDP/ICE over its Unix socket; the media track and four input/cursor channels run directly
 between LinkShell.app and the native iOS receiver or web player.
 

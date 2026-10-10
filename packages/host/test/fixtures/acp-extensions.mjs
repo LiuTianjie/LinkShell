@@ -43,6 +43,14 @@ async function run(sessionId, prompt) {
     await ask("terminal/release", { sessionId, terminalId });
     update(sessionId, { sessionUpdate: "tool_call_update", toolCallId: "terminal-tool", status: "completed" });
     text(sessionId, "answer", JSON.stringify({ content, output, exit }));
+  } else if (prompt === "STREAM_IO") {
+    const script = "let i=0;const timer=setInterval(()=>{process.stdout.write(String(i).padStart(4,'0')+'x'.repeat(1020));if(++i===100)clearInterval(timer)},2)";
+    const { terminalId } = await ask("terminal/create", { sessionId, command: process.execPath, args: ["-e", script], outputByteLimit: 256 * 1024 });
+    update(sessionId, { sessionUpdate: "tool_call", toolCallId: "stream-output", title: "Terminal stream", kind: "execute", status: "in_progress", content: [{ type: "terminal", terminalId }] });
+    await ask("terminal/wait_for_exit", { sessionId, terminalId });
+    await ask("terminal/release", { sessionId, terminalId });
+    update(sessionId, { sessionUpdate: "tool_call_update", toolCallId: "stream-output", status: "completed" });
+    text(sessionId, "stream-done", "done");
   } else if (prompt === "CHILD") {
     const child = "child-1";
     update(sessionId, { sessionUpdate: "subagent_update", sessionId: child, title: "审查", description: "审查更改", capabilities: { cancel: {} }, state: { state: "running" } });

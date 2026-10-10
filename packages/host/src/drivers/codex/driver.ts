@@ -287,6 +287,8 @@ export class CodexDriver implements AgentDriver {
   }
 
   async stop(): Promise<void> {
+    if (this.attentionTimer) clearInterval(this.attentionTimer);
+    this.attentionTimer = undefined;
     for (const timer of this.taskPolls.values()) clearTimeout(timer);
     this.taskPolls.clear();
     this.stopped = true;
@@ -304,7 +306,33 @@ export class CodexDriver implements AgentDriver {
     this.server = undefined;
   }
 
-  private readonly attention = new Map<string, { stamp: string; value: CodexAttention | undefined }>();
+  private readonly attention = new Map<string, { stamp: string; value: CodexAttention | undefined; path: string; session: DiscoveredSession }>();
+  private attentionTimer?: ReturnType<typeof setInterval>;
+
+  /** An answered desktop question must not wait for the next full agent catalog refresh. */
+  private pollQuestionReplies(): void {
+    let pending = false;
+    for (const [threadId, attention] of this.attention) {
+      if (!attention.value?.questions.length || this.attached.has(threadId) || this.observed.has(threadId)) continue;
+      const stamp = fileStamp(attention.path);
+      if (stamp && stamp !== attention.stamp) {
+        const value = rolloutAttention(attention.path);
+        attention.stamp = stamp;
+        if (value) {
+          const changed = JSON.stringify(value) !== JSON.stringify(attention.value);
+          attention.value = value;
+          if (changed) this.host?.sessionSeen(this.id, {
+            ...attention.session, state: value.running ? "running" : "idle", asyncQuestions: value.questions,
+          });
+        }
+      }
+      pending ||= !!attention.value?.questions.length;
+    }
+    if (!pending && this.attentionTimer) {
+      clearInterval(this.attentionTimer);
+      this.attentionTimer = undefined;
+    }
+  }
 
   archivedSessions(): Promise<string[]> {
     return archivedThreadIds((this.options.env ?? process.env).CODEX_HOME || join(homedir(), ".codex"));
@@ -319,11 +347,16 @@ export class CodexDriver implements AgentDriver {
       const stamp = thread.path ? fileStamp(thread.path) : undefined;
       let attention = this.attention.get(thread.id);
       if (thread.path && stamp && attention?.stamp !== stamp) {
-        attention = { stamp, value: rolloutAttention(thread.path) };
+        attention = { stamp, value: rolloutAttention(thread.path), path: thread.path, session: discovered };
         this.attention.set(thread.id, attention);
       }
       // Live notifications win over the file, which can lag while the agent writes.
       if (!this.attached.has(thread.id) && !this.observed.has(thread.id) && attention?.value) {
+        attention.session = discovered;
+        if (attention.value.questions.length && this.host && !this.attentionTimer) {
+          this.attentionTimer = setInterval(() => this.pollQuestionReplies(), 1000);
+          this.attentionTimer.unref?.();
+        }
         return { ...discovered, state: attention.value.running ? "running" : "idle", asyncQuestions: attention.value.questions };
       }
       return state ? { ...discovered, state } : discovered;

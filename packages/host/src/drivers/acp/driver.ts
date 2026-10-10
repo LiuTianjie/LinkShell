@@ -177,10 +177,11 @@ export class AcpDriver implements AgentDriver {
     this.tier = spec.tier;
     this.services = new AcpClientServices({ env: this.env,
       scope: (id) => { const state = this.sessions.get(id); return state ? { cwd: state.cwd, additionalDirectories: state.settings.additionalDirectories } : undefined; },
-      output: (id, terminalId, _text, snapshot) => {
+      output: (id, terminalId, text, snapshot) => {
         for (const call of this.terminalCalls.get(`${id}\n${terminalId}`) ?? []) {
-          this.emit(id, { sessionUpdate: "tool_call_update", toolCallId: call, replaceOutput: snapshot.output });
-          if (snapshot.exitStatus) this.emit(id, { sessionUpdate: "tool_call_update", toolCallId: call, rawOutput: { output: snapshot.output, truncated: snapshot.truncated, ...snapshot.exitStatus } });
+          // The first terminal reference carries the backlog; later output is already a delta.
+          if (text) this.emit(id, { sessionUpdate: "tool_call_update", toolCallId: call, appendOutput: text });
+          if (snapshot.exitStatus) this.emit(id, { sessionUpdate: "tool_call_update", toolCallId: call, rawOutput: { truncated: snapshot.truncated, ...snapshot.exitStatus } });
         }
       },
     });

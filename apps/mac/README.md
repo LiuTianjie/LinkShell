@@ -7,7 +7,9 @@ unix socket; nobody starts it by hand.
 
 It has no place in the Dock (`LSUIElement`) and one window, shown only when asked for
 (`--setup`): the one in which the user gives it its two permissions. macOS 13 or later, on
-Apple silicon only: there is no build for Intel Macs.
+Apple silicon and Intel. The universal app and its WebRTC framework contain both arm64 and x86_64;
+macOS chooses the native architecture at launch. No separate installer or Rosetta is needed.
+Intel real-hardware capture, encoding and end-to-end performance validation is pending.
 
 ## Current media path
 
@@ -143,7 +145,7 @@ sleeping when the lid is closed or the user chooses Sleep.
 A package manager can't carry the app as it is: npm leaves out the framework's symbolic links,
 pnpm the program's permission to run. The package carries one file,
 `build/LinkShell.app.tar.gz`; `@linkshell/host` has this package as an optional dependency
-(`os: darwin`, `cpu: arm64`) and unpacks the archive with `/usr/bin/tar -xzf` into `~/.linkshell/LinkShell.app`,
+(`os: darwin`, `cpu: arm64, x64`) and unpacks the archive with `/usr/bin/tar -xzf` into `~/.linkshell/LinkShell.app`,
 once per archive (by its SHA-256). In a checkout the host uses `build/LinkShell.app` directly.
 
 ## Build and check
@@ -157,10 +159,10 @@ pnpm test                         # swift test: what needs no screen and no netw
 pnpm check                        # that, then pass or fail for the built app, in about a minute
 ```
 
-`build-app.mjs [--out <directory>]` builds for arm64, embeds the framework (its arm64 half),
+`build-app.mjs [--out <directory>] [--scratch-path <directory>]` builds a universal arm64/x86_64 executable, embeds both framework architectures, checks that neither is missing,
 signs from the inside out (hardened runtime, timestamp), swaps the
 finished bundle into place, packs the archive and proves that the archive unpacks into an app
-whose signature verifies. It signs with the "Developer ID Application" identity in the keychain,
+whose signature verifies for both architectures. It signs with the "Developer ID Application" identity in the keychain,
 or the one `LINKSHELL_SIGN_IDENTITY` names. Without one it signs ad hoc: that app runs, but is
 another app to the system, with permissions of its own — not for release.
 `LINKSHELL_REQUIRE_SIGNED=1` (set by `prepack`) makes a missing identity fatal. The app is not

@@ -112,6 +112,8 @@ struct Session {
   GhosttyRenderStateRowCells cells = nullptr;
   GhosttyKeyEncoder encoder = nullptr;
   GhosttyKeyEvent keyEvent = nullptr;
+  GhosttyMouseEncoder mouseEncoder = nullptr;
+  GhosttyMouseEvent mouseEvent = nullptr;
   // Query responses emitted by the terminal during vt_write; forwarded to the
   // PTY by the caller after each write.
   std::vector<uint8_t> ptyOut;
@@ -203,6 +205,8 @@ bool parseColor(JNIEnv* env, jstring str, GhosttyColorRgb* out) {
 
 void destroySession(Session* session) {
   if (session == nullptr) return;
+  ghostty_mouse_event_free(session->mouseEvent);
+  ghostty_mouse_encoder_free(session->mouseEncoder);
   ghostty_key_event_free(session->keyEvent);
   ghostty_key_encoder_free(session->encoder);
   ghostty_render_state_row_cells_free(session->cells);
@@ -382,7 +386,9 @@ Java_expo_modules_linkterminal_GhosttyVt_nativeCreate(
       ghostty_render_state_row_iterator_new(nullptr, &session->rowIter) != GHOSTTY_SUCCESS ||
       ghostty_render_state_row_cells_new(nullptr, &session->cells) != GHOSTTY_SUCCESS ||
       ghostty_key_encoder_new(nullptr, &session->encoder) != GHOSTTY_SUCCESS ||
-      ghostty_key_event_new(nullptr, &session->keyEvent) != GHOSTTY_SUCCESS) {
+      ghostty_key_event_new(nullptr, &session->keyEvent) != GHOSTTY_SUCCESS ||
+      ghostty_mouse_encoder_new(nullptr, &session->mouseEncoder) != GHOSTTY_SUCCESS ||
+      ghostty_mouse_event_new(nullptr, &session->mouseEvent) != GHOSTTY_SUCCESS) {
     __android_log_print(ANDROID_LOG_ERROR, kLogTag, "failed to create terminal session");
     destroySession(session);
     return 0;
@@ -546,6 +552,49 @@ Java_expo_modules_linkterminal_GhosttyVt_nativeScroll(
   behavior.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA;
   behavior.value.delta = deltaRows;
   ghostty_terminal_scroll_viewport(session->term, behavior);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_expo_modules_linkterminal_GhosttyVt_nativeMouseCaptured(
+    JNIEnv*, jobject, jlong handle) {
+  auto* session = fromHandle(handle);
+  bool captured = false;
+  if (session) ghostty_terminal_get(session->term, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &captured);
+  return captured;
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_expo_modules_linkterminal_GhosttyVt_nativeMouseScroll(
+    JNIEnv* env, jobject, jlong handle, jint deltaRows, jfloat x, jfloat y) {
+  auto* session = fromHandle(handle);
+  if (!session || deltaRows == 0) return nullptr;
+  uint16_t cols = 0, rows = 0;
+  ghostty_terminal_get(session->term, GHOSTTY_TERMINAL_DATA_COLS, &cols);
+  ghostty_terminal_get(session->term, GHOSTTY_TERMINAL_DATA_ROWS, &rows);
+  GhosttyMouseEncoderSize size{};
+  size.size = sizeof(size);
+  size.cell_width = session->cellWidth;
+  size.cell_height = session->cellHeight;
+  size.screen_width = cols * size.cell_width;
+  size.screen_height = rows * size.cell_height;
+  ghostty_mouse_encoder_setopt_from_terminal(session->mouseEncoder, session->term);
+  ghostty_mouse_encoder_setopt(session->mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &size);
+  ghostty_mouse_event_set_action(session->mouseEvent, GHOSTTY_MOUSE_ACTION_PRESS);
+  // Buttons four/five are the terminal protocol's wheel up/down events.
+  ghostty_mouse_event_set_button(session->mouseEvent, deltaRows < 0 ? GHOSTTY_MOUSE_BUTTON_FOUR : GHOSTTY_MOUSE_BUTTON_FIVE);
+  ghostty_mouse_event_set_position(session->mouseEvent, {x, y});
+  char encoded[128];
+  size_t length = 0;
+  if (ghostty_mouse_encoder_encode(session->mouseEncoder, session->mouseEvent, encoded, sizeof(encoded), &length) != GHOSTTY_SUCCESS || length == 0) return nullptr;
+  // Bound work for an exceptionally fast fling without ever emitting a
+  // partial escape sequence. Normal gestures are only a few rows per frame.
+  const int count = std::min<int64_t>(256, deltaRows < 0 ? -int64_t(deltaRows) : deltaRows);
+  std::vector<uint8_t> output;
+  output.reserve(length * count);
+  for (int i = 0; i < count; ++i) output.insert(output.end(), encoded, encoded + length);
+  auto result = env->NewByteArray(static_cast<jsize>(output.size()));
+  if (result) env->SetByteArrayRegion(result, 0, output.size(), reinterpret_cast<const jbyte*>(output.data()));
+  return result;
 }
 
 JNIEXPORT void JNICALL

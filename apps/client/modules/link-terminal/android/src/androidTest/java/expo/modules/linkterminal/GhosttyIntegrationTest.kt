@@ -44,6 +44,42 @@ class GhosttyIntegrationTest {
     assertTrue(text, text.contains("第二行"))
   } }
 
+  @Test fun wheelUsesNegotiatedMouseProtocolAndLeavesShellScrollbackLocal() = onMain { withTerminal { handle ->
+    assertFalse(GhosttyVt.nativeMouseCaptured(handle))
+    assertNull(GhosttyVt.nativeMouseScroll(handle, -1, 25f, 50f))
+    GhosttyVt.nativeWrite(handle, "\u001b[?1049h\u001b[?1000h\u001b[?1006h".toByteArray())
+    assertTrue(GhosttyVt.nativeMouseCaptured(handle))
+    assertEquals("\u001b[<64;3;3M".repeat(2), GhosttyVt.nativeMouseScroll(handle, -2, 25f, 50f)!!.decodeToString())
+    assertEquals("\u001b[<65;3;3M", GhosttyVt.nativeMouseScroll(handle, 1, 25f, 50f)!!.decodeToString())
+    GhosttyVt.nativeWrite(handle, "\u001b[?1006l".toByteArray())
+    assertArrayEquals(byteArrayOf(27, 91, 77, 96, 35, 35), GhosttyVt.nativeMouseScroll(handle, -1, 25f, 50f))
+    GhosttyVt.nativeWrite(handle, "\u001b[?1000l\u001b[?1049l".toByteArray())
+    assertFalse(GhosttyVt.nativeMouseCaptured(handle))
+    assertNull(GhosttyVt.nativeMouseScroll(handle, 1, 25f, 50f))
+  } }
+
+  @Test fun touchDistanceAccumulatesIntoWheelStepsAndResumesLocalShellScrolling() = onMain {
+    val view = GhosttyTerminalView(ApplicationProvider.getApplicationContext())
+    val output = mutableListOf<String>()
+    view.onInputBytes = { output += it.decodeToString() }
+    try {
+      view.layout(0, 0, 800, 480)
+      view.write("\u001b[?1000h\u001b[?1006h".toByteArray())
+      repeat(50) { view.scrollByPixels(-0.1f) }
+      assertTrue(output.isEmpty())
+      repeat(1000) { view.scrollByPixels(-0.1f) }
+      val up = output.joinToString("")
+      assertTrue(up, up.contains("\u001b[<64;"))
+      output.clear()
+      view.scrollByPixels(200f)
+      assertTrue(output.joinToString("").contains("\u001b[<65;"))
+      output.clear()
+      view.write(("\u001b[?1000l" + "shell history\r\n".repeat(100)).toByteArray())
+      view.scrollByPixels(-200f)
+      assertTrue(output.isEmpty())
+    } finally { view.destroy() }
+  }
+
   @Test fun kittyRgbPlacementMovesAndDeletesWithTheCore() = onMain { withTerminal { handle ->
     GhosttyVt.nativeWrite(handle, "\u001b_Ga=T,f=24,s=1,v=1,i=9,c=2,r=2;/wAA\u001b\\".toByteArray())
     val placements = GhosttyVt.nativeImages(handle)!!

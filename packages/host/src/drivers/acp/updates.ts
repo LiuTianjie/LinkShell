@@ -47,21 +47,35 @@ export class AcpUpdates {
     if (version === 2 && (kind === "terminal_update" || kind === "terminal_output_chunk")) {
       const id = optional(update.terminalId); if (!id) return [];
       const terminal = this.terminal(id);
-      if (kind === "terminal_output_chunk" && typeof update.data === "string") terminal.output += terminal.decoder.write(Buffer.from(update.data, "base64"));
+      let appended = "", replaced = false;
+      if (kind === "terminal_output_chunk" && typeof update.data === "string") {
+        appended = terminal.decoder.write(Buffer.from(update.data, "base64"));
+        terminal.output += appended;
+      }
       if (kind === "terminal_update") {
         if (update.output !== undefined) {
           terminal.decoder = new StringDecoder("utf8");
           terminal.output = terminal.decoder.write(Buffer.from(optional(object(update.output).data) ?? "", "base64"));
+          replaced = true;
         }
         if (update.command !== undefined) terminal.command = optional(update.command);
         if (update.cwd !== undefined) terminal.cwd = optional(update.cwd);
         if (update.exitStatus !== undefined) {
           terminal.exitStatus = update.exitStatus;
-          if (update.exitStatus !== null) terminal.output += terminal.decoder.end();
+          if (update.exitStatus !== null) {
+            const tail = terminal.decoder.end();
+            terminal.output += tail; appended += tail;
+          }
         }
       }
       terminal.output = terminal.output.slice(-LIMIT);
-      return [...terminal.calls].map((toolCallId) => this.terminalUpdate(toolCallId, terminal));
+      if (kind === "terminal_output_chunk" && !appended) return [];
+      // Keep a bounded backlog for late references, without retransmitting it on each chunk.
+      return [...terminal.calls].map((toolCallId) => ({
+        sessionUpdate: "tool_call_update", toolCallId,
+        ...(replaced ? { replaceOutput: terminal.output } : appended ? { appendOutput: appended } : {}),
+        ...(kind === "terminal_update" ? { rawOutput: { command: terminal.command, cwd: terminal.cwd, exitStatus: terminal.exitStatus } } : {}),
+      }));
     }
     let mapped = normalizeAcpUpdate(raw);
     if (!mapped) return [];
@@ -76,8 +90,11 @@ export class AcpUpdates {
     if (version === 2 && (mapped.sessionUpdate === "tool_call" || mapped.sessionUpdate === "tool_call_update")) {
       for (const item of mapped.content ?? []) {
         if (item.type !== "terminal") continue;
-        const terminal = this.terminal(item.terminalId); terminal.calls.add(mapped.toolCallId);
-        result.push(this.terminalUpdate(mapped.toolCallId, terminal));
+        const terminal = this.terminal(item.terminalId);
+        if (!terminal.calls.has(mapped.toolCallId)) {
+          terminal.calls.add(mapped.toolCallId);
+          result.push(this.terminalUpdate(mapped.toolCallId, terminal));
+        }
       }
     }
     return result;

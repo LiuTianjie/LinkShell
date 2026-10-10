@@ -20,7 +20,7 @@ let package = Package(
     // What can be proved with no screen and no network (`swift test`, part of `pnpm check`).
     .testTarget(name: "LinkShellTests", dependencies: ["LinkShell"], path: "Tests/LinkShellTests"),
     // libwebrtc, prebuilt from the unmodified upstream source (M154, branch-heads/8037):
-    // a dynamic framework with arm64 and x86_64 slices for macOS, of which the app keeps arm64.
+    // a dynamic framework with arm64 and x86_64 slices, both kept in the universal Mac app.
     .binaryTarget(
       name: "WebRTC",
       url: "https://github.com/stasel/WebRTC/releases/download/154.0.0/WebRTC-M154.xcframework.zip",

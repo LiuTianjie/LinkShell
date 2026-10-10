@@ -155,12 +155,33 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
   }
 
   private var scrollAccum = 0f
+  private var mouseScrollAccum = 0f
+  private var scrollX = 0f
+  private var scrollY = 0f
+  private var scrollingProgram = false
 
   // ── Scrollback state ──
   private val scroller = OverScroller(context)
   private var flingLastY = 0
   internal fun scrollByPixels(delta: Float) {
     if (handle == 0L) return
+    val captured = GhosttyVt.nativeMouseCaptured(handle)
+    if (captured != scrollingProgram) {
+      scrollAccum = 0f
+      mouseScrollAccum = 0f
+      scrollingProgram = captured
+    }
+    if (captured) {
+      // TUI history belongs to the application. Retain fractional motion,
+      // but never translate its fixed header/prompt as local scrollback.
+      mouseScrollAccum += delta
+      val whole = (mouseScrollAccum / cellHeight).toInt()
+      mouseScrollAccum -= whole * cellHeight
+      if (whole != 0 && !restoring) {
+        GhosttyVt.nativeMouseScroll(handle, whole, scrollX, scrollY)?.let { onInputBytes?.invoke(it) }
+      }
+      return
+    }
     val before = GhosttyVt.nativeScrollbar(handle) ?: return
     scrollAccum += delta
     val whole = (scrollAccum / cellHeight).toInt()
@@ -240,6 +261,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         distanceY: Float
       ): Boolean {
         if (handle == 0L || scaleDetector.isInProgress) return false
+        scrollX = e2.x
+        scrollY = e2.y
         scrollByPixels(distanceY)
         return true
       }
@@ -1041,7 +1064,17 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
   // ── Input ──
 
   override fun onTouchEvent(event: MotionEvent): Boolean {
-    if (event.actionMasked == MotionEvent.ACTION_DOWN) scroller.abortAnimation()
+    if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+      scroller.abortAnimation()
+      removeCallbacks(flingRunnable)
+      mouseScrollAccum = 0f
+      scrollX = event.x
+      scrollY = event.y
+    }
+    if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+      scroller.abortAnimation()
+      removeCallbacks(flingRunnable)
+    }
     scaleDetector.onTouchEvent(event)
     if (scaleDetector.isInProgress) {
       if (draggingHandle != HANDLE_NONE) {

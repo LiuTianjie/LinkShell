@@ -13,7 +13,8 @@
     "darwin"
   ],
   "cpu": [
-    "arm64"
+    "arm64",
+    "x64"
   ],
   "files": [
     "build/LinkShell.app.tar.gz",

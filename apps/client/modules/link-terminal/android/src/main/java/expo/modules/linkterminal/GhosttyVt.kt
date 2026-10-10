@@ -76,6 +76,11 @@ internal object GhosttyVt {
   /** Scroll the viewport by [deltaRows]; negative is up (into scrollback). */
   external fun nativeScroll(handle: Long, deltaRows: Int)
 
+  external fun nativeMouseCaptured(handle: Long): Boolean
+
+  /** Encode wheel steps using the program's active mouse protocol; positive is down. */
+  external fun nativeMouseScroll(handle: Long, deltaRows: Int, x: Float, y: Float): ByteArray?
+
   external fun nativeScrollToBottom(handle: Long)
 
   /** Viewport scrollbar as [total, offset, len] rows, or null. */

@@ -80,7 +80,7 @@ Watching and controlling the computer's screen from the phone needs two macOS pe
 linkshell screen      # macOS: a LinkShell window takes you to each switch and waits for it
 ```
 
-On a Mac nothing else needs installing: the picture and the control are **LinkShell**'s, a signed app that comes with the CLI. Its two permissions (Screen Recording, Accessibility) are switches named LinkShell that you turn on once; they hold whichever terminal starts the host and across upgrades. It needs a Mac with Apple silicon, macOS 13 or later. On Linux the screen can be watched (not controlled) and needs `ffmpeg` with an X11 display.
+On a Mac nothing else needs installing: the picture and the control are **LinkShell**'s, a signed app that comes with the CLI. Its two permissions (Screen Recording, Accessibility) are switches named LinkShell that you turn on once; they hold whichever terminal starts the host and across upgrades. It needs macOS 13 or later, on Apple silicon or Intel. The same installation includes both architectures; macOS selects the native one automatically. Intel real-hardware capture and performance validation is pending. On Linux the screen can be watched (not controlled) and needs `ffmpeg` with an X11 display.
 
 <details>
 <summary>Other ways to install</summary>
@@ -109,7 +109,7 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
     <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-screen.jpg" alt="The phone in landscape showing the computer's screen in trackpad mode" width="100%" /><br />
       <strong>The computer's screen</strong><br />
-      Real-time video when the two connect directly, a few tens of milliseconds behind the computer's own display. Full screen or landscape; trackpad mode takes the mouse and keyboard (macOS, Apple silicon).
+      Real-time video when the two connect directly; latency depends on the Mac and network. Full screen or landscape; trackpad mode takes the mouse and keyboard (macOS 13+, Apple silicon or Intel).
     </td>
   </tr>
 </table>
@@ -135,13 +135,13 @@ Currently supports Codex on macOS with compatible Computer Use tools. See [setup
 - **Commands and persistent goals.** Type `/`, tap the command button beside the composer, or open Commands from the session menu to search commands and skills without losing an unsent draft. Codex and Claude Code support `/goal` and a dedicated goal screen. Codex can pause, resume and set a token budget; Claude can set or clear a completion condition. Available controls depend on the agent installed on your computer.
 - **Background tasks.** `/tasks` and the session header show commands that outlive a reply, including output, duration and exit code. Stop one Codex task independently; Claude Bash / Monitor tasks are viewable, with stopping handled on the computer. Tasks stay separate from sub-agents and Workflows and recover after reconnecting.
 - **Different screen sizes.** Adaptive layouts support iPhone Duo and standard iPhones, adjusting the conversation, composer and controls to the available space.
-- **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app.
+- **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app. Touch scrolling retains momentum in both shell history and mouse-tracking applications such as Claude Code.
 - **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
 - **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
 - **Find a session.** Search the home page by title, latest message preview, project path, worktree branch or agent. Results include archived sessions and terminals on the selected computer.
 - **Tidy sessions.** Codex rename, archive and delete update its native records; Claude rename and delete do too, while Claude and other ACP archives stay in LinkShell. Archived Codex sessions leave the active list and remain readable without being restored. Projects and sessions show the current git branch. A computer you no longer use is removed with a long press under My computers.
 - **Recover session history.** Restarting the host rechecks activity instead of retaining stale running flags. Missing or unreadable history shows an explanation while preserving cached messages. See [session recovery and ACP compatibility](docs/v2/session-recovery.md).
-- **Screen and files.** Watch the computer's screen, full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag; a sheet of one-tap Mac shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own); and a text box for anything longer, which also takes the phone's clipboard (macOS, Apple silicon; `linkshell setup` gets the permissions in place). Send photos or files from the phone into the project.
+- **Screen and files.** Watch the computer's screen, full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag; a sheet of one-tap Mac shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own); and a text box for anything longer, which also takes the phone's clipboard (macOS 13+, Apple silicon or Intel; `linkshell setup` gets the permissions in place). Send photos or files from the phone into the project.
 
 ## Agents
 

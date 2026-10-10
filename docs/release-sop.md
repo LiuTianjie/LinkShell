@@ -6,7 +6,7 @@
 |---|---|---|---|
 | `@linkshell/wire` | `packages/wire` | `package.json` | — |
 | `@linkshell/mac`（LinkShell.app） | `apps/mac` | `package.json` | — |
-| `@linkshell/host` | `packages/host` | `package.json` | wire；mac（可选依赖，仅 macOS arm64） |
+| `@linkshell/host` | `packages/host` | `package.json` | wire；mac（可选依赖，macOS arm64/x64） |
 | `@linkshell/gateway` | `packages/gateway` | `package.json` | wire |
 | `linkshell-cli` | `packages/cli` | `package.json` | wire、host、gateway |
 | Docker 镜像 `nickname4th/linkshell-gateway` | `packages/gateway/Dockerfile` | tag `gateway-vX.Y.Z` | — |
@@ -110,9 +110,9 @@ cd ../cli                 && pnpm publish --access public
 > ```
 > - **必须在装有 `Developer ID Application` 证书的 Mac 上发布**。`prepack` 以 `LINKSHELL_REQUIRE_SIGNED=1` 构建：没有证书或签名失败，发布直接中止。签名身份和 bundle id（`com.bd.linkshell.host`）决定了权限记在谁名下，换掉等于让所有用户重新授权，不要换。
 > - 包里装的是**压缩包**而不是 .app 本身：npm 包带不了 framework 里的符号链接，也保不住可执行权限。host 第一次用到时把它解到 `~/.linkshell/LinkShell.app`（`unpackedApp`），升级时原地替换。
-> - 发布前抽检：`cd apps/mac && pnpm pack`，解开 tgz 再解开里面的 `build/LinkShell.app.tar.gz`，`codesign --verify --deep --strict LinkShell.app` 应无输出；`pnpm --filter @linkshell/mac check` 应全部通过。
+> - 发布前抽检：`cd apps/mac && pnpm pack`，解开 tgz 再解开里面的 `build/LinkShell.app.tar.gz`，`codesign --verify --deep --strict --all-architectures LinkShell.app` 应无输出；`pnpm --filter @linkshell/mac check` 应全部通过。
 > - Mac 上不再需要 ffmpeg（Linux 主机仍然用它）。
-> - 只支持 Apple 芯片的 Mac（`cpu: arm64`），macOS 13 及以上；Intel Mac 上屏幕功能不可用，其余功能不受影响。
+> - 支持 Apple 芯片和 Intel Mac（npm `cpu: arm64, x64`），macOS 13 及以上。程序与 WebRTC 框架都必须包含 `arm64 x86_64`，由 macOS 自动选择本机架构。发布前验证双架构及签名；Intel 真机采集、控制、直连和回退另行验收，不能把 Rosetta 测试等同于真机测试。
 
 iOS 原生屏幕接收在 `apps/client/modules/link-screen`，与 Mac helper 分开交付。修改原生接收、Metal 或 WebKit 桥接后必须走正常 iOS 二进制发布；Metro 重载或只发 CLI 都不会把模块装进已有 App。它复用 App 的 JitsiWebRTC，不额外装第二份框架。协议或能力协商改动要同时检查新旧 Host/App 的兼容回退，详见[屏幕技术架构](v2/screen-realtime.md)。
 

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { asyncQuestionReply } from "@linkshell/wire";
 import { CodexDriver } from "../src/drivers/codex/driver.js";
 import type { CodexThread } from "../src/drivers/codex/mapper.js";
+import type { DriverHost } from "../src/drivers/types.js";
 import { rolloutAttention } from "../src/drivers/codex/attention.js";
 
 const dirs: string[] = [];
@@ -54,5 +55,29 @@ describe("desktop question attention without opening a session", () => {
     expect(rolloutAttention(path + "-missing")).toBeUndefined();
     writeFileSync(path, start + "\n" + ask.slice(0, -10));
     expect(rolloutAttention(path, 37)).toEqual({ running: true, questions: [] });
+  });
+  it("pushes desktop answers without another catalog request or phone attachment", async () => {
+    vi.useFakeTimers();
+    const path = file([start, ask]);
+    const driver = new CodexDriver({ socketPath: path + ".sock", hostVersion: "test", desktopBusPath: false });
+    const seen = vi.fn();
+    (driver as unknown as { host: DriverHost }).host = { sessionSeen: seen } as unknown as DriverHost;
+    const rpc = vi.spyOn(driver as unknown as { rpc: () => Promise<{ data: CodexThread[] }> }, "rpc");
+    rpc.mockResolvedValue({ data: [{ id: "desktop", cwd: "/w", path, createdAt: 1, updatedAt: 2 }] });
+    try {
+      await driver.listSessions(50);
+      const reply = line("response_item", { type: "message", role: "user", content: [{ type: "input_text", text: asyncQuestionReply([{ question: q, answer: "已回答" }, { question: q2, answer: "" }]) }] });
+      writeFileSync(path, [start, ask, reply, ""].join("\n"));
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(seen).toHaveBeenCalledWith("codex", expect.objectContaining({ nativeId: "desktop", state: "running", asyncQuestions: [] }));
+      expect(rpc).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(seen).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await driver.stop();
+      rpc.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

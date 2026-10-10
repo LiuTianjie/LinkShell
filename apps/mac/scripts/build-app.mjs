@@ -9,9 +9,9 @@
 //                           npm leaves out the framework's symbolic links, and pnpm the
 //                           executable's permission to run.
 //
-//   node scripts/build-app.mjs [--out <directory>]
+//   node scripts/build-app.mjs [--out <directory>] [--scratch-path <directory>]
 //
-// For Apple silicon only: Intel Macs are not supported.
+// Universal: macOS chooses arm64 on Apple silicon and x86_64 on Intel at launch.
 //
 // It needs macOS and Xcode's Swift. The system gives the Screen Recording and Accessibility
 // permissions to a signing identity and a bundle id, so a build that users get has to carry the
@@ -31,13 +31,13 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BUNDLE_ID = "com.bd.linkshell.host";
 const MINIMUM_SYSTEM = "13.0";
-const ARCH = "arm64";
+const ARCHES = ["arm64", "x86_64"];
 const RPATH = "@executable_path/../Frameworks";
 const AD_HOC = "-";
 const option = (flag) => (process.argv.includes(flag) ? process.argv[process.argv.indexOf(flag) + 1] : undefined);
 const out = option("--out") ? resolve(option("--out")) : join(root, "build");
-// SwiftPM's own work, and the framework it downloads: kept in one place whatever --out says.
-const scratch = join(root, "build", "swiftpm");
+// An explicit scratch path keeps isolated verification builds out of the checkout's cache.
+const scratch = option("--scratch-path") ? resolve(option("--scratch-path")) : join(root, "build", "swiftpm");
 const app = join(out, "LinkShell.app");
 const archive = join(out, "LinkShell.app.tar.gz");
 
@@ -64,8 +64,16 @@ if (adHoc && process.env.LINKSHELL_REQUIRE_SIGNED === "1") fail("no Developer ID
 
 const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 
-console.log(`[build-app] swift build (${ARCH})`);
-const buildArgs = ["build", "-c", "release", "--arch", ARCH, "--package-path", root, "--scratch-path", scratch];
+const architectures = (path) => run("/usr/bin/lipo", ["-archs", path]).trim().split(/\s+/);
+const requireUniversal = (path) => {
+  const found = architectures(path);
+  if (found.length !== ARCHES.length || !ARCHES.every((arch) => found.includes(arch))) {
+    throw new Error(`${path} must contain ${ARCHES.join(" and ")}, got ${found.join(" ")}`);
+  }
+};
+
+console.log(`[build-app] swift build (${ARCHES.join(" + ")})`);
+const buildArgs = ["build", "-c", "release", ...ARCHES.flatMap((arch) => ["--arch", arch]), "--package-path", root, "--scratch-path", scratch];
 const built = spawnSync("/usr/bin/swift", buildArgs, { encoding: "utf8", timeout: 900_000, maxBuffer: 64 * 1024 * 1024 });
 const said = `${built.stdout ?? ""}${built.stderr ?? ""}`;
 if (built.status !== 0) fail(`swift build failed:\n${said}`);
@@ -76,12 +84,8 @@ if (warnings.length) console.log(`[build-app] the compiler warns:\n${warnings.jo
 // Asking the toolchain prevents a successful new build from silently packaging an old binary.
 const program = join(run("/usr/bin/swift", [...buildArgs, "--show-bin-path"]).trim(), "LinkShell");
 if (!existsSync(program)) fail(`the built program is missing: ${program}`);
+requireUniversal(program);
 console.log(`[build-app] program: ${program}`);
-// SwiftPM leaves the build's own search paths in the binary (this Mac's Xcode among them).
-// In the app there is one place to look: Contents/Frameworks.
-for (const [, path] of run("/usr/bin/otool", ["-l", program]).matchAll(/cmd LC_RPATH\n\s+cmdsize \d+\n\s+path (.+) \(offset \d+\)/g)) {
-  if (path !== RPATH && path !== "/usr/lib/swift") run("/usr/bin/install_name_tool", ["-delete_rpath", path, program]);
-}
 
 // The framework as SwiftPM unpacked it: the macOS slice of the xcframework.
 const artifacts = join(scratch, "artifacts");
@@ -120,10 +124,16 @@ try {
   mkdirSync(join(staged, "Contents/MacOS"), { recursive: true });
   mkdirSync(join(staged, "Contents/Resources"), { recursive: true });
   mkdirSync(join(staged, "Contents/Frameworks"), { recursive: true });
-  cpSync(program, join(staged, "Contents/MacOS/LinkShell"));
+  const executable = join(staged, "Contents/MacOS/LinkShell");
+  cpSync(program, executable);
+  // Remove build-only search paths from the packaged copy, leaving SwiftPM's output intact.
+  // otool lists each slice: each shared rpath must only be removed once from the fat binary.
+  const rpaths = new Set([...run("/usr/bin/otool", ["-l", executable]).matchAll(/cmd LC_RPATH\n\s+cmdsize \d+\n\s+path (.+) \(offset \d+\)/g)].map((match) => match[1]));
+  for (const path of rpaths) {
+    if (path !== RPATH && path !== "/usr/lib/swift") run("/usr/bin/install_name_tool", ["-delete_rpath", path, executable]);
+  }
 
-  // The framework, with its links kept, without what only a compiler reads, and without the
-  // half of it that is for Intel.
+  // Keep both architectures and the framework's links, without what only a compiler reads.
   const embedded = join(staged, "Contents/Frameworks/WebRTC.framework");
   run("/usr/bin/ditto", [framework, embedded]);
   for (const name of ["Headers", "Modules"]) {
@@ -131,7 +141,7 @@ try {
     rmSync(join(embedded, "Versions/A", name), { recursive: true, force: true });
   }
   const library = join(embedded, "Versions/A/WebRTC");
-  if (run("/usr/bin/lipo", ["-archs", library]).trim() !== ARCH) run("/usr/bin/lipo", [library, "-thin", ARCH, "-output", library]);
+  requireUniversal(library);
 
   // The app's face in System Settings: the same icon as the phone app.
   const icon = join(root, "../client/assets/icon.png");
@@ -191,7 +201,7 @@ try {
 }
 
 // What the system makes of it. Not notarized yet, so Gatekeeper's verdict is a report, not a failure.
-const verify = (path) => report("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--verbose=2", path]);
+const verify = (path) => report("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--all-architectures", "--verbose=2", path]);
 const megabytes = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const verified = verify(app);
 console.log(`[build-app] codesign --verify --deep --strict: ${verified.ok ? "ok" : "FAILED"}\n${verified.said}`);
@@ -200,7 +210,7 @@ if (!adHoc) {
   const assessed = report("/usr/sbin/spctl", ["-a", "-vv", app]);
   console.log(`[build-app] spctl -a -vv: ${assessed.ok ? "accepted" : "rejected"}\n${assessed.said}`);
 }
-const archs = (path) => run("/usr/bin/lipo", ["-archs", join(app, path)]).trim();
+const archs = (path) => architectures(join(app, path)).join(" ");
 console.log(`[build-app] architectures: the program ${archs("Contents/MacOS/LinkShell")}, the framework ${archs("Contents/Frameworks/WebRTC.framework/Versions/A/WebRTC")}`);
 console.log(`[build-app] ${app}: ${megabytes(Number(run("/usr/bin/du", ["-sk", app]).split("\t")[0]) * 1024)}, version ${version}${adHoc ? ", signed ad hoc" : ""}`);
 

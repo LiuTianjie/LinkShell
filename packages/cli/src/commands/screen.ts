@@ -40,7 +40,7 @@ export function screenReady(access: ScreenAccess): boolean {
 export function describeScreen(access: ScreenAccess | "old" | undefined): string | undefined {
   if (!access) return undefined;
   if (access === "old") return "restart the host to check (linkshell host stop && linkshell host --daemon)";
-  if (!access.supported) return process.platform === "darwin" ? "needs a Mac with Apple silicon" : "not available on this system";
+  if (!access.supported) return access.problem ?? "not available on this system";
   if (!access.ffmpeg) return process.platform === "darwin" ? MISSING_APP : "needs ffmpeg (install it with your package manager)";
   if (process.platform !== "darwin") return "can be watched (controlling it needs macOS)";
   if (access.recording === null || access.control === null) return `can't tell${access.problem ? `: ${access.problem}` : ""}`;
@@ -78,7 +78,7 @@ export async function setUpScreen(out: Print, interactive: boolean): Promise<boo
     return false;
   }
   if (!access.supported) {
-    row(out, false, "Screen", process.platform === "darwin" ? "needs a Mac with Apple silicon" : "not available on this system");
+    row(out, false, "Screen", access.problem ?? "not available on this system");
     return false;
   }
   if (process.platform !== "darwin") {

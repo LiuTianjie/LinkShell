@@ -57,6 +57,16 @@ describe("ACP optional capabilities across the host RPC", () => {
     expect(f.view().items.find((item) => item.id === "terminal-tool")).toMatchObject({ kind: "tool", output: "终端中文", status: "completed" });
   });
 
+  it("streams client terminal deltas through RPC without retransmitting the accumulated log", async () => {
+    const f = await setup(); await f.send("STREAM_IO"); await waitFor(() => f.ended() === 1);
+    const expected = Array.from({ length: 100 }, (_, i) => String(i).padStart(4, "0") + "x".repeat(1020)).join("");
+    expect(f.view().items.find((item) => item.id === "stream-output")).toMatchObject({ kind: "tool", output: expected, status: "completed" });
+    const events = f.events.filter((event) => "toolCallId" in event.update && event.update.toolCallId === "stream-output");
+    expect(events.some((event) => "appendOutput" in event.update)).toBe(true);
+    expect(events.filter((event) => "replaceOutput" in event.update)).toHaveLength(1);
+    expect(events.reduce((bytes, event) => bytes + Buffer.byteLength(JSON.stringify(event)), 0)).toBeLessThan(Buffer.byteLength(expected) * 1.5);
+  });
+
   it("decodes split UTF-8 and keeps notices ephemeral", async () => {
     const f = await setup(); await f.send("UTF8"); await waitFor(() => f.ended() === 1);
     expect(f.view().items.find((item) => item.id === "utf8")).toMatchObject({ text: "中文" });

@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError } from "@linkshell/wire";
-import { closeInputApp, inputApp, InputControl, NO_APP, videoSignal, type HelperApp } from "./input.js";
+import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type HelperApp } from "./input.js";
 import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
 import { viewerPage } from "./screen-viewer.js";
 
@@ -299,15 +299,15 @@ export class ScreenShare {
    * (`ffmpeg`: whether what captures is there — ffmpeg itself on Linux.)
    */
   async access(ask: boolean): Promise<ScreenAccess> {
-    const supported = process.platform === "darwin" || process.platform === "linux";
+    const supported = macAppSupported() || process.platform === "linux";
     if (process.platform !== "darwin") return { supported, ffmpeg: supported && (await hasFfmpeg()), recording: null, control: null, problem: "controlling the screen needs macOS" };
     const app = inputApp(this.log);
     if (!app) {
       const problem =
-        process.arch === "arm64"
+        supported
           ? "LinkShell.app is missing from this installation (the optional package @linkshell/mac was not installed): reinstall with `npm install -g linkshell-cli`"
-          : "the screen needs a Mac with Apple silicon (this one is Intel)";
-      return { supported: process.arch === "arm64", ffmpeg: false, recording: null, control: null, problem };
+          : "this Mac architecture is not supported";
+      return { supported, ffmpeg: false, recording: null, control: null, problem };
     }
     try {
       const status = await app.access();

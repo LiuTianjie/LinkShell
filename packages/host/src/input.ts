@@ -179,18 +179,20 @@ function packagedApp(): string | undefined {
 
 let found: { app: string | undefined } | undefined;
 
-/** LinkShell.app, where this installation has it: a Mac with Apple silicon, with `@linkshell/mac` installed beside the host. */
+/** The universal app ships both native Mac architectures (Node calls x86_64 "x64"). */
+export function macAppSupported(): boolean {
+  return process.platform === "darwin" && (process.arch === "arm64" || process.arch === "x64");
+}
+
+/** LinkShell.app, with `@linkshell/mac` installed beside the host. */
 export function shippedApp(): string | undefined {
-  if (process.platform !== "darwin" || process.arch !== "arm64" || process.env.LINKSHELL_INPUT_APP === "off") return undefined;
+  if (!macAppSupported() || process.env.LINKSHELL_INPUT_APP === "off") return undefined;
   found ??= { app: packagedApp() };
   return found.app;
 }
 
-/** What to tell someone whose Mac has no LinkShell.app: it is an Intel Mac (the app is built for Apple silicon only), or the package that carries it wasn't installed. */
-export const NO_APP =
-  process.arch === "arm64"
-    ? "这次安装缺少 LinkShell.app（可选组件没有装上）。重新安装一次即可：npm install -g linkshell-cli"
-    : "查看和控制屏幕需要 Apple 芯片的 Mac（这台是 Intel 芯片）";
+/** The optional package may have been omitted on either Mac architecture. */
+export const NO_APP = "这次安装缺少 LinkShell.app（可选组件没有装上）。重新安装一次即可：npm install -g linkshell-cli";
 
 function parse(line: string): Record<string, unknown> | undefined {
   try {

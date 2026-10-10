@@ -62,6 +62,7 @@ if (platform === "ios") {
     "-scheme", "LinkShell",
     "-configuration", "Release",
     "-archivePath", archive,
+    "-derivedDataPath", join(outDir, "DerivedData"),
     "-destination", "generic/platform=iOS",
     "-allowProvisioningUpdates",
     "CODE_SIGN_STYLE=Automatic",

@@ -5,23 +5,22 @@ set -e
 
 VERSION=${1:-$(node -e "console.log(require('./packages/cli/package.json').version)")}
 TARBALL_URL="https://registry.npmjs.org/linkshell-cli/-/linkshell-cli-${VERSION}.tgz"
-TAP_DIR="/tmp/homebrew-linkshell"
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/linkshell-brew.XXXXXX")
+trap 'rm -rf "$WORK_DIR"' EXIT
+TAP_DIR="$WORK_DIR/tap"
+TARBALL="$WORK_DIR/linkshell-cli.tgz"
 
 echo "Updating Homebrew formula for v${VERSION}..."
 
 # Download and hash
-curl -fsSL -o /tmp/linkshell-cli.tgz "$TARBALL_URL"
-tar -tzf /tmp/linkshell-cli.tgz >/dev/null
-SHA=$(shasum -a 256 /tmp/linkshell-cli.tgz | awk '{print $1}')
+curl -fsSL -o "$TARBALL" "$TARBALL_URL"
+tar -tzf "$TARBALL" >/dev/null
+SHA=$(shasum -a 256 "$TARBALL" | awk '{print $1}')
 echo "SHA256: ${SHA}"
 
-# Clone or pull tap repo
-if [ -d "$TAP_DIR" ]; then
-  cd "$TAP_DIR" && git pull origin main
-else
-  git clone https://github.com/LiuTianjie/homebrew-linkshell.git "$TAP_DIR"
-  cd "$TAP_DIR"
-fi
+# Own this checkout so a release never reuses someone else's dirty tap.
+git clone --depth 1 https://github.com/LiuTianjie/homebrew-linkshell.git "$TAP_DIR"
+cd "$TAP_DIR"
 
 # Update formula
 cat > Formula/linkshell.rb << RUBY
@@ -50,4 +49,3 @@ git commit -m "bump: linkshell ${VERSION}"
 git push origin main
 
 echo "Done! Formula updated to v${VERSION}"
-rm -f /tmp/linkshell-cli.tgz
