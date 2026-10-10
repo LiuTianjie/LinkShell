@@ -21,15 +21,16 @@ import { type } from "@/theme/type";
 
 function Row({ entry, last, now, onPress }: { entry: SubagentInfo; last: boolean; now: number; onPress: () => void }) {
   const failed = entry.failed === true;
+  const outcome = entry.state === "unknown" ? "结果待确认" : entry.state === "stopped" ? "已停止" : entry.state === "paused" ? "已暂停" : failed ? "失败" : "已完成";
   const state = entry.running
-    ? `已运行 ${duration(now - entry.startedAt)}`
-    : `${failed ? "失败" : "已完成"} · ${relativeTime(entry.endedAt ?? entry.startedAt, now)}`;
+    ? entry.state === "paused" ? "已暂停" : `已运行 ${duration(now - entry.startedAt)}`
+    : `${outcome} · ${relativeTime(entry.endedAt ?? entry.startedAt, now)}`;
   return (
     <PressableScale
       onPress={onPress}
       pressedScale={0.985}
       accessibilityRole="button"
-      accessibilityLabel={[entry.agentType ?? "子 Agent", entry.task, entry.running ? "运行中" : failed ? "失败" : "已完成"].join("，")}
+      accessibilityLabel={[entry.name ?? entry.agentType ?? "子 Agent", entry.task, entry.running ? "运行中" : outcome].join("，")}
       accessibilityHint="查看这个子 Agent 的全部过程"
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingLeft: 14 }}>
@@ -56,7 +57,7 @@ function Row({ entry, last, now, onPress }: { entry: SubagentInfo; last: boolean
                 numberOfLines={1}
                 style={[type.footnote, { flex: 1, color: entry.running ? colors.running : failed ? colors.danger : colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}
               >
-                {entry.agentType && entry.task ? <Text style={{ color: colors.secondaryLabel }}>{entry.agentType} · </Text> : null}
+                {(entry.name ?? entry.agentType) && entry.task ? <Text style={{ color: colors.secondaryLabel }}>{entry.name ?? entry.agentType} · </Text> : null}
                 {state}
               </Text>
             </View>

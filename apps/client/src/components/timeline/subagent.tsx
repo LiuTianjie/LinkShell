@@ -85,7 +85,7 @@ export function useSubagentProgress(item: ToolItem) {
     stopped,
     unknown,
     workflow: !!workflow,
-    name: detail?.agentType ?? "子 Agent",
+    name: detail?.name ?? record?.name ?? detail?.agentType ?? "子 Agent",
     model: worker?.model ?? detail?.model,
     task: detail?.task ?? item.title.replace(/^[^:：]*[:：]\s*/, ""),
     summary:

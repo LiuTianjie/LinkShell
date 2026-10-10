@@ -157,9 +157,13 @@ export function TerminalScreen() {
       {
         text: ended ? "删除" : "关闭",
         style: "destructive",
-        onPress: () => {
-          void link.call("terminals.close", { terminalId: id }).catch(() => {});
-          router.back();
+        onPress: async () => {
+          try {
+            await link.call("terminals.close", { terminalId: id });
+            router.dismissTo("/");
+          } catch (reason) {
+            Alert.alert(ended ? "删除失败" : "关闭失败", reason instanceof Error ? reason.message : String(reason));
+          }
         },
       },
     ]);

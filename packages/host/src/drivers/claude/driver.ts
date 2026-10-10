@@ -247,6 +247,7 @@ export class ClaudeDriver extends AcpDriver {
     if (path) {
       const transcript = readTranscript(path, { includeSubagents: false, onLine: (raw) => activity.observe(raw) });
       activity.poll();
+      if (!(this.modes.get(nativeId) === "remote" && state.loaded) && sessionHolders(this.configDir, nativeId).length === 0) activity.lostHolder();
       state.tracker = new AcpItemTracker();
       // What is under way on the computer isn't history yet: a turn's start and
       // the tool calls still running, and agents working in the background
@@ -736,9 +737,13 @@ export class ClaudeDriver extends AcpDriver {
 
   private async watchRemoteSessions(): Promise<void> {
     for (const [nativeId, tasks] of this.tasks) {
-      if (![...tasks.records.values()].some((task) => task.state === "running")) continue;
+      const activity = this.activity.get(nativeId);
+      if (![...tasks.records.values()].some((task) => task.state === "running") && !activity?.hasRunningTeammates()) continue;
       if (this.modes.get(nativeId) === "remote" && this.sessions.get(nativeId)?.loaded) continue;
-      if (sessionHolders(this.configDir, nativeId).length === 0) tasks.lostHolder();
+      if (sessionHolders(this.configDir, nativeId).length === 0) {
+        tasks.lostHolder();
+        activity?.lostHolder();
+      }
     }
     for (const nativeId of [...this.waiting.keys()]) await this.sendWaiting(nativeId).catch(() => {});
     for (const [nativeId, mode] of this.modes) {

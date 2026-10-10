@@ -155,6 +155,7 @@ export const subagentInfoSchema = z.object({
   task: z.string(),
   /** Its role or type, e.g. "Explore". */
   agentType: z.string().optional(),
+  name: z.string().optional(),
   running: z.boolean(),
   failed: z.boolean().optional(),
   startedAt: z.number(),

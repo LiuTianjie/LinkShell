@@ -9,6 +9,7 @@ import type { SessionEvent, SessionSummary } from "@linkshell/wire";
 import { ClaudeDriver } from "../src/drivers/claude/driver.js";
 import { connectHost, type HostClient } from "../src/rpc/client.js";
 import { startHost, type RunningHost } from "../src/host.js";
+import { HostStore } from "../src/store.js";
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 const FAKE_ACP = fileURLToPath(new URL("./fixtures/fake-acp.mjs", import.meta.url));
@@ -133,6 +134,44 @@ async function terminal(host: RunningHost, e: Env, sessionId?: string) {
 const text = (t: string) => [{ type: "text" as const, text: t }];
 
 describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
+  it("backfills teammate steps into a legacy host log and corrects completed-at-launch without duplicating history", async () => {
+    const e = makeEnv(); const host = await boot(e); const p = await phone(host); const desk = await terminal(host, e);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    desk.type("prepare"); await waitFor(() => p.agentTexts(desk.id).includes("echo: prepare"));
+    const native = desk.id.slice("claude:".length);
+    const dir = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"));
+    const transcript = join(dir, `${native}.jsonl`), children = join(dir, native, "subagents");
+    await desk.quit(); await host.stop(); mkdirSync(children, { recursive: true });
+    const legacy = new HostStore(join(e.home, "state.db"));
+    const write = (path: string, entry: object) => appendFileSync(path, JSON.stringify({ timestamp: new Date().toISOString(), uuid: randomUUID(), ...entry }) + "\n");
+    for (const [name, done] of [["frontend", true], ["backend", false]] as const) {
+      const call = `call-${name}`, agentId = `a${name}-123`;
+      write(transcript, { type: "assistant", message: { content: [{ type: "tool_use", id: call, name: "Agent", input: { name, description: `${name} work`, subagent_type: "general-purpose" } }] } });
+      write(transcript, { type: "user", message: { content: [{ type: "tool_result", tool_use_id: call, content: "Spawned successfully" }] }, toolUseResult: { status: "teammate_spawned", agentId, name } });
+      writeFileSync(join(children, `agent-${agentId}.meta.json`), JSON.stringify({ taskKind: "in_process_teammate", name }));
+      const child = join(children, `agent-${agentId}.jsonl`);
+      write(child, { type: "assistant", isSidechain: true, message: { id: `${name}-step`, stop_reason: "tool_use", content: [{ type: "tool_use", id: `${name}-read`, name: "Read", input: { file_path: "/repo/a.ts" } }] } });
+      write(child, { type: "user", isSidechain: true, message: { content: [{ type: "tool_result", tool_use_id: `${name}-read`, content: "file contents" }] } });
+      if (done) write(child, { type: "assistant", isSidechain: true, message: { id: `${name}-report`, stop_reason: "end_turn", content: text("real finished report") } });
+      legacy.appendEvent(desk.id, { sessionUpdate: "tool_call", toolCallId: call, title: `${name} work`, kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", agentType: "general-purpose" } });
+      legacy.appendEvent(desk.id, { sessionUpdate: "tool_call_update", toolCallId: call, status: "completed", content: [{ type: "content", content: { type: "text", text: "Spawned successfully" } }] });
+      legacy.markItemLogged(desk.id, `tool:${call}`);
+    }
+    legacy.close();
+    const restarted = await boot(e); const p2 = await phone(restarted);
+    await p2.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    expect(restarted.hub.subagents(desk.id).find((a) => a.toolCallId === "call-frontend")).toMatchObject({ name: "frontend", state: "completed", running: false });
+    expect(restarted.hub.subagents(desk.id).find((a) => a.toolCallId === "call-backend")).toMatchObject({ name: "backend", state: "unknown", running: false });
+    const before = restarted.hub.subagent(desk.id, "call-frontend");
+    expect(before.some((e) => e.update.sessionUpdate === "tool_call" && e.update.toolCallId === "frontend-read")).toBe(true);
+    expect(before.findLast((e) => e.update.sessionUpdate === "tool_call_update" && e.update.toolCallId === "call-frontend")?.update).toMatchObject({ content: [] });
+    await restarted.stop();
+    const again = await boot(e); const p3 = await phone(again);
+    await p3.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    const replay = again.hub.subagent(desk.id, "call-frontend");
+    expect(replay.filter((e) => e.update.sessionUpdate === "agent_message_chunk" && e.update.messageId === "frontend-report")).toHaveLength(1);
+    expect(replay.filter((e) => e.update.sessionUpdate === "tool_call" && e.update.toolCallId === "frontend-read")).toHaveLength(1);
+  }, 20_000);
   it("follows shell tasks after the remote turn, reconciles restart history and marks an exited holder unknown", async () => {
     const e = makeEnv(); e.env.FAKE_ACP_EXPECT_RAW_GOAL = "1"; const host = await boot(e, 60_000, 100); const p = await phone(host);
     const { session } = await p.client.call("sessions.create", { agent: "claude", cwd: e.workDir });

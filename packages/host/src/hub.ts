@@ -695,12 +695,14 @@ export class SessionHub {
         ? { ...detail.workflow, state: "failed" as const, endedAt: state.ts }
         : detail?.workflow;
       const running = workflow?.state ? workflow.state === "running" || workflow.state === "paused" || workflow.agents?.some((agent) => agent.state === "running" || agent.state === "paused") === true
+        : detail?.state ? detail.state === "running" || detail.state === "paused" || detail.state === "pending"
         : subagentRunning({ callDone, turnActive: state.turnActive, lastChildTs: state.lastChildTs });
       agents.set(call.toolCallId, {
         toolCallId: call.toolCallId,
         parentToolCallId: call.parentToolCallId,
         task: detail?.task ?? call.title,
         agentType: detail?.agentType,
+        name: detail?.name,
         running,
         failed: (workflow?.state ? workflow.state === "failed" : detail?.state ? detail.state === "failed" : state.status === "failed") || undefined,
         startedAt: workflow?.startedAt ?? event.ts,
@@ -740,8 +742,11 @@ export class SessionHub {
     }
     if (update.sessionUpdate === "tool_call_update") {
       const state = known.get(update.toolCallId);
-      if (!state || state.callDone || (update.status !== "completed" && update.status !== "failed")) return false;
-      state.callDone = true;
+      if (!state || update.status === undefined) return false;
+      const done = update.status === "completed" || update.status === "failed";
+      if (state.callDone === done) return false;
+      // A corrected launch or a teammate's next turn can reopen the same call.
+      state.callDone = done;
       return true;
     }
     const parent = (update as { parentToolCallId?: string }).parentToolCallId;

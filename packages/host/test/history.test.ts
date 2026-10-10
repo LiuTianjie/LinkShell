@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEvent, SessionUpdate } from "@linkshell/wire";
 import type { AgentDriver, DriverHost } from "../src/drivers/types.js";
 import { SessionHub } from "../src/hub.js";
@@ -99,6 +99,20 @@ afterEach(() => {
 });
 
 describe("session history in pages", () => {
+  it("keeps a corrected teammate launch running through a long quiet command", () => {
+    driver.emit({ sessionUpdate: "tool_call", toolCallId: "member", title: "frontend", kind: "other", status: "completed", detail: { type: "subagent", action: "spawn" } });
+    expect(hub.getSession("fake:s1").subagents?.running).toBe(0);
+    driver.emit({ sessionUpdate: "tool_call_update", toolCallId: "member", status: "in_progress", detail: { type: "subagent", action: "spawn", state: "running" } });
+    driver.emit({ sessionUpdate: "ls_turn", parentToolCallId: "member", state: "started" });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 20 * 60_000);
+    try {
+      expect(hub.getSession("fake:s1").subagents?.running).toBe(1);
+      expect(hub.subagents("fake:s1")[0]?.running).toBe(true);
+      driver.emit({ sessionUpdate: "tool_call_update", toolCallId: "member", status: "completed", detail: { type: "subagent", action: "spawn", state: "completed" } });
+      driver.emit({ sessionUpdate: "ls_turn", parentToolCallId: "member", state: "ended", stopReason: "end_turn" });
+      expect(hub.getSession("fake:s1").subagents?.running).toBe(0);
+    } finally { clock.mockRestore(); }
+  });
   it("restores a workflow launch failure without waiting for a background run that was never created", () => {
     driver.emit({ sessionUpdate: "tool_call", toolCallId: "wf-failed", title: "Workflow", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", workflow: {} } });
     driver.emit({ sessionUpdate: "tool_call_update", toolCallId: "wf-failed", status: "failed" });

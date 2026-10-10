@@ -126,8 +126,8 @@ function SubagentSheet({ item, fullScreen }: { item: ToolItem; fullScreen: boole
         <ScrollableState>
         <EmptyState
           icon={{ sf: "hourglass", md: "hourglass_empty" }}
-          title={progress.running ? "正在启动…" : "没有过程记录"}
-          message={progress.running ? undefined : "这个 Agent 没有上报它的步骤。"}
+          title={progress.running ? "等待过程记录…" : "暂无过程记录"}
+          message="暂未读取到这个 Agent 的执行步骤。"
         />
         </ScrollableState>
       ) : (

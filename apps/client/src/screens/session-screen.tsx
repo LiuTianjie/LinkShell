@@ -149,8 +149,8 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const [contentHeight, setContentHeight] = useState<number | null>(null);
   const composerInset = useSharedValue(0);
   const headerHeight = useHeaderHeight();
-  // The workspace already places the pane below the native bar.
-  const headerConsumed = embedded || workspace !== null;
+  // Only bounded panes consume the bar; a full-height iOS list underlaps it.
+  const headerConsumed = embedded || workspace?.headerConsumed === true;
   const introFrame = useAnimatedStyle(() => ({ bottom: composerInset.get(), paddingTop: headerConsumed ? 0 : headerHeight }));
   const listRef = useRef<LegendListRef>(null);
   const [atEnd, setAtEnd] = useState(true);

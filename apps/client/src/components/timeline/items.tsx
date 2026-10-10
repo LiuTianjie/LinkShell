@@ -11,6 +11,7 @@ import { type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
+import { AgentInbox } from "./agent-inbox";
 import { useTimelineFork, useTimelineQuestions } from "./context";
 import { questionReplies, userMessageText } from "@/lib/user-message";
 
@@ -36,6 +37,7 @@ export const UserMessage = memo(function UserMessage({
   // A slash command or skill the user ran: `/review src`, `/pdf`.
   const command = /^\/[\w:.-]+/.exec(text);
   const long = text.length > 900 || text.split("\n").length > LONG_MESSAGE_LINES;
+  if (item.agentMessages?.length) return <View style={{ gap: 10 }}>{item.agentMessages.map((message, index) => <AgentInbox key={`${message.sender}:${index}`} message={message} />)}</View>;
   return (
     <View style={{ alignItems: "flex-end", gap: 4 }}>
       {images.length ? <Attachments blocks={images} align="end" thumb={116} /> : null}

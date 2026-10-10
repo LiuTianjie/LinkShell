@@ -16,6 +16,7 @@ import type {
   ToolDetail,
   ToolKind,
 } from "@linkshell/wire";
+import { agentInboxMessages, type AgentInboxMessage } from "./agent-messages.js";
 
 // Turns a session's event log into what the UI renders. Pure and immutable:
 // each event returns a new view, and only the items it touched are new objects,
@@ -78,6 +79,8 @@ export type TimelineItem =
       kind: "user";
       id: string;
       blocks: ContentBlock[];
+      /** Claude delivers teammate mail through user-role envelopes. */
+      agentMessages?: AgentInboxMessage[];
       ts: number;
       /** Sent from this device and not yet confirmed by the host. */
       pending?: boolean;
@@ -305,7 +308,7 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       const existing = get(view, id, "user");
       // The host's copy confirms (and replaces) an optimistic one with the same id.
       const blocks = existing && !existing.pending ? [...existing.blocks, update.content] : [update.content];
-      return upsert(view, { kind: "user", id, blocks: mergeText(blocks), ts: existing?.ts ?? ts });
+      return upsert(view, { kind: "user", id, blocks: mergeText(blocks), agentMessages: agentInboxMessages(blocks), ts: existing?.ts ?? ts });
     }
     case "agent_message_chunk": {
       const existing = get(view, update.messageId, "agent");
@@ -531,7 +534,10 @@ function joinItem(earlier: TimelineItem, later: TimelineItem): TimelineItem {
     return { ...later, text: earlier.text + later.text, attachments: attachments.length ? attachments : undefined, ts: earlier.ts };
   }
   if (earlier.kind === "thought" && later.kind === "thought") return { ...later, text: earlier.text + later.text, ts: earlier.ts };
-  if (earlier.kind === "user" && later.kind === "user") return { ...later, blocks: mergeText([...earlier.blocks, ...later.blocks]), ts: earlier.ts };
+  if (earlier.kind === "user" && later.kind === "user") {
+    const blocks = mergeText([...earlier.blocks, ...later.blocks]);
+    return { ...later, blocks, agentMessages: agentInboxMessages(blocks), ts: earlier.ts };
+  }
   if (earlier.kind === "tool" && later.kind === "tool") {
     return {
       ...later,

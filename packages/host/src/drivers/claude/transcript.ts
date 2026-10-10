@@ -5,6 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 import { sessionGoalSchema, type ContentBlock, type PlanEntry, type SessionUpdate, type ToolCallContent, type ToolDetail, type ToolKind } from "@linkshell/wire";
 import { inlineImage } from "../images.js";
 import { nestUnder } from "../nesting.js";
+import { ClaudeChildIndex, ownedFile } from "./children.js";
 
 // Claude Code writes each session to ~/.claude/projects/<encoded cwd>/<id>.jsonl,
 // one JSON object per line. Assistant lines are one content block each
@@ -84,6 +85,7 @@ export function describeClaudeTool(name: string, input: Json): { title: string; 
           action: "spawn",
           task: str(input.description) ?? str(input.prompt),
           agentType: str(input.subagent_type),
+          name: str(input.name),
           model: str(input.model),
         },
       };
@@ -394,9 +396,10 @@ export function transcriptLine(
         userText = true;
       } else if (block.type === "tool_result" && str(block.tool_use_id)) {
         if (options.hidden?.delete(str(block.tool_use_id)!)) continue;
-        const launched = obj(line.toolUseResult);
+        const launched = obj(line.toolUseResult ?? line.tool_use_result);
         const workflow = launched?.status === "async_launched" || launched?.status === "remote_launched";
-        if (!block.is_error && !launched?.error && ((launched?.isAsync === true && str(launched.agentId)) || (workflow && str(launched?.taskId))) && !options.sidechain) {
+        const teammate = launched?.status === "teammate_spawned" && (str(launched.agentId) ?? str(launched.agent_id));
+        if (!block.is_error && !launched?.error && (teammate || (launched?.isAsync === true && str(launched.agentId)) || (workflow && str(launched?.taskId))) && !options.sidechain) {
           // An agent started in the background: the call returns at once (with
           // nothing to show) while the agent works on. Its end is a task notification.
           options.agents?.add(str(block.tool_use_id)!);
@@ -464,24 +467,31 @@ export const transcriptTimes = new WeakMap<SessionUpdate, number>();
 
 /**
  * Claude Code keeps each sub-agent's transcript next to the session:
- * `<session>/subagents/agent-<id>.jsonl`, with `agent-<id>.meta.json` naming
- * the Agent/Task tool call that spawned it. Returns the sub-agents' work as
+ * `<session>/subagents/agent-<id>.jsonl`. The Agent/Task result links its id
+ * to the spawning call; ordinary agents also carry that call in .meta.json.
+ * Returns the sub-agents' work as
  * updates nested under those calls (their prompt is the call's own input).
  */
-export function readSubagents(transcriptPath: string): SessionUpdate[] {
-  const dir = join(transcriptPath.replace(/\.jsonl$/, ""), "subagents");
+export function readSubagents(transcriptPath: string, index?: ClaudeChildIndex): SessionUpdate[] {
+  const root = transcriptPath.replace(/\.jsonl$/, "");
+  const dir = join(root, "subagents");
   if (!existsSync(dir)) return [];
+  if (!index) {
+    index = new ClaudeChildIndex();
+    eachLine(transcriptPath, (raw) => index!.observe(raw));
+  }
   const updates: SessionUpdate[] = [];
   for (const file of readdirSync(dir)) {
-    if (!file.endsWith(".meta.json")) continue;
-    let parent: string | undefined;
+    if (!file.startsWith("agent-") || !file.endsWith(".jsonl")) continue;
+    let parent = index.children.get(file.slice(6, -6))?.call;
     try {
-      parent = str(obj(JSON.parse(readFileSync(join(dir, file), "utf8")))?.toolUseId);
+      const metaPath = join(dir, file.replace(/\.jsonl$/, ".meta.json"));
+      if (ownedFile(root, metaPath)) parent ??= str(obj(JSON.parse(readFileSync(metaPath, "utf8")))?.toolUseId);
     } catch {
-      continue;
+      // A launch result can associate the child before its sidecar exists.
     }
-    const transcript = join(dir, file.replace(/\.meta\.json$/, ".jsonl"));
-    if (!parent || !existsSync(transcript)) continue;
+    const transcript = join(dir, file);
+    if (!parent || !ownedFile(root, transcript)) continue;
     const hidden = new Set<string>();
     const seen = new Set<string>();
     for (const raw of readFileSync(transcript, "utf8").split("\n")) {
@@ -565,9 +575,11 @@ export function readTranscript(path: string, options: { includeSubagents?: boole
   const hidden = new Set<string>();
   const agents = new Set<string>();
   const seen = new Set<string>();
+  const children = new ClaudeChildIndex();
   const size = eachLine(path, (raw) => {
     if (!raw.trim()) return;
     options.onLine?.(raw);
+    if (options.includeSubagents !== false) children.observe(raw);
     const result = transcriptLine(raw, { hidden, agents, seen });
     // The latest reply and prompt say what the session is using.
     settings = mergeSettings(settings, settingsOf(raw)) ?? settings;
@@ -575,7 +587,7 @@ export function readTranscript(path: string, options: { includeSubagents?: boole
     updates.push(...result.updates);
     if (result.title) title = result.title;
   });
-  return { updates: mergeByTime(updates, options.includeSubagents === false ? [] : readSubagents(path)), title, settings, size, agents, seen };
+  return { updates: mergeByTime(updates, options.includeSubagents === false ? [] : readSubagents(path, children)), title, settings, size, agents, seen };
 }
 
 /**

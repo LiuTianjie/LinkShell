@@ -69,6 +69,8 @@ export const toolDetailSchema = z.discriminatedUnion("type", [
     task: z.string().optional(),
     /** The sub-agent's role or type, e.g. "Explore". */
     agentType: z.string().optional(),
+    /** A named agent's address, distinct from its role. */
+    name: z.string().optional(),
     model: z.string().optional(),
     /** Agent outcome when a tool's coarse completed/failed state is insufficient. */
     state: workflowAgentStateSchema.optional(),

@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { SessionUpdate, ToolDetail, WorkflowAgentState, WorkflowPhase, WorkflowState } from "@linkshell/wire";
 import { nestUnder } from "../nesting.js";
-import { transcriptLine, TranscriptTail } from "./transcript.js";
+import { transcriptLine, TranscriptTail, type TranscriptLineResult } from "./transcript.js";
+import { ClaudeChildIndex, ownedFile, type ClaudeChild } from "./children.js";
 
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json | undefined => value && typeof value === "object" && !Array.isArray(value) ? value as Json : undefined;
@@ -35,6 +36,7 @@ interface Worker {
 }
 
 interface ChildReader { tail: TranscriptTail; revision: number }
+interface Teammate extends ClaudeChild { state: WorkflowAgentState; lastTs?: number; published?: string }
 
 interface Workflow {
   call: string;
@@ -64,6 +66,8 @@ export class ClaudeActivity {
   private readonly workflows = new Map<string, Workflow>();
   private readonly launches = new Map<string, { name?: string; task?: string; ts?: number }>();
   private readonly children = new Map<string, ChildReader>();
+  private readonly childIndex = new ClaudeChildIndex();
+  private readonly teammates = new Map<string, Teammate>();
   private readonly seen = new Set<string>();
   private observer?: TranscriptTail;
   private timer?: ReturnType<typeof setInterval>;
@@ -84,6 +88,7 @@ export class ClaudeActivity {
     const uuid = string(line.uuid);
     if (uuid && this.seen.has(uuid)) return;
     if (uuid) this.seen.add(uuid);
+    this.childIndex.observe(raw);
     const result = object(line.toolUseResult ?? line.tool_use_result);
     const content = object(line.message)?.content;
     for (const block of Array.isArray(content) ? content : []) {
@@ -156,9 +161,22 @@ export class ClaudeActivity {
   }
 
   isRunning(call: string): boolean {
+    if ([...this.teammates.values()].some((agent) => agent.call === call && active(agent.state))) return true;
     return [...this.workflows.values()].some((run) => run.call === call
       ? run.state === "running" || run.state === "paused" || [...run.workers.values()].some((worker) => active(worker.state))
       : [...run.workers.values()].some((worker) => worker.agentId && this.workerCall(run, worker) === call && active(worker.state)));
+  }
+
+  hasRunningTeammates(): boolean {
+    return [...this.teammates.values()].some((agent) => active(agent.state));
+  }
+
+  lostHolder(): void {
+    for (const agent of this.teammates.values()) {
+      if (!active(agent.state)) continue;
+      agent.state = "unknown";
+      this.publishTeammate(agent);
+    }
   }
 
   poll(): void {
@@ -168,27 +186,72 @@ export class ClaudeActivity {
     const sessionDir = transcript.replace(/\.jsonl$/, "");
     const dir = join(sessionDir, "subagents");
     for (const file of files(dir)) {
-      if (!file.endsWith(".meta.json")) continue;
-      if (!ownedFile(sessionDir, join(dir, file))) continue;
-      const meta = readJson(join(dir, file));
-      const parent = string(meta?.toolUseId);
-      const path = join(dir, file.replace(/\.meta\.json$/, ".jsonl"));
-      if (parent && ownedFile(sessionDir, path)) this.child(path, parent, () => this.options.desktop()).tail.poll();
+      if (!file.startsWith("agent-") || !file.endsWith(".jsonl")) continue;
+      const path = join(dir, file);
+      if (!ownedFile(sessionDir, path)) continue;
+      const metaPath = path.replace(/\.jsonl$/, ".meta.json");
+      const meta = ownedFile(sessionDir, metaPath) ? readJson(metaPath) : undefined;
+      const linked = this.childIndex.children.get(file.slice(6, -6));
+      const parent = linked?.call ?? string(meta?.toolUseId);
+      if (!parent) continue;
+      let teammate = this.teammates.get(parent);
+      if (!teammate && linked?.teammate) {
+        teammate = { ...linked, state: "running", lastTs: linked.ts };
+        this.teammates.set(parent, teammate);
+      }
+      const agent = teammate;
+      this.child(path, parent, () => this.options.desktop(), agent ? (line, parsed) => {
+        if (!parsed.updates.length) return;
+        agent.model ??= string(object(line.message)?.model);
+        agent.lastTs = parsed.ts ?? agent.lastTs;
+        // A teammate can receive another assignment after its previous turn ended.
+        // Only the transcript's turn outcome proves completion, never message prose.
+        agent.state = "running";
+        for (const update of parsed.updates) {
+          if (update.sessionUpdate !== "ls_turn" || update.state !== "ended") continue;
+          agent.state = update.stopReason === "cancelled" ? "stopped" : update.stopReason === "end_turn" ? "completed" : "failed";
+        }
+        if (line.isApiErrorMessage === true) agent.state = "failed";
+      } : undefined).tail.poll();
+      if (agent) this.publishTeammate(agent);
+    }
+    // The launch can precede the first child file. It is already running then.
+    for (const linked of this.childIndex.children.values()) {
+      if (!linked.teammate || this.teammates.has(linked.call)) continue;
+      const agent: Teammate = { ...linked, state: "running", lastTs: linked.ts };
+      this.teammates.set(linked.call, agent);
+      this.publishTeammate(agent);
     }
     for (const workflow of this.workflows.values()) this.pollWorkflow(sessionDir, workflow);
   }
 
-  private child(path: string, parent: string, enabled: () => boolean, metadata?: (line: Json) => void): ChildReader {
+  private publishTeammate(agent: Teammate): void {
+    const detail: Detail = { type: "subagent", action: "spawn", name: agent.name, task: agent.task,
+      agentType: agent.agentType, model: agent.model, state: agent.state };
+    const snapshot = JSON.stringify(detail);
+    if (snapshot === agent.published) return;
+    const running = active(agent.state);
+    this.options.onUpdate({ sessionUpdate: "tool_call_update", toolCallId: agent.call,
+      status: running ? "in_progress" : agent.state === "failed" ? "failed" : "completed", detail,
+      // Clear the old host's mistakenly saved "Spawned successfully" result.
+      content: [] }, agent.lastTs);
+    this.options.onUpdate({ sessionUpdate: "ls_turn", parentToolCallId: agent.call, state: running ? "started" : "ended",
+      stopReason: running ? undefined : agent.state === "stopped" ? "cancelled" : agent.state === "failed" ? "error" : "end_turn" }, agent.lastTs);
+    agent.published = snapshot;
+  }
+
+  private child(path: string, parent: string, enabled: () => boolean, metadata?: (line: Json, parsed: TranscriptLineResult) => void): ChildReader {
     let reader = this.children.get(path);
     if (!reader) {
       const hidden = new Set<string>();
       const seen = new Set<string>();
       const tail = new TranscriptTail({ locate: () => path, offset: 0, onLine: (raw) => {
         const parsed = transcriptLine(raw, { sidechain: true, hidden, seen });
-        // Advance while ACP owns an ordinary sub-agent, without echoing its stream.
-        if (!enabled()) return;
         const line = metadata ? json(raw) : undefined;
-        if (line) metadata?.(line);
+        if (line) metadata?.(line, parsed);
+        // Lifecycle still follows disk while ACP owns the conversation, but
+        // the child text must come from only one stream across handoff.
+        if (!enabled()) return;
         if (parsed.updates.length) reader!.revision += 1;
         for (const update of parsed.updates) {
           const nested = "parentToolCallId" in update && update.parentToolCallId ? update : nestUnder(update, parent);
@@ -405,13 +468,4 @@ function files(path: string): string[] {
 
 function readJson(path: string): Json | undefined {
   try { return statSync(path).size <= 16 * 1024 * 1024 ? json(readFileSync(path, "utf8")) : undefined; } catch { return undefined; }
-}
-
-/** Transcript content may name paths; only follow artifacts inside this session. */
-function ownedFile(root: string, path: string): boolean {
-  try {
-    if (!existsSync(path)) return false;
-    const rel = relative(realpathSync(root), realpathSync(path));
-    return rel !== ".." && !rel.startsWith(`..${sep}`) && !rel.startsWith(sep) && statSync(path).isFile();
-  } catch { return false; }
 }

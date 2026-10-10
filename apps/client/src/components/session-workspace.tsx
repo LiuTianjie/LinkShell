@@ -26,7 +26,7 @@ import { haptics } from "@/lib/haptics";
 import { LayoutProbe } from "../../modules/link-layout";
 
 type Panel = "changes" | "preview";
-const Workspace = createContext<{ split: boolean; show: (panel: Panel) => void } | null>(null);
+const Workspace = createContext<{ split: boolean; headerConsumed: boolean; show: (panel: Panel) => void } | null>(null);
 export const useSessionWorkspace = () => use(Workspace);
 
 /** The conversation and browser stay mounted while the window folds or resizes. */
@@ -49,17 +49,21 @@ export function SessionWorkspace({ sessionId, initialPanel, children }: { sessio
     setToolsOpen(true);
   }, []);
   const closeTools = () => { setMotionAction((value) => value + 1); setToolsOpen(false); };
-  const context = useMemo(() => ({ split, show: showPanel }), [split, showPanel]);
   const safeTop = Math.max(8, insets.top, Platform.OS === "ios" ? homeNavigationLayout(insets, systemInsets, headerHeight).contentTop : 0);
+  // The iOS list adjusts its own inset and must scroll behind the transparent bar.
+  // Folded panes keep their explicit bounds so content cannot cross the hinge.
+  const chatTop = Platform.OS === "ios" && !folded ? 0 : safeTop;
+  const headerConsumed = chatTop > 0;
+  const context = useMemo(() => ({ split, headerConsumed, show: showPanel }), [split, headerConsumed, showPanel]);
   const bottom = laptop ? insets.bottom : 0;
   const foldLayout = useMemo(() => laptop ? { bottomReserved: bottom } : null, [laptop, bottom]);
   const motionGeometry = [geometry.revision, width, height, folded, axis, before, after, gap, safeTop, bottom].join(":");
   const chatVisible = split || !toolsOpen;
   const chat: PaneFrame = laptop
-    ? { left: 0, top: safeTop, width, height: Math.max(0, height - safeTop - bottom) }
+    ? { left: 0, top: chatTop, width, height: Math.max(0, height - chatTop - bottom) }
     : folded && !toolsOpen
-      ? { left: before + gap, top: safeTop, width: after, height: Math.max(0, height - safeTop) }
-      : { left: 0, top: safeTop, width: chatVisible ? toolsOpen && split ? before : width : 0, height: Math.max(0, height - safeTop) };
+      ? { left: before + gap, top: chatTop, width: after, height: Math.max(0, height - chatTop) }
+      : { left: 0, top: chatTop, width: chatVisible ? toolsOpen && split ? before : width : 0, height: Math.max(0, height - chatTop) };
   const tools: PaneFrame = split && axis === "column"
     ? { left: 0, top: safeTop, width, height: toolsOpen ? Math.max(0, before - safeTop) : 0 }
     : { left: toolsOpen ? split ? before + gap : 0 : width, top: safeTop, width: toolsOpen ? Math.max(0, split ? after - 12 : width) : 0, height: Math.max(0, height - safeTop - 12) };

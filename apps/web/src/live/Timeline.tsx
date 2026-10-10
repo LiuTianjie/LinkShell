@@ -345,6 +345,13 @@ export function Timeline({
                     : "本轮结束"}
             </p>
           );
+        if (item.kind === "user" && item.agentMessages?.length)
+          return <article key={item.id} className="agent-message">
+            {item.agentMessages.map((message, index) => <details key={`${message.sender}:${index}`}>
+              <summary><span className="message-label">{message.notice === "idle" ? `@${message.sender} · 本轮已结束` : `来自 @${message.sender}`}</span>{message.summary ? ` · ${message.summary}` : ""}</summary>
+              <RichText text={message.body || "当前空闲，等待后续任务。"} />
+            </details>)}
+          </article>;
         if (item.kind === "user")
           return (
             <article className="user-message" key={item.id}>
