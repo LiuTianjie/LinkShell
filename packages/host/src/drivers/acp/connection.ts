@@ -34,6 +34,7 @@ export interface AcpConnectionOptions {
   onUpdate: (sessionId: string, update: unknown) => void;
   /** Agent → client requests (session/request_permission, …). */
   onRequest: (method: string, params: unknown, id: RpcId) => unknown;
+  onCancelRequest?: (id: RpcId) => void;
   onExit: (reason: string) => void;
 }
 
@@ -71,6 +72,11 @@ export class AcpConnection {
         if (child.stdin?.writable) child.stdin.write(`${text}\n`);
       },
       onNotification: (method, params) => {
+        if (method === "$/cancel_request") {
+          const id = (params as { requestId?: unknown } | undefined)?.requestId;
+          if (typeof id === "string" || typeof id === "number") this.options.onCancelRequest?.(id);
+          return;
+        }
         if (method === "_claude/sdkMessage") {
           const raw = params as { sessionId?: string; message?: { type?: string; value?: { condition?: string; iterations?: number; last_reason?: string } | null } };
           if (raw?.sessionId && raw.message?.type === "active_goal") {

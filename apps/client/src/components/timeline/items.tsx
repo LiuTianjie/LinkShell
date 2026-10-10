@@ -31,7 +31,7 @@ export const UserMessage = memo(function UserMessage({
   const [expanded, setExpanded] = useState(false);
   const raw = userMessageText(item.blocks);
   const replies = questionReplies(raw);
-  const text = replies ? replies.map((reply) => reply.answer).join("\n\n") : raw;
+  const text = replies ? replies.map((reply) => reply.answer || "已跳过").join("\n\n") : raw;
   const images = item.blocks.filter((block) => block.type === "image");
   const links = item.blocks.filter((block) => block.type === "resource_link");
   // A slash command or skill the user ran: `/review src`, `/pdf`.
@@ -116,13 +116,16 @@ export const AgentMessage = memo(function AgentMessage({ item, last = false }: {
 function AsyncQuestions({ questions }: { questions: NonNullable<Of<"agent">["questions"]> }) {
   const context = useTimelineQuestions();
   const [picked, setPicked] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   if (!context) return null;
   return (
     <View style={{ gap: 12 }}>
+      {error ? <Text style={[type.caption, { color: colors.danger }]}>{error}</Text> : null}
       {questions.map((question) => {
         const given = picked[question.id] ?? context.answered.get(question.id);
         const done = given !== undefined;
-        if (question.options.length === 0) return null;
+        if (question.options.length === 0 || (context.pending !== undefined && !done)) return null;
         return (
           <View key={question.id} style={{ gap: 8 }}>
             {questions.length > 1 ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{question.title}</Text> : null}
@@ -132,15 +135,18 @@ function AsyncQuestions({ questions }: { questions: NonNullable<Of<"agent">["que
                 return (
                   <Pressable
                     key={option}
-                    disabled={done}
+                    disabled={done || busy !== null}
                     onPress={() => {
                       haptics.selection();
-                      setPicked((current) => ({ ...current, [question.id]: option }));
-                      context.answer(question, option);
+                      setBusy(question.id);
+                      setError(null);
+                      void context.answer(question, option).then(() => {
+                        setPicked((current) => ({ ...current, [question.id]: option }));
+                      }).catch(() => setError("回答未送达，请重试")).finally(() => setBusy(null));
                     }}
                     accessibilityRole="button"
                     accessibilityLabel={`回答：${option}`}
-                    accessibilityState={{ disabled: done, selected: chosen }}
+                    accessibilityState={{ disabled: done || busy !== null, selected: chosen }}
                     style={({ pressed }) => ({
                       minHeight: 44,
                       justifyContent: "center",

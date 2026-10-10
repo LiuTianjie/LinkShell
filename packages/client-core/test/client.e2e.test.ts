@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AcpDriver, connectHost, startHost, type RunningHost } from "@linkshell/host";
 import { HostLink, type SocketLike } from "../src/host-link.js";
 import { createClientStore, shownQueue, subagentKey, type ClientStore } from "../src/store.js";
@@ -69,6 +69,25 @@ const agentText = (store: ClientStore, id: string) =>
   (store.getState().views[id]?.items ?? []).flatMap((i) => (i.kind === "agent" ? [i.text] : [])).join("|");
 
 describe("client core against a real host", () => {
+  it("keeps an unanswered question when immediate delivery fails, then accepts a retry", async () => {
+    const { host, link, store } = await setup();
+    const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });
+    await waitFor(() => store.getState().ready[session.id]);
+    const question = { id: "q1", title: "Which?", options: ["A", "B"] };
+    host.hub.driverHost.update("fake", session.nativeId, { sessionUpdate: "ls_async_questions", questions: [question] });
+    await waitFor(() => store.getState().sessions[session.id]?.asyncQuestions?.length === 1);
+    const call = vi.spyOn(link, "call");
+    call.mockRejectedValueOnce(new Error("offline"));
+    await expect(store.getState().answerAsync(session.id, question, "A")).rejects.toThrow("offline");
+    expect(store.getState().sessions[session.id]?.asyncQuestions).toEqual([question]);
+    expect(store.getState().queueing[session.id]).toBeUndefined();
+    expect(store.getState().outbox).toEqual({});
+    await store.getState().answerAsync(session.id, question, "My own answer");
+    await waitFor(() => store.getState().sessions[session.id]?.asyncQuestions?.length === 0);
+    expect(call.mock.calls.find(([method]) => method === "sessions.prompt")?.[1]).not.toHaveProperty("whenBusy");
+    call.mockRestore();
+  });
+
   it("reloads task snapshots after a disconnect even when the launching conversation is not loaded", async () => {
     const { host, store } = await setup();
     const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });

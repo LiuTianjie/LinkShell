@@ -1,5 +1,8 @@
 import {
   RpcError,
+  questionReplies,
+  updateAsyncQuestions,
+  type AsyncQuestion,
   type GoalChange,
   type BackgroundTask,
   sessionIdFor,
@@ -56,6 +59,7 @@ function isActivity(update: SessionUpdate): boolean {
     case "usage_update":
     // What state a session is in and who drives it are said again whenever it
     // is opened; a turn starting or ending is what counts.
+    case "ls_async_questions":
     case "ls_status":
     case "ls_driver":
     // A task's record is said again whenever the session is opened; its end is followed by the agent's turn about it.
@@ -367,7 +371,19 @@ export class SessionHub {
     return (this.worktreeCache ??= this.store.listWorktrees());
   }
 
+  private readonly pendingQuestions = new Map<string, AsyncQuestion[]>();
+
+  private questionsOf(sessionId: string): AsyncQuestion[] {
+    let questions = this.pendingQuestions.get(sessionId);
+    if (!questions) {
+      questions = JSON.parse(this.store.getDriverState(sessionId, "asyncQuestions") ?? "[]") as AsyncQuestion[];
+      this.pendingQuestions.set(sessionId, questions);
+    }
+    return questions;
+  }
+
   private decorate(summary: SessionSummary): SessionSummary {
+    summary = { ...summary, asyncQuestions: this.questionsOf(summary.id) };
     const live = this.live.get(summary.id);
     if (!live) return this.withWorktree(summary);
     const activity = live.turnActive ? live.activity : undefined;
@@ -817,7 +833,9 @@ export class SessionHub {
     }
     if (!this.store.claimClientMessage(sessionId, clientMessageId)) return "duplicate";
     const live = this.liveFor(sessionId);
-    if (whenBusy === "queue" && (live.turnActive || live.held.length > 0)) {
+    // An answer belongs in the turn that asked it, even from an older client using the normal queue.
+    const answersQuestion = summary.agent === "codex" && content.length === 1 && content[0]?.type === "text" && questionReplies(content[0].text);
+    if (whenBusy === "queue" && !answersQuestion && (live.turnActive || live.held.length > 0)) {
       live.held.push({ clientMessageId, content });
       this.announce(sessionId);
       return "queued";
@@ -1230,7 +1248,13 @@ export class SessionHub {
         before.updatedAt !== summary.updatedAt ||
         before.cwd !== summary.cwd ||
         before.model !== summary.model);
-    if (created || changed) this.emitSummary(summary);
+    let questionsChanged = false;
+    if (session.asyncQuestions !== undefined) {
+      questionsChanged = JSON.stringify(this.questionsOf(summary.id)) !== JSON.stringify(session.asyncQuestions);
+      this.pendingQuestions.set(summary.id, session.asyncQuestions);
+      if (questionsChanged) this.store.setDriverState(summary.id, "asyncQuestions", JSON.stringify(session.asyncQuestions));
+    }
+    if (created || changed || questionsChanged) this.emitSummary(summary);
   }
 
   private ingest(sessionId: string, update: SessionUpdate, itemId?: string, ts?: number): void {
@@ -1273,6 +1297,14 @@ export class SessionHub {
     if (!before) return;
     const patch: SessionPatch = {};
     let activityChanged = this.trackSubagent(live, update) && !live.importing;
+    const questions = this.questionsOf(sessionId);
+    const nextQuestions = updateAsyncQuestions(questions, update);
+    if (questions !== nextQuestions && JSON.stringify(questions) !== JSON.stringify(nextQuestions)) {
+      this.pendingQuestions.set(sessionId, nextQuestions);
+      this.store.setDriverState(sessionId, "asyncQuestions", JSON.stringify(nextQuestions));
+      if (live.importing) live.importChanged = true;
+      else activityChanged = true;
+    }
     if (update.sessionUpdate === "ls_task") {
       this.tasksOf(sessionId, live).set(update.task.id, update.task);
       if (live.importing) live.importChanged = true;

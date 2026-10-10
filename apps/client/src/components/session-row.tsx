@@ -4,7 +4,7 @@ import { memo, useRef } from "react";
 import { Platform, StyleSheet, View, type ColorValue } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
-import { activityText, plainPreview, sessionTitle } from "@/lib/describe";
+import { activityText, plainPreview, sessionTitle, needsUserInput } from "@/lib/describe";
 import { baseName, relativeTime } from "@/lib/format";
 import { BranchTag } from "./branch-tag";
 import { agentLook } from "@/theme/agents";
@@ -36,7 +36,7 @@ export function openSession(sessionId: string) {
 
 /** Agent tile with a status badge in its corner. */
 export function SessionAvatar({ session, size = 36 }: { session: SessionSummary; size?: number }) {
-  const showBadge = session.state !== "idle";
+  const showBadge = session.state !== "idle" || needsUserInput(session);
   const dot = Math.max(6, Math.round(size * 0.22));
   return (
     <View style={{ width: size, height: size }}>
@@ -52,9 +52,17 @@ export function SessionAvatar({ session, size = 36 }: { session: SessionSummary;
             backgroundColor: colors.card,
           }}
         >
-          <LiveDot color={stateColor(session.state)} size={dot} live={session.state === "running"} />
+          <LiveDot color={needsUserInput(session) ? colors.accent : stateColor(session.state)} size={dot} live={session.state === "running" && !needsUserInput(session)} />
         </View>
       ) : null}
+    </View>
+  );
+}
+
+export function UserInputBadge() {
+  return (
+    <View style={{ backgroundColor: colors.accentSoft, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 }}>
+      <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>需要用户输入</Text>
     </View>
   );
 }
@@ -286,7 +294,7 @@ export const SessionRow = memo(function SessionRow({
       leading={<SessionAvatar session={session} size={ICON} />}
       title={title}
       time={relativeTime(session.updatedAt, now)}
-      accessory={<DriverGlyph session={session} />}
+      accessory={needsUserInput(session) ? <UserInputBadge /> : <DriverGlyph session={session} />}
       project={project}
       branch={branch}
       detail={detail ?? (project || branch ? undefined : look.name)}

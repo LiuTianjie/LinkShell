@@ -9,6 +9,35 @@ It has no place in the Dock (`LSUIElement`) and one window, shown only when aske
 (`--setup`): the one in which the user gives it its two permissions. macOS 13 or later, on
 Apple silicon only: there is no build for Intel Macs.
 
+## Current media path
+
+ScreenCaptureKit produces NV12 `CVPixelBuffer`s backed by IOSurface. The video track excludes
+the cursor. `ScreenEncoderFactory` defaults to the app's low-latency VideoToolbox H.264
+adapter, retaining libwebrtc's transport, bandwidth feedback, NACK/RTX and negotiated FlexFEC.
+Encoder initialization/operation failures fall back to stock H.264; `--encoder stock` is the
+explicit comparison path. `playout-delay` 0/0 asks for prompt display, not zero end-to-end delay.
+The attempted `MaxFrameDelayCount=0` property is not supported by the hardware in the recorded
+checks and does not establish zero encoder queueing.
+
+The media peer is an iOS native receiver or a web player, independently of the Node host's
+werift bulk-data connection. iOS normally decodes H.264 through VideoToolbox into a latest-frame
+mailbox, then maps the pixel buffer to Metal. Its transparent WebView still owns gestures,
+controls and the cursor. It requests a ceiling of 120 fps, bounded by both displays, power,
+thermal state and adaptation; standard receivers retain the 60/30 defaults. No video frames
+cross JS. The native module shares the app's JitsiWebRTC M124 framework; this sender uses M154,
+so codec/extension support must be established by the actual negotiation.
+
+Failed media falls back to the host's H.264 byte stream. iOS first tries the standard WebView
+receiver and then bypasses the bulk direct channel for that screen, using RPC. Android/Web
+retain their existing stream path. Both Mac capture paths use ScreenCaptureKit/VideoToolbox;
+only the byte stream includes the cursor in the picture. There is no TURN service.
+
+See the [current architecture and diagrams](../../docs/v2/screen-realtime.md),
+[iOS receiver](../client/modules/link-screen/README.md) and
+[historical measurements](../../docs/v2/screen-realtime-history.md). Stable 120 fps, stable
+4K/60 and phone-side FlexFEC recovery are not established; the recorded periodic stutter is
+still unresolved. These are validation limits, not reasons to change defaults without evidence.
+
 ## Why it is an app
 
 macOS gives Screen Recording and Accessibility to the *responsible app* of a process, not to the
@@ -234,12 +263,12 @@ and takes its place; what is then said for the earlier `v` is dropped.
 
 | | Message | |
 |---|---|---|
-| → | `{t:"rtc.open", v, screen?, iceServers?, maxWidth?, fps?, codec?}` | `iceServers`: `[{urls, username?, credential?}]`, `urls` a string or a list. `maxWidth`: default 1920, at least 160; the picture is never larger than the display. `fps`: 1–60, the one rate to send at; left out, 60, and 30 while 60 is not being carried (see Tuning). `codec`: `"h264"` (default) or `"hevc"`, which this build of libwebrtc can't encode: H.264 is offered, and a `log` says so. |
+| → | `{t:"rtc.open", v, screen?, iceServers?, maxWidth?, fps?, maxFps?, codec?}` | `iceServers`: `[{urls, username?, credential?}]`, `urls` a string or list. `maxWidth`: default 1920, clamped to 160–3840 and bounded by the source display. `maxFps`: receiver ceiling, 30 / 60 / 120, default 60; automatic rate selection also considers the source display. `fps`: optional fixed 1–120 rate, overriding automatic selection (internal comparison). `codec`: `"h264"` (default) or `"hevc"`, which this build cannot encode; H.264 is offered and a log explains why. |
 | ← | `{t:"rtc.offer", v, sdp}` | The app offers: one send-only video track, and the four data channels. |
 | → | `{t:"rtc.answer", v, sdp}` | |
 | ↔ | `{t:"rtc.ice", v, candidate, sdpMid, sdpMLineIndex}` | Trickled, either way. Gathering goes on for the life of the session, so a viewer that changes network is found again. |
 | ← | `{t:"rtc.state", v, ice, connection}` | On every change of either, named as a browser names them. |
-| ← | `{t:"rtc.stats", v, …}` | Once a second: `bitrate` (bit/s), `fps` (frames encoded), `frameRate` (the rate in force: 60 or 30, or the one `rtc.open` named), `frameRateReason` (why it last changed, as the `log` said it; `null` while it hasn't), `width`, `height`, `encoder`, `hardware`, `codec`, `fmtp`, `keyFrames`, `qualityLimitation`, `targetBitrate`, `availableOutgoing`, `rttMs`, `packetsLost`, `nack`, `pli`, `encodeMs`, `sendDelayMs`, `hugeFrames`, `captureFps`, `repeated` (the last picture sent again), `gapMs` (the longest libwebrtc went without a picture, new or repeated), `heard` (messages received on each channel), `clock` (with `--clock`: the strip as captured against the time it was displayed, `{n, unreadable, min, median, max}` in ms). A number libwebrtc doesn't have is `null`. |
+| ← | `{t:"rtc.stats", v, …}` | Once a second: `bitrate` (bit/s), `fps` (frames encoded), `frameRate` (the rate in force: up to 120 / 60 / 30 subject to source and receiver limits, or the fixed `fps` requested), `frameRateReason` (why it last changed, as the `log` said it; `null` while it hasn't), `width`, `height`, `encoder`, `hardware`, `codec`, `fmtp`, `keyFrames`, `qualityLimitation`, `targetBitrate`, `availableOutgoing`, `rttMs`, `packetsLost`, `nack`, `pli`, `encodeMs`, `sendDelayMs`, `hugeFrames`, `captureFps`, `repeated` (the last picture sent again), `gapMs` (the longest libwebrtc went without a picture, new or repeated), `heard` (messages received on each channel), `clock` (with `--clock`: the strip as captured against the time it was displayed, `{n, unreadable, min, median, max}` in ms). A number libwebrtc doesn't have is `null`. |
 | ← | `{t:"rtc.error", v, message}` | The session has ended, and why. |
 | → | `{t:"rtc.close", v}` | |
 
@@ -322,7 +351,7 @@ and a stream beside an `rtc` session, run independently.
 
 | | Message | |
 |---|---|---|
-| → | `{t:"stream.open", v, socket, screen?, width?, fps?, bitrate?, ceiling?, gop?, profile?}` | `socket`: the path the app connects to and writes records on. `width`: the widest the picture may be, default 1920, at least 160. `fps`: default 30, 1–60. `bitrate`: bit/s on average, default 2 000 000, at least 50 000. `ceiling`: the most in any one second, never below `bitrate`. `gop`: seconds between key frames at most, default 1, at least 0.2. `profile`: `"baseline"` or `"high"`; left out, High from the low-latency encoder and Baseline from the usual one. |
+| → | `{t:"stream.open", v, socket, screen?, width?, fps?, bitrate?, ceiling?, gop?, profile?}` | `socket`: the path the app connects to and writes records on. `width`: the widest the picture may be, default 1920, at least 160. `fps`: default 30, 1–120 at this helper interface; the host's compatibility ladder requests only 8–20 fps. `bitrate`: bit/s on average, default 2 000 000, at least 50 000. `ceiling`: the most in any one second, never below `bitrate`. `gop`: seconds between key frames at most, default 1, at least 0.2. `profile`: `"baseline"` or `"high"`; left out, High from the low-latency encoder and Baseline from the usual one. |
 | → | `{t:"stream.set", v, width?, fps?, bitrate?, ceiling?}` | Takes effect without the stream stopping. |
 | → | `{t:"stream.key", v}` | The next frame is a key frame, and goes now. |
 | ← | `{t:"stream.started", v, width, height, fps, generation, mode, profile, hardware}` | After the first frame of each generation is written. `mode`: `"low-latency"` or `"real-time"`, the rate control the encoder gave. |
@@ -359,44 +388,48 @@ again once.
 
 ## Tuning
 
-`Sources/LinkShell/Tuning.swift` has the numbers that shape the picture, each with its reason:
-the defaults (1920 wide; 60 frames for the track, 30 for the stream), the track's ceiling (8 Mbit/s for 1920×1080 at 30, in
-proportion to the pixels, half as much again above 30, between 2 and 16) and where its
-bandwidth estimate starts (2 Mbit/s), the degradation preference (the picture gets smaller, not
-jerkier), the field trials (playout-delay 0), how much more than the frame rate the capture is
-asked for (1.1×), how often a still screen's picture is sent again (every 0.1 s for a second,
-then every 0.5 s), the pointer's rates (60 and 5 a second), and everything about the stream's
-pacing and key frames.
+`Sources/LinkShell/Tuning.swift` defines the shared limits. The video defaults to a maximum
+width of 1920, with a 3840 cap; an ordinary receiver gets a 60 fps ceiling, while `maxFps`
+can request 30 / 60 / 120 without disabling adaptation. The source display bounds the starting
+rate. The helper's separate byte-stream interface defaults to 30 fps, but `screen-pacer.ts`
+selects its own 8–20 fps ladder (1280-wide / 12 fps / 900 kbit/s target when `q=low`). These
+are different paths; selecting a video width does not override the compatibility ladder.
 
-**The track's frame rate** (`FrameRate.swift`, a rule with no clock and no network in it,
-tested in `Tests/`; what a change takes is `ScreenSession.change`). A session that `rtc.open`
-gave no `fps` starts at 60 and is judged once a second, while its connection is up, on the
-numbers `rtc.stats` says:
+The video bitrate ceiling starts from 8 Mbit/s for 1920×1080 at 30 fps. Pixel counts below
+1080p scale proportionally; above it they scale by their square root. The frame factor is 1
+through 30 fps, 1.5 through 60, and `1.5 × fps / 60` above 60. The result is clamped to
+2–30 Mbit/s: 1080p30/60/120 ceilings are 8/12/24 Mbit/s. Actual bitrate follows WebRTC's
+estimate, initialized at 2 Mbit/s, and the content.
 
-- **Down to 30** when, for 3 seconds running, the picture sent has under 0.9 of the captured
-  picture's pixels (libwebrtc made it smaller: too little bandwidth, or too little processor),
-  or the screen gives at least 0.8 of the rate and under 0.75 of what it gives is encoded.
-  Packets lost, a low estimate while the picture is whole, and the encoder's time over a frame
-  are not reasons.
-- **Back to 60** when, for 10 seconds running at 30, the picture is whole, libwebrtc says
-  nothing limits it, frames are not being lost and the bandwidth estimate is at least 0.4 of
-  the ceiling at 60 (4.8 Mbit/s for 1920×1080). The 10 seconds double, up to 160, each time 60
-  is lost again within 30 seconds of being tried.
-- Nothing is concluded in a connection's first 4 seconds, nor in the 4 after each change.
+`maintainFramerate` permits WebRTC to reduce resolution under resource pressure. Separately,
+`ScreenEncoderFactory.scaling` returns no QP thresholds, suppressing QP-only quality scaling
+that unnecessarily shrank text. `FrameRate.swift` judges the connection once a second and
+reduces rate when the full picture/rate cannot be carried:
 
-A change is made with the capture running and nothing negotiated: ScreenCaptureKit's frame
-interval, the sender's `maxFramerate` and its ceiling. Going down, a picture libwebrtc had
-shrunk is whole again from the next frame (a key frame) and stays so for 4 seconds, after which
-libwebrtc may shrink it again; going up, the first second may send half of what 30 was sending.
-Each change is a `log`: `frame rate 60 → 30: the picture was being shrunk for 3 s (bandwidth)`,
-`frame rate 30 → 60: nothing limited the picture for 10 s, and the network is estimated at
-9.8 Mbit/s`.
+- Start at the receiver/source ceiling, normally 120 or 60, with lower stages at 60 and 30
+  where applicable. A source below these rates bounds the starting rate further. Explicit
+  `fps` is a fixed internal override.
+- Reduce after 3 consecutive troubled seconds: estimated bandwidth below the full-rate
+  ceiling × 0.2 × current/full, sent pixel share below 0.9, or encoded output below 0.75 of
+  the requested active input while capture supplies at least 0.8 of the current rate.
+  Packet loss alone and time per encoded frame are not independent triggers.
+- Raise to the next stage after 10 good seconds: full picture, no quality limitation,
+  sufficient encoded output and estimated bandwidth at least the full-rate ceiling × 0.4
+  × next/full. If a raised rate fails again within 30 seconds, the next wait doubles, up
+  to 160 seconds.
+- The first 4 seconds and the 4 after a change are settling periods.
 
-Elsewhere: the quantizers at which libwebrtc resizes the picture (the encoders say 28 and 39,
-`LowLatencyEncoder.swift`; libwebrtc goes by its own for H.264, 24 and 37, as its log says), the sizing of key frames (`VideoCompressor.swift`), the 0.3 s after an event in
-which the pointer is the viewer's own and the ±2000 on a scroll (`Control.swift`), the pause
-and the 2.5 s around the input source (`Keys.swift`), and the pointer picture's scale
-(`PointerShape.swift`).
+Rate changes update ScreenCaptureKit, sender parameters and the bitrate ceiling without
+renegotiating the media connection. A decrease requests restoration of the captured dimensions;
+the sender can adapt them again later. An increase eases the first second's bitrate using
+half the previous observed bitrate, with a 1 Mbit/s floor. Neither change guarantees physical
+presentation cadence.
+
+Other settings include capture rate slack (1.1×), capture surface queue depth (5), static-frame
+repeats (0.1 s for a second, then 0.5 s), cursor position/shape polling (60/5 Hz), playout-delay
+0/0 and FlexFEC field trials. Surface pool sizes are not measured queued-frame counts.
+`VideoCompressor.swift` controls keyframe sizing, `Control.swift` input state and scroll bounds,
+and `Keys.swift` the temporary input-source switch for text.
 
 ## Measuring
 

@@ -97,8 +97,10 @@ function SubagentSheet({ item, fullScreen }: { item: ToolItem; fullScreen: boole
   const progress = useSubagentProgress(item);
 
   return (
-    <View onLayout={(event) => setHeight(event.nativeEvent.layout.height)} style={{ flex: 1, backgroundColor: colors.plain }}>
-      <View style={{ paddingTop: Math.max(12, insets.top + 8), paddingHorizontal: 20, paddingBottom: 12, gap: 10 }}>
+    // Keep the native container intact: a form sheet otherwise mistakes the
+    // task's flattened ScrollView for its main content and overwrites its frame.
+    <View collapsable={false} onLayout={(event) => setHeight(event.nativeEvent.layout.height)} style={{ flex: 1, backgroundColor: colors.plain }}>
+      <View collapsable={false} style={{ paddingTop: Math.max(12, insets.top + 8), paddingHorizontal: 20, paddingBottom: 12, gap: 10 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <SubagentGlyph failed={progress.failed} size={40} />
           <View style={{ flex: 1, gap: 2 }}>
@@ -112,7 +114,7 @@ function SubagentSheet({ item, fullScreen }: { item: ToolItem; fullScreen: boole
           <StatusMark running={progress.running && !progress.paused} failed={progress.failed} paused={progress.paused} stopped={progress.stopped} unknown={progress.unknown} />
         </View>
         {progress.task ? (
-          <ScrollView style={{ maxHeight: height ? Math.max(60, height * 0.3) : 120 }} nestedScrollEnabled>
+          <ScrollView style={{ flexGrow: 0, maxHeight: height ? Math.max(60, height * 0.3) : 120 }} contentInsetAdjustmentBehavior="never" automaticallyAdjustContentInsets={false} nestedScrollEnabled>
           <Pressable onPress={() => setTaskOpen((open) => !open)} accessibilityRole="button" accessibilityState={{ expanded: taskOpen }} accessibilityLabel="子 Agent 任务说明" style={{ minHeight: 44, justifyContent: "center" }}>
             <Text numberOfLines={taskOpen ? undefined : 3} style={[type.subhead, { color: colors.secondaryLabel }]}>
               {progress.task}

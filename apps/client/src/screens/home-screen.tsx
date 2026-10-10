@@ -1,3 +1,4 @@
+import { needsAttention } from "@/lib/describe";
 import { LegendList } from "@legendapp/list/react-native";
 import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
 import { router, Stack } from "expo-router";
@@ -80,14 +81,14 @@ function dayBucket(ts: number, now: number): string {
 
 function buildItems(sessions: SessionSummary[], terminals: TerminalInfo[], now: number): { items: Item[]; waiting: number; running: number } {
   const live = sessions.filter((s) => !s.archived);
-  const waiting = live.filter((s) => s.state === "waiting").sort(newest);
+  const waiting = live.filter((s) => needsAttention(s)).sort(newest);
   const busyTerminals = terminals.filter((t) => terminalState(t).busy);
   const running: Entry[] = [
-    ...live.filter((s) => s.state === "running").map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
+    ...live.filter((s) => s.state === "running" && !needsAttention(s)).map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
     ...busyTerminals.map((terminal): Entry => ({ kind: "terminal", terminal, at: terminal.activeAt })),
   ].sort((a, b) => b.at - a.at);
   const recent: Entry[] = [
-    ...live.filter((s) => s.state !== "waiting" && s.state !== "running").map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
+    ...live.filter((s) => !needsAttention(s) && s.state !== "running").map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
     ...terminals.filter((t) => !busyTerminals.includes(t)).map((terminal): Entry => ({ kind: "terminal", terminal, at: terminal.activeAt })),
   ].sort((a, b) => b.at - a.at);
   const items: Item[] = [];
@@ -177,7 +178,7 @@ function HomeWorkspace() {
   const [motionAction, setMotionAction] = useState(0);
   const [detailVisited, setDetailVisited] = useState(false);
   const [tool, setTool] = useState<"changes" | "preview" | null>(null);
-  const first = useMemo(() => Object.values(sessions).filter((session) => !session.archived).sort((a, b) => Number(b.state === "waiting") - Number(a.state === "waiting") || b.updatedAt - a.updatedAt)[0], [sessions]);
+  const first = useMemo(() => Object.values(sessions).filter((session) => !session.archived).sort((a, b) => Number(needsAttention(b)) - Number(needsAttention(a)) || b.updatedAt - a.updatedAt)[0], [sessions]);
   const selected = selectedId && sessions[selectedId] && !sessions[selectedId].archived ? sessions[selectedId] : first;
   const select = useCallback((id: string) => {
     if (!split) {

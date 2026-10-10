@@ -305,3 +305,12 @@ export function plainPreview(text: string): string {
     .replace(/\s[-*•]\s+(?=\S)/g, " · ")
     .trim();
 }
+
+/** Async questions need attention even while the agent keeps working. */
+export function needsUserInput(session: SessionSummary): boolean {
+  return !!session.permission?.questions?.length || !!session.asyncQuestions?.length;
+}
+
+export function needsAttention(session: SessionSummary): boolean {
+  return session.state === "waiting" || needsUserInput(session);
+}

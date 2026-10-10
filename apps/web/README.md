@@ -27,6 +27,25 @@ Output: `apps/web/dist`. The gateway Docker image and npm package bundle this cl
 
 Browser UI does not independently reimplement authorization, agent execution or the session event model. Host actions remain authoritative. Unsupported agent capabilities are not advertised as available.
 
+## Remote screen transport
+
+`src/live/Video.tsx` calls `screen.start`, fetches the host viewer HTML through `HostStreams`
+and mounts it in a sandboxed iframe. Its WebSocket shim only forwards the selected loopback
+port's `/stream`. It keeps the page's controls, resolution choices and input behavior.
+
+On a Mac, that page receives a WebRTC video track directly from LinkShell.app into `<video>`;
+four DataChannels carry input and cursor state. This is a separate peer connection from the
+Node host's bulk DataChannel used by `HostStreams`. SDP/ICE still crosses the authenticated
+host stream. A failed video connection falls back to H.264 bytes over that existing stream
+and WebCodecs/Canvas; it can use bulk direct transport or the encrypted gateway RPC path.
+There is no TURN. The iOS native receiver and its final forced-RPC step do not run here.
+
+The current browser entry does not set `q=low` or `maxFps`: it retains the standard media
+ceiling of 60 fps (bounded by the Mac display) and does not automatically select the mobile
+relay's 12 fps compatibility start. WebCodecs availability is required for byte-stream
+fallback. Runtime negotiation and real networks need separate validation; see the
+[current architecture](../../docs/v2/screen-realtime.md).
+
 ## Official and private deployments
 
 | | Official website | Self-hosted website |

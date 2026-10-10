@@ -1,6 +1,8 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   RpcError,
+  asyncQuestionReply,
+  type AsyncQuestion,
   type ContentBlock,
   type BackgroundTask,
   type MachineInfo,
@@ -96,6 +98,8 @@ export interface ClientActions {
   respond(sessionId: string, requestId: string, optionId: string): Promise<void>;
   /** Answers the questions of a pending request (one whose `questions` are set). */
   answer(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>;
+  /** Answers an async question immediately, without putting it behind the active turn. */
+  answerAsync(sessionId: string, question: AsyncQuestion, answer: string): Promise<void>;
   cancel(sessionId: string): Promise<void>;
   takeover(sessionId: string): Promise<void>;
   /** Hands a handoff session back so the desktop can pick it up again. */
@@ -452,6 +456,23 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
       async answer(sessionId, requestId, answers) {
         await link.call("sessions.answer", { sessionId, requestId, answers });
+      },
+
+      async answerAsync(sessionId, question, answer) {
+        const clientMessageId = newId();
+        const result = await link.call("sessions.prompt", {
+          sessionId, clientMessageId,
+          content: [{ type: "text", text: asyncQuestionReply([{ question, answer }]) }],
+        }, 30_000);
+        // Older hosts enqueue desktop-owned turns. Use their existing immediate-send path.
+        if (result.delivery === "queued") {
+          try {
+            await link.call("sessions.sendQueued", { sessionId, clientMessageId }, 30_000);
+          } catch (error) {
+            await link.call("sessions.unqueue", { sessionId, clientMessageId }).catch(() => {});
+            throw error;
+          }
+        }
       },
 
       async cancel(sessionId) {

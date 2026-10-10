@@ -89,9 +89,10 @@ function chunk(kind, messageId, text) {
   if (withIds && messageId) payload.messageId = messageId;
   return payload;
 }
-function requestClient(method, params) {
+function requestClient(method, params, cancelAfter) {
   const id = nextId++;
   send({ id, method, params });
+  if (cancelAfter) setTimeout(() => send({ method: "$/cancel_request", params: { requestId: id } }), cancelAfter);
   return new Promise((resolve) => pendingClientRequests.set(id, resolve));
 }
 function config(session) {
@@ -124,6 +125,7 @@ function requireSession(params) {
   return session;
 }
 function requireOpenArgs(params) {
+  if (process.env.FAKE_ACP_EXPECT_QUESTIONS === "1" && params._meta?.askUserQuestion !== true) throw { code: -32602, message: "missing askUserQuestion capability" };
   if (process.env.FAKE_ACP_EXPECT_RAW_GOAL === "1" && !params._meta?.claudeCode?.emitRawSDKMessages?.some((filter) => filter.type === "active_goal")) throw { code: -32602, message: "missing Goal SDK filter" };
   if (!Array.isArray(params.mcpServers)) throw { code: -32602, message: "Invalid params: mcpServers is required" };
   if (typeof params.cwd !== "string") throw { code: -32602, message: "Invalid params: cwd is required" };
@@ -142,6 +144,31 @@ async function runPrompt(sessionId, text) {
   }
   if (text === "RAW_GOAL") {
     send({ jsonrpc: "2.0", method: "_claude/sdkMessage", params: { sessionId, message: { type: "active_goal", value: { condition: "完整验证", iterations: 2, last_reason: "还在运行" } } } });
+  }
+  if (text.startsWith("CURSOR_QUESTION") || text.startsWith("GROK_QUESTION") || text.startsWith("GROK_FORM")) {
+    const toolCallId = `question-${sessionId}`;
+    if (!text.includes("UNSCOPED")) update(sessionId, { sessionUpdate: "tool_call", toolCallId, title: "Question", kind: "other", status: "in_progress" });
+    const cursor = text.startsWith("CURSOR");
+    const form = text.startsWith("GROK_FORM");
+    const method = cursor ? text.includes("PREFIXED") ? "_cursor/ask_question" : "cursor/ask_question" : form ? "_x.ai/mcp/elicit" : "_x.ai/ask_user_question";
+    const params = cursor ? {
+      toolCallId, title: "Choose", questions: [
+        { id: "db", prompt: "Database?", options: [{ id: "pg", label: "Postgres" }, { id: "lite", label: "SQLite" }] },
+        { id: "checks", prompt: "Checks?", allowMultiple: true, options: [{ id: "unit", label: "Unit tests" }, { id: "types", label: "Typecheck" }] },
+      ],
+    } : form ? {
+      sessionId, toolCallId, mode: "form", serverName: "test", message: "Settings?", requestedSchema: { type: "object", properties: { enabled: { type: "boolean" } } },
+    } : {
+      sessionId, toolCallId, mode: "default", questions: [
+        { question: "Database?", options: [{ label: "Postgres", description: "Default", preview: "Plan preview" }, { label: "SQLite", description: "Local" }] },
+        { question: "Checks?", multiSelect: true, options: [{ label: "lint, strict", description: "Lint" }, { label: "tests", description: "Tests" }] },
+      ],
+    };
+    const outcome = await requestClient(method, params, text.includes("CANCEL_REVERSE") ? 250 : undefined);
+    if (text.includes("CANCEL_REVERSE")) await sleep(200);
+    update(sessionId, chunk("agent_message_chunk", `reply-${++messageCounter}`, `question-result: ${JSON.stringify(outcome)}`));
+    running.delete(sessionId);
+    return "end_turn";
   }
   if (text.includes("ASK")) {
     // Like Claude's adapter presents AskUserQuestion: a form, each question with a field for an answer of the user's own.
@@ -336,7 +363,7 @@ process.stdin.on("data", (data) => {
     if (!line) continue;
     const message = JSON.parse(line);
     if (message.method === undefined && message.id !== undefined) {
-      pendingClientRequests.get(message.id)?.(message.result);
+      pendingClientRequests.get(message.id)?.(message.error ? { rpcError: message.error } : message.result);
       pendingClientRequests.delete(message.id);
       continue;
     }

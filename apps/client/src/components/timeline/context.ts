@@ -22,7 +22,9 @@ export function useTimelineFork(): ((itemId: string) => void) | undefined {
 export interface TimelineQuestions {
   /** The answer given to each question answered so far, by its id. */
   answered: ReadonlyMap<string, string>;
-  answer: (question: AsyncQuestion, answer: string) => void;
+  /** Defined by newer hosts: active questions have a pinned answer card. */
+  pending?: ReadonlySet<string>;
+  answer: (question: AsyncQuestion, answer: string) => Promise<void>;
 }
 export const TimelineQuestions = createContext<TimelineQuestions | undefined>(undefined);
 

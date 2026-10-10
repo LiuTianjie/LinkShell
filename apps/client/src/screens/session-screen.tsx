@@ -1,6 +1,7 @@
+import type { AsyncQuestion } from "@linkshell/wire";
 import { setComputerPreviewMode } from "@/lib/use-computer-preview";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import { answeredQuestions, asyncQuestionReply, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
+import { answeredQuestions, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
@@ -11,6 +12,7 @@ import { KeyboardStickyView } from "react-native-keyboard-controller";
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
 import { AgentTile } from "@/components/agent-tile";
+import { AsyncQuestionCard } from "@/components/async-question-card";
 import { Composer } from "@/components/composer";
 import { Glass } from "@/components/glass";
 import { Icon } from "@/components/icon";
@@ -166,14 +168,13 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const timelineItems = useMemo(() => sessionTimelineItems(items, workflows, subagents), [items, workflows, subagents]);
   // The agent's async questions (Codex Desktop) are answered by a message quoting them, from here or the computer.
   const questions = useMemo(() => {
-    const answered = new Map(items.flatMap((item) => (item.kind === "user" ? item.blocks.flatMap((block) => (block.type === "text" ? answeredQuestions(block.text) : [])) : [])));
+    const answered = new Map(items.flatMap((item) => (item.kind === "user" && !item.failed && !item.pending ? item.blocks.flatMap((block) => (block.type === "text" ? answeredQuestions(block.text) : [])) : [])));
     return {
       answered,
-      // Sent like any message: a failed one shows in the timeline with its retry.
-      answer: (question: Parameters<typeof asyncQuestionReply>[0][number]["question"], answer: string) =>
-        void actions.send(id, [{ type: "text", text: asyncQuestionReply([{ question, answer }]) }]),
+      pending: summary?.asyncQuestions ? new Set(summary.asyncQuestions.map((question) => question.id)) : undefined,
+      answer: (question: AsyncQuestion, answer: string) => actions.answerAsync(id, question, answer),
     };
-  }, [items, actions, id]);
+  }, [items, actions, id, summary?.asyncQuestions]);
   // The session opens at its latest turns; what came before loads a page at a time.
   const hasEarlier = (view?.startSeq ?? 0) > 0;
   const earlier = useMemo(
@@ -505,7 +506,15 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
           keyboardOffset={keyboardOffset}
           autoFocusOnPoseEntry={folded !== null}
           accessoryHeight={(!atEnd && items.length > 0 ? 42 : 0) + (embedded ? 0 : insets.top)}
-          leadingContent={view?.goal || tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <>{view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}{tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} /> : null}</> : undefined}
+          leadingContent={
+            (summary.asyncQuestions?.length ?? 0) > 0 || view?.goal || tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? (
+              <>
+                {summary.asyncQuestions?.length ? <AsyncQuestionCard sessionId={id} questions={summary.asyncQuestions} agentName={look.name} disabled={!online} /> : null}
+                {view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}
+                {tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} /> : null}
+              </>
+            ) : undefined
+          }
           onSend={commandControls.send}
           onStop={() => guard(() => actions.cancel(id), "停止失败")}
           queue={shownQueue(summary.queue, queueing)}

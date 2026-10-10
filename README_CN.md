@@ -80,7 +80,7 @@ linkshell codex     # Codex：终端和手机同时在线
 linkshell screen      # macOS：弹出 LinkShell 窗口，带你到每个开关前，等你打开
 ```
 
-在 Mac 上不需要再装别的：画面和控制都由 **LinkShell** 完成——一个随 CLI 一起安装的带签名的程序。它的两项权限（录屏、辅助功能）是两个名为 LinkShell 的开关，打开一次即可：不管用哪个终端启动 host、怎么升级，都不用再授权。需要 Apple 芯片的 Mac、macOS 13 及以上。Linux 上可以看屏幕（不能控制），需要装有 `ffmpeg`。
+在 Mac 上不需要再装别的：画面和控制都由 **LinkShell** 完成——一个随 CLI 一起安装的带签名的程序。它的两项权限（录屏、辅助功能）是两个名为 LinkShell 的开关，打开一次即可：不管用哪个终端启动 host、怎么升级，都不用再授权。需要 Apple 芯片的 Mac、macOS 13 及以上。Linux 上可以看屏幕（不能控制），需要装有 `ffmpeg` 并有 X11 显示环境。
 
 <details>
 <summary>其他安装方式</summary>
@@ -128,8 +128,8 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 
 ### 还有这些
 
-- **回答它的提问。** Agent 让你做选择或填内容时——Claude 的提问、Codex 的提问、MCP 服务的表单——问题会连同选项一起推到手机上：选一个、自己写，或者跳过。
-- **直连你的电脑。** 屏幕画面和端口预览在能直连时点对点传输（同一网络，或者穿透 NAT），网关只负责帮两边找到对方。Mac 屏幕使用硬件编码的实时视频，指针在手机上本地绘制。iOS 默认原生低延迟接收，按设备和网络能力自动请求最高 120 帧；不可用时依次回退常规视频和网关中继，无需手动切换。
+- **回答它的提问。** Codex（包括 Desktop 异步提问）、Claude、Cursor 和 Grok 的结构化问题会推到手机上，会话显示「需要用户输入」，可在问题卡片中回答或跳过。Agent 支持时可填写自定义文字；Cursor 的扩展仅支持选择。详见[Agent 提问支持范围](docs/v2/agent-questions.md)。
+- **直连你的电脑。** 屏幕画面和端口预览在能直连时点对点传输（同一网络，或者穿透 NAT）。Mac 屏幕使用低延迟 H.264 硬件编码，指针在手机本地绘制。支持原生接收的 iOS 构建默认使用原生 WebRTC 解码与 Metal 显示，在显示器、电量、温控和网络允许时请求最高 120 帧。失败先尝试 WebView 视频，再为这一路屏幕绕过独立的数据直连，走网关上的加密 RPC 字节流。Android 和浏览器使用常规观看页。网关继续负责会话和信令；当前没有部署 TURN。
 - **分叉和 worktree。** 想换个思路，就从那条回复分叉出一个新会话；可以留在当前目录，也可以放进新的 git worktree，不碰你手头的工作区。
 - **子 Agent、Claude Workflow 和长会话。** 按阶段查看工作流进度，点进每个 Agent 的对话和工具结果；后台工作流保留在输入框上方，随时能回去看。正文保留紧凑摘要，工作流内的 Agent 在流程详情查看，不再重复显示为正文卡片；连续已结束的 Agent 步骤会折叠。标题旁的按钮列出工作流和子 Agent。长会话先显示最近几轮；项目里的文件可以直接浏览和查看。
 - **命令与持续目标。** 输入 `/`、点击输入框的命令按钮，或从会话菜单打开命令面板，搜索 Agent 的命令和 skills；未发送的草稿会保留。支持 Codex 和 Claude Code 的 `/goal`，也有独立目标页面；Codex 可以暂停、继续和设置 token 预算，Claude 可以设置或清除完成条件。具体操作取决于电脑端 Agent 提供的能力。
@@ -163,7 +163,7 @@ LinkShell 用的是你电脑上已经安装、已经登录的 Agent，不经手�
 | 分叉会话（整段或从某条回复） | 原生 | 原生 | 由 LinkShell 代做：把之前的对话以文字交给它 |
 | 在 git worktree 里开会话 | 支持 | 支持 | 支持 |
 | 斜杠命令 | `/compact`、`/review`、`/init` 和你的 skills | Claude 自己的命令和你的 skills | Agent 提供什么就有什么 |
-| 向你提问（选项、自由输入） | 支持，计划模式内外都可以 | 支持 | Agent 通过 ACP 表单提问时支持 |
+| 向你提问（选项、自由输入） | 支持，包括 Desktop 异步提问 | 支持 | Cursor 选项、Grok 提问、标准 ACP 表单 |
 | 计划模式 | 手机上的一个开关 | 权限模式里的一项 | Agent 提供什么模式就有什么 |
 | 持续目标 | 设置、暂停、继续、清除、token 预算 | 设置、清除（需支持 `/goal`） | 暂未统一接入 |
 | 后台命令任务 | 状态、输出、单任务停止 | Bash / Monitor 的状态和输出 | 暂未统一接入 |
@@ -236,7 +236,10 @@ macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具�
 | `packages/client-core` | App 共用的客户端状态与时间线 |
 | `apps/client` | 手机 App：Expo / React Native，iOS 与 Android |
 | `apps/mac` | LinkShell.app（`@linkshell/mac`）：Mac 这一侧的屏幕——采集、WebRTC 视频、输入、系统权限 |
+| `apps/client/modules/link-screen` | iOS 原生屏幕接收：WebRTC 解码、最新帧缓存、Metal；复用 WebView 控件 |
 | `docs/site` | 官网与安装脚本（修改后运行 `python3 scripts/build-site-pages.py`；`scripts/site-promo-assets.sh` 负责剪出其中的影片和片段） |
+
+[远程桌面架构与链路图](docs/v2/screen-realtime.md) 说明 Mac/iOS 媒体管线、两套 WebRTC 连接、回退及验证边界。原生接收模块改动需要新 iOS 安装包，Metro 重载不能安装模块。最高 120 帧是能力请求，稳定 120 fps、稳定 4K/60 和真机弱网收益仍待验证，已记录的周期性短卡顿尚未定位。
 
 开发 App 时，在两个终端中分别从仓库根目录运行下面两条命令。给开发 host 单独的状态目录，避免与已安装的 host 共用会话和配置：
 

@@ -112,6 +112,8 @@ cd ../cli                 && pnpm publish --access public
 > - Mac 上不再需要 ffmpeg（Linux 主机仍然用它）。
 > - 只支持 Apple 芯片的 Mac（`cpu: arm64`），macOS 13 及以上；Intel Mac 上屏幕功能不可用，其余功能不受影响。
 
+iOS 原生屏幕接收在 `apps/client/modules/link-screen`，与 Mac helper 分开交付。修改原生接收、Metal 或 WebKit 桥接后必须走正常 iOS 二进制发布；Metro 重载或只发 CLI 都不会把模块装进已有 App。它复用 App 的 JitsiWebRTC，不额外装第二份框架。协议或能力协商改动要同时检查新旧 Host/App 的兼容回退，详见[屏幕技术架构](v2/screen-realtime.md)。
+
 ### 4.1 发布后立即抽检 tarball
 
 每发完一个包，等它在 npm 上出现后下载下来检查，确认没有任何 `workspace:` 字面量泄漏：
@@ -316,7 +318,11 @@ docker pull --platform linux/amd64 nickname4th/linkshell-gateway:latest
 curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网关
 ```
 
-改了屏幕相关的代码时，在 Mac 上再跑一次 `linkshell screen --check`，并用手机实际看一次屏幕。
+改了屏幕相关代码时，按[原生模块验证说明](../apps/client/modules/link-screen/README.md#validation)运行相应测试；Mac helper 改动还需 `pnpm --filter @linkshell/mac check`。`linkshell screen --check` 只证明权限/可用性，不能证明视频、输入和性能。
+
+用正常 App 二进制在真机分别检查原生视频、WebView 视频与 RPC 字节流回退，覆盖点击/拖拽/滚动/文字、缩放、横竖屏、切换显示器、前后台与重连。原生层使用原工具栏，不能留下独立预览应用或验收入口。记录 Mac/iOS 版本、所用编码器、实际协商和路径。
+
+涉及性能的发布说明必须区分请求上限、编码 FPS、解码 FPS、实际新画面显示节奏及端到端延迟；稳定 120 fps、4K/60 或弱网恢复不能由构建或平均吞吐推出。对照正常/诊断模式并做至少 30 分钟热稳定性、网络变化和输入到真实结果检查；没有取得的数据明确列为待验收。已记录的周期性短卡顿尚未定位，不能随文档或构建更新宣布修复。
 
 ## 快速发版 Checklist
 

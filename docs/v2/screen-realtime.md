@@ -1,371 +1,251 @@
-# 屏幕实时化设计：用 WebRTC 媒体通道重做远程桌面
+# 远程桌面技术架构：Mac → iOS、WebRTC 与兼容回退
 
-> 状态：基础视频直连已实现；回环、模拟器和 iPhone 15 Pro 真机（Wi-Fi）验证通过（2026-10-02）。§10 的 iOS 原生接收和帧率协商已有首版实现（2026-10-10）：默认低延迟接收、按设备能力请求最高 120 帧，失败依次回退常规 WebRTC 和中继；原生真机性能及公网效果仍待验证。· 前置：cli 0.8.2 / host 0.3.2 / app 2.2.0 已发布的屏幕控制
-> 结论：采集和编码搬进 LinkShell.app，用 libwebrtc 的视频轨道传画面，手机端用系统自带的 WebRTC 接收；只做直连，打不通时回退到现有管线。不部署 TURN（2026-10-01 定：不用自己的服务器中转画面）。
+> 现状核对：2026-10-10，按当前源码梳理。本文描述已实现的路径、配置和边界；不代表所有已安装版本均具备相同能力，也不把构建通过当作性能验收。
+>
+> 主路线：**ScreenCaptureKit → VideoToolbox 低延迟 H.264 → WebRTC 视频直连 → iOS 原生解码 → Metal 显示**。iOS 的透明 WebView 保留工具栏、手势和光标；失败依次回退网页 WebRTC 和强制 RPC 字节流。历史设计、回环数据与早期真机记录见 [历史存档](screen-realtime-history.md)。
 
-## 0. 为什么要重做
+## 1. 组件与完整链路
 
-0.8.2 的屏幕是“可用”的，但它的上限由结构决定，不是调参能突破的：
+远程桌面有两条独立的 WebRTC 连接，不能把通用流的 `direct` 状态等同于视频轨道已经直连：
 
-| 环节 | 现状 | 上限在哪 |
-|---|---|---|
-| 采集 | ffmpeg 命令行（AVFoundation） | 用户要自己装 ffmpeg；最高 20 帧；指针烧在画面里，跟着视频一起延迟 |
-| 编码控制 | 码率、分辨率写死在命令行参数里 | 换档要重启采集，画面停约 1 秒；关键帧只能定时（1 秒一个），不能按需 |
-| 传输 | H.264 字节流走“可靠、有序”的通道（网关中继或 WebRTC 数据通道） | 一个包丢了，后面的全等它重传：延迟随丢包放大。0.8.2 的回执丢帧只是不让队列变长，治不了这个 |
-| 拥塞控制 | 自己写的回执 + 五档阶梯 | 反应以秒计；专业实现以毫秒计，并且不需要停顿 |
-| 解码显示 | WebView 里 WebCodecs → canvas | 没有抖动缓冲和丢包恢复，这些本该由传输层配合完成 |
-
-要做到“跟手”，需要的是一整套实时媒体传输：基于 UDP、带带宽估计、丢包重传/前向纠错、按需关键帧、抖动缓冲。这套东西不该自己写。
-
-## 1. 目标与非目标
-
-**最初的可用性目标（历史目标；已有的基线数据见 §9，2026-10-09 的速度与流畅度联合目标见 §10.6–10.8）**
-
-1. 端到端延迟（电脑上画面变化 → 手机上看到）：同一局域网 ≤ 70 ms；4G/5G 直连 ≤ 150 ms。
-2. 默认 30 帧，网络允许时 60 帧；文字清晰优先于帧率。
-3. 丢包 2% 时不卡顿；带宽变化时无停顿地调码率和分辨率。
-4. 指针单独传输，本地即时绘制，不跟视频延迟。
-5. 不再依赖 ffmpeg；安装仍然是 `npm i -g linkshell-cli` 一条命令，设置仍然是 `linkshell screen`。
-6. 保持端到端加密：网关只见密文。
-
-**非目标（本期不做）**
-
-- 多台设备同时观看（沿用“后来的接手”）。
-- 声音、剪贴板同步、文件拖放（列为后续）。
-- Linux / Windows 主机的新管线（继续用现有管线）。
-
-## 2. 现成方案比较
-
-| 方案 | 画面传输 | 许可证 | 能否拿来用 |
+| 连接 | 两端 | 承载内容 | 协商入口 |
 |---|---|---|---|
-| Sunshine + Moonlight | 游戏串流协议，画质和延迟目前开源里最好 | GPL-3.0 | 不能集成：许可证与我们的 App 不兼容；外网访问要端口转发或 VPN，没有打洞和中继，手机在 5G 下基本连不上 |
-| RustDesk | 自有协议，打洞 + 中继，硬件 H.264/H.265 | AGPL | 不能集成：它是完整产品，不是可嵌入的组件 |
-| Parsec / Jump Desktop / Splashtop | 自研 | 商业闭源 | 不提供可嵌入的 SDK |
-| macOS 自带屏幕共享 | 高性能模式仅限 Mac 对 Mac；对外是 VNC | 系统自带 | VNC 是最慢的一类，不考虑 |
-| **WebRTC（libwebrtc）** | UDP + 拥塞控制 + 重传/纠错 + 按需关键帧 + 硬件编解码 | BSD | **选它**。Chrome 远程桌面和浏览器端云游戏都建在它上面；我们两端已经各有一份（手机 WebView / 浏览器自带，App 里还有 react-native-webrtc） |
+| 通用数据连接 | Node Host（werift）↔ 客户端 | 端口预览、观看页 HTTP/WebSocket、兼容 H.264 字节流 | RPC `direct.offer`，客户端发 offer |
+| 屏幕媒体连接 | LinkShell.app（libwebrtc）↔ iOS 原生接收器或网页播放器 | 视频轨道，以及 `input` / `pointer` / `cursor` / `shape` 数据通道 | 观看服务 `/stream` 转发 SDP / ICE，Mac 发 offer |
 
-选 WebRTC 不是因为它“参数最高”（Moonlight 在局域网里更强），而是它是唯一同时满足四条的：许可证允许集成、自带穿透和中继机制、手机端零新增依赖、拥塞控制和丢包恢复是工业级的。
-
-## 3. 总体架构
-
+```mermaid
+flowchart TB
+  subgraph SIGNAL["连接、认证与信令"]
+    CLIENT["手机 App / Web 客户端"] <-->|"端到端加密 RPC"| GATEWAY["Gateway：认证、配对、密文转发"]
+    GATEWAY <-->|"端到端加密 RPC"| HOST["Node Host：screen.start、proxy.*、观看服务"]
+    HOST <-->|"Unix Socket：命令、SDP、ICE"| APP["LinkShell.app：权限与媒体会话"]
+    CLIENT <-.->|"独立 WebRTC DataChannel：通用字节流"| HOST
+  end
+  subgraph VIDEO["首选：屏幕媒体直连"]
+    CAPTURE["Mac ScreenCaptureKit：NV12 / IOSurface，无光标"] --> ENCODE["VideoToolbox：低延迟 H.264"]
+    ENCODE --> RTC["Mac libwebrtc：带宽估计、发送节奏、恢复"]
+    RTC ==>|"P2P 视频轨道 / DTLS-SRTP"| NATIVE["iOS 原生 WebRTC / VideoToolbox 解码"]
+    NATIVE --> MAILBOX["最新已解码帧单槽缓存"] --> METAL["纹理映射 / Metal / 显示时机调度"]
+    RTC ==>|"P2P 视频轨道 / DTLS-SRTP"| WEB["Android、浏览器、iOS 第一层回退：video"]
+    UI["WebView / 网页：手势、键盘、工具栏、本地光标"] <-->|"四条 DataChannel；iOS 经 WebKit → Swift"| INPUT["Mac Control：CGEvent 输入与光标同步"]
+  end
+  subgraph FALLBACK["兼容字节流"]
+    SOURCE["Mac：ScreenCaptureKit + VT；Linux：ffmpeg / x264"] --> PACER["Host：帧序号、ACK、丢帧、降档"]
+    PACER --> TRANSPORT["通用数据直连或加密 RPC 经网关"] --> CANVAS["WebCodecs：H.264 → Canvas"]
+    CANVAS -.->|"ACK / 输入经 Host；Mac 注入系统"| PACER
+  end
+  APP -.->|"启动采集与协商"| CAPTURE
+  RTC -.->|"视频路径失败"| SOURCE
 ```
-Mac                                                              手机
-┌ LinkShell.app（签名，持有录屏/辅助功能权限）┐
-│ ScreenCaptureKit 采集（不带指针，30–60 帧） │
-│        ↓                                    │
-│ libwebrtc：硬件编码 H.264/HEVC，带宽估计    │═══ 视频轨道（SRTP/UDP）═══▶ <video>（硬件解码、抖动缓冲）
-│ 数据通道 pointer（不可靠、无序）            │◀══ 指针移动 / 滚动 ═════════ 手势（现有页面）
-│ 数据通道 keys（可靠、有序）                 │◀══ 点击 / 按键 / 文字 ══════
-│ 数据通道 cursor                             │═══ 指针位置和形状 ══════════▶ 本地绘制指针
-└──────────────┬──────────────────────────────┘
-               │ 本机 socket：只传信令（SDP、ICE 候选）
-            host ───── 现有端到端加密通道（网关中继）───── 页面的 WebSocket
-```
 
-- **媒体路径**：ICE 只试直连（局域网、STUN 打洞）；不通就回退到 0.8.2 的现有管线（它自己也是先试数据通道直连，再经网关中继，中继时码率封顶在 900 kbps 以内）。
-- **信令路径**：不新增通道。页面已有的 WebSocket 经端到端加密通道到 host，host 再转给 LinkShell.app。DTLS 指纹随信令走，所以媒体仍是端到端加密。
-- **网关的角色**不变：配对、在线状态、转发信令和消息。网关不需要任何改动；直连成功时画面不经过网关。
+Mac 视频直连成功后，画面不经过 Node Host 或 Gateway。直连使用 ICE/STUN，没有部署 TURN；失败后的网关转发仍然存在，是现有加密 RPC 上的兼容字节流。
 
-## 4. 各部分的改动
+本功能与 [Computer Use 窗口预览](computer-use.md) 不同：后者用独立 helper 捕获目标窗口、传输可独立解码的图片，不提供这里的整屏视频轨道和人工控制。
 
-### 4.1 LinkShell.app（最大的一块）
+## 2. 从打开屏幕到开始播放
 
-从单文件 Swift 程序变成一个 Swift Package 工程：
+1. 客户端通过已配对设备或同账号身份连接 Host。Gateway 认证双方，Host 再检查设备授权。
+2. `screen.start` 枚举显示器，返回 `{port, token, displays}`。Host 只在 `127.0.0.1` 上提供观看 HTML 和 `/stream` WebSocket；每次 start 生成新的随机 token，旧 URL 不再通过授权。
+3. 手机用 `forwardPort` 在自己的回环地址提供入口，经 `HostStreams` 转到 Host。新流可走通用 DataChannel 或 RPC。Web 客户端通过 `proxy.*` 读取同一页面，装入隔离 iframe，用限于该端口的 WebSocket 桥接转发。
+4. 原生 iOS 接收器或网页播放器请求 `/stream?video=1`。Host 通过 Unix Socket 向 Mac 发送 `rtc.open`；Mac 发 offer，接收端发 answer，双方交换 ICE 候选。
+5. 媒体连接建立后，视频走加密轨道；输入与光标走该连接旁的四条 DataChannel。观看服务 socket 继续负责信令、控制授权状态和生命周期。
+6. 关闭观看、切换显示器或断线时释放对应连接与输入状态。原生 iOS 退到后台会拆除媒体连接和显示调度，回到前台重新建立。屏幕由后来的观看者接手，不支持多人同时观看同一服务会话。
 
-- **采集**：ScreenCaptureKit（macOS 12.3+）。`showsCursor = false`；分辨率和帧率用 `updateConfiguration` 实时改，不重启。
-- **编码与传输**：libwebrtc 的预编译框架（BSD；候选 LiveKitWebRTC，2026-08 仍在更新到 M144；备选 stasel/WebRTC）。视频源标记为屏幕内容，降级策略设为“保分辨率”。码率由 libwebrtc 的带宽估计实时驱动 VideoToolbox；关键帧由对端请求（PLI）触发。
-- **低延迟**：发送端带 playout-delay 扩展头，要求接收端把播放缓冲压到最小（Chrome 远程桌面的实测是减少约 150 ms）。
-- **输入**：现有的注入代码原样保留，入口从 host 的 socket 改为数据通道，少一跳。
-- **指针**：采样系统指针的位置和图形，经数据通道发给页面。
-- **体积与分发**：框架约 30–40 MB，不再适合塞进 host 包。改为一个只在 macOS 安装的可选依赖包（npm 的 `os` 字段，做法同 esbuild 的平台包），`npm i -g linkshell-cli` 仍然一步装完。需要做公证。
+信令仍然依赖 Host 连接；已经打通视频并不意味着可以永久脱离 Host/Gateway 的会话管理。
 
-### 4.2 观看页（host 下发的页面）
+## 3. Mac 发送端
 
-- canvas + WebCodecs 换成 `<video>` + `RTCPeerConnection`（只收不发，WKWebView 和 Android WebView 都支持，不需要相机权限）。
-- 手势、工具条、键盘条全部保留；事件改走数据通道，指针移动用不可靠通道（旧位置丢了无所谓）。
-- 本地绘制指针。
-- 连不上时自动回退到现有的 WebSocket 管线，并在顶栏标出当前走的是哪条路。
+### 3.1 采集与像素缓冲
 
-### 4.3 host
+`ScreenCapturer.swift` 使用 ScreenCaptureKit，输出 IOSurface 支撑的 `CVPixelBuffer`，格式为 8 位 NV12（Y + UV）、BT.709 视频范围，色彩空间为 sRGB。完整源帧和时间戳交给 libwebrtc；采集运行在独立的 `userInteractive` 队列。
 
-- 信令透传：页面 ↔ LinkShell.app。
-- 把 STUN 配置交给两端（沿用现有直连通道的那一份）。
-- 现有采集管线（ffmpeg + 回执丢帧）保留为回退路径，以及 Linux 主机的唯一路径。
+- 视频路径 `showsCursor=false`，指针单独传输；兼容路径的 `StreamCapture` 则把指针采进画面。
+- 更新帧率不重启采集。采集请求给目标帧率留 1.1 倍余量，后续管线限制实际输出。
+- 静止画面停止产生新帧时，短期每 0.1 秒、随后每 0.5 秒重送最后画面，给关键帧和画质恢复留机会；这些重复帧不是新源内容。
+- `captureQueueDepth=5` 是采集可用表面的配置，不能直接解释成固定排队五帧。
 
-### 4.4 网关与中继
+原生缓冲贯通减少应用层全帧 CPU 拷贝和格式转换，但缩放、裁剪、编码、封包仍可能涉及复制；没有全链路 trace 不能宣称绝对零拷贝。
 
-不部署 TURN，网关不改。理由：中继画面的流量和成本都落在自己的服务器上，而打不通的情况已经有现有管线兜底。
-如果以后实测直连成功率太低，再回头评估（需要一台有公网 IP、能开 UDP 端口的机器；Luma 目前没有 UDP 暴露方式）。
+### 3.2 默认低延迟 H.264 编码
 
-### 4.5 手机 App
+`Engine.ownEncoder=true`：默认使用 `LowLatencyH264Encoder` 适配自有 `VideoCompressor`，底层仍是 Apple VideoToolbox 硬件编码。当前不是以 stock 编码器为默认。
 
-第一阶段**不需要改 App**：页面里的 WebRTC 用的是系统 WebView 自带的实现。App 2.2.0 即可。
-
-## 5. 待验证的假设（先做验证，再全面开工）
-
-这份设计里有四处是我没有实测过的，任何一处不成立都会改变方案，所以第一步只做验证：
-
-| # | 假设 | 不成立时的备选 |
-|---|---|---|
-| V1 | App 里的 WKWebView（页面来自 `http://127.0.0.1`）能接收原生 libwebrtc 发来的视频轨道，延迟达标。已知 Safari 不支持 `jitterBufferTarget`，要靠发送端的 playout-delay 扩展头 | 改用原生播放器：App 里已有 react-native-webrtc，用它的原生视图渲染；手势改为原生实现。代价是要发新版 App |
-| V2 | 预编译的 libwebrtc 框架能在无窗口的后台 App 里跑通 ScreenCaptureKit → 硬件编码 → 发送，签名和公证正常 | 换另一个预编译发行版；最差自己编 libwebrtc |
-| V3 | 手机在 4G/5G 下与家用宽带的直连成功率可接受 | 打不通的走现有管线；比例太高时再评估 TURN |
-| V4 | 30–40 MB 的平台可选依赖在 npm、Homebrew、curl 三种安装方式下都能正确装上并保持签名 | 首次运行 `linkshell screen` 时下载并校验签名 |
-
-验证用的画面带毫秒时间戳，用它量出真实的端到端延迟，作为后续每一步的回归基准。
-
-## 6. 里程碑（每一步都要可实测）
-
-| 阶段 | 内容 | 验收 |
-|---|---|---|
-| M0 验证 | V1、V2 的最小原型 + 延迟测量工具 | 拿到局域网下的实测延迟数字；决定页面方案还是原生播放器 |
-| M1 直连 | 4.1–4.3 完成，仅 STUN | 局域网和可打洞网络达到 §1 的目标；失败时回退到现有管线，不比现在差 |
-| M2 打磨 | HEVC、60 帧选项、指针图形、断线重连、弱网表现调优 | 丢包 2%、带宽骤降场景的实测达标 |
-| M3 可选 | 菜单栏桌面端（状态、权限引导、开机自启、DMG）；声音；剪贴板 | 按需求再定 |
-
-## 7. 多 agent 分工
-
-设计文档（本文件）是共享的上下文。M0 结论出来后：
-
-- **A：媒体引擎**（LinkShell.app：采集、libwebrtc、数据通道、指针）
-- **B：页面与信令**（观看页改造、host 透传、回退切换）
-- **C：测量与验收**（延迟测量工具、弱网模拟、测试矩阵；独立于 A/B，负责说“达没达标”）
-
-A、B 之间的接口只有两样：信令消息格式、数据通道上的事件格式，先由我定稿再并行。各自在独立的工作树里做，由我集成、真机验证和发版。
-
-## 8. 风险
-
-- **WKWebView 的延迟不可控**（V1）。这是最大的不确定项，所以放在最前面验证。
-- **运营商网络直连率**未知（V3）。打不通的用户只能得到现有管线的体验。
-- **包体积**从 0.4 MB 到几十 MB，安装时间和失败率会上升（V4）。
-- **公证**需要你的 Apple 账号凭证（App 专用密码或 API Key），我拿不到，需要你配置一次。
-- **回退路径长期存在**意味着两套管线都要维护，直到新管线覆盖率足够高。
-
-## 9. 实施结果（2026-10-01）
-
-### 做成了什么
-
-| 部分 | 位置 | 说明 |
-|---|---|---|
-| LinkShell.app | `apps/mac`（Swift 包，发布为 `@linkshell/mac`） | ScreenCaptureKit 采集；libwebrtc（stasel/WebRTC M154 预编译框架，未改动的上游）发送视频轨道；四条数据通道（`input`、`pointer`、`cursor`、`shape`）；鼠标键盘注入和权限；显示器列表；给 socket 管线用的自有 VideoToolbox 编码（低延迟码控）。协议见 `apps/mac/README.md` |
-| host | `packages/host/src/screen.ts`、`input.ts` | 页面的 WebSocket 上转发信令；直连不成时在同一条 socket 上改发 H.264 帧；从 `@linkshell/mac` 的压缩包解出 App |
-| 观看页 | `packages/host/src/screen-viewer.ts` | `<video>` + 只收的 `RTCPeerConnection`；手势不变；指针本地绘制；放弃直连的条件：ICE 失败、8 秒没连上、连上后 4 秒没有画面、断开超过 4 秒 |
-| 手机 App | `apps/client/src/screens/screen-screen.tsx` | WebView 允许内联播放，并告诉页面（`video: true`）；旧版 App 自动走 socket 管线 |
-
-### 与设计稿不同的地方
-
-- **Mac 上彻底不用 ffmpeg 了。** 回退管线也由 App 编码：换档不重启（`stream.set`），关键帧按需生成（`stream.key`）而不是每秒一个，静止画面几乎不发数据。ffmpeg 只剩 Linux 主机在用。
-- **降级策略是“保帧率”**（`maintainFramerate`）：带宽不够时先缩分辨率，不卡顿。设计稿写的是保分辨率，与“流畅优先”的要求相反，已改。
-- **零缓冲靠 field trial**（`WebRTC-ForceSendPlayoutDelay/min_ms:0,max_ms:0/`）让发送端带 playout-delay 扩展头。Safari 没有接收端的旋钮，但认这个头：缓冲从约 68 ms 降到 0。
-- **上游的一个坑**：libwebrtc 在 macOS 上把 H.264 级别钉在 3.1，1080p 会被 VideoToolbox 拒绝，然后悄悄退到软件 VP8（CPU 约 110%）。`Encoders.swift` 包了一层把级别提上去。
-- **WebRTC 路径仍用 libwebrtc 自带的编码器。** 自写的低延迟编码器每帧快 3 ms、码率跟得更准，但 1080p30 下 95 分位延迟更差（除非同时改 pacer 的 field trial，而那只在回环上测过），所以留作开关（`--encoder own`），不是默认。
-- **没做 HEVC**：这个框架没有 ObjC 的 H.265 编码类。
-- **App 解到固定位置** `~/.linkshell/LinkShell.app`，升级时原地替换（见 V4）。
-- **默认 60 帧，带不动自动降到 30**（`FrameRate.swift`）。在 60 帧下画面被 libwebrtc 缩小、或帧发不出去持续 3 秒，就降到 30 并把完整分辨率还回来；之后 10 秒内没有任何受限且带宽估计够用，再升回 60，升上去没撑住的话下次等待时间加倍（上限 160 秒）。切换不重启采集、不重新协商。丢包本身不是降帧的理由。
-- **只支持 Apple 芯片**：LinkShell.app 只构建 arm64（`cpu: arm64`），Intel Mac 上屏幕功能不可用。
-- **首次引导**：权限由 LinkShell.app 自己的窗口带着设置（`--setup`），`linkshell setup` 把“启动 host → 屏幕权限 → 连接手机”一次做完，首次 `linkshell host --daemon` 时自动进入。
-- **有人在看时不让显示器休眠**，连上时唤醒已休眠的显示器。
-
-### 实测数字（同一台 Mac 上回环，1080p；不代表真实网络）
-
-| 发送 → 接收 | 模式 | 帧率 | 延迟 p50 | p95 | 接收缓冲 |
-|---|---|---|---|---|---|
-| App → 模拟器 Safari（iOS 26.5） | 视频 | 60 | 20 ms | 23 ms | 0 ms |
-| App → 模拟器 Safari | 视频 | 30 | 24 ms | 26 ms | 0.7 ms |
-| App → 模拟器里的 LinkShell App（WKWebView） | 视频 | 30 | 约 25 ms | 约 28 ms | 1–3 ms |
-| App → 无头 Chrome 154 | 视频 | 60 | 20 ms | 29 ms | 0.3 ms |
-| App → 模拟器 Safari | socket（兼容） | 20 | 42 ms | 65 ms | – |
-| App → 无头 Chrome | socket（兼容） | 20 | 42 ms | 63 ms | – |
-
-延迟的量法：App 用 `--clock` 在屏幕上画一条 16 位格雷码的毫秒时间码，页面逐帧读回（`?measure=1`；host 设 `LINKSHELL_SCREEN_CLOCK=1` 时自动开启并把结果写进日志）。
-
-资源：1080p30 采集 + 编码约占一个核的 11–17%，60 帧约 16–25%；静止画面约 1%。App 体积 13.6 MB，压缩包 6.8 MB（只含 arm64）。
-
-### 真机实测（iPhone 15 Pro，App 2.3.0 的 WKWebView，2026-10-02）
-
-| 链路 | 时长 | 延迟 p50 | p95 | 接收缓冲 | 备注 |
-|---|---|---|---|---|---|
-| Wi-Fi（局域网主机直连） | 62 秒 | 29 ms | 50 ms | 0.1 ms | 两次链路瞬断（约 1.1 秒、0.5 秒），都在 1 秒内追回，无累积延迟 |
-| 本地快速链路（往返 2 ms） | 64 秒 | 20 ms | 25 ms | 0 ms | 无卡顿 |
-
-五次进入五次走上视频直连。当时是 30 帧；蜂窝网络下的公网打洞没有留下测量数据（测量开关已关）。
-
-### 四个假设的结论
-
-| # | 结论 |
+| 设置或机制 | 当前作用 |
 |---|---|
-| V1 | 成立：模拟器和 iPhone 15 Pro 真机上，App 内 WKWebView 都把接收缓冲压到了 0 |
-| V2 | 成立：预编译框架、无窗口、Developer ID 签名、`open` 启动均正常。未公证 |
-| V3 | 未验证：需要真机在 4G/5G 下测直连成功率 |
-| V4 | 改了做法：npm 包带不了 framework 的符号链接，所以包里放压缩包，host 首次使用时解开并校验可运行 |
+| `EnableLowLatencyRateControl` | 请求硬件低延迟码率控制 |
+| `RealTime=true` | 实时编码 |
+| `AllowFrameReordering=false` | 禁止帧重排 |
+| WebRTC `setBitrate` → VT 属性更新 | 编码码率随传输反馈调整 |
+| 请求关键帧 | 由 WebRTC 恢复请求驱动，不依赖固定帧数间隔 |
+| Annex B / RTP 时间戳 / 采集时间 / QP | 适配器把编码结果连同元信息交回 libwebrtc |
 
-### 还没验证的
+初始化、运行错误或需要裁剪等不适合自有编码器的输入，会切换到 `H264ScreenEncoder`，以关键帧接续。`--encoder stock` 保留对照；上游编码器的 H.264 level 会按实际画面和会话帧率上限修正。
 
-蜂窝网络下的直连成功率；真实丢包和带宽变化下的表现；较新的 Android WebView 和 Android 真机；macOS 13–15；公证。
+`MaxFrameDelayCount=0` 只是尝试设置；历史硬件检查不支持该属性的设置/读取，不能据此声称编码零排队。当前 iOS 原生解码工厂只支持 H.264；HEVC、AV1、HDR、4:4:4 不是现行主链路能力。
 
-不支持 Intel 芯片的 Mac（2026-10-02 定）：LinkShell.app 只构建 arm64。
+### 3.3 网络、恢复与播放等待
 
-macOS 15 起，直接录屏的程序会被系统定期询问（“…requesting to bypass the system private window picker…”）。远程桌面类程序可以向 Apple 申请 `com.apple.developer.persistent-content-capture` 权利来免除，尚未申请。
+Mac 使用未修改上游的 stasel/WebRTC M154 预编译框架。libwebrtc 负责媒体带宽估计、发包节奏、反馈、NACK/RTX 和关键帧恢复。视频经 DTLS-SRTP 加密；数据通道使用 WebRTC 自身的加密传输。
 
-## 10. 公网弱网与 iOS 优先优化（2026-10-10）
+- 默认启用 `WebRTC-ForceSendPlayoutDelay=min_ms:0,max_ms:0`，提示接收端尽快呈现；提示不消除组包、参考帧依赖、解码和系统呈现时间。
+- 默认启用 FlexFEC 广告与发送能力。只有 answer 接受对应 codec 且 offer 有 FEC-FR 保护组，才记为 `negotiated`；未接受时继续 H.264 与 NACK/RTX。
+- 协商成功、收到保护包、实际恢复丢包、减少冻结是四层不同的证据。现有回环只证明前两层，不能代替手机弱网验收。
+- ICE 持续收集候选，但 Wi-Fi/蜂窝切换能否恢复仍需设备测试。当前没有 TURN。
 
-产品方向：优先把 Mac → iPhone 做到更快且更流畅，两者同时作为验收条件；iOS 的改进不以 Android 同时支持为前提。Android 和浏览器继续使用已有接收路径。`apps/client/modules/link-screen/README.md` 记录原生首版的实现范围；本节中 LTR、局部块更新、跨端期限反馈等仍是后续设计，不代表已实现或已测出收益。
+## 4. iOS 原生接收与显示
 
-界面保持原来的悬浮工具栏、收起圆球、模式菜单、连接信息/清晰度弹层和快捷操作面板。原生接收只替换视频显示层；透明 WKWebView 复用 host 的原页面，输入和画面布局经 WebKit 直接交给原生模块，视频帧不经过 JS。不得以接入原生播放为由另做一套控件或改变现有交互。连接信息仅在打开时查询普通 WebRTC 统计，不启用逐帧诊断或重连。
+`apps/client/modules/link-screen` 复用 `react-native-webrtc` 已安装的 JitsiWebRTC：pod 要求 `~>124.0.0`，本次核对的本地 Pod 锁定为 124.0.2。Mac M154、iOS M124 和 WKWebView 不能互相推定扩展能力。
 
-### 10.1 可复用的基础与当前缺口
+### 4.1 解码、最新帧与 Metal
 
-| 环节 | 当前代码 | 下一步要证明的事 |
+1. `ScreenConnection` 通过本机转发器上的 WebSocket 收发信令，原生 PeerConnection 接收视频轨道。
+2. WebRTC 的 VideoToolbox H.264 解码器输出 `RTCCVPixelBuffer`；正常播放不加逐帧诊断包装。
+3. `ScreenMailbox` 只保留最新的待呈现已解码帧。新帧替换尚未使用的旧帧，压住这一段的画面年龄；压缩参考帧仍由 WebRTC 管理，不能任意丢弃。
+4. `CVMetalTextureCache` 将 NV12 的 Y / UV 平面映射为 `R8` / `RG8` 纹理，一次 Metal 绘制完成 YUV 转换、缩放和画面呈现。代码同时兼容解码器给出的 BGRA 缓冲。
+5. 纹理和画面保持存活直到 GPU 完成读取。帧不进入 WebView JS 或 React Native JS，也不先转换成 UIImage。
+
+### 4.2 按显示时机提交
+
+- iOS 17+：`CAMetalDisplayLink`，`preferredFrameLatency=1`，使用目标呈现时间。
+- 更早的受支持 iOS：`CADisplayLink` 的 `targetTimestamp`；模块最低 iOS 16.4。
+- `maximumDrawableCount=2`；应用同时最多提交一笔 GPU 工作。
+- 提交前比较剩余时间与估计 GPU 耗时，至少留 `max(0.5 ms, GPU耗时 × 1.25)`；错过预算或 GPU 忙时暂缓，保留最新候选供下次显示机会使用。
+
+这些是本地显示调度与队列约束，不是物理扫描线控制，也不是“端到端只有一帧”的保证。发送端目前还没有使用 iOS 显示期限反馈来协同调度整条链路。
+
+### 4.3 控制层仍是原来的 WebView
+
+透明 RN WebView 覆盖在原生画面上，继续拥有悬浮工具栏、收起圆球、模式菜单、连接信息/清晰度弹层、键盘、快捷操作、文字框、手势和光标。画面布局通过 WebKit 消息交给 Metal，保留缩放和旋转的同一坐标系。
+
+输入由网页识别，经公开的 `WKScriptMessageHandler` 直接送入 Swift，再发送到媒体 DataChannel；指针消息绕过 RN JS。当前集成设置 `showsPointer=false`，光标由网页绘制，不能把 Metal 中存在的可选光标代码描述成已经启用的产品路径。原生接收失败后复用同一套页面控件，不另做模式选择器。
+
+## 5. 分辨率、帧率与适配
+
+| 项目 | 当前值与边界 |
+|---|---|
+| 视频宽度 | 默认 1920；UI 可选 1280 / 1920 / 2560 / 原生；原生最多宽 3840，且不超过源显示器 |
+| 原生 iOS 请求 | 默认最高 120 fps；显示能力、低电量模式、严重/临界温控把请求限制到 60 |
+| Mac 自动帧率 | 按接收上限与源显示器能力选档；最高可 120，向 60 / 30 调整；源能力更低时进一步受限 |
+| 旧接收端 | 未传 `maxFps` 时保留最高 60、降至 30 的路径 |
+| `maxFps` | 接收能力上限，30 / 60 / 120；仍允许自动适配 |
+| 显式 `fps` | 内部固定帧率请求，1–120；覆盖自动帧率选择，不能作为产品保证 |
+| 码率 | 初始带宽估计 2 Mbps；上限按像素与帧率计算，限制在 2–30 Mbps；不是恒定发送速率 |
+
+例如 1920×1080 的视频上限在 30 / 60 / 120 fps 下分别为 8 / 12 / 24 Mbps。高于 1080p 的像素增长按平方根缩放；实际码率由网络和内容决定。
+
+`maintainFramerate` 允许 WebRTC 在资源不足时缩小画面。同时，编码器不提供 QP 缩放阈值，避免仅因桌面压缩程度就缩小分辨率；自有 `FrameRate` 每秒判断是否需要降帧，照顾文字清晰度。
+
+持续 3 秒出现带宽估计低于按当前档位缩放的阈值、发送像素不足源画面的 90%，或活跃采集下编码吞吐不足，就尝试降档。恢复需要画面完整、无受限且有带宽余量持续 10 秒；恢复后很快又降档时，下一次等待翻倍，上限 160 秒。启动和每次切档后有 4 秒观察期。丢包率本身和单帧编码耗时不是单独的降帧条件。
+
+## 6. 输入与光标
+
+| 通道 | 方向 | 传输语义 |
 |---|---|---|
-| 采集与发送 | `ScreenCapturer.swift`、`ScreenSession.swift`：ScreenCaptureKit → libwebrtc 视频轨道，已有带宽估计、发送节奏控制和帧率自适应 | 公网丢包、突发抖动、带宽骤降时的发送排队和恢复时间 |
-| 编码 | 默认使用 `LowLatencyEncoder.swift` 的低延迟 `VideoCompressor`，失败回退到上游 H.264；`--encoder stock` 保留对照 | 自有编码器在弱网下是否改善 p95，而不仅是单帧编码耗时；高分辨率下的吞吐取舍；尚无 LTR token 反馈链路 |
-| 接收 | iOS 默认 `link-screen` 原生低延迟接收，按设备能力请求最高 120 帧；不可用时依次回退 WKWebView WebRTC 和强制 RPC 中继，无手动模式开关 | 原生 iOS 接收能否改善尾延迟、冻结和恢复，同时保持手势、键盘、旋转和显示器切换 |
-| 播放缓冲 | `Tuning.swift` 发送 playout-delay 的 0/0 提示，观看页在支持的浏览器请求零缓冲 | 对照零缓冲和小幅自适应缓冲；提示值不等于公网下始终没有排队 |
-| 观测 | `ScreenSession.swift` 已报告码率、带宽估计、发送等待、编码、NACK/PLI；观看页已报告 RTT、解码、缓冲、冻结、路径和时间码 | 汇总同一轮测试的两端指标，补足突发丢包、恢复时间和网络切换数据 |
+| `input` | 接收端 → Mac | 可靠、有序；按下、松开、文字、快捷键和有顺序依赖的事件 |
+| `pointer` | 接收端 → Mac | 无序、零重传；可替代的移动和部分滚动 |
+| `cursor` | Mac → 接收端 | 无序、零重传；位置与事件序号 |
+| `shape` | Mac → 接收端 | 可靠、有序；光标图片、热点、缩放和缓存 ID |
 
-App 声明的 `react-native-webrtc` 为 `^124.0.8`，Mac 框架为 M154。原生试验先核实安装版本、编解码器和扩展协商结果，不能把 Mac 或 WKWebView 的能力直接视作 RN 绑定已支持。
+拖拽、按钮按住时的移动、与具体位置绑定的滚动等走可靠通道。Mac 的 `Control` 把显示器归一化坐标映射为系统坐标，用 CGEvent 注入鼠标与键盘。视频会话结束会释放持有的按钮和修饰键。
 
-### 10.2 参考方案中需要修正的前提
+本地光标可即时响应，远程窗口和文字变化仍需真实输入处理及返回视频。当前手势在 WebView、Mac 输入处理在主线程；没有实现完全独立于 UI 线程的输入系统。辅助功能未授权时只能观看。
 
-- **不承诺 100% 打洞。** ICE/STUN、IPv6 和可用的网关映射能增加直连机会，但对端网络可能禁止 UDP，家庭路由器映射也不等于控制运营商 CGNAT。端口预测依赖映射规律，不作为连接保证。TURN 本身就是中继，不属于无中继媒体路径。[RFC 8656](https://www.rfc-editor.org/rfc/rfc8656.html)
-- **LTR 可行，但不能任选普通 P 帧作参考。** Apple 的编码器决定哪些帧是 LTR；应用回传已确认 token，再请求 LTR 刷新。没有已确认 LTR 时仍可能输出 IDR，不能禁用所有关键帧。LTR-P 大小取决于参考帧与当前画面的差异，并不保证几 KB 或没有额外开销。[Apple WWDC21](https://developer.apple.com/videos/play/wwdc2021/10158/)
-- **FEC 不等于零等待。** 恢复需要足够的源包/修复包到达，还要付出编码、解码和带宽成本。按源数据计，10 个数据包加 1 个冗余包是 10% 冗余，不是 5%。突发丢包与随机丢包必须分开测试。[RFC 8834 §6](https://www.rfc-editor.org/rfc/rfc8834.html#section-6)
-- **不一律禁用重传或把等待写死为 2 ms。** 在播放期限内可到达的重传可能比重新生成参考画面便宜；完整的 P 帧也可能依赖尚未到达的参考帧。以帧依赖和剩余播放期限决定等待、丢弃或恢复，环形队列本身不能消除这些依赖。[RFC 8834 §6.1](https://www.rfc-editor.org/rfc/rfc8834.html#section-6.1)
-- **动态调码率不保证帧率和延迟毫无变化。** 设置编码属性不会清空已经形成的网络队列；仍需发送节奏控制和分辨率/帧率退让。FEC、重传和包头一起计入网络预算，不在拥塞时盲目增加冗余。[RFC 8834 §7](https://www.rfc-editor.org/rfc/rfc8834.html#section-7)
-- **10–16 ms 只能作为特定条件下的探索目标。** 120 Hz 的刷新周期约 8.33 ms，60 Hz 约 16.67 ms；显示等待受相位、合成和扫描影响，不能固定写成 1.5 ms。RTT/2 也只是对称路径的估计；视频延迟与“输入 → 主机响应 → 手机显示”必须分别测量。
+## 7. 回退与平台支持
 
-### 10.3 实施顺序
-
-1. **并行完成 Mac 低延迟编码器与 iOS 原生首版。** Mac 视频轨道默认选择已有低延迟编码器，保留初始化/运行失败回退及显式 stock 对照开关；不等 LTR。iOS 收住当前 H.264、Metal、输入与重连范围，随正常 App 发版交付，不保留临时预览入口或验收应用。同一文件的前序改动先独立提交，再交接 Mac 工作。
-2. **先做同条件的 60 fps 对照，再测 120 fps。** 固定同一 Mac 构建、源画面、网络、分辨率和编码参数，比较 WKWebView 与原生。2560 宽度下另测源端/接收端均支持 120 Hz 时的采集、编码吞吐、解码和真实新画面显示率；不得由协商参数或单帧编码耗时推断稳态帧率。review 中旧构建的编码数字仅用于排优先级，需最新构建复测。诊断默认关闭，抽样诊断与正常模式分别核对开销。
-3. **FlexFEC 单独验证和提交。** 确认 M154 发送端与 M124 原生接收端、WKWebView 的真实 H.264 协商结果及修复包/恢复计数，保留不支持时的兼容路径。打开 field trial 不作为已生效证据；未协商或没有丢包时，不宣称取得弱网收益。
-4. **上述结果确定后再扩展公网与恢复策略。** 固定设备、版本和内容，记录选中 ICE candidate pair、协议和是否经中继，分别测 IPv4、IPv6、家庭宽带 ↔ 蜂窝和网络切换。之后再探测 LTR 并接入 token 闭环、评估 HEVC、自适应缓冲或局部更新。自研纠错与私有传输不属于本轮。
-
-本轮不引入裸 UDP 私有媒体协议。它还需要认证、加密、防重放、MTU/分片、拥塞控制、反馈与网络切换等完整实现；不能用一个时间戳和序列号头替代已有媒体栈。[RFC 8085](https://www.rfc-editor.org/rfc/rfc8085.html)
-
-UPnP/PCP/NAT-PMP 留作穿透数据出来后的可选增强：映射必须对应媒体实际使用的 socket，作为候选参与连通性检查，并有租期、续期和关闭清理；独立开一个 UDP 端口并不会让现有 WebRTC 会话自动使用它。未部署 TURN 的决定保持不变。
-
-### 10.4 LTR 接口边界
-
-Apple 官方文档和本机 macOS 26.5 SDK 的 `VTCompressionProperties.h` 均包含下列接口；API 存在不等于当前编码会话支持，也不等于本项目已接入。
-
-```text
-Mac：低延迟 VTCompressionSession + EnableLTR
-  → 输出 sample 的 RequireLTRAcknowledgementToken
-  → 将 token 与媒体帧标识、会话代次关联，传给 iOS
-iOS：确认该帧完整且解码参考状态有效
-  → 回传对应 token 的 ACK
-Mac：后续 encode 的 AcknowledgedLTRTokens
-  → 收到恢复请求时设置 ForceLTRRefresh
-  → 编码器选择已确认 LTR；没有可用 LTR 时退回 IDR
-```
-
-必须绑定会话代次和 RTP 时间戳/帧标识，处理时间戳回绕、反馈重复/乱序/丢失。编码器重建、切屏或分辨率变化后使旧 token 失效，接收端解码状态丢失后不能再把旧 ACK 当作有效参考。token 映射有界；恢复请求限频；新会话与无可用 LTR 均保留关键帧自举。
-
-WKWebView 当前使用的 JS 接收接口不能完成上述逐帧确认；仅改 Mac 的 `EnableLTR` 无法闭环。即便换成原生 libwebrtc，也需验证帧丢失后其参考帧门控是否会让 LTR-P 送到解码器，以及解码反馈如何准确关联 token；可能需要原生 C++ 接口或框架修改。`RTCView` 加一个 JS 消息回调不足以证明支持。先证明 H.264 全链路，再单独评估 HEVC 的协商、低延迟模式和设备兼容性。
-
-### 10.5 验收与测量口径
-
-以下是待执行矩阵，不是通过结果。每组至少重复三次，保存设备/OS、代码版本、编解码器、分辨率、目标帧率和真实链路；冻结及失败样本必须计入结果。
-
-| 场景 | 条件 | 主要观察 |
+| 接收端 | 起始路径 | 后续回退 |
 |---|---|---|
-| 局域网对照 | WKWebView / iOS 原生，同一画面与 30/60 fps | p50/p95/p99、清晰度、CPU、发热；不能只比较平均延迟 |
-| 公网直连 | 家庭宽带 ↔ 4G/5G，不同运营商；IPv4/IPv6 分列 | 建连成功率与耗时、实际候选路径、视频延迟和输入响应 |
-| 随机丢包 | 0%、1%、2%、5%、10%，RTT 分别 20/50/100 ms | 冻结时长、恢复时长、重传/FEC 开销、LTR/IDR 次数 |
-| 抖动与突发丢包 | 额外抖动 10/30 ms、连续丢包 50/100 ms，记录注入方向与分布 | 尾延迟、参考链恢复、小缓冲是否优于零缓冲 |
-| 带宽变化 | 12 → 2 → 8 Mbps，各维持 30 秒 | 发送队列消退、实际总码率、画面清晰度和帧率恢复 |
-| 网络切换 | Wi-Fi ↔ 蜂窝、短断网、前后台切换 | 重新建连、解码状态重建、旧 token 隔离、无持续黑屏 |
+| iOS，原生模块可用 | 原生 WebRTC → Metal | WKWebView WebRTC → 强制 RPC 字节流 → WebCodecs / Canvas |
+| iOS，原生模块不可用 | WKWebView WebRTC | 强制 RPC 字节流 → WebCodecs / Canvas |
+| Android | WebView WebRTC | 原通用转发路径上的 WebCodecs / Canvas |
+| Web | 隔离 iframe 内 WebRTC | 原通用转发路径上的 WebCodecs / Canvas |
 
-§1 的延迟目标仅是基础可用性回归门槛，不是本轮优化的终点。高丢包组用于找出能力边界，不承诺所有条件下都达标。新路径按 §10.8 同时评估速度和流畅度，不能以平均延迟的改善掩盖更多卡顿，也不能靠延后画面换取平滑。
+iOS 最后一步用 `direct:false` 重新建立该屏幕转发并关闭视频轨道请求，不再依赖通用 DataChannel；其他流不受影响。经网关连接时这一步走加密中继，开发直连 Host 时则走其 RPC 连接。重试、重新进入屏幕或更换 Host 连接会重新选择起始路径；旧代次失败回调不会跳过下一条路径。原生首次无画面超时为 12 秒，持续断开超过 4 秒会失败。
 
-`?measure=sync` 当前按最小 RTT 估计时钟偏移，且校时消息经过观看页 socket，可能与视频直连走不同路径。跨网校时的路径不对称会污染单向延迟估计；报告要带校时 RTT 和误差说明。软件的 `expectedDisplayTime` 不是屏幕真实出光时间，最终用高速摄影同拍主机与手机做显示延迟复核，输入到显示另测。§9 的历史 Wi-Fi 数字不应直接外推为公网性能。
+WebCodecs 不可用时会提示升级系统，不能承诺所有浏览器均可完成兼容回退。
 
-### 10.6 同时更快、更流畅的目标
-
-本轮目标是在给定设备、公开系统 API、网络路径和画质要求下，逼近实时显示的可达边界。不能证明任意网络、任意内容和未来硬件上没有其他技术更快：未到达的信息不能被正确预测，未知的网络延迟也使固定零等待与永不卡顿无法同时保证。工程上需要证明：当前关键路径上每一段可消除的等待都已消除，剩余开销有测量依据，并在同条件对照中同时保持画面新鲜与运动连续。
-
-分别记录四个量，不能用一个 FPS 或平均延迟代替：
-
-| 指标 | 定义 | 排除的错误结论 |
+| 主机 | 采集与编码 | 控制 |
 |---|---|---|
-| 真实画面年龄 | 每次呈现时，最新真实内容距源端生成的时间，记录 p50/p95/p99 | 排队播放旧画面也可能有很高 FPS |
-| 显示节奏 | 运动场景下真实新画面的显示间隔、漏过的显示时机、连续重复帧和冻结时长 | 插帧或重复旧画面不能算成真实 120 fps |
-| 操作到结果 | 手机收到输入 → 主机应用改变内容 → 手机显示该变化 | 本地指针先动不能算远程应用已响应 |
-| 恢复与持续性 | 丢包后的恢复时间、带宽恢复后的收敛、持续运行的热状态与功耗 | 只跑十秒的高帧率不代表持续流畅 |
+| Apple silicon Mac，macOS 13+ | 主路径与回退均由 LinkShell.app 完成，无需 ffmpeg | 录屏权限 + 辅助功能权限 |
+| Linux | ffmpeg `x11grab` + libx264，仅兼容路径，需要 X11/DISPLAY | 只看，无输入控制 |
+| Intel Mac / Windows | 当前屏幕功能不支持 | 不支持 |
 
-源端和接收端的真实能力共同决定档位。首版已将 `fpsRange` 扩至 120，并按双方能力提供 120/60/30 档位；`Tuning.fullFps = 60` 和旧接收端的 60/30 行为保留。协商上限不代表实际吞吐。120 Hz 手机上显示 60 个不同源帧仍只有 60 fps 的内容。ScreenCaptureKit 可随 120 Hz 的源内容输出到 120 fps；必须一起验证采集、编码吞吐、码率预算、解码吞吐与呈现。[Apple ScreenCaptureKit](https://developer.apple.com/videos/play/wwdc2022/10155/)
+Mac 兼容路径使用 `StreamCapture` / `StreamSession`，光标在画面里，编码帧经第二条 Unix Socket 送到 Host；Linux 用 ffmpeg。Host 再加关键帧标记和序号，客户端解码到 Canvas 后回 ACK；解码跳过的帧也会确认已消费，避免 Host 永久等它。拥堵时在发送前丢弃后续帧，恢复从关键帧开始，持续问题触发降档。
 
-默认优先保持设备能持续承载的高帧率，调整码率、内容编码方式和分辨率时遵守文字可读性底线；资源不足时稳定切换到可持续档位，并有迟滞，避免反复跳档。120/60 是待测的首要档位，不能硬编码假定所有 iPhone、显示器和温控状态都支持 120 Hz。[Apple ProMotion](https://developer.apple.com/documentation/quartzcore/optimizing-iphone-and-ipad-apps-to-support-promotion-displays)
+| 档位 | 最大宽度 | fps | 目标码率 | 码率 ceiling |
+|---|---:|---:|---:|---:|
+| 0 | 1600 | 20 | 3 Mbps | 4 Mbps |
+| 1 | 1440 | 15 | 1.5 Mbps | 2 Mbps |
+| 2 | 1280 | 12 | 900 Kbps | 1.3 Mbps |
+| 3 | 1024 | 10 | 500 Kbps | 700 Kbps |
+| 4 | 854 | 8 | 260 Kbps | 380 Kbps |
 
-### 10.7 架构：以显示时机组织整条链路
+`q=low` 从档位 2 开始且不升到更高档；900 Kbps 是编码目标，不是含封装/加密/重传的网关线速硬上限。手机按网关路径附加该参数，当前 Web 入口未附加，不能把所有浏览器中继都说成固定从 12 fps 开始。视频宽度选择不改变这套兼容档位。
 
-```text
-Mac 源内容 → ScreenCaptureKit / IOSurface
-  → 有界待编码队列 → 按内容选择低延迟编码
-  → 有拥塞预算的加密 P2P 传输
-  → iOS 按依赖和截止时间重组 / 解码
-  → CVPixelBuffer / Metal 纹理 → 原生呈现调度器 → 屏幕
-        ↑ 解码反馈、显示时机、帧年龄、丢包与链路预算反馈
+## 8. 安全、部署与配置
 
-iOS 原生触控 → 本地指针 / 视口反馈
-          └→ 独立优先级的输入传输 → Mac 输入注入 → 真实结果走画面链路
-```
+- Gateway 挑战由 Ed25519 签名；设备经配对或同账号授权。Host 校验已配对设备的键，或接受登录状态下网关确认的同账号设备。
+- 客户端与 Host 通过 X25519 派生会话密钥，以 XChaCha20-Poly1305 加密 RPC 和中继流；Gateway 只见密文。SDP/DTLS 指纹通过已认证的信令路径传递。
+- Host 观看端口只监听回环地址并校验 token。它不直接对公网开放。
+- Mac 录屏与辅助功能权限绑定 `com.bd.linkshell.host` 和 Developer ID 签名身份；身份、bundle id 和安装路径须稳定。
+- iOS 原生模块需包含在新的 App 二进制中，Metro 重载不能添加它；随正常 App / TestFlight 流程交付，没有独立预览应用。
 
-**A. 显示时机与队列由一个预算协调。** 接收端选择最早可赶上的显示时机，用实测解码/GPU 耗时和适量余量向前推导各阶段期限；发送端通过带误差界的时间映射使用反馈。公网不对称和漂移使两端精确锁相不可保证，反馈过期时退回本地保守预算。源应用、WindowServer 和屏幕的相位不能由我们任意控制，不宣称完全同步。
+| 配置 | 精确作用 |
+|---|---|
+| `LINKSHELL_ICE_SERVERS` | Host 的 STUN URL 列表，也传给 Mac 屏幕媒体会话 |
+| `LINKSHELL_ICE_SERVERS=off` | 禁用通用 DataChannel 能力并让屏幕会话收到空 STUN 列表；不阻止视频会话尝试局域网候选 |
+| `LINKSHELL_SCREEN_VIDEO=off` | Host 不提供屏幕视频轨道；用于兼容路径对照/排障 |
+| `LINKSHELL_SCREEN_FPS=1..120` | Host 给 Mac 视频会话传固定 `fps`；内部对照用途 |
+| `LINKSHELL_SCREEN_CLOCK=1` | 开启时间码测量入口；不要用诊断运行冒充普通播放性能 |
 
-采集、编码、发包、解码、GPU 提交不各自维护一条无限 FIFO。编码前可以合并尚未编码的旧帧，只保留最新候选；解码后用最新可呈现帧替换过时输出；已经编码的参考帧须按依赖保留或完成恢复，不能随便丢。保留硬件流水并行所需的表面与在途帧，限制它们的年龄和数量；不能把 ScreenCaptureKit 的 surface pool 或 Metal 的 drawable pool 大小直接当作已排队帧数。
+## 9. 性能证据与验收
 
-**B. 原生 iOS 呈现掌握最后一次刷新机会。** Expo 保留页面、账户和设置，规划独立 `link-screen` 原生模块管理媒体、触控和渲染。VideoToolbox 输出的像素缓冲通过 `CVMetalTextureCache` 映射，在 Metal 中合并 YUV 转换、缩放和指针合成，避免 CPU 读回、逐帧 JS 通知和多次中间纹理转换；“零拷贝”须用实际缓冲与 GPU trace 证明。
+已实现的性能手段包括原生像素缓冲、低延迟硬件 H.264、WebRTC 传输闭环、最新已解码帧缓存、Metal 映射与按显示时机提交。它们减少转换或等待，不自动证明端到端领先，也不等于零拷贝、零缓冲或物理扫描控制。
 
-使用 `CAMetalDisplayLink` 的显示时间信息调度渲染，对照 `preferredFrameLatency = 1` 与默认路径；Apple 公共接口接受 1 或 2，不存在设为 0 就直达扫描线的开关。`maximumDrawableCount` 的合法值是 2 或 3，两个 drawable 也不是自动少等一帧；实际在途提交与错过显示期限才是指标。显示前尽可能晚地取最新已解码帧和本地指针状态，同时留足 GPU 完成时间；该策略不等于可以控制物理扫描线。[Apple preferredFrameLatency](https://developer.apple.com/documentation/quartzcore/cametaldisplaylink/preferredframelatency)
+### 已有记录的边界
 
-**C. 编码按到屏幕的总耗时选择。** 以可观测的低延迟 VideoToolbox 会话为候选：硬件能力探测、禁止帧重排、实时码率调整，并测试 `PrioritizeEncodingSpeedOverQuality`。本机 SDK 明确该属性可用速度换编码质量且并非所有编码器支持；不能忽略返回状态或放弃画质底线。H.264 与 HEVC 比较的是编码、帧大小对应的发送耗时、恢复成本与解码/呈现的完整关键路径；更小的码流或更快的单帧编码都不自动代表端到端更优。
+- 历史 WKWebView Wi-Fi、模拟器和 Mac 回环数据保存在 [历史存档](screen-realtime-history.md)，不是当前原生路径的性能结果，也不能外推到公网。
+- 2026-10-10 的原生构建、签名与安装启动检查属于交付验证；没有证明完整手势正确性、持续帧率和公网性能。
+- 已记录原生与网页/兼容路径约每秒或更短间隔出现短暂停顿，尚未定位或修复。一次原生诊断快照为 120 编码 fps、116 解码 fps、解码到呈现 p95 30.6 ms；这些平均吞吐和局部耗时不能证明显示节奏稳定。
+- 稳定 120 fps、稳定 4K/60、手机端 FlexFEC 恢复收益仍未通过验证。历史 Mac 回环保护包计数不能替代手机丢包恢复证据。
 
-进一步测试内容自适应路径：大面积连续运动用视频；少量文字/局部 UI 更新，用 ScreenCaptureKit 的 dirty rects 实验局部块更新，接收端在 Metal 合成。只有总传输和处理成本更低时才选择后者；切换要有迟滞、统一拥塞预算与清晰度验证。局部更新必须标明基准代次和序号，累积被跳过帧的变化区域，丢包后补齐或重置基准，同代修改按完整提交呈现，避免漏更新与撕裂。视频低延迟基线完成后再引入这项实验。
+### 测量口径
 
-`MaxH264SliceBytes` 只限制 slice 大小，不能由此推导当前 VideoToolbox 会在整帧结束前回调。分块、slice 级流水线与部分解码要先证明公开 API 的输出时机和解码支持；逐行扫描输出不作为 iOS 公共 API 已提供的能力。可控制源程序的终端/原生界面可单独比较语义传输，本地渲染能省掉视频编码，但不把它当作通用远程桌面的替代证明。
+分别记录采集新帧率、重复帧、编码/解码吞吐、真实新画面的显示间隔、冻结/恢复、画面年龄 p50/p95/p99、输入到真实结果、分辨率、码率和热状态。不能用降低画质或大量跳帧掩盖另一维度的退化。
 
-**D. 修复以剩余显示时间和参考价值决定。** 已协商的 FEC、NACK 重传、LTR 恢复共享带宽预算。能及时修复就修复；来不及显示但仍是必要参考的数据按依赖处理；失效的参考链及时恢复。根据抖动分布分配尽可能小的缓冲，不能机械采用固定 0 ms 或 2 ms。放大发包突发、关闭 pacer 或追加冗余可能增加路由器排队，需要用整条链路验证。复用 libwebrtc 的传输基础，若其默认帧门控/缓冲挡住实测收益，可在固定版本的原生 C++ 层做有回归测试的修改；不把现有预编译绑定当作永久上限。
+原生诊断默认关闭；连接信息弹层只在打开时请求普通 WebRTC 统计。内部 `diagnostics=1` 约每 31 帧抽样、每 5 秒汇总；解码与解码到呈现耗时不是采集到出光的端到端延迟。正常模式与诊断模式需用相同外部方法分别测量开销。
 
-**E. 输入拥有独立的时间预算。** 原生输入及时发送，移动位置可合并成最新状态；按下、抬起、文字和带顺序语义的滚动必须保持正确顺序与状态。现有 Mac 数据通道输入经过主线程，先测量该跳的排队，再考虑隔离可离开主线程的输入状态机；不能直接跨线程调用 AppKit。发送优先级和总带宽调度一起验证，单独开数据通道不保证网络优先。
+时间码 `measure=sync` 用最小 RTT 估计时钟偏移，信令与媒体可能走不同路径；公网非对称会影响结果。报告需给样本数、校时 RTT、误差和配置。软件呈现时间也不能替代高速摄影同拍两端的出光测量。
 
-本地指针和画面视口平移/缩放按本地刷新率响应；远程窗口滚动、文字编辑和执行结果必须等待真实状态或使用可校正且明确区分的预测。Apple 低延迟插帧仍基于前后两幅已知图像生成中间时刻内容，不能同时作为“更早获得真实结果”的证据，默认控制链路不靠补帧达成 120 fps。[Apple 插帧接口](https://developer.apple.com/documentation/videotoolbox/vtlowlatencyframeinterpolationconfiguration)
+### 更改屏幕代码后的检查
 
-### 10.8 验收门槛与第一阶段交付
+按 [原生接收模块](../../apps/client/modules/link-screen/README.md#validation) 和 [发布 SOP](../release-sop.md) 执行构建/静态检查与相关测试，再用正常 App 真机验证：输入、拖拽、滚动、文字、缩放、旋转、切屏、前后台与重连，分别覆盖原生、网页视频和 RPC 回退。用相同源内容比较 60/120 档，至少 30 分钟检查热稳定性；另测公网、丢包、带宽骤降与网络切换。文档更新本身不产生新的性能证据。
 
-在同一设备、源内容、网络、分辨率和可比画质下同时比较画面年龄分位数、显示间隔分布、真实新帧率、冻结/恢复和输入到真实结果；画质变化要另列，不能拿模糊画面或大量丢帧换取表面胜出。新默认路径的速度和流畅度均须不劣于基线，且改善可重复；其中一个维度的提升不能抵销另一个维度的明显退化。置信区间、样本数和预先约定的误差容限随报告保存。
+## 10. 尚未实现的优化
 
-1. 交付当前源码的 iOS 开发构建、Mac 构建和可重复的对照入口，回归画面、手势、键盘、横竖屏、切屏与重连；原生仍为主动选择的预览。
-2. 以 2560/60 fps 先比较两种接收端，再独立测 2560/120 fps 的实际各阶段吞吐和持续运行。达不到 120 不视作原生首版失败，保留可持续的 60/30 档位。至少 30 分钟热稳定性和最终手感由真机验收决定。
-3. 将编码器、FlexFEC、接收端三项的结果分开，避免一次改变多个变量后归因。只报告实际取得的统计；缺少跨端校时或物理显示测量时，不把解码后耗时称作端到端延迟。
-4. 自动化构建、单元测试和可执行的功能检查先完成，再把开发包、版本和短验收步骤交给用户。高速摄影、dirty rects、输入线程重构、LTR/HEVC 不作为本轮交付的前置条件，也不在拿到原生对照结果前继续铺开。
+以下属于后续研究，不能画进“当前已实现”的主路径：
 
-即使第一阶段通过，也只能证明指定条件下达到已测性能边界。每个剩余瓶颈应标成系统/硬件、网络、算法或尚未消除的实现开销，为下一轮优化提供证据。
+- LTR 长期参考帧确认与恢复闭环：需绑定会话代次、帧标识与真实解码参考状态，处理过期反馈；仅开 VT 开关不够。
+- ScreenCaptureKit dirty rects 与局部块更新：需统一版本、依赖、补齐和拥塞预算，防止漏更新与撕裂。
+- iOS 显示期限反馈到 Mac：需跨端时间映射、误差界与过期回退；当前仅有 iOS 本地呈现预算。
+- HEVC/AV1、HDR/4:4:4、slice 级流水线、输入线程进一步隔离：均需单独验证公开 API、兼容性与完整链路收益。
+- UPnP/PCP/NAT-PMP 与 TURN：当前均未接入；先测直连覆盖率，再决定是否改变网络路线。
 
-2026-10-10 的阶段检查：完整 workspace build/typecheck/lint、Mac 47 条测试、host 屏幕 7 条测试、原生调度 3 条测试通过。iPhone Release 配置已在 iPhone Air（iOS 27.0）完成安装与启动检查；临时应用和连接已清理，后续交付正常 TestFlight 版本，最终真机效果由用户验证。Mac 的 Xcode 27 打包路径已修正，交付包的 Mach-O UUID 和全部文件内 section 与实测程序一致。
+音频、自动双向剪贴板同步、桌面文件拖放和多人观看未实现。已有“发送文字”可读取手机剪贴板供用户确认后发送，这不等于剪贴板同步；会话文件上传是另一个功能。
 
-同一 M3 Max 的短时回环结果如下；后台仍有其他任务，不能作为硬件极限、手机显示帧率或端到端延迟。`own` 为低延迟编码器，`stock` 为上游编码器。
+## 11. 源码与技术参考
 
-| 实际画面 / 请求帧率 | 编码器 | 平均编码耗时 | 解码帧率 |
-|---|---|---|---|
-| 2560×1440 / 60 | stock → own | 18.4 → 11.1 ms | 60.0 → 59.8 fps |
-| 3840×2160 / 60 | stock → own | 71.9 → 19.5 ms | 59.3 → 49.9 fps |
-| 内屏 2560×1662 / 固定 120 | own | 56.0 ms | 87.4 fps |
-| 内屏 2560×1662 / 自动上限 120 | own | 54.3 ms | 89.9 fps |
+| 范围 | 入口 |
+|---|---|
+| Host 观看服务、信令、回退 | [screen.ts](../../packages/host/src/screen.ts)、[input.ts](../../packages/host/src/input.ts)、[screen-pacer.ts](../../packages/host/src/screen-pacer.ts) |
+| 通用数据直连与转发 | [direct.ts](../../packages/host/src/direct.ts)、[streams.ts](../../packages/client-core/src/streams.ts)、[preview.ts](../../apps/client/src/lib/preview.ts) |
+| Mac 协议、采集、编码、适配 | [Mac README](../../apps/mac/README.md)、[ScreenSession.swift](../../apps/mac/Sources/LinkShell/ScreenSession.swift)、[Tuning.swift](../../apps/mac/Sources/LinkShell/Tuning.swift) |
+| iOS 原生接收与 Metal | [模块 README](../../apps/client/modules/link-screen/README.md)、[ScreenConnection.swift](../../apps/client/modules/link-screen/ios/ScreenConnection.swift)、[ScreenMetalView.swift](../../apps/client/modules/link-screen/ios/ScreenMetalView.swift) |
+| 网页控件与手机回退 | [screen-viewer.ts](../../packages/host/src/screen-viewer.ts)、[screen-playback.ts](../../apps/client/src/lib/screen-playback.ts)、[screen-screen.tsx](../../apps/client/src/screens/screen-screen.tsx) |
+| Web iframe 观看入口 | [Video.tsx](../../apps/web/src/live/Video.tsx) |
 
-120 档实际采集约 119 fps、无应用重复帧；自动档短跑仍停留在 120，并未稳定输出 120。4K 的吞吐和稳定 120 **均不判通过**，这些是此前对照配置的历史结果；当前 iOS 默认请求最高 120 帧，并不保证持续输出 120。低延迟编码会话不支持 `MaxFrameDelayCount` 设置/读取，本轮未更改排队或降档策略。
-
-FlexFEC 的 M154 回环夹具在双向各 60 ms、视频包丢失 5% 时确认协商并收到 5569 个保护包；模拟接收端拒绝后保护包为零、视频仍可解码。公共统计未提供恢复数量，这些检查不证明手机端恢复效果或更低卡顿。临时产物已按用户要求清理；表内数字仅记录此次历史回环测量。
-
-真机验收中用户另报告：原生与兼容模式都有约每秒或更短间隔的短暂停顿。原生诊断截图为 120 编码帧/秒、116 解码帧/秒、解码后到显示 p95 30.6 ms；这些平均数不能证明显示节奏平稳。该问题尚未定位或修复，按用户要求先完成本轮交付，后续单独排查。
-
-## 参考
-
-- WebRTC playout-delay 扩展头：https://webrtc.googlesource.com/src/+/main/docs/native-code/rtp-hdrext/playout-delay/README.md
-- WebKit 的 WebRTC 支持（任意 web view 可用 RTCPeerConnection，recvonly）：https://webkit.org/blog/7763/a-closer-look-into-webrtc
-- `jitterBufferTarget`（Safari 不支持）：https://developer.mozilla.org/en-US/docs/Web/API/RTCRtpReceiver/jitterBufferTarget
-- libwebrtc 的 ScreenCaptureKit 采集器：https://webrtc.googlesource.com/src/+/refs/heads/lkgr/modules/desktop_capture/mac/screen_capturer_sck.mm
-- 预编译框架：https://www.github.com/stasel/WebRTC
-- Sunshine 许可证（GPL-3.0）：https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2legal.html
-- RustDesk 的架构与编解码：https://rustdesk.com/de/blog/rustdesk-vs-vnc-nat-traversal-codecs-verschlusselung
+- [Apple ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos)：采集与 IOSurface 缓冲。
+- [Apple 低延迟 VideoToolbox](https://developer.apple.com/videos/play/wwdc2021/10158/)：硬件低延迟模式、码率适应与帧重排。
+- [Apple CVMetalTextureCache](https://developer.apple.com/documentation/corevideo/cvmetaltexturecache-q3j)：Core Video / Metal 纹理映射。
+- [Apple CAMetalDisplayLink](https://developer.apple.com/documentation/quartzcore/cametaldisplaylink)、[preferredFrameLatency](https://developer.apple.com/documentation/quartzcore/cametaldisplaylink/preferredframelatency)：显示调度及请求值边界。
+- [WebRTC 媒体传输标准 RFC 8834](https://www.rfc-editor.org/rfc/rfc8834.html)：重传、纠错、媒体适配。
+- [WebRTC playout-delay](https://webrtc.googlesource.com/src/+/main/docs/native-code/rtp-hdrext/playout-delay/README.md)：尽力满足的呈现延迟提示。

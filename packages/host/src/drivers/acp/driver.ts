@@ -13,7 +13,7 @@ import {
 } from "@linkshell/wire";
 import type { AgentDriver, AttachContext, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem } from "../types.js";
 import { AcpConnection } from "./connection.js";
-import { QUESTION_OPTIONS, formContent, formQuestions, type Form } from "../../questions.js";
+import { mapAcpQuestions, questionMethod, type AcpQuestionRequest } from "./questions.js";
 import {
   AcpItemTracker,
   mapPermissionRequest,
@@ -75,8 +75,10 @@ export interface AcpSessionState {
   inflight: number;
   queue: PendingPrompt[];
   permissions: Map<string, (outcome: unknown) => void>;
-  /** Questions waiting for an answer: the form each came as, and how it is answered. */
-  questions: Map<string, { form: Form; resolve: (response: unknown) => void }>;
+  /** Keep the native response adapter until the user answers or the agent cancels the request. */
+  questions: Map<string, { rpcId: RpcId; request: AcpQuestionRequest; resolve: (response: unknown) => void }>;
+  /** Cursor's documented question extension omits sessionId; tool calls provide its routing context. */
+  toolCalls: Set<string>;
 }
 
 /** Turns agent failures into something a person can act on. */
@@ -192,7 +194,7 @@ export class AcpDriver implements AgentDriver {
     if (!this.connection?.alive) await this.ensureStarted();
     if (!this.connection?.capabilities.sessionCapabilities?.fork) throw RpcError.app("not_supported", `${this.label} 不支持从会话分叉`);
     if (options.upTo) throw RpcError.app("not_supported", `${this.label} 只能分叉整个会话`);
-    const response = await this.rpc<{ sessionId: string }>("session/fork", { sessionId: nativeId, cwd: options.cwd, mcpServers: [] });
+    const response = await this.rpc<{ sessionId: string }>("session/fork", { sessionId: nativeId, cwd: options.cwd, mcpServers: [], ...this.sessionMeta() });
     const now = Date.now();
     return { nativeId: response.sessionId, cwd: options.cwd, createdAt: now, updatedAt: now };
   }
@@ -200,6 +202,7 @@ export class AcpDriver implements AgentDriver {
   protected sessionMeta(): Record<string, unknown> {
     // Raw Goal messages preserve the normal sub-agent stream. AIR opt-in changes
     // parentToolUseId/toolName metadata and is incompatible with our mapper.
+    if (this.id === "grok") return { _meta: { askUserQuestion: true } };
     return this.id === "claude" ? { _meta: { claudeCode: { emitRawSDKMessages: [{ type: "active_goal" }] } } } : {};
   }
 
@@ -314,7 +317,7 @@ export class AcpDriver implements AgentDriver {
     if (question) {
       // Not answering: skip (the agent goes on without an answer) or stop.
       this.sessions.get(nativeId)?.questions.delete(requestId);
-      question.resolve({ action: optionId === "cancel" ? "cancel" : "decline" });
+      question.resolve(question.request.respond(optionId));
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_permission_resolved", requestId, optionId });
       return;
     }
@@ -375,6 +378,7 @@ export class AcpDriver implements AgentDriver {
       clientVersion: this.options.hostVersion,
       onUpdate: (sessionId, update) => this.onUpdate(sessionId, update),
       onRequest: (method, params, id) => this.onRequest(method, params, id),
+      onCancelRequest: (id) => this.cancelQuestionRequest(id),
       onExit: (reason) => this.onExit(reason),
     });
     this.connection = connection;
@@ -445,6 +449,7 @@ export class AcpDriver implements AgentDriver {
         queue: [],
         permissions: new Map(),
         questions: new Map(),
+        toolCalls: new Set(),
       };
       this.sessions.set(nativeId, state);
     }
@@ -480,6 +485,7 @@ export class AcpDriver implements AgentDriver {
       state.replaying.push(update);
       return;
     }
+    if (state?.turnActive && (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update")) state.toolCalls.add(update.toolCallId);
     if (update.sessionUpdate === "current_mode_update" && state) {
       const mode = state.config.find((option) => option.category === "mode");
       if (mode) mode.current = update.currentModeId;
@@ -491,7 +497,7 @@ export class AcpDriver implements AgentDriver {
   }
 
   private onRequest(method: string, params: unknown, id: RpcId): unknown {
-    if (method === "elicitation/create") return this.onQuestions(params, id);
+    if (questionMethod(this.id, method)) return this.onQuestions(method, params, id);
     if (method !== "session/request_permission") {
       throw new RpcError(-32601, `LinkShell does not implement ${method}`);
     }
@@ -507,43 +513,60 @@ export class AcpDriver implements AgentDriver {
     });
   }
 
-  /** The agent asks the user something (a form to fill in): it waits as a request with questions. */
-  private onQuestions(params: unknown, id: RpcId): unknown {
-    const request = params as { sessionId?: unknown; mode?: unknown; message?: unknown; requestedSchema?: unknown; toolCallId?: unknown } | undefined;
-    const sessionId = typeof request?.sessionId === "string" ? request.sessionId : undefined;
-    const state = sessionId ? this.sessions.get(sessionId) : undefined;
-    const message = typeof request?.message === "string" ? request.message : undefined;
-    const form = request?.mode === "form" ? formQuestions(request.requestedSchema, message) : undefined;
-    // Nothing we can show (a page to open, a form without fields): the agent goes on without an answer.
-    if (!sessionId || !state || !form) return { action: "decline" };
+  /** Questions are routed by explicit session id, then Cursor's tool id, never a "last session". */
+  private questionSession(params: unknown): string {
+    const request = params as { sessionId?: unknown; toolCallId?: unknown } | undefined;
+    if (!request || typeof request !== "object") throw new RpcError(-32602, "提问缺少会话信息");
+    const matches = [...this.sessions].filter(([, state]) => state.turnActive && typeof request.toolCallId === "string" && state.toolCalls.has(request.toolCallId));
+    if (request.sessionId !== undefined) {
+      if (typeof request.sessionId === "string" && this.sessions.has(request.sessionId)) return request.sessionId;
+      throw new RpcError(-32602, "提问的会话信息不匹配");
+    }
+    if (this.id === "cursor") {
+      if (matches.length === 1) return matches[0]![0];
+      const active = [...this.sessions].filter(([, state]) => state.turnActive);
+      if (matches.length === 0 && active.length === 1) return active[0]![0];
+    }
+    throw new RpcError(-32602, "无法确定这个问题属于哪个会话，未提交任何回答");
+  }
+
+  private onQuestions(method: string, params: unknown, id: RpcId): unknown {
+    const sessionId = this.questionSession(params);
+    const state = this.sessions.get(sessionId)!;
     const requestId = `${this.id}-q${this.nextPermissionId++}-${String(id)}`;
+    const request = mapAcpQuestions(this.id, method, params, requestId);
     return new Promise((resolve) => {
-      state.questions.set(requestId, { form, resolve });
+      state.questions.set(requestId, { rpcId: id, request, resolve });
       this.closeMessage(sessionId);
-      this.host?.update(this.id, sessionId, {
-        sessionUpdate: "ls_permission",
-        requestId,
-        toolCallId: typeof request?.toolCallId === "string" ? request.toolCallId : undefined,
-        title: message ?? form.questions[0]!.text,
-        options: QUESTION_OPTIONS,
-        questions: form.questions,
-      });
+      this.host?.update(this.id, sessionId, request.update);
     });
+  }
+
+  private cancelQuestionRequest(id: RpcId): void {
+    for (const [sessionId, state] of this.sessions) {
+      for (const [requestId, pending] of state.questions) {
+        if (pending.rpcId !== id) continue;
+        state.questions.delete(requestId);
+        pending.resolve(pending.request.respond("cancel"));
+        this.host?.update(this.id, sessionId, { sessionUpdate: "ls_permission_resolved", requestId });
+      }
+    }
   }
 
   async answerQuestion(nativeId: string, requestId: string, answers: QuestionAnswer[]): Promise<void> {
     const state = this.sessions.get(nativeId);
     const pending = state?.questions.get(requestId);
     if (!state || !pending) throw RpcError.app("not_found", "这个问题已经不在等回答了");
+    const response = pending.request.answer(answers);
     state.questions.delete(requestId);
-    pending.resolve({ action: "accept", content: formContent(pending.form, answers) });
+    pending.resolve(response);
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_permission_resolved", requestId, optionId: "answered", answers });
   }
 
   private cancelPermissions(state: AcpSessionState): void {
     for (const resolve of state.permissions.values()) resolve({ outcome: { outcome: "cancelled" } });
     state.permissions.clear();
-    for (const pending of state.questions.values()) pending.resolve({ action: "cancel" });
+    for (const pending of state.questions.values()) pending.resolve(pending.request.respond("cancel"));
     state.questions.clear();
   }
 
@@ -580,6 +603,7 @@ export class AcpDriver implements AgentDriver {
     if (state.inflight > 0) return;
     this.closeMessage(nativeId);
     state.turnActive = false;
+    state.toolCalls.clear();
     this.cancelPermissions(state);
     this.emit(nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason });
     const next = state.queue.shift();

@@ -1,5 +1,6 @@
 import type {
   AgentAuth,
+  AsyncQuestion,
   GoalChange,
   SessionGoal,
   AgentCapabilities,
@@ -23,6 +24,7 @@ export interface DiscoveredSession {
   createdAt: number;
   updatedAt: number;
   state?: SessionState;
+  asyncQuestions?: AsyncQuestion[];
 }
 
 /**

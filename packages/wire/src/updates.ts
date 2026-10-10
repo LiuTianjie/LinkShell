@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { asyncQuestionSchema } from "./async-questions.js";
 import { sessionGoalSchema } from "./goal.js";
 import { backgroundTaskSchema, permissionOptionSchema, questionAnswerSchema, questionSchema, sessionDriverSchema, sessionStateSchema, toolKindSchema } from "./model.js";
 import { workflowAgentStateSchema, workflowSchema } from "./workflow.js";
@@ -181,6 +182,10 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
   }),
   // ── LinkShell extensions ──
   z.object({
+    sessionUpdate: z.literal("ls_async_questions"),
+    questions: z.array(asyncQuestionSchema),
+  }),
+  z.object({
     sessionUpdate: z.literal("ls_message_done"),
     parentToolCallId: z.string().optional(),
     messageId: z.string(),
@@ -190,7 +195,7 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
      * `request_user_input_async`): answered by an ordinary message that quotes
      * them (`asyncQuestionReply`). An app that predates them shows the text only.
      */
-    questions: z.array(z.object({ id: z.string(), title: z.string(), options: z.array(z.string()) })).optional(),
+    questions: z.array(asyncQuestionSchema).optional(),
   }),
   /** Selectable session settings (model, permission mode, effort…) as the agent reports them. */
   z.object({

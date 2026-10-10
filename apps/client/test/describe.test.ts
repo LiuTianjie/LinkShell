@@ -1,6 +1,6 @@
-import type { PermissionOption } from "@linkshell/wire";
+import type { PermissionOption, SessionSummary } from "@linkshell/wire";
 import { describe, expect, it } from "vitest";
-import { activityText, commandOf, permissionChoices, plainPreview, sessionTitle, tidyCommand } from "@/lib/describe";
+import { activityText, needsAttention, needsUserInput, commandOf, permissionChoices, plainPreview, sessionTitle, tidyCommand } from "@/lib/describe";
 
 const option = (optionId: string, kind: PermissionOption["kind"], name = optionId): PermissionOption => ({ optionId, kind, name });
 
@@ -61,5 +61,18 @@ describe("one line about a session", () => {
     // A preview that arrives already on one line still has its bullets in it.
     expect(plainPreview("包括： - 一 - 二")).toBe("包括：一 · 二");
     expect(plainPreview("```ts\nconst a = 1;\n```\n完成")).toBe("完成");
+  });
+});
+
+describe("sessions needing user input", () => {
+  const session: SessionSummary = { id: "s", nativeId: "s", agent: "codex", cwd: "/w", state: "running", pendingPermissions: 0, createdAt: 1, updatedAt: 1, lastSeq: 0, archived: false };
+  it("puts async questions in Needs you while preserving the running state", () => {
+    const pending = { ...session, asyncQuestions: [{ id: "q", title: "Which?", options: [] }] };
+    expect(needsUserInput(pending)).toBe(true);
+    expect(needsAttention(pending)).toBe(true);
+    expect(pending.state).toBe("running");
+    expect(needsUserInput(session)).toBe(false);
+    expect(needsAttention(session)).toBe(false);
+    expect(needsAttention({ ...session, state: "waiting" })).toBe(true);
   });
 });

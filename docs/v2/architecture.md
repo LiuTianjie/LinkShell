@@ -26,7 +26,7 @@ v1 是 Agent 进程的**旁观者**：电脑上跑的 `claude`、`codex` 由用�
 
 **非目标（v2.0 不做，后续再议）**
 
-- 桌面屏幕共享（WebRTC）——价值低、复杂度高，先不迁移。
+- 桌面屏幕共享最初不在 2.0 首发迁移范围内；后来已实现 Mac 原生采集/视频直连与 iOS 原生接收，当前架构、回退和验证边界见 [screen-realtime.md](screen-realtime.md)。
 - 用量统计面板。
 - 旧协议兼容（直接断代）。
 
@@ -275,7 +275,7 @@ LinkShell **从不经手 Agent 的凭据**，只用与用户终端完全相同�
 | `packages/cli` | 命令外壳 + shim |
 | `packages/gateway` | 中继：密文路由、配对会合、账号校验；官方网关和自建网关是同一份代码 |
 | `packages/client-core` | 客户端状态与时间线（不含界面） |
-| `apps/client` | Expo App（iOS / Android） |
+| `apps/client` | Expo App（iOS / Android），含 `modules/link-screen` iOS 原生 WebRTC 解码与 Metal 显示；复用 WebView 控件 |
 | `apps/mac` | LinkShell.app：Mac 上的屏幕采集、视频和输入（见 [screen-realtime.md](screen-realtime.md)） |
 
 **网关的拆分与合并**：重写期间网关分成两半——v1 网关留在 `packages/gateway`，新中继单独放在 `packages/gateway-v2`，由前者挂在同一个端口的 `/v2/connect` 上，这样一个部署同时服务两代客户端。v1 那一半删除后，中继并入 `packages/gateway`，`packages/gateway-v2` 不复存在。对已安装的电脑和手机没有任何变化：路径仍是 `/v2/connect`，握手里的挑战串仍是 `linkshell-gateway-v2:…`，数据仍是同一个 `relay.db`、同样的表结构。路径和挑战串里的 “v2” 是协议的一部分，不是可以顺手整理掉的版本号；`relay.db` 的位置和表结构同样不能动。
@@ -294,7 +294,7 @@ LinkShell **从不经手 Agent 的凭据**，只用与用户终端完全相同�
 | M5 | 终端、开发预览、推送、语音输入迁移；发布 | 真机验收 |
 | M6 ✅ | 删除 v1 代码，网关合并为一个包（2026-10，见 §8） | 全量 build + typecheck + 测试；新镜像挂旧数据卷启动，配对仍在 |
 
-2.0 于 2026-09-30 发布，M3–M5 的主体（加密通道、中继、配对、App、终端、开发预览）都在其中。当时列在里面但没有做的：推送、局域网发现、语音输入、Web 端。屏幕和开发预览的直连后来用 WebRTC 实现（`packages/wire/src/direct.ts`），屏幕的实时视频见 [screen-realtime.md](screen-realtime.md)。
+2.0 于 2026-09-30 发布，M3–M5 的主体（加密通道、中继、配对、App、终端、开发预览）都在其中。当时列在里面但没有做的：推送、局域网发现、语音输入、Web 端。开发预览和屏幕兼容字节流后来增加了 Host ↔ 客户端的 WebRTC DataChannel（`packages/wire/src/direct.ts`）。Mac 屏幕另有 LinkShell.app ↔ 接收器的视频连接；iOS 默认原生 WebRTC/Metal，失败依次回退 WebView 视频和 RPC。两套连接、当前参数及性能边界见 [screen-realtime.md](screen-realtime.md)，旧设计和实验见 [历史存档](screen-realtime-history.md)。
 
 ## 10. 风险
 

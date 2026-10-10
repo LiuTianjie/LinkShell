@@ -38,10 +38,13 @@ export function HeaderActions({ actions }: { actions: HeaderAction[] }) {
     return (
       <Stack.Toolbar placement="right">
         {actions.map((action) =>
-          action.kind === "button" ? (
+          action.kind === "button" ? action.live !== undefined ? (
+            <Stack.Toolbar.View key={action.key}>
+              <IconButton icon={action.icon} label={action.label} live={action.live} onPress={action.onPress} />
+            </Stack.Toolbar.View>
+          ) : (
             <Stack.Toolbar.Button key={action.key} icon={action.icon.sf} accessibilityLabel={action.label} onPress={action.onPress}>
               <Stack.Toolbar.Label>{action.label}</Stack.Toolbar.Label>
-              {action.live ? <Stack.Toolbar.Badge>•</Stack.Toolbar.Badge> : null}
             </Stack.Toolbar.Button>
           ) : (
             <Stack.Toolbar.Menu key={action.key} icon={action.icon.sf} accessibilityLabel={action.label}>

@@ -28,6 +28,36 @@ acceptance app. A new native binary is required; a Metro reload cannot add it.
 Diagnostics report sender and decoder output separately; neither is a physical
 display-rate result.
 
+## Architecture and compatibility
+
+The [current end-to-end architecture](../../../../docs/v2/screen-realtime.md) distinguishes
+this media peer (LinkShell.app ↔ receiver) from the independent bulk DataChannel
+(Node host ↔ client). That bulk connection may carry the forwarded viewer HTTP/WebSocket;
+its `direct` status does not prove media connectivity. The native receiver opens `/stream`
+with `video=1` and its capability-limited `maxFps`. Host/Mac signalling remains necessary
+throughout the session.
+
+The module targets iOS 16.4+. It reuses `JitsiWebRTC ~>124.0.0` (the locally checked Pod lock
+has 124.0.2), while the Mac uses M154. The native decoder factory offers H.264 only. FlexFEC
+is offered by the Mac, but actual negotiation, received protection packets and recovered loss
+must be validated separately; neither Mac loopback results nor WKWebView support establish
+the native receiver's capabilities.
+
+```mermaid
+flowchart LR
+  track["WebRTC H.264 track"] --> decode["VideoToolbox / CVPixelBuffer"]
+  decode --> latest["Latest decoded-frame mailbox"]
+  latest --> texture["CVMetalTextureCache"]
+  texture --> metal["Metal / display link"]
+  web["Transparent WebView: controls, gestures, cursor"] --> bridge["WebKit → Swift → input channels"]
+```
+
+This module requires a native app build. With an older host missing the control bridge, or
+with a failed/unsupported media path, the app moves through the normal fallback state machine.
+The final RPC fallback only changes this screen's forwarding; unrelated direct streams remain
+usable. RPC goes through the encrypted gateway tunnel for paired/account connections, or the
+existing RPC connection for an explicitly configured development host.
+
 ## Pipeline
 
 - The host accepts `maxFps=30|60|120` as a receiver ceiling, leaving adaptation
@@ -46,6 +76,21 @@ display-rate result.
   bound the requested rate. No claim of physical scanout control is made.
 - Closing the view or backgrounding tears down the socket, peer, track and display
   link. Reconnection starts a new session and releases held pointer state.
+
+`maximumDrawableCount=2` bounds the drawable pool; the separate semaphore limits application
+GPU submissions to one. Before taking the mailbox, presentation checks that the remaining
+time exceeds `max(0.5 ms, estimated GPU work × 1.25)`. A missed opportunity leaves the newest
+pending picture for the next one. Pool sizes and `preferredFrameLatency=1` are not measured
+queue lengths or an end-to-end one-frame guarantee. There is no cross-device presentation-
+deadline feedback yet.
+
+The current integration sets the renderer's `showsPointer=false`: the WebView draws the
+cursor, even though the Metal renderer also contains an optional cursor path. Gestures still
+run in WebView JS and Mac input handling still reaches the main thread. The bridge is a
+private message channel built with public WebKit APIs, not a private system API. Pixel-buffer
+mapping avoids application-side CPU conversion/readback, but does not establish that every
+capture, scaling, codec and network stage is zero-copy. The current source is 8-bit NV12,
+BT.709/sRGB; HDR and 4:4:4 are not implemented.
 
 ## Measurement overhead
 

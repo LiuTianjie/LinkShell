@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ABANDON, RpcPeer, type SessionEvent } from "@linkshell/wire";
+import { ABANDON, RpcPeer, asyncQuestionReply, type SessionEvent } from "@linkshell/wire";
 import { connectHost } from "../src/rpc/client.js";
 import { startHost, type RunningHost } from "../src/host.js";
 import { CodexDriver } from "../src/drivers/codex/driver.js";
@@ -255,6 +255,51 @@ const prompt = (sessionId: string, clientMessageId: string, message: string) =>
 describe("a Codex thread held by a Codex that can't be joined (the desktop app)", () => {
   const id = "codex:desk-thread";
   let desk: ReturnType<typeof deskCodex>;
+
+  it("shows async questions above a running desktop turn and sends answers immediately without queueing", async () => {
+    const desktop = deskCodex(disk, "async-input-thread", "/desk/questions");
+    desktop.hold();
+    desktop.startTurn("Implement it");
+    desktop.add({ type: "agentMessage", id: "ask", text: "Which features?", delivery: "async", questions: [
+      { title: "Which features?", options: ["A", "B"] }, { title: "Anything else?", options: [] },
+    ] });
+    await host.hub.refreshDiscovery();
+    const sessionId = "codex:async-input-thread";
+    await phone.client.call("sessions.subscribe", { sessionId, fromSeq: 0 });
+    const pending = host.hub.getSession(sessionId).asyncQuestions!;
+    expect(pending).toHaveLength(2);
+    expect(host.hub.getSession(sessionId)).toMatchObject({ state: "running", pendingPermissions: 0 });
+    const reply = asyncQuestionReply([{ question: pending[0]!, answer: "My custom answer" }]);
+    // A missing desktop bus is an error, never a queued answer or an answered badge.
+    await expect(phone.client.call("sessions.prompt", { sessionId, clientMessageId: "async-answer", content: text(reply), whenBusy: "queue" })).rejects.toMatchObject({ appCode: "busy" });
+    expect(desktop.queue()).toEqual([]);
+    expect(host.hub.getSession(sessionId).asyncQuestions).toHaveLength(2);
+    const bus = desktopBus(busSocket, ({ method, params }) => {
+      expect(method).toBe("thread-follower-steer-turn");
+      desktop.add({ type: "userMessage", id: `answer-${params.clientUserMessageId}`, clientId: params.clientUserMessageId, content: params.input });
+      return { result: { turnId: desktop.turnId() } };
+    });
+    try {
+      await waitFor(() => existsSync(busSocket));
+      expect(await phone.client.call("sessions.prompt", { sessionId, clientMessageId: "async-answer", content: text(reply), whenBusy: "queue" })).toEqual({ delivery: "steered" });
+      await waitFor(() => host.hub.getSession(sessionId).asyncQuestions?.length === 1);
+      expect(desktop.queue()).toEqual([]);
+      expect(host.hub.getSession(sessionId).asyncQuestions).toEqual([pending[1]]);
+      // Desktop answers the other question; phone clears it too, without ending the turn.
+      desktop.add({ type: "userMessage", id: "desktop-answer", content: input(asyncQuestionReply([{ question: pending[1]!, answer: "" }])) });
+      await waitFor(() => host.hub.getSession(sessionId).asyncQuestions?.length === 0);
+      expect(host.hub.getSession(sessionId).state).toBe("running");
+      desktop.add({ type: "agentMessage", id: "ask-again", text: "Next?", delivery: "async", questions: [{ title: "Next?" }] });
+      await waitFor(() => host.hub.getSession(sessionId).asyncQuestions?.length === 1);
+      await phone.client.call("sessions.unsubscribe", { sessionId });
+      await sleep(220);
+      await phone.client.call("sessions.subscribe", { sessionId, fromSeq: 0 });
+      expect(host.hub.getSession(sessionId).asyncQuestions).toHaveLength(1);
+      desktop.endTurn();
+      await waitFor(() => host.hub.getSession(sessionId).state === "idle");
+      expect(host.hub.getSession(sessionId).asyncQuestions).toEqual([]);
+    } finally { await bus.close(); }
+  });
 
   it("reports a desktop-owned running turn correctly through /status", async () => {
     const desktop = deskCodex(disk, "status-thread", "/desk/status");

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { asyncQuestionSchema } from "./async-questions.js";
 import { workflowAgentStateSchema, workflowSchema } from "./workflow.js";
 
 /**
@@ -218,6 +219,8 @@ export const sessionSummarySchema = z.object({
   archived: z.boolean(),
   activity: sessionActivitySchema.optional(),
   permission: pendingPermissionSchema.optional(),
+  /** Unanswered questions in the current turn, even while the agent continues working. */
+  asyncQuestions: z.array(asyncQuestionSchema).optional(),
   /**
    * Live only: messages waiting for the current turn to end, when the host
    * holds them (agents that can't take input mid-turn). Oldest first.

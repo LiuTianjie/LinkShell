@@ -1,6 +1,7 @@
+import { rolloutAttention, type CodexAttention } from "./attention.js";
 import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import { codexPreview } from "./computer-preview.js";
-import { ABANDON, RpcError, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
+import { ABANDON, RpcError, questionReplies, updateAsyncQuestions, type AsyncQuestion, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
 import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
 import { parseCodexLoginStatus, runStatusCommand } from "../auth.js";
 import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
@@ -300,12 +301,24 @@ export class CodexDriver implements AgentDriver {
     this.server = undefined;
   }
 
+  private readonly attention = new Map<string, { stamp: string; value: CodexAttention | undefined }>();
+
   async listSessions(limit: number): Promise<DiscoveredSession[]> {
     const result = await this.rpc<{ data: CodexThread[] }>("thread/list", { limit, archived: false });
     return result.data.map((thread) => {
       const discovered = threadToDiscovered(thread);
       // This host's app-server only knows the state of the threads loaded in it.
       const state = this.stateElsewhere(thread.id);
+      const stamp = thread.path ? fileStamp(thread.path) : undefined;
+      let attention = this.attention.get(thread.id);
+      if (thread.path && stamp && attention?.stamp !== stamp) {
+        attention = { stamp, value: rolloutAttention(thread.path) };
+        this.attention.set(thread.id, attention);
+      }
+      // Live notifications win over the file, which can lag while the agent writes.
+      if (!this.attached.has(thread.id) && !this.observed.has(thread.id) && attention?.value) {
+        return { ...discovered, state: attention.value.running ? "running" : "idle", asyncQuestions: attention.value.questions };
+      }
       return state ? { ...discovered, state } : discovered;
     });
   }
@@ -468,6 +481,7 @@ export class CodexDriver implements AgentDriver {
     // A turn already running: the session shows as working, and its end has a start to close.
     if (active) this.host?.update(this.id, threadId, { sessionUpdate: "ls_turn", state: "started", turnId: active.id });
     this.host?.update(this.id, threadId, { sessionUpdate: "ls_status", state: threadStateOf(thread.status) });
+    this.announceQuestions(threadId, thread, true);
     const read = new Set((thread.turns ?? []).flatMap((turn) => turn.items.map((item) => item.id)));
     for (const item of underWay) {
       // A command still running: its card. (Its output so far was missed, so the whole of it comes when it finishes.)
@@ -509,6 +523,7 @@ export class CodexDriver implements AgentDriver {
     if (thread.cwd) this.cwds.set(threadId, thread.cwd);
     this.host?.update(this.id, threadId, { sessionUpdate: "ls_status", state: running ? "running" : "idle" });
     this.reportHeld(threadId, true);
+    this.announceQuestions(threadId, thread, true);
     this.readHeldSettings(threadId, thread.path ?? undefined);
     void this.announceCommands(threadId);
     void this.announceGoal(threadId);
@@ -549,6 +564,7 @@ export class CodexDriver implements AgentDriver {
         watch.seen.add(item.itemId);
         this.report(threadId, item);
       }
+      this.announceQuestions(threadId, thread);
       const last = thread.turns?.at(-1);
       const running = turnUnderWay(last);
       watch.turnId = running ? last?.id : undefined;
@@ -566,6 +582,19 @@ export class CodexDriver implements AgentDriver {
     } finally {
       watch.reading = false;
     }
+  }
+
+  private announceQuestions(threadId: string, thread: CodexThread, force = false): void {
+    const turn = thread.turns?.at(-1);
+    let questions: AsyncQuestion[] = [];
+    if (turnUnderWay(turn)) {
+      for (const item of threadToHistory({ ...thread, turns: turn ? [turn] : [] })) {
+        for (const update of item.updates) questions = updateAsyncQuestions(questions, update);
+      }
+    }
+    // Always restore on attach, even if this host already imported the history.
+    const changed = this.isNews(`questions:${threadId}`, questions);
+    if (force || changed) this.host?.update(this.id, threadId, { sessionUpdate: "ls_async_questions", questions });
   }
 
   /**
@@ -1108,7 +1137,19 @@ export class CodexDriver implements AgentDriver {
 
   private async send(nativeId: string, input: unknown[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
     if (input.length === 0) throw RpcError.app("invalid_params", "nothing to send");
-    if (this.observed.has(nativeId)) return this.enqueue(nativeId, input, clientMessageId);
+    const watch = this.observed.get(nativeId);
+    if (watch?.running && questionReplies(textOf(input as Record<string, unknown>[]))) {
+      try {
+        if (!this.desktopBusPath) throw new Error("desktop bus unavailable");
+        await steerThroughDesktop(this.desktopBusPath, nativeId, this.desktopMessage(nativeId, input, clientMessageId));
+      } catch (error) {
+        this.host?.log(`[codex] couldn't deliver a question answer to ${nativeId}: ${error instanceof Error ? error.message : String(error)}`);
+        throw this.refused(nativeId, "回答未确认送达 · 请重试或在电脑上回答", "回答未确认送达，问题仍保留");
+      }
+      void this.refresh(nativeId);
+      return "steered";
+    }
+    if (watch) return this.enqueue(nativeId, input, clientMessageId);
     const activeTurnId = this.stateOf(nativeId).activeTurnId;
     if (activeTurnId) {
       try {

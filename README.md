@@ -80,7 +80,7 @@ Watching and controlling the computer's screen from the phone needs two macOS pe
 linkshell screen      # macOS: a LinkShell window takes you to each switch and waits for it
 ```
 
-On a Mac nothing else needs installing: the picture and the control are **LinkShell**'s, a signed app that comes with the CLI. Its two permissions (Screen Recording, Accessibility) are switches named LinkShell that you turn on once; they hold whichever terminal starts the host and across upgrades. It needs a Mac with Apple silicon, macOS 13 or later. On Linux the screen can be watched (not controlled) and needs `ffmpeg`.
+On a Mac nothing else needs installing: the picture and the control are **LinkShell**'s, a signed app that comes with the CLI. Its two permissions (Screen Recording, Accessibility) are switches named LinkShell that you turn on once; they hold whichever terminal starts the host and across upgrades. It needs a Mac with Apple silicon, macOS 13 or later. On Linux the screen can be watched (not controlled) and needs `ffmpeg` with an X11 display.
 
 <details>
 <summary>Other ways to install</summary>
@@ -128,8 +128,8 @@ Currently supports Codex on macOS with compatible Computer Use tools. See [setup
 
 ### More features
 
-- **Answer its questions.** When an agent asks you to choose or to type something — Claude's questions, Codex's, an MCP server's form — the question arrives with its options: pick, write your own answer, or skip.
-- **Straight to your computer.** The screen and port previews travel peer to peer whenever a direct path exists (the same network, or through NAT); the gateway then only helps the two sides find each other. A Mac's screen uses hardware-encoded real-time video, with the pointer drawn on the phone. iOS defaults to the native low-latency receiver, requesting up to 120 fps within device and network limits; it automatically falls back to standard video and then the gateway relay when needed.
+- **Answer its questions.** Codex (including Desktop asynchronous questions), Claude, Cursor and Grok can send structured questions to your phone. Sessions show when input is needed; answer from the question card or skip. Free text is available when the agent supports it; Cursor's extension accepts choices only. See [agent question support](docs/v2/agent-questions.md).
+- **Straight to your computer.** The screen and port previews travel peer to peer whenever a direct path exists (the same network, or through NAT). A Mac's screen uses low-latency H.264 hardware encoding, with the pointer drawn on the phone. Supported iOS builds default to native WebRTC decoding and Metal display, requesting a ceiling of 120 fps within display, power, thermal and network limits. Failure tries standard WebView video, then the encrypted RPC stream through the gateway, bypassing the separate direct data channel for this screen. Android and browsers use the standard viewer. The gateway retains session/signalling duties; no TURN is deployed.
 - **Forks and worktrees.** Fork a session from any reply to try another direction — in the same directory or in a new git worktree that leaves your working tree alone.
 - **Sub-agents, Claude Workflows and long sessions.** Follow a Workflow by phase, open each Agent's conversation and tool results, and return to a background run from the bar above the composer. The main conversation keeps a compact summary; Workflow agents stay in their run's details instead of repeating as conversation cards. Consecutive finished Agent steps fold together. The button beside the session title lists its Workflows and sub-agents. Long sessions open at their latest turns; project files are there to browse and read.
 - **Commands and persistent goals.** Type `/`, tap the command button beside the composer, or open Commands from the session menu to search commands and skills without losing an unsent draft. Codex and Claude Code support `/goal` and a dedicated goal screen. Codex can pause, resume and set a token budget; Claude can set or clear a completion condition. Available controls depend on the agent installed on your computer.
@@ -163,7 +163,7 @@ What each agent supports from the phone:
 | Fork a session, or from a reply | native | native | made by LinkShell: the conversation is handed over as text |
 | Sessions in git worktrees | yes | yes | yes |
 | Slash commands | `/compact`, `/review`, `/init`, your skills | Claude's own list and your skills | whatever the agent offers |
-| Questions for you (choices, free text) | yes, in plan mode and outside it | yes | when the agent asks through ACP forms |
+| Questions for you (choices, free text) | yes, including Desktop asynchronous questions | yes | Cursor choices, Grok questions, standard ACP forms |
 | Plan mode | a setting on the phone | a permission mode | whatever modes the agent offers |
 | Persistent goals | set, pause, resume, clear, token budget | set and clear, when `/goal` is available | not integrated |
 | Background commands | status, output, stop one task | Bash / Monitor status and output | not integrated |
@@ -236,7 +236,10 @@ On macOS, the full build also builds LinkShell.app and needs Xcode's Swift toolc
 | `packages/client-core` | Client state and timeline shared by the apps |
 | `apps/client` | The app: Expo / React Native for iOS and Android |
 | `apps/mac` | LinkShell.app (`@linkshell/mac`): the Mac side of the screen — capture, WebRTC video, input, permissions |
+| `apps/client/modules/link-screen` | iOS native screen receiver: WebRTC decode, latest-frame mailbox, Metal; existing WebView controls |
 | `docs/site` | Website and installer (`python3 scripts/build-site-pages.py` after editing; `scripts/site-promo-assets.sh` cuts its film and clips) |
+
+The [remote-desktop architecture and diagrams](docs/v2/screen-realtime.md) describe the Mac/iOS media path, both WebRTC connections, fallback and validation limits. Native receiver changes require a new iOS binary; Metro reloads cannot install them. A 120 fps ceiling is not sustained display performance: stable 120 fps, stable 4K/60 and real-device weak-network gains remain unproven, and the recorded periodic stutter is still unresolved.
 
 To work on the app, run these from the repository root in separate terminals. Give the development host its own state directory so it does not share sessions or configuration with your installed host:
 

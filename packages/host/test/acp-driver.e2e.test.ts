@@ -34,7 +34,7 @@ const spec: AcpAgentSpec = {
 
 const running: { host: RunningHost; home: string }[] = [];
 
-async function setup(env: Record<string, string> = {}, store?: Record<string, unknown>) {
+async function setup(env: Record<string, string> = {}, store?: Record<string, unknown>, agent = "fake") {
   const home = mkdtempSync(join(tmpdir(), "lsh-acp-"));
   const storePath = join(home, "fake-acp-store.json");
   const authLog = join(home, "auth.log");
@@ -42,7 +42,7 @@ async function setup(env: Record<string, string> = {}, store?: Record<string, un
   const host = await startHost({
     home,
     version: "test",
-    drivers: () => [new AcpDriver(spec, { env: { ...process.env, FAKE_ACP_STORE: storePath, FAKE_ACP_AUTH_LOG: authLog, ...env }, hostVersion: "test" })],
+    drivers: () => [new AcpDriver({ ...spec, id: agent, label: agent === "fake" ? spec.label : agent }, { env: { ...process.env, FAKE_ACP_STORE: storePath, FAKE_ACP_AUTH_LOG: authLog, ...env }, hostVersion: "test" })],
     log: () => {},
   });
   running.push({ host, home });
@@ -320,6 +320,75 @@ describe("generic ACP driver (fake agent)", () => {
     const done = t.of(session.id).find((e) => e.update.sessionUpdate === "tool_call_update" && e.update.status === "completed");
     expect(done?.update).toMatchObject({ content: [{ type: "content", content: { type: "text", text: "hi" } }] });
     expect(t.host.hub.getSession(session.id)).toMatchObject({ state: "idle", pendingPermissions: 0 });
+  });
+
+  it("routes Cursor questions without sessionId to their tool's session, even with two pending turns", async () => {
+    const f = await setup({}, undefined, "cursor");
+    const { session: first } = await f.client.call("sessions.create", { agent: "cursor", cwd: "/one" });
+    const { session: second } = await f.client.call("sessions.create", { agent: "cursor", cwd: "/two" });
+    for (const session of [first, second]) {
+      await f.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+      await f.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: session.id, content: prompt("CURSOR_QUESTION") });
+    }
+    const pending = (id: string) => f.host.hub.getSession(id).permission;
+    await waitFor(() => pending(first.id) && pending(second.id));
+    await f.client.call("sessions.answer", { sessionId: second.id, requestId: pending(second.id)!.requestId, answers: [{ id: "db", values: ["lite", "pg"] }, { id: "checks", values: ["unit", "types", "forged"] }] });
+    await waitFor(() => f.ended(second.id).length === 1);
+    expect(f.text(second.id)).toContain('"answers":[{"questionId":"db","selectedOptionIds":["lite"]},{"questionId":"checks","selectedOptionIds":["unit","types"]}]');
+    expect(f.host.hub.getSession(first.id).state).toBe("waiting");
+    await f.client.call("sessions.permission", { sessionId: first.id, requestId: pending(first.id)!.requestId, optionId: "skip" });
+    await waitFor(() => f.ended(first.id).length === 1);
+    expect(f.text(first.id)).toContain('"outcome":{"outcome":"skipped"}');
+  });
+
+  it("refuses ambiguous Cursor routing and handles an unscoped question only with one active session", async () => {
+    const f = await setup({}, undefined, "cursor");
+    const { session: first } = await f.client.call("sessions.create", { agent: "cursor", cwd: "/one" });
+    const { session: second } = await f.client.call("sessions.create", { agent: "cursor", cwd: "/two" });
+    for (const session of [first, second]) await f.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await f.client.call("sessions.prompt", { sessionId: first.id, clientMessageId: "one", content: prompt("CURSOR_QUESTION") });
+    await waitFor(() => f.host.hub.getSession(first.id).permission);
+    await f.client.call("sessions.prompt", { sessionId: second.id, clientMessageId: "two", content: prompt("CURSOR_QUESTION_UNSCOPED") });
+    await waitFor(() => f.ended(second.id).length === 1);
+    expect(f.text(second.id)).toContain('"rpcError":{"code":-32602');
+    expect(f.host.hub.getSession(second.id).permission).toBeUndefined();
+    expect(f.host.hub.getSession(first.id).state).toBe("waiting");
+    await f.client.call("sessions.cancel", { sessionId: first.id });
+    await waitFor(() => f.ended(first.id).length === 1);
+    expect(f.text(first.id)).toContain('"outcome":{"outcome":"cancelled"}');
+    await f.client.call("sessions.prompt", { sessionId: second.id, clientMessageId: "three", content: prompt("CURSOR_QUESTION_UNSCOPED_PREFIXED") });
+    await waitFor(() => f.host.hub.getSession(second.id).permission);
+    expect(f.host.hub.getSession(second.id).permission?.questions?.[0]?.id).toBe("db");
+  });
+
+  it("enables Grok questions and sends native arrays, annotations and MCP form responses", async () => {
+    const f = await setup({ FAKE_ACP_EXPECT_QUESTIONS: "1" }, undefined, "grok");
+    const { session } = await f.client.call("sessions.create", { agent: "grok", cwd: "/w" });
+    await f.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await f.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "one", content: prompt("GROK_QUESTION") });
+    const pending = () => f.host.hub.getSession(session.id).permission;
+    await waitFor(pending);
+    expect(pending()?.questions?.[0]).toMatchObject({ other: true, kind: "choice" });
+    await f.client.call("sessions.answer", { sessionId: session.id, requestId: pending()!.requestId, answers: [{ id: "question_0", values: [], other: "MySQL" }, { id: "question_1", values: ["lint, strict", "tests"] }] });
+    await waitFor(() => f.ended(session.id).length === 1);
+    expect(f.text(session.id)).toContain('"outcome":"accepted","answers":{"Database?":["Other"],"Checks?":["lint, strict","tests"]},"annotations":{"Database?":{"notes":"MySQL"}}');
+    await f.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "two", content: prompt("GROK_FORM") });
+    await waitFor(pending);
+    await f.client.call("sessions.answer", { sessionId: session.id, requestId: pending()!.requestId, answers: [{ id: "enabled", values: ["false"] }] });
+    await waitFor(() => f.ended(session.id).length === 2);
+    expect(f.text(session.id)).toContain('"outcome":"accept","content":{"enabled":false}');
+  });
+
+  it.each(["cursor", "grok"])("clears a %s question when the agent cancels its reverse request", async (agent) => {
+    const f = await setup({}, undefined, agent);
+    const { session } = await f.client.call("sessions.create", { agent, cwd: "/w" });
+    await f.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await f.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "one", content: prompt(`${agent.toUpperCase()}_QUESTION_CANCEL_REVERSE`) });
+    const request = await waitFor(() => f.host.hub.getSession(session.id).permission);
+    await waitFor(() => !f.host.hub.getSession(session.id).permission);
+    await expect(f.client.call("sessions.answer", { sessionId: session.id, requestId: request.requestId, answers: [] })).rejects.toMatchObject({ appCode: "not_found" });
+    await waitFor(() => f.ended(session.id).length === 1);
+    expect(f.text(session.id)).toContain('"outcome":"cancelled"');
   });
 
   it("puts an agent's questions to the phone: picks, an own answer, skipping", async () => {

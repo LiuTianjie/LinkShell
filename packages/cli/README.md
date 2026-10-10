@@ -34,6 +34,20 @@ linkshell codex     # Codex; the terminal and the phone are live at the same tim
 
 Claude Workflow progress, phases and Agent details require CLI 0.10.6 or newer and app 2.3.5 or newer. After upgrading the CLI, restart the host with `linkshell host stop` and `linkshell host --daemon`.
 
+## Remote screen
+
+On Apple silicon Macs with macOS 13+, the CLI includes the signed LinkShell.app for screen
+capture, low-latency H.264 encoding and input. `linkshell screen` sets up Screen Recording and
+Accessibility; `--check` reports permissions and availability, not media performance. Linux
+viewing requires ffmpeg and an X11 display and has no input control.
+
+Supported iOS app builds receive native WebRTC video and present it with Metal, requesting
+up to 120 fps within source/receiver, power, thermal and network limits. They automatically
+try standard WebView video and then RPC fallback if needed. A native receiver change needs
+a new iOS app binary as well as any required computer-side update. See the
+[architecture and validation limits](https://github.com/LiuTianjie/LinkShell/blob/main/docs/v2/screen-realtime.md);
+a 120 fps request does not establish sustained 120 fps or stable 4K/60.
+
 ## Commands
 
 | | |

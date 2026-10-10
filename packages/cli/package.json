@@ -1,6 +1,6 @@
 {
   "name": "linkshell-cli",
-  "version": "0.10.17",
+  "version": "0.10.18",
   "description": "Follow, steer and approve the coding agents on your computer (Claude Code, Codex, Gemini, Copilot and more) from your phone",
   "type": "module",
   "main": "dist/cli/src/index.js",
