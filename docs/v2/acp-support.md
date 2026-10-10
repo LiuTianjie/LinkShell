@@ -1,6 +1,6 @@
 # ACP 支持与验证边界
 
-本说明对应 2026-10-11 的 ACP 实现改动。功能代码完成不等于已经发布或已更新电脑和手机；版本、安装及部署由更新任务处理。
+本说明对应 App 2.3.17、Host 0.4.20 / CLI 0.10.20 和网关网页 0.6.10。电脑端与手机端需要配套更新；能力由所连接的 Agent 协商。
 
 ## 协议基线
 
@@ -50,12 +50,15 @@ NES 没有语言服务，**不声明 semantic rename 支持**；收到这种建�
 
 ## 验证
 
-- 全仓 `pnpm build`、`pnpm typecheck`、`pnpm lint`、`pnpm test` 均通过；663 项 JavaScript/TypeScript 测试、47 项 Swift 测试。在独立检出执行，包含 CLI 编译的 Host/Gateway 源码和 macOS Swift 构建/测试。
+- 全仓 `pnpm build`、`pnpm typecheck`、`pnpm lint`、`pnpm test` 均通过；发布整合检查包含 777 项 JavaScript/TypeScript 测试、48 项 Swift 测试。在独立检出执行，包含 CLI 编译的 Host/Gateway 源码和 macOS Swift 构建/测试。
 - `acp-extensions.e2e.test.ts` 使用真正的 stdio 子进程、Host RPC 与客户端时间线，覆盖生命周期、配置、文件/终端、授权、通知、用量和子代理。
 - `acp-remote.test.ts` 使用官方 SDK 的本地 HTTP/WebSocket 服务端，分别协商 ACP 1/2 并验证双向请求；不是外部厂商服务的兼容认证。
 - `acp-client-services.test.ts`、`acp-mcp.test.ts`、`acp-editor.test.ts`、`acp-updates.test.ts` 覆盖目录边界、子进程清理、取消、MCP 错误/进度、位置编码、文件冲突、null 清空与资源保留；client-core 回归覆盖长时间登录请求、消息替换和历史分页。
 - 浏览器通过隔离的本机网关实际配对：整数默认值显示、小数被禁用提交、有效回答完成、布尔配置及空配置同步、压缩卡片、费用/用量、无会话登录表单均完成操作验证。没有控制或重启已安装的 Host。
 - 更新后的传输层已对本机 Claude ACP 适配器 0.84.0、Copilot 1.0.95、Gemini 0.62.0、Grok 完成真实初始化握手，均协商 ACP 1。此项没有发送模型任务，只证明当前安装版本的初始化兼容；Grok 未返回 Agent 版本。
+- 发布整合补充检查：真实 Codex 8/8、Claude Code 接力 13/13 通过；Mac 输入、H.264 流和视频握手检查通过。iOS 完整 Release 编译与 Android 原生终端模块编译通过。
+- 桌面回答异步问题后，未打开会话的手机客户端通过 Host RPC 自动清除待回答状态，断线重连后不复现；端到端回归覆盖部分回答与全部回答。
+- ACP 终端输出改为按增量转发；100 次各 1 KiB 的固定输出夹具，映射后 JSON 从 2,228,931 字节降到 114,492 字节。该测量不包含隧道封装，也不代表线上总体流量。
 - iOS/Android 的音频播放、系统授权页、键盘/光标和真机布局尚未完成设备验证。`expo-audio` 是新增原生依赖，必须由新 App 二进制承载，不能用旧二进制的 OTA 声称已支持。
 
 ## App 界面与布局验证
@@ -64,6 +67,6 @@ App 的新增页面复用现有 `colors`、`type`、`radius`、`Button`、`Agent
 
 这一轮界面调整通过 App 类型检查、全仓 lint 和 97 项 App 测试；使用真实 React Native 页面组件在 320/390 点宽度的 React Native Web 布局预览中检查了浅色/深色、长标题、审批纵向操作区和添加/保存流程。预览替换了原生导航、图标适配和电脑接口，不能作为 iOS/Android 真机验收。
 
-## 更新任务的接入范围
+## 配套版本
 
-本次改动涉及 wire、Host、client-core、App 和网页。网关业务路由无需修改，但其发布包内嵌网页需重新构建。发布时应整批消费对应源码和锁文件，统一安排包版本、App 原生构建以及本地/网关更新。这个实现任务不 bump 发布版本、不发布 npm、不安装 App/CLI、不部署网关。
+本次配套版本为 wire 0.2.9、Mac 组件 0.1.5、Host 0.4.20、网关 0.6.10、CLI 0.10.20 和 App 2.3.17。client-core 为私有包，随 App 和网页构建。网关内嵌网页一并更新，业务路由、配对数据卷和鉴权协议保持兼容。手机端滚动和新界面的真机体验，以及 Intel Mac 的实际采集与编码表现，仍需单独验证。

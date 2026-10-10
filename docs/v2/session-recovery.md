@@ -1,6 +1,6 @@
 # 会话恢复与 ACP 兼容
 
-基础恢复策略始于 Host 0.4.19 / CLI 0.10.19。本文同时说明当前开发分支的 ACP 扩展；完整能力与验证边界见 [ACP 支持说明](acp-support.md)。
+基础恢复策略始于 Host 0.4.19 / CLI 0.10.19。本文同时说明 Host 0.4.20 / CLI 0.10.20 与 App 2.3.17 的 ACP 扩展；完整能力与验证边界见 [ACP 支持说明](acp-support.md)。
 
 ## 状态与历史是两件事
 
@@ -36,7 +36,7 @@ LinkShell 的 v2 架构、Codex app-server 的 v2 API、网关的 `/v2/connect` 
 - `session/load`：协商了 `loadSession` 后调用，在响应前通过 `session/update` 回放历史。
 - `session/resume`：协商了 `sessionCapabilities.resume` 后调用，恢复上下文但不回放历史。LinkShell 提供说明，不把空历史冒充为成功加载的完整对话。
 
-[ACP 2 迁移指南](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/protocol/v2/migration.mdx)目前仍将整体协议标为 draft。当前分支提供默认关闭的 ACP 2 开关，允许协商回 ACP 1；后续按实际版本处理消息。ACP 2 的 `session/prompt` 响应只确认消息已插入，结束状态由 `state_update` 推送；历史恢复使用 `session/resume` 加 `replayFrom: { type: "start" }`。完整消息替换、字段显式清空、终端输出、权限结构和配置同步分别适配，重放中尚未完成的工具和计划也保留。
+[ACP 2 迁移指南](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/protocol/v2/migration.mdx)目前仍将整体协议标为 draft。此版本提供默认关闭的 ACP 2 开关，允许协商回 ACP 1；后续按实际版本处理消息。ACP 2 的 `session/prompt` 响应只确认消息已插入，结束状态由 `state_update` 推送；历史恢复使用 `session/resume` 加 `replayFrom: { type: "start" }`。完整消息替换、字段显式清空、终端输出、权限结构和配置同步分别适配，重放中尚未完成的工具和计划也保留。
 
 2026-10-10 对本机真实进程执行了只读初始化握手，没有发送任务：
 
@@ -54,5 +54,5 @@ LinkShell 的 v2 架构、Codex app-server 的 v2 API、网关的 `/v2/connect` 
 - `session-recovery.e2e.test.ts` 覆盖跨重启的旧状态、发现窗口之外的会话、按需启动、仅恢复不回放、Claude 原记录缺失后恢复、持有进程消失以及不兼容协议。
 - `codex-attention.test.ts`、`codex-archives.test.ts` 和 `hub.test.ts` 覆盖中断、原生归档、只读历史、缓存保留与失败重试。
 - 真实初始化握手只证明版本与声明的能力；真实问答、接力、审批用 `live:codex` / `live:claude` 验证，手机交互需要单独验证。
-- 2026-10-10 的基础恢复版本真实 Codex 检查 8/8 通过（问答流、审批、多客户端与终端入口）；Claude Code 2.1.168 接力检查 13/13 通过（历史导入、手机继续、交还终端、上下文连续与消息去重）。这不是新增 ACP 扩展的真机证明。当前分支证据见 [ACP 支持说明](acp-support.md)。
-- 配套更新应按 [完整发版 SOP](../release-sop.md) 处理 wire、Host、CLI、App 和网关内置网页。版本号和发布由负责更新的会话统一安排。
+- 2026-10-10 的基础恢复版本真实 Codex 检查 8/8 通过（问答流、审批、多客户端与终端入口）；Claude Code 2.1.168 接力检查 13/13 通过（历史导入、手机继续、交还终端、上下文连续与消息去重）。这不是新增 ACP 扩展的真机证明。配套版本证据见 [ACP 支持说明](acp-support.md)。
+- 配套更新应按 [完整发版 SOP](../release-sop.md) 处理 wire、Host、CLI、App 和网关内置网页。配套版本见 [ACP 支持说明](acp-support.md#配套版本)。
