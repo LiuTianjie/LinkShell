@@ -68,8 +68,8 @@ export function ScreenScreen() {
   // The native header overlays a stable WebView frame; safe areas reserve its controls.
   const insets = safeContentInsets(layout, safeArea);
   // The mode the page opens in is the one last chosen; after that the page reports its own.
-  const [initialMode] = useState(loadScreenMode);
-  const [mode, setMode] = useState<ScreenMode>(initialMode);
+  const [viewerMode, setViewerMode] = useState(loadScreenMode);
+  const [mode, setMode] = useState<ScreenMode>(viewerMode);
   // The user's own shortcuts: the page shows and edits them, and they are kept here.
   const [shortcuts, setShortcuts] = useState(loadScreenShortcuts);
   // How wide the video may be. The page changes it itself (it loads again with the new one); it is kept here
@@ -140,6 +140,7 @@ export function ScreenScreen() {
         fontScale: window.fontScale,
         // This app lets the page play video in place: the page may take the picture as a video track.
         video: !relayOnly,
+        nativePicture: playback.mode === "native",
         relayFallback: Platform.OS === "ios" && !relayOnly,
         // Lying down that way, the right is the side without the camera.
         clear: landscape && Platform.OS === "ios" && !resizableIOS ? "right" : null,
@@ -151,7 +152,7 @@ export function ScreenScreen() {
         // The keyboard covers the bottom edge while it is up.
         insets: { top: fullscreen ? insets.top : Math.max(insets.top, headerHeight), right: insets.right, bottom: keyboardOpen ? 0 : insets.bottom, left: insets.left },
       }),
-    [fullscreen, landscape, window.fontScale, headerHeight, keyboardOpen, shortcuts, layout?.divisions, insets.top, insets.right, insets.bottom, insets.left, relayOnly],
+    [fullscreen, landscape, window.fontScale, headerHeight, keyboardOpen, shortcuts, layout?.divisions, insets.top, insets.right, insets.bottom, insets.left, relayOnly, playback.mode],
   );
   const tellPage = useCallback((state: string) => web.current?.injectJavaScript(`window.linkshellChrome && window.linkshellChrome(${state}); true;`), []);
   useEffect(() => tellPage(chrome), [chrome, tellPage]);
@@ -165,7 +166,9 @@ export function ScreenScreen() {
         return;
       }
       // Full screen is lying down: a computer's screen is wide. The rotate button still stands it up again.
-      if (message.type === "screenFallback" && Platform.OS === "ios") {
+      if (message.type === "nativeUnavailable") {
+        updatePlayback({ type: "unavailable", mode: "native", generation: playback.generation });
+      } else if (message.type === "screenFallback" && Platform.OS === "ios") {
         updatePlayback({ type: "unavailable", mode: "standard", generation: playback.generation });
       } else if (message.type === "fullscreen") present(message.on === true, message.on === true);
       else if (message.type === "landscape") present(fullscreen, message.on === true);
@@ -189,7 +192,10 @@ export function ScreenScreen() {
           .catch(() => "")
           .then((text) => web.current?.injectJavaScript(`window.linkshellClipboard && window.linkshellClipboard(${JSON.stringify(text.slice(0, 20_000))}); true;`));
       } else if (message.type === "width") {
-        if (isScreenWidth(message.width)) saveScreenWidth(message.width);
+        if (isScreenWidth(message.width)) {
+          saveScreenWidth(message.width);
+          if (playback.mode === "native") { setViewerMode(mode); setWidth(message.width); }
+        }
       } else if (message.type === "ready" || message.type === "mode") {
         if (message.mode === "view" || message.mode === "trackpad" || message.mode === "touch") {
           setMode(message.mode);
@@ -204,7 +210,7 @@ export function ScreenScreen() {
         }
       }
     },
-    [present, fullscreen, tellPage, chrome, playback.generation],
+    [present, fullscreen, tellPage, chrome, playback.generation, playback.mode, mode],
   );
 
   // The page ends above the keyboard, frame by frame, so its key bar sits on the keys.
@@ -248,7 +254,44 @@ export function ScreenScreen() {
   const quality = streamVia === "relay" && computer.kind !== "direct" ? "&q=low" : "";
   // video=1: this app plays video in place. Said here as well as in `chrome`, which on Android can reach the page after its script has run.
   const fallback = Platform.OS === "ios" && !relayOnly ? "&fallback=relay" : "";
-  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}&mode=${initialMode}&video=${relayOnly ? 0 : 1}&width=${width}${fallback}` : null;
+  const uri = viewer && display !== null ? `${viewer.forward.url}?token=${encodeURIComponent(viewer.token)}&display=${display}${quality}&mode=${viewerMode}&video=${relayOnly ? 0 : 1}&width=${width}${fallback}` : null;
+
+  const webViewer = uri ? (
+        <WebView
+          key={uri}
+          ref={web}
+          source={{ uri }}
+          originWhitelist={["http://127.0.0.1*"]}
+          onMessage={onMessage}
+          onLoadEnd={() => {
+            if (playback.mode === "native") web.current?.injectJavaScript('if (!window.linkshellNative) window.ReactNativeWebView.postMessage(JSON.stringify({type:"nativeUnavailable"})); true;');
+          }}
+          onError={({ nativeEvent }) => {
+            if (Platform.OS === "ios" && !relayOnly) updatePlayback({ type: "unavailable", mode: playback.mode, generation: playback.generation });
+            else setFailure(nativeEvent.description || "屏幕页面加载失败，请重试");
+          }}
+          onContentProcessDidTerminate={() => {
+            if (!relayOnly) updatePlayback({ type: "unavailable", mode: playback.mode, generation: playback.generation });
+            else setFailure("屏幕显示已中断，请重新连接");
+          }}
+          injectedJavaScriptBeforeContentLoaded={`window.__linkshellChrome = ${chrome}; true;`}
+          // The page moves and zooms the picture itself, and puts its own keys above the keyboard.
+          bounces={false}
+          scrollEnabled={false}
+          overScrollMode="never"
+          setBuiltInZoomControls={false}
+          textZoom={100}
+          automaticallyAdjustContentInsets={false}
+          contentInsetAdjustmentBehavior="never"
+          hideKeyboardAccessoryView
+          keyboardDisplayRequiresUserAction={false}
+          // The picture is a video the page plays where it is, at once, without being asked to.
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
+          style={{ flex: 1, backgroundColor: playback.mode === "native" ? "transparent" : "#000000" }}
+          containerStyle={{ backgroundColor: playback.mode === "native" ? "transparent" : "#000000" }}
+        />
+  ) : null;
 
   return (
     <Animated.View onLayout={geometry.onLayout} style={[{ flex: 1, backgroundColor: "#000000" }, lift]}>
@@ -305,43 +348,10 @@ export function ScreenScreen() {
           <Button title="重试" variant="tonal" size="small" onPress={() => { updatePlayback({ type: "restart", nativeAvailable: nativeScreenAvailable }); setAttempt((value) => value + 1); }} />
         </ScrollView>
       ) : uri && playback.mode === "native" ? (
-        <NativeScreenPane key={uri} url={uri} mode={mode} onMode={(next) => { setMode(next); saveScreenMode(next); }}
-          width={width} onWidth={(next) => { setWidth(next); saveScreenWidth(next); }} shortcuts={shortcuts}
-          fullscreen={fullscreen} onFullscreen={() => present(!fullscreen, !fullscreen)} canRotate={canRotate} onRotate={() => present(fullscreen, !landscape)}
-          onUnavailable={() => updatePlayback({ type: "unavailable", mode: "native", generation: playback.generation })} top={Math.max(insets.top, fullscreen ? 0 : headerHeight)} bottom={insets.bottom} left={insets.left} right={insets.right} />
-      ) : uri ? (
-        <WebView
-          key={uri}
-          ref={web}
-          source={{ uri }}
-          originWhitelist={["http://127.0.0.1*"]}
-          onMessage={onMessage}
-          onError={({ nativeEvent }) => {
-            if (Platform.OS === "ios" && !relayOnly) updatePlayback({ type: "unavailable", mode: "standard", generation: playback.generation });
-            else setFailure(nativeEvent.description || "屏幕页面加载失败，请重试");
-          }}
-          onContentProcessDidTerminate={() => {
-            if (!relayOnly) updatePlayback({ type: "unavailable", mode: "standard", generation: playback.generation });
-            else setFailure("屏幕显示已中断，请重新连接");
-          }}
-          injectedJavaScriptBeforeContentLoaded={`window.__linkshellChrome = ${chrome}; true;`}
-          // The page moves and zooms the picture itself, and puts its own keys above the keyboard.
-          bounces={false}
-          scrollEnabled={false}
-          overScrollMode="never"
-          setBuiltInZoomControls={false}
-          textZoom={100}
-          automaticallyAdjustContentInsets={false}
-          contentInsetAdjustmentBehavior="never"
-          hideKeyboardAccessoryView
-          keyboardDisplayRequiresUserAction={false}
-          // The picture is a video the page plays where it is, at once, without being asked to.
-          allowsInlineMediaPlayback
-          mediaPlaybackRequiresUserAction={false}
-          style={{ flex: 1, backgroundColor: "#000000" }}
-          containerStyle={{ backgroundColor: "#000000" }}
-        />
-      ) : (
+        <NativeScreenPane key={uri} url={uri} onUnavailable={() => updatePlayback({ type: "unavailable", mode: "native", generation: playback.generation })}>
+          {webViewer}
+        </NativeScreenPane>
+      ) : uri ? webViewer : (
         <ActivityIndicator style={{ marginTop: 64 }} color="rgba(255,255,255,0.6)" />
       )}
     </Animated.View>

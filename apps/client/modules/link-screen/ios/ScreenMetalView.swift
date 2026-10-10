@@ -23,6 +23,7 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
   var showsPointer = true { didSet { dirty = true } }
   var zoom: CGFloat = 1 { didSet { dirty = true } }
   var pan = CGPoint.zero { didSet { dirty = true } }
+  var externalContentRect: CGRect? { didSet { dirty = true } }
   private(set) var pictureSize = CGSize(width: 16, height: 9)
   private(set) var requestedFps = 60
   private let mailbox = ScreenMailbox<ScreenPicture>()
@@ -33,6 +34,7 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
   private var submittedTimestamp: UInt32?
   private var dirty = true
   private var reportedFrame = false
+  private var reportedSize = CGSize.zero
   private var reportedFailure = false
   private var queue: MTLCommandQueue?
   private var yuvPipeline: MTLRenderPipelineState?
@@ -115,6 +117,7 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
   }
 
   var contentRect: CGRect {
+    if let externalContentRect { return externalContentRect }
     let fit = min(bounds.width / max(1, pictureSize.width), bounds.height / max(1, pictureSize.height))
     let size = CGSize(width: pictureSize.width * fit * zoom, height: pictureSize.height * fit * zoom)
     return CGRect(x: (bounds.width - size.width) / 2 + pan.x, y: (bounds.height - size.height) / 2 + pan.y, width: size.width, height: size.height)
@@ -256,8 +259,9 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
     committed = true
     submittedTimestamp = picture.timestamp
     dirty = false
-    if !reportedFrame {
+    if !reportedFrame || reportedSize != pictureSize {
       reportedFrame = true
+      reportedSize = pictureSize
       onPicture?(pictureSize)
     }
   }

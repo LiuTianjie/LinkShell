@@ -83,6 +83,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
 
   func stop() { queue.async { self.close() } }
   func pictureArrived() { queue.async { self.receivedPicture = true } }
+  func requestStats() { queue.async { self.report(requested: true) } }
 
   func requestControl() {
     queue.async {
@@ -222,12 +223,12 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     incoming.add(renderer)
   }
 
-  private func report() {
+  private func report(requested: Bool = false) {
     guard !closed else { return }
     let now = CACurrentMediaTime()
     if !receivedPicture, now - startedAt > 12 { return fail("视频直连超时") }
     if let disconnectedAt, now - disconnectedAt > 4 { return fail("视频直连已中断，请重新连接") }
-    guard metrics.enabled, !statsPending, now - previousAt >= 5, let peer else { return }
+    guard metrics.enabled || requested, !statsPending, now - previousAt >= (requested ? 1 : 5), let peer else { return }
     statsPending = true
     peer.statistics { [weak self, weak peer] report in
       self?.queue.async { [weak self, weak peer] in
@@ -250,6 +251,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
         #endif
         if let frames = number(inbound, "framesDecoded") {
           if let previous = self.previousFrames { stats["decodedFps"] = max(0, frames - previous) / max(0.001, elapsed) }
+          else { stats["decodedFps"] = number(inbound, "framesPerSecond") }
           self.previousFrames = frames
         }
         stats["requestedFps"] = self.maxFps
@@ -265,7 +267,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
         var measured = stats
         measured.removeValue(forKey: "trace")
         measured["t"] = "measure"; measured["mode"] = "native"
-        self.signal(measured)
+        if self.metrics.enabled { self.signal(measured) }
       }
     }
   }

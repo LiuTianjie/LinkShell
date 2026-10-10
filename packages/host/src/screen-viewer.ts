@@ -41,6 +41,8 @@ const STYLE = String.raw`
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   html, body { margin: 0; height: 100%; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   body { position: fixed; inset: 0; color: #fff; font: 15px/1.45 -apple-system, system-ui, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+  html.native-picture, html.native-picture body { background: transparent; }
+  .native-picture canvas, .native-picture video { visibility: hidden; }
   #stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
   #picture { position: absolute; inset: 0; transform-origin: 0 0; will-change: transform; }
   #stage.presenting #pointer { opacity: 0 !important; }
@@ -440,6 +442,12 @@ let mode = MODES.includes(query.get("mode")) ? query.get("mode") : MODES.include
 // What the app around the page has done to the phone's screen. A page in a plain browser has none of it.
 // "clear" is the side of a phone lying down that has no camera in it.
 const chrome = Object.assign({ fullscreen: false, landscape: false, canRotate: false, clear: null, insets: { top: 0, right: 0, bottom: 0, left: 0 } }, window.__linkshellChrome || {});
+// The same controls and gestures sit over the iOS Metal surface. Only small input and
+// layout messages cross WebKit's native bridge; video frames never enter this page.
+const nativePicture = chrome.nativePicture === true;
+document.documentElement.classList.toggle("native-picture", nativePicture);
+const nativePost = (message) => window.webkit?.messageHandlers?.linkshellScreen?.postMessage(message);
+let nativeStats = null;
 // Whether this viewer may move the computer's pointer: asked for with the first controlling mode.
 const control = { asked: false, known: false, available: false, trusted: false, reason: "", app: "", prompted: false };
 const content = { w: 0, h: 0 };
@@ -463,11 +471,11 @@ function sps(unit) {
 // full-screen player for it. The app says so in the address as well (?video=1): on Android what it tells the
 // page as it loads can arrive after this script has run. ?video=0 keeps to the socket, to try that way out.
 const relayed = query.get("q") === "low";
-const wantVideo = "RTCPeerConnection" in window && (!app || chrome.video === true || query.get("video") === "1") && query.get("video") !== "0";
+const wantVideo = !nativePicture && "RTCPeerConnection" in window && (!app || chrome.video === true || query.get("video") === "1") && query.get("video") !== "0";
 // The iOS app owns the final transport fallback, so it can bypass a failed direct data channel.
-const relayFallback = !!app && (chrome.relayFallback === true || query.get("fallback") === "relay") && query.get("video") !== "0";
+const relayFallback = !nativePicture && !!app && (chrome.relayFallback === true || query.get("fallback") === "relay") && query.get("video") !== "0";
 const unseeable = () => say("这个系统版本的浏览器内核不支持视频解码，请升级系统后再试。");
-if (!wantVideo && !("VideoDecoder" in window)) unseeable();
+if (!nativePicture && !wantVideo && !("VideoDecoder" in window)) unseeable();
 let decoder, skipping = false, skipped = 0, arrived = 0, keyAsked = -Infinity;
 // Only a keyframe gets a decoder that lost its place going again, and the host makes them when asked rather than by the clock.
 const askKey = () => { const now = performance.now(); if (now - keyAsked > 500) { keyAsked = now; send({ t: "keyframe" }); } };
@@ -497,7 +505,9 @@ asked.set("width", width);
 const framed = document.URL === "about:srcdoc";
 const reloadVia = framed && typeof window.__linkshellReload === "function" ? window.__linkshellReload : null;
 const canChooseWidth = !framed || !!reloadVia;
-const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream?" + asked);
+const ws = nativePicture
+  ? { readyState: 1, send: (data) => nativePost({ kind: "signal", message: JSON.parse(data) }) }
+  : new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream?" + asked);
 ws.binaryType = "arraybuffer";
 const send = (message) => { if (ws.readyState === 1) ws.send(JSON.stringify(message)); };
 ws.onopen = () => { if (mode !== "view") askControl(); if (document.hidden) send({ t: "hidden" }); };
@@ -703,7 +713,7 @@ function fallBack() {
   if (tried) hint(live ? "直连断开了：已改用兼容方式传画面，延迟会高一些" : "没能和电脑直连：已改用兼容方式传画面，延迟会高一些", 5000);
 }
 
-if (!wantVideo) requestRelay();
+if (!nativePicture && !wantVideo) requestRelay();
 
 function play() {
   const started = video.play();
@@ -787,7 +797,7 @@ function echo(x, y) {
   else if (gesture) return;
   cursor.x = x;
   cursor.y = y;
-  if (rtc && !pointed) point();
+  if ((rtc || nativePicture) && !pointed) point();
   else place();
 }
 
@@ -843,6 +853,7 @@ function finishPresentation() {
   presentation.time = null;
   presentation.active = false;
   stage.classList.remove("presenting");
+  if (nativePicture && content.w) nativePost({ kind: "frame", rect: shown });
   armControlsIdle();
 }
 function drawPresentation() {
@@ -856,6 +867,7 @@ function drawPresentation() {
   const flip = presentationFlip(presentation.current, shown, reducedMotion.matches);
   if (!flip) return finishPresentation();
   picture.style.transform = "translate(" + flip.x + "px," + flip.y + "px) scale(" + flip.sx + "," + flip.sy + ")";
+  if (nativePicture) nativePost({ kind: "frame", rect: visiblePicture() });
 }
 function stepPresentation(time) {
   presentation.frame = 0;
@@ -1279,6 +1291,7 @@ function layout() {
   toast.style.top = area.y + 14 + "px";
   place();
   animatePresentation();
+  if (nativePicture && content.w && !presentation.active) nativePost({ kind: "frame", rect: shown });
 }
 
 function place() {
@@ -1341,6 +1354,7 @@ let wired = false, held = 0, sure = true, sent = 0, rest = 0, movedAt = -Infinit
 const trail = [];
 
 function lanes() {
+  if (nativePicture) { wired = true; return; }
   const channels = rtc && rtc.channels;
   const open = !!channels && !!channels.input && channels.input.readyState === "open" && !!channels.pointer && channels.pointer.readyState === "open";
   // Not taken up with a button down: its release goes the way it went down.
@@ -1348,6 +1362,7 @@ function lanes() {
 }
 
 function post(message, lane) {
+  if (nativePicture) return nativePost({ kind: "input", message, replaceable: lane === "pointer" });
   if (!wired) return send(message);
   message.i = ++sent;
   rtc.channels[lane].send(JSON.stringify(message));
@@ -1359,7 +1374,7 @@ function tell(placed) {
   lanes();
   moveWaiting = false;
   const now = performance.now(), lane = laneOf("move", placed, held > 0, false);
-  if (rtc) {
+  if (rtc || nativePicture) {
     // What was sent, to know it by when it comes back (see echo).
     trail.push({ x: cursor.x, y: cursor.y, t: now });
     while (now - trail[0].t > 1000) trail.shift();
@@ -1989,6 +2004,14 @@ async function status() {
     layout();
   }
   const way = !content.w ? "正在连接…" : live ? "直连 · 视频" : (relayed ? "中继" : "直连") + " · 兼容\n" + content.w + "×" + content.h;
+  if (nativePicture) {
+    nativePost({ kind: "stats" });
+    const detail = [content.w ? content.w + "×" + content.h : null,
+      nativeStats?.decodedFps == null ? null : Math.round(nativeStats.decodedFps) + " 帧/秒",
+      nativeStats?.rttMs == null ? null : "往返 " + Math.round(nativeStats.rttMs) + " 毫秒"].filter(Boolean).join(" · ");
+    put(way + (detail ? "\n" + detail : ""));
+    return;
+  }
   const pc = live && rtc && rtc.pc;
   if (!pc || !line.textContent.startsWith(way)) put(way);
   const now = pc && (await vitals(pc, statusWas).catch(() => null));
@@ -2032,6 +2055,7 @@ for (const tile of $("widths").querySelectorAll(".tile")) {
     if (chosen === width) return;
     try { localStorage.setItem("linkshell.screen.width", chosen); } catch {}
     tellApp({ type: "width", width: chosen });
+    if (nativePicture) return;
     if (reloadVia) return reloadVia({ width: chosen, mode });
     const next = new URLSearchParams(location.search);
     next.set("width", chosen);
@@ -2347,7 +2371,7 @@ window.linkshellChrome = (next) => {
 // was seen, whichever way the picture comes. The page's clock is taken to be the computer's (a browser on
 // it, a simulator); with ?measure=sync the host is asked the time, for a device with a clock of its own.
 let meter = null;
-if (query.get("measure")) meter = (() => {
+if (!nativePicture && query.get("measure")) meter = (() => {
   const pageTime = () => performance.timeOrigin + performance.now();
   const sync = query.get("measure") === "sync", pings = new Map();
   let clock = { offset: 0, trip: Infinity }, pinged = 0;
@@ -2494,6 +2518,38 @@ if (query.get("measure")) meter = (() => {
 resetTyping();
 refresh();
 wake();
+if (nativePicture) {
+  window.linkshellNative = {
+    picture: (size) => {
+      content.w = size.width; content.h = size.height;
+      if (!live) show(true);
+      say("");
+      layout();
+    },
+    message: (message) => {
+      if (message.t === "cursor" || message.t === "shape") told(message);
+      else heard(message);
+    },
+    stats: (stats) => { nativeStats = stats; },
+    connecting: () => {
+      nativeStats = null;
+      Object.assign(control, { asked: false, known: false, trusted: false });
+      say("正在连接电脑屏幕…");
+      if (mode !== "view") askControl();
+    },
+  };
+  // React Native mounts the WebView as a child of the native renderer. Its WebKit
+  // handler can arrive just after this page, so wait for that attachment once.
+  const waitingSince = performance.now();
+  const attachNative = () => {
+    if (window.webkit?.messageHandlers?.linkshellScreen) {
+      nativePost({ kind: "ready", version: 1 });
+      ws.onopen();
+    } else if (performance.now() - waitingSince < 5000) setTimeout(attachNative, 50);
+    else tellApp({ type: "nativeUnavailable" });
+  };
+  attachNative();
+}
 tellApp({ type: "ready", mode });
 `;
 

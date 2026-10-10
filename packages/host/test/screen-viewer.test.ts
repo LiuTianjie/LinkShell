@@ -335,9 +335,11 @@ describe("anchored screen controls", () => {
 });
 
 /** Exercise the shipped layout function, keeping its DOM state between every resize. */
-function changingViewer() {
+function changingViewer(native = false) {
   const source = /function layout\(\) \{[\s\S]*?\n\}\n\nfunction place/.exec(viewerPage())![0].replace(/\n\nfunction place$/, "");
-  return new Function(`${VIEWER_LOGIC}
+  return new Function("nativePicture", `${VIEWER_LOGIC}
+    let nativeFrame;
+    const nativePost = (message) => { if (message.kind === 'frame') nativeFrame = message.rect; };
     function element(kind) {
       const classes = new Set();
       return {
@@ -365,14 +367,26 @@ function changingViewer() {
       sheetOpen = open === 'sheet'; keysOpen = open === 'keys'; composerOpen = open === 'composer';
       menu.classList.toggle('gone', open !== 'menu'); connection.classList.toggle('gone', true);
       layout();
-      return { area: { ...area }, shown: { ...shown }, bar: { ...bar.style }, menu: { ...menu.style }, sheet: { ...sheet.style }, keys: { ...keys.style }, composer: { ...composer.style }, video: { ...video.style }, horizontal: menu.classList.contains('horizontal') };
+      return { area: { ...area }, shown: { ...shown }, nativeFrame, bar: { ...bar.style }, menu: { ...menu.style }, sheet: { ...sheet.style }, keys: { ...keys.style }, composer: { ...composer.style }, video: { ...video.style }, horizontal: menu.classList.contains('horizontal') };
     };
-  `)() as (viewport: Rect, insets: { top: number; right: number; bottom: number; left: number }, open?: string, fontScale?: number, fullscreen?: boolean, divisions?: Array<{ x: number; y: number; width: number; height: number; active: boolean }>, preferred?: { u: number; v: number } | null) => {
-    area: Rect; shown: Rect; bar: Record<string, string>; menu: Record<string, string>; sheet: Record<string, string>; keys: Record<string, string>; composer: Record<string, string>; video: Record<string, string>; horizontal: boolean;
+  `)(native) as (viewport: Rect, insets: { top: number; right: number; bottom: number; left: number }, open?: string, fontScale?: number, fullscreen?: boolean, divisions?: Array<{ x: number; y: number; width: number; height: number; active: boolean }>, preferred?: { u: number; v: number } | null) => {
+    area: Rect; shown: Rect; nativeFrame?: Rect; bar: Record<string, string>; menu: Record<string, string>; sheet: Record<string, string>; keys: Record<string, string>; composer: Record<string, string>; video: Record<string, string>; horizontal: boolean;
   };
 }
 
 describe("continuous screen layout changes", () => {
+  it("uses exactly the same picture and controls for native playback across panels and orientation", () => {
+    const normal = changingViewer(), native = changingViewer(true);
+    for (const viewport of [{ x: 0, y: 0, w: 420, h: 912 }, { x: 0, y: 0, w: 912, h: 420 }]) {
+      for (const open of ["menu", "sheet", "keys", "composer"]) {
+        const insets = { top: 100, right: 0, bottom: 34, left: 0 };
+        const original = normal(viewport, insets, open);
+        const restored = native(viewport, insets, open);
+        expect(restored.nativeFrame).toEqual(original.shown);
+        expect({ ...restored, nativeFrame: undefined }).toEqual(original);
+      }
+    }
+  });
   it("keeps authored control sizes when system text size changes", () => {
     const run = changingViewer();
     const viewport = { x: 0, y: 0, w: 950, h: 670 }, insets = { top: 0, right: 70, bottom: 0, left: 0 };
@@ -447,6 +461,7 @@ describe("live fullscreen motion", () => {
   it("keeps position and velocity on reversal and safe-inset retargeting, then respects reduced motion", () => {
     const source = /const reducedMotion = matchMedia\("\(prefers-reduced-motion: reduce\)"\);[\s\S]*?window.linkshellPresent = beginPresentation;/.exec(viewerPage())![0];
     const motion = new Function(`${VIEWER_LOGIC}
+      const nativePicture = false;
       const timers = new Map(), frames = new Map(), released = [];
       let serial = 0, reducedListener;
       const media = { matches: false, addEventListener: (_, fn) => { reducedListener = fn; } };

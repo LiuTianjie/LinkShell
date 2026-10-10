@@ -1,9 +1,17 @@
 # Native iOS screen receiver
 
-This local Expo module owns the WebRTC receiver, decoded-frame mailbox, Metal
-presentation and screen gestures. It shares the installed JitsiWebRTC framework
+This local Expo module owns the WebRTC receiver, decoded-frame mailbox and Metal
+presentation. It shares the installed JitsiWebRTC framework
 with `react-native-webrtc`. The existing host forwarder carries authenticated
 signalling; the media track remains DTLS-SRTP peer to peer.
+
+The host's existing viewer page owns the floating toolbar, collapsible orb,
+control-mode menu, connection/resolution popover, keyboard, shortcuts, text
+composer and gestures. The same RN WebView is mounted transparently over the
+native picture. A private WebKit message handler sends small input and picture
+geometry messages directly to the native receiver, preserving the existing
+ordered input and replaceable pointer channels. Frames never enter either JS
+runtime. Hosts without this bridge fall back automatically to the regular viewer.
 
 iOS starts with this receiver automatically and requests a **120 fps ceiling**.
 The source display, receiver display, thermal state, Low Power Mode and transport
@@ -26,11 +34,12 @@ display-rate result.
   enabled. Existing receivers remain at the existing 60/30 defaults. The Mac
   bounds its rate by the source display and uses 120/60/30 when both sides allow it.
 - H.264 decodes through WebRTC's VideoToolbox decoder to `RTCCVPixelBuffer`.
-  Frames and touch gestures never cross JS. No camera or microphone track is made.
+  Frames never cross JS. Input crosses WebKit directly into the native data
+  channels, bypassing React Native JS. No camera or microphone track is made.
 - A single-slot decoded-frame mailbox replaces obsolete pending output. Encoded
   reference frames remain with WebRTC's dependency-aware receiver.
 - Metal maps NV12 planes through `CVMetalTextureCache`; one pass renders the
-  picture and cursor. At most one GPU submission is in flight. A missed rendering
+  picture. The existing viewer draws its cursor. At most one GPU submission is in flight. A missed rendering
   deadline retains the newest candidate for the next display opportunity.
 - iOS 17+ uses `CAMetalDisplayLink` with `preferredFrameLatency=1`; older supported
   iOS uses `CADisplayLink`. Display capabilities, Low Power Mode and thermal state
@@ -41,17 +50,23 @@ display-rate result.
 ## Measurement overhead
 
 Diagnostics are **off by default**. This path uses the stock decoder directly:
-there is no timing wrapper, per-frame presentation timing handler, stats polling,
+there is no timing wrapper, per-frame presentation timing handler, background stats polling,
 trace allocation, diagnostic JS event or diagnostic network traffic. The GPU
 completion handler and deadline estimate are part of normal presentation control.
 
-The **诊断信息** control starts an instrumented session. It samples RTP timestamps
+The existing **连接信息** popover requests only the normal WebRTC resolution,
+decoded FPS and RTT counters while open; closing it stops these requests. It
+does not reconnect the stream or enable decoder instrumentation. Resolution
+choices stay in this popover instead of occupying a second permanent toolbar.
+
+An internal native URL with **diagnostics=1** starts an instrumented session.
+There is no permanent diagnostics panel in the product UI. It samples RTP timestamps
 at approximately 1 in 31 frames, collects locally in bounded buffers, and reports
 once every five seconds. Only sampled frames acquire measurement locks and record
 decode/presentation timestamps. The displayed FPS is decoder output, not a claim
 about distinct frames physically shown. Inter-sample gaps are never reported as
 display jitter. Full tracing is a separate internal diagnostic mode, not enabled
-by the viewer's sampling control.
+by normal viewing or the connection-info popover.
 
 Diagnostic percentiles are estimates and include their sample count. They measure
 decoder and decode-to-presentation work, **not end-to-end capture-to-photon
@@ -86,16 +101,16 @@ Further diagnosis is deferred at the user's request.
 
 Device checks use the regular release app:
 
-1. Enter the screen and verify automatic native playback with diagnostics off.
-   A 120 Hz source and receiver allow the highest ceiling; diagnostics can briefly
-   distinguish actual encoded/decoded FPS from the request.
+1. Enter the screen and verify automatic native playback with the original
+   floating controls. A 120 Hz source and receiver allow the highest ceiling;
+   connection info reports actual decoded FPS, not the requested ceiling.
 2. Check pointer/drag, scroll, keyboard, zoom, rotation, screen selection and
    reconnect/backgrounding. Run for 30 minutes to assess heat and sustained cadence.
 3. Test networks where direct video is unavailable and confirm the automatic
    standard-video and relay fallbacks, with usable input after the transition.
 
-Diagnostics reconnect the stream; allow the connection to settle before sampling.
-Compare diagnostics off/on separately. Input-to-result, actual display cadence,
+Internal diagnostic sessions should settle before sampling; compare them with
+normal playback separately. Input-to-result, actual display cadence,
 and impaired/public-network behaviour still require device measurement. Stable
 120 fps and stable 4K/60 were not demonstrated by the initial Mac loopback tests.
 LTR feedback, content-adaptive tile transport and cross-device presentation-deadline
