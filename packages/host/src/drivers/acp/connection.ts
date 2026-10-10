@@ -1,6 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { RpcPeer, type RpcId } from "@linkshell/wire";
 
+export const ACP_PROTOCOL_VERSION = 1;
+
+export class AcpProtocolError extends Error {
+  constructor(version: unknown) {
+    super(`这个 Agent 返回了不兼容的 ACP 协议版本（${String(version ?? "未提供")}）；当前支持 ACP ${ACP_PROTOCOL_VERSION}。请使用兼容的 Agent 版本。`);
+  }
+}
+
 /** The subset of ACP `initialize` results LinkShell reads. */
 export interface AcpAgentCapabilities {
   loadSession?: boolean;
@@ -129,7 +137,7 @@ export class AcpConnection {
       peer.request<AcpInitializeResult>(
         "initialize",
         {
-          protocolVersion: 1,
+          protocolVersion: ACP_PROTOCOL_VERSION,
           // LinkShell doesn't serve files or terminals to the agent: agents use their own tools.
           clientCapabilities: {
             fs: { readTextFile: false, writeTextFile: false },
@@ -147,6 +155,12 @@ export class AcpConnection {
       ),
       exited,
     ]);
+    // v2 is still draft and changes turn completion as well as message replay.
+    // Accepting it as v1 would silently drop messages and report false idle turns.
+    if (this.initializeResult.protocolVersion !== ACP_PROTOCOL_VERSION) {
+      await this.stop();
+      throw new AcpProtocolError(this.initializeResult.protocolVersion);
+    }
     return this.initializeResult;
   }
 

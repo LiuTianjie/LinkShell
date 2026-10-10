@@ -1,5 +1,8 @@
 import { rolloutAttention, type CodexAttention } from "./attention.js";
 import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { archivedThreadIds } from "./archives.js";
 import { codexPreview } from "./computer-preview.js";
 import { ABANDON, RpcError, questionReplies, updateAsyncQuestions, type AsyncQuestion, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
 import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
@@ -303,10 +306,14 @@ export class CodexDriver implements AgentDriver {
 
   private readonly attention = new Map<string, { stamp: string; value: CodexAttention | undefined }>();
 
+  archivedSessions(): Promise<string[]> {
+    return archivedThreadIds((this.options.env ?? process.env).CODEX_HOME || join(homedir(), ".codex"));
+  }
+
   async listSessions(limit: number): Promise<DiscoveredSession[]> {
     const result = await this.rpc<{ data: CodexThread[] }>("thread/list", { limit, archived: false });
     return result.data.map((thread) => {
-      const discovered = threadToDiscovered(thread);
+      const discovered = { ...threadToDiscovered(thread), archived: false };
       // This host's app-server only knows the state of the threads loaded in it.
       const state = this.stateElsewhere(thread.id);
       const stamp = thread.path ? fileStamp(thread.path) : undefined;
@@ -393,6 +400,14 @@ export class CodexDriver implements AgentDriver {
       joined = await this.subscribe(nativeId);
     } catch (error) {
       this.attached.delete(nativeId);
+      if (error instanceof Error && /session .+ is archived\b/i.test(error.message)) {
+        // Archives remain readable; opening history must not unarchive or resume the agent.
+        const { thread } = await this.rpc<{ thread: CodexThread }>("thread/read", { threadId: nativeId, includeTurns: true });
+        this.host?.sessionSeen(this.id, { ...threadToDiscovered(thread), archived: true, state: "idle", asyncQuestions: [] });
+        const history = await this.withSubAgents(nativeId, thread, threadToHistory(thread));
+        this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "idle" });
+        return history;
+      }
       if (error instanceof Error && /no rollout/i.test(error.message)) {
         // Opened in another client but no turn yet, so not on disk. A turn can
         // still be started on it; after that it can be joined.

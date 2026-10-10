@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { delimiter, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { RpcError, type ContentBlock, type SessionConfigOption, type SessionUpdate } from "@linkshell/wire";
+import { RpcError, type ContentBlock, type SessionConfigOption, type SessionState, type SessionUpdate } from "@linkshell/wire";
 import { AcpDriver, inOrder } from "../acp/driver.js";
 import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
@@ -147,6 +147,7 @@ export class ClaudeDriver extends AcpDriver {
   /** Desktop-driven sessions: the model of the latest reply, from the transcript. */
   /** Per session: the settings its transcript shows it running with (what the Claude on the computer is set to). */
   private readonly observed = new Map<string, ObservedSettings>();
+  private readonly reportedStates = new Map<string, SessionState>();
   /** Per session: TodoWrite calls shown as the plan, whose results the tail skips. */
   private readonly hiddenTools = new Map<string, Set<string>>();
   /** Per session: calls that started an agent in the background and haven't heard back (see transcriptLine). */
@@ -224,6 +225,11 @@ export class ClaudeDriver extends AcpDriver {
   override async attach(nativeId: string, context: AttachContext): Promise<HistoryItem[]> {
     const state = this.stateFor(nativeId, context.cwd);
     const path = findTranscript(this.configDir, nativeId, context.cwd);
+    // New sessions write no transcript until the first message. An old unknown
+    // session with no file must remain retryable instead of attaching an empty tail forever.
+    if (!path && !state.loaded && !this.modes.has(nativeId) && !this.host?.desktop(this.id, nativeId)) {
+      throw RpcError.app("history_unavailable", "找不到这个 Claude 会话的原始记录，可能已被移动或删除；已缓存的消息仍可查看。");
+    }
     let history: HistoryItem[] = [];
     let offset = 0;
     this.activity.get(nativeId)?.stop();
@@ -256,7 +262,7 @@ export class ClaudeDriver extends AcpDriver {
       // the session shows as working and results have a card to land on.
       const underway: SessionUpdate[] = [];
       history = toHistory(mergeByTime(transcript.updates, nested), state.tracker, (update) => transcriptTimes.get(update), underway);
-      const working = turnInProgress(path, this.busyWindowMs);
+      const working = (await this.discoveredState(nativeId, context.cwd)) === "running";
       for (const update of underway) {
         const call = (update as { parentToolCallId?: string; toolCallId?: string }).parentToolCallId ?? (update as { toolCallId?: string }).toolCallId;
         if (working || (call && (transcript.agents.has(call) || activity.isRunning(call)))) this.host?.update(this.id, nativeId, update, undefined, transcriptTimes.get(update));
@@ -290,9 +296,31 @@ export class ClaudeDriver extends AcpDriver {
     activity.start();
     const mode = this.modes.get(nativeId) ?? "idle";
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_driver", driver: driverOf(mode) });
+    this.reportState(nativeId, await this.discoveredState(nativeId, context.cwd));
     if (mode === "remote") this.emitConfig(nativeId, state);
     else void this.loadTemplate(context.cwd).then(() => this.emitDesktopConfig(nativeId));
     return history;
+  }
+
+  protected override async discoveredState(nativeId: string, cwd: string): Promise<SessionState> {
+    if (this.modes.get(nativeId) === "remote" && this.sessions.get(nativeId)?.loaded) return this.localState(nativeId);
+    const path = findTranscript(this.configDir, nativeId, cwd);
+    if (!path) return this.modes.has(nativeId) || this.host?.desktop(this.id, nativeId) ? "idle" : "offline";
+    try {
+      const held = this.host?.desktop(this.id, nativeId) || sessionHolders(this.configDir, nativeId).length > 0;
+      if (held) return turnInProgress(path, this.busyWindowMs) ? "running" : "idle";
+      if (this.hasHolderRecords()) return "idle";
+      return (await this.elsewhere(nativeId))?.working ? "running" : "idle";
+    } catch {
+      // The transcript can disappear between discovery and the bounded read.
+      return "offline";
+    }
+  }
+
+  private reportState(nativeId: string, state: SessionState): void {
+    if (this.reportedStates.get(nativeId) === state) return;
+    this.reportedStates.set(nativeId, state);
+    this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state });
   }
 
   /**
@@ -627,6 +655,7 @@ export class ClaudeDriver extends AcpDriver {
 
   /** Desktop activity: what the TUI (or a plain `claude`) writes to the transcript. */
   private onTranscriptLine(nativeId: string, line: string): void {
+    this.reportedStates.delete(nativeId);
     let hidden = this.hiddenTools.get(nativeId);
     if (!hidden) this.hiddenTools.set(nativeId, (hidden = new Set()));
     let agents = this.backgroundAgents.get(nativeId);
@@ -736,6 +765,11 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   private async watchRemoteSessions(): Promise<void> {
+    for (const nativeId of this.tails.keys()) {
+      if (this.modes.get(nativeId) === "remote") continue;
+      const state = await this.discoveredState(nativeId, this.sessions.get(nativeId)?.cwd ?? "");
+      if (this.modes.get(nativeId) !== "remote") this.reportState(nativeId, state);
+    }
     for (const [nativeId, tasks] of this.tasks) {
       const activity = this.activity.get(nativeId);
       if (![...tasks.records.values()].some((task) => task.state === "running") && !activity?.hasRunningTeammates()) continue;

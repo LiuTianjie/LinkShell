@@ -28,12 +28,12 @@ export function rolloutAttention(path: string, chunk = 256 * 1024, limit = 16 * 
       prefix = data.subarray(0, first);
       for (let index = lines.length - 1; index >= 0; index--) {
         const line = lines[index]!;
-        if (!line.includes('"task_') && !line.includes("request_user_input_async") && !line.includes("send_user_message_question_reply")) continue;
+        if (!line.includes('"task_') && !line.includes('"turn_aborted"') && !line.includes("request_user_input_async") && !line.includes("send_user_message_question_reply")) continue;
         let entry;
         try { entry = JSON.parse(line); } catch { continue; }
         const payload = entry.payload;
         if (!payload || typeof payload !== "object") continue;
-        if (entry.type === "event_msg" && payload.type === "task_complete") return { running: false, questions: [] };
+        if (entry.type === "event_msg" && (payload.type === "task_complete" || payload.type === "turn_aborted")) return { running: false, questions: [] };
         if (entry.type === "event_msg" && payload.type === "task_started") {
           return { running: true, questions: questions.filter((question) => !answered.has(question.id)) };
         }

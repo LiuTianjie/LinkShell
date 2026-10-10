@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,8 +12,8 @@ afterEach(async () => {
   for (const { host, home, clients } of running.splice(0)) {
     for (const client of clients) client.close();
     await host.stop();
-    // A shell on its way out may still be writing into its home (it is the HOME of the test's shells).
-    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    // Let the exiting shell finish its history write while removal retries.
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -245,7 +246,7 @@ describe("terminals", () => {
     expect((await c2.call("terminals.list", {})).terminals.map((t) => t.id)).toEqual([running.id]);
     c2.close();
     await second.stop();
-    rmSync(home, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   it("pages the original image and keyboard protocols with a stable attach boundary and original sizes", async () => {
     const { connect } = await setup();

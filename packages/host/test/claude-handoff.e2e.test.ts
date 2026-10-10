@@ -465,6 +465,8 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     await p.client.call("sessions.sendQueued", { sessionId: desk.id });
     expect(await gone).toBe("SIGINT");
     await waitFor(() => p.agentTexts(desk.id).includes("echo: urgent"));
+    // Text can arrive before the prompt settles; the desktop resumes after that turn finishes.
+    await waitFor(() => host.hub.getSession(desk.id).state === "idle");
     expect(host.hub.getSession(desk.id).queue ?? []).toEqual([]);
 
     // Stop: the turn on the computer is interrupted, and what was waiting is dropped.

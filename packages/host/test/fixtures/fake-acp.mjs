@@ -250,9 +250,9 @@ const handlers = {
   initialize: (params) => {
     if (params.clientCapabilities?._meta?.jetbrains?.air) throw { code: -32602, message: "AIR would break native sub-agent metadata" };
     return ({
-    protocolVersion: 1,
+    protocolVersion: process.env.FAKE_ACP_PROTOCOL_VERSION === "missing" ? undefined : Number(process.env.FAKE_ACP_PROTOCOL_VERSION ?? 1),
     agentCapabilities: {
-      loadSession: true,
+      loadSession: process.env.FAKE_ACP_RESUME_ONLY !== "1",
       promptCapabilities: { image: true, embeddedContext: true },
       sessionCapabilities: { list: {}, resume: {}, close: {}, delete: {}, ...(process.env.FAKE_ACP_FORK === "1" ? { fork: {} } : {}) },
       _meta: steering ? { claudeCode: { promptQueueing: true } } : {},
@@ -362,6 +362,7 @@ process.stdin.on("data", (data) => {
     buffer = buffer.slice(index + 1);
     if (!line) continue;
     const message = JSON.parse(line);
+    if (message.method && process.env.FAKE_ACP_CALL_LOG) appendFileSync(process.env.FAKE_ACP_CALL_LOG, `${message.method}\n`);
     if (message.method === undefined && message.id !== undefined) {
       pendingClientRequests.get(message.id)?.(message.error ? { rpcError: message.error } : message.result);
       pendingClientRequests.delete(message.id);

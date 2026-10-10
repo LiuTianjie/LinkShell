@@ -32,6 +32,11 @@ describe("desktop question attention without opening a session", () => {
     expect(rolloutAttention(file([start, ask, answer(q, "自己的回答"), answer(q2, "")]), 53)).toEqual({ running: true, questions: [] });
     expect(rolloutAttention(file([start, ask, end]), 53)).toEqual({ running: false, questions: [] });
   });
+  it("clears running and questions after a desktop interruption, then recognizes a new turn", () => {
+    const aborted = line("event_msg", { type: "turn_aborted", turn_id: "t", reason: "interrupted" });
+    expect(rolloutAttention(file([start, ask, aborted]), 37)).toEqual({ running: false, questions: [] });
+    expect(rolloutAttention(file([start, ask, aborted, start]), 37)).toEqual({ running: true, questions: [] });
+  });
   it("discovers and clears input badges without attaching to a desktop thread", async () => {
     const path = file([start, ask]);
     const driver = new CodexDriver({ socketPath: path + ".sock", hostVersion: "test", desktopBusPath: false });

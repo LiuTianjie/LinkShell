@@ -64,6 +64,7 @@ App release builds: `pnpm prod:ios` / `pnpm prod:android` (`apps/client/scripts/
 - `apps/mac` (`@linkshell/mac`) — LinkShell.app: captures the Mac's screen, sends it (WebRTC video, or encoded for the host), posts pointer and key events, and holds the two macOS permissions. Shipped to npm as one archive.
 - `docs/site` — the website and `install.sh` (GitHub Pages). After editing `index.html` run `python3 scripts/build-site-pages.py`.
 - `docs/v2/architecture.md` (design), `docs/v2/screen-realtime.md` (current screen architecture, diagrams, fallback and validation; older experiments in `screen-realtime-history.md`), `docs/deploy.md` (self-hosting), `docs/release-sop.md`.
+- `docs/v2/session-recovery.md` — current session status, native archive and history recovery rules, ACP version compatibility, and validation boundaries.
 
 ## Architecture
 

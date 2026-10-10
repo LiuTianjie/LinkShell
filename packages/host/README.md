@@ -8,6 +8,18 @@ Run it through the CLI: `npm install -g linkshell-cli`, then `linkshell host --d
 
 Claude Workflow progress and background sub-agent transcripts stay synchronized even while the main conversation is idle. The app can open each run, phase and Agent independently.
 
+## Session recovery
+
+Host 0.4.19 revalidates busy sessions after restart, reconciles Codex native archives,
+and treats interrupted turns as finished. Archived Codex history is read without unarchiving.
+Missing Claude transcripts and other history failures preserve cached messages and show a
+retryable error. Lazy ACP agents initialize before their restore capabilities are checked;
+resume-only agents explain that earlier messages cannot be fetched.
+
+The host negotiates and validates ACP 1. ACP 2 remains draft and changes prompt completion,
+history replay, messages and permissions; changing the version number alone is incompatible.
+See [session recovery, protocol evidence and validation](../../docs/v2/session-recovery.md).
+
 ## Agent questions
 
 Codex Desktop asynchronous questions retain their pending state and accept immediate replies.

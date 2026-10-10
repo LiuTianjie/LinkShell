@@ -24,6 +24,8 @@ export interface DiscoveredSession {
   createdAt: number;
   updatedAt: number;
   state?: SessionState;
+  /** When supplied, the agent's own archive state is authoritative. */
+  archived?: boolean;
   asyncQuestions?: AsyncQuestion[];
 }
 
@@ -139,6 +141,8 @@ export interface AgentDriver {
   authStatus?(): Promise<AgentAuth>;
 
   listSessions(limit: number): Promise<DiscoveredSession[]>;
+  /** Native archives, including sessions that disappeared from recent discovery. Never implies deletion. */
+  archivedSessions?(): Promise<string[]>;
   createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession>;
   /**
    * Starts live updates for a session and returns its full native history.

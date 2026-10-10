@@ -34,6 +34,10 @@ linkshell codex     # Codex; the terminal and the phone are live at the same tim
 
 Claude Workflow progress, phases and Agent details require CLI 0.10.6 or newer and app 2.3.5 or newer. After upgrading the CLI, restart the host with `linkshell host stop` and `linkshell host --daemon`.
 
+CLI 0.10.19 includes Host 0.4.19 session recovery fixes: stale running states, Codex native
+archives, missing Claude history and lazy ACP reconnection. This update needs only the
+computer-side CLI and a host restart; no mobile app, gateway or screen-helper update is required.
+
 ## Remote screen
 
 On Apple silicon Macs with macOS 13+, the CLI includes the signed LinkShell.app for screen

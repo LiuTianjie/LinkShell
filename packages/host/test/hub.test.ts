@@ -1,7 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RpcError } from "@linkshell/wire";
 import type { ContentBlock, SessionEvent, SessionSummary, SessionUpdate } from "@linkshell/wire";
 import type { AgentDriver, DiscoveredSession, DriverHost, HistoryItem } from "../src/drivers/types.js";
 import { SessionHub } from "../src/hub.js";
@@ -19,6 +20,7 @@ class FakeDriver implements AgentDriver {
   prompts: { nativeId: string; content: ContentBlock[]; clientMessageId: string }[] = [];
   answers: { requestId: string; optionId: string }[] = [];
   sessions: DiscoveredSession[] = [{ nativeId: "s1", cwd: "/w/app", createdAt: 1, updatedAt: 1 }];
+  archives: string[] = [];
 
   async start(host: DriverHost) {
     this.host = host;
@@ -31,6 +33,7 @@ class FakeDriver implements AgentDriver {
   async listSessions() {
     return this.sessions;
   }
+  async archivedSessions() { return this.archives; }
   async createSession(options: { cwd: string }) {
     return { nativeId: "new", cwd: options.cwd, createdAt: 2, updatedAt: 2 };
   }
@@ -84,12 +87,73 @@ beforeEach(async () => {
   await hub.start();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await hub.stop();
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
 
 describe("SessionHub", () => {
+  it("reconciles native archives omitted from discovery without deleting history or hiding older active sessions", async () => {
+    driver.history = [{ itemId: "m0", updates: [chunk("m0", "still readable")] }];
+    await hub.subscribe("fake:s1", 0, collector().subscriber);
+    store.patchSession("fake:s1", { state: "running", title: "Native title" });
+    await hub.rename("fake:s1", "Local title");
+    driver.sessions = [{ nativeId: "s2", cwd: "/w/app", createdAt: 2, updatedAt: 2 }];
+    driver.archives = ["s1", "unknown"];
+    await hub.refreshDiscovery();
+    expect(hub.listSessions({}).sessions.map((s) => s.id)).toEqual(["fake:s2"]);
+    expect(hub.getSession("fake:s1")).toMatchObject({ archived: true, state: "idle", updatedAt: 1 });
+    expect(store.readEvents("fake:s1", 0, 10).some((event) => event.update.sessionUpdate === "agent_message_chunk")).toBe(true);
+    expect(store.getSession("fake:unknown")).toBeUndefined();
+    expect(summaries.at(-1)).toMatchObject({ id: "fake:s1", archived: true });
+    await hub.rename("fake:s1", "");
+    expect(hub.getSession("fake:s1").title).toBe("Native title");
+
+    driver.sessions = [{ nativeId: "s1", cwd: "/w/app", createdAt: 1, updatedAt: 1, state: "idle", archived: false }];
+    driver.archives = [];
+    await hub.refreshDiscovery();
+    expect(hub.listSessions({}).sessions.map((s) => s.id)).toEqual(["fake:s2", "fake:s1"]);
+  });
+
+  it("reconciles archives when restarting with a cached running session", async () => {
+    await hub.stop();
+    store.patchSession("fake:s1", { state: "running" });
+    driver.sessions = [];
+    driver.archives = ["s1"];
+    hub = new SessionHub(store, [driver]);
+    await hub.start({ discoveryIntervalMs: 0 });
+    expect(hub.listSessions({}).sessions).toEqual([]);
+    expect(hub.getSession("fake:s1")).toMatchObject({ archived: true, state: "idle" });
+  });
+
+  it("shows a history load failure and still serves cached messages; reopening retries", async () => {
+    store.appendEvent("fake:s1", chunk("cached", "cached reply"), 1);
+    const attach = vi.spyOn(driver, "attach").mockRejectedValueOnce(new Error("unreadable history"));
+    const got = collector();
+    const failed = await hub.subscribe("fake:s1", 0, got.subscriber);
+    expect(got.events.map((event) => event.update)).toEqual([
+      chunk("cached", "cached reply"),
+      { sessionUpdate: "ls_status", state: "error" },
+      expect.objectContaining({ sessionUpdate: "ls_error", code: "history_unavailable", message: "读取会话消息失败：unreadable history" }),
+    ]);
+    expect(failed.session.state).toBe("error");
+    expect(failed.session.updatedAt).toBe(1);
+    hub.unsubscribe("fake:s1", got.subscriber);
+    driver.history = [{ itemId: "restored", updates: [chunk("restored", "restored reply")] }];
+    const retry = collector();
+    await hub.subscribe("fake:s1", failed.session.lastSeq, retry.subscriber);
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(retry.events.map((event) => event.update)).toContainEqual(chunk("restored", "restored reply"));
+  });
+
+  it("does not report a fresh session without messages as a load failure", async () => {
+    vi.spyOn(driver, "attach").mockRejectedValueOnce(RpcError.app("not_ready", "no messages yet"));
+    const got = collector();
+    await hub.subscribe("fake:s1", 0, got.subscriber);
+    expect(got.events).toEqual([]);
+  });
+
   it("keeps durable task status and output independent of turn completion and rejects broad cancellation", async () => {
     await hub.subscribe("fake:s1", 0, collector().subscriber);
     const task = { id: "b1", toolCallId: "c1", title: "build", kind: "shell" as const, startedAt: 1, state: "running" as const };

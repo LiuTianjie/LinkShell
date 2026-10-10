@@ -14,6 +14,8 @@
 
 发布顺序就是依赖顺序：**wire → mac → host → gateway → cli**。没改的包跳过，但要注意：`workspace:*` 在发布时会被写成当时的**确切版本号**，所以上游发了新版本，下游也要跟着发一版才会用上它（改了 wire，就要发 host、gateway、cli；改了 `apps/mac`，就要发 mac、host、cli）。
 
+**只有 Host 驱动或会话恢复逻辑变化时，仍需发布 host → cli 两个包**，并同步根 `package.json` 的 CLI 版本。CLI 的发布依赖固定了 Host 的确切版本，只发 Host 不会让已安装的 CLI 自动使用它。没有 wire、网关、屏幕原生组件或移动端改动时，不发布这些组件。用户安装新 CLI 后还要重启 Host，最后用 `machine.info` / `linkshell host status` 核对运行版本；只看到 `linkshell --version` 变了不算完成。[会话恢复验证范围](v2/session-recovery.md)。
+
 `@linkshell/client-core` 和 `apps/client` 是私有包，不发 npm。`@linkshell/protocol`、`@linkshell/gateway-v2` 是已经删除的 1.x / 过渡包，不再发布。
 
 三种 tag，各管各的：

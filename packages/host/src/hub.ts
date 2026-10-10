@@ -241,6 +241,7 @@ export class SessionHub {
   }
 
   async start(options: { discoveryIntervalMs?: number } = {}): Promise<void> {
+    for (const id of this.store.resetLiveSessions()) this.pendingQuestions.delete(id);
     await Promise.all(
       [...this.drivers.values()].map(async (driver) => {
         try {
@@ -249,6 +250,7 @@ export class SessionHub {
           await this.refreshAuth(driver);
           if (status.problem) return;
           for (const session of await driver.listSessions(100)) this.recordDiscovered(driver.id, session);
+          await this.refreshArchives(driver);
         } catch (error) {
           this.log(`[hub] ${driver.id} failed to start: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -270,11 +272,24 @@ export class SessionHub {
         if (!status.installed || status.problem) return;
         try {
           for (const session of await driver.listSessions(limit)) this.recordDiscovered(driver.id, session);
+          await this.refreshArchives(driver);
         } catch (error) {
           this.log(`[hub] ${driver.id} discovery failed: ${error instanceof Error ? error.message : String(error)}`);
         }
       }),
     );
+  }
+
+  private async refreshArchives(driver: AgentDriver): Promise<void> {
+    for (const nativeId of await driver.archivedSessions?.() ?? []) {
+      const before = this.store.getSession(sessionIdFor(driver.id, nativeId));
+      // Only reconcile sessions already known here; never import the entire native archive.
+      if (!before || (before.archived && before.state === "idle")) continue;
+      this.recordDiscovered(driver.id, {
+        nativeId, cwd: before.cwd, createdAt: before.createdAt, updatedAt: before.updatedAt,
+        archived: true, state: "idle", asyncQuestions: [],
+      });
+    }
   }
 
   async stop(): Promise<void> {
@@ -592,9 +607,13 @@ export class SessionHub {
         // Serve the log we have; not_ready sessions attach once they get a turn.
         if (!(error instanceof RpcError && error.appCode === "not_ready")) {
           this.log(`[hub] attach ${sessionId} failed: ${error instanceof Error ? error.message : String(error)}`);
-          if (error instanceof RpcError && error.appCode === "not_logged_in") {
-            this.commit(sessionId, { sessionUpdate: "ls_error", code: error.appCode, message: error.message });
-          }
+          this.commit(sessionId, { sessionUpdate: "ls_status", state: "error" });
+          this.commit(sessionId, {
+            sessionUpdate: "ls_error",
+            code: error instanceof RpcError ? error.appCode ?? "history_unavailable" : "history_unavailable",
+            message: `读取会话消息失败：${error instanceof Error ? error.message : String(error)}`,
+            hint: "重新打开会话可重试",
+          }, undefined, summary.updatedAt);
         }
       }
     }
@@ -1202,7 +1221,7 @@ export class SessionHub {
           const stored = this.store.getSession(sessionId);
           if (live.importChanged && stored) this.emitSummary(stored);
         }
-        live.attached = true;
+        live.attached = !this.store.getSession(sessionId)?.archived;
       } finally {
         const buffered = live.buffer ?? [];
         live.buffer = undefined;
@@ -1229,7 +1248,7 @@ export class SessionHub {
         if (session.updatedAt <= hold.until) session = { ...session, updatedAt: before.updatedAt };
       }
     }
-    const { summary, created } = this.store.upsertSession({
+    const stored = this.store.upsertSession({
       id: sessionIdFor(agent, session.nativeId),
       agent,
       nativeId: session.nativeId,
@@ -1241,10 +1260,15 @@ export class SessionHub {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     });
+    const { created } = stored;
+    const summary = session.archived !== undefined && session.archived !== stored.summary.archived
+      ? this.store.patchSession(stored.summary.id, { archived: session.archived })
+      : stored.summary;
     const changed =
       !!before &&
       (before.title !== summary.title ||
         before.state !== summary.state ||
+        before.archived !== summary.archived ||
         before.updatedAt !== summary.updatedAt ||
         before.cwd !== summary.cwd ||
         before.model !== summary.model);
@@ -1350,6 +1374,10 @@ export class SessionHub {
         break;
       case "ls_status":
         patch.state = update.state;
+        if (!live.importing) {
+          live.turnActive = update.state === "running" || update.state === "waiting";
+          if (!live.turnActive) setActivity(undefined);
+        }
         break;
       case "ls_permission":
         live.permissions.set(update.requestId, update);

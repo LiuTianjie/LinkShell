@@ -288,6 +288,15 @@ export class HostStore {
 
   // ── removal ───────────────────────────────────────────────────────
 
+  /** A previous host's busy flags are not evidence that an agent is still working. */
+  resetLiveSessions(): string[] {
+    const rows = this.db.prepare("SELECT id FROM sessions WHERE state IN ('running', 'waiting') OR pending_permissions > 0").all() as { id: string }[];
+    this.db.prepare("UPDATE sessions SET state = 'offline', pending_permissions = 0 WHERE state IN ('running', 'waiting') OR pending_permissions > 0").run();
+    const clearQuestions = this.db.prepare("DELETE FROM driver_state WHERE session_id = ? AND key = 'asyncQuestions'");
+    for (const { id } of rows) clearQuestions.run(id);
+    return rows.map(({ id }) => id);
+  }
+
   /** Deleted by the user: forgotten, and kept out of rediscovery. */
   removeSession(id: string): void {
     this.db.exec("BEGIN IMMEDIATE");

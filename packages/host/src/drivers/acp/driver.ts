@@ -7,12 +7,13 @@ import {
   type AgentTier,
   type ContentBlock,
   type RpcId,
+  type SessionState,
   type SessionUpdate,
   type StopReason,
   type QuestionAnswer,
 } from "@linkshell/wire";
 import type { AgentDriver, AttachContext, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem } from "../types.js";
-import { AcpConnection } from "./connection.js";
+import { AcpConnection, AcpProtocolError } from "./connection.js";
 import { mapAcpQuestions, questionMethod, type AcpQuestionRequest } from "./questions.js";
 import {
   AcpItemTracker,
@@ -181,12 +182,26 @@ export class AcpDriver implements AgentDriver {
       );
       for (const info of page.sessions ?? []) {
         const updatedAt = info.updatedAt ? Date.parse(info.updatedAt) || Date.now() : Date.now();
-        found.push({ nativeId: info.sessionId, cwd: info.cwd, title: info.title ?? undefined, createdAt: updatedAt, updatedAt });
+        found.push({
+          nativeId: info.sessionId, cwd: info.cwd, title: info.title ?? undefined, createdAt: updatedAt, updatedAt,
+          state: await this.discoveredState(info.sessionId, info.cwd),
+        });
         if (found.length >= limit) return found;
       }
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
     return found;
+  }
+
+  /** ACP v1 does not include live state in session/list; only this connection's turns are known. */
+  protected async discoveredState(nativeId: string, _cwd: string): Promise<SessionState> {
+    return this.localState(nativeId);
+  }
+
+  protected localState(nativeId: string): SessionState {
+    const state = this.sessions.get(nativeId);
+    if (state?.permissions.size || state?.questions.size) return "waiting";
+    return state?.turnActive ? "running" : "idle";
   }
 
   /** ACP's session/fork, for agents that offer it: the whole conversation, in `cwd`. */
@@ -227,9 +242,13 @@ export class AcpDriver implements AgentDriver {
   }
 
   async attach(nativeId: string, context: AttachContext): Promise<HistoryItem[]> {
+    // Lazy agents have no capabilities until initialize has completed.
+    await this.ensureStarted();
+    if (!this.connection?.alive) throw RpcError.app("agent_unavailable", this.current.problem ?? `${this.label} 尚未启动`);
     const state = this.stateFor(nativeId, context.cwd);
     if (state.loaded) {
       this.emitConfig(nativeId, state);
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: this.localState(nativeId) });
       return [];
     }
     const capabilities = this.connection?.capabilities;
@@ -257,11 +276,19 @@ export class AcpDriver implements AgentDriver {
         ...this.sessionMeta(),
       });
       state.config = toConfigOptions(response);
+      history.push({
+        itemId: "linkshell:acp-history-unavailable",
+        updates: [{
+          sessionUpdate: "ls_notice", level: "info", title: "这个 AI 暂不提供以往消息",
+          detail: "会话已恢复；这里只显示 LinkShell 已缓存的内容和之后的新消息。",
+        }],
+      });
     } else {
-      throw RpcError.app("not_supported", `${this.label} can't reopen earlier sessions`);
+      throw RpcError.app("not_supported", `${this.label} 当前版本不支持恢复以往会话；已缓存的消息仍可查看。`);
     }
     state.loaded = true;
     this.emitConfig(nativeId, state);
+    this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: this.localState(nativeId) });
     return history;
   }
 
@@ -397,12 +424,13 @@ export class AcpDriver implements AgentDriver {
       this.current = { installed: true, version: this.current.version };
       this.restartDelay = 1000;
     } catch (error) {
+      await connection.stop();
       this.current = {
         installed: true,
         version: this.current.version,
         problem: `${this.label} failed to start: ${error instanceof Error ? error.message : String(error)}`,
       };
-      this.scheduleRestart();
+      if (!(error instanceof AcpProtocolError)) this.scheduleRestart();
     }
   }
 
