@@ -1,6 +1,9 @@
 import type { ContentBlock } from "@linkshell/wire";
 import { Image } from "expo-image";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio";
+import { File, Paths } from "expo-file-system";
+import { Buffer } from "buffer";
 import { ActivityIndicator, Modal, Pressable, StatusBar, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
@@ -23,9 +26,10 @@ import { PressableScale } from "../pressable-scale";
 import { useTimelineSession } from "./context";
 
 type ImageBlock = Extract<ContentBlock, { type: "image" }>;
+type AudioBlock = Extract<ContentBlock, { type: "audio" }>;
 type LinkBlock = Extract<ContentBlock, { type: "resource_link" }>;
 
-export function imageSource(block: ImageBlock): { uri: string } {
+export function imageSource(block: ImageBlock | AudioBlock): { uri: string } {
   return { uri: block.uri && !block.data ? block.uri : `data:${block.mimeType};base64,${block.data ?? ""}` };
 }
 
@@ -53,7 +57,7 @@ export interface LoadedImage {
  * and are fetched when the row mounts: the list is virtualized, so that is
  * when they are about to be seen. Nothing loads a session's pictures up front.
  */
-export function useImage(block: ImageBlock): LoadedImage {
+export function useImage(block: ImageBlock | AudioBlock): LoadedImage {
   const sessionId = useTimelineSession();
   const { loadImage } = useActions();
   const reference = sessionId && !block.data && block.uri && REFERENCE.test(block.uri) ? block.uri : undefined;
@@ -386,7 +390,8 @@ export const LinkChip = memo(function LinkChip({ block, onBubble = false }: { bl
 export function Attachments({ blocks, align = "start", thumb = 120 }: { blocks: ContentBlock[]; align?: "start" | "end"; thumb?: number }) {
   const images = blocks.filter((b): b is ImageBlock => b.type === "image");
   const links = blocks.filter((b): b is LinkBlock => b.type === "resource_link");
-  if (!images.length && !links.length) return null;
+  const media = blocks.filter((block) => block.type === "audio" || block.type === "resource");
+  if (!images.length && !links.length && !media.length) return null;
   const justify = align === "end" ? "flex-end" : "flex-start";
   return (
     <View style={{ gap: 6, alignItems: align === "end" ? "flex-end" : "flex-start" }}>
@@ -402,8 +407,71 @@ export function Attachments({ blocks, align = "start", thumb = 120 }: { blocks: 
       {links.map((link, index) => (
         <LinkChip key={index} block={link} />
       ))}
+      {media.map((block, index) => block.type === "audio" ? <AudioAttachment key={index} block={block} /> : block.type === "resource" ? <EmbeddedResource key={index} block={block} /> : null)}
     </View>
   );
+}
+
+function AudioAttachment({ block }: { block: AudioBlock }) {
+  const loaded = useImage(block);
+  const player = useAudioPlayer(null, { updateInterval: 250 });
+  const status = useAudioPlayerStatus(player);
+  const cached = useRef<File | null>(null);
+  const source = useRef<string | undefined>(undefined);
+  const pending = useRef(false);
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    if (pending.current && status.isLoaded) { pending.current = false; player.play(); }
+  }, [player, status.isLoaded]);
+  useEffect(() => () => { try { cached.current?.delete(); } catch { /* Only this row's cache file is removed. */ } }, []);
+  const play = async () => {
+    setError(undefined);
+    if (loaded.failed) { loaded.retry(); return; }
+    if (!loaded.uri) return;
+    try {
+      await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: false });
+      if (status.playing) { player.pause(); return; }
+      if (source.current !== loaded.uri) {
+        let uri = loaded.uri;
+        if (uri.startsWith("data:")) {
+          const ext = block.mimeType.includes("wav") ? "wav" : block.mimeType.includes("mp4") || block.mimeType.includes("aac") ? "m4a" : block.mimeType.includes("ogg") ? "ogg" : "mp3";
+          const file = new File(Paths.cache, `linkshell-audio-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`);
+          file.create(); file.write(Buffer.from(uri.slice(uri.indexOf(",") + 1), "base64"));
+          try { cached.current?.delete(); } catch { /* A previous cached source may already have been evicted. */ }
+          cached.current = file; uri = file.uri;
+        }
+        source.current = loaded.uri; pending.current = true; player.replace({ uri });
+      } else {
+        if (status.didJustFinish || status.duration > 0 && status.currentTime >= status.duration) await player.seekTo(0);
+        player.play();
+      }
+    } catch (reason) { pending.current = false; setError(reason instanceof Error ? reason.message : "音频无法播放"); }
+  };
+  const seconds = Math.max(0, Math.floor(status.currentTime));
+  return <View style={{ gap: 4, minWidth: 180, maxWidth: 300 }}>
+    <Pressable onPress={() => void play()} disabled={!loaded.uri && !loaded.failed} accessibilityRole="button" accessibilityLabel={status.playing ? "暂停音频" : "播放音频"} style={{ minHeight: 48, borderRadius: 16, paddingHorizontal: 14, backgroundColor: colors.fill, flexDirection: "row", alignItems: "center", gap: 12 }}>
+      {!loaded.uri && !loaded.failed ? <ActivityIndicator size="small" color={colors.accent} /> : <Icon sf={status.playing ? "pause.fill" : "play.fill"} md={status.playing ? "pause" : "play_arrow"} size={18} color={colors.accent} />}
+      <Text style={[type.footnote, { color: colors.label }]}>{loaded.failed ? "重新加载音频" : `音频 · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}${status.duration ? ` / ${Math.floor(status.duration)} 秒` : ""}`}</Text>
+    </Pressable>
+    {error ? <Text style={[type.caption, { color: colors.danger }]}>{error}</Text> : null}
+  </View>;
+}
+
+function EmbeddedResource({ block }: { block: Extract<ContentBlock, { type: "resource" }> }) {
+  const [expanded, setExpanded] = useState(false);
+  const resource = block.resource;
+  const mimeType = resource.mimeType ?? "application/octet-stream";
+  if (/^image\//.test(mimeType) && (resource.blob || resource.assetUri)) return <SingleImage block={{ type: "image", mimeType, data: resource.blob, uri: resource.assetUri }} maxWidth={240} maxHeight={240} />;
+  if (/^audio\//.test(mimeType) && (resource.blob || resource.assetUri)) return <AudioAttachment block={{ type: "audio", mimeType, data: resource.blob, uri: resource.assetUri }} />;
+  let label = baseName(resource.uri);
+  try { label = decodeURIComponent(label.replace(/^attachment:/, "")); } catch { /* Keep the original resource name. */ }
+  return <View style={{ gap: 6, padding: 12, borderRadius: 14, backgroundColor: colors.fill, maxWidth: 320 }}>
+    <Pressable onPress={() => setExpanded((value) => !value)} accessibilityRole="button" accessibilityState={{ expanded }} style={{ minHeight: 32, flexDirection: "row", gap: 8, alignItems: "center" }}>
+      <Icon sf="doc.text" md="description" size={16} color={colors.accent} /><Text numberOfLines={2} style={[type.footnote, { color: colors.label, flexShrink: 1 }]}>{label}</Text>
+    </Pressable>
+    <Text style={[type.caption, { color: colors.secondaryLabel }]}>{mimeType}{resource.blob ? ` · ${Math.ceil(resource.blob.length * 0.75 / 1024)} KB` : ""}</Text>
+    {expanded ? <Text selectable style={[type.footnote, { color: colors.label }]}>{resource.text ?? resource.uri}</Text> : resource.text ? <Text numberOfLines={3} style={[type.footnote, { color: colors.secondaryLabel }]}>{resource.text}</Text> : null}
+  </View>;
 }
 
 /** One image keeps its own aspect ratio, bounded to a comfortable size. */

@@ -16,6 +16,7 @@ export const toolVerb: Record<ToolKind, string> = {
   execute: "运行",
   think: "思考",
   fetch: "获取",
+  switch_mode: "切换模式",
   other: "",
 };
 
@@ -28,6 +29,7 @@ export const toolGlyph: Record<ToolKind, Glyph> = {
   execute: { sf: "terminal", md: "terminal" },
   think: { sf: "brain", md: "psychology" },
   fetch: { sf: "globe", md: "language" },
+  switch_mode: { sf: "slider.horizontal.3", md: "tune" },
   other: { sf: "wrench.and.screwdriver", md: "build" },
 };
 

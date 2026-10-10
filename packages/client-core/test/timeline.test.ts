@@ -20,6 +20,26 @@ const text = (t: string) => ({ type: "text" as const, text: t });
 const kinds = (items: TimelineItem[]) => items.map((i) => i.kind);
 
 describe("timeline reducer", () => {
+  it("upserts ACP messages, clears tool snapshots, and preserves a child's pending action after its parent finishes", () => {
+    seq = 0;
+    let view = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "ls_turn", state: "started" }),
+      ev({ sessionUpdate: "ls_message", role: "agent", messageId: "m", content: [text("original")] }),
+      ev({ sessionUpdate: "agent_message_chunk", messageId: "m", content: text(" chunk") }),
+      ev({ sessionUpdate: "ls_message", role: "agent", messageId: "m", content: [text("replacement")] }),
+      ev({ sessionUpdate: "tool_call", toolCallId: "t", title: "Edit", kind: "edit", status: "completed", rawInput: { secret: "old" }, content: [{ type: "diff", path: "/file", oldText: "a", newText: "b" }] }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "t", name: "", rawInput: null, content: [], replaceContent: true, replaceOutput: "fresh", status: "in_progress" }),
+      ev({ sessionUpdate: "ls_permission", requestId: "p", childSessionId: "child", title: "Child approval", options: [{ optionId: "yes", name: "Yes", kind: "allow_once" }] }),
+      ev({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" }),
+    ]);
+    expect(view.items.filter((item) => item.kind === "agent")).toMatchObject([{ id: "m", text: "replacement", streaming: false }]);
+    expect(findTool(view, "t")).toMatchObject({ rawInput: null, content: [], output: "fresh", status: "in_progress", endedTs: undefined });
+    expect(view).toMatchObject({ state: "waiting", turnActive: false }); expect(view.permissions).toHaveLength(1);
+    view = applyEvent(view, ev({ sessionUpdate: "ls_permission_resolved", requestId: "p", optionId: "yes" }));
+    expect(view.permissions).toHaveLength(0); expect(view.state).toBe("idle");
+    view = applyEvent(view, ev({ sessionUpdate: "ls_message", role: "agent", messageId: "m", content: [] }));
+    expect(view.items.find((item) => item.id === "m")).toMatchObject({ text: "", attachments: [] });
+  });
   it("keeps goals across turn ends and does not restore an old goal when paging history", () => {
     seq = 0;
     const old = ev({ sessionUpdate: "ls_goal", goal: { objective: "Old", status: "active" } });

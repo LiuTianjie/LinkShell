@@ -134,6 +134,45 @@ async function terminal(host: RunningHost, e: Env, sessionId?: string) {
 const text = (t: string) => [{ type: "text" as const, text: t }];
 
 describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
+  it("clears stale teammate running state from the native roster even while a lead process holds the session", async () => {
+    const e = makeEnv(); const host = await boot(e); const p = await phone(host); const desk = await terminal(host, e);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    desk.type("prepare"); await waitFor(() => p.agentTexts(desk.id).includes("echo: prepare"));
+    const native = desk.id.slice("claude:".length);
+    const dir = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"));
+    const transcript = join(dir, `${native}.jsonl`), children = join(dir, native, "subagents");
+    mkdirSync(children, { recursive: true });
+    const team = join(e.configDir, "teams", "team"); mkdirSync(team, { recursive: true });
+    const roster = (members: string[]) => writeFileSync(join(team, "config.json"), JSON.stringify({
+      name: "team", leadSessionId: native, members: members.map((agentId) => ({ agentId })),
+    }));
+    const write = (path: string, entry: object) => appendFileSync(path, JSON.stringify({ timestamp: "2026-10-10T04:27:01Z", uuid: randomUUID(), ...entry }) + "\n");
+    roster(["team-lead@team", "backend@team", "working@team"]);
+    for (const name of ["backend", "working"]) {
+      write(transcript, { type: "assistant", message: { content: [{ type: "tool_use", id: `call-${name}`, name: "Agent", input: { name, description: `${name} work` } }] } });
+      write(transcript, { type: "user", message: { content: [{ type: "tool_result", tool_use_id: `call-${name}`, content: "Spawned successfully" }] },
+        toolUseResult: { status: "teammate_spawned", agentId: `a${name}`, teammate_id: `${name}@team`, team_name: "team" } });
+      write(join(children, `agent-a${name}.jsonl`), { type: "assistant", isSidechain: true, message: { id: `${name}-progress`, stop_reason: null, content: text("unfinished turn") } });
+    }
+    await waitFor(() => host.hub.getSession(desk.id).subagents?.running === 2);
+    roster(["team-lead@team", "working@team"]);
+    await waitFor(() => host.hub.subagents(desk.id).find((a) => a.toolCallId === "call-backend")?.state === "unknown");
+    expect(host.hub.getSession(desk.id).subagents).toMatchObject({ total: 2, running: 1 });
+    expect(host.hub.subagents(desk.id).find((a) => a.toolCallId === "call-working")).toMatchObject({ running: true });
+    await desk.quit(); await host.stop();
+    // A resumed lead process is not proof that its old teammates were resumed.
+    mkdirSync(join(e.configDir, "sessions"), { recursive: true });
+    writeFileSync(join(e.configDir, "sessions", `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: native, entrypoint: "cli" }));
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const restarted = await boot(e); const client = await phone(restarted);
+      await client.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+      expect(restarted.hub.subagents(desk.id).find((a) => a.toolCallId === "call-backend")).toMatchObject({ state: "unknown", running: false });
+      expect(restarted.hub.getSession(desk.id).subagents).toMatchObject({ total: 2, running: 1 });
+      expect(restarted.hub.subagent(desk.id, "call-backend").filter((event) => event.update.sessionUpdate === "agent_message_chunk" && event.update.messageId === "backend-progress")).toHaveLength(1);
+      await restarted.stop();
+    }
+  }, 20_000);
+
   it("backfills teammate steps into a legacy host log and corrects completed-at-launch without duplicating history", async () => {
     const e = makeEnv(); const host = await boot(e); const p = await phone(host); const desk = await terminal(host, e);
     await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });

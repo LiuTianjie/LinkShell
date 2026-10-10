@@ -3,7 +3,8 @@ import { homedir, hostname, platform } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { DEFAULT_ICE_SERVERS, type GatewayStatus, type MachineInfo } from "@linkshell/wire";
-import { defaultDrivers } from "./drivers/registry.js";
+import { defaultDrivers, remoteDriver } from "./drivers/registry.js";
+import { AcpSettingsStore } from "./acp-settings.js";
 import type { AgentDriver } from "./drivers/types.js";
 import { SessionHub } from "./hub.js";
 import { connectHost } from "./rpc/client.js";
@@ -136,10 +137,12 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   const machineId = loadMachineId(paths.home);
   // Agents and terminals start clean even when LinkShell ran inside a Claude Code session.
   const env = withoutClaudeSession(options.env ?? process.env);
+  const acpSettings = new AcpSettingsStore(join(paths.home, "acp.json"));
   if (!options.drivers) removeLegacyCopilotHooks(join(homedir(), ".copilot", "hooks"), log);
   const drivers = options.drivers
     ? options.drivers(paths)
     : defaultDrivers({
+        agents: acpSettings.agents(),
         env,
         hostVersion: options.version,
         codexSocket: paths.codexSocket,
@@ -148,7 +151,20 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
         claudeAdapter: options.claudeAdapter,
       });
   const store = new HostStore(paths.database);
-  const hub = new SessionHub(store, drivers, log, paths.home);
+  const terminals = new TerminalManager(env, store);
+  const hub = new SessionHub(store, drivers, log, paths.home, {
+    settings: acpSettings,
+    createDriver: (agent) => remoteDriver(agent, { env, hostVersion: options.version }),
+    loginTerminal: async (_agent, launch) => {
+      const terminal = terminals.create({ launch, cols: 100, rows: 30 });
+      const exited = new Promise<number | null>((resolve) => {
+        const stop = terminals.onChange((info, closed) => {
+          if (info.id === terminal.id && (closed || info.exitCode !== undefined)) { stop(); resolve(info.exitCode ?? null); }
+        });
+      });
+      return { terminalId: terminal.id, exited };
+    },
+  });
   await hub.start({ discoveryIntervalMs: options.discoveryIntervalMs });
 
   const iceServers = options.iceServers ?? iceServersFromEnv(process.env.LINKSHELL_ICE_SERVERS);
@@ -163,7 +179,6 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     // LINKSHELL_ICE_SERVERS: STUN servers for the direct channel, comma separated ("off": never direct).
     ...(iceServers ? { direct: { iceServers } } : {}),
   });
-  const terminals = new TerminalManager(env, store);
   const server = new HostRpcServer({
     hub,
     terminals,

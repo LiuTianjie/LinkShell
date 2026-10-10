@@ -10,7 +10,7 @@ import {
   type AsyncQuestion,
   type TimelineItem,
 } from "@linkshell/client-core";
-import { AgentMark, ErrorNotice, useActions, useJob } from "./common";
+import { AgentMark, ErrorNotice, useActions, useConnection, useJob } from "./common";
 
 export const TimelineNavigation = createContext<{
   cwd: string;
@@ -123,6 +123,22 @@ function Picture({
     <span className="muted">{error ?? "图片加载中…"}</span>
   );
 }
+
+function Asset({ block, sessionId, download }: { block: { data?: string; uri?: string; mimeType: string }; sessionId: string; download?: string }) {
+  const { loadImage } = useActions();
+  const [uri, setUri] = useState(block.data ? `data:${block.mimeType};base64,${block.data}` : block.uri?.startsWith("linkshell-event:") ? undefined : block.uri);
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    let alive = true;
+    setError(undefined);
+    setUri(block.data ? `data:${block.mimeType};base64,${block.data}` : block.uri?.startsWith("linkshell-event:") ? undefined : block.uri);
+    if (block.uri?.startsWith("linkshell-event:")) void loadImage(sessionId, block.uri).then((value) => { if (alive) setUri(value); }, () => { if (alive) setError("附件加载失败"); });
+    return () => { alive = false; };
+  }, [block.data, block.uri, block.mimeType, loadImage, sessionId]);
+  if (!uri) return <span className="muted">{error ?? "附件加载中…"}</span>;
+  if (!/^(data:|https?:\/\/)/.test(uri)) return <span className="muted">附件地址无效</span>;
+  return <div className="protocol-asset">{block.mimeType.startsWith("audio/") ? <audio controls preload="metadata" src={uri} /> : block.mimeType.startsWith("image/") ? <img src={uri} className="message-image" alt={download ?? "附件"} /> : null}<a className="resource-chip" href={uri} download={download ?? "audio"}>下载{download ? ` ${download}` : "音频"}</a></div>;
+}
 export function Blocks({
   blocks,
   sessionId,
@@ -139,7 +155,9 @@ export function Blocks({
           <RichText key={index} text={block.text} />
         ) : block.type === "image" ? (
           <Picture key={index} block={block} sessionId={sessionId} />
-        ) : /^https?:\/\//.test(block.uri) ? (
+        ) : block.type === "audio" ? <Asset key={index} block={block} sessionId={sessionId} />
+        : block.type === "resource" ? <details key={index} className="notice-card" open={!!block.resource.text}><summary>{block.resource.uri} · {block.resource.mimeType ?? "附件"}</summary>{block.resource.text !== undefined ? <pre>{block.resource.text}</pre> : <Asset block={{ data: block.resource.blob, uri: block.resource.assetUri, mimeType: block.resource.mimeType ?? "application/octet-stream" }} sessionId={sessionId} download={block.resource.uri.split("/").at(-1)} />}</details>
+        : /^https?:\/\//.test(block.uri) ? (
           <a
             key={index}
             href={block.uri}
@@ -302,6 +320,7 @@ export function Timeline({
   onTerminal?: (id: string) => void;
 }) {
   const actions = useActions();
+  const { link } = useConnection();
   const job = useJob();
   const tail = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -342,7 +361,7 @@ export function Timeline({
                   ? "本轮已停止"
                   : item.stopReason === "error"
                     ? "本轮执行失败"
-                    : "本轮结束"}
+                    : item.stopReason === "max_tokens" ? "达到输出上限，回复被截断" : item.stopReason === "max_turn_requests" ? "达到本轮请求次数上限" : item.stopReason === "refusal" ? "Agent 拒绝了这个请求" : item.stopReason === "unknown" ? "本轮已结束，Agent 未提供明确原因" : "本轮结束"}
             </p>
           );
         if (item.kind === "user" && item.agentMessages?.length)
@@ -400,6 +419,7 @@ export function Timeline({
         if (item.kind === "agent")
           return (
             <article className="assistant-message" key={item.id}>
+              {item.senderSessionId || item.recipientSessionId ? <small className="muted">{item.senderSessionId ?? "Agent"} → {item.recipientSessionId ?? "当前会话"}</small> : null}
               <div className="message-author">
                 <AgentMark agent={agent} />
                 <strong>{agent}</strong>
@@ -449,7 +469,9 @@ export function Timeline({
         if (item.kind === "plan")
           return (
             <section className="plan-card" key={item.id}>
-              <strong>执行计划</strong>
+              <strong>{item.title ?? "执行计划"}</strong>
+              {item.markdown ? <RichText text={item.markdown} /> : null}
+              {item.path ? <button className="resource-chip" onClick={() => onFile(item.path!.replace(/^file:\/\//, ""))}>查看计划文件</button> : null}
               <ul>
                 {item.entries.map((entry, index) => (
                   <li key={index}>
@@ -485,7 +507,7 @@ export function Timeline({
           <details className={`tool-record ${item.status}`} key={item.id}>
             <summary>
               <span className="tool-state">
-                {item.status === "completed"
+                {item.detail?.type === "subagent" && item.detail.state === "unknown" ? "?" : item.status === "completed"
                   ? "✓"
                   : item.status === "failed"
                     ? "!"
@@ -495,11 +517,13 @@ export function Timeline({
               <small>
                 {item.detail?.type === "mcp"
                   ? `MCP · ${item.detail.server}`
+                  : item.detail?.type === "subagent" && item.detail.state ? ({ pending: "待开始", running: "运行中", paused: "等待操作", completed: "已完成", failed: "失败", stopped: "已停止", unknown: "状态未确认" }[item.detail.state])
                   : item.status === "in_progress"
                     ? "执行中"
                     : ""}
               </small>
             </summary>
+            {item.detail?.type === "subagent" && item.detail.canCancel && item.detail.nativeSessionId && ["running", "paused", "pending"].includes(item.detail.state ?? "") ? <button className="button secondary" disabled={job.busy} onClick={() => void job.run(() => link.call("sessions.cancelSubagent", { sessionId, nativeSessionId: item.detail!.type === "subagent" ? item.detail!.nativeSessionId! : "" }))}>停止这个子代理</button> : null}
             {item.detail?.type === "mcp" && (
               <p className="muted">
                 服务：{item.detail.server} · 工具：{item.detail.tool}
@@ -517,13 +541,7 @@ export function Timeline({
                   onFile={onFile}
                 />
               ) : content.type === "terminal" ? (
-                <button
-                  key={index}
-                  className="text-button"
-                  onClick={() => onTerminal?.(content.terminalId)}
-                >
-                  打开关联终端
-                </button>
+                <span key={index} className="muted">Agent 终端输出{item.output ? "见上方" : "正在等待输出"}</span>
               ) : (
                 <Diff key={index} change={content} />
               ),

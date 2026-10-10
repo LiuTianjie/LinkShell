@@ -1,4 +1,15 @@
 @layer base {
+  .acp-settings { display: grid; gap: 16px; margin: 20px 0; max-width: 760px; }
+  .acp-settings h3, .acp-settings h4 { margin: 0; }
+  .acp-settings form, .acp-section { display: grid; gap: 12px; padding: 16px; background: var(--card); border-radius: 18px; }
+  .acp-settings label { display: grid; gap: 7px; font-size: 13px; color: var(--secondaryLabel); }
+  .acp-settings input:not([type="checkbox"]), .acp-settings select, .acp-settings textarea { width: 100%; border: 1px solid var(--separator); border-radius: 10px; padding: 10px; color: var(--label); background: var(--background); }
+  .acp-settings .choice-option { display: flex; align-items: center; gap: 8px; }
+  .code-input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.6; resize: vertical; }
+  .protocol-asset { display: grid; gap: 8px; max-width: 100%; }
+  .protocol-asset audio { max-width: 100%; }
+  .acp-editor { display: grid; gap: 12px; padding: 16px; }
+  .acp-editor textarea { width: 100%; min-height: 320px; max-height: 65vh; padding: 14px; border: 1px solid var(--separator); border-radius: 12px; color: var(--label); background: var(--card); }
   .live-overview h2 {
     font-size: 21px;
     margin: 18px 0 12px;

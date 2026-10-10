@@ -238,6 +238,7 @@ export class ClaudeDriver extends AcpDriver {
     const tasks = new ClaudeTasks((task) => { if (!importing) this.emit(nativeId, { sessionUpdate: "ls_task", task }); });
     this.tasks.set(nativeId, tasks);
     const activity = new ClaudeActivity({
+      configDir: this.configDir,
       locate: () => findTranscript(this.configDir, nativeId, context.cwd),
       onLine: (raw) => tasks.observe(raw),
       desktop: () => importing || this.modes.get(nativeId) !== "remote",

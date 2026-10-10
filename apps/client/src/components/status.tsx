@@ -42,6 +42,7 @@ export function stateColor(state: SessionState): ColorValue {
     case "error":
       return colors.danger;
     case "offline":
+    case "unknown":
       return colors.tertiaryLabel;
     default:
       return colors.ok;
@@ -58,6 +59,8 @@ export function stateLabel(state: SessionState): string {
       return "出错";
     case "offline":
       return "离线";
+    case "unknown":
+      return "状态未确认";
     default:
       return "空闲";
   }

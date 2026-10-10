@@ -1,4 +1,4 @@
-import { sessionGoalSchema } from "@linkshell/wire";
+import { contentBlockSchema, sessionGoalSchema } from "@linkshell/wire";
 import type {
   ContentBlock,
   PermissionOption,
@@ -24,32 +24,26 @@ const obj = (value: unknown): Json | undefined =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : undefined;
 const arr = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
-const TOOL_KINDS = new Set(["read", "edit", "delete", "move", "search", "execute", "think", "fetch", "other"]);
+const TOOL_KINDS = new Set(["read", "edit", "delete", "move", "search", "execute", "think", "fetch", "switch_mode", "other"]);
 const TOOL_STATUSES = new Set(["pending", "in_progress", "completed", "failed"]);
 
 export function toContentBlock(raw: unknown): ContentBlock | undefined {
   const block = obj(raw);
   if (!block) return undefined;
-  switch (block.type) {
-    case "text":
-      return typeof block.text === "string" ? { type: "text", text: block.text } : undefined;
-    case "image":
-      if (str(block.data)) return inlineImage(str(block.data), str(block.mimeType));
-      return str(block.uri) ? { type: "image", mimeType: str(block.mimeType) ?? "image/*", uri: str(block.uri)! } : undefined;
-    case "resource_link":
-      return str(block.uri) ? { type: "resource_link", uri: str(block.uri)!, name: str(block.name) ?? str(block.uri)! } : undefined;
-    case "resource": {
-      const resource = obj(block.resource);
-      if (typeof resource?.text === "string") return { type: "text", text: resource.text };
-      if (str(resource?.mimeType)?.startsWith("image/") && str(resource?.blob)) return inlineImage(str(resource?.blob), str(resource?.mimeType));
-      return str(resource?.uri) ? { type: "resource_link", uri: str(resource?.uri)!, name: str(resource?.uri)! } : undefined;
-    }
-    default:
-      return undefined;
+  const normalized: Json = Object.fromEntries(Object.entries(block).filter(([, value]) => value !== null));
+  if (block.type === "image" || block.type === "audio") normalized.mimeType = str(block.mimeType) ?? str(block.mediaType) ?? `${block.type}/*`;
+  if (block.type === "image" && str(block.data)) {
+    const image = inlineImage(str(block.data), str(normalized.mimeType));
+    if (!image) return undefined;
+    Object.assign(normalized, image);
   }
+  if (block.type === "resource_link") normalized.name = str(block.name) ?? str(block.title) ?? str(block.uri);
+  if (block.type === "resource" && obj(block.resource)) normalized.resource = Object.fromEntries(Object.entries(obj(block.resource)!).filter(([, value]) => value !== null));
+  const parsed = contentBlockSchema.safeParse(normalized);
+  return parsed.success ? parsed.data : undefined;
 }
 
-function toolContent(raw: unknown): ToolCallContent[] | undefined {
+export function toolContent(raw: unknown): ToolCallContent[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const content: ToolCallContent[] = [];
   for (const entry of raw) {
@@ -60,10 +54,37 @@ function toolContent(raw: unknown): ToolCallContent[] | undefined {
       if (block) content.push({ type: "content", content: block });
     } else if (item.type === "diff" && str(item.path) && typeof item.newText === "string") {
       content.push({ type: "diff", path: str(item.path)!, oldText: str(item.oldText) ?? null, newText: item.newText });
+    } else if (item.type === "diff" && Array.isArray(item.changes)) {
+      content.push(...v2Diff(item));
     } else if (item.type === "terminal" && str(item.terminalId)) {
       content.push({ type: "terminal", terminalId: str(item.terminalId)! });
     }
   }
+  return content;
+}
+
+/** Attribute a git patch only when its path is unambiguous; otherwise retain it once as a whole. */
+function v2Diff(item: Json): ToolCallContent[] {
+  const changes = arr(item.changes).map(obj).filter((change): change is Json => !!change && typeof change.path === "string");
+  const patch = str(obj(item.patch)?.text) ?? "";
+  const pieces = obj(item.patch)?.format === "git_patch" ? patch.split(/(?=^diff --git )/m).filter((part) => part.trim()) : [];
+  const pathOf = (piece: string) => {
+    const path = /^\+\+\+ (.+)$/m.exec(piece)?.[1] ?? /^--- (.+)$/m.exec(piece)?.[1];
+    if (!path || path.startsWith('"') || path === "/dev/null") return undefined;
+    return path.split("\t")[0]!.replace(/^[ab]\//, "");
+  };
+  const assigned = pieces.map((piece) => {
+    const path = pathOf(piece);
+    const matches = path ? changes.filter((change) => [change.path, change.oldPath].some((candidate) => typeof candidate === "string" && (candidate === path || candidate.endsWith(`/${path}`)))) : [];
+    return { piece, change: matches.length === 1 ? matches[0] : undefined };
+  });
+  const split = !!patch && assigned.length > 0 && assigned.every((part) => part.change) && new Set(assigned.map((part) => part.change)).size === assigned.length;
+  const content: ToolCallContent[] = changes.map((change) => ({ type: "patch", path: change.operation === "move" ? str(change.oldPath) ?? str(change.path)! : str(change.path)!,
+    movePath: change.operation === "move" ? str(change.path) : undefined,
+    change: change.operation === "add" || change.operation === "copy" ? "add" : change.operation === "delete" ? "delete" : "update",
+    diff: split ? assigned.find((part) => part.change === change)?.piece ?? "" : change.operation === "copy" ? `copy from ${String(change.oldPath)}\ncopy to ${String(change.path)}` : "",
+  }));
+  if (patch && !split) content.push({ type: "content", content: { type: "text", text: patch } });
   return content;
 }
 
@@ -94,14 +115,20 @@ export function toConfigOptions(response: unknown): SourcedConfigOption[] {
   const options: SourcedConfigOption[] = [];
   for (const raw of arr(source.configOptions)) {
     const option = obj(raw);
-    if (!option || option.type !== "select" || !str(option.id)) continue;
+    if (!option || !["select", "boolean"].includes(String(option.type)) || !str(option.id)) continue;
+    if (option.type === "boolean") {
+      if (typeof option.currentValue !== "boolean") continue;
+      options.push({ id: str(option.id)!, name: str(option.name) ?? str(option.id)!, description: str(option.description), type: "boolean", category: "other",
+        current: option.currentValue ? "on" : "off", values: [{ value: "on", name: "开" }, { value: "off", name: "关" }], source: "configOptions" });
+      continue;
+    }
     const values = arr(option.options).flatMap((entry) => {
       const value = obj(entry);
       if (!value) return [];
       if (Array.isArray(value.options)) {
         return value.options.flatMap((inner) => {
           const v = obj(inner);
-          return str(v?.value) ? [{ value: str(v?.value)!, name: str(v?.name) ?? str(v?.value)!, description: str(v?.description) }] : [];
+          return str(v?.value) ? [{ value: str(v?.value)!, name: str(v?.name) ?? str(v?.value)!, description: str(v?.description), group: str(value.name) ?? str(value.group) }] : [];
         });
       }
       return str(value.value) ? [{ value: str(value.value)!, name: str(value.name) ?? str(value.value)!, description: str(value.description) }] : [];
@@ -110,7 +137,8 @@ export function toConfigOptions(response: unknown): SourcedConfigOption[] {
     options.push({
       id: str(option.id)!,
       name: str(option.name) ?? str(option.id)!,
-      category: category === "model" || category === "mode" ? category : category?.includes("thought") || category?.includes("effort") ? "effort" : "other",
+      description: str(option.description),
+      category: category === "model" || category === "mode" || category === "model_config" ? category : category?.includes("thought") || category?.includes("effort") ? "effort" : "other",
       current: str(option.currentValue) ?? values[0]?.value ?? "",
       values,
       source: "configOptions",
@@ -190,9 +218,11 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
         toolCallId,
         parentToolCallId: parentOf(update),
         title: str(update.title) ?? str(update.name) ?? "Tool",
+        name: str(update.name),
         kind: toolKind(update.kind),
         status: toolStatus(update.status) ?? "pending",
         rawInput: update.rawInput,
+        rawOutput: update.rawOutput,
         content: toolContent(update.content),
         locations: locations(update.locations),
         detail: toolDetail(update),
@@ -210,6 +240,10 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
         parentToolCallId: parentOf(update),
         status: workflow && update.status === "completed" ? "in_progress" : toolStatus(update.status),
         title: str(update.title) ?? undefined,
+        name: str(update.name),
+        kind: typeof update.kind === "string" ? toolKind(update.kind) : undefined,
+        locations: locations(update.locations),
+        rawInput: update.rawInput,
         detail: workflow ? undefined : toolDetail(update),
         content: toolContent(update.content),
         rawOutput: update.rawOutput,
@@ -245,7 +279,7 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
       return str(update.currentModeId) ? { sessionUpdate: "current_mode_update", currentModeId: str(update.currentModeId)! } : undefined;
     case "config_option_update": {
       const options = toConfigOptions({ configOptions: update.configOptions }).map(({ source: _source, ...option }) => option);
-      return options.length > 0 ? { sessionUpdate: "ls_config", options } : undefined;
+      return Array.isArray(update.configOptions) ? { sessionUpdate: "ls_config", options } : undefined;
     }
     case "session_info_update": {
       const air = obj(obj(obj(update._meta)?.jetbrains)?.air);
@@ -254,13 +288,16 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
         const goal = sessionGoalSchema.safeParse(air.goal);
         if (goal.success) return { sessionUpdate: "ls_goal", goal: goal.data };
       }
-      return str(update.title) ? { sessionUpdate: "session_info_update", title: str(update.title) } : undefined;
+      return typeof update.title === "string" || update.title === null || update.updatedAt !== undefined
+        ? { sessionUpdate: "session_info_update", title: update.title === null ? null : str(update.title), updatedAt: update.updatedAt === null ? null : str(update.updatedAt) } : undefined;
     }
     case "usage_update":
       return {
         sessionUpdate: "usage_update",
         usedTokens: typeof update.used === "number" ? update.used : undefined,
         contextWindow: typeof update.size === "number" ? update.size : undefined,
+        cost: update.cost === null ? null : typeof obj(update.cost)?.amount === "number" && str(obj(update.cost)?.currency)
+          ? { amount: obj(update.cost)!.amount as number, currency: str(obj(update.cost)!.currency)! } : undefined,
       };
     case "notice": {
       const title = str(update.title);
@@ -306,6 +343,11 @@ export class AcpItemTracker {
 
   feed(update: SessionUpdate): TrackedUpdate[] {
     const out: TrackedUpdate[] = [];
+    if (update.sessionUpdate === "ls_message") {
+      out.push(...this.close());
+      out.push({ update, itemId: `message:${update.role}:${update.messageId}:${contentHash(JSON.stringify(update))}` });
+      return out;
+    }
     if (
       update.sessionUpdate === "agent_message_chunk" ||
       update.sessionUpdate === "agent_thought_chunk" ||
@@ -445,11 +487,13 @@ export function toAcpPrompt(content: ContentBlock[]): Json[] {
   return content.flatMap((block): Json[] => {
     switch (block.type) {
       case "text":
-        return [{ type: "text", text: block.text }];
+        return [{ ...block }];
       case "image":
-        return block.data ? [{ type: "image", mimeType: block.mimeType, data: block.data, uri: block.uri }] : [];
+      case "audio":
+        return block.data ? [{ ...block }] : [];
       case "resource_link":
-        return [{ type: "resource_link", uri: block.uri, name: block.name }];
+      case "resource":
+        return [{ ...block }];
       default:
         return [];
     }
@@ -461,11 +505,12 @@ export function toStopReason(value: unknown): StopReason {
     case "cancelled":
     case "refusal":
     case "max_tokens":
-      return value;
     case "max_turn_requests":
-      return "max_tokens";
+    case "end_turn":
+    case "error":
+      return value;
     default:
-      return "end_turn";
+      return "unknown";
   }
 }
 
@@ -475,7 +520,8 @@ export interface AcpPermissionRequest {
 
 export function mapPermissionRequest(params: unknown, requestId: string): AcpPermissionRequest | undefined {
   const payload = obj(params);
-  const toolCall = obj(payload?.toolCall);
+  const subject = obj(payload?.subject);
+  const toolCall = obj(payload?.toolCall) ?? (subject?.type === "tool_call" ? obj(subject.toolCall) : subject?.type === "command" ? { toolCallId: subject.toolCallId, kind: "execute", rawInput: { command: subject.command, cwd: subject.cwd } } : undefined);
   const options: PermissionOption[] = arr(payload?.options).flatMap((entry) => {
     const option = obj(entry);
     const kind = option?.kind;
@@ -492,8 +538,12 @@ export function mapPermissionRequest(params: unknown, requestId: string): AcpPer
       sessionUpdate: "ls_permission",
       requestId,
       toolCallId: str(toolCall?.toolCallId),
-      title: str(toolCall?.title) ?? "Permission required",
-      detail,
+      title: str(payload?.title) ?? str(toolCall?.title) ?? "需要授权",
+      detail: str(payload?.description) ?? (subject?.type === "command" ? str(subject.command) : undefined) ?? detail,
+      tool: toolCall ? {
+        title: str(toolCall.title), kind: typeof toolCall.kind === "string" ? toolKind(toolCall.kind) : undefined,
+        rawInput: toolCall.rawInput, content: toolContent(toolCall.content), locations: locations(toolCall.locations),
+      } : undefined,
       options,
     },
   };

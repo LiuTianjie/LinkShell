@@ -326,17 +326,18 @@ export class TerminalManager {
     ].sort((a, b) => b.activeAt - a.activeAt);
   }
 
-  create(options: { cwd?: string; command?: string; cols: number; rows: number }): TerminalInfo {
+  create(options: { cwd?: string; command?: string; cols: number; rows: number; launch?: { command: string; args: string[]; env?: Record<string, string> } }): TerminalInfo {
     if (this.terminals.size >= MAX_TERMINALS) throw RpcError.app("busy", `at most ${MAX_TERMINALS} terminals can run at once`);
     const cwd = options.cwd ?? homedir();
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw RpcError.app("invalid_params", `no such directory: ${cwd}`);
     const base = this.env ?? process.env;
-    const shell = base.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/zsh");
+    const shell = options.launch?.command ?? (base.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/zsh"));
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(base)) if (value !== undefined) env[key] = value;
     Object.assign(env, { TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "LinkShell" });
     env.LANG ??= "en_US.UTF-8";
-    const pty = spawn(shell, process.platform === "win32" ? [] : ["-l"], {
+    Object.assign(env, options.launch?.env);
+    const pty = spawn(shell, options.launch?.args ?? (process.platform === "win32" ? [] : ["-l"]), {
       name: "xterm-256color",
       cols: options.cols,
       rows: options.rows,

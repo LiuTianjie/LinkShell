@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { asyncQuestionSchema } from "./async-questions.js";
 import { workflowAgentStateSchema, workflowSchema } from "./workflow.js";
+import { toolCallContentSchema } from "./content.js";
 
 /**
  * How far LinkShell can take a given agent. The UI renders capabilities from
@@ -21,6 +22,10 @@ export const agentCapabilitiesSchema = z.object({
   steer: z.boolean(),
   permissions: z.boolean(),
   images: z.boolean(),
+  audio: z.boolean().optional(),
+  embeddedContext: z.boolean().optional(),
+  /** Host-managed ACP settings and optional protocol features. */
+  acp: z.boolean().optional(),
   /**
    * The agent forks sessions itself, keeping everything it knew. Every agent's
    * sessions can be forked: without this (or from a single reply, where the
@@ -67,7 +72,7 @@ export type AgentInfo = z.infer<typeof agentInfoSchema>;
 export const sessionDriverSchema = z.enum(["desktop", "remote", "none"]);
 export type SessionDriver = z.infer<typeof sessionDriverSchema>;
 
-export const sessionStateSchema = z.enum(["idle", "running", "waiting", "error", "offline"]);
+export const sessionStateSchema = z.enum(["idle", "running", "waiting", "error", "offline", "unknown"]);
 export type SessionState = z.infer<typeof sessionStateSchema>;
 
 export const toolKindSchema = z.enum([
@@ -79,6 +84,7 @@ export const toolKindSchema = z.enum([
   "execute",
   "think",
   "fetch",
+  "switch_mode",
   "other",
 ]);
 export type ToolKind = z.infer<typeof toolKindSchema>;
@@ -106,6 +112,14 @@ export type SessionActivity = z.infer<typeof sessionActivitySchema>;
  */
 export const questionSchema = z.object({
   id: z.string(),
+  constraints: z.object({
+    type: z.enum(["string", "number", "integer", "boolean", "array"]),
+    minimum: z.number().optional(), maximum: z.number().optional(),
+    minLength: z.number().int().nonnegative().optional(), maxLength: z.number().int().nonnegative().optional(),
+    minItems: z.number().int().nonnegative().optional(), maxItems: z.number().int().nonnegative().optional(),
+    pattern: z.string().optional(), format: z.string().optional(),
+  }).optional(),
+  defaults: z.array(z.string()).optional(),
   /** A short label for the question ("Auth method"). */
   header: z.string().optional(),
   text: z.string(),
@@ -131,9 +145,12 @@ export type QuestionAnswer = z.infer<typeof questionAnswerSchema>;
 
 export const pendingPermissionSchema = z.object({
   requestId: z.string(),
+  childSessionId: z.string().optional(),
   toolCallId: z.string().optional(),
   title: z.string(),
   detail: z.string().optional(),
+  tool: z.object({ title: z.string().optional(), kind: toolKindSchema.optional(), rawInput: z.unknown().optional(), content: z.array(toolCallContentSchema).optional(), locations: z.array(z.object({ path: z.string(), line: z.number().int().optional() })).optional() }).optional(),
+  url: z.object({ url: z.string(), elicitationId: z.string() }).optional(),
   options: z.array(permissionOptionSchema).min(1),
   /** Set when this is a question to answer (`sessions.answer`) rather than a permission to give. */
   questions: z.array(questionSchema).optional(),
@@ -150,6 +167,8 @@ export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 
 /** A sub-agent a session started: the tool call it runs under, and how it is doing. */
 export const subagentInfoSchema = z.object({
+  nativeSessionId: z.string().optional(),
+  canCancel: z.boolean().optional(),
   toolCallId: z.string(),
   parentToolCallId: z.string().optional(),
   /** What it was asked to do. */

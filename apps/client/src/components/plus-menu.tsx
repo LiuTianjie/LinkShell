@@ -6,17 +6,21 @@ import { Icon } from "./icon";
 
 export interface PlusMenuProps {
   canAttachImages: boolean;
+  canAttachAudio?: boolean;
+  canAttachFiles?: boolean;
   /** The agent has slash commands to offer. */
   hasCommands: boolean;
   onPickPhoto: () => void;
   onTakePhoto: () => void;
   /** Opens the command picker. */
   onCommands: () => void;
+  onPickAudio?: () => void;
+  onPickFile?: () => void;
   disabled?: boolean;
 }
 
 /** The composer's "+": photos, camera and the agent's slash commands. */
-export function PlusMenu({ canAttachImages, hasCommands, onPickPhoto, onTakePhoto, onCommands, disabled }: PlusMenuProps) {
+export function PlusMenu({ canAttachImages, canAttachAudio, canAttachFiles, hasCommands, onPickPhoto, onTakePhoto, onPickAudio, onPickFile, onCommands, disabled }: PlusMenuProps) {
   const actions: MenuAction[] = [
     ...(canAttachImages
       ? [
@@ -26,6 +30,8 @@ export function PlusMenu({ canAttachImages, hasCommands, onPickPhoto, onTakePhot
       : []),
     // A sheet with a search field, not a submenu: an agent can have over a hundred.
     ...(hasCommands ? [{ id: "commands", title: "命令", image: "command" }] : []),
+    ...(canAttachAudio ? [{ id: "audio", title: "音频文件", image: "waveform" }] : []),
+    ...(canAttachFiles ? [{ id: "file", title: "文件内容", image: "doc" }] : []),
   ];
   return (
     <AppMenu
@@ -36,6 +42,8 @@ export function PlusMenu({ canAttachImages, hasCommands, onPickPhoto, onTakePhot
         if (id === "photo") onPickPhoto();
         else if (id === "camera") onTakePhoto();
         else if (id === "commands") onCommands();
+        else if (id === "audio") onPickAudio?.();
+        else if (id === "file") onPickFile?.();
       }}
     >
       <View

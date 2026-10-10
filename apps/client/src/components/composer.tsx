@@ -2,6 +2,10 @@ import type { PendingPermission, QueueEntry } from "@linkshell/client-core";
 import type { AgentInfo, ContentBlock, QuestionAnswer, SessionConfigOption, SessionDriver } from "@linkshell/wire";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
+import { File, Paths } from "expo-file-system";
+import { Buffer } from "buffer";
+import type { DraftAttachment } from "@/lib/composer-drafts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
 import { Text, TextInput } from "@/components/fixed-text";
@@ -21,6 +25,8 @@ import { ConfigSummary } from "./config-menu";
 import { Glass } from "./glass";
 import { Icon } from "./icon";
 import { PermissionActions } from "./permission-actions";
+import { PermissionContext } from "./permission-context";
+import { openAuthorization } from "@/lib/authorization";
 import { PlusMenu } from "./plus-menu";
 import { QueuePanel } from "./queue-panel";
 import { QuestionCard } from "./question-card";
@@ -97,6 +103,8 @@ export function Composer(props: ComposerProps) {
   const desktopDriving = tier === "handoff" && driver === "desktop";
   const trimmed = text.trim();
   const canAttachImages = props.agentInfo?.capabilities.images ?? false;
+  const canAttachAudio = props.agentInfo?.capabilities.audio ?? false;
+  const canAttachFiles = props.agentInfo?.capabilities.embeddedContext ?? false;
   const hasContent = trimmed.length > 0 || attachments.length > 0;
   const input = useRef<TextInput>(null);
   const poseFocused = useRef(false);
@@ -136,6 +144,24 @@ export function Composer(props: ComposerProps) {
     }
   };
   const inputDisabled = !!blocked || desktopDriving;
+  const addDocument = async (audio: boolean) => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: audio ? "audio/*" : "*/*", copyToCacheDirectory: true, multiple: false });
+      if (result.canceled) return;
+      const asset = result.assets[0]!;
+      const file = new File(asset.uri);
+      try {
+        if ((asset.size ?? file.size) > MAX_IMAGE_BYTES) throw new Error("单个附件不能超过 5 MB");
+        const bytes = Buffer.from(await file.arrayBuffer());
+        if (bytes.length > MAX_IMAGE_BYTES) throw new Error("单个附件不能超过 5 MB");
+        const mimeType = asset.mimeType ?? "application/octet-stream";
+        const decoded = bytes.toString("utf8");
+        const text = !audio && (/^text\//.test(mimeType) || /\.(md|txt|json|csv|ts|tsx|js|jsx|py|swift|rs|go|yaml|yml)$/i.test(asset.name)) && Buffer.from(decoded).equals(bytes) ? decoded : undefined;
+        const picked: DraftAttachment = { kind: audio ? "audio" : "resource", name: asset.name, uri: `attachment:${encodeURIComponent(asset.name)}`, mimeType, data: bytes.toString("base64"), text };
+        setAttachments((current) => [...current, picked].slice(0, 4));
+      } finally { if (file.uri.startsWith(Paths.cache.uri)) { try { file.delete(); } catch { /* Cache eviction is best effort. */ } } }
+    } catch (error) { Alert.alert("没能添加附件", error instanceof Error ? error.message : String(error)); }
+  };
   useEffect(() => {
     if (!props.autoFocusOnPoseEntry) { poseFocused.current = false; return; }
     if (!focused || inputDisabled || poseFocused.current) return;
@@ -156,7 +182,9 @@ export function Composer(props: ComposerProps) {
     if (!hasContent || inputDisabled) return;
     haptics.light();
     const content: ContentBlock[] = [
-      ...attachments.map((image) => ({ type: "image" as const, mimeType: image.mimeType, data: image.data })),
+      ...attachments.map((attachment): ContentBlock => attachment.kind === "resource"
+        ? { type: "resource", resource: { uri: attachment.uri, mimeType: attachment.mimeType, ...(attachment.text === undefined ? { blob: attachment.data } : { text: attachment.text }) } }
+        : { type: attachment.kind === "audio" ? "audio" : "image", mimeType: attachment.mimeType, data: attachment.data }),
       ...(trimmed ? [{ type: "text" as const, text: normalizeCommandText(trimmed) }] : []),
     ];
     setText("");
@@ -177,10 +205,10 @@ export function Composer(props: ComposerProps) {
     const content = await props.onTakeQueued(clientMessageId).catch(() => undefined);
     if (!content) return;
     const words = content.map((block) => (block.type === "text" ? block.text : "")).join("").trim();
-    const images = content.flatMap((block) =>
-      block.type === "image" && block.data
-        ? [{ uri: `data:${block.mimeType};base64,${block.data}`, mimeType: block.mimeType, data: block.data }]
-        : [],
+    const images = content.flatMap((block): DraftAttachment[] =>
+      (block.type === "image" || block.type === "audio") && block.data
+        ? [{ kind: block.type, uri: `data:${block.mimeType};base64,${block.data}`, mimeType: block.mimeType, data: block.data }]
+        : block.type === "resource" ? [{ kind: "resource", uri: block.resource.uri, name: block.resource.uri, mimeType: block.resource.mimeType ?? "application/octet-stream", data: block.resource.blob ?? "", text: block.resource.text }] : [],
     );
     if (words) setText((current) => [words, current.trim()].filter(Boolean).join("\n\n"));
     if (images.length) setAttachments((current) => [...images, ...current].slice(0, 4));
@@ -208,7 +236,7 @@ export function Composer(props: ComposerProps) {
       ? `排队一条消息，${name} 忙完这一轮就发`
       : `给 ${name} 发消息`;
 
-  const order = { model: 0, effort: 1, mode: 2, other: 3 } as const;
+  const order = { model: 0, model_config: 1, effort: 2, mode: 3, other: 4 } as const;
   const configShown = config
     .filter((option) => option.values.length > 1)
     .sort((a, b) => order[a.category] - order[b.category])
@@ -315,12 +343,13 @@ export function Composer(props: ComposerProps) {
               {permission.detail ? (
                 <PermissionDetail key={`detail:${permission.requestId}`} detail={permission.detail} />
               ) : null}
+              <PermissionContext request={permission} />
               <PermissionActions
                 key={permission.requestId}
                 options={permission.options}
                 disabled={!props.online}
                 size="large"
-                onChoose={(optionId) => props.onRespond(permission.requestId, optionId)}
+                onChoose={(optionId) => { openAuthorization(permission, optionId); return props.onRespond(permission.requestId, optionId); }}
               />
               {tier === "multi_client" || tier === "handoff" ? (
                 <Text style={[type.caption, { color: colors.tertiaryLabel, textAlign: "center" }]}>在哪边回答都行，另一边会同步收起</Text>
@@ -361,11 +390,11 @@ export function Composer(props: ComposerProps) {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 6, paddingTop: 8 }}>
               {attachments.map((image, index) => (
                 <View key={`${image.uri}-${index}`}>
-                  <Image source={{ uri: image.uri }} style={{ width: 64, height: 64, borderRadius: 14 }} contentFit="cover" />
+                  {image.kind === "audio" || image.kind === "resource" ? <View style={{ width: 108, height: 64, borderRadius: 14, backgroundColor: colors.fill, padding: 8, justifyContent: "center", gap: 4 }}><Icon sf={image.kind === "audio" ? "waveform" : "doc"} md={image.kind === "audio" ? "graphic_eq" : "description"} size={18} color={colors.accent} /><Text numberOfLines={1} style={[type.caption, { color: colors.label }]}>{image.name ?? "附件"}</Text></View> : <Image source={{ uri: image.uri }} style={{ width: 64, height: 64, borderRadius: 14 }} contentFit="cover" />}
                   <Pressable
                     onPress={() => setAttachments((current) => current.filter((_, i) => i !== index))}
                     accessibilityRole="button"
-                    accessibilityLabel={`移除第 ${index + 1} 张图片`}
+                    accessibilityLabel={`移除第 ${index + 1} 个附件`}
                     style={{
                       position: "absolute",
                       top: 0,
@@ -420,10 +449,14 @@ export function Composer(props: ComposerProps) {
           <View style={{ flexDirection: "row", alignItems: "center", gap: compact ? 4 : 6, minHeight: 44, paddingLeft: 2 }}>
             <PlusMenu
               canAttachImages={canAttachImages}
+              canAttachAudio={canAttachAudio}
+              canAttachFiles={canAttachFiles}
               hasCommands={hasCommands}
-              disabled={inputDisabled || (!canAttachImages && !hasCommands)}
+              disabled={inputDisabled || (!canAttachImages && !canAttachAudio && !canAttachFiles && !hasCommands)}
               onPickPhoto={() => void addImage(false)}
               onTakePhoto={() => void addImage(true)}
+              onPickAudio={() => void addDocument(true)}
+              onPickFile={() => void addDocument(false)}
               onCommands={props.onCommands}
             />
             {/* (Commands: the + menu, or `/` in the input.) */}

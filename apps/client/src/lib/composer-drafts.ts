@@ -1,6 +1,9 @@
 import { createStore } from "zustand/vanilla";
 
 export interface DraftAttachment {
+  kind?: "image" | "audio" | "resource";
+  name?: string;
+  text?: string;
   uri: string;
   mimeType: string;
   data: string;

@@ -1,6 +1,7 @@
 import {
   RpcError,
   questionReplies,
+  questionAnswerError,
   updateAsyncQuestions,
   type AsyncQuestion,
   type GoalChange,
@@ -19,7 +20,13 @@ import {
   type GitInfo,
   type ProjectSummary,
   type WorktreeEntry,
+  type SessionNotice,
+  type AcpAgentSettings,
+  type AcpRemoteAgent,
+  type PendingPermissionSummary,
+  type EditorRequest,
 } from "@linkshell/wire";
+import type { AcpSettingsStore } from "./acp-settings.js";
 import type {
   AgentDriver,
   DesktopController,
@@ -41,6 +48,7 @@ import { MacPreviewCapture } from "./computer-preview-capture.js";
 
 export interface Subscriber {
   event(event: SessionEvent): void;
+  notice?(notice: SessionNotice): void;
   /** The backlog that follows starts after `startSeq`, not where the subscriber left off. */
   window?(startSeq: number): void;
 }
@@ -173,6 +181,8 @@ export class SessionHub {
   private readonly live = new Map<string, LiveSession>();
   private readonly summaryListeners = new Set<(summary: SessionSummary) => void>();
   private readonly removedListeners = new Set<(sessionId: string) => void>();
+  private readonly interactionListeners = new Set<(agent: string, request: PendingPermissionSummary | { requestId: string; resolved: true }) => void>();
+  private readonly agentListeners = new Set<(agent: AgentInfo) => void>();
   private readonly auth = new Map<string, { value: AgentAuth; checkedAt: number }>();
   /** Terminals (`linkshell <agent>`) currently driving handoff sessions. */
   private readonly desktops = new Map<string, DesktopController>();
@@ -183,6 +193,21 @@ export class SessionHub {
   readonly previews: ComputerPreviews;
 
   readonly driverHost: DriverHost = {
+    authChanged: (agent) => {
+      const driver = this.drivers.get(agent); if (!driver) return;
+      void this.refreshAuth(driver).then(() => { const info = this.agents().find((entry) => entry.id === agent); if (info) for (const listener of this.agentListeners) listener(info); }).catch(() => {});
+    },
+    agentSettings: (agent) => this.acpServices!.settings.settings(agent),
+    loginTerminal: async (agent, launch) => {
+      if (!this.acpServices) throw RpcError.app("not_supported", "终端登录不可用");
+      return this.acpServices.loginTerminal(agent, launch);
+    },
+    interaction: (agent, request) => { for (const listener of this.interactionListeners) listener(agent, request); },
+    notice: (agent, nativeId, notice) => {
+      const live = this.live.get(sessionIdFor(agent, nativeId));
+      if (!live || live.importing) return;
+      for (const subscriber of live.subscribers) subscriber.notice?.(notice);
+    },
     tasks: (agent, nativeId) => {
       const id = sessionIdFor(agent, nativeId);
       return this.store.getSession(id) ? this.tasks(id) : [];
@@ -228,7 +253,9 @@ export class SessionHub {
     private readonly log: (message: string) => void = () => {},
     /** Where the host keeps its own files: worktrees go under it. */
     private readonly home: string = join(homedir(), ".linkshell"),
+    private readonly acpServices?: { settings: AcpSettingsStore; createDriver(agent: AcpRemoteAgent): AgentDriver; loginTerminal(agent: string, launch: LaunchSpec): Promise<{ terminalId: string; exited: Promise<number | null> }> },
   ) {
+    if (!acpServices) this.driverHost.agentSettings = undefined;
     const capture = process.platform === "darwin" ? new MacPreviewCapture(log) : undefined;
     this.previews = new ComputerPreviews({
       load: (id) => store.getDriverState(id, "computer-preview"),
@@ -312,6 +339,77 @@ export class SessionHub {
         capabilities: driver.capabilities,
       };
     });
+  }
+
+  onInteraction(listener: (agent: string, request: PendingPermissionSummary | { requestId: string; resolved: true }) => void): () => void {
+    this.interactionListeners.add(listener);
+    return () => { this.interactionListeners.delete(listener); };
+  }
+  onAgent(listener: (agent: AgentInfo) => void): () => void { this.agentListeners.add(listener); return () => { this.agentListeners.delete(listener); }; }
+
+  async acpInfo(agent: string, sessionId?: string) {
+    const driver = this.requireDriver(agent);
+    if (!driver.acpInfo) throw RpcError.app("not_supported", "这个 AI 不使用 ACP");
+    const session = sessionId ? this.getSession(sessionId) : undefined;
+    if (session && session.agent !== agent) throw RpcError.app("invalid_params", "会话与 AI 不匹配");
+    return driver.acpInfo(session?.nativeId);
+  }
+
+  pendingInteractions() { return [...this.drivers.values()].flatMap((driver) => (driver.pendingInteractions?.() ?? []).map((request) => ({ agent: driver.id, request }))); }
+
+  async editor(input: EditorRequest) {
+    const driver = this.requireDriver(input.agent);
+    if (!driver.editor) throw RpcError.app("not_supported", "这个 AI 不支持编辑建议");
+    return driver.editor(input);
+  }
+
+  async configureAcp(agent: string, settings: AcpAgentSettings, sessionId?: string): Promise<void> {
+    const driver = this.requireDriver(agent);
+    if (!driver.configureAcp || !this.acpServices) throw RpcError.app("not_supported", "这个 AI 不支持 ACP 配置");
+    const session = sessionId ? this.getSession(sessionId) : undefined;
+    if (session && session.agent !== agent) throw RpcError.app("invalid_params", "会话与 AI 不匹配");
+    await driver.configureAcp(settings, session?.nativeId);
+    if (!session) this.acpServices.settings.setSettings(agent, settings);
+  }
+
+  async authenticate(agent: string, methodId?: string, logout?: boolean) {
+    const driver = this.requireDriver(agent);
+    if (!driver.authenticate) throw RpcError.app("not_supported", "这个 AI 不支持 ACP 登录");
+    const result = await driver.authenticate(methodId, logout);
+    await this.refreshAuth(driver);
+    return result;
+  }
+
+  async respondInteraction(agent: string, requestId: string, response: { optionId?: string; answers?: QuestionAnswer[] }): Promise<void> {
+    const driver = this.requireDriver(agent);
+    if (!driver.respondInteraction) throw RpcError.app("not_supported", "这个 AI 不支持此交互");
+    await driver.respondInteraction(requestId, response);
+  }
+
+  async providers(agent: string, operation: "list" | "set" | "disable", config?: { providerId: string; apiType?: string; baseUrl?: string; headers?: Record<string, string> }) {
+    const driver = this.requireDriver(agent);
+    if (!driver.providers) throw RpcError.app("not_supported", "这个 AI 不支持供应商配置");
+    return driver.providers(operation, config);
+  }
+
+  async customAgents(save?: AcpRemoteAgent, remove?: string): Promise<AcpRemoteAgent[]> {
+    const services = this.acpServices;
+    if (!services) throw RpcError.app("not_supported", "自定义 ACP 配置不可用");
+    if (save && remove) throw RpcError.app("invalid_params", "不能同时保存和移除 Agent");
+    const id = save?.id ?? remove;
+    if (id) {
+      const existing = this.drivers.get(id);
+      if (existing && !services.settings.agents().some((agent) => agent.id === id)) throw RpcError.app("invalid_params", "不能覆盖或移除内置 AI");
+      const driver = save ? services.createDriver(save) : undefined;
+      if (existing) {
+        await existing.configureAcp?.(services.settings.settings(id));
+        await existing.stop();
+        this.drivers.delete(id);
+      }
+      if (save && driver) { services.settings.saveAgent(save); this.drivers.set(id, driver); await driver.start(this.driverHost); }
+      else services.settings.removeAgent(id);
+    }
+    return services.settings.agents();
   }
 
   /** Re-checks login state in the background when the cached answer is older than `maxAgeMs`. */
@@ -428,9 +526,12 @@ export class SessionHub {
     if (first) {
       decorated.permission = {
         requestId: first.requestId,
+        childSessionId: first.childSessionId,
         toolCallId: first.toolCallId,
         title: first.title,
         detail: first.detail,
+        tool: first.tool,
+        url: first.url,
         options: first.options,
         questions: first.questions,
       };
@@ -738,6 +839,8 @@ export class SessionHub {
         task: detail?.task ?? call.title,
         agentType: detail?.agentType,
         name: detail?.name,
+        nativeSessionId: detail?.nativeSessionId,
+        canCancel: detail?.canCancel,
         running,
         failed: (workflow?.state ? workflow.state === "failed" : detail?.state ? detail.state === "failed" : state.status === "failed") || undefined,
         startedAt: workflow?.startedAt ?? event.ts,
@@ -748,6 +851,13 @@ export class SessionHub {
       });
     }
     return [...agents.values()].reverse();
+  }
+
+  async cancelSubagent(sessionId: string, nativeSessionId: string): Promise<void> {
+    const session = this.getSession(sessionId), driver = this.requireDriver(session.agent);
+    if (!driver.cancelSubagent) throw RpcError.app("not_supported", "这个 AI 不支持单独停止子代理");
+    await this.ensureAttached(sessionId);
+    await driver.cancelSubagent(session.nativeId, nativeSessionId);
   }
 
   private subagentsOf(sessionId: string, live: LiveSession): NonNullable<LiveSession["subagents"]> {
@@ -1080,10 +1190,10 @@ export class SessionHub {
       const other = question.other ? answer.other?.trim() || undefined : undefined;
       return [{ id: question.id, values, other }];
     });
-    const missing = request.questions.find(
-      (question) => question.required && !kept.some((answer) => answer.id === question.id && (answer.values.some(Boolean) || answer.other)),
-    );
-    if (missing) throw RpcError.app("invalid_params", `还没回答：${missing.header ?? missing.text}`);
+    for (const question of request.questions) {
+      const error = questionAnswerError(question, kept.find((answer) => answer.id === question.id));
+      if (error) throw RpcError.app("invalid_params", error);
+    }
     await driver.answerQuestion(summary.nativeId, requestId, kept);
   }
 
@@ -1310,6 +1420,7 @@ export class SessionHub {
     // A finished turn can't still be waiting on approvals; clear stale cards.
     if (update.sessionUpdate === "ls_turn" && update.state === "ended" && !update.parentToolCallId) {
       for (const requestId of [...live.permissions.keys()]) {
+        if (live.permissions.get(requestId)?.childSessionId) continue;
         this.commit(sessionId, { sessionUpdate: "ls_permission_resolved", requestId });
       }
       if (!live.importing) void this.sendHeld(sessionId);
@@ -1340,6 +1451,14 @@ export class SessionHub {
       activityChanged = true;
     };
     switch (update.sessionUpdate) {
+      case "ls_message": {
+        if (update.parentToolCallId || !update.content) break;
+        const text = update.content.filter((block) => block.type === "text").map((block) => block.text).join("");
+        if (update.role === "user" && !before.title && text.trim()) patch.title = compact(text, TITLE_LENGTH);
+        if (update.role === "agent" && text.trim()) patch.preview = compact(text, PREVIEW_LENGTH);
+        if (live.turnActive && update.role === "agent") setActivity({ kind: "responding" });
+        break;
+      }
       case "user_message_chunk": {
         const text = update.content.type === "text" ? update.content.text : "";
         if (text && !before.title) patch.title = compact(text, TITLE_LENGTH);
@@ -1370,12 +1489,12 @@ export class SessionHub {
         live.turnActive = update.state === "started";
         setActivity(live.turnActive ? { kind: "thinking" } : undefined);
         // Leftover permissions are cleared right after a turn ends (see commit).
-        patch.state = live.turnActive ? "running" : update.stopReason === "error" ? "error" : "idle";
+        patch.state = live.turnActive ? "running" : [...live.permissions.values()].some((permission) => permission.childSessionId) ? "waiting" : update.stopReason === "error" ? "error" : "idle";
         break;
       case "ls_status":
         patch.state = update.state;
         if (!live.importing) {
-          live.turnActive = update.state === "running" || update.state === "waiting";
+          live.turnActive = update.turnActive ?? (update.state === "running" || update.state === "waiting");
           if (!live.turnActive) setActivity(undefined);
         }
         break;
@@ -1390,7 +1509,11 @@ export class SessionHub {
         if (live.permissions.size === 0 && before.state === "waiting") patch.state = live.turnActive ? "running" : "idle";
         break;
       case "session_info_update":
-        if (update.title) patch.title = compact(update.title, TITLE_LENGTH);
+        if (update.title !== undefined) patch.title = update.title === null ? null : compact(update.title, TITLE_LENGTH);
+        if (update.updatedAt !== undefined) {
+          const updatedAt = update.updatedAt === null ? before.createdAt : Date.parse(update.updatedAt);
+          if (Number.isFinite(updatedAt)) patch.updatedAt = updatedAt;
+        }
         if (update.model) patch.model = update.model;
         break;
       case "ls_driver":

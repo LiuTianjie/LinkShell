@@ -11,6 +11,7 @@
     "@react-native-menu/menu": "^2.0.0",
     "buffer": "^6.0.3",
     "expo": "~57.0.26",
+    "expo-audio": "~57.0.5",
     "expo-blur": "~57.0.3",
     "expo-build-properties": "~57.0.22",
     "expo-camera": "~57.0.6",

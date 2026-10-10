@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { goalChangeSchema, sessionGoalSchema } from "./goal.js";
+import { acpAgentSettingsSchema, acpFeaturesSchema, acpRemoteAgentSchema, acpProviderSchema } from "./acp.js";
+import { editorRequestSchema, editorResultSchema } from "./editor.js";
 import {
   backgroundTaskSchema,
+  agentInfoSchema,
   gatewayStatusSchema,
   machineInfoSchema,
   portInfoSchema,
@@ -13,8 +16,9 @@ import {
   gitInfoSchema,
   worktreeEntrySchema,
   questionAnswerSchema,
+  pendingPermissionSchema,
 } from "./model.js";
-import { contentBlockSchema, sessionEventSchema } from "./updates.js";
+import { contentBlockSchema, sessionEventSchema, sessionNoticeSchema } from "./updates.js";
 
 // ── JSON-RPC 2.0 framing ─────────────────────────────────────────────
 
@@ -72,7 +76,36 @@ export const directoryEntrySchema = z.object({
 });
 export type DirectoryEntry = z.infer<typeof directoryEntrySchema>;
 
-export const methods = {
+const acpMethods = {
+  "agents.editor": { params: editorRequestSchema, result: editorResultSchema },
+  "agents.acp": {
+    params: z.object({ agent: z.string().min(1), sessionId: z.string().optional() }),
+    result: z.object({ features: acpFeaturesSchema, settings: acpAgentSettingsSchema, interactions: z.array(pendingPermissionSchema) }),
+  },
+  "agents.pending": { params: empty, result: z.object({ interactions: z.array(z.object({ agent: z.string(), request: pendingPermissionSchema })) }) },
+  "agents.configure": {
+    params: z.object({ agent: z.string().min(1), settings: acpAgentSettingsSchema, sessionId: z.string().optional() }),
+    result: empty,
+  },
+  "agents.authenticate": {
+    params: z.object({ agent: z.string().min(1), methodId: z.string().optional(), logout: z.boolean().optional() }),
+    result: z.object({ terminalId: z.string().optional() }),
+  },
+  "agents.respond": {
+    params: z.object({ agent: z.string().min(1), requestId: z.string().min(1), optionId: z.string().optional(), answers: z.array(questionAnswerSchema).optional() }),
+    result: empty,
+  },
+  "agents.providers": {
+    params: z.object({ agent: z.string().min(1), operation: z.enum(["list", "set", "disable"]), config: z.object({ providerId: z.string(), apiType: z.string().optional(), baseUrl: z.string().url().optional(), headers: z.record(z.string()).optional() }).optional() }),
+    result: z.object({ providers: z.array(acpProviderSchema) }),
+  },
+  "agents.custom": {
+    params: z.object({ save: acpRemoteAgentSchema.optional(), remove: z.string().optional() }),
+    result: z.object({ agents: z.array(acpRemoteAgentSchema) }),
+  },
+} as const;
+
+const coreMethods = {
   "machine.info": {
     params: empty,
     result: machineInfoSchema,
@@ -151,6 +184,10 @@ export const methods = {
   "sessions.subagents": {
     params: z.object({ sessionId: z.string().min(1) }),
     result: z.object({ subagents: z.array(subagentInfoSchema) }),
+  },
+  "sessions.cancelSubagent": {
+    params: z.object({ sessionId: z.string().min(1), nativeSessionId: z.string().min(1) }),
+    result: empty,
   },
   /**
    * One sub-agent's conversation: the call that started it and the events
@@ -575,6 +612,8 @@ export const methods = {
   },
 } as const;
 
+export const methods: typeof coreMethods & typeof acpMethods = { ...coreMethods, ...acpMethods };
+
 export type MethodName = keyof typeof methods;
 export type MethodParams<M extends MethodName> = z.input<(typeof methods)[M]["params"]>;
 export type MethodResult<M extends MethodName> = z.infer<(typeof methods)[M]["result"]>;
@@ -586,6 +625,9 @@ export function isMethodName(name: string): name is MethodName {
 // ── Notifications (host → client) ────────────────────────────────────
 
 export const notifications = {
+  "agent.changed": z.object({ agent: agentInfoSchema }),
+  "agent.interaction": z.object({ agent: z.string(), request: z.union([pendingPermissionSchema, z.object({ requestId: z.string(), resolved: z.literal(true) })]) }),
+  "session.notice": z.object({ sessionId: z.string(), notice: sessionNoticeSchema }),
   "session.event": sessionEventSchema,
   /**
    * Sent before a subscription's backlog when it doesn't continue from the

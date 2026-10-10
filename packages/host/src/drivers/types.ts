@@ -11,6 +11,13 @@ import type {
   QuestionAnswer,
   SessionState,
   SessionUpdate,
+  SessionNotice,
+  AcpAgentSettings,
+  AcpFeatures,
+  AcpProvider,
+  PendingPermissionSummary,
+  EditorRequest,
+  EditorResult,
 } from "@linkshell/wire";
 import type { PreviewInput } from "../computer-preview.js";
 
@@ -66,6 +73,11 @@ export interface ForkOptions {
 
 /** Callbacks a driver uses to report to the host. */
 export interface DriverHost {
+  notice?(agent: string, nativeId: string, notice: SessionNotice): void;
+  agentSettings?(agent: string): AcpAgentSettings;
+  interaction?(agent: string, request: PendingPermissionSummary | { requestId: string; resolved: true }): void;
+  loginTerminal?(agent: string, launch: LaunchSpec): Promise<{ terminalId: string; exited: Promise<number | null> }>;
+  authChanged?(agent: string): void;
   /** Independent computer-use surface; never a conversation image. */
   preview?(agent: string, nativeId: string, frame: PreviewInput): void;
   /** A session was created or changed outside of any client request (e.g. in the desktop TUI). */
@@ -139,6 +151,13 @@ export interface AgentDriver {
   status(): DriverStatus;
   /** The agent's own report of how it is logged in. Must not read or return secrets. */
   authStatus?(): Promise<AgentAuth>;
+  acpInfo?(nativeId?: string): Promise<{ features: AcpFeatures; settings: AcpAgentSettings; interactions: PendingPermissionSummary[] }>;
+  pendingInteractions?(): PendingPermissionSummary[];
+  editor?(input: EditorRequest): Promise<EditorResult>;
+  configureAcp?(settings: AcpAgentSettings, nativeId?: string): Promise<void>;
+  authenticate?(methodId?: string, logout?: boolean): Promise<{ terminalId?: string }>;
+  respondInteraction?(requestId: string, response: { optionId?: string; answers?: QuestionAnswer[] }): Promise<void>;
+  providers?(operation: "list" | "set" | "disable", config?: { providerId: string; apiType?: string; baseUrl?: string; headers?: Record<string, string> }): Promise<AcpProvider[]>;
 
   listSessions(limit: number): Promise<DiscoveredSession[]>;
   /** Native archives, including sessions that disappeared from recent discovery. Never implies deletion. */
@@ -164,6 +183,7 @@ export interface AgentDriver {
    */
   prompt(nativeId: string, content: ContentBlock[], clientMessageId: string, context?: string): Promise<"started" | "steered" | "queued">;
   cancel(nativeId: string): Promise<void>;
+  cancelSubagent?(nativeId: string, childId: string): Promise<void>;
   respondPermission(nativeId: string, requestId: string, optionId: string): Promise<void>;
   /** Answers the questions of a pending request (an `ls_permission` with `questions`). */
   answerQuestion?(nativeId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>;

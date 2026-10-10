@@ -32,7 +32,7 @@ export const UserMessage = memo(function UserMessage({
   const raw = userMessageText(item.blocks);
   const replies = questionReplies(raw);
   const text = replies ? replies.map((reply) => reply.answer || "已跳过").join("\n\n") : raw;
-  const images = item.blocks.filter((block) => block.type === "image");
+  const images = item.blocks.filter((block) => block.type === "image" || block.type === "audio" || block.type === "resource");
   const links = item.blocks.filter((block) => block.type === "resource_link");
   // A slash command or skill the user ran: `/review src`, `/pdf`.
   const command = /^\/[\w:.-]+/.exec(text);
@@ -101,6 +101,7 @@ export const AgentMessage = memo(function AgentMessage({ item, last = false }: {
   if (!hasText && !item.attachments?.length) return null;
   return (
     <View style={{ gap: 8 }}>
+      {item.senderSessionId || item.recipientSessionId ? <Text selectable style={[type.caption, { color: colors.secondaryLabel }]}>{item.senderSessionId ?? "Agent"} → {item.recipientSessionId ?? "当前会话"}</Text> : null}
       {hasText ? <Markdown text={item.text} streaming={item.streaming} /> : null}
       {item.attachments?.length ? <Attachments blocks={item.attachments} /> : null}
       {item.questions?.length && !item.streaming ? <AsyncQuestions questions={item.questions} /> : null}
@@ -261,12 +262,14 @@ export const PlanCard = memo(function PlanCard({ item, active }: { item: Of<"pla
     <View style={{ backgroundColor: colors.inset, borderRadius: 18, borderCurve: "continuous", padding: 14, gap: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Icon sf="checklist" md="checklist" size={15} color={colors.accent} />
-        <Text style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>计划</Text>
-        <Text style={[type.footnote, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>
+        <Text style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>{item.title ?? "计划"}</Text>
+        {total ? <Text style={[type.footnote, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>
           {done}/{total}
-        </Text>
+        </Text> : null}
       </View>
-      <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.fill, overflow: "hidden" }}>
+      {item.markdown ? <Markdown text={item.markdown} /> : null}
+      {item.path ? <LinkChip block={{ type: "resource_link", uri: item.path, name: "查看计划文件" }} /> : null}
+      {total ? <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.fill, overflow: "hidden" }}>
         <View
           style={{
             width: `${total ? (done / total) * 100 : 0}%`,
@@ -275,7 +278,7 @@ export const PlanCard = memo(function PlanCard({ item, active }: { item: Of<"pla
             backgroundColor: done === total ? colors.ok : colors.accent,
           }}
         />
-      </View>
+      </View> : null}
       <View style={{ gap: 7 }}>
         {item.entries.map((entry, index) => {
           const complete = entry.status === "completed";
@@ -378,6 +381,8 @@ const stopCopy: Partial<Record<Of<"turn-end">["stopReason"], string>> = {
   cancelled: "已停止",
   error: "这一轮出错结束",
   max_tokens: "达到输出上限，回复被截断",
+  max_turn_requests: "达到本轮请求次数上限",
+  unknown: "本轮已结束，Agent 未提供明确原因",
   refusal: "Agent 拒绝了这个请求",
 };
 

@@ -528,7 +528,7 @@ export class HostStore {
   /** Where the exchange that `seq` is in ends: just before the user speaks next, or the end of the session. */
   turnEnd(sessionId: string, seq: number): number {
     const next = this.db
-      .prepare("SELECT MIN(seq) AS seq FROM event_meta WHERE session_id = ? AND kind = 'user_message_chunk' AND seq > ?")
+      .prepare("SELECT MIN(seq) AS seq FROM event_meta WHERE session_id = ? AND kind IN ('user_message_chunk', 'ls_message') AND opens_turn = 1 AND seq > ?")
       .get(sessionId, seq) as { seq: number | null };
     return next.seq ? next.seq - 1 : (this.getSession(sessionId)?.lastSeq ?? seq);
   }
@@ -549,8 +549,11 @@ export class HostStore {
       const body = JSON.stringify(update);
       this.db.prepare("INSERT INTO events (session_id, seq, ts, body) VALUES (?, ?, ?, ?)").run(sessionId, seq, ts, body);
       const fields = update as { toolCallId?: string; parentToolCallId?: string };
-      const opensTurn =
-        update.sessionUpdate === "user_message_chunk" || (update.sessionUpdate === "ls_turn" && update.state === "started" && !fields.parentToolCallId);
+      const userMessage = update.sessionUpdate === "user_message_chunk" || update.sessionUpdate === "ls_message" && update.role === "user" && !update.parentToolCallId;
+      const messageKey = userMessage && update.messageId ? `ls:user-present:${update.messageId}` : undefined;
+      const newUser = userMessage && (update.sessionUpdate === "user_message_chunk" || !messageKey || !this.isItemLogged(sessionId, messageKey));
+      const opensTurn = newUser || (update.sessionUpdate === "ls_turn" && update.state === "started" && !fields.parentToolCallId);
+      if (messageKey) this.markItemLogged(sessionId, messageKey);
       const spawns = update.sessionUpdate === "tool_call" && update.detail?.type === "subagent" && (update.detail.action ?? "spawn") === "spawn";
       this.db
         .prepare("INSERT INTO event_meta (session_id, seq, kind, bytes, opens_turn, tool, parent, spawns) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")

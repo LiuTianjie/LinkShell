@@ -10,6 +10,7 @@ import {
   useLoad,
 } from "./common";
 import { Icon } from "../icons";
+import { FileEditor } from "./Editor";
 
 export async function fileBase64(file: File): Promise<string> {
   if (file.size > 30 * 1024 * 1024) throw new Error(`${file.name} 超过 30 MB`);
@@ -24,6 +25,7 @@ export function FileView({ path, line }: { path: string; line?: number }) {
   const lineRef = useRef<HTMLSpanElement>(null);
   const { link } = useConnection();
   const job = useJob();
+  const [editing, setEditing] = useState(false);
   const loaded = useLoad(() => link.call("fs.read", { path }), [link, path]);
   const [extra, setExtra] = useState<{
     path: string;
@@ -35,6 +37,7 @@ export function FileView({ path, line }: { path: string; line?: number }) {
   useEffect(() => {
     lineRef.current?.scrollIntoView({ block: "center" });
   }, [path, line, file, current]);
+  if (editing) return <FileEditor key={path} path={path} close={() => { setEditing(false); loaded.reload(); }} />;
   return (
     <div className="file-reader">
       <LoadState {...loaded} />
@@ -44,6 +47,7 @@ export function FileView({ path, line }: { path: string; line?: number }) {
           <div className="reader-meta">
             <strong>{baseName(path)}</strong>
             <span>{Math.ceil(file.size / 1024)} KB</span>
+            {file.kind === "text" && !file.truncated && <button className="text-button" onClick={() => setEditing(true)}>AI 编辑建议</button>}
           </div>
           {file.kind === "image" ? (
             <img

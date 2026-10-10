@@ -1,5 +1,5 @@
-import { realpathSync, statSync } from "node:fs";
-import { relative, sep } from "node:path";
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json | undefined => value && typeof value === "object" && !Array.isArray(value) ? value as Json : undefined;
@@ -9,6 +9,8 @@ export interface ClaudeChild {
   agentId: string;
   call: string;
   teammate: boolean;
+  teammateId?: string;
+  teamName?: string;
   name?: string;
   task?: string;
   agentType?: string;
@@ -48,9 +50,29 @@ export class ClaudeChildIndex {
     if (previous && previous.call !== call) return;
     this.children.set(agentId, {
       ...this.launches.get(call), agentId, call, teammate: result?.status === "teammate_spawned",
+      teammateId: string(result?.teammate_id), teamName: string(result?.team_name),
       model: string(result?.resolvedModel) ?? string(result?.model) ?? this.launches.get(call)?.model,
     });
   }
+}
+
+/** null means the whole runtime team directory is gone; undefined is unreadable or unrelated. */
+export function readClaudeTeam(configDir: string, sessionId: string, teamName: string): { members: Set<string>; updatedAt: number } | null | undefined {
+  if (!/^[a-zA-Z0-9_-]+$/.test(teamName)) return undefined;
+  const root = join(configDir, "teams");
+  const dir = join(root, teamName);
+  try { lstatSync(dir); } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? null : undefined;
+  }
+  const path = join(dir, "config.json");
+  if (!ownedFile(root, path)) return undefined;
+  try {
+    const team = object(JSON.parse(readFileSync(path, "utf8")));
+    if (team?.name !== teamName || team.leadSessionId !== sessionId || !Array.isArray(team.members)) return undefined;
+    const ids = team.members.map((member) => string(object(member)?.agentId));
+    if (ids.some((id) => !id)) return undefined;
+    return { members: new Set(ids as string[]), updatedAt: statSync(path).mtimeMs };
+  } catch { return undefined; }
 }
 
 /** Transcript content may name paths; only follow files inside this session. */

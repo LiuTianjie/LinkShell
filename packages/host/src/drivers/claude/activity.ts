@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import type { SessionUpdate, ToolDetail, WorkflowAgentState, WorkflowPhase, WorkflowState } from "@linkshell/wire";
 import { nestUnder } from "../nesting.js";
 import { transcriptLine, TranscriptTail, type TranscriptLineResult } from "./transcript.js";
-import { ClaudeChildIndex, ownedFile, type ClaudeChild } from "./children.js";
+import { ClaudeChildIndex, ownedFile, readClaudeTeam, type ClaudeChild } from "./children.js";
 
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json | undefined => value && typeof value === "object" && !Array.isArray(value) ? value as Json : undefined;
@@ -73,6 +73,7 @@ export class ClaudeActivity {
   private timer?: ReturnType<typeof setInterval>;
 
   constructor(private readonly options: {
+    configDir?: string;
     locate: () => string | undefined;
     desktop: () => boolean;
     onUpdate: Emit;
@@ -213,13 +214,25 @@ export class ClaudeActivity {
         }
         if (line.isApiErrorMessage === true) agent.state = "failed";
       } : undefined).tail.poll();
-      if (agent) this.publishTeammate(agent);
     }
     // The launch can precede the first child file. It is already running then.
     for (const linked of this.childIndex.children.values()) {
       if (!linked.teammate || this.teammates.has(linked.call)) continue;
       const agent: Teammate = { ...linked, state: "running", lastTs: linked.ts };
       this.teammates.set(linked.call, agent);
+    }
+    const teams = new Map<string, ReturnType<typeof readClaudeTeam>>();
+    for (const agent of this.teammates.values()) {
+      if (active(agent.state) && this.options.configDir && agent.teamName && agent.teammateId && agent.ts !== undefined) {
+        if (!teams.has(agent.teamName)) teams.set(agent.teamName, readClaudeTeam(this.options.configDir, basename(sessionDir), agent.teamName));
+        const team = teams.get(agent.teamName);
+        // The lead can stay open (or be resumed via ACP) after its members exit.
+        // An older roster may simply predate the spawn. Absence is not success.
+        if (team && team.updatedAt > agent.ts && !team.members.has(agent.teammateId)) agent.state = "unknown";
+        // Whole-team cleanup is distinct from a config file mid-rewrite. Allow
+        // startup and buffered transcript writes to settle before losing liveness.
+        if (team === null && Date.now() - (agent.lastTs ?? agent.ts) > 5_000) agent.state = "unknown";
+      }
       this.publishTeammate(agent);
     }
     for (const workflow of this.workflows.values()) this.pollWorkflow(sessionDir, workflow);

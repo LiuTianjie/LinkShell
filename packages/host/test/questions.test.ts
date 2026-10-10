@@ -21,7 +21,7 @@ describe("forms as questions", () => {
 
   it("takes each field as a question of the right kind, in the form's order", () => {
     const form = formQuestions(schema, "Set the project up")!;
-    expect(form.questions).toEqual([
+    expect(form.questions).toMatchObject([
       { id: "name", header: "Project name", text: "What should the project be called?", kind: "text", required: true },
       { id: "plan", text: "Plan", kind: "choice", required: true, options: [{ value: "free", label: "Free" }, { value: "pro", label: "Pro" }] },
       { id: "seats", text: "Seats", kind: "text" },
@@ -46,8 +46,22 @@ describe("forms as questions", () => {
         { id: "regions", values: ["eu", "us"] },
         { id: "token", values: [""] },
       ]),
-    ).toEqual({ name: "weather", plan: "pro", seats: 12, notify: false, regions: ["eu", "us"] });
-    // Not a number: left out rather than sent as one.
-    expect(formContent(form, [{ id: "seats", values: ["a few"] }])).toEqual({});
+    ).toEqual({ name: "weather", plan: "pro", seats: 12, notify: false, regions: ["eu", "us"], token: "" });
+    expect(() => formContent(form, [{ id: "seats", values: ["a few"] }])).toThrow();
+  });
+
+  it("enforces numeric, string and collection constraints before returning a form", () => {
+    const form = formQuestions({ type: "object", required: ["seats", "code", "regions"], properties: {
+      seats: { type: "integer", minimum: 1, maximum: 10, default: 3 },
+      code: { type: "string", minLength: 2, maxLength: 4, pattern: "^[A-Z]+$" },
+      regions: { type: "array", items: { enum: ["eu", "us", "ap"] }, minItems: 1, maxItems: 2 },
+    } })!;
+    expect(form.questions[0]?.defaults).toEqual(["3"]);
+    const valid = [{ id: "seats", values: ["3"] }, { id: "code", values: ["OK"] }, { id: "regions", values: ["eu"] }];
+    expect(formContent(form, valid)).toEqual({ seats: 3, code: "OK", regions: ["eu"] });
+    for (const [id, values] of [["seats", ["1.5"]], ["seats", ["11"]], ["code", ["a"]], ["regions", []], ["regions", ["eu", "eu"]], ["regions", ["unknown"]]] as [string, string[]][]) {
+      expect(() => formContent(form, valid.map((answer) => answer.id === id ? { id, values } : answer))).toThrow();
+    }
+    expect(formQuestions({ required: ["nested"], properties: { nested: { type: "object" } } })).toBeUndefined();
   });
 });

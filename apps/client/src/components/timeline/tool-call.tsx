@@ -20,7 +20,7 @@ const MAX_OUTPUT_LINES = 80;
 
 function mediaOf(item: ToolItem): ContentBlock[] {
   return item.content.flatMap((entry) =>
-    entry.type === "content" && (entry.content.type === "image" || entry.content.type === "resource_link") ? [entry.content] : [],
+    entry.type === "content" && entry.content.type !== "text" ? [entry.content] : [],
   );
 }
 
@@ -143,7 +143,7 @@ function ToolRow({ item }: { item: ToolItem }) {
   const running = item.status === "in_progress" || item.status === "pending";
   const failed = item.status === "failed";
   const media = mediaOf(item);
-  const images = media.filter((block) => block.type === "image");
+  const images = media.filter((block) => block.type !== "resource_link");
   const links = media.filter((block) => block.type === "resource_link");
   const collapsedImages = isComputerUse(item);
   const params = paramsOf(item, described.subject);

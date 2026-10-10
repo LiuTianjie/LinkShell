@@ -7,6 +7,7 @@ import { ActivityIndicator, FlatList, Platform, Pressable, ScrollView, View } fr
 import { Text } from "@/components/fixed-text";
 import { usePageInsets } from "@/components/adaptive-page";
 import { AppMenu } from "@/components/app-menu";
+import { AcpFileEditor } from "@/components/acp-file-editor";
 import { Icon } from "@/components/icon";
 import { ContentWidth, useContentWidth } from "@/lib/content-width";
 import { HeaderActions, useHeaderTitleWidth, type HeaderMenuItem } from "@/components/header-actions";
@@ -175,6 +176,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
   const [more, setMore] = useState<"idle" | "loading" | "failed">("idle");
   const target = line ? Number(line) : undefined;
   const [wrap, setWrap] = useState(() => WRAPS.test(baseName(path)));
+  const [editing, setEditing] = useState(false);
   const open = useRef(true);
 
   useEffect(() => {
@@ -227,6 +229,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
   const footer = file ? <MoreRow file={file} state={more} onPress={loadMore} /> : undefined;
 
   const items: HeaderMenuItem[] = [
+    ...(file?.kind === "text" && !file.truncated ? [{ title: "AI 编辑建议", icon: { sf: "pencil" as const, md: "edit" as const }, onPress: () => setEditing(true) }] : []),
     ...(file?.text !== undefined
       ? [
           {
@@ -300,7 +303,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
         ]}
       />
       </>}
-      {error ? (
+      {editing ? <AcpFileEditor path={path} onClose={() => { setEditing(false); void link.call("fs.read", { path, maxBytes: PART }).then(setFile).catch(() => {}); }} /> : error ? (
         <ScrollableState>
           {error.tooLarge ? (
             <EmptyState icon={{ sf: "doc.badge.ellipsis", md: "draft" }} title={error.message} message="可以在电脑上打开它。" />

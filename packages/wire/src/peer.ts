@@ -91,13 +91,21 @@ export class RpcPeer {
   receive(text: string): void {
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
-      let message: Record<string, unknown>;
+      let message: Record<string, unknown> | Record<string, unknown>[];
       try {
-        message = JSON.parse(line) as Record<string, unknown>;
+        message = JSON.parse(line) as typeof message;
       } catch {
         continue;
       }
-      this.dispatch(message);
+      if (Array.isArray(message)) {
+        if (!message.length || message.length > 128) {
+          this.write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid JSON-RPC batch" } });
+          continue;
+        }
+        const responses: Record<string, unknown>[] = [];
+        void Promise.all(message.map((entry) => Promise.resolve(this.dispatch(entry, (response) => { responses.push(response); }))))
+          .then(() => { if (responses.length) this.write(responses); });
+      } else void this.dispatch(message);
     }
   }
 
@@ -116,7 +124,13 @@ export class RpcPeer {
     return this.closed;
   }
 
-  private dispatch(message: Record<string, unknown>): void {
+  hasPendingRequest(id: RpcId): boolean { return this.pending.has(id); }
+
+  private dispatch(message: Record<string, unknown>, respond = (response: Record<string, unknown>) => this.write(response)): void | Promise<void> {
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      respond({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid JSON-RPC request" } });
+      return;
+    }
     const id = message.id as RpcId | undefined;
     const method = typeof message.method === "string" ? message.method : undefined;
 
@@ -139,27 +153,27 @@ export class RpcPeer {
 
     const handler = this.options.onRequest;
     if (!handler) {
-      this.write({ jsonrpc: "2.0", id, error: { code: RPC_METHOD_NOT_FOUND, message: `no handler for ${method}` } });
+      respond({ jsonrpc: "2.0", id, error: { code: RPC_METHOD_NOT_FOUND, message: `no handler for ${method}` } });
       return;
     }
-    Promise.resolve()
+    return Promise.resolve()
       .then(() => handler(method, message.params, id))
       .then(
         (result) => {
           if (result === ABANDON) return;
-          this.write({ jsonrpc: "2.0", id, result: result ?? {} });
+          respond({ jsonrpc: "2.0", id, result: result ?? {} });
         },
         (error: unknown) => {
           const rpcError =
             error instanceof RpcError
               ? error
               : new RpcError(RPC_APP_ERROR, error instanceof Error ? error.message : String(error), { code: "internal" });
-          this.write({ jsonrpc: "2.0", id, error: rpcError.toObject() });
+          respond({ jsonrpc: "2.0", id, error: rpcError.toObject() });
         },
       );
   }
 
-  private write(message: Record<string, unknown>): void {
+  private write(message: Record<string, unknown> | Record<string, unknown>[]): void {
     if (this.closed) return;
     try {
       this.options.send(JSON.stringify(message));

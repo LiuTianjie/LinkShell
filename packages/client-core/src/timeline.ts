@@ -45,6 +45,8 @@ export type TimelineItem =
       text: string;
       /** Images and links the agent sent alongside its text. */
       attachments?: ContentBlock[];
+      senderSessionId?: string;
+      recipientSessionId?: string;
       /** Questions it asks without stopping (Codex Desktop): answered with `asyncQuestionReply`. */
       questions?: AsyncQuestion[];
       streaming: boolean;
@@ -55,6 +57,7 @@ export type TimelineItem =
       kind: "tool";
       id: string;
       title: string;
+      name?: string;
       toolKind: ToolKind;
       status: ToolCallStatus;
       rawInput?: unknown;
@@ -68,7 +71,7 @@ export type TimelineItem =
       ts: number;
       endedTs?: number;
     }
-  | { kind: "plan"; id: string; entries: PlanEntry[]; ts: number }
+  | { kind: "plan"; id: string; entries: PlanEntry[]; title?: string; markdown?: string | null; path?: string | null; ts: number }
   | { kind: "notice"; id: string; level: "info" | "warning"; title: string; detail?: string; ts: number }
   | { kind: "error"; id: string; code: string; message: string; hint?: string; ts: number }
   | { kind: "turn-end"; id: string; stopReason: StopReason; ts: number }
@@ -89,9 +92,12 @@ export type TimelineItem =
 
 export interface PendingPermission {
   requestId: string;
+  childSessionId?: string;
   toolCallId?: string;
   title: string;
   detail?: string;
+  tool?: Extract<SessionUpdate, { sessionUpdate: "ls_permission" }>["tool"];
+  url?: Extract<SessionUpdate, { sessionUpdate: "ls_permission" }>["url"];
   options: PermissionOption[];
   /** The agent is asking these rather than asking permission: answered with `answer`, or skipped with an option. */
   questions?: Question[];
@@ -114,7 +120,7 @@ export interface SessionView {
   commands: { name: string; description: string; hint?: string }[];
   goal?: import("@linkshell/wire").SessionGoal | null;
   modeId?: string;
-  usage?: { usedTokens?: number; contextWindow?: number };
+  usage?: Omit<Extract<SessionUpdate, { sessionUpdate: "usage_update" }>, "sessionUpdate">;
   state: SessionState;
   turnActive: boolean;
   driver?: SessionDriver;
@@ -189,6 +195,8 @@ function settleAll(view: SessionView, ts: number): SessionView {
 
 function parentOf(update: SessionUpdate): string | undefined {
   switch (update.sessionUpdate) {
+    case "ls_message":
+      return update.parentToolCallId;
     case "agent_message_chunk":
     case "agent_thought_chunk":
     case "tool_call":
@@ -254,6 +262,26 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
   const parentId = parentOf(update);
   if (parentId) return applyToChild(view, parentId, update, ts, key);
   switch (update.sessionUpdate) {
+    case "ls_message": {
+      const id = update.role === "thought" ? `thought:${update.messageId}` : update.messageId;
+      const role = update.role === "session" ? "agent" : update.role;
+      const existing = get(view, id, role);
+      if (update.content === undefined && existing) {
+        return role === "agent" ? upsert(view, { ...existing, senderSessionId: update.senderSessionId ?? (existing.kind === "agent" ? existing.senderSessionId : undefined), recipientSessionId: update.recipientSessionId ?? (existing.kind === "agent" ? existing.recipientSessionId : undefined) } as TimelineItem) : view;
+      }
+      const blocks = update.content ?? [];
+      const text = blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
+      const at = existing?.ts ?? ts;
+      if (role === "user") {
+        const content = update.append && existing?.kind === "user" ? [...existing.blocks, ...blocks] : blocks;
+        return upsert(view, { kind: "user", id, blocks: mergeText(content), agentMessages: agentInboxMessages(content), ts: at });
+      }
+      if (role === "thought") return upsert(view, { kind: "thought", id, text: (update.append && existing?.kind === "thought" ? existing.text : "") + text, streaming: view.turnActive, ts: at });
+      return upsert(view, { kind: "agent", id, text: (update.append && existing?.kind === "agent" ? existing.text : "") + text,
+        attachments: [...(update.append && existing?.kind === "agent" ? existing.attachments ?? [] : []), ...blocks.filter((block) => block.type !== "text")],
+        senderSessionId: update.senderSessionId ?? (existing?.kind === "agent" ? existing.senderSessionId : undefined),
+        recipientSessionId: update.recipientSessionId ?? (existing?.kind === "agent" ? existing.recipientSessionId : undefined), streaming: view.turnActive, ts: at });
+    }
     case "user_message_chunk": {
       const id = update.messageId ?? `user-${key}`;
       const existing = get(view, id, "user");
@@ -300,10 +328,11 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
         kind: "tool",
         id: update.toolCallId,
         title: update.title,
+        name: update.name ?? existing?.name,
         toolKind: update.kind,
         status: update.status,
         rawInput: update.rawInput ?? existing?.rawInput,
-        rawOutput: existing?.rawOutput,
+        rawOutput: update.rawOutput ?? existing?.rawOutput,
         locations: update.locations ?? existing?.locations,
         detail: update.detail ?? existing?.detail,
         sub: existing?.sub,
@@ -330,19 +359,24 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       return upsert(view, {
         ...base,
         title: update.title ?? base.title,
+        name: update.name ?? base.name,
+        toolKind: update.kind ?? base.toolKind,
+        rawInput: update.rawInput === undefined ? base.rawInput : update.rawInput,
+        locations: update.locations ?? base.locations,
         detail: update.detail ?? base.detail,
         status,
-        content: update.content ? keepDiffs(base.content, update.content) : base.content,
-        output: update.appendOutput ? base.output + update.appendOutput : base.output,
-        rawOutput: update.rawOutput ?? base.rawOutput,
-        endedTs: done ? (base.endedTs ?? ts) : base.endedTs,
+        content: update.content ? update.replaceContent ? update.content : keepDiffs(base.content, update.content) : base.content,
+        output: update.replaceOutput ?? (update.appendOutput ? base.output + update.appendOutput : base.output),
+        rawOutput: update.rawOutput === undefined ? base.rawOutput : update.rawOutput,
+        endedTs: done ? (base.endedTs ?? ts) : update.status ? undefined : base.endedTs,
         sub: done && base.sub ? settleAll(base.sub, ts) : base.sub,
       });
     }
     case "plan": {
       // One plan card per turn, updated in place.
-      const id = view.planId ?? `plan-${key}`;
-      const next = upsert(view, { kind: "plan", id, entries: update.entries, ts: get(view, id, "plan")?.ts ?? ts });
+      const id = update.planId ? `plan:${update.planId}` : view.planId ?? `plan-${key}`;
+      if (update.removed) return removeItem(view, id);
+      const next = upsert(view, { kind: "plan", id, entries: update.entries, title: update.title, markdown: update.markdown, path: update.path, ts: get(view, id, "plan")?.ts ?? ts });
       return { ...next, planId: id };
     }
     case "available_commands_update":
@@ -358,9 +392,10 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
     case "ls_config":
       return { ...view, config: update.options, modeId: update.options.find((o) => o.category === "mode")?.current ?? view.modeId };
     case "session_info_update":
-      return { ...view, title: update.title ?? view.title };
+      return { ...view, title: update.title === null ? undefined : update.title ?? view.title };
     case "usage_update":
-      return { ...view, usage: { usedTokens: update.usedTokens, contextWindow: update.contextWindow } };
+      return { ...view, usage: { ...view.usage, usedTokens: update.usedTokens ?? view.usage?.usedTokens, contextWindow: update.contextWindow ?? view.usage?.contextWindow,
+        cost: update.cost === undefined ? view.usage?.cost : update.cost, tokens: update.tokens ?? view.usage?.tokens } };
     case "ls_turn":
       if (update.state === "started") return { ...view, turnActive: true, state: "running", planId: undefined };
       {
@@ -368,16 +403,16 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
         const ended: SessionView = {
           ...settled,
           turnActive: false,
-          state: update.stopReason === "error" ? "error" : "idle",
-          permissions: [],
+          state: settled.permissions.some((permission) => permission.childSessionId) ? "waiting" : update.stopReason === "error" ? "error" : "idle",
+          permissions: settled.permissions.filter((permission) => permission.childSessionId),
         };
-        // Only interruptions are worth a marker; a normal end is implied by the reply.
-        return update.stopReason === "cancelled"
-          ? upsert(ended, { kind: "turn-end", id: `turn-end-${key}`, stopReason: "cancelled", ts })
+        // A normal end is implied; limits and refusals must remain visible.
+        return update.stopReason && update.stopReason !== "end_turn"
+          ? upsert(ended, { kind: "turn-end", id: `turn-end-${key}`, stopReason: update.stopReason, ts })
           : ended;
       }
     case "ls_status":
-      return { ...view, state: update.state };
+      return { ...view, state: update.state, turnActive: update.turnActive ?? view.turnActive };
     case "ls_permission": {
       if (view.permissions.some((p) => p.requestId === update.requestId)) return view;
       return {
@@ -387,9 +422,12 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
           ...view.permissions,
           {
             requestId: update.requestId,
+            childSessionId: update.childSessionId,
             toolCallId: update.toolCallId,
             title: update.title,
             detail: update.detail,
+            tool: update.tool,
+            url: update.url,
             options: update.options,
             questions: update.questions,
             ts,

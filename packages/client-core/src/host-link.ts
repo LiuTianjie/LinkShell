@@ -137,11 +137,13 @@ export class HostLink {
   async call<M extends MethodName>(method: M, params: MethodParams<M>, timeoutMs?: number): Promise<MethodResult<M>> {
     const limit = timeoutMs ?? this.options.requestTimeoutMs ?? 30_000;
     const deadline = Date.now() + limit;
-    await this.waitOnline(limit);
+    // Interactive authentication can wait for the user indefinitely, while an
+    // offline connection still needs a bounded wait before reporting failure.
+    await this.waitOnline(limit > 0 ? limit : this.options.requestTimeoutMs || 30_000);
     if (!this.peer || this.statusValue !== "online") {
       throw RpcError.app("offline", "Not connected to the computer", { code: "offline" });
     }
-    return this.peer.request<MethodResult<M>>(method, params, Math.max(1000, deadline - Date.now()));
+    return this.peer.request<MethodResult<M>>(method, params, limit === 0 ? 0 : Math.max(1000, deadline - Date.now()));
   }
 
   /** A session's subscription was restored after a (re)connect: its backlog has been delivered. */

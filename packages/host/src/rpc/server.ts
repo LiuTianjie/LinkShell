@@ -105,6 +105,14 @@ export class HostRpcServer {
     const terminals = options.terminals;
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;
     this.handlers = {
+      "agents.editor": (params: P<"agents.editor">) => hub.editor(params),
+      "agents.acp": (params: P<"agents.acp">) => hub.acpInfo(params.agent, params.sessionId),
+      "agents.pending": () => ({ interactions: hub.pendingInteractions() }),
+      "agents.configure": async (params: P<"agents.configure">) => { await hub.configureAcp(params.agent, params.settings, params.sessionId); return {}; },
+      "agents.authenticate": (params: P<"agents.authenticate">) => hub.authenticate(params.agent, params.methodId, params.logout),
+      "agents.respond": async (params: P<"agents.respond">) => { await hub.respondInteraction(params.agent, params.requestId, params); return {}; },
+      "agents.providers": async (params: P<"agents.providers">) => ({ providers: await hub.providers(params.agent, params.operation, params.config) }),
+      "agents.custom": async (params: P<"agents.custom">) => ({ agents: await hub.customAgents(params.save, params.remove) }),
       "machine.info": () => {
         void hub.refreshAuthIfStale();
         return options.machineInfo();
@@ -124,6 +132,7 @@ export class HostRpcServer {
         if (previous) hub.unsubscribe(params.sessionId, previous);
         const slim = { lazyImages: params.lazyImages };
         const subscriber: Subscriber = {
+          notice: (notice) => context.peer.notify("session.notice", { sessionId: params.sessionId, notice }),
           event: (event) => context.peer.notify("session.event", slimEvent(event, slim)),
           window: (startSeq) => context.peer.notify("session.window", { sessionId: params.sessionId, startSeq }),
         };
@@ -138,6 +147,7 @@ export class HostRpcServer {
       "sessions.taskOutput": (params: P<"sessions.taskOutput">) => hub.taskOutput(params.sessionId, params.taskId, params.before, params.limit),
       "sessions.stopTask": (params: P<"sessions.stopTask">) => hub.stopTask(params.sessionId, params.taskId).then(() => ({})),
       "sessions.subagents": (params: P<"sessions.subagents">) => ({ subagents: hub.subagents(params.sessionId) }),
+      "sessions.cancelSubagent": async (params: P<"sessions.cancelSubagent">) => { await hub.cancelSubagent(params.sessionId, params.nativeSessionId); return {}; },
       "sessions.subagent": (params: P<"sessions.subagent">) => ({
         events: hub.subagent(params.sessionId, params.toolCallId).map((event) => slimEvent(event, { lazyImages: params.lazyImages })),
       }),
@@ -410,6 +420,8 @@ export class HostRpcServer {
       peer,
     };
     this.connections.add(context.peer);
+    const stopInteractions = this.options.hub.onInteraction((agent, request) => context.peer.notify("agent.interaction", { agent, request }));
+    const stopAgents = this.options.hub.onAgent((agent) => context.peer.notify("agent.changed", { agent }));
     const stopSummaries = this.options.hub.onSummary((session) => context.peer.notify("session.summary", { session }));
     const stopRemoved = this.options.hub.onRemoved((sessionId) => {
       context.subscriptions.delete(sessionId);
@@ -422,6 +434,8 @@ export class HostRpcServer {
     transport.onClose(() => {
       this.connections.delete(context.peer);
       stopSummaries();
+      stopInteractions();
+      stopAgents();
       stopRemoved();
       stopTerminals();
       for (const [terminalId, listener] of context.terminals) this.options.terminals.detach(terminalId, listener);

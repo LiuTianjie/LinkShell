@@ -19,6 +19,7 @@ import { BranchTag } from "@/components/branch-tag";
 import { branchLabel, branchOf, useGitInfo } from "@/lib/worktree";
 import { agentLook, tierCopy } from "@/theme/agents";
 import { SheetHeader } from "@/components/sheet-header";
+import { AgentInteractions } from "./acp-screen";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 
@@ -193,6 +194,7 @@ export function NewSessionScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: insets.bottom + 24, gap: 22 }}
       >
+        {selectedAgent ? <AgentInteractions agent={selectedAgent.id} /> : null}
         <View style={{ gap: 10 }}>
           <Label>用什么</Label>
           <ScrollView

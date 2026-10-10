@@ -1,7 +1,8 @@
 import { subagentKey, type SessionView, type TimelineItem } from "@linkshell/client-core";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, ScrollView, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, View } from "react-native";
+import { Button } from "@/components/button";
 import { Text } from "@/components/fixed-text";
 import { useSharedValue } from "react-native-reanimated";
 import { usePageInsets } from "@/components/adaptive-page";
@@ -11,7 +12,8 @@ import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSession } from "@/components/timeline/context";
 import { StatusMark, SubagentGlyph, useSubagentProgress } from "@/components/timeline/subagent";
 import { Timeline } from "@/components/timeline/timeline";
-import { useActions, useClient, useSessionSubscription } from "@/lib/client";
+import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
+import { useTimelineSession } from "@/components/timeline/context";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
@@ -88,6 +90,9 @@ export function SubagentScreen({ fullScreen = false }: { fullScreen?: boolean } 
 }
 
 function SubagentSheet({ item, fullScreen }: { item: ToolItem; fullScreen: boolean }) {
+  const sessionId = useTimelineSession();
+  const { link } = useConnection();
+  const [cancelling, setCancelling] = useState(false);
   const insets = usePageInsets();
   const bottom = useSharedValue(16 + (Platform.OS === "ios" ? 0 : insets.bottom));
   const [taskOpen, setTaskOpen] = useState(false);
@@ -113,6 +118,7 @@ function SubagentSheet({ item, fullScreen }: { item: ToolItem; fullScreen: boole
           </View>
           <StatusMark running={progress.running && !progress.paused} failed={progress.failed} paused={progress.paused} stopped={progress.stopped} unknown={progress.unknown} />
         </View>
+        {sessionId && item.detail?.type === "subagent" && item.detail.canCancel && item.detail.nativeSessionId && (progress.running || progress.paused) ? <Button title="停止这个子代理" variant="destructive" busy={cancelling} onPress={() => { setCancelling(true); void link.call("sessions.cancelSubagent", { sessionId, nativeSessionId: item.detail!.type === "subagent" ? item.detail!.nativeSessionId! : "" }).catch((error: unknown) => Alert.alert("停止失败", error instanceof Error ? error.message : String(error))).finally(() => setCancelling(false)); }} /> : null}
         {progress.task ? (
           <ScrollView style={{ flexGrow: 0, maxHeight: height ? Math.max(60, height * 0.3) : 120 }} contentInsetAdjustmentBehavior="never" automaticallyAdjustContentInsets={false} nestedScrollEnabled>
           <Pressable onPress={() => setTaskOpen((open) => !open)} accessibilityRole="button" accessibilityState={{ expanded: taskOpen }} accessibilityLabel="子 Agent 任务说明" style={{ minHeight: 44, justifyContent: "center" }}>

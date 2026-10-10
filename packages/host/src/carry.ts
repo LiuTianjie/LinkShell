@@ -7,6 +7,7 @@ import type { SessionEvent, SessionUpdate } from "@linkshell/wire";
 /** What of a session's log is the conversation itself: what was said and done, not state that was true then. */
 export function isConversation(update: SessionUpdate): boolean {
   switch (update.sessionUpdate) {
+    case "ls_message":
     case "user_message_chunk":
     case "agent_message_chunk":
     case "agent_thought_chunk":
@@ -53,9 +54,16 @@ export function conversationDigest(events: SessionEvent[], maxBytes = 60_000): s
   const last = () => entries[entries.length - 1];
   for (const { update } of events) {
     if ("parentToolCallId" in update && update.parentToolCallId) continue;
-    if (update.sessionUpdate === "user_message_chunk" || update.sessionUpdate === "agent_message_chunk") {
+    if (update.sessionUpdate === "ls_message" && update.role !== "thought" && update.content) {
+      const label = update.role === "user" ? "User" : "Assistant", key = `${label}:${update.messageId}`;
+      const text = update.content.map((block) => block.type === "text" ? block.text : block.type === "resource" ? `${block.resource.uri}\n${block.resource.text ?? "[attachment]"}` : block.type === "resource_link" ? `[${block.name}]` : `[${block.type}]`).join("");
+      const existing = entries.find((entry) => entry.key === key);
+      if (existing) existing.text = (update.append ? existing.text : "") + text;
+      else entries.push({ key, label, text });
+    } else if (update.sessionUpdate === "user_message_chunk" || update.sessionUpdate === "agent_message_chunk") {
       const label = update.sessionUpdate === "user_message_chunk" ? "User" : "Assistant";
-      const text = update.content.type === "text" ? update.content.text : update.content.type === "image" ? "[image]" : `[${update.content.name}]`;
+      const block = update.content;
+      const text = block.type === "text" ? block.text : block.type === "resource" ? `${block.resource.uri}\n${block.resource.text ?? "[attachment]"}` : block.type === "resource_link" ? `[${block.name}]` : `[${block.type}]`;
       const key = `${label}:${update.messageId ?? ""}`;
       if (last()?.key === key) last()!.text += text;
       else entries.push({ key, label, text });

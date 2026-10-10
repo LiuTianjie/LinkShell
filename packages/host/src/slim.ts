@@ -20,13 +20,13 @@ export interface SlimOptions {
 
 type Json = unknown;
 
-function isLargeImage(value: Json): value is { type: "image"; mimeType: string; data: string } {
+function isLargeImage(value: Json): value is { type: "image" | "audio"; mimeType: string; data: string } {
   const block = value as { type?: unknown; data?: unknown; mimeType?: unknown };
-  return block?.type === "image" && typeof block.data === "string" && block.data.length > INLINE_IMAGE && typeof block.mimeType === "string";
+  return (block?.type === "image" || block?.type === "audio") && typeof block.data === "string" && block.data.length > INLINE_IMAGE && typeof block.mimeType === "string";
 }
 
 /** Visits every large picture in an update, in a fixed order; `replace` returns what takes its place. */
-function walk(value: Json, state: { images: number }, replace: (image: { mimeType: string; data: string }, index: number) => Json, cut: boolean): Json {
+function walk(value: Json, state: { images: number }, replace: (image: { type: "image" | "audio"; mimeType: string; data: string }, index: number) => Json, cut: boolean): Json {
   if (typeof value === "string") {
     if (!cut || value.length <= MAX_TEXT) return value;
     return `${value.slice(0, KEPT_TEXT)}\n… [已省略 ${Math.round((value.length - KEPT_TEXT) / 1024)} KB，完整内容在电脑上]`;
@@ -41,6 +41,13 @@ function walk(value: Json, state: { images: number }, replace: (image: { mimeTyp
   }
   if (value && typeof value === "object") {
     if (isLargeImage(value)) return replace(value, state.images++);
+    const resource = value as { type?: unknown; resource?: { blob?: unknown; mimeType?: string } };
+    if (resource.type === "resource" && typeof resource.resource?.blob === "string" && resource.resource.blob.length > INLINE_IMAGE) {
+      const replacement = replace({ type: "audio", mimeType: resource.resource.mimeType ?? "application/octet-stream", data: resource.resource.blob }, state.images++) as { uri?: string; data?: string };
+      if (replacement.data) return value;
+      const { blob: _blob, ...rest } = resource.resource;
+      return { ...value, resource: { ...rest, ...(replacement.uri ? { assetUri: replacement.uri } : { text: "[二进制附件]" }) } };
+    }
     let out: Record<string, Json> | undefined;
     for (const [key, entry] of Object.entries(value)) {
       const next = walk(entry, state, replace, cut);
@@ -56,10 +63,12 @@ export function slimEvent(event: SessionEvent, options: SlimOptions = {}): Sessi
   const update = walk(
     event.update,
     { images: 0 },
-    (image, index) =>
-      options.lazyImages
-        ? { type: "image", mimeType: image.mimeType, uri: `linkshell-event:${event.seq}/${index}` }
-        : { type: "text", text: "[图片]" },
+    (image, index) => {
+      const { data: _data, ...metadata } = image;
+      return options.lazyImages
+        ? { ...metadata, uri: `linkshell-event:${event.seq}/${index}` }
+        : { type: "text", text: image.type === "audio" ? "[音频]" : "[图片]" };
+    },
     true,
   );
   return update === event.update ? event : { ...event, update: update as SessionEvent["update"] };

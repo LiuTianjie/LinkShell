@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,14 +18,14 @@ const assistant = (id: string, content: unknown[], stop = "tool_use") => row({ t
   message: { id, content, stop_reason: stop } });
 const text = (value: string) => ({ type: "text", text: value });
 
-function fixture() {
+function fixture(teams = false) {
   const dir = mkdtempSync(join(tmpdir(), "linkshell-teammates-")); dirs.push(dir);
   const main = join(dir, "s.jsonl");
   const children = join(dir, "s", "subagents"); mkdirSync(children, { recursive: true });
   writeFileSync(main, "");
   const updates: SessionUpdate[] = [];
   let desktop = true;
-  const follower = new ClaudeActivity({ locate: () => main, desktop: () => desktop, onUpdate: (update) => { sessionUpdateSchema.parse(update); updates.push(update); } });
+  const follower = new ClaudeActivity({ configDir: teams ? dir : undefined, locate: () => main, desktop: () => desktop, onUpdate: (update) => { sessionUpdateSchema.parse(update); updates.push(update); } });
   follower.followFrom(0);
   return { dir, main, children, updates, follower, remote: (value: boolean) => { desktop = !value; } };
 }
@@ -98,6 +98,67 @@ describe("Claude CLI teammates", () => {
     expect(state(f.updates)).toMatchObject({ detail: { state: "completed" } });
     f.remote(false); appendFileSync(path, assistant("m3", [text("back at desk")])); f.follower.poll();
     expect(f.updates.filter((u) => u.sessionUpdate === "agent_message_chunk").map((u) => u.content)).toEqual([text("desktop"), text("back at desk")]);
+  });
+
+  it("reconciles removed teammates without inventing completion while the lead remains open", () => {
+    const f = fixture(true);
+    appendFileSync(f.main, [...spawn(), ...spawn("done", "adone", "done"), ...spawn("failed", "afailed", "failed")].join(""));
+    const path = join(f.children, "agent-afrontend-123.jsonl");
+    writeFileSync(path, assistant("progress", [text("still working")], ""));
+    writeFileSync(join(f.children, "agent-adone.jsonl"), assistant("done", [text("finished")], "end_turn"));
+    writeFileSync(join(f.children, "agent-afailed.jsonl"), assistant("failed", [text("limit")], "max_tokens"));
+    const team = join(f.dir, "teams", "team"); mkdirSync(team, { recursive: true });
+    const roster = (members: string[]) => writeFileSync(join(team, "config.json"), JSON.stringify({
+      name: "team", leadSessionId: "s", members: members.map((agentId) => ({ agentId })),
+    }));
+    roster(["team-lead@team", "frontend@team"]); f.follower.poll();
+    expect(f.follower.isRunning("call")).toBe(true);
+    // ACP owning the main session does not keep the old CLI's teammates alive.
+    f.remote(true); roster(["team-lead@team"]); f.follower.poll();
+    expect(state(f.updates)).toMatchObject({ status: "completed", detail: { state: "unknown" } });
+    expect(f.follower.hasRunningTeammates()).toBe(false);
+    expect(state(f.updates, "done")).toMatchObject({ detail: { state: "completed" } });
+    expect(state(f.updates, "failed")).toMatchObject({ status: "failed", detail: { state: "failed" } });
+    const count = f.updates.length; f.follower.poll(); expect(f.updates).toHaveLength(count);
+    // Buffered output after removal is still not proof the member remains live.
+    appendFileSync(path, assistant("buffered", [text("later buffered output")])); f.follower.poll();
+    expect(state(f.updates)).toMatchObject({ detail: { state: "unknown" } });
+    roster(["team-lead@team", "frontend@team"]);
+    appendFileSync(path, assistant("new-work", [text("new assignment")])); f.follower.poll();
+    expect(f.follower.isRunning("call")).toBe(true);
+    appendFileSync(path, assistant("final", [text("finished")], "end_turn")); f.follower.poll();
+    expect(state(f.updates)).toMatchObject({ detail: { state: "completed" } });
+  });
+
+  it("does not treat missing, partial, unrelated or pre-launch rosters as removal", () => {
+    const f = fixture(true); appendFileSync(f.main, spawn().join(""));
+    const team = join(f.dir, "teams", "team"); mkdirSync(team, { recursive: true });
+    f.follower.poll(); expect(f.follower.isRunning("call")).toBe(true);
+    const path = join(team, "config.json");
+    const removed = { name: "team", leadSessionId: "s", members: [{ agentId: "team-lead@team" }] };
+    for (const value of ["{", JSON.stringify({ ...removed, name: "other" }), JSON.stringify({ ...removed, leadSessionId: "other" }), JSON.stringify({ ...removed, members: [{}] })]) {
+      writeFileSync(path, value); f.follower.poll(); expect(f.follower.isRunning("call")).toBe(true);
+    }
+    writeFileSync(path, JSON.stringify(removed));
+    utimesSync(path, new Date("2026-10-10T04:26:00Z"), new Date("2026-10-10T04:26:00Z"));
+    f.follower.poll(); expect(f.follower.isRunning("call")).toBe(true);
+    const outside = join(f.dir, "outside.json"); writeFileSync(outside, JSON.stringify(removed));
+    rmSync(path); symlinkSync(outside, path); f.follower.poll(); expect(f.follower.isRunning("call")).toBe(true);
+    rmSync(path); writeFileSync(path, JSON.stringify(removed)); f.follower.poll();
+    expect(state(f.updates)).toMatchObject({ detail: { state: "unknown" } });
+  });
+
+  it("reconciles whole-team cleanup without timing out a quiet registered member", () => {
+    const f = fixture(true); appendFileSync(f.main, spawn().join(""));
+    const team = join(f.dir, "teams", "team"); mkdirSync(team, { recursive: true });
+    writeFileSync(join(team, "config.json"), JSON.stringify({ name: "team", leadSessionId: "s", members: [{ agentId: "frontend@team" }] }));
+    f.follower.poll(); expect(f.follower.isRunning("call")).toBe(true);
+    rmSync(team, { recursive: true }); f.follower.poll();
+    expect(state(f.updates)).toMatchObject({ detail: { state: "unknown" } });
+
+    const starting = fixture(true);
+    appendFileSync(starting.main, spawn().map((raw) => row({ ...JSON.parse(raw), timestamp: new Date().toISOString() })).join(""));
+    starting.follower.poll(); expect(starting.follower.isRunning("call")).toBe(true);
   });
 
   it("does not guess an association from names, follow outside symlinks or move a resumed agent's history", () => {

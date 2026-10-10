@@ -238,6 +238,29 @@ describe("session history in pages", () => {
     expect(slimEvent(small)).toBe(small);
   });
 
+  it("loads audio and binary resource payloads losslessly without cutting their base64", () => {
+    const data = Buffer.alloc(40_000, 7).toString("base64");
+    const event: SessionEvent = { sessionId: "s", seq: 3, ts: 1, update: { sessionUpdate: "ls_message", role: "agent", messageId: "m", content: [
+      { type: "audio", mimeType: "audio/wav", data, annotations: { audience: ["user"] } },
+      { type: "resource", resource: { uri: "attachment:document.pdf", mimeType: "application/pdf", blob: data } },
+    ] } };
+    const sent = slimEvent(event, { lazyImages: true });
+    expect(JSON.stringify(sent)).not.toContain(data.slice(0, 50));
+    expect(sent.update).toMatchObject({ content: [{ type: "audio", uri: "linkshell-event:3/0", annotations: { audience: ["user"] } }, { type: "resource", resource: { uri: "attachment:document.pdf", assetUri: "linkshell-event:3/1" } }] });
+    expect(imageOf(event, 0)).toEqual({ mimeType: "audio/wav", data });
+    expect(imageOf(event, 1)).toEqual({ mimeType: "application/pdf", data });
+  });
+
+  it("treats the first native v2 user snapshot as a turn boundary, not its later replacements", () => {
+    const text = (value: string) => ({ type: "text" as const, text: value });
+    const first = store.appendEvent("fake:s1", { sessionUpdate: "ls_message", role: "user", messageId: "u1", content: [text("first")] });
+    const reply = store.appendEvent("fake:s1", { sessionUpdate: "ls_message", role: "agent", messageId: "a1", content: [text("reply")] });
+    store.appendEvent("fake:s1", { sessionUpdate: "ls_message", role: "user", messageId: "u1", content: [text("replaced")] });
+    const second = store.appendEvent("fake:s1", { sessionUpdate: "ls_message", role: "user", messageId: "u2", content: [text("second")] });
+    expect(store.turnEnd("fake:s1", first.seq)).toBe(second.seq - 1);
+    expect(store.turnEnd("fake:s1", reply.seq)).toBe(second.seq - 1);
+  });
+
   it("describes events logged by an older host, once", () => {
     for (let n = 1; n <= 3; n++) turn(n, 2);
     const expected = store.pageStart("fake:s1", store.getSession("fake:s1")!.lastSeq, { minEvents: 5, minBytes: 1e9, maxEvents: 100, maxBytes: 1e9, eventBytes: 1e9 });

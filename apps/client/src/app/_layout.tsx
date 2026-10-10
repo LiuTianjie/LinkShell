@@ -29,6 +29,7 @@ export default function RootLayout() {
               {!nativeStatusBar ? <StatusBar style="auto" /> : null}
               <Stack screenOptions={{ headerBackButtonDisplayMode: "minimal", ...(nativeStatusBar ? { statusBarStyle: "auto", statusBarHidden: false } as const : {}), headerStyle: { backgroundColor: colors.background as string } }}>
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="acp" options={{ title: "ACP", contentStyle: sheetContent }} />
                 <Stack.Screen name="session/[id]/index" options={{ title: "", headerTransparent: true, headerStyle: { backgroundColor: "transparent" }, headerShadowVisible: false }} />
                 <Stack.Screen name="session/[id]/workflow/[call]" options={{ title: "工作流" }} />
                 <Stack.Screen name="session/[id]/workflows" options={{ title: "工作流" }} />

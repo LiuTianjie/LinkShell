@@ -33,6 +33,7 @@ import {
   useLoad,
 } from "./common";
 import { Diff, Timeline } from "./Timeline";
+import { AcpSettings } from "./Acp";
 
 export function Commands({
   commands,
@@ -96,6 +97,8 @@ export function Settings({
   const actions = useActions();
   const online = useClient((state) => state.status === "online");
   const job = useJob();
+  const acp = useClient((state) => state.machine?.agents.find((agent) => agent.id === session.agent)?.capabilities.acp);
+  const [advanced, setAdvanced] = useState(false);
   return (
     <div className="settings-panel">
       <h3>会话设置</h3>
@@ -108,7 +111,8 @@ export function Settings({
             <FieldLabel htmlFor={`config-${option.id}`}>
               {option.name}
             </FieldLabel>
-            <Choice
+            {option.description && <p className="muted">{option.description}</p>}
+            {option.type === "boolean" ? <input id={`config-${option.id}`} type="checkbox" checked={option.current === "on"} disabled={!online || job.busy} onChange={(event) => void job.run(() => actions.setConfig(session.id, option.id, event.target.checked ? "on" : "off"))} /> : <Choice
               id={`config-${option.id}`}
               label={option.name}
               value={option.current}
@@ -121,10 +125,10 @@ export function Settings({
               options={option.values.map((value) => ({
                 value: value.value,
                 label:
-                  value.name +
+                  (value.group ? `${value.group} · ` : "") + value.name +
                   (value.description ? ` · ${value.description}` : ""),
               }))}
-            />
+            />}
           </Field>
         ))}
       </FieldGroup>
@@ -132,6 +136,10 @@ export function Settings({
         <p className="muted">当前 Agent 尚未提供可调整的配置。</p>
       )}
       <ErrorNotice error={job.error} />
+      {view?.usage?.tokens && <p className="muted">输入 {view.usage.tokens.inputTokens.toLocaleString()} · 输出 {view.usage.tokens.outputTokens.toLocaleString()} · 总计 {view.usage.tokens.totalTokens.toLocaleString()} tokens</p>}
+      {view?.usage?.cost && <p className="muted">累计费用 {view.usage.cost.currency} {view.usage.cost.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>}
+      {acp && <button className="button secondary" onClick={() => setAdvanced((value) => !value)}>会话工具与附加目录</button>}
+      {advanced && <AcpSettings agent={session.agent} sessionId={session.id} />}
     </div>
   );
 }

@@ -13,6 +13,15 @@ function pair(handlers: {
 }
 
 describe("RpcPeer", () => {
+  it("answers a mixed asynchronous JSON-RPC batch once and leaves notifications unanswered", async () => {
+    const replies: unknown[] = [], notices: string[] = [];
+    const peer = new RpcPeer({ send: (text) => replies.push(JSON.parse(text)), onNotification: (method) => notices.push(method), onRequest: async (method) => { if (method === "slow") await new Promise((resolve) => setTimeout(resolve, 10)); return method; } });
+    peer.receive(JSON.stringify([{ jsonrpc: "2.0", id: 1, method: "slow" }, { jsonrpc: "2.0", method: "notice" }, { jsonrpc: "2.0", id: "1", method: "fast" }, null]));
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(notices).toEqual(["notice"]); expect(replies).toHaveLength(1);
+    expect(replies[0]).toEqual(expect.arrayContaining([{ jsonrpc: "2.0", id: 1, result: "slow" }, { jsonrpc: "2.0", id: "1", result: "fast" }, { jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid JSON-RPC request" } }]));
+    peer.close();
+  });
   it("round-trips a request", async () => {
     const { left } = pair({ onRequest: (method, params) => ({ method, echo: params }) });
     await expect(left.request("ping", { a: 1 })).resolves.toEqual({ method: "ping", echo: { a: 1 } });

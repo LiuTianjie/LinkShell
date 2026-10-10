@@ -14,6 +14,8 @@ import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
 import { AgentTile } from "@/components/agent-tile";
 import { AsyncQuestionCard } from "@/components/async-question-card";
 import { Composer } from "@/components/composer";
+import { SessionNotices } from "@/components/session-notices";
+import { AgentInteractions } from "./acp-screen";
 import { Glass } from "@/components/glass";
 import { Icon } from "@/components/icon";
 import { LiveDot } from "@/components/status";
@@ -495,7 +497,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
           agent={summary.agent}
           agentInfo={agentInfo}
           online={online}
-          turnActive={turnActive}
+          turnActive={turnActive || summary.state === "unknown"}
           driver={driver}
           permission={view?.permissions[0]}
           permissionCount={view?.permissions.length ?? 0}
@@ -507,13 +509,13 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
           autoFocusOnPoseEntry={folded !== null}
           accessoryHeight={(!atEnd && items.length > 0 ? 42 : 0) + (embedded ? 0 : insets.top)}
           leadingContent={
-            (summary.asyncQuestions?.length ?? 0) > 0 || view?.goal || tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? (
               <>
+                <SessionNotices sessionId={id} />
+                <AgentInteractions agent={summary.agent} />
                 {summary.asyncQuestions?.length ? <AsyncQuestionCard sessionId={id} questions={summary.asyncQuestions} agentName={look.name} disabled={!online} /> : null}
                 {view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}
                 {tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} /> : null}
               </>
-            ) : undefined
           }
           onSend={commandControls.send}
           onStop={() => guard(() => actions.cancel(id), "停止失败")}

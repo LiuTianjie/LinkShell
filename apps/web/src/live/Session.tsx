@@ -43,6 +43,7 @@ import {
   useJob,
 } from "./common";
 import { Permission } from "./Permission";
+import { AgentInteractions } from "./Acp";
 import { Timeline, TimelineNavigation } from "./Timeline";
 import { FileView, Files, fileBase64 } from "./Files";
 import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
@@ -81,6 +82,7 @@ export function Session({
     state.machine?.agents.find((agent) => agent.id === session.agent),
   );
   const queueing = useClient((state) => state.queueing[session.id]);
+  const notices = useClient((state) => state.notices[session.id]);
   const commands = useMemo(
     () =>
       sessionCommands(session.agent, view?.commands ?? [], view?.config ?? []),
@@ -252,6 +254,8 @@ export function Session({
         agent?.capabilities.images
       )
         content.push({ type: "image", mimeType: file.type, data });
+      else if (/^audio\//.test(file.type) && agent?.capabilities.audio && file.size <= 5 * 1024 * 1024) content.push({ type: "audio", mimeType: file.type, data });
+      else if (agent?.capabilities.embeddedContext && file.size <= 5 * 1024 * 1024) content.push({ type: "resource", resource: { uri: `attachment:${encodeURIComponent(file.name)}`, mimeType: file.type || "application/octet-stream", ...(/^text\//.test(file.type) || file.type === "application/json" ? { text: await file.text() } : { blob: data }) } });
       else {
         const result = await link.call(
           "fs.upload",
@@ -512,6 +516,8 @@ export function Session({
                   sessionId={session.id}
                 />
               ))}
+              <AgentInteractions agent={session.agent} />
+              {notices?.map((notice) => <section key={notice.id} className={`notice-card ${notice.severity === "error" ? "error" : ""}`} role="status"><div className="browser-toolbar"><strong>{notice.title}</strong><button className="text-button" onClick={() => actions.dismissNotice(session.id, notice.id)}>关闭</button></div>{notice.description && <p>{notice.description}</p>}</section>)}
             </div>
             {terminal && !terminals && (
               <div className="inline-terminal">
@@ -793,7 +799,7 @@ export function Session({
                         )}
                       </div>
                       <div>
-                        {view?.turnActive && agent?.capabilities.interrupt && (
+                        {(view?.turnActive || session.state === "unknown") && agent?.capabilities.interrupt && (
                           <button
                             className="icon-button"
                             aria-label="停止当前回合"

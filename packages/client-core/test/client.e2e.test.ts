@@ -69,6 +69,17 @@ const agentText = (store: ClientStore, id: string) =>
   (store.getState().views[id]?.items ?? []).flatMap((i) => (i.kind === "agent" ? [i.text] : [])).join("|");
 
 describe("client core against a real host", () => {
+  it("lets interactive authentication wait longer than one second when its timeout is disabled", async () => {
+    const { host, link } = await setup();
+    const auth = vi.spyOn(host.hub, "authenticate").mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1250));
+      return {};
+    });
+    try {
+      await expect(link.call("agents.authenticate", { agent: "fake", methodId: "interactive" }, 0)).resolves.toEqual({});
+    } finally { auth.mockRestore(); }
+  });
+
   it("keeps an unanswered question when immediate delivery fails, then accepts a retry", async () => {
     const { host, link, store } = await setup();
     const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });

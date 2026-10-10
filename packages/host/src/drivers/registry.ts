@@ -1,4 +1,5 @@
 import type { AgentDriver } from "./types.js";
+import type { AcpRemoteAgent } from "@linkshell/wire";
 import { AcpDriver, type AcpAgentSpec } from "./acp/driver.js";
 import { ClaudeDriver } from "./claude/driver.js";
 import { CodexDriver } from "./codex/driver.js";
@@ -19,6 +20,7 @@ export const ACP_AGENTS: AcpAgentSpec[] = [
 ];
 
 export interface DefaultDriverOptions {
+  agents?: AcpRemoteAgent[];
   env?: NodeJS.ProcessEnv;
   hostVersion: string;
   codexSocket: string;
@@ -37,5 +39,12 @@ export function defaultDrivers(options: DefaultDriverOptions): AgentDriver[] {
       adapter: options.claudeAdapter,
     }),
     ...ACP_AGENTS.map((spec) => new AcpDriver(spec, { env: options.env, hostVersion: options.hostVersion })),
+    ...(options.agents ?? []).map((spec) => remoteDriver(spec, options)),
   ];
+}
+
+export function remoteDriver(spec: AcpRemoteAgent, options: { env?: NodeJS.ProcessEnv; hostVersion: string }): AgentDriver {
+  if (["codex", "claude", ...ACP_AGENTS.map((agent) => agent.id)].includes(spec.id)) throw new Error("自定义 Agent ID 不能覆盖内置 AI");
+  if (spec.transport === "stdio" ? !spec.command : !spec.url) throw new Error("请填写 Agent 命令或服务地址");
+  return new AcpDriver({ ...spec, tier: "remote", command: spec.command ?? "", discover: true }, options);
 }

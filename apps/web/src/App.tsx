@@ -25,6 +25,7 @@ import {
 } from "./live/common";
 import { Session } from "./live/Session";
 import { Permission } from "./live/Permission";
+import { AcpManager, AgentInteractions } from "./live/Acp";
 import { Files } from "./live/Files";
 import { Terminals } from "./live/Terminal";
 import { Worktrees } from "./live/Panels";
@@ -651,6 +652,7 @@ function NewSession({
 
   return (
     <Modal title="新建任务" close={close} wide={browse}>
+      <AgentInteractions agent={agent} />
       {browse ? (
         <Files
           start={cwd}
@@ -826,6 +828,7 @@ function Computers({ connect }: { connect: () => void }) {
           </article>
         ))}
       </div>
+      <AcpManager />
       <h3>配对设备</h3>
       <LoadState {...gateway} />
       {gateway.value?.devices.map((device) => (

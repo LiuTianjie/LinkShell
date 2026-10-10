@@ -24,7 +24,8 @@ export function ConfigMenu({
   // One line per choice: its name, and a check on the current one. Descriptions made a menu of six fill half the screen.
   const actions: MenuAction[] = option.values.map((value) => ({
     id: value.value,
-    title: valueLabel(option, value.value),
+    title: value.group ? `${value.group} · ${valueLabel(option, value.value)}` : valueLabel(option, value.value),
+    subtitle: value.description,
     state: value.value === option.current ? "on" : "off",
     attributes: { disabled },
   }));

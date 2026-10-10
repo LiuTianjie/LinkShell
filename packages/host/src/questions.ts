@@ -1,4 +1,4 @@
-import type { PermissionOption, Question, QuestionAnswer } from "@linkshell/wire";
+import { questionAnswerError, RpcError, type PermissionOption, type Question, type QuestionAnswer } from "@linkshell/wire";
 
 // Questions an agent asks the user. Claude's AskUserQuestion and MCP servers
 // ask through a form (a small JSON schema, the same in ACP and MCP); Codex has
@@ -21,6 +21,7 @@ interface FormField {
   type: "string" | "number" | "integer" | "boolean" | "array";
   /** The field that takes the user's own answer for this one (Claude: `question_0_custom`). */
   custom?: string;
+  schema: Json;
 }
 
 export interface Form {
@@ -65,14 +66,27 @@ export function formQuestions(schema: unknown, message?: string): Form | undefin
   for (const key of keys) {
     const property = obj(properties[key]);
     const type = property?.type;
-    if (type !== "string" && type !== "number" && type !== "integer" && type !== "boolean" && type !== "array") continue;
+    if (type !== "string" && type !== "number" && type !== "integer" && type !== "boolean" && type !== "array") {
+      if (required.has(key)) return undefined;
+      continue;
+    }
     const custom = [...companionOf].find(([, base]) => base === key)?.[0];
     const title = str(property?.title);
     const text = str(property?.description) ?? (keys.length === 1 ? message : undefined) ?? title ?? key;
-    const base = { id: key, header: title && title !== text ? title : undefined, text, required: required.has(key) || undefined };
+    const constraints: NonNullable<Question["constraints"]> = { type };
+    for (const field of ["minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"] as const) {
+      if (typeof property?.[field] === "number" && Number.isFinite(property[field])) constraints[field] = property[field] as number;
+    }
+    if (str(property?.pattern)) {
+      try { new RegExp(str(property?.pattern)!, "u"); } catch { return undefined; }
+      constraints.pattern = str(property?.pattern);
+    }
+    constraints.format = str(property?.format);
+    const defaults = property?.default === undefined ? undefined : (Array.isArray(property.default) ? property.default : [property.default]).map(String);
+    const base = { id: key, header: title && title !== text ? title : undefined, text, required: required.has(key) || undefined, constraints, defaults };
     if (type === "array") {
       const choices = options(property?.items);
-      if (!choices) continue;
+      if (!choices) { if (required.has(key)) return undefined; continue; }
       form.questions.push({ ...base, kind: "choices", options: choices, other: custom ? true : undefined });
     } else if (type === "boolean") {
       form.questions.push({ ...base, kind: "choice", options: [{ value: "true", label: "是" }, { value: "false", label: "否" }] });
@@ -84,7 +98,7 @@ export function formQuestions(schema: unknown, message?: string): Form | undefin
           : { ...base, kind: "text", secret: property?.format === "password" || undefined },
       );
     }
-    form.fields.push({ key, type, custom });
+    form.fields.push({ key, type, custom, schema: property! });
   }
   return form.questions.length > 0 ? form : undefined;
 }
@@ -94,11 +108,14 @@ export function formContent(form: Form, answers: QuestionAnswer[]): Record<strin
   const content: Record<string, string | number | boolean | string[]> = {};
   for (const field of form.fields) {
     const answer = answers.find((entry) => entry.id === field.key);
+    const question = form.questions.find((entry) => entry.id === field.key)!;
+    const error = questionAnswerError(question, answer);
+    if (error) throw RpcError.app("invalid_params", error);
     if (!answer) continue;
     const [first] = answer.values;
     if (field.type === "array") {
-      if (answer.values.length > 0) content[field.key] = answer.values;
-    } else if (first !== undefined && first !== "") {
+      content[field.key] = answer.values;
+    } else if (first !== undefined && (first !== "" || field.type === "string")) {
       if (field.type === "boolean") content[field.key] = first === "true";
       else if (field.type === "string") content[field.key] = first;
       else if (Number.isFinite(Number(first))) content[field.key] = Number(first);

@@ -57,6 +57,7 @@ function hostOf(url: string): string {
 }
 
 function AgentRow({ agent, first }: { agent: AgentInfo; first: boolean }) {
+  const pending = useClient((state) => state.interactions[agent.id]?.length ?? 0);
   const look = agentLook(agent.id, agent.label);
   const missing = agent.auth?.state === "missing";
   const login = look.login;
@@ -80,6 +81,7 @@ function AgentRow({ agent, first }: { agent: AgentInfo; first: boolean }) {
             </Text>
           </View>
           {missing ? <Icon sf="exclamationmark.circle.fill" md="error" size={16} color={colors.waiting} /> : null}
+          {agent.capabilities.acp ? <Button title={pending ? `待处理 ${pending}` : "设置"} size="small" variant={pending ? "warning" : "plain"} onPress={() => router.push({ pathname: "/acp", params: { agent: agent.id } })} /> : null}
         </View>
         {missing && login ? (
           <View
@@ -500,6 +502,7 @@ export function ComputerScreen() {
               agents.filter((agent) => agent.installed).map((agent, index) => <AgentRow key={agent.id} agent={agent} first={index === 0} />)
             )}
           </View>
+          {online ? <Button title="自定义 ACP 连接" variant="plain" onPress={() => router.push("/acp")} /> : null}
           {agents.some((agent) => !agent.installed) ? (
             <Text style={[type.footnote, { color: colors.tertiaryLabel, paddingHorizontal: 6 }]}>
               未安装：

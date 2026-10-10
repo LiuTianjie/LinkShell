@@ -12,6 +12,8 @@ import {
   type QuestionAnswer,
   type SessionEvent,
   type SessionSummary,
+  type SessionNotice,
+  type PendingPermissionSummary,
   type SubagentInfo,
   type GitInfo,
   type WorktreeEntry,
@@ -40,6 +42,8 @@ export interface ClientState {
   /** True once the first session list has arrived (distinguishes "loading" from "empty"). */
   sessionsLoaded: boolean;
   sessionsError?: string;
+  notices: Record<string, (SessionNotice & { id: string })[]>;
+  interactions: Record<string, PendingPermissionSummary[]>;
   projects: ProjectSummary[];
   views: Record<string, SessionView>;
   /** Sessions currently subscribed (on screen). */
@@ -82,6 +86,7 @@ export function shownQueue(queue: QueuedMessage[] | undefined, queueing: QueueEn
 }
 
 export interface ClientActions {
+  dismissNotice(sessionId: string, id: string): void;
   connect(): void;
   disconnect(): void;
   refresh(): Promise<void>;
@@ -278,6 +283,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       };
       return {
         sessions: without(state.sessions),
+        notices: without(state.notices),
         views: without(state.views),
         open: without(state.open),
         ready: without(state.ready),
@@ -291,6 +297,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     });
   }
 
+  const resolvedInteractions = new Set<string>();
   const store = createStore<ClientState & ClientActions>()((set, get) => {
     const updateView = (sessionId: string, fn: (view: SessionView) => SessionView) =>
       set((state) => {
@@ -325,6 +332,8 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     return {
       status: link.status,
       sessions: {},
+      notices: {},
+      interactions: {},
       sessionsLoaded: false,
       projects: [],
       views: {},
@@ -345,8 +354,19 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       disconnect() {
         link.stop();
       },
+      dismissNotice(sessionId, id) { set((state) => ({ notices: { ...state.notices, [sessionId]: (state.notices[sessionId] ?? []).filter((notice) => notice.id !== id) } })); },
 
       async refresh() {
+        void link.call("agents.pending", {}).then(({ interactions }) => {
+          set((state) => {
+            const next = { ...state.interactions };
+            for (const { agent, request } of interactions) {
+              if (resolvedInteractions.has(`${agent}\n${request.requestId}`) || next[agent]?.some((pending) => pending.requestId === request.requestId)) continue;
+              next[agent] = [...(next[agent] ?? []), request];
+            }
+            return { interactions: next };
+          });
+        }).catch(() => {});
         try {
           const [machine, list, projects] = await Promise.all([
             link.call("machine.info", {}),
@@ -684,7 +704,21 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     };
   });
 
-  link.onStatus((status, detail) => store.setState({ status, statusDetail: detail || undefined }));
+  link.onStatus((status, detail) => {
+    if (status !== "online") resolvedInteractions.clear();
+    store.setState({ status, statusDetail: detail || undefined, ...(status !== "online" ? { notices: {}, interactions: {} } : {}) });
+  });
+  link.on("agent.interaction", ({ agent, request }) => {
+    const key = `${agent}\n${request.requestId}`;
+    if ("resolved" in request) resolvedInteractions.add(key); else resolvedInteractions.delete(key);
+    store.setState((state) => ({ interactions: { ...state.interactions, [agent]: "resolved" in request
+      ? (state.interactions[agent] ?? []).filter((pending) => pending.requestId !== request.requestId)
+      : [...(state.interactions[agent] ?? []).filter((pending) => pending.requestId !== request.requestId), request] } }));
+  });
+  link.on("agent.changed", ({ agent }) => store.setState((state) => state.machine ? { machine: { ...state.machine, agents: state.machine.agents.map((entry) => entry.id === agent.id ? agent : entry) } } : {}));
+  link.on("session.notice", ({ sessionId, notice }) => {
+    store.setState((state) => ({ notices: { ...state.notices, [sessionId]: [...(state.notices[sessionId] ?? []).slice(-4), { ...notice, id: newId() }] } }));
+  });
   link.on("session.removed", ({ sessionId }) => forget(sessionId));
   // What the host sends next for this session starts after `startSeq`.
   link.on("session.window", ({ sessionId, startSeq }) => {

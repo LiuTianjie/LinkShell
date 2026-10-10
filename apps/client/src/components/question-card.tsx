@@ -1,5 +1,5 @@
 import type { PendingPermission } from "@linkshell/client-core";
-import type { Question, QuestionAnswer } from "@linkshell/wire";
+import { questionAnswerError, type Question, type QuestionAnswer } from "@linkshell/wire";
 import { useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { Text, TextInput } from "@/components/fixed-text";
@@ -28,11 +28,6 @@ function saveDraft(key: string, draft: Draft) {
   pendingDrafts.set(key, draft);
   if (pendingDrafts.size > 60) pendingDrafts.delete(pendingDrafts.keys().next().value!);
   for (const listener of draftListeners) listener();
-}
-
-function answered(question: Question, draft: Draft): boolean {
-  const entry = draft[question.id];
-  return !!entry && (entry.values.some(Boolean) || entry.other.trim().length > 0);
 }
 
 function Field({
@@ -109,6 +104,7 @@ function Field({
           secureTextEntry={question.secret}
           autoCapitalize="none"
           autoCorrect={!question.secret}
+          keyboardType={question.constraints?.type === "integer" || question.constraints?.type === "number" ? "numbers-and-punctuation" : question.constraints?.format === "email" ? "email-address" : "default"}
           placeholder={typed ? "输入你的回答" : question.options?.length ? "或者自己写" : "输入你的回答"}
           placeholderTextColor={colors.placeholder as string}
           selectionColor={colors.accent}
@@ -163,9 +159,14 @@ export function QuestionCard({
   const keyboardHeight = useKeyboardState((state) => state.height);
   const available = Math.max(96, height - keyboardHeight - 180);
   const maxHeight = Math.min(520, available);
-  const entryOf = (question: Question) => draft[question.id] ?? { values: [], other: "" };
-  const missing = questions.find((question) => question.required && !answered(question, draft));
-  const ready = !missing && questions.some((question) => answered(question, draft));
+  const entryOf = (question: Question) => draft[question.id] ?? { values: question.defaults ?? [], other: "" };
+  const answers = questions.flatMap((question): QuestionAnswer[] => {
+    if (!draft[question.id] && !question.defaults && !question.required) return [];
+    const entry = entryOf(question);
+    return [{ id: question.id, values: entry.values, other: entry.other.trim() || undefined }];
+  });
+  const validation = questions.map((question) => questionAnswerError(question, answers.find((answer) => answer.id === question.id))).find(Boolean);
+  const ready = !validation;
   const skip = request.options.find((option) => option.optionId === "skip");
 
   const run = async (kind: "answer" | "skip", action: () => Promise<void>) => {
@@ -187,10 +188,7 @@ export function QuestionCard({
       haptics.success();
       await onAnswer(
         request.requestId,
-        questions.map((question) => {
-          const entry = entryOf(question);
-          return { id: question.id, values: entry.values.filter(Boolean), other: entry.other.trim() || undefined };
-        }),
+        answers,
       );
     });
 
@@ -221,6 +219,7 @@ export function QuestionCard({
         ))}
       </View>
       {error ? <Text style={[type.caption, { color: colors.danger }]}>{error}</Text> : null}
+      {validation && Object.keys(draft).length ? <Text style={[type.caption, { color: colors.danger }]}>{validation}</Text> : null}
       <View style={{ flexDirection: "row", alignSelf: "stretch", gap: 8 }}>
         {skip ? (
           <Button title="跳过" variant="tonal" size="large" wide busy={busy === "skip"} disabled={disabled || busy !== null} onPress={() => void run("skip", () => onChoose(request.requestId, skip.optionId))} />

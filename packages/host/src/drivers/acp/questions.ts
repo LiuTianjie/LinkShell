@@ -94,6 +94,19 @@ export function mapAcpQuestions(agent: string, method: string, params: unknown, 
     };
   }
   if (kind === "form" || kind === "grok-form") {
+    const url = z.object({ mode: z.literal("url"), message: z.string(), elicitationId: z.string(), url: z.string().url() }).safeParse(params);
+    if (url.success && kind === "form") {
+      if (!["https:", "http:"].includes(new URL(url.data.url).protocol)) throw invalid();
+      return {
+        update: { sessionUpdate: "ls_permission", requestId, title: url.data.message, url: { url: url.data.url, elicitationId: url.data.elicitationId }, options: [
+          { optionId: "accept", name: "打开授权页面", kind: "allow_once" },
+          { optionId: "decline", name: "拒绝", kind: "reject_once" },
+          { optionId: "cancel", name: "取消", kind: "reject_once" },
+        ] },
+        answer: () => { throw invalid(); },
+        respond: (optionId) => ({ action: optionId === "accept" ? "accept" : optionId === "cancel" ? "cancel" : "decline" }),
+      };
+    }
     const parsed = formSchema.safeParse(params);
     if (!parsed.success) throw invalid();
     const request = parsed.data;
