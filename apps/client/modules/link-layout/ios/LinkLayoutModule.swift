@@ -7,6 +7,11 @@ public class LinkLayoutModule: Module {
     Constants([
       "viewControllerStatusBarAppearance": Bundle.main.object(forInfoDictionaryKey: "UIViewControllerBasedStatusBarAppearance") as? Bool ?? true
     ])
+    AsyncFunction("requestLandscape") { [weak self] in
+      guard let scene = self?.appContext?.utilities?.currentViewController()?.view.window?.windowScene else { return }
+      // Request the initial wide presentation without restricting later device rotations.
+      scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+    }.runOnQueue(.main)
     View(LinkLayoutView.self) {
       Events("onMetrics")
       Prop("revision") { (view: LinkLayoutView, revision: String) in view.updateRevision(revision) }

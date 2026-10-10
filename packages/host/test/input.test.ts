@@ -25,6 +25,7 @@ describe("the viewer page", () => {
     expect(() => new Script(script)).not.toThrow();
     expect(() => JSON.parse(/<script type="application\/json" id="icons">([\s\S]*?)<\/script>/.exec(page)![1]!)).not.toThrow();
     expect(page).toContain("VideoDecoder");
-    for (const id of ["stage", "screen", "pointer", "bar", "menu", "keys", "typing", "shortcut", "mode", "keyboard", "fit", "rotate", "full", "hide"]) expect(page).toContain(`id="${id}"`);
+    for (const id of ["stage", "screen", "pointer", "bar", "menu", "keys", "typing", "shortcut", "mode", "keyboard", "fit", "full", "hide"]) expect(page).toContain(`id="${id}"`);
+    expect(page).not.toContain('id="rotate"');
   });
 });

@@ -23,7 +23,20 @@ interface Props extends ViewProps {
   onMetrics: (event: NativeSyntheticEvent<LayoutMetrics>) => void;
 }
 
-const NativeProbe = Platform.OS === "ios" && requireOptionalNativeModule("LinkLayout") ? requireNativeView<Props>("LinkLayout") : null;
+const nativeLayout = requireOptionalNativeModule<{
+  requestLandscape?: () => Promise<void>;
+  clearOrientationRequest?: () => Promise<void>;
+}>("LinkLayout");
+const NativeProbe = Platform.OS === "ios" && nativeLayout ? requireNativeView<Props>("LinkLayout") : null;
+
+/** Enter wide once; subsequent physical rotations remain available. */
+export function requestLandscape(): Promise<void> {
+  return nativeLayout?.requestLandscape?.() ?? Promise.resolve();
+}
+
+export function clearOrientationRequest(): Promise<void> {
+  return nativeLayout?.clearOrientationRequest?.() ?? Promise.resolve();
+}
 
 export function LayoutProbe({ onMetrics, revision = "" }: { onMetrics: (metrics: LayoutMetrics) => void; revision?: string }) {
   return NativeProbe ? <NativeProbe revision={revision} pointerEvents="none" style={{ position: "absolute", inset: 0 }} onMetrics={(event) => onMetrics(event.nativeEvent)} /> : null;

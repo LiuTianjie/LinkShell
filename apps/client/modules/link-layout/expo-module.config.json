@@ -1,4 +1,5 @@
 {
-  "platforms": ["apple"],
-  "apple": { "modules": ["LinkLayoutModule"] }
+  "platforms": ["apple", "android"],
+  "apple": { "modules": ["LinkLayoutModule"] },
+  "android": { "modules": ["expo.modules.linklayout.LinkLayoutModule"] }
 }

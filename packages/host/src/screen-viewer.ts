@@ -27,7 +27,6 @@ const ICONS = {
   touch: icon('<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="7.6"/>'),
   keyboard: icon('<rect x="2.5" y="6" width="19" height="12" rx="2.6"/><path d="M6.6 10h.01M10.2 10h.01M13.8 10h.01M17.4 10h.01M6.6 14h.01M17.4 14h.01M10 14h4"/>'),
   fit: icon('<circle cx="10.5" cy="10.5" r="6.2"/><path d="m15.2 15.2 5 5M8 10.5h5"/>'),
-  rotate: icon('<rect x="3.5" y="10" width="17" height="9.5" rx="2.2"/><path d="M7 6.2a8.4 8.4 0 0 1 10 0M17 6.2V3.4M17 6.2h-2.8"/>'),
   expand: icon('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
   shrink: icon('<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>'),
   down: icon('<path d="m6 9.5 6 6 6-6"/>'),
@@ -1937,8 +1936,6 @@ function refresh() {
   $("keyboard").classList.toggle("gone", mode === "view");
   $("quick").classList.toggle("gone", mode === "view");
   $("fit").classList.toggle("gone", zoom < 1.05);
-  $("rotate").classList.toggle("gone", !app || !chrome.canRotate);
-  $("rotate").classList.toggle("on", chrome.landscape);
   const full = app ? chrome.fullscreen : !!document.fullscreenElement;
   $("full").classList.toggle("gone", !app && !document.fullscreenEnabled);
   $("full").innerHTML = full ? ICON.shrink : ICON.expand;
@@ -2046,7 +2043,6 @@ tappable($("closeinfo"), closeMenu);
 pressable($("keyboard"), () => (coarse ? raiseKeys() : toggleKeys()));
 pressable($("quick"), openSheet);
 pressable($("fit"), () => zoomTo(1, { x: area.x + area.w / 2, y: area.y + area.h / 2 }));
-pressable($("rotate"), () => tellApp({ type: "landscape", on: !chrome.landscape }));
 for (const tile of $("widths").querySelectorAll(".tile")) {
   tile.classList.toggle("on", tile.dataset.width === width);
   tile.setAttribute("aria-pressed", String(tile.dataset.width === width));
@@ -2589,7 +2585,6 @@ export function viewerPage(): string {
   <div class="tool" id="keyboard" role="button" aria-label="键盘">${ICONS.keyboard}</div>
   <div class="tool" id="quick" role="button" aria-label="快捷操作">${ICONS.quick}</div>
   <div class="tool" id="fit" role="button" aria-label="还原缩放">${ICONS.fit}</div>
-  <div class="tool" id="rotate" role="button" aria-label="横屏">${ICONS.rotate}</div>
   <div class="tool" id="info" role="button" aria-label="连接信息">${ICONS.info}</div>
   <div class="tool" id="full" role="button" aria-label="全屏"></div>
 </div>

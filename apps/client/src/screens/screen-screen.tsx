@@ -1,10 +1,8 @@
 import { nativeStatusBar } from "@/lib/native-status-bar";
 import * as Clipboard from "expo-clipboard";
-import * as Device from "expo-device";
 import { useKeepAwake } from "expo-keep-awake";
 import { Stack } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
-import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ActivityIndicator, BackHandler, Platform, ScrollView, View } from "react-native";
@@ -14,7 +12,7 @@ import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-k
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
-import { LayoutProbe } from "../../modules/link-layout";
+import { clearOrientationRequest, LayoutProbe, requestLandscape } from "../../modules/link-layout";
 import { useLayoutGeometry } from "@/lib/use-layout-geometry";
 import { safeContentInsets } from "@/lib/adaptive-insets";
 import { Button } from "@/components/button";
@@ -34,14 +32,6 @@ interface Viewer {
   token: string;
   displays: { index: number; name: string }[];
 }
-
-// Resizable iOS windows follow their actual geometry; older phones retain the toolbar rotation control.
-const resizableIOS = Platform.OS === "ios" && Number.parseInt(String(Platform.Version), 10) >= 27;
-const canRotate = !resizableIOS && Device.deviceType !== Device.DeviceType.TABLET;
-// An iPhone lies down one way, its camera to the left: the page then knows which side is all screen, and
-// keeps its toolbar there (the system can't be asked which way a phone was turned until it has been).
-// Android reports the camera's side as the larger inset, so either way will do.
-const LANDSCAPE = Platform.OS === "ios" ? ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT : ScreenOrientation.OrientationLock.LANDSCAPE;
 
 /**
  * The computer's screen, live: the host's viewer page and H.264 stream,
@@ -86,40 +76,27 @@ export function ScreenScreen() {
   }, [link]);
   const [fullscreen, setFullscreen] = useState(false);
   const window = useWindowDimensions();
-  const [turned, setLandscape] = useState(false);
-  const landscape = resizableIOS ? window.width > window.height : turned;
-  // Landscape has no room for a header, so it is always the full screen; leaving the full screen stands the phone up again.
-  const present = useCallback((full: boolean, turned: boolean) => {
-    const land = canRotate && turned;
-    web.current?.injectJavaScript(`window.linkshellPresent && window.linkshellPresent(${full || land}); true;`);
-    setFullscreen(full || land);
-    setLandscape(land);
+  // Measure the picture's frame independently of the requested rotation (including folding and resizing).
+  const landscape = window.width > window.height;
+  const present = useCallback((full: boolean) => {
+    web.current?.injectJavaScript(`window.linkshellPresent && window.linkshellPresent(${full}); true;`);
+    setFullscreen(full);
+    if (full) void requestLandscape().catch((error: unknown) => console.warn("[screen] landscape request failed", error));
+    else void clearOrientationRequest().catch(() => {});
   }, []);
 
-  const turnedOnce = useRef(false);
-  useEffect(() => {
-    if (!canRotate || (!landscape && !turnedOnce.current)) return;
-    turnedOnce.current = true;
-    void ScreenOrientation.lockAsync(landscape ? LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-  }, [landscape]);
-  // Restore the app's adaptive orientation when leaving the viewer.
-  useEffect(
-    () => () => {
-      if (turnedOnce.current) void ScreenOrientation.unlockAsync().catch(() => {});
-    },
-    [],
-  );
+  useEffect(() => () => { void clearOrientationRequest().catch(() => {}); }, []);
 
   // A screen that failed has only the header to leave by.
   useEffect(() => {
-    if (failure) present(false, false);
+    if (failure) present(false);
   }, [failure, present]);
 
   // Android's back leaves the full screen before it leaves the viewer.
   useEffect(() => {
     if (!fullscreen) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      present(false, false);
+      present(false);
       return true;
     });
     return () => subscription.remove();
@@ -136,14 +113,14 @@ export function ScreenScreen() {
       JSON.stringify({
         fullscreen,
         landscape,
-        canRotate,
+        // Hide the separate rotation control when connected to an older host.
+        canRotate: false,
         fontScale: window.fontScale,
         // This app lets the page play video in place: the page may take the picture as a video track.
         video: !relayOnly,
         nativePicture: playback.mode === "native",
         relayFallback: Platform.OS === "ios" && !relayOnly,
-        // Lying down that way, the right is the side without the camera.
-        clear: landscape && Platform.OS === "ios" && !resizableIOS ? "right" : null,
+        clear: null,
         // Whether the keyboard is on the screen: the system tells the app, and a page only its field's focus,
         // which a phone leaves standing when it takes the keyboard away.
         keyboard: keyboardOpen,
@@ -165,13 +142,12 @@ export function ScreenScreen() {
       } catch {
         return;
       }
-      // Full screen is lying down: a computer's screen is wide. The rotate button still stands it up again.
+      // Full screen enters wide once, then physical rotation and window geometry remain in charge.
       if (message.type === "nativeUnavailable") {
         updatePlayback({ type: "unavailable", mode: "native", generation: playback.generation });
       } else if (message.type === "screenFallback" && Platform.OS === "ios") {
         updatePlayback({ type: "unavailable", mode: "standard", generation: playback.generation });
-      } else if (message.type === "fullscreen") present(message.on === true, message.on === true);
-      else if (message.type === "landscape") present(fullscreen, message.on === true);
+      } else if (message.type === "fullscreen") present(message.on === true);
       else if (message.type === "haptic") (message.kind === "medium" ? haptics.medium : haptics.light)();
       else if (message.type === "keyboard") {
         // The page is asking for the keyboard, and the system gives one only to the view the keys go to. That
@@ -210,7 +186,7 @@ export function ScreenScreen() {
         }
       }
     },
-    [present, fullscreen, tellPage, chrome, playback.generation, playback.mode, mode],
+    [present, tellPage, chrome, playback.generation, playback.mode, mode],
   );
 
   // The page ends above the keyboard, frame by frame, so its key bar sits on the keys.
