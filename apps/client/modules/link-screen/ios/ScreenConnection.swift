@@ -29,6 +29,8 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   private var startedAt = CACurrentMediaTime()
   private var previousAt = CACurrentMediaTime()
   private var previousFrames: Double?
+  private var jitterBufferTime = ScreenCounterAverage()
+  private var decoderTime = ScreenCounterAverage()
   private var statsPending = false
   private var senderStats: [String: Any] = [:]
   private var disconnectedAt: Double?
@@ -255,6 +257,10 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
           self.previousFrames = frames
         }
         stats["requestedFps"] = self.maxFps
+        stats["jitterBufferMs"] = self.jitterBufferTime.milliseconds(seconds: number(inbound, "jitterBufferDelay"), count: number(inbound, "jitterBufferEmittedCount"))
+        stats["webrtcDecodeMeanMs"] = self.decoderTime.milliseconds(seconds: number(inbound, "totalDecodeTime"), count: number(inbound, "framesDecoded"))
+        stats["framesDropped"] = number(inbound, "framesDropped")
+        stats["freezeCount"] = number(inbound, "freezeCount")
         stats["replacedFrames"] = self.renderer.takeReplacements()
         stats["width"] = number(inbound, "frameWidth")
         stats["height"] = number(inbound, "frameHeight")

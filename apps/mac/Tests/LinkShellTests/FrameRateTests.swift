@@ -1,25 +1,21 @@
 import XCTest
 @testable import LinkShell
 
-/// The rule that chooses between the two frame rates, a second at a time, with no screen and no
+/// The rule that chooses between the frame rates, a second at a time, with no screen and no
 /// network: what ends the full rate, what doesn't, and how long the way back takes.
 final class FrameRateTests: XCTestCase {
-  /// 1920×1080's ceiling at the full rate; the estimate has to reach `Tuning.frameRateRoom` of it.
-  private let ceiling = 12_000_000
-  private var room: Double { Double(ceiling) * Tuning.frameRateRoom }
-
   private func rate() -> FrameRate {
-    FrameRate(full: 60, reduced: 30, ceiling: ceiling)
+    FrameRate(full: 60, reduced: 30)
   }
 
   /// A busy screen, carried whole at `fps`.
   private func carried(_ fps: Double, available: Double = 20_000_000) -> FrameRate.Second {
-    .init(captured: fps + 1, encoded: fps, sentShare: 1, limitation: "none", available: available)
+    .init(captured: fps + 1, encoded: fps, sentShare: 1, limitation: "none", available: available, sendDelayMs: 0)
   }
 
   /// libwebrtc's first step down from 1920×1080: 1280×720.
   private func shrunk(_ fps: Double, because limitation: String = "bandwidth", available: Double = 1_500_000) -> FrameRate.Second {
-    .init(captured: fps + 1, encoded: fps, sentShare: 4.0 / 9, limitation: limitation, available: available)
+    .init(captured: fps + 1, encoded: fps, sentShare: 4.0 / 9, limitation: limitation, available: available, sendDelayMs: 0)
   }
 
   /// The same second again and again, until the rate changes: how many it took and what was
@@ -45,7 +41,7 @@ final class FrameRateTests: XCTestCase {
   }
 
   func testHighRefreshFallsBackInStagesAndRecoversInStages() {
-    var rate = FrameRate(full: 120, reduced: 60, lowest: 30, ceiling: 24_000_000)
+    var rate = FrameRate(full: 120, reduced: 60, lowest: 30)
     XCTAssertEqual(rate.current, 120)
     XCTAssertNotNil(seconds(of: shrunk(120), to: &rate))
     XCTAssertEqual(rate.current, 60)
@@ -58,17 +54,18 @@ final class FrameRateTests: XCTestCase {
     XCTAssertEqual(rate.current, 120)
   }
 
-  func testHighRefreshDoesNotOscillateWhenOnlySixtyFramesFit() {
-    var rate = FrameRate(full: 120, reduced: 60, lowest: 30, ceiling: 24_000_000)
+  func testHighRefreshCanRecoverAtFiveMegabitsWhenThePictureIsHealthy() {
+    var rate = FrameRate(full: 120, reduced: 60, lowest: 30)
     XCTAssertNotNil(seconds(of: shrunk(120), to: &rate))
     XCTAssertEqual(rate.current, 60)
-    XCTAssertNil(seconds(of: carried(60, available: 6_000_000), to: &rate, limit: 180))
-    XCTAssertEqual(rate.current, 60)
+    XCTAssertNotNil(seconds(of: carried(60, available: 5_000_000), to: &rate))
+    XCTAssertEqual(rate.current, 120)
+    XCTAssertNil(seconds(of: carried(120, available: 5_000_000), to: &rate))
   }
 
   func testAStillScreenSaysNothingAgainstTheFullRate() {
     var rate = rate()
-    let still = FrameRate.Second(captured: 0, encoded: 2, sentShare: 1, limitation: "none", available: 3_000_000)
+    let still = FrameRate.Second(captured: 0, encoded: 2, sentShare: 1, limitation: "none", available: 100_000, sendDelayMs: 200)
     XCTAssertNil(seconds(of: still, to: &rate))
   }
 
@@ -84,19 +81,11 @@ final class FrameRateTests: XCTestCase {
     XCTAssertNil(seconds(of: unknown, to: &rate))
   }
 
-  func testAnEstimateBelowTheRoomButAboveTheNarrowLineKeepsTheFullRate() {
-    var rate = rate()
-    // A session's first estimate: under what it takes to go back up, over what ends the full rate.
-    XCTAssertNil(seconds(of: carried(60, available: (rate.narrow + rate.room) / 2), to: &rate))
-  }
-
-  func testANarrowNetworkEndsTheFullRateWhileThePictureIsWhole() {
+  func testALowEstimateDoesNotEndTheFullRateWhenThePictureIsCarried() {
     var rate = rate()
     settle(&rate, at: 60)
-    let change = seconds(of: carried(60, available: 800_000), to: &rate)
-    XCTAssertEqual(change?.count, Tuning.frameRateDownAfter)
-    XCTAssertEqual(change?.verdict, .down("the network was estimated at 0.8 Mbit/s for 3 s"))
-    XCTAssertEqual(rate.current, 30)
+    XCTAssertNil(seconds(of: carried(60, available: 800_000), to: &rate))
+    XCTAssertEqual(rate.current, 60)
   }
 
   func testAnEncoderThatCropsARowHasNotShrunkThePicture() {
@@ -147,6 +136,40 @@ final class FrameRateTests: XCTestCase {
     XCTAssertEqual(change?.verdict, .down("only 40 of 60 frames a second were sent for 3 s"))
   }
 
+  func testPersistentPacketWaitingEndsTheFullRateBeforeFramesAreLost() {
+    var rate = rate()
+    settle(&rate, at: 60)
+    var queued = carried(60)
+    queued.sendDelayMs = 120
+    let change = seconds(of: queued, to: &rate)
+    XCTAssertEqual(change?.count, Tuning.frameRateDownAfter)
+    XCTAssertEqual(change?.verdict, .down("packets waited 120 ms before being sent for 3 s"))
+    XCTAssertEqual(rate.current, 30)
+  }
+
+  func testASingleQueueSpikeDoesNotChangeTheRate() {
+    var rate = rate()
+    settle(&rate, at: 60)
+    var queued = carried(60)
+    queued.sendDelayMs = 1200
+    for _ in 0..<20 {
+      XCTAssertEqual(rate.judge(queued), .keep)
+      XCTAssertEqual(rate.judge(carried(60)), .keep)
+    }
+    XCTAssertEqual(rate.current, 60)
+  }
+
+  func testQueueDeadbandKeepsTheCurrentRate() {
+    var rate = rate()
+    var delayed = carried(60)
+    delayed.sendDelayMs = (Tuning.frameRateQueueSlowMs + Tuning.frameRateQueueCalmMs) / 2
+    XCTAssertNil(seconds(of: delayed, to: &rate))
+    var lower = reduced()
+    delayed = carried(30)
+    delayed.sendDelayMs = Tuning.frameRateQueueCalmMs + 1
+    XCTAssertNil(seconds(of: delayed, to: &lower))
+  }
+
   // MARK: Up
 
   private func reduced() -> FrameRate {
@@ -157,21 +180,18 @@ final class FrameRateTests: XCTestCase {
     return rate
   }
 
-  func testRoomForAWhileBringsTheFullRateBack() {
+  func testHealthyDeliveryForAWhileProbesTheFullRate() {
     var rate = reduced()
     let change = seconds(of: carried(30), to: &rate)
     XCTAssertEqual(change?.count, Tuning.frameRateSettle + Tuning.frameRateCalm)
-    XCTAssertEqual(change?.verdict, .up("nothing limited the picture for 10 s, and the network is estimated at 20.0 Mbit/s"))
+    XCTAssertEqual(change?.verdict, .up("the whole picture and a drained send queue held for 10 s; trying the next frame rate"))
     XCTAssertEqual(rate.current, 60)
   }
 
-  func testNoWayBackWithoutRoom() {
-    var short = reduced()
-    XCTAssertNil(seconds(of: carried(30, available: room - 1), to: &short))
-
+  func testNoProbeWithoutPositiveDeliveryEvidence() {
     var unknown = reduced()
     var second = carried(30)
-    second.available = nil
+    second.sendDelayMs = nil
     XCTAssertNil(seconds(of: second, to: &unknown))
 
     var small = reduced()
@@ -186,18 +206,35 @@ final class FrameRateTests: XCTestCase {
     second = carried(30)
     second.encoded = 20
     XCTAssertNil(seconds(of: second, to: &losing))
+
+    let invalidDelays: [Double?] = [nil, .nan, .infinity, -1]
+    for invalid in invalidDelays {
+      var invalidQueue = reduced()
+      second = carried(30)
+      second.sendDelayMs = invalid
+      XCTAssertNil(seconds(of: second, to: &invalidQueue))
+    }
+
+    var noFrames = reduced()
+    second = carried(30)
+    second.encoded = nil
+    XCTAssertNil(seconds(of: second, to: &noFrames))
   }
 
-  func testTheEstimateJustReachingTheRoomIsEnough() {
+  func testMissingBandwidthEstimateDoesNotBlockAHealthyProbe() {
     var rate = reduced()
-    XCTAssertNotNil(seconds(of: carried(30, available: room), to: &rate))
+    var second = carried(30)
+    second.available = nil
+    XCTAssertNotNil(seconds(of: second, to: &rate))
   }
 
-  func testASecondWithoutRoomStartsTheWaitAgain() {
+  func testASecondWithAQueueStartsTheRecoveryWaitAgain() {
     var rate = reduced()
     settle(&rate, at: 30)
     for _ in 0..<(Tuning.frameRateCalm - 1) { XCTAssertEqual(rate.judge(carried(30)), .keep) }
-    XCTAssertEqual(rate.judge(carried(30, available: room / 2)), .keep)
+    var queued = carried(30)
+    queued.sendDelayMs = Tuning.frameRateQueueCalmMs + 1
+    XCTAssertEqual(rate.judge(queued), .keep)
     XCTAssertEqual(seconds(of: carried(30), to: &rate)?.count, Tuning.frameRateCalm)
   }
 

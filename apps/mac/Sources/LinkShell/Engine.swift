@@ -34,14 +34,18 @@ enum Engine {
     initFieldTrials(trials)
     RTCInitializeSSL()
     // VideoToolbox for H.264; the software codecs are there for a viewer without it.
-    return RTCPeerConnectionFactory(encoderFactory: ScreenEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory())
+    return RTCPeerConnectionFactory(encoderFactory: ScreenEncoderFactory(), decoderFactory: decoderFactory())
   }()
 
   /// Codec level must fit this session's eventual rate, without raising old receivers' level.
   static func screenFactory(maximumFrameRate: Int) -> RTCPeerConnectionFactory {
     let standard = factory // Initialises SSL and field trials exactly once.
     guard maximumFrameRate > Tuning.fullFps else { return standard }
-    return RTCPeerConnectionFactory(encoderFactory: ScreenEncoderFactory(maximumFrameRate: maximumFrameRate), decoderFactory: RTCDefaultVideoDecoderFactory())
+    return RTCPeerConnectionFactory(encoderFactory: ScreenEncoderFactory(maximumFrameRate: maximumFrameRate), decoderFactory: decoderFactory())
+  }
+
+  private static func decoderFactory() -> RTCVideoDecoderFactory {
+    MediaStageProbe.enabled ? MediaProbeDecoderFactory() : RTCDefaultVideoDecoderFactory()
   }
 
   private static func initFieldTrials(_ trials: [String: String]) {

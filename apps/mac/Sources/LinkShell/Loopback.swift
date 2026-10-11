@@ -98,6 +98,7 @@ final class Loopback: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegat
 
   func renderFrame(_ frame: RTCVideoFrame?) {
     guard let frame else { return }
+    if MediaStageProbe.enabled { MediaStageProbe.shared.decoded(UInt32(bitPattern: frame.timeStamp)) }
     let host = HostClock.seconds()
     lock.lock()
     if let lastFrame { gap = max(gap, host - lastFrame) }
@@ -250,6 +251,7 @@ final class Loopback: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegat
             ? ["n": 0]
             : ["n": sorted.count, "min": sorted[0], "p50": sorted[sorted.count / 2], "p95": sorted[min(sorted.count - 1, sorted.count * 95 / 100)], "max": sorted[sorted.count - 1]]
         }
+        if MediaStageProbe.enabled { message["encodeInputToDecode"] = MediaStageProbe.shared.take() }
         self.link.emit(message)
       }
     }

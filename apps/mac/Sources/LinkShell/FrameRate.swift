@@ -6,17 +6,14 @@ import Foundation
 /// Text with half the frames and all its pixels reads better than text with all the frames and
 /// half its pixels, so a network that doesn't carry the full rate costs frames, not pixels: the
 /// encoder gives libwebrtc no quantizers to shrink the picture by (`ScreenEncoderFactory.scaling`).
-/// What ends the full rate is a bandwidth estimate under `Tuning.frameRateNarrow` of its
-/// ceiling, a picture libwebrtc made smaller anyway (on its own account, when even the bits for
-/// a smaller one are short), or frames that don't come out of the encoder, for a few seconds
-/// running. A session's first estimate is low and climbs: it stays above the narrow line. Packets
-/// being lost is not trouble: half the frames lose the same share of theirs. Nor the time the
-/// encoder takes over a frame: it is the hardware's own (11 ms here at 30 frames and at 60),
-/// and when it is too long frames don't come out, which is counted.
+/// A low bandwidth estimate alone doesn't say that this particular picture is too expensive.
+/// What ends the full rate is a smaller picture, missing encoder output under active capture,
+/// or packets persistently waiting to be sent. Packets being lost or a single frame taking a
+/// long time are not enough: the consequences for delivered pictures are what matter.
 ///
-/// The way back asks for more and takes longer: nothing limiting the reduced rate, and a
-/// bandwidth estimate with room for the full one, for a time that doubles whenever the full rate
-/// was tried and lost again soon after (as `Pacer` in the host does with its ladder).
+/// A whole picture and a drained send queue permit a trial of the next rate. The trial doesn't
+/// reserve a fraction of a worst-case bitrate ceiling: desktop content may fit in much less.
+/// The wait doubles when a trial fails soon after, keeping an overloaded path from oscillating.
 ///
 /// It is shown one second of the session at a time, in the numbers `rtc.stats` says, and has no
 /// clock of its own: its time is the seconds it has been shown. The thresholds are `Tuning`'s.
@@ -34,8 +31,10 @@ struct FrameRate {
     var sentShare: Double?
     /// libwebrtc's `qualityLimitationReason`: "none", "bandwidth", "cpu" or "other".
     var limitation: String?
-    /// The bandwidth estimate, in bits a second.
+    /// The bandwidth estimate, for diagnostic context only, not a frame-rate threshold.
     var available: Double?
+    /// Average RTP packet wait before reaching the network socket, not network RTT.
+    var sendDelayMs: Double? = nil
   }
 
   enum Verdict: Equatable {
@@ -49,10 +48,6 @@ struct FrameRate {
   let full: Int
   let reduced: Int
   let lowest: Int
-  /// The bandwidth estimate there has to be before the full rate is tried again, in bits a second.
-  let room: Double
-  /// The estimate below which the network does not carry the full rate, in bits a second.
-  let narrow: Double
   /// The rate in force.
   private(set) var current: Int
 
@@ -67,13 +62,10 @@ struct FrameRate {
   /// or was lost since.
   private var sinceRaised: Int?
 
-  /// `ceiling`: the most the full rate may send, in bits a second (`Tuning.maxBitrate`).
-  init(full: Int = Tuning.fullFps, reduced: Int = Tuning.reducedFps, lowest: Int? = nil, ceiling: Int) {
+  init(full: Int = Tuning.fullFps, reduced: Int = Tuning.reducedFps, lowest: Int? = nil) {
     self.full = full
     self.reduced = reduced
     self.lowest = lowest ?? reduced
-    room = Double(ceiling) * Tuning.frameRateRoom
-    narrow = Double(ceiling) * Tuning.frameRateNarrow
     current = full
   }
 
@@ -107,13 +99,13 @@ struct FrameRate {
   }
 
   private mutating func judgeReduced(_ second: Second) -> Verdict {
-    guard let available = second.available, hasRoom(second, available) else {
+    guard healthy(second) else {
       calm = 0
       return .keep
     }
     calm += 1
     guard calm >= wait else { return .keep }
-    let reason = String(format: "nothing limited the picture for \(calm) s, and the network is estimated at %.1f Mbit/s", available / 1e6)
+    let reason = "the whole picture and a drained send queue held for \(calm) s; trying the next frame rate"
     sinceRaised = 0
     change(to: nextHigher)
     return .up(reason)
@@ -128,18 +120,23 @@ struct FrameRate {
 
   /// What says the full rate is not being carried, if anything does.
   private func trouble(_ second: Second) -> String? {
-    if let available = second.available, available < narrow * Double(current) / Double(full) { return String(format: "the network was estimated at %.1f Mbit/s", available / 1e6) }
     if let share = second.sentShare, share < Tuning.frameRateShrunk { return "the picture was being shrunk" }
     if let encoded = second.encoded, dropping(encoded, of: second.captured, at: current) {
       return String(format: "only %.0f of %.0f frames a second were sent", encoded, min(second.captured, Double(current)))
     }
+    // Reducing a frame-rate ceiling cannot help a quiet screen sending a rare large frame.
+    if second.captured >= Double(current) * Tuning.frameRateBusy,
+       let delay = second.sendDelayMs, delay.isFinite, delay > Tuning.frameRateQueueSlowMs {
+      return String(format: "packets waited %.0f ms before being sent", delay)
+    }
     return nil
   }
 
-  /// The reduced rate whole and unhindered, and an estimate that has the bits for the full one.
-  private func hasRoom(_ second: Second, _ available: Double) -> Bool {
-    guard let share = second.sentShare, share >= Tuning.frameRateShrunk, second.limitation == "none", available >= room * Double(nextHigher) / Double(full) else { return false }
-    if let encoded = second.encoded, dropping(encoded, of: second.captured, at: current) { return false }
+  /// Positive delivery evidence is required to probe; absent statistics never count as health.
+  private func healthy(_ second: Second) -> Bool {
+    guard let share = second.sentShare, share >= Tuning.frameRateShrunk, second.limitation == "none",
+          let delay = second.sendDelayMs, delay.isFinite, delay >= 0, delay <= Tuning.frameRateQueueCalmMs,
+          let encoded = second.encoded, encoded > 0, !dropping(encoded, of: second.captured, at: current) else { return false }
     return true
   }
 

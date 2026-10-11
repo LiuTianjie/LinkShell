@@ -62,6 +62,28 @@ enum Tuning {
   /// seconds of a screen unreadable; a home network carries this from the first frame.
   static let startBitrate = 2_000_000
 
+  // MARK: The floor under the estimate on the local network (`LanFloor`)
+
+  /// What the estimate is held to while the video stays on the local network: enough for crisp
+  /// text at 1080p, a small part of what any working Wi-Fi carries.
+  static let lanFloor = 8_000_000
+  /// Seconds of round trips looked at. The floor is set when the lowest of them is under
+  /// `lanFloorRttMs` and lifted when even the lowest is over `lanFloorLiftRttMs`: a radio that
+  /// holds packets for a moment raises some round trips, a queue that stays raises all of them.
+  static let lanFloorWindow = 4
+  static let lanFloorRttMs = 20.0
+  static let lanFloorLiftRttMs = 40.0
+  /// Loss the floor is set under, and lifted over.
+  static let lanFloorLoss = 0.01
+  static let lanFloorLiftLoss = 0.05
+  /// Average sender queueing the floor is set under, and lifted over: a floor the network can't
+  /// take shows here first, before the round trip or loss do.
+  static let lanFloorSendDelayMs = 10.0
+  static let lanFloorLiftSendDelayMs = 50.0
+  /// Calm seconds before a lifted floor comes back, and lifts after which it never does.
+  static let lanFloorRecalm = 30
+  static let lanFloorMaxLifts = 2
+
   /// DSCP marking and the pacer's order, where a network honours it.
   static let networkPriority = RTCPriority.high
 
@@ -86,24 +108,17 @@ enum Tuning {
   static let frameRateBusy = 0.8
   static let frameRateCarried = 0.75
 
-  /// Back to the full rate after this many seconds running in which nothing limits the reduced
-  /// one and the bandwidth estimate is at least `frameRateRoom` of the full rate's ceiling
-  /// (`maxBitrate`). The wait doubles, up to the longest, each time the full rate is lost again
-  /// within `frameRateHeld` seconds of being tried.
-  ///
-  /// 0.4 of the ceiling is 4.8 Mbit/s for a 1920-wide picture: the moving picture the tools show
-  /// (`MotionWindow`) kept all its pixels at 60 frames on an estimate of 2 Mbit/s and lost them
-  /// on 1.75, so it is more than twice what a busy screen needed.
-  /// The full rate is not carried while the estimate is under this share of its ceiling: 3.2
-  /// Mbit/s for a 2560-wide picture. A session starts at about 6 and climbs, so the start never
-  /// counts; the moving picture at 1.5 Mbit/s does. Between this and `frameRateRoom` the rate in
-  /// force stays.
-  static let frameRateNarrow = 0.2
+  /// A sustained queue is pressure, even before libwebrtc reduces resolution or drops frames.
+  /// These are adaptation thresholds, not a guarantee that individual packets meet a deadline.
+  /// Separate down/up thresholds prevent small queue fluctuations from changing the rate.
+  static let frameRateQueueSlowMs = 50.0
+  static let frameRateQueueCalmMs = 10.0
 
+  /// Probe the next rate after the current picture and send queue stay healthy this long.
+  /// Failed probes double the wait up to the maximum; a low bitrate estimate alone is harmless.
   static let frameRateCalm = 10
   static let frameRateCalmMax = 160
   static let frameRateHeld = 30
-  static let frameRateRoom = 0.4
 
 
   /// For its first second the full rate may send this share of what the reduced rate was
@@ -117,6 +132,10 @@ enum Tuning {
   /// Surfaces ScreenCaptureKit may have out at once: one being encoded, one kept for repeating,
   /// and room for the next ones.
   static let captureQueueDepth = 5
+
+  /// Raw pictures admitted to VideoToolbox before its callbacks return. More lets a busy
+  /// encoder build a queue of stale screen contents; fewer can starve its hardware pipeline.
+  static let encoderPendingFrames = 2
 
   /// The capture is asked for a little more than the frame rate. Asked for exactly 60,
   /// ScreenCaptureKit delivered 55 a second from a 120 Hz display and 57.5 from a 144 Hz one

@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 
 // The app's own logic, tested without a phone: what needs React Native is replaced in each test.
 export default defineConfig({
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

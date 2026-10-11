@@ -20,13 +20,19 @@ Encoder initialization/operation failures fall back to stock H.264; `--encoder s
 explicit comparison path. `playout-delay` 0/0 asks for prompt display, not zero end-to-end delay.
 The attempted `MaxFrameDelayCount=0` property is not supported by the hardware in the recorded
 checks and does not establish zero encoder queueing.
+The adapter now admits at most two raw frames to VideoToolbox at once. If both are pending,
+it skips new raw input and retains any key-frame request for the next accepted frame. It never
+discards already-compressed reference frames to enforce this bound.
 
 The media peer is an iOS native receiver or a web player, independently of the Node host's
 werift bulk-data connection. iOS normally decodes H.264 through VideoToolbox into a latest-frame
 mailbox, then maps the pixel buffer to Metal. Its transparent WebView still owns gestures,
 controls and the cursor. It requests a ceiling of 120 fps, bounded by both displays, power,
 thermal state and adaptation; standard receivers retain the 60/30 defaults. No video frames
-cross JS. The native module shares the app's JitsiWebRTC M124 framework; this sender uses M154,
+cross JS. Display-link callbacks, texture mapping and GPU submission now run on a dedicated
+iOS render thread; UIKit publishes small layout snapshots. This removes dependence on UI
+event processing, without establishing a phone latency or sustained-frame-rate result.
+The native module shares the app's JitsiWebRTC M124 framework; this sender uses M154,
 so codec/extension support must be established by the actual negotiation.
 
 Failed media falls back to the host's H.264 byte stream. iOS first tries the standard WebView
@@ -179,11 +185,56 @@ already, and stop if it is not rather than have the system ask.
 | `app-smoke.mjs` | Opens the app, asks for an offer, says what it holds. Part of `check`. |
 | `loopback.mjs` | The video track with no viewer: the app answers its own offer, and both ends' numbers are printed. Without `--fps`, at the app's own choice of frame rate; `--fps 30,60` holds each of those. `--narrow <bit/s>:<from second>:<for seconds>` holds the bandwidth estimate down for a while, prints every second, and says what each change of frame rate cost; `--timeline`, `--seconds 10`, `--motion`, `--still`, `--encoder own\|stock`, `--json <file>`; the rest in its header. |
 | `flexfec-check.mjs` | A short functional check over its own loopback UDP proxy: 60 ms each way, every twentieth original video packet dropped. Checks real FlexFEC packet receipt, then successful video without FlexFEC when the test receiver declines it. `--json <file>` saves the evidence. No system network changes or latency claims. |
+| `network-check.mjs` | A 48-second congestion/recovery scenario: an owned UDP proxy changes media capacity from 20 to 0.7 to 20 Mbps, with 10 ms propagation each way and a 200 ms router queue. Includes RTX/FEC in the budget. `--screen`, `--maxFps`, `--maxWidth`, `--app`, repeatable `--trial`, `--json`; passing proves traversal and decoding, not acceptable latency or iPhone performance. |
+| `media-lab.mjs` | Loopback-only encrypted UDP experiment using the same capture, VT H.264 and native decoder. `--network` uses the congestion scenario above; `--no-ltr` checks recovery without acknowledged long-term references. Requires `--loopback --media-lab` in the helper. Not a remote transport. |
+| `codec-check.mjs` | Encode-only H.264/HEVC hardware comparison with fixed `--fps`, `--bitrate`, `--maxWidth` and raw input bound `--pending`. No transport, decoder, picture-quality or display result. HEVC is not enabled for shipping media. |
 | `setup-shots.mjs` | The setup window drawn into PNG files in every state, light and dark, Chinese and English (24 of them, in `build/setup-shots` or the directory named), with nothing shown and nothing asked of the system. For looking at the window after changing it. |
 | `app.mjs`, `h264.mjs`, `pointer-shapes.swift` | Shared by the above: opening the app, reading H.264, changing the pointer's picture. |
 
 The host's own tests run its real code against this app: `packages/host/test/app.test.ts`, and
 `packages/host/scripts/screen-check.ts` with a real viewer page.
+
+## Media experiments
+
+The default remains H.264 over WebRTC. The alternative transport is a laboratory, gated behind
+`--loopback --media-lab`: both sockets bind to `127.0.0.1`, share a fresh in-process key, and
+authenticate every packet with ChaCha20-Poly1305 using direction-specific HKDF keys. A
+256-packet replay window, 1200-byte datagrams, at most eight assembling frames / 4 MiB / 800 ms,
+and bounded raw inputs keep malformed or delayed input from making queues grow indefinitely.
+There is no remote handshake, pairing integration, NAT traversal or iOS receiver for it.
+
+Frame deadlines abandon an expired prediction chain; only an IDR or a refresh based on a
+successfully decoded, acknowledged LTR may resume it. Recovery waits for a decoded ACK before
+admitting speculative deltas. Quiet probes avoid an application-limited feedback deadlock.
+The experimental controller uses delivery feedback, never the proxy's configured capacity.
+These mechanisms are implemented and tested, but the full-screen weak-network comparison
+showed longer freezes than WebRTC. They have not been adopted in the product path.
+
+Run the built helper through these tools, selecting an actual display index:
+
+```sh
+TMPDIR=/tmp node tools/loopback.mjs --screen 1 --maxFps 120 --motion --media-probe --seconds 15
+TMPDIR=/tmp node tools/network-check.mjs --screen 1 --maxFps 120 --full-screen-motion --json /tmp/rtc.json
+TMPDIR=/tmp node tools/media-lab.mjs --screen 1 --maxFps 120 --full-screen-motion --network --deadline-ms 300 --json /tmp/udp.json
+TMPDIR=/tmp node tools/codec-check.mjs --screen 1 --fps 120 --codec hevc --bitrate 5000000 --seconds 8
+```
+
+`--media-probe` carries encoder-input monotonic time in an H.264 SEI and matches it at decode,
+instead of assuming sender/receiver RTP timestamps have the same origin. It is loopback-only
+and disabled in normal use; reported time excludes capture waiting and physical presentation.
+`network-check.mjs` enables it automatically. Use `--quality` on the two network tools in a
+separate run to compare sampled, frame-matched luma grids (about 1/31 frames plus recovery
+frames, video/full-range normalized); this adds CPU work and does not measure chroma or text
+readability. `--full-screen-motion` covers the chosen screen with a repeatable scrolling
+fixture and closes it with the helper. No synthetic input or system network settings change.
+
+`--budget-keyframes` on the WebRTC diagnostic tool limits requested recovery key-frame quality
+using the previous key frame's size and 0.2 seconds of target bitrate. It is off by default;
+smaller recovery frames can still mean worse pictures. `--trial WebRTC-FrameDropper=Disabled`
+is also experimental: more decoded frames in a narrow link did not ensure fresh content.
+Compare delivered updates, age, freezes, bitrate and quality together. Conditions, binary
+hashes and results are recorded in the [architecture experiment section](../../docs/v2/screen-realtime.md).
+Remove owned temporary JSON/log/build outputs after recording the useful results.
 
 ## Command line
 
@@ -205,7 +256,10 @@ The host's own tests run its real code against this app: `packages/host/test/app
 | `--no-playout-delay` | Leaves out the field trial that sends playout-delay 0. |
 | `--no-flexfec` | Disables FlexFEC advertisement and sending for an explicit comparison. |
 | `--loopback-no-flexfec` | Makes the test receiver decline FlexFEC through codec preferences, to check an unsupported viewer's path. |
-| `--loopback-network` | Only with `--loopback`: passes its ICE candidates to `flexfec-check.mjs`, which supplies proxy candidates. The proxy exists only while that tool runs. |
+| `--loopback-network` | Only with `--loopback`: passes its ICE candidates to `flexfec-check.mjs` or `network-check.mjs`, which supplies proxy candidates. The proxy exists only while that tool runs. |
+| `--media-probe`, `--media-quality` | Loopback-only frame timing, and optional sampled luma comparison. Normal sessions do neither. |
+| `--media-lab`, `--lab-codec-only` | Loopback-only alternative media lab, or encode-only codec probe. Use the tools above; these are not host/phone modes. |
+| `--full-screen-motion`, `--budget-keyframes` | Full-display diagnostic workload; optional experimental key-frame budget, never enabled by default. |
 | `--trial <name>=<value>` | Another libwebrtc field trial (repeatable). |
 | `--rtc-log` | libwebrtc's log, as `log` messages. |
 
@@ -411,14 +465,15 @@ reduces rate when the full picture/rate cannot be carried:
 - Start at the receiver/source ceiling, normally 120 or 60, with lower stages at 60 and 30
   where applicable. A source below these rates bounds the starting rate further. Explicit
   `fps` is a fixed internal override.
-- Reduce after 3 consecutive troubled seconds: estimated bandwidth below the full-rate
-  ceiling × 0.2 × current/full, sent pixel share below 0.9, or encoded output below 0.75 of
-  the requested active input while capture supplies at least 0.8 of the current rate.
-  Packet loss alone and time per encoded frame are not independent triggers.
-- Raise to the next stage after 10 good seconds: full picture, no quality limitation,
-  sufficient encoded output and estimated bandwidth at least the full-rate ceiling × 0.4
-  × next/full. If a raised rate fails again within 30 seconds, the next wait doubles, up
-  to 160 seconds.
+- Reduce after 3 consecutive troubled seconds: sent pixel share below 0.9, encoded output
+  below 0.75 of the requested active input, or average packet send wait above 50 ms.
+  Output/queue triggers require capture to supply at least 0.8 of the current rate. A low
+  bandwidth estimate, packet loss alone and time per encoded frame are not independent triggers.
+- Probe the next stage after 10 good seconds: full picture, no quality limitation,
+  sufficient encoded output and average packet send wait at most 10 ms. Missing delivery
+  statistics don't count as health. No fraction of the maximum bitrate is reserved for a
+  probe: low-complexity desktop content can sustain a higher rate on less bandwidth.
+  If a raised rate fails again within 30 seconds, the next wait doubles, up to 160 seconds.
 - The first 4 seconds and the 4 after a change are settling periods.
 
 Rate changes update ScreenCaptureKit, sender parameters and the bitrate ceiling without
@@ -426,6 +481,11 @@ renegotiating the media connection. A decrease requests restoration of the captu
 the sender can adapt them again later. An increase eases the first second's bitrate using
 half the previous observed bitrate, with a 1 Mbit/s floor. Neither change guarantees physical
 presentation cadence.
+
+The queue thresholds identify sustained pressure; they do not cap the age of individual
+packets already inside WebRTC. A quiet screen's occasional large frame does not lower the
+frame-rate ceiling. `--rtc-log` also logs the bitrate and input-rate estimates supplied to
+the custom encoder, to diagnose overshoot when motion resumes or the rate changes.
 
 Other settings include capture rate slack (1.1×), capture surface queue depth (5), static-frame
 repeats (0.1 s for a second, then 0.5 s), cursor position/shape polling (60/5 Hz), playout-delay

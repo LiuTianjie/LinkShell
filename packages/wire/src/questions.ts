@@ -6,7 +6,7 @@ export function questionAnswerError(question: Question, answer: QuestionAnswer |
   const values = answer?.values ?? [];
   const c = question.constraints;
   if (values.length > 1 && question.kind !== "choices") return `${label}只能填写一个答案`;
-  if (question.options && values.some((value) => !question.options!.some((option) => option.value === value))) return `${label}包含无效选项`;
+  if (question.kind !== "text" && question.options && values.some((value) => !question.options!.some((option) => option.value === value))) return `${label}包含无效选项`;
   const present = c?.type === "array" ? answer !== undefined : c?.type === "string" ? values[0] !== undefined || !!answer?.other?.trim() : values.some((value) => value !== "") || !!answer?.other?.trim();
   if (!present) return question.required ? `还没回答：${label}` : undefined;
   if (!c) return;

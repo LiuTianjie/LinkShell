@@ -6,6 +6,7 @@ import WebRTC
 /// be checked without depending on a particular Mac's hardware failing during a test.
 protocol ScreenCompression: AnyObject {
   var mode: String { get }
+  var keyPlan: VideoCompressor.KeyPlan? { get set }
   func setRates(bitrate: Int, ceiling: Int?, fps: Int)
   func encode(_ buffer: CVPixelBuffer, at time: CMTime, key: Bool, done: @escaping (Result<VideoCompressor.Frame?, VideoCompressor.Failure>) -> Void)
 }
@@ -38,6 +39,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
 
   private let info: RTCVideoCodecInfo
   private let maximumFrameRate: Int
+  private let maxPendingFrames: Int
   private let profile: VideoCompressor.Profile
   private let packetization: RTCH264PacketizationMode
   private var callback: RTCVideoEncoderCallback?
@@ -50,13 +52,15 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   private var latestRates: (bitrate: UInt32, framerate: UInt32)?
   /// Set on the encoder's thread when a frame fails; read on libwebrtc's before the next.
   /// Old callbacks must not break a replacement session or publish its stale pictures.
-  private let state = Locked((generation: 0, failure: String?.none))
+  private let state = Locked((generation: 0, failure: String?.none, pending: 0, keyWanted: false))
 
   init(info: RTCVideoCodecInfo, maximumFrameRate: Int = Tuning.fullFps,
+       maxPendingFrames: Int = Tuning.encoderPendingFrames,
        makeCompressor: @escaping (VideoCompressor.Setup) throws -> ScreenCompression = { try VideoCompressor($0) },
        makeStock: @escaping (RTCVideoCodecInfo, Int) -> RTCVideoEncoder = { H264ScreenEncoder(info: $0, maximumFrameRate: $1) }) {
     self.info = info
     self.maximumFrameRate = maximumFrameRate
+    self.maxPendingFrames = max(1, maxPendingFrames)
     self.makeCompressor = makeCompressor
     self.makeStock = makeStock
     // 42…: (Constrained) Baseline; anything else offered is Constrained High.
@@ -89,6 +93,9 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
       // Without its rate control this encoder has nothing over libwebrtc's.
       guard made.mode == "low-latency" else { return fallBack("no low-latency encoder on this Mac") }
       compressor = made
+      if Launch.has("--budget-keyframes") {
+        made.keyPlan = .init(budget: max(1024, Int(settings.startBitrate) * 1000 / 8 / 5), finest: nil)
+      }
       return Code.ok
     } catch {
       return fallBack("\(error)")
@@ -129,22 +136,41 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     let captured = frame.timeStampNs / 1_000_000
     let rotation = frame.rotation
     let packetization = self.packetization
-    let generation = state.withLock { $0.generation }
-    compressor.encode(native.pixelBuffer, at: CMTime(value: frame.timeStampNs, timescale: 1_000_000_000), key: key) { [state] result in
-      guard state.withLock({ $0.generation == generation }) else { return }
+    // A hardware encoder can accept frames faster than it finishes them. Bound raw input
+    // instead of queuing old screen contents or discarding compressed reference frames later.
+    let job: (generation: Int, key: Bool)? = state.withLock { state in
+      state.keyWanted = state.keyWanted || key
+      guard state.pending < maxPendingFrames else { return nil }
+      state.pending += 1
+      let key = state.keyWanted
+      state.keyWanted = false
+      return (state.generation, key)
+    }
+    guard let job else { return Code.ok }
+    let began = MediaStageProbe.enabled ? ProcessInfo.processInfo.systemUptime : 0
+    if MediaStageProbe.enabled, job.key || rtpTime % 31 == 0 {
+      MediaStageProbe.shared.reference(native.pixelBuffer, began: began)
+    }
+    compressor.encode(native.pixelBuffer, at: CMTime(value: frame.timeStampNs, timescale: 1_000_000_000), key: job.key) { [state] result in
+      guard state.withLock({ state in
+        guard state.generation == job.generation else { return false }
+        state.pending -= 1
+        return true
+      }) else { return }
       switch result {
       case .failure(let failure):
-        state.withLock { if $0.generation == generation { $0.failure = "\(failure)" } }
+        state.withLock { if $0.generation == job.generation { $0.failure = "\(failure)" } }
       case .success(nil):
         // Dropped to keep to the rate: libwebrtc hears of no frame, as from its own encoder.
+        if job.key { state.withLock { if $0.generation == job.generation { $0.keyWanted = true } } }
         break
       case .success(let encoded?):
         guard let data = encoded.accessUnit() else {
-          state.withLock { if $0.generation == generation { $0.failure = "an encoded frame had no H.264 access unit" } }
+          state.withLock { if $0.generation == job.generation { $0.failure = "an encoded frame had no H.264 access unit" } }
           return
         }
         let image = RTCEncodedImage()
-        image.buffer = data
+        image.buffer = MediaStageProbe.enabled ? MediaStageProbe.attaching(to: data, began: began) : data
         image.encodedWidth = width
         image.encodedHeight = height
         image.timeStamp = rtpTime
@@ -164,9 +190,15 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   }
 
   func setBitrate(_ bitrateKbit: UInt32, framerate: UInt32) -> Int32 {
+    if Launch.has("--rtc-log") {
+      Engine.report("encoder target: \(bitrateKbit) kbit/s, \(framerate) fps")
+    }
     latestRates = (bitrateKbit, framerate)
     if let stock { return stock.setBitrate(bitrateKbit, framerate: framerate) }
     compressor?.setRates(bitrate: Int(bitrateKbit) * 1000, ceiling: nil, fps: Int(framerate))
+    if Launch.has("--budget-keyframes") {
+      compressor?.keyPlan = .init(budget: max(1024, Int(bitrateKbit) * 1000 / 8 / 5), finest: nil)
+    }
     return Int32(Code.ok)
   }
 
@@ -193,6 +225,8 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     state.withLock {
       $0.generation += 1
       $0.failure = nil
+      $0.pending = 0
+      $0.keyWanted = false
     }
   }
 

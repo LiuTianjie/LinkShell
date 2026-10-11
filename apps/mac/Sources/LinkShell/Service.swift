@@ -16,6 +16,7 @@ final class Service {
   private let options: ScreenSession.Options
   private var controls: [String: Control] = [:]
   private var session: ScreenSession?
+  private var mediaLab: (id: String, run: MediaLab)?
   private var streams: [String: StreamSession] = [:]
   private var previews: [String: ComputerPreview] = [:]
   private var watch: Watch?
@@ -33,6 +34,7 @@ final class Service {
       // goes too. Its captures and encoders end with it.
       for control in controls.values { control.releaseAll() }
       session?.close()
+      mediaLab?.run.close()
       for preview in previews.values { preview.close() }
       InputSource.restoreNow()
       watch?.cancel()
@@ -56,6 +58,18 @@ final class Service {
     }
     guard let id = command["v"] as? String else { return }
     switch kind {
+    case "lab.open":
+      guard options.loopback, Launch.has("--media-lab") else { return }
+      mediaLab?.run.close()
+      let run = MediaLab(request: ScreenRequest(viewer: id, command), link: link)
+      mediaLab = (id, run); run.start()
+    case "lab.route":
+      guard mediaLab?.id == id, let sender = command["senderPort"] as? Int,
+            let receiver = command["receiverPort"] as? Int else { return }
+      mediaLab?.run.route(senderPort: sender, receiverPort: receiver)
+    case "lab.close":
+      guard mediaLab?.id == id else { return }
+      mediaLab?.run.close(); mediaLab = nil
     case "preview.open":
       previews.removeValue(forKey: id)?.close()
       guard previews.count < 8, let preview = ComputerPreview(viewer: id, command: command, link: link) else {

@@ -6,6 +6,7 @@
 //   node tools/loopback.mjs [--fps 30,60] [--maxFps 60] [--seconds 10] [--maxWidth 1920] [--screen 0] [--codec h264]
 //                           [--still] [--motion] [--encoder own|stock] [--no-low-latency] [--trial <name>=<value>]
 //                           [--narrow <bit/s>:<from second>:<for seconds>] [--timeline]
+//                           [--expect-steady]
 //                           [--no-playout-delay] [--no-flexfec] [--loopback-no-flexfec] [--rtc-log] [--json <file>]
 //
 // Without --fps it is one run at the app's own choice of frame rate: 60, and 30 while 60 is not
@@ -17,6 +18,8 @@
 // every second (as --timeline does), and each change of frame rate with the longest wait for a
 // frame across it. Where the app chooses the rate, the run fails unless the rate went down and
 // came back up.
+// --expect-steady instead checks that the rate never changes, for a lower bandwidth estimate
+// that still carries this screen. It does not assert picture quality or physical display FPS.
 //
 // The clock strip is shown while it runs (unless --still): it changes at every refresh of the
 // display, so the capture has a new picture every time, and the receiving end reads it back to
@@ -40,8 +43,9 @@ const timeline = args.includes("--timeline") || Boolean(narrow);
 const still = args.includes("--still");
 const flags = [
   "--loopback",
+  ...(args.includes("--media-probe") ? ["--media-probe"] : []),
   ...(still ? [] : ["--clock"]),
-  ...["--rtc-log", "--no-playout-delay", "--motion", "--no-low-latency", "--no-flexfec", "--loopback-no-flexfec"].filter((flag) => args.includes(flag)),
+  ...["--rtc-log", "--no-playout-delay", "--motion", "--full-screen-motion", "--no-low-latency", "--no-flexfec", "--loopback-no-flexfec"].filter((flag) => args.includes(flag)),
   ...(value("--encoder") ? ["--encoder", value("--encoder")] : []),
   ...(value("--trial") ? ["--trial", value("--trial")] : []),
 ];
@@ -236,7 +240,12 @@ for (const fps of rates) {
     console.log(`            longest wait for a frame across it: ${change.captureGapMs} ms captured, ${change.decodedGapMs} ms decoded${still ? "" : `; glass → decoded p50 at most ${change.latencyMs} ms in the three seconds after`}`);
     console.log(`            ${change.widthBefore} wide before it, ${change.widthAfter} wide by the end of ${change.to} fps`);
   }
-  if (narrow && fps === undefined) {
+  if (args.includes("--expect-steady")) {
+    if (result.changes.length) {
+      console.error("  FAILED the frame rate changed despite the expected steady delivery");
+      process.exitCode = 1;
+    }
+  } else if (narrow && fps === undefined) {
     const down = result.changes.findIndex((change) => change.to < change.from);
     const up = result.changes.findIndex((change, index) => index > down && change.to > change.from);
     if (down < 0 || up < 0) {

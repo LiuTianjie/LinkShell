@@ -19,13 +19,95 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
   let metrics: ScreenMetrics
   var onFailure: ((String) -> Void)?
   var onPicture: ((CGSize) -> Void)?
-  var pointer = CGPoint(x: 0.5, y: 0.5) { didSet { dirty = true } }
-  var showsPointer = true { didSet { dirty = true } }
-  var zoom: CGFloat = 1 { didSet { dirty = true } }
-  var pan = CGPoint.zero { didSet { dirty = true } }
-  var externalContentRect: CGRect? { didSet { dirty = true } }
+  var pointer = CGPoint(x: 0.5, y: 0.5) { didSet { updatePresentation() } }
+  var showsPointer = true { didSet { updatePresentation() } }
+  var zoom: CGFloat = 1 { didSet { updatePresentation() } }
+  var pan = CGPoint.zero { didSet { updatePresentation() } }
+  var externalContentRect: CGRect? { didSet { updatePresentation() } }
   private(set) var pictureSize = CGSize(width: 16, height: 9)
   private(set) var requestedFps = 60
+  private var renderer: ScreenMetalRenderer!
+
+  init(metrics: ScreenMetrics) {
+    self.metrics = metrics
+    super.init(frame: .zero)
+    isUserInteractionEnabled = false
+    clipsToBounds = true
+    backgroundColor = .black
+    renderer = ScreenMetalRenderer(surface: layer as! CAMetalLayer, metrics: metrics,
+      picture: { [weak self] size in self?.pictureSize = size; self?.onPicture?(size) },
+      failure: { [weak self] message in self?.onFailure?(message) })
+    let size = CGSize(width: 18, height: 26)
+    let image = UIGraphicsImageRenderer(size: size).image { _ in
+      let path = UIBezierPath()
+      path.move(to: CGPoint(x: 1, y: 1)); path.addLine(to: CGPoint(x: 1, y: 21))
+      path.addLine(to: CGPoint(x: 6, y: 17)); path.addLine(to: CGPoint(x: 10, y: 25))
+      path.addLine(to: CGPoint(x: 14, y: 23)); path.addLine(to: CGPoint(x: 10, y: 15))
+      path.addLine(to: CGPoint(x: 17, y: 15)); path.close()
+      UIColor.white.setFill(); path.fill()
+      UIColor.black.setStroke(); path.lineWidth = 1; path.stroke()
+    }
+    setCursor(image, size: size, hotspot: .zero)
+  }
+
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+  override func layoutSubviews() { super.layoutSubviews(); updatePresentation() }
+
+  private func updatePresentation() {
+    guard renderer != nil else { return }
+    renderer.presentation.update { state in
+      state.bounds = bounds.size; state.scale = window?.screen.scale ?? UIScreen.main.scale
+      state.pointer = pointer; state.showsPointer = showsPointer
+      state.zoom = zoom; state.pan = pan; state.externalRect = externalContentRect
+      state.revision &+= 1
+    }
+  }
+
+  var contentRect: CGRect { renderer.presentation.read().contentRect(picture: pictureSize) }
+  func setCursor(_ image: UIImage, size: CGSize, hotspot: CGPoint) {
+    guard let cg = image.cgImage else { return }
+    renderer.setCursor(cg, size: size, hotspot: hotspot)
+  }
+  func start(fps: Int) {
+    requestedFps = min(fps, window?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond)
+    updatePresentation(); renderer.start(fps: requestedFps)
+  }
+  func stop() { renderer.stop() }
+  func setSize(_ size: CGSize) { /* The frame and its dimensions must be consumed together. */ }
+  func renderFrame(_ frame: RTCVideoFrame?) { if let frame { renderer.receive(frame) } }
+  func takeReplacements() -> Int { renderer.takeReplacements() }
+}
+
+private struct ScreenPresentation {
+  var bounds = CGSize.zero
+  var scale: CGFloat = 1
+  var pointer = CGPoint(x: 0.5, y: 0.5)
+  var showsPointer = true
+  var zoom: CGFloat = 1
+  var pan = CGPoint.zero
+  var externalRect: CGRect?
+  var cursor: MTLTexture?
+  var cursorSize = CGSize(width: 18, height: 26)
+  var cursorHotspot = CGPoint.zero
+  var revision: UInt64 = 0
+  func contentRect(picture: CGSize) -> CGRect {
+    if let externalRect { return externalRect }
+    let fit = min(bounds.width / max(1, picture.width), bounds.height / max(1, picture.height))
+    let size = CGSize(width: picture.width * fit * zoom, height: picture.height * fit * zoom)
+    return CGRect(x: (bounds.width - size.width) / 2 + pan.x, y: (bounds.height - size.height) / 2 + pan.y, width: size.width, height: size.height)
+  }
+}
+
+/// The worker owns display-link callbacks, texture mapping and submission. The UIView only
+/// publishes value snapshots and receives occasional main-thread size/failure notifications.
+private final class ScreenMetalRenderer {
+  let presentation = ScreenShared(ScreenPresentation())
+  private let surface: CAMetalLayer
+  private let metrics: ScreenMetrics
+  private let onPicture: (CGSize) -> Void
+  private let onFailure: (String) -> Void
+  private let worker = ScreenRenderThread()
+  private let lifecycle = ScreenShared((generation: UInt64(0), active: true))
   private let mailbox = ScreenMailbox<ScreenPicture>()
   private let inFlight = DispatchSemaphore(value: 1)
   private let timingLock = NSLock()
@@ -36,31 +118,22 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
   private var reportedFrame = false
   private var reportedSize = CGSize.zero
   private var reportedFailure = false
+  private var presentedRevision: UInt64?
   private var queue: MTLCommandQueue?
   private var yuvPipeline: MTLRenderPipelineState?
   private var rgbaPipeline: MTLRenderPipelineState?
   private var cache: CVMetalTextureCache?
-  private var cursorTexture: MTLTexture?
-  private var cursorSize = CGSize(width: 18, height: 26)
-  private var cursorHotspot = CGPoint.zero
   private var driver: ScreenDisplayDriver?
   private var metalLink: AnyObject?
   private var legacyLink: CADisplayLink?
 
-  init(metrics: ScreenMetrics) {
-    self.metrics = metrics
-    super.init(frame: .zero)
-    isUserInteractionEnabled = false
-    clipsToBounds = true
-    backgroundColor = .black
+  init(surface: CAMetalLayer, metrics: ScreenMetrics, picture: @escaping (CGSize) -> Void, failure: @escaping (String) -> Void) {
+    self.surface = surface; self.metrics = metrics; onPicture = picture; onFailure = failure
     configureMetal()
   }
 
-  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
   private func configureMetal() {
     guard let device = MTLCreateSystemDefaultDevice() else { return fail("这台设备无法使用原生屏幕渲染") }
-    let surface = layer as! CAMetalLayer
     surface.device = device
     surface.pixelFormat = .bgra8Unorm
     surface.framebufferOnly = true
@@ -88,68 +161,51 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
       }
       yuvPipeline = try pipeline("screenYUV", blend: false)
       rgbaPipeline = try pipeline("screenRGBA", blend: true)
-      let image = UIGraphicsImageRenderer(size: cursorSize).image { context in
-        let path = UIBezierPath()
-        path.move(to: CGPoint(x: 1, y: 1)); path.addLine(to: CGPoint(x: 1, y: 21))
-        path.addLine(to: CGPoint(x: 6, y: 17)); path.addLine(to: CGPoint(x: 10, y: 25))
-        path.addLine(to: CGPoint(x: 14, y: 23)); path.addLine(to: CGPoint(x: 10, y: 15))
-        path.addLine(to: CGPoint(x: 17, y: 15)); path.close()
-        UIColor.white.setFill(); path.fill()
-        UIColor.black.setStroke(); path.lineWidth = 1; path.stroke()
-      }
-      setCursor(image, size: cursorSize, hotspot: .zero)
     } catch { fail("原生屏幕渲染初始化失败") }
   }
 
-  func setCursor(_ image: UIImage, size: CGSize, hotspot: CGPoint) {
-    guard let device = (layer as? CAMetalLayer)?.device, let cg = image.cgImage else { return }
-    cursorTexture = try? MTKTextureLoader(device: device).newTexture(cgImage: cg, options: [.SRGB: false])
-    cursorSize = size; cursorHotspot = hotspot; dirty = true
-  }
-
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    let scale = window?.screen.scale ?? UIScreen.main.scale
-    let surface = layer as! CAMetalLayer
-    surface.contentsScale = scale
-    surface.drawableSize = CGSize(width: max(1, bounds.width * scale), height: max(1, bounds.height * scale))
-    dirty = true
-  }
-
-  var contentRect: CGRect {
-    if let externalContentRect { return externalContentRect }
-    let fit = min(bounds.width / max(1, pictureSize.width), bounds.height / max(1, pictureSize.height))
-    let size = CGSize(width: pictureSize.width * fit * zoom, height: pictureSize.height * fit * zoom)
-    return CGRect(x: (bounds.width - size.width) / 2 + pan.x, y: (bounds.height - size.height) / 2 + pan.y, width: size.width, height: size.height)
+  func setCursor(_ image: CGImage, size: CGSize, hotspot: CGPoint) {
+    guard let device = surface.device else { return }
+    let texture = try? MTKTextureLoader(device: device).newTexture(cgImage: image, options: [.SRGB: false])
+    presentation.update { $0.cursor = texture; $0.cursorSize = size; $0.cursorHotspot = hotspot; $0.revision &+= 1 }
   }
 
   func start(fps: Int) {
+    lifecycle.update { $0.generation &+= 1; $0.active = true }
+    worker.perform { [self] in configureDisplayLink(fps: fps) }
+  }
+
+  private func configureDisplayLink(fps: Int) {
     stopDisplayLink()
-    requestedFps = min(fps, window?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond)
-    let driver = ScreenDisplayDriver(view: self)
+    guard lifecycle.read().active else { return }
+    // Starting a new generation can invalidate a size callback still waiting on the UI
+    // thread. Report the first picture again even when its dimensions have not changed.
+    reportedFrame = false
+    applySize(presentation.read())
+    let driver = ScreenDisplayDriver(renderer: self)
     self.driver = driver
-    let range = CAFrameRateRange(minimum: Float(min(60, requestedFps)), maximum: Float(requestedFps), preferred: Float(requestedFps))
+    let range = CAFrameRateRange(minimum: Float(min(60, fps)), maximum: Float(fps), preferred: Float(fps))
     if #available(iOS 17.0, *) {
-      let link = CAMetalDisplayLink(metalLayer: layer as! CAMetalLayer)
+      let link = CAMetalDisplayLink(metalLayer: surface)
       link.preferredFrameLatency = 1
       link.preferredFrameRateRange = range
       link.delegate = driver
-      link.add(to: .main, forMode: .common)
+      link.add(to: .current, forMode: .common)
       metalLink = link
     } else {
       let link = CADisplayLink(target: driver, selector: #selector(ScreenDisplayDriver.tick(_:)))
       link.preferredFrameRateRange = range
-      link.add(to: .main, forMode: .common)
+      link.add(to: .current, forMode: .common)
       legacyLink = link
     }
   }
 
   func stop() {
-    stopDisplayLink()
-    _ = mailbox.take()
-    current = nil
-    submittedTimestamp = nil
-    reportedFrame = false
+    lifecycle.update { $0.generation &+= 1; $0.active = false }
+    worker.perform { [self] in
+      stopDisplayLink(); _ = mailbox.take(); current = nil
+      submittedTimestamp = nil; reportedFrame = false
+    }
   }
 
   private func stopDisplayLink() {
@@ -159,24 +215,30 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
   }
 
   deinit {
-    if #available(iOS 17.0, *) { (metalLink as? CAMetalDisplayLink)?.invalidate() }
-    legacyLink?.invalidate()
+    let metal = metalLink, legacy = legacyLink
+    worker.stop {
+      if #available(iOS 17.0, *) { (metal as? CAMetalDisplayLink)?.invalidate() }
+      legacy?.invalidate()
+    }
   }
-
-  func setSize(_ size: CGSize) { /* The frame and its dimensions must be consumed together. */ }
-
-  func renderFrame(_ frame: RTCVideoFrame?) {
-    guard let frame else { return }
+  func receive(_ frame: RTCVideoFrame) {
+    guard lifecycle.read().active else { return }
     guard let native = frame.buffer as? RTCCVPixelBuffer else {
-      DispatchQueue.main.async { [weak self] in self?.fail("当前视频格式无法使用原生屏幕渲染") }
+      worker.perform { [weak self] in self?.fail("当前视频格式无法使用原生屏幕渲染") }
       return
     }
-    mailbox.put(ScreenPicture(frame: frame, buffer: native.pixelBuffer, timestamp: UInt32(bitPattern: frame.timeStamp)))
+    let timestamp = UInt32(bitPattern: frame.timeStamp)
+    metrics.received(timestamp)
+    mailbox.put(ScreenPicture(frame: frame, buffer: native.pixelBuffer, timestamp: timestamp))
   }
 
   func takeReplacements() -> Int { mailbox.takeReplacements() }
 
   fileprivate func draw(drawable supplied: CAMetalDrawable?, deadline: Double) {
+    let life = lifecycle.read()
+    guard life.active else { return }
+    let view = presentation.read()
+    defer { applySize(view) }
     timingLock.lock(); let cost = gpuSeconds; timingLock.unlock()
     guard ScreenTiming.canSubmit(now: CACurrentMediaTime(), deadline: deadline, gpuSeconds: cost),
           inFlight.wait(timeout: .now()) == .success else { metrics.missed(); return }
@@ -184,11 +246,13 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
     defer { if !committed { inFlight.signal() } }
     if let picture = mailbox.take() {
       current = picture
-      pictureSize = CGSize(width: Int(picture.frame.width), height: Int(picture.frame.height))
       dirty = true
     }
+    dirty = dirty || presentedRevision != view.revision
     guard dirty, let picture = current, let cache, let queue,
-          let command = queue.makeCommandBuffer(), let drawable = supplied ?? (layer as! CAMetalLayer).nextDrawable() else { return }
+          let command = queue.makeCommandBuffer(), let drawable = supplied ?? surface.nextDrawable() else { return }
+    let pictureSize = CGSize(width: Int(picture.frame.width), height: Int(picture.frame.height))
+    let contentRect = view.contentRect(picture: pictureSize)
     let format = CVPixelBufferGetPixelFormatType(picture.buffer)
     var heldTextures: [CVMetalTexture] = []
     func texture(_ plane: Int, _ format: MTLPixelFormat, planar: Bool) -> MTLTexture? {
@@ -213,7 +277,7 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
     pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
     guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { return }
     func viewport(_ rect: CGRect) {
-      let scale = (layer as! CAMetalLayer).contentsScale
+      let scale = view.scale
       encoder.setViewport(MTLViewport(originX: rect.minX * scale, originY: rect.minY * scale, width: rect.width * scale, height: rect.height * scale, znear: 0, zfar: 1))
     }
     viewport(contentRect)
@@ -224,9 +288,9 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
     var range = SIMD4<Float>(full ? 1 : 255.0 / 219, full ? 0 : 16.0 / 255, full ? 1 : 255.0 / 224, 0)
     encoder.setFragmentBytes(&range, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
     encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-    if showsPointer, let cursorTexture, let rgbaPipeline {
+    if view.showsPointer, let cursorTexture = view.cursor, let rgbaPipeline {
       let rect = contentRect
-      viewport(CGRect(x: rect.minX + pointer.x * rect.width - cursorHotspot.x, y: rect.minY + pointer.y * rect.height - cursorHotspot.y, width: cursorSize.width, height: cursorSize.height))
+      viewport(CGRect(x: rect.minX + view.pointer.x * rect.width - view.cursorHotspot.x, y: rect.minY + view.pointer.y * rect.height - view.cursorHotspot.y, width: view.cursorSize.width, height: view.cursorSize.height))
       encoder.setRenderPipelineState(rgbaPipeline)
       encoder.setFragmentTexture(cursorTexture, index: 0)
       encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
@@ -251,25 +315,42 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
       }
       inFlight.signal()
       if buffer.status == .error {
-        DispatchQueue.main.async { [weak self] in self?.fail("屏幕渲染失败，请重新连接") }
+        self?.worker.perform { [weak self] in self?.fail("屏幕渲染失败，请重新连接") }
       }
     }
     command.present(drawable)
     command.commit()
+    metrics.committed()
     committed = true
     submittedTimestamp = picture.timestamp
     dirty = false
+    presentedRevision = view.revision
     if !reportedFrame || reportedSize != pictureSize {
       reportedFrame = true
       reportedSize = pictureSize
-      onPicture?(pictureSize)
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.lifecycle.read() == life else { return }
+        self.onPicture(pictureSize)
+      }
     }
+  }
+
+  private func applySize(_ view: ScreenPresentation) {
+    let size = CGSize(width: max(1, view.bounds.width * view.scale), height: max(1, view.bounds.height * view.scale))
+    if surface.drawableSize != size { surface.drawableSize = size }
+    if surface.contentsScale != view.scale { surface.contentsScale = view.scale }
   }
 
   private func fail(_ message: String) {
     guard !reportedFailure else { return }
     reportedFailure = true
-    onFailure?(message)
+    let life = lifecycle.read()
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      let current = self.lifecycle.read()
+      guard current.active, life.generation == 0 || current == life else { return }
+      self.onFailure(message)
+    }
   }
 
   private static let shader = """
@@ -295,14 +376,14 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
 }
 
 private final class ScreenDisplayDriver: NSObject {
-  weak var view: ScreenMetalView?
-  init(view: ScreenMetalView) { self.view = view }
-  @objc func tick(_ link: CADisplayLink) { view?.draw(drawable: nil, deadline: link.targetTimestamp) }
+  weak var renderer: ScreenMetalRenderer?
+  init(renderer: ScreenMetalRenderer) { self.renderer = renderer }
+  @objc func tick(_ link: CADisplayLink) { renderer?.draw(drawable: nil, deadline: link.targetTimestamp) }
 }
 
 @available(iOS 17.0, *)
 extension ScreenDisplayDriver: CAMetalDisplayLinkDelegate {
   func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
-    view?.draw(drawable: update.drawable, deadline: update.targetPresentationTimestamp)
+    renderer?.draw(drawable: update.drawable, deadline: update.targetPresentationTimestamp)
   }
 }

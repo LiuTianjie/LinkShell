@@ -98,6 +98,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
 
   private var bytes = Rate()
   private var encodeTime = Rate()
+  private var quantizers = Rate()
   private var encodedFrames = Rate()
   private var sendDelay = Rate()
   private var packetsSent = Rate()
@@ -110,6 +111,10 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   /// The most the track may send for now, in bits a second, where that is not the frame rate's
   /// ceiling: the second after the rate went up (`change`).
   private var eased: Int?
+  /// The floor under the bandwidth estimate while the video is on the local network.
+  private var lanFloor = LanFloor()
+  private var roundTrips = Rate()
+  private var roundTripCount = Rate()
 
   init(request: ScreenRequest, options: Options, link: Link) {
     self.request = request
@@ -131,8 +136,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     if request.fps == nil {
       frameRate = Tuning.fullRate(viewer: request.maxFps, display: display.screen?.maximumFramesPerSecond ?? 60)
       if frameRate > 30 {
-        steps = FrameRate(full: frameRate, reduced: frameRate > 60 ? 60 : 30, lowest: 30,
-                          ceiling: Tuning.maxBitrate(width: size.width, height: size.height, fps: frameRate))
+        steps = FrameRate(full: frameRate, reduced: frameRate > 60 ? 60 : 30, lowest: 30)
       }
     }
     // The viewer's hands are on the display it is shown, wherever that display is moved to.
@@ -537,19 +541,22 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
         let text = StatsReader.text
         let frames = self.encodedFrames.step(number(outbound, "framesEncoded"))
         let seconds = self.encodeTime.step(number(outbound, "totalEncodeTime"))
+        let qp = self.quantizers.step(number(outbound, "qpSum"))
         let round = number(remote, "roundTripTime") ?? number(pair, "currentRoundTripTime")
         // The name libwebrtc was given when the encoder was made, unless its own has taken over since.
         let named = text(outbound, "encoderImplementation")
         let encoder = named == LowLatencyH264Encoder.name && LowLatencyH264Encoder.tookOver.withLock({ $0 }) ? "VideoToolbox" : named
         let waited = self.sendDelay.step(number(outbound, "totalPacketSendDelay"))
         let packets = self.packetsSent.step(number(outbound, "packetsSent"))
+        let sendDelayMs = packets.flatMap { count in waited.flatMap { count > 0 && $0 >= 0 ? $0 / count * 1000 : nil } }
         let bitrate = self.bytes.per(second: number(outbound, "bytesSent"), at: time).map { ($0 * 8).rounded() }
         let second = FrameRate.Second(
           captured: Double(captured.captured),
           encoded: number(outbound, "framesPerSecond"),
           sentShare: number(outbound, "frameWidth").flatMap { width in number(outbound, "frameHeight").map { width * $0 / Double(self.size.width * self.size.height) } },
           limitation: text(outbound, "qualityLimitationReason"),
-          available: number(pair, "availableOutgoingBitrate")
+          available: number(pair, "availableOutgoingBitrate"),
+          sendDelayMs: sendDelayMs
         )
         self.link.emit([
           "t": "rtc.stats",
@@ -579,8 +586,9 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
           "hardware": (outbound?.values["powerEfficientEncoder"] as? NSNumber)?.boolValue ?? NSNull(),
           "targetBitrate": json(number(outbound, "targetBitrate")),
           "encodeMs": json(frames.flatMap { count in seconds.flatMap { count > 0 ? $0 / count * 1000 : nil } }),
+          "qp": json(frames.flatMap { count in qp.flatMap { count > 0 && $0 >= 0 ? $0 / count : nil } }),
           // How long a packet waited to be sent, between the encoder and the network.
-          "sendDelayMs": json(packets.flatMap { count in waited.flatMap { count > 0 ? $0 / count * 1000 : nil } }),
+          "sendDelayMs": json(sendDelayMs),
           "hugeFrames": json(number(outbound, "hugeFramesSent")),
           "heard": self.heard,
           // With --clock: the strip as captured, against the time the capture says it was displayed.
@@ -594,6 +602,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
         // Only a connection that is up says anything about a rate: while one is being made, or
         // is lost, no frame is sent at any.
         guard connection.connectionState == .connected else { return }
+        self.holdFloor(reader: reader, pair: pair, remote: remote, sendDelayMs: sendDelayMs)
         switch self.steps?.judge(second) {
         case .down(let reason), .up(let reason):
           if let rate = self.steps?.current { self.change(to: rate, because: reason, sending: bitrate) }
@@ -601,6 +610,32 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
           break
         }
       }
+    }
+  }
+
+  /// The estimate's floor on the local network (`LanFloor`), from this second's numbers. The
+  /// round trip is the average of the second's measurements, not libwebrtc's smoothed one.
+  private func holdFloor(reader: StatsReader, pair: RTCStatistics?, remote: RTCStatistics?, sendDelayMs: Double?) {
+    func endpoint(_ key: String) -> LanFloor.Endpoint? {
+      guard let candidate = reader.linked(pair, key), let type = StatsReader.text(candidate, "candidateType") else { return nil }
+      return LanFloor.Endpoint(type: type, address: StatsReader.text(candidate, "address") ?? StatsReader.text(candidate, "ip") ?? "")
+    }
+    let total = roundTrips.step(StatsReader.number(pair, "totalRoundTripTime"))
+    let count = roundTripCount.step(StatsReader.number(pair, "responsesReceived"))
+    let rttMs = total.flatMap { seconds in count.flatMap { $0 > 0 && seconds >= 0 ? seconds / $0 * 1000 : nil } }
+      ?? StatsReader.number(pair, "currentRoundTripTime").map { $0 * 1000 }
+    let second = LanFloor.Second(local: endpoint("localCandidateId"), remote: endpoint("remoteCandidateId"),
+                                 rttMs: rttMs, fractionLost: StatsReader.number(remote, "fractionLost"), sendDelayMs: sendDelayMs)
+    let ceiling = eased ?? Tuning.maxBitrate(width: size.width, height: size.height, fps: frameRate)
+    switch lanFloor.judge(second, ceiling: ceiling) {
+    case .apply(let floor):
+      link.log("bandwidth estimate held at \(floor / 1000) kbit/s or more: the video is on the local network")
+      _ = connection?.setBweMinBitrateBps(NSNumber(value: floor), currentBitrateBps: nil, maxBitrateBps: nil)
+    case .lift(let reason):
+      link.log("bandwidth estimate floor lifted: \(reason)")
+      _ = connection?.setBweMinBitrateBps(NSNumber(value: 0), currentBitrateBps: nil, maxBitrateBps: nil)
+    case .keep:
+      break
     }
   }
 

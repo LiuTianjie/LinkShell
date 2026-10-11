@@ -79,6 +79,51 @@ final class EncoderTests: XCTestCase {
     XCTAssertEqual(encoder.implementationName(), LowLatencyH264Encoder.name)
   }
 
+  func testSlowEncoderCannotAccumulateRawFramesAndKeepsAKeyframeRequest() throws {
+    let compression = Compression()
+    let encoder = LowLatencyH264Encoder(info: info, makeCompressor: { _ in compression })
+    encoder.setCallback { _, _ in true }
+    _ = encoder.startEncode(with: settings(), numberOfCores: 2)
+    let picture = try frame()
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: delta)
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: delta)
+    let finish = try XCTUnwrap(compression.done)
+    for _ in 0..<120 { _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: delta) }
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: [NSNumber(value: RTCFrameType.videoFrameKey.rawValue)])
+    XCTAssertEqual(compression.keys, [false, false])
+    finish(.success(nil))
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: delta)
+    XCTAssertEqual(compression.keys, [false, false, true])
+  }
+
+  func testDroppedKeyframeIsRequestedAgainOnTheNextAcceptedFrame() throws {
+    let compression = Compression()
+    let encoder = LowLatencyH264Encoder(info: info, makeCompressor: { _ in compression })
+    encoder.setCallback { _, _ in true }
+    _ = encoder.startEncode(with: settings(), numberOfCores: 2)
+    let picture = try frame()
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: [NSNumber(value: RTCFrameType.videoFrameKey.rawValue)])
+    compression.done?(.success(nil))
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: delta)
+    XCTAssertEqual(compression.keys, [true, true])
+  }
+
+  func testOldCallbacksDoNotFreeTheNewEncodersSlots() throws {
+    let compression = Compression()
+    let encoder = LowLatencyH264Encoder(info: info, makeCompressor: { _ in compression })
+    encoder.setCallback { _, _ in true }
+    _ = encoder.startEncode(with: settings(), numberOfCores: 2)
+    let picture = try frame()
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: delta)
+    let old = compression.done
+    _ = encoder.startEncode(with: settings(), numberOfCores: 2)
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: delta)
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: delta)
+    old?(.success(nil))
+    _ = encoder.encode(picture, codecSpecificInfo: nil, frameTypes: delta)
+    XCTAssertEqual(compression.keys.count, 3)
+  }
+
   private func settings() -> RTCVideoEncoderSettings {
     let settings = RTCVideoEncoderSettings()
     settings.name = "H264"
@@ -98,11 +143,14 @@ final class EncoderTests: XCTestCase {
 
   private final class Compression: ScreenCompression {
     let mode: String
+    var keyPlan: VideoCompressor.KeyPlan?
     init(mode: String = "low-latency") { self.mode = mode }
     var done: ((Result<VideoCompressor.Frame?, VideoCompressor.Failure>) -> Void)?
+    var keys: [Bool] = []
     func setRates(bitrate: Int, ceiling: Int?, fps: Int) {}
     func encode(_ buffer: CVPixelBuffer, at time: CMTime, key: Bool, done: @escaping (Result<VideoCompressor.Frame?, VideoCompressor.Failure>) -> Void) {
       self.done = done
+      keys.append(key)
     }
   }
 

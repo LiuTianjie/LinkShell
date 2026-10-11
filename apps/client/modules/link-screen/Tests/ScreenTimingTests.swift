@@ -2,6 +2,25 @@ import XCTest
 @testable import ScreenTiming
 
 final class ScreenTimingTests: XCTestCase {
+  func testCumulativeCountersMeasureOnlyTheCurrentInterval() {
+    var average = ScreenCounterAverage()
+    XCTAssertNil(average.milliseconds(seconds: 10, count: 100))
+    XCTAssertEqual(average.milliseconds(seconds: 10.06, count: 120)!, 3, accuracy: 0.000001)
+    XCTAssertNil(average.milliseconds(seconds: 10.06, count: 120))
+    XCTAssertEqual(average.milliseconds(seconds: 10.08, count: 130)!, 2, accuracy: 0.000001)
+  }
+
+  func testMissingOrResetCountersCannotInventAQueueSpike() {
+    var average = ScreenCounterAverage()
+    XCTAssertNil(average.milliseconds(seconds: 20, count: 200))
+    XCTAssertNil(average.milliseconds(seconds: nil, count: 220))
+    XCTAssertNil(average.milliseconds(seconds: 20.5, count: 230))
+    XCTAssertEqual(average.milliseconds(seconds: 20.52, count: 240)!, 2, accuracy: 0.000001)
+    XCTAssertNil(average.milliseconds(seconds: 0.02, count: 10))
+    XCTAssertEqual(average.milliseconds(seconds: 0.04, count: 20)!, 2, accuracy: 0.000001)
+    XCTAssertNil(average.milliseconds(seconds: .nan, count: 30))
+  }
+
   func testOnlyTheNewestDecodedFrameSurvivesABusyGPU() {
     let mailbox = ScreenMailbox<Int>()
     for frame in 0..<120 { mailbox.put(frame) }

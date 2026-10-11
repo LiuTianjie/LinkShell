@@ -25,8 +25,9 @@ export function AsyncQuestionCard({ sessionId, questions, agentName, disabled }:
       questions: [{
         id: question.id, text: question.title,
         kind: question.options.length ? "choice" : "text",
-        options: question.options.map((option) => ({ value: option, label: option })),
+        options: question.options.length ? question.options.map((option) => ({ value: option, label: option })) : undefined,
         other: question.options.length > 0,
+        required: true,
       }],
     }}
     count={questions.length}

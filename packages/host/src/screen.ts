@@ -8,6 +8,7 @@ import { RpcError } from "@linkshell/wire";
 import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type HelperApp } from "./input.js";
 import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
 import { viewerPage } from "./screen-viewer.js";
+import { screenMeasurementLog } from "./screen-metrics.js";
 
 // Viewing the computer's screen from the phone. The host serves a small
 // viewer page on a loopback port; the phone opens it through the same
@@ -647,7 +648,7 @@ export class ScreenShare {
       // A viewer measuring (`?measure=1`): its clock against this computer's (it keeps the answer that came back
       // quickest), then what it sees, once a second.
       else if (kind === "ping") tell({ pong: { n: (message as { n?: unknown }).n, at: (message as { at?: unknown }).at, now: Date.now() } });
-      else if (kind === "measure") this.log(`[screen] measured: ${JSON.stringify(message).slice(0, 1000)}`);
+      else if (kind === "measure") this.log(`[screen] measured: ${screenMeasurementLog(message)}`);
       else if (kind === "control") void control.start(shown?.screen ?? 0);
       else control.send(message);
     });

@@ -1,0 +1,511 @@
+{
+  "date": "2026-10-11",
+  "scope": "Mac M3 Max loopback and iOS simulator; unpublished working tree, no physical phone or presentation measurement",
+  "sourceDisplay": "3600x2338 at 120 Hz; video 1920x1246",
+  "aggregation": {
+    "warm": [
+      4,
+      7
+    ],
+    "narrow": [
+      10,
+      23
+    ],
+    "recovered": [
+      26,
+      48
+    ],
+    "fps": "arithmetic mean of per-second decoder rates; missing rate means no decoded frame",
+    "age": "encoder input to decoded frame, same monotonic clock; weighted mean by matched sample count",
+    "quality": "separate run; sampled frame-matched 256x160 normalized luma grids; different delivered frames, no chroma/readability result",
+    "maxDecodeGap": "maximum across the complete recovered run; UDP also tracks ongoing gaps, RTP reports gaps when decoding resumes"
+  },
+  "networkRuns": [
+    {
+      "name": "full-rtc",
+      "conditions": {
+        "delayEachWayMs": 10,
+        "capacityMbps": [
+          20,
+          0.7,
+          20
+        ],
+        "phaseSeconds": [
+          8,
+          16,
+          24
+        ],
+        "maxRouterQueueMs": 200,
+        "screen": 1,
+        "maxWidth": 1920,
+        "maxFps": 120,
+        "fullScreenMotion": true,
+        "qualitySampling": false,
+        "appSha256": "b0a42b0448145b182f5aec854200ff2fdaa5e39ee4f11d1c50d39d61357ed293"
+      },
+      "flags": [
+        "--media-probe",
+        "--full-screen-motion"
+      ],
+      "phases": {
+        "warm": {
+          "intervals": 4,
+          "decodeFps": 117.75,
+          "matchedFrames": 471,
+          "meanAgeMs": 26.49,
+          "maxAgeMs": 42.6,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        },
+        "narrow": {
+          "intervals": 14,
+          "decodeFps": 0.64,
+          "matchedFrames": 7,
+          "meanAgeMs": 2617.35,
+          "maxAgeMs": 4467.93,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        },
+        "recovered": {
+          "intervals": 23,
+          "decodeFps": 26.13,
+          "matchedFrames": 599,
+          "meanAgeMs": 48.35,
+          "maxAgeMs": 3138.31,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        }
+      },
+      "maxDecodeGapMs": 8402
+    },
+    {
+      "name": "full-udp",
+      "conditions": {
+        "shaped": true,
+        "seconds": 48,
+        "screen": 1,
+        "maxFps": 120,
+        "fullScreenMotion": true,
+        "qualitySampling": false,
+        "appSha256": "b0a42b0448145b182f5aec854200ff2fdaa5e39ee4f11d1c50d39d61357ed293",
+        "maxWidth": 1920,
+        "delayEachWayMs": 10,
+        "capacityMbps": [
+          20,
+          0.7,
+          20
+        ],
+        "phaseSeconds": [
+          8,
+          16,
+          24
+        ],
+        "maxRouterQueueMs": 200
+      },
+      "flags": [],
+      "phases": {
+        "warm": {
+          "intervals": 4,
+          "decodeFps": 112.28,
+          "matchedFrames": 449,
+          "meanAgeMs": 27.54,
+          "maxAgeMs": 37.6,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        },
+        "narrow": {
+          "intervals": 14,
+          "decodeFps": 0.29,
+          "matchedFrames": 4,
+          "meanAgeMs": 309.33,
+          "maxAgeMs": 400.85,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        },
+        "recovered": {
+          "intervals": 23,
+          "decodeFps": 29.05,
+          "matchedFrames": 668,
+          "meanAgeMs": 43.43,
+          "maxAgeMs": 495.76,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        }
+      },
+      "lab": {
+        "ltr": true,
+        "deadlineMs": 300,
+        "width": 1920,
+        "height": 1246,
+        "fps": 120
+      },
+      "maxDecodeGapMs": 12988.87
+    },
+    {
+      "name": "quality-rtc",
+      "conditions": {
+        "delayEachWayMs": 10,
+        "capacityMbps": [
+          20,
+          0.7,
+          20
+        ],
+        "phaseSeconds": [
+          8,
+          16,
+          24
+        ],
+        "maxRouterQueueMs": 200,
+        "screen": 1,
+        "maxWidth": 1920,
+        "maxFps": 120,
+        "fullScreenMotion": true,
+        "qualitySampling": true,
+        "appSha256": "b0a42b0448145b182f5aec854200ff2fdaa5e39ee4f11d1c50d39d61357ed293"
+      },
+      "flags": [
+        "--media-probe",
+        "--full-screen-motion",
+        "--media-quality"
+      ],
+      "phases": {
+        "warm": {
+          "intervals": 4,
+          "decodeFps": 119.25,
+          "matchedFrames": 478,
+          "meanAgeMs": 26.85,
+          "maxAgeMs": 53.66,
+          "qualitySamples": 15,
+          "meanLumaPSNRdB": 28.03
+        },
+        "narrow": {
+          "intervals": 14,
+          "decodeFps": 0.14,
+          "matchedFrames": 4,
+          "meanAgeMs": 1426.91,
+          "maxAgeMs": 2925.32,
+          "qualitySamples": 3,
+          "meanLumaPSNRdB": 30.03
+        },
+        "recovered": {
+          "intervals": 23,
+          "decodeFps": 39.13,
+          "matchedFrames": 902,
+          "meanAgeMs": 39.13,
+          "maxAgeMs": 472.44,
+          "qualitySamples": 29,
+          "meanLumaPSNRdB": 31.56
+        }
+      },
+      "maxDecodeGapMs": 6767
+    },
+    {
+      "name": "quality-udp",
+      "conditions": {
+        "shaped": true,
+        "seconds": 48,
+        "screen": 1,
+        "maxFps": 120,
+        "fullScreenMotion": true,
+        "qualitySampling": true,
+        "appSha256": "b0a42b0448145b182f5aec854200ff2fdaa5e39ee4f11d1c50d39d61357ed293",
+        "maxWidth": 1920,
+        "delayEachWayMs": 10,
+        "capacityMbps": [
+          20,
+          0.7,
+          20
+        ],
+        "phaseSeconds": [
+          8,
+          16,
+          24
+        ],
+        "maxRouterQueueMs": 200
+      },
+      "flags": [],
+      "phases": {
+        "warm": {
+          "intervals": 4,
+          "decodeFps": 115.25,
+          "matchedFrames": 461,
+          "meanAgeMs": 27.82,
+          "maxAgeMs": 43.76,
+          "qualitySamples": 14,
+          "meanLumaPSNRdB": 28.36
+        },
+        "narrow": {
+          "intervals": 14,
+          "decodeFps": 0.29,
+          "matchedFrames": 4,
+          "meanAgeMs": 490.93,
+          "maxAgeMs": 685.23,
+          "qualitySamples": 4,
+          "meanLumaPSNRdB": 23.95
+        },
+        "recovered": {
+          "intervals": 23,
+          "decodeFps": 24.74,
+          "matchedFrames": 569,
+          "meanAgeMs": 43.48,
+          "maxAgeMs": 538.79,
+          "qualitySamples": 24,
+          "meanLumaPSNRdB": 30.91
+        }
+      },
+      "lab": {
+        "ltr": true,
+        "deadlineMs": 300,
+        "width": 1920,
+        "height": 1246,
+        "fps": 120
+      },
+      "maxDecodeGapMs": 10282.62
+    },
+    {
+      "name": "quality-no-ltr",
+      "conditions": {
+        "shaped": true,
+        "seconds": 48,
+        "screen": 1,
+        "maxFps": 120,
+        "fullScreenMotion": true,
+        "qualitySampling": true,
+        "appSha256": "b0a42b0448145b182f5aec854200ff2fdaa5e39ee4f11d1c50d39d61357ed293",
+        "maxWidth": 1920,
+        "delayEachWayMs": 10,
+        "capacityMbps": [
+          20,
+          0.7,
+          20
+        ],
+        "phaseSeconds": [
+          8,
+          16,
+          24
+        ],
+        "maxRouterQueueMs": 200
+      },
+      "flags": [],
+      "phases": {
+        "warm": {
+          "intervals": 4,
+          "decodeFps": 116.99,
+          "matchedFrames": 468,
+          "meanAgeMs": 26.73,
+          "maxAgeMs": 41.09,
+          "qualitySamples": 15,
+          "meanLumaPSNRdB": 28.25
+        },
+        "narrow": {
+          "intervals": 14,
+          "decodeFps": 0,
+          "matchedFrames": 0,
+          "meanAgeMs": null,
+          "maxAgeMs": null,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        },
+        "recovered": {
+          "intervals": 23,
+          "decodeFps": 34.52,
+          "matchedFrames": 794,
+          "meanAgeMs": 43.04,
+          "maxAgeMs": 716.69,
+          "qualitySamples": 29,
+          "meanLumaPSNRdB": 31.13
+        }
+      },
+      "lab": {
+        "ltr": false,
+        "deadlineMs": 300,
+        "width": 1920,
+        "height": 1246,
+        "fps": 120
+      },
+      "maxDecodeGapMs": 17735.66
+    },
+    {
+      "name": "rtc-dropper-disabled",
+      "conditions": {
+        "delayEachWayMs": 10,
+        "capacityMbps": [
+          20,
+          0.7,
+          20
+        ],
+        "phaseSeconds": [
+          8,
+          16,
+          24
+        ],
+        "maxRouterQueueMs": 200,
+        "screen": 1,
+        "maxWidth": 1920,
+        "maxFps": 120,
+        "fullScreenMotion": true,
+        "qualitySampling": false,
+        "appSha256": "0b8e387a722579b9baf0f4a1246a955bc7d3b704adcb871bf2bc47a9c087ad90"
+      },
+      "flags": [
+        "--media-probe",
+        "--budget-keyframes",
+        "--full-screen-motion",
+        "--trial",
+        "WebRTC-FrameDropper=Disabled"
+      ],
+      "phases": {
+        "warm": {
+          "intervals": 4,
+          "decodeFps": 119.75,
+          "matchedFrames": 480,
+          "meanAgeMs": 26.06,
+          "maxAgeMs": 37.45,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        },
+        "narrow": {
+          "intervals": 14,
+          "decodeFps": 5.14,
+          "matchedFrames": 64,
+          "meanAgeMs": 3590.05,
+          "maxAgeMs": 5341.82,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        },
+        "recovered": {
+          "intervals": 23,
+          "decodeFps": 23.83,
+          "matchedFrames": 550,
+          "meanAgeMs": 50.31,
+          "maxAgeMs": 597.68,
+          "qualitySamples": 0,
+          "meanLumaPSNRdB": null
+        }
+      },
+      "maxDecodeGapMs": 3145
+    }
+  ],
+  "codecRuns": [
+    {
+      "conditions": {
+        "codec": "h264",
+        "fps": 120,
+        "maxWidth": 1920,
+        "screen": 1,
+        "bitrate": 5000000,
+        "seconds": 8,
+        "pending": 2
+      },
+      "binarySha256": "0b8e387a722579b9baf0f4a1246a955bc7d3b704adcb871bf2bc47a9c087ad90",
+      "hardware": true,
+      "mode": "low-latency",
+      "aggregation": "last six one-second intervals after five warmup seconds",
+      "intervals": 6,
+      "encodedFps": 119.49,
+      "encodeMs": 10.04,
+      "scope": "encode only, no decoding or quality comparison"
+    },
+    {
+      "conditions": {
+        "codec": "hevc",
+        "fps": 120,
+        "maxWidth": 1920,
+        "screen": 1,
+        "bitrate": 5000000,
+        "seconds": 8,
+        "pending": 2
+      },
+      "binarySha256": "0b8e387a722579b9baf0f4a1246a955bc7d3b704adcb871bf2bc47a9c087ad90",
+      "hardware": true,
+      "mode": "real-time",
+      "aggregation": "last six one-second intervals after five warmup seconds",
+      "intervals": 6,
+      "encodedFps": 79.68,
+      "encodeMs": 20.52,
+      "scope": "encode only, no decoding or quality comparison"
+    }
+  ],
+  "simulator": {
+    "runtime": "27.1",
+    "device": "iPhone Duo",
+    "blockedSeconds": 0.6,
+    "runs": {
+      "reference": {
+        "blockedCommits": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "steadyCommits": [
+          4,
+          5,
+          4,
+          5,
+          4,
+          5,
+          4,
+          5,
+          4
+        ],
+        "resumedCommits": [
+          4,
+          4,
+          4,
+          5,
+          5,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          5,
+          4
+        ],
+        "failures": []
+      },
+      "worker": {
+        "blockedCommits": [
+          4,
+          5,
+          4,
+          5,
+          4
+        ],
+        "steadyCommits": [
+          5,
+          4,
+          5,
+          4,
+          5,
+          4,
+          5,
+          4,
+          5
+        ],
+        "resumedCommits": [
+          5,
+          4,
+          5,
+          4,
+          5,
+          4,
+          4,
+          4,
+          5,
+          4,
+          5,
+          4,
+          5,
+          4
+        ],
+        "failures": []
+      }
+    },
+    "reference": "f23b1c976b2edde5eb065b9b6e6f0694433e35bb"
+  }
+}

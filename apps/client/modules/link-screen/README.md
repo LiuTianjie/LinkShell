@@ -74,6 +74,10 @@ existing RPC connection for an explicitly configured development host.
 - iOS 17+ uses `CAMetalDisplayLink` with `preferredFrameLatency=1`; older supported
   iOS uses `CADisplayLink`. Display capabilities, Low Power Mode and thermal state
   bound the requested rate. No claim of physical scanout control is made.
+- The display link, texture mapping and Metal submission run on a dedicated render
+  thread. UIKit publishes layout/cursor snapshots; frame rendering does not read
+  UIView geometry or wait for main-thread work. Display-link changes and teardown
+  are serialized on that worker, with generation checks for callbacks to the UI.
 - Closing the view or backgrounding tears down the socket, peer, track and display
   link. Reconnection starts a new session and releases held pointer state.
 
@@ -119,6 +123,16 @@ latency**. Validation must compare instrumentation off/on using the same externa
 method and workload. Report the measured overhead and uncertainty; do not claim
 zero observer effect. Never enable full tracing for a headline latency benchmark.
 
+Sampled delivery is also split into `decodeToRenderer`, `rendererToSubmit` and
+`submitToPresent`: WebRTC's decoder callback to the native renderer, the mailbox/display
+wait before GPU submission, and submission to presentation. Their percentiles cannot
+be added together. Interval-average `jitterBufferMs` and `webrtcDecodeMeanMs` use matched
+cumulative-counter baselines; missing/reset counters produce no latency value. These
+stages distinguish a media-engine wait from a local rendering delay without assuming
+that all decode-to-presentation time belongs to either one.
+`gpuSubmissions` counts command-buffer submissions when diagnostics are enabled;
+it is not a physical presentation counter and is useful on the simulator too.
+
 ## Validation
 
 ```sh
@@ -131,6 +145,19 @@ pnpm build
 ```
 
 The Swift package checks scheduling primitives without Expo, a screen or WebRTC.
+The reusable simulator check creates and deletes its own simulator and temporary
+app bundles. It supplies synthetic NV12 frames, blocks the main thread for 600 ms,
+and checks GPU submissions, stop/restart and renderer replacement:
+
+```sh
+python3 apps/client/modules/link-screen/tools/renderer-check.py --reference <earlier-commit>
+```
+
+On 2026-10-11, an iOS 27.1 simulator comparison against `f23b1c9` observed zero
+submissions in all five interior 100 ms stall samples with the old main-thread loop,
+and continued submissions with the worker. Both paths rendered before/after the
+stall. This proves isolation from that injected UI stall, not phone scanout latency.
+
 The playback-state tests cover automatic fallback order and stale callbacks;
 viewer tests exercise standard WebRTC failure and the relay request. The stream
 integration test checks that a forced RPC stream coexists with direct streams.
@@ -141,8 +168,9 @@ or interaction correctness.
 Known issue: the user reports a short periodic stutter roughly once per second
 or faster in both native and web receivers. A native diagnostic snapshot showed
 120 encoded / 116 decoded fps and decode-to-presentation p95 of 30.6 ms. The cause
-has not been established or fixed; average throughput is not a frame-pacing pass.
-Further diagnosis is deferred at the user's request.
+of the reported real-device symptom has not been established; average throughput
+is not a frame-pacing pass. The independent render loop removes one known source
+of coupling, while real-device validation remains pending.
 
 Device checks use the regular release app:
 
@@ -158,5 +186,6 @@ Internal diagnostic sessions should settle before sampling; compare them with
 normal playback separately. Input-to-result, actual display cadence,
 and impaired/public-network behaviour still require device measurement. Stable
 120 fps and stable 4K/60 were not demonstrated by the initial Mac loopback tests.
-LTR feedback, content-adaptive tile transport and cross-device presentation-deadline
-feedback remain later stages.
+Shipping LTR feedback, content-adaptive tile transport and cross-device presentation-deadline
+feedback remain later stages. A Mac-only LTR/UDP laboratory exists; its weak-network results
+have not justified replacing the default WebRTC path.

@@ -11,7 +11,8 @@ final class MotionWindow {
   /// The lower middle of the display, clear of the clock strip.
   init(screen: NSScreen) {
     let frame = screen.frame
-    let rect = NSRect(x: frame.minX + frame.width * 0.1, y: frame.minY + frame.height * 0.12, width: frame.width * 0.8, height: frame.height * 0.6)
+    let rect = Launch.has("--full-screen-motion") ? frame
+      : NSRect(x: frame.minX + frame.width * 0.1, y: frame.minY + frame.height * 0.12, width: frame.width * 0.8, height: frame.height * 0.6)
     window = NSWindow(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false)
     window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
     window.isOpaque = true

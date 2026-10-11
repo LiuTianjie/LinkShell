@@ -1,5 +1,21 @@
 import Foundation
 
+/// WebRTC reports cumulative seconds and frame counts. Reset both baselines together so a
+/// missing report or a recreated stream cannot turn old work into a false latency spike.
+struct ScreenCounterAverage {
+  private var previous: (seconds: Double, count: Double)?
+
+  mutating func milliseconds(seconds: Double?, count: Double?) -> Double? {
+    guard let seconds, let count, seconds.isFinite, count.isFinite, seconds >= 0, count >= 0 else {
+      previous = nil
+      return nil
+    }
+    defer { self.previous = (seconds, count) }
+    guard let previous, count > previous.count, seconds >= previous.seconds else { return nil }
+    return (seconds - previous.seconds) / (count - previous.count) * 1000
+  }
+}
+
 /// Only undecoded capture candidates or already-decoded output may use this mailbox.
 /// Compressed reference frames must stay in the media engine's dependency-aware queue.
 final class ScreenMailbox<Value> {

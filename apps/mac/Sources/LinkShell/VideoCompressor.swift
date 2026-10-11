@@ -3,7 +3,7 @@ import CoreVideo
 import Foundation
 import VideoToolbox
 
-/// H.264 from the hardware encoder, for a picture that is being watched as it is made: one
+/// H.264 for the shipping screen, with HEVC available only to the codec laboratory: one
 /// VideoToolbox compression session of one size.
 ///
 /// It is asked for the low-latency rate control first. That mode keeps to the rate from one
@@ -37,6 +37,10 @@ final class VideoCompressor {
     var profile: Profile?
     /// Ask for the low-latency rate control (off to be as on a Mac without it: `--no-low-latency`).
     var lowLatency = true
+    /// Only the media laboratory currently supplies decoder acknowledgements for this mode.
+    var longTermReferences = false
+    /// HEVC is used only by the codec laboratory; the shipping stream remains H.264.
+    var codec: CMVideoCodecType = kCMVideoCodecType_H264
   }
 
   struct Failure: Error, CustomStringConvertible {
@@ -50,13 +54,16 @@ final class VideoCompressor {
     let key: Bool
     /// 0 the finest, 51 the coarsest; nil when it couldn't be read.
     let quantizer: Int?
+    var referenceToken: UInt64? = nil
     /// The encoder's stream doesn't say that frames come in the order they are shown.
     fileprivate let silentOnOrder: Bool
 
     /// The frame as a decoder off this Mac wants it (`AnnexB`), after `reserved` bytes left
     /// for the caller's own header.
     func accessUnit(reserved: Int = 0) -> Data? {
-      AnnexB.accessUnit(sample, key: key, reserved: reserved, statingNoReordering: silentOnOrder)
+      guard let format = CMSampleBufferGetFormatDescription(sample),
+            CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_H264 else { return nil }
+      return AnnexB.accessUnit(sample, key: key, reserved: reserved, statingNoReordering: silentOnOrder)
     }
   }
 
@@ -64,6 +71,7 @@ final class VideoCompressor {
   let mode: String
   let profile: Profile
   let hardware: Bool
+  let longTermReferences: Bool
   let width: Int
   let height: Int
 
@@ -99,6 +107,7 @@ final class VideoCompressor {
   }
 
   private let session: VTCompressionSession
+  private let codec: CMVideoCodecType
   private let state = Locked(State())
   private let settings = DispatchQueue(label: "com.bd.linkshell.encoder-settings")
 
@@ -112,7 +121,7 @@ final class VideoCompressor {
   init(_ setup: Setup) throws {
     var made: (session: VTCompressionSession, lowLatency: Bool, profile: Profile)?
     var failure = Failure(what: "no encoder", status: kVTCouldNotFindVideoEncoderErr)
-    for lowLatency in setup.lowLatency ? [true, false] : [false] {
+    for lowLatency in setup.lowLatency && setup.codec == kCMVideoCodecType_H264 ? [true, false] : [false] {
       let profile = setup.profile ?? (lowLatency ? .high : .baseline)
       do {
         made = (try VideoCompressor.session(setup, lowLatency: lowLatency, profile: profile), lowLatency, profile)
@@ -127,6 +136,9 @@ final class VideoCompressor {
     profile = made.profile
     width = setup.width
     height = setup.height
+    codec = setup.codec
+    longTermReferences = setup.longTermReferences && made.lowLatency
+      && VTSessionSetProperty(session, key: kVTCompressionPropertyKey_EnableLTR, value: kCFBooleanTrue) == noErr
     // The low-latency encoder is the hardware's and doesn't answer the question.
     hardware = made.lowLatency || (VideoCompressor.copy(kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder, of: session) as? Bool ?? false)
     setRates(bitrate: setup.bitrate, ceiling: setup.ceiling, fps: setup.fps)
@@ -148,7 +160,7 @@ final class VideoCompressor {
       allocator: nil,
       width: Int32(setup.width),
       height: Int32(setup.height),
-      codecType: kCMVideoCodecType_H264,
+      codecType: setup.codec,
       encoderSpecification: specification as CFDictionary,
       imageBufferAttributes: nil,
       compressedDataAllocator: nil,
@@ -162,7 +174,8 @@ final class VideoCompressor {
     // way of making one is tried.
     let required: [(CFString, Any)] = [
       (kVTCompressionPropertyKey_RealTime, true),
-      (kVTCompressionPropertyKey_ProfileLevel, profile == .high ? kVTProfileLevel_H264_ConstrainedHigh_AutoLevel : kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel),
+      (kVTCompressionPropertyKey_ProfileLevel, setup.codec == kCMVideoCodecType_HEVC ? kVTProfileLevel_HEVC_Main_AutoLevel
+        : profile == .high ? kVTProfileLevel_H264_ConstrainedHigh_AutoLevel : kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel),
       (kVTCompressionPropertyKey_AllowFrameReordering, false),
     ]
     for (key, value) in required {
@@ -214,15 +227,34 @@ final class VideoCompressor {
   /// (nil when the encoder dropped it to keep to the rate) or what went wrong. Frames come out
   /// in the order they went in.
   func encode(_ buffer: CVPixelBuffer, at time: CMTime, key: Bool, done: @escaping (Result<Frame?, Failure>) -> Void) {
+    encode(buffer, at: time, key: key, refresh: false, acknowledged: [], done: done)
+  }
+
+  /// Acknowledgements refer to successfully decoded frames of this exact compression session.
+  /// A refresh may be a small LTR-P; it is not advertised to ordinary RTP receivers as an IDR.
+  func encode(_ buffer: CVPixelBuffer, at time: CMTime, key: Bool, refresh: Bool,
+              acknowledged: [UInt64], done: @escaping (Result<Frame?, Failure>) -> Void) {
     if key { holdKeyQuantizer() }
-    let properties = key ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
-    let status = VTCompressionSessionEncodeFrame(session, imageBuffer: buffer, presentationTimeStamp: time, duration: .invalid, frameProperties: properties, infoFlagsOut: nil) { [weak self] status, flags, sample in
+    var properties: [CFString: Any] = [:]
+    if key { properties[kVTEncodeFrameOptionKey_ForceKeyFrame] = true }
+    if longTermReferences {
+      if refresh { properties[kVTEncodeFrameOptionKey_ForceLTRRefresh] = true }
+      if !acknowledged.isEmpty { properties[kVTEncodeFrameOptionKey_AcknowledgedLTRTokens] = acknowledged.map { NSNumber(value: $0) } }
+    }
+    let status = VTCompressionSessionEncodeFrame(session, imageBuffer: buffer, presentationTimeStamp: time, duration: .invalid, frameProperties: properties as CFDictionary, infoFlagsOut: nil) { [weak self] status, flags, sample in
       if status != noErr { return done(.failure(Failure(what: "a frame could not be encoded", status: status))) }
       guard let self, let sample, !flags.contains(.frameDropped) else { return done(.success(nil)) }
       let key = AnnexB.isKey(sample)
-      let quantizer = self.state.withLock { $0.reader.quantizer(of: sample) }
+      let quantizer = self.codec == kCMVideoCodecType_H264 ? self.state.withLock { $0.reader.quantizer(of: sample) } : nil
       if key { self.keyCameOut(quantizer: quantizer, bytes: CMSampleBufferGetTotalSampleSize(sample)) }
-      done(.success(Frame(sample: sample, key: key, quantizer: quantizer, silentOnOrder: self.mode != "low-latency")))
+      var referenceToken: UInt64?
+      if self.longTermReferences {
+        let attachments = (CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]])?.first
+        let token = (CMGetAttachment(sample, key: kVTSampleAttachmentKey_RequireLTRAcknowledgementToken, attachmentModeOut: nil)
+          ?? attachments?[kVTSampleAttachmentKey_RequireLTRAcknowledgementToken] as CFTypeRef?) as? NSNumber
+        referenceToken = token?.uint64Value
+      }
+      done(.success(Frame(sample: sample, key: key, quantizer: quantizer, referenceToken: referenceToken, silentOnOrder: self.mode != "low-latency")))
     }
     if status != noErr { done(.failure(Failure(what: "a frame was not taken by the encoder", status: status))) }
   }
