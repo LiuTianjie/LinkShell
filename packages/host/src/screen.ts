@@ -640,6 +640,11 @@ export class ScreenShare {
         pacer.restarted(Date.now());
         running?.key?.();
       }
+      // Why a viewer gave its track up: what ICE gathered and tried, for this log only.
+      else if (kind === "rtc.diagnosis") {
+        const { reason, ice } = message as { reason?: unknown; ice?: unknown };
+        this.log(`[screen] the video track was given up (${String(reason ?? "no reason").slice(0, 120)}): ${String(ice || "no ICE statistics").slice(0, 300)}`);
+      }
       // No direct path between the two, or none in time: the viewer asks for the picture here instead.
       else if (kind === "rtc.failed") {
         this.log(`[screen] no video track for this viewer (${String((message as { reason?: unknown }).reason ?? "no reason given").slice(0, 200)}): the picture goes down the socket`);

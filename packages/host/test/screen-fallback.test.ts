@@ -51,6 +51,22 @@ describe("screen video fallback", () => {
     expect(page.messages).toEqual([]);
   });
 
+  it("waits 25 s for a path by default, and says what ICE found when it gives up", async () => {
+    const page = viewerPage();
+    expect(page).toContain(`Number(query.get("patience")) || 25`);
+    const start = page.indexOf("async function iceSummary"), end = page.indexOf("\n}\n", start) + 2;
+    const iceSummary = new Script(`${page.slice(start, end)}\niceSummary;`).runInNewContext({}) as (pc: unknown) => Promise<string>;
+    const stats = new Map<string, Record<string, unknown>>([
+      ["a", { type: "local-candidate", candidateType: "host" }],
+      ["b", { type: "local-candidate", candidateType: "srflx" }],
+      ["c", { type: "remote-candidate", candidateType: "srflx" }],
+      ["d", { type: "candidate-pair", state: "failed" }],
+      ["e", { type: "candidate-pair", state: "failed" }],
+    ]);
+    const summary = await iceSummary({ getStats: async () => stats, iceConnectionState: "checking", iceGatheringState: "complete" });
+    expect(summary).toBe("local host×1,srflx×1; remote srflx×1; pairs failed×2; ice checking/complete");
+  });
+
   it("keeps the existing socket fallback for a normal browser", () => {
     const page = receiver({ nativeApp: false });
     page.signal({ t: "config" });

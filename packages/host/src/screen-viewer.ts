@@ -595,6 +595,31 @@ function heard(message) {
 let rtc = null, live = false, tried = false, gaveUp = false, blocked = false, patience = 0, relayRequested = false;
 // For trying the way back out: ?failAfter=5 gives the track up 5 s after it was offered.
 const failAfter = Number(query.get("failAfter")) || 0;
+// How long a path may take to be found. A phone on a cellular network can take well over 8 s
+// to gather and check its candidates through the gateway; once given up there is no retry.
+const patienceSeconds = Math.min(60, Math.max(5, Number(query.get("patience")) || 25));
+
+/** What ICE gathered and tried, for the reason a track was given up. */
+async function iceSummary(pc) {
+  try {
+    const report = await pc.getStats();
+    const local = {}, remote = {}, pairs = {};
+    let selected = "";
+    report.forEach((entry) => {
+      if (entry.type === "local-candidate") local[entry.candidateType] = (local[entry.candidateType] || 0) + 1;
+      else if (entry.type === "remote-candidate") remote[entry.candidateType] = (remote[entry.candidateType] || 0) + 1;
+      else if (entry.type === "candidate-pair") {
+        pairs[entry.state] = (pairs[entry.state] || 0) + 1;
+        if (entry.nominated && entry.state === "succeeded") selected = "nominated";
+      }
+    });
+    const list = (counts) => Object.entries(counts).map(([kind, n]) => kind + "×" + n).join(",") || "none";
+    return "local " + list(local) + "; remote " + list(remote) + "; pairs " + list(pairs) + (selected ? "; " + selected : "")
+      + "; ice " + pc.iceConnectionState + "/" + pc.iceGatheringState;
+  } catch {
+    return "no statistics";
+  }
+}
 
 function signal(message) {
   if (message.t === "off") return fallBack();
@@ -604,7 +629,7 @@ function signal(message) {
   if (!mine) return;
   if (message.t === "offer") {
     tried = true;
-    patience = setTimeout(() => giveUp("not connected within 8 s of the offer"), 8000);
+    patience = setTimeout(() => giveUp("not connected within " + patienceSeconds + " s of the offer"), patienceSeconds * 1000);
     if (failAfter) setTimeout(() => { if (rtc === mine) giveUp("asked to (failAfter)"); }, failAfter * 1000);
     // The answer is the browser's own, as it made it: the sender's playout-delay header has to survive in it.
     mine.described = mine.pc.setRemoteDescription({ type: "offer", sdp: message.sdp })
@@ -677,8 +702,15 @@ function frameless() {
 function giveUp(reason) {
   if (gaveUp) return;
   gaveUp = true;
-  drop();
-  if (!requestRelay()) send({ t: "rtc.failed", reason });
+  const pc = rtc && rtc.pc;
+  const told = (detail) => {
+    drop();
+    // The host's log says why, whichever way the picture goes next; with no connection there is nothing to say.
+    if (detail) send({ t: "rtc.diagnosis", reason, ice: detail });
+    if (!requestRelay()) send({ t: "rtc.failed", reason: detail ? reason + " (" + detail + ")" : reason });
+  };
+  if (pc) iceSummary(pc).then(told, () => told(""));
+  else told("");
 }
 
 function requestRelay() {

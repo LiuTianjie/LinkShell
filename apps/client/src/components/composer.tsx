@@ -17,6 +17,7 @@ import { useComposerDraft } from "@/lib/use-composer-draft";
 import { useIsFocused } from "expo-router/react-navigation";
 import { commandDetail, commandQuery, matchCommands, normalizeCommandText } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
+import { imageMimeType } from "@/lib/image-type";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
@@ -135,7 +136,7 @@ export function Composer(props: ComposerProps) {
       if (result.canceled) return;
       const picked = result.assets
         .filter((asset) => asset.base64 && asset.base64.length * 0.75 <= MAX_IMAGE_BYTES)
-        .map((asset) => ({ uri: asset.uri, mimeType: asset.mimeType ?? "image/jpeg", data: asset.base64! }));
+        .map((asset) => ({ uri: asset.uri, mimeType: imageMimeType(asset.base64!, asset.mimeType), data: asset.base64! }));
       if (picked.length < result.assets.length) Alert.alert("有图片太大", "单张图片不能超过 5 MB。");
       setAttachments((current) => [...current, ...picked].slice(0, 4));
       haptics.selection();

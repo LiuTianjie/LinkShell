@@ -35,6 +35,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   private var senderStats: [String: Any] = [:]
   private var disconnectedAt: Double?
   private var receivedPicture = false
+  private var diagnosing = false
   private static let initialize: Void = { RTCInitializeSSL() }()
 
   init?(url: String, maxFps: Int, renderer: ScreenMetalView, metrics: ScreenMetrics) {
@@ -138,6 +139,37 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     onFailure?(message)
   }
 
+  /// Seconds a path may take to be found before the relay takes over.
+  static let patience: Double = 25
+
+  /// Tells the host what ICE gathered and tried (for its log), then fails.
+  private func diagnoseThenFail(_ message: String, reason: String) {
+    guard !closed, let peer, !diagnosing else { return }
+    diagnosing = true
+    peer.statistics { [weak self] report in
+      self?.queue.async { [weak self] in
+        guard let self, !self.closed else { return }
+        self.signal(["t": "rtc.diagnosis", "reason": reason, "ice": Self.iceSummary(report, peer: peer)])
+        // The message has to leave before the socket closes.
+        self.queue.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.fail(message) }
+      }
+    }
+  }
+
+  static func iceSummary(_ report: RTCStatisticsReport, peer: RTCPeerConnection) -> String {
+    var local: [String: Int] = [:], remote: [String: Int] = [:], pairs: [String: Int] = [:]
+    for record in report.statistics.values {
+      switch record.type {
+      case "local-candidate": local[record.values["candidateType"] as? String ?? "?", default: 0] += 1
+      case "remote-candidate": remote[record.values["candidateType"] as? String ?? "?", default: 0] += 1
+      case "candidate-pair": pairs[record.values["state"] as? String ?? "?", default: 0] += 1
+      default: break
+      }
+    }
+    func list(_ counts: [String: Int]) -> String { counts.isEmpty ? "none" : counts.sorted { $0.key < $1.key }.map { "\($0.key)×\($0.value)" }.joined(separator: ",") }
+    return "local \(list(local)); remote \(list(remote)); pairs \(list(pairs)); ice \(peer.iceConnectionState.rawValue)/\(peer.iceGatheringState.rawValue) (native)"
+  }
+
   private func signal(_ message: [String: Any]) {
     guard !closed, let data = try? JSONSerialization.data(withJSONObject: message) else { return }
     let context = NWConnection.ContentContext(identifier: "screen-signal", metadata: [NWProtocolWebSocket.Metadata(opcode: .text)])
@@ -228,7 +260,9 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   private func report(requested: Bool = false) {
     guard !closed else { return }
     let now = CACurrentMediaTime()
-    if !receivedPicture, now - startedAt > 12 { return fail("视频直连超时") }
+    // A phone on a cellular network can need well over ten seconds to find a path through
+    // the gateway's signalling; the picture falls back to the relay only after this.
+    if !receivedPicture, now - startedAt > Self.patience { return diagnoseThenFail("视频直连超时", reason: "no picture within \(Int(Self.patience)) s") }
     if let disconnectedAt, now - disconnectedAt > 4 { return fail("视频直连已中断，请重新连接") }
     guard metrics.enabled || requested, !statsPending, now - previousAt >= (requested ? 1 : 5), let peer else { return }
     statsPending = true
@@ -290,7 +324,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
       switch newState {
       case .connected, .completed: self.disconnectedAt = nil; self.attachTrack(peerConnection)
       case .disconnected: if self.disconnectedAt == nil { self.disconnectedAt = CACurrentMediaTime() }
-      case .failed: self.fail("当前网络无法建立视频直连")
+      case .failed: self.diagnoseThenFail("当前网络无法建立视频直连", reason: "ICE failed")
       default: break
       }
     }
