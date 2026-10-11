@@ -24,8 +24,11 @@ def run(*args, **kwargs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference")
+    parser.add_argument("--connection", action="store_true", help="Check native timeout fallback with and without RTC config instead of renderer cadence")
     parser.add_argument("--json", type=Path)
     options = parser.parse_args()
+    if options.connection and options.reference:
+        parser.error("--connection and --reference cannot be combined")
     module = Path(__file__).resolve().parents[1]
     repo = module.parents[3]
     source = module / "ios"
@@ -69,6 +72,8 @@ def main():
             (app / "Info.plist").write_bytes(plistlib.dumps(info))
             files = [*sorted((source / "Core").glob("*.swift")), source / "ScreenMetrics.swift", metal,
                      module / "tools/fixtures/RendererAudit.swift"]
+            if options.connection:
+                files[-1:] = [source / "ScreenDecoder.swift", source / "ScreenConnection.swift", module / "tools/fixtures/ConnectionAudit.swift"]
             run("xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "5", "-target", arch + "-apple-ios16.4-simulator",
                 "-sdk", sdk, "-F", str(framework), "-framework", "WebRTC", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",
                 *map(str, files), "-o", str(app / "RenderCheck"))
@@ -85,12 +90,17 @@ def main():
                 container = Path(run("xcrun", "simctl", "get_app_container", owned, bundle, "data"))
                 result = container / "Documents/result.json"
                 run("xcrun", "simctl", "launch", "--terminate-running-process", owned, bundle)
-                until = time.monotonic() + 25
+                until = time.monotonic() + (40 if options.connection else 25)
                 while not result.exists() and time.monotonic() < until:
                     time.sleep(0.1)
                 if not result.exists():
                     raise RuntimeError(name + " did not finish the rendering check")
                 data = json.loads(result.read_text())
+                if options.connection:
+                    results["runs"]["connection"] = data
+                    assert data["passed"], "Native timeout fallback failed: " + json.dumps(data)
+                    run("xcrun", "simctl", "terminate", owned, bundle)
+                    continue
                 blocked = [r["gpuSubmissions"] for r in data["rows"] if r["blocked"] and 2.1 < r["second"] < 2.55]
                 steady = [r["gpuSubmissions"] for r in data["rows"] if 1 < r["second"] < 1.9]
                 resumed = [r["gpuSubmissions"] for r in data["rows"] if 5.5 < r["second"] < 6.9]

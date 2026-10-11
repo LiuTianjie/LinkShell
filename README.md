@@ -146,7 +146,7 @@ Currently supports Codex on macOS with compatible Computer Use tools. See [setup
 
 ## Agents
 
-LinkShell runs the agents already installed and signed in on your computer. It never handles their accounts or API keys.
+LinkShell runs the agents installed on your computer with their existing authentication and provider configuration. Codex supports ChatGPT login, API keys and custom providers, including configuration managed by CC Switch; a Codex login is not required by LinkShell. It never handles agents' accounts or API keys. Restart the host after changing its shell environment so new values are inherited.
 
 | Agent | Mode | What you get |
 | --- | --- | --- |

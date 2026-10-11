@@ -220,7 +220,7 @@ LinkShell **从不经手 Agent 的凭据**，只用与用户终端完全相同�
 | `settings.json` 的 `env` / `apiKeyHelper`、Bedrock / Vertex | 由 Agent 自己读取配置 |
 | 终端里临时 export 的变量 | shim（`linkshell claude`）把自己的环境交给 daemon，远程模式沿用 |
 
-- **登录状态**用 Agent 自带的状态命令获取，只报告方式、不返回密钥：`claude auth status --json`（`loggedIn` / `authMethod` / `apiProvider`，如 `api_key`、`oauth_token`、`bedrock`）、`codex login status`（`Logged in using ChatGPT` / API key）。结果放进 `machine.info` 的 `agents[].auth`，在「电脑」页和 `linkshell doctor` 显示；未登录时给出具体操作提示。
+- **认证状态**只报告方式、不返回密钥：Claude 使用 `claude auth status --json`；Codex 优先读取 app-server 的 `account/read`（不主动刷新令牌），以当前 provider 的 `requiresOpenaiAuth` 为准，旧版本回退到 `codex login status`。结果放进 `machine.info` 的 `agents[].auth`，在「电脑」页和 `linkshell doctor` 显示。Codex 没有账户登录时报告 `unknown`，不禁用新建会话或发送消息；API Key、CC Switch 和自定义 provider 的配置交给 Codex 自己读取，凭据是否有效由实际请求判断。修改 shell 环境变量后需要重启 Host；切换 provider 时按 Codex 的配置加载规则重启或新建会话。
 - 已知限制：从非用户终端派生的进程（如另一个 App 的子进程）可能读不到钥匙串里的 claude.ai 登录。daemon 应由用户终端里的 `linkshell` 拉起，或由 launchd 以用户会话运行。
 
 ## 6. 身份、配对与加密

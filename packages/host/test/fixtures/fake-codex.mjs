@@ -339,6 +339,11 @@ function userItem(input, clientId) {
 const goals = new Map();
 let skillsChanged = false;
 const handlers = {
+  "account/read": (params) => {
+    if (params.refreshToken !== false) throw { code: -32602, message: "status must not refresh credentials" };
+    if (!process.env.FAKE_CODEX_ACCOUNT) throw { code: -32601, message: "account/read unavailable" };
+    return JSON.parse(process.env.FAKE_CODEX_ACCOUNT);
+  },
   "test/changeSkills": () => { skillsChanged = true; broadcast("skills/changed", {}); return {}; },
   "mcpServerStatus/list": (params) => ({ data: [{ name: params.cursor ? "second-server" : "first-server", tools: { check: {} }, authStatus: "notLoggedIn" }], nextCursor: params.cursor ? null : "next" }),
   "app/list": () => ({ data: [{ name: "Test connector", isEnabled: true }], nextCursor: null }),

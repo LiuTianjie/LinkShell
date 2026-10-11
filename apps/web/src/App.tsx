@@ -816,10 +816,10 @@ function Computers({ connect }: { connect: () => void }) {
               <p>
                 {agent.installed ? (agent.version ?? "已安装") : "未安装"} ·{" "}
                 {agent.auth?.state === "ok"
-                  ? "已登录"
+                  ? agent.id === "codex" ? "使用电脑认证配置" : "已登录"
                   : agent.auth?.state === "missing"
                     ? "需要登录"
-                    : "登录状态未知"}
+                    : agent.id === "codex" ? "使用电脑认证配置" : "登录状态未知"}
               </p>
               {(agent.problem || agent.auth?.hint) && (
                 <p className="muted">{agent.problem ?? agent.auth?.hint}</p>

@@ -153,6 +153,15 @@ and checks GPU submissions, stop/restart and renderer replacement:
 python3 apps/client/modules/link-screen/tools/renderer-check.py --reference <earlier-commit>
 ```
 
+The receiver timeout regression uses the real native connection against loopback sockets
+that withhold RTC config or send config without an offer. Both must report failure after
+the 25-second timeout; the latter must also send diagnostics. Diagnostics have a separate
+one-second deadline so missing statistics cannot block fallback.
+
+```sh
+python3 apps/client/modules/link-screen/tools/renderer-check.py --connection
+```
+
 On 2026-10-11, an iOS 27.1 simulator comparison against `f23b1c9` observed zero
 submissions in all five interior 100 ms stall samples with the old main-thread loop,
 and continued submissions with the worker. Both paths rendered before/after the

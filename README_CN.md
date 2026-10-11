@@ -146,7 +146,7 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 
 ## 支持的 Agent
 
-LinkShell 用的是你电脑上已经安装、已经登录的 Agent，不经手它们的账号和 API key。
+LinkShell 使用电脑上已安装的 Agent，沿用它们现有的认证和服务商配置。Codex 可以使用 ChatGPT 登录、API Key 或自定义服务商（包括 CC Switch 管理的配置），LinkShell 不强制要求 Codex 登录，也不经手 Agent 的账号和 API Key。修改 shell 环境变量后，需要重启 Host 才能继承新值。
 
 | Agent | 方式 | 体验 |
 | --- | --- | --- |

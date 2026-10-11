@@ -8,6 +8,18 @@ Run it through the CLI: `npm install -g linkshell-cli`, then `linkshell host --d
 
 Claude Workflow progress and background sub-agent transcripts stay synchronized even while the main conversation is idle. The app can open each run, phase and Agent independently.
 
+## Codex authentication
+
+Codex uses the computer's existing ChatGPT, API key or custom-provider configuration,
+including settings managed by CC Switch. A Codex login is not required by LinkShell:
+account detection is advisory, and Codex reports credential errors when a request runs.
+Restart the host after changing shell environment variables.
+
+`pnpm --filter @linkshell/host live:codex-api` checks the installed Codex CLI against a
+loopback Responses fixture with isolated configuration: saved API keys, provider env keys
+and providers without account authentication. Each completes two turns through the host
+and checks HTTP authentication. No real API credentials or paid inference are used.
+
 ## Session recovery
 
 Host 0.4.19 revalidates busy sessions after restart, reconciles Codex native archives,

@@ -33,6 +33,8 @@ import { useContentWidth } from "@/lib/content-width";
 const authMethod: Record<string, string> = {
   "claude.ai": "Claude 账号",
   api_key: "API Key",
+  provider: "服务商配置",
+  access_token: "访问令牌",
   oauth_token: "OAuth 令牌",
   chatgpt: "ChatGPT 账号",
   bedrock: "Amazon Bedrock",

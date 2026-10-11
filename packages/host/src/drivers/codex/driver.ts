@@ -6,7 +6,7 @@ import { archivedThreadIds } from "./archives.js";
 import { codexPreview } from "./computer-preview.js";
 import { ABANDON, RpcError, questionReplies, updateAsyncQuestions, type AsyncQuestion, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
 import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
-import { parseCodexLoginStatus, runStatusCommand } from "../auth.js";
+import { parseCodexAccountStatus, parseCodexLoginStatus, runStatusCommand } from "../auth.js";
 import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
 import { CodexAppServer, CodexSharedServer, detectCodex, sharedServerSocket } from "./app-server.js";
 import {
@@ -283,6 +283,12 @@ export class CodexDriver implements AgentDriver {
   }
 
   async authStatus(): Promise<AgentAuth> {
+    try {
+      const auth = parseCodexAccountStatus(await this.rpc("account/read", { refreshToken: false }));
+      if (auth) return auth;
+    } catch {
+      // Older app-servers may not expose account/read. The CLI is advisory too.
+    }
     return parseCodexLoginStatus(await runStatusCommand(this.options.command ?? "codex", ["login", "status"], this.options.env));
   }
 

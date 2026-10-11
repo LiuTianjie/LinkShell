@@ -40,9 +40,11 @@ pnpm test                 # Mac 上包含 apps/mac 的 swift test
 # CLI / host：从源码跑一遍
 cd packages/cli && npx tsx src/index.ts doctor
 
-# host 的 Agent 驱动有改动（需要本机装好并登录对应的 Agent；live:claude 要在自己的终端里跑）
+# host 的 Agent 驱动有改动（需要本机装好并配置好对应的 Agent 认证；API Key/provider 均可；live:claude 要在自己的终端里跑）
 pnpm --filter @linkshell/host live:codex
 pnpm --filter @linkshell/host live:claude
+# Codex API 认证回归：真实 CLI + 本地 Responses 测试服务，不需要真实凭据或付费调用
+pnpm --filter @linkshell/host live:codex-api
 
 # apps/mac 有改动
 pnpm --filter @linkshell/mac check

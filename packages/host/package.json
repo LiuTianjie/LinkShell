@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/host",
-  "version": "0.4.22",
+  "version": "0.4.23",
   "description": "LinkShell v2 host daemon: owns agent sessions and terminals on your computer, serves them to your devices.",
   "license": "MIT",
   "repository": {
@@ -34,6 +34,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "live:codex": "tsx scripts/live-codex-check.ts",
+    "live:codex-api": "tsx scripts/live-codex-api-check.ts",
     "live:claude": "tsx scripts/live-claude-check.ts",
     "postinstall": "node scripts/postinstall.mjs"
   },

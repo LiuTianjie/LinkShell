@@ -144,8 +144,12 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
 
   /// Tells the host what ICE gathered and tried (for its log), then fails.
   private func diagnoseThenFail(_ message: String, reason: String) {
-    guard !closed, let peer, !diagnosing else { return }
+    guard !closed, !diagnosing else { return }
+    // Signalling may stall before config creates the peer; diagnostics must never prevent fallback.
+    guard let peer else { return fail(message) }
     diagnosing = true
+    // Statistics are best-effort. Even a stalled callback must release the native receiver.
+    queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.fail(message) }
     peer.statistics { [weak self] report in
       self?.queue.async { [weak self] in
         guard let self, !self.closed else { return }

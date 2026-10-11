@@ -41,12 +41,31 @@ export function parseClaudeAuthStatus(output: string | undefined): AgentAuth {
   return { state: "ok", method: provider && provider !== "firstParty" ? provider : method };
 }
 
-/** `codex login status`. */
+/** Account presence is informative: a provider can authenticate without a Codex login. */
+export function parseCodexAccountStatus(output: unknown): AgentAuth | undefined {
+  if (!output || typeof output !== "object") return undefined;
+  const { account, requiresOpenaiAuth } = output as { account?: { type?: unknown } | null; requiresOpenaiAuth?: unknown };
+  if (account?.type === "amazonBedrock") return { state: "ok", method: "bedrock" };
+  // The selected provider wins over any unrelated ChatGPT account still saved on disk.
+  if (requiresOpenaiAuth === false) return { state: "ok", method: "provider" };
+  switch (account?.type) {
+    case "apiKey": return { state: "ok", method: "api_key" };
+    case "chatgpt": return { state: "ok", method: "chatgpt" };
+    case "chatgptAuthTokens": return { state: "ok", method: "oauth_token" };
+    case "personalAccessToken": return { state: "ok", method: "access_token" };
+  }
+  if (account === null && requiresOpenaiAuth === true) return { state: "unknown" };
+  return undefined;
+}
+
+/** Fallback for Codex versions without account/read; absence of a login never blocks use. */
 export function parseCodexLoginStatus(output: string | undefined): AgentAuth {
   if (!output) return { state: "unknown" };
   const text = output.toLowerCase();
   if (text.includes("not logged in")) {
-    return { state: "missing", hint: "Codex 未登录：在电脑终端运行 codex login" };
+    // API keys and providers configured by tools such as CC Switch need no ChatGPT login.
+    // Let the actual request report missing credentials instead of disabling the clients.
+    return { state: "unknown" };
   }
   if (text.includes("logged in")) {
     if (text.includes("chatgpt")) return { state: "ok", method: "chatgpt" };
