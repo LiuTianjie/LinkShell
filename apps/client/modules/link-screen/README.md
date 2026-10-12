@@ -1,7 +1,7 @@
 # Native iOS screen receiver
 
 This local Expo module owns the WebRTC receiver, decoded-frame mailbox and Metal
-presentation. It shares the installed JitsiWebRTC framework
+presentation. It shares one libwebrtc (M154)
 with `react-native-webrtc`. The existing host forwarder carries authenticated
 signalling; the media track remains DTLS-SRTP peer to peer.
 
@@ -37,8 +37,10 @@ its `direct` status does not prove media connectivity. The native receiver opens
 with `video=1` and its capability-limited `maxFps`. Host/Mac signalling remains necessary
 throughout the session.
 
-The module targets iOS 16.4+. It reuses `JitsiWebRTC ~>124.0.0` (the locally checked Pod lock
-has 124.0.2), while the Mac uses M154. The native decoder factory offers H.264 only. FlexFEC
+The module targets iOS 16.4+. It uses `WebRTC-lib 154.0.0`, the same M154 as the Mac;
+`react-native-webrtc` is patched (`patches/react-native-webrtc@124.0.8.patch`) to share it. The
+native decoder factory offers HEVC first where the device decodes it in hardware
+(`ios/HEVCDecoder.swift`, also linked into apps/mac for its loopback receiver), then H.264. FlexFEC
 is offered by the Mac, but actual negotiation, received protection packets and recovered loss
 must be validated separately; neither Mac loopback results nor WKWebView support establish
 the native receiver's capabilities.

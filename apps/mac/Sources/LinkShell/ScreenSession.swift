@@ -115,6 +115,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   private var lanFloor = LanFloor()
   private var roundTrips = Rate()
   private var roundTripCount = Rate()
+  /// The path last written to the log, so a viewer's log says which one its video took.
+  private var pathSaid: String?
 
   init(request: ScreenRequest, options: Options, link: Link) {
     self.request = request
@@ -624,7 +626,15 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     let count = roundTripCount.step(StatsReader.number(pair, "responsesReceived"))
     let rttMs = total.flatMap { seconds in count.flatMap { $0 > 0 && seconds >= 0 ? seconds / $0 * 1000 : nil } }
       ?? StatsReader.number(pair, "currentRoundTripTime").map { $0 * 1000 }
-    let second = LanFloor.Second(local: endpoint("localCandidateId"), remote: endpoint("remoteCandidateId"),
+    let near = endpoint("localCandidateId"), far = endpoint("remoteCandidateId")
+    if let near, let far {
+      let path = LanFloor.describe(local: near, remote: far)
+      if path != pathSaid {
+        pathSaid = path
+        link.log("the video goes \(path)")
+      }
+    }
+    let second = LanFloor.Second(local: near, remote: far,
                                  rttMs: rttMs, fractionLost: StatsReader.number(remote, "fractionLost"), sendDelayMs: sendDelayMs)
     let ceiling = eased ?? Tuning.maxBitrate(width: size.width, height: size.height, fps: frameRate)
     switch lanFloor.judge(second, ceiling: ceiling) {

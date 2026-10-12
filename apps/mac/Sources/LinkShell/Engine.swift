@@ -45,7 +45,7 @@ enum Engine {
   }
 
   private static func decoderFactory() -> RTCVideoDecoderFactory {
-    MediaStageProbe.enabled ? MediaProbeDecoderFactory() : RTCDefaultVideoDecoderFactory()
+    HEVCDecoderFactory(MediaStageProbe.enabled ? MediaProbeDecoderFactory() : RTCDefaultVideoDecoderFactory())
   }
 
   private static func initFieldTrials(_ trials: [String: String]) {
@@ -93,4 +93,14 @@ enum Codecs {
 
 private protocol FieldTrialSetting {
   func set(_ trials: [String: String])
+}
+
+/// libwebrtc's decoders and HEVC (`HEVCDecoder`), for the test receiver (`--loopback`).
+final class HEVCDecoderFactory: NSObject, RTCVideoDecoderFactory {
+  private let others: RTCVideoDecoderFactory
+  init(_ others: RTCVideoDecoderFactory) { self.others = others }
+  func supportedCodecs() -> [RTCVideoCodecInfo] { (HEVCDecoder.available ? [HEVCDecoder.codecInfo] : []) + others.supportedCodecs() }
+  func createDecoder(_ info: RTCVideoCodecInfo) -> RTCVideoDecoder? {
+    info.name == ScreenEncoderFactory.hevcName ? HEVCDecoder() : others.createDecoder(info)
+  }
 }

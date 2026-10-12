@@ -21,6 +21,7 @@ function out(line: string): void {
   appendFileSync(REPORT, `${line}\n`);
 }
 const results: [string, boolean, string?][] = [];
+let fatal = false;
 const check = (name: string, ok: boolean, detail?: string) => {
   results.push([name, ok, detail]);
   out(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`);
@@ -118,6 +119,7 @@ try {
   check("no message imported twice", userLines === 3, `${userLines} user messages`);
   client.close();
 } catch (error) {
+  fatal = true;
   out(`stopped: ${error instanceof Error ? error.message : String(error)}`);
 } finally {
   await host.stop();
@@ -125,4 +127,4 @@ try {
 }
 const failed = results.filter(([, ok]) => !ok).length;
 out(`\n${results.length - failed}/${results.length} checks passed  (report: ${REPORT})`);
-process.exit(failed === 0 && results.length > 0 ? 0 : 1);
+process.exit(!fatal && failed === 0 && results.length === 13 ? 0 : 1);

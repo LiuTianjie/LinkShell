@@ -24,6 +24,10 @@ extension VideoCompressor: ScreenCompression {}
 ///
 /// Where the low-latency session can't be had, or stops working, libwebrtc's encoder takes over
 /// (`H264ScreenEncoder`) for the rest of the call, and the name in the statistics says so.
+///
+/// It encodes HEVC too, for a receiver that asked for it (`ScreenEncoderFactory`): libwebrtc
+/// (M154) packetizes H.265 but has no encoder for it here. There nothing can take over, so a
+/// failure is libwebrtc's to handle: it asks for the next codec the call agreed.
 final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   static let name = "LinkShellLowLatency"
 
@@ -34,6 +38,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   /// libwebrtc's own answers (video_error_codes.h).
   private enum Code {
     static let ok = 0
+    static let error = -1
     static let uninitialized = -7
   }
 
@@ -41,6 +46,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   private let maximumFrameRate: Int
   private let maxPendingFrames: Int
   private let profile: VideoCompressor.Profile
+  private let hevc: Bool
   private let packetization: RTCH264PacketizationMode
   private var callback: RTCVideoEncoderCallback?
   private var settings: RTCVideoEncoderSettings?
@@ -65,6 +71,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     self.makeStock = makeStock
     // 42…: (Constrained) Baseline; anything else offered is Constrained High.
     profile = (info.parameters["profile-level-id"] ?? "").lowercased().hasPrefix("42") ? .baseline : .high
+    hevc = info.name == ScreenEncoderFactory.hevcName
     packetization = info.parameters["packetization-mode"] == "1" ? .nonInterleaved : .singleNalUnit
     LowLatencyH264Encoder.tookOver.withLock { $0 = false }
   }
@@ -88,7 +95,8 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
         fps: Int(settings.maxFramerate),
         bitrate: Int(settings.startBitrate) * 1000,
         profile: profile,
-        lowLatency: Launch.lowLatency
+        lowLatency: Launch.lowLatency,
+        codec: hevc ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
       ))
       // Without its rate control this encoder has nothing over libwebrtc's.
       guard made.mode == "low-latency" else { return fallBack("no low-latency encoder on this Mac") }
@@ -136,6 +144,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     let captured = frame.timeStampNs / 1_000_000
     let rotation = frame.rotation
     let packetization = self.packetization
+    let hevc = self.hevc
     // A hardware encoder can accept frames faster than it finishes them. Bound raw input
     // instead of queuing old screen contents or discarding compressed reference frames later.
     let job: (generation: Int, key: Bool)? = state.withLock { state in
@@ -166,11 +175,12 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
         break
       case .success(let encoded?):
         guard let data = encoded.accessUnit() else {
-          state.withLock { if $0.generation == job.generation { $0.failure = "an encoded frame had no H.264 access unit" } }
+          state.withLock { if $0.generation == job.generation { $0.failure = "an encoded frame had no access unit" } }
           return
         }
         let image = RTCEncodedImage()
-        image.buffer = MediaStageProbe.enabled ? MediaStageProbe.attaching(to: data, began: began) : data
+        // The probe's marker is an H.264 SEI; HEVC would read it as a reserved unit.
+        image.buffer = MediaStageProbe.enabled && !hevc ? MediaStageProbe.attaching(to: data, began: began) : data
         image.encodedWidth = width
         image.encodedHeight = height
         image.timeStamp = rtpTime
@@ -181,6 +191,8 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
         // "No timing in this frame" (VideoSendTiming::kInvalid): libwebrtc fills in its own.
         image.flags = UInt8.max
         image.qp = NSNumber(value: encoded.quantizer ?? -1)
+        // libwebrtc's bridge takes no other kind; for HEVC the packetizer goes by the payload's
+        // name and reads nothing from it.
         let specific = RTCCodecSpecificInfoH264()
         specific.packetizationMode = packetization
         _ = callback(image, specific)
@@ -231,6 +243,12 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   }
 
   private func fallBack(_ reason: String) -> Int {
+    if hevc {
+      Engine.report("the HEVC encoder stopped (\(reason))")
+      invalidateCallbacks()
+      compressor = nil
+      return Code.error
+    }
     Engine.report("the low-latency encoder is not used (\(reason)): libwebrtc's VideoToolbox encoder takes over")
     invalidateCallbacks()
     compressor = nil

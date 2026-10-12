@@ -9,6 +9,7 @@ import { AcpDriver, inOrder } from "../acp/driver.js";
 import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
 import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
+import type { DriverBehavior } from "../behavior.js";
 import { descendsFrom, sessionHolders, type SessionHolder } from "./holders.js";
 import { ClaudeTasks } from "./tasks.js";
 import { ClaudeActivity } from "./activity.js";
@@ -133,6 +134,11 @@ export interface ClaudeDriverOptions {
  * stream through ACP. Both carry the same message and tool ids.
  */
 export class ClaudeDriver extends AcpDriver {
+  override get behavior(): DriverBehavior {
+    // The transcript and SDK own these capabilities even before ACP initializes.
+    return { ...super.behavior, desktop: "handoff", history: "native-snapshot", fork: "native-turn" };
+  }
+
   private readonly modes = new Map<string, Mode>();
   private readonly tails = new Map<string, TranscriptTail>();
   private readonly tasks = new Map<string, ClaudeTasks>();
@@ -154,6 +160,8 @@ export class ClaudeDriver extends AcpDriver {
   private readonly backgroundAgents = new Map<string, Set<string>>();
   /** Ids of the transcript lines read lately: Claude writes some again after compacting. */
   private readonly seenLines = new Map<string, Set<string>>();
+  /** Native message times covered by this host's ACP stream, including late disk flushes. */
+  private readonly streamedTranscripts = new Map<string, { from: number; until: number }[]>();
   private readonly claudeCommand: string;
   private readonly configDir: string;
   private readonly busyWindowMs: number;
@@ -189,7 +197,7 @@ export class ClaudeDriver extends AcpDriver {
     this.busyWindowMs = options.busyWindowMs ?? 10 * 60_000;
     this.holderCheckMs = options.holderCheckMs ?? 3000;
     this.adapterMissing = adapterMissing;
-    this.capabilities = { ...this.capabilities, models: true, modes: true };
+    this.capabilityState = { ...this.capabilityState, models: true, modes: true };
   }
 
   private readonly adapterMissing: boolean;
@@ -335,7 +343,7 @@ export class ClaudeDriver extends AcpDriver {
         const response = await this.rpc<Record<string, unknown>>("session/new", { cwd, mcpServers: [], ...this.sessionMeta() });
         const options = toConfigOptions(response);
         if (options.length > 0) this.template ??= options;
-        if (typeof response.sessionId === "string" && this.connection?.capabilities.sessionCapabilities?.close) {
+        if (typeof response.sessionId === "string" && this.acpBehavior.detach === "protocol-close") {
           void this.rpc("session/close", { sessionId: response.sessionId }).catch(() => {});
         }
         return this.template;
@@ -377,6 +385,7 @@ export class ClaudeDriver extends AcpDriver {
     if (config?.length) this.template = config;
     // Born on a device: this host is the writer from the start.
     this.modes.set(created.nativeId, "remote");
+    this.beginTranscriptStream(created.nativeId);
     this.setWriter(created.nativeId, "remote");
     return created;
   }
@@ -390,6 +399,7 @@ export class ClaudeDriver extends AcpDriver {
     this.tails.get(nativeId)?.stop();
     this.tails.delete(nativeId);
     await super.detach(nativeId);
+    this.endTranscriptStream(nativeId);
   }
 
   /**
@@ -444,6 +454,7 @@ export class ClaudeDriver extends AcpDriver {
     if (transcript) await super.delete(nativeId);
     else this.sessions.delete(nativeId);
     this.modes.delete(nativeId);
+    this.streamedTranscripts.delete(nativeId);
     this.hiddenTools.delete(nativeId);
     this.backgroundAgents.delete(nativeId);
     this.activity.get(nativeId)?.stop();
@@ -664,6 +675,10 @@ export class ClaudeDriver extends AcpDriver {
     let seen = this.seenLines.get(nativeId);
     if (!seen) this.seenLines.set(nativeId, (seen = new Set()));
     const result = transcriptLine(line, { hidden, agents, seen });
+    // Claude may flush SDK messages after session/close has returned and the
+    // desktop has reclaimed it. Still record their UUIDs, but don't echo them.
+    if (result.ts !== undefined && line.includes(REMOTE_ENTRYPOINT) &&
+        this.streamedTranscripts.get(nativeId)?.some(({ from, until }) => result.ts! >= from && result.ts! <= until)) return;
     if (result.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: result.title });
     for (const update of result.updates) this.emit(nativeId, update);
     // Changed on the computer (another model, effort, permission mode): the phone shows it.
@@ -720,6 +735,7 @@ export class ClaudeDriver extends AcpDriver {
       }
     }
     if (Object.keys(pending).length) this.host?.state(this.id, nativeId).set("pendingConfig", "{}");
+    this.beginTranscriptStream(nativeId);
     this.setWriter(nativeId, "remote");
     this.setMode(nativeId, "remote");
     this.emitConfig(nativeId, target);
@@ -814,10 +830,22 @@ export class ClaudeDriver extends AcpDriver {
       while (state.turnActive && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
     }
     await super.detach(nativeId);
+    this.endTranscriptStream(nativeId);
     this.setMode(nativeId, "idle");
     // What the remote turns wrote was already streamed live; anything another
     // Claude wrote in between (it was reopened on the computer) is new.
-    this.tails.get(nativeId)?.resumeSkipping((line) => line.includes(REMOTE_ENTRYPOINT));
+    this.tails.get(nativeId)?.resumeSkipping(() => false);
+  }
+
+  private beginTranscriptStream(nativeId: string): void {
+    const windows = this.streamedTranscripts.get(nativeId) ?? [];
+    windows.push({ from: Date.now(), until: Infinity });
+    this.streamedTranscripts.set(nativeId, windows);
+  }
+
+  private endTranscriptStream(nativeId: string): void {
+    const window = this.streamedTranscripts.get(nativeId)?.at(-1);
+    if (window?.until === Infinity) window.until = Date.now();
   }
 
   /**

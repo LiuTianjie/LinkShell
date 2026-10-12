@@ -32,8 +32,10 @@ thermal state and adaptation; standard receivers retain the 60/30 defaults. No v
 cross JS. Display-link callbacks, texture mapping and GPU submission now run on a dedicated
 iOS render thread; UIKit publishes small layout snapshots. This removes dependence on UI
 event processing, without establishing a phone latency or sustained-frame-rate result.
-The native module shares the app's JitsiWebRTC M124 framework; this sender uses M154,
-so codec/extension support must be established by the actual negotiation.
+The native module and this sender use M154; react-native-webrtc shares the same iOS framework.
+HEVC is offered to capable native receivers only after the Mac's low-latency hardware encoder
+passes an availability probe; other viewers keep H.264. Codec/extension support still depends
+on the actual negotiation.
 
 Failed media falls back to the host's H.264 byte stream. iOS first tries the standard WebView
 receiver and then bypasses the bulk direct channel for that screen, using RPC. Android/Web
@@ -187,7 +189,7 @@ already, and stop if it is not rather than have the system ask.
 | `flexfec-check.mjs` | A short functional check over its own loopback UDP proxy: 60 ms each way, every twentieth original video packet dropped. Checks real FlexFEC packet receipt, then successful video without FlexFEC when the test receiver declines it. `--json <file>` saves the evidence. No system network changes or latency claims. |
 | `network-check.mjs` | A 48-second congestion/recovery scenario: an owned UDP proxy changes media capacity from 20 to 0.7 to 20 Mbps, with 10 ms propagation each way and a 200 ms router queue. Includes RTX/FEC in the budget. `--screen`, `--maxFps`, `--maxWidth`, `--app`, repeatable `--trial`, `--json`; passing proves traversal and decoding, not acceptable latency or iPhone performance. |
 | `media-lab.mjs` | Loopback-only encrypted UDP experiment using the same capture, VT H.264 and native decoder. `--network` uses the congestion scenario above; `--no-ltr` checks recovery without acknowledged long-term references. Requires `--loopback --media-lab` in the helper. Not a remote transport. |
-| `codec-check.mjs` | Encode-only H.264/HEVC hardware comparison with fixed `--fps`, `--bitrate`, `--maxWidth` and raw input bound `--pending`. No transport, decoder, picture-quality or display result. HEVC is not enabled for shipping media. |
+| `codec-check.mjs` | Encode-only H.264/HEVC hardware comparison with fixed `--fps`, `--bitrate`, `--maxWidth` and raw input bound `--pending`. No transport, decoder, picture-quality or display result. Shipping HEVC additionally uses WebRTC and the shared VideoToolbox decoder. |
 | `setup-shots.mjs` | The setup window drawn into PNG files in every state, light and dark, Chinese and English (24 of them, in `build/setup-shots` or the directory named), with nothing shown and nothing asked of the system. For looking at the window after changing it. |
 | `app.mjs`, `h264.mjs`, `pointer-shapes.swift` | Shared by the above: opening the app, reading H.264, changing the pointer's picture. |
 
@@ -365,7 +367,7 @@ NACK/RTX. There is no SDP rewriting to pretend a viewer supports it. See M154's
 [FEC sender creation](https://webrtc.googlesource.com/src/+/refs/branch-heads/8037/call/rtp_video_sender.cc).
 
 Upstream [M124](https://webrtc.googlesource.com/src/+/refs/branch-heads/6367/media/engine/webrtc_video_engine.cc)
-already exposes FlexFEC receive support unless explicitly disabled; the installed Jitsi build
+already exposes FlexFEC receive support unless explicitly disabled; the native M154 receiver
 and WKWebView still have to prove their capability in their actual answers. A clean network
 can negotiate FlexFEC and send no repair packets, because M154's protection controller uses
 loss and RTT to choose redundancy. The advertised `repair-window=10000000` is a required

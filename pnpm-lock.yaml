@@ -15,6 +15,9 @@ patchedDependencies:
   react-native-enriched-markdown@1.0.2:
     hash: bf030571a82c590962ed0e516eb27af625617c114430e8395653804ddb73fbcf
     path: patches/react-native-enriched-markdown@1.0.2.patch
+  react-native-webrtc@124.0.8:
+    hash: 0f6739e0d65ff5f49c131fa32477187cac395a9b6e1c5e7162235e9182eac21f
+    path: patches/react-native-webrtc@124.0.8.patch
 
 importers:
 
@@ -184,7 +187,7 @@ importers:
         version: 6.4.3(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))
       react-native-webrtc:
         specifier: ^124.0.8
-        version: 124.0.8(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))
+        version: 124.0.8(patch_hash=0f6739e0d65ff5f49c131fa32477187cac395a9b6e1c5e7162235e9182eac21f)(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))
       react-native-webview:
         specifier: 13.16.1
         version: 13.16.1(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
@@ -9074,9 +9077,7 @@ snapshots:
       metro-runtime: 0.84.5
     transitivePeerDependencies:
       - '@babel/core'
-      - bufferutil
       - supports-color
-      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89':
     optional: true
@@ -12371,7 +12372,7 @@ snapshots:
       - encoding
     optional: true
 
-  react-native-webrtc@124.0.8(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3)):
+  react-native-webrtc@124.0.8(patch_hash=0f6739e0d65ff5f49c131fa32477187cac395a9b6e1c5e7162235e9182eac21f)(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3)):
     dependencies:
       base64-js: 1.5.1
       debug: 4.3.4

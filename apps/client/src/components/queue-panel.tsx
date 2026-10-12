@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
+import type { queuedSendAction } from "@/lib/queued-send-action";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { AppMenu } from "./app-menu";
@@ -21,6 +22,8 @@ export interface QueuePanelProps {
   /** Offline, or the composer can't take a message: the rows only show. */
   disabled?: boolean;
   contained?: boolean;
+  sendAction: ReturnType<typeof queuedSendAction>;
+  status: string;
   onSendNow: (clientMessageId: string) => Promise<void>;
   /** Takes the message back into the composer. */
   onEdit: (clientMessageId: string) => void;
@@ -35,6 +38,7 @@ function Row({
   count,
   first,
   disabled,
+  sendAction,
   onSendNow,
   onEdit,
   onRemove,
@@ -45,6 +49,7 @@ function Row({
   count: number;
   first: boolean;
   disabled: boolean;
+  sendAction: QueuePanelProps["sendAction"];
   onSendNow: () => Promise<void>;
   onEdit: () => void;
   onRemove: () => void;
@@ -53,7 +58,7 @@ function Row({
   const [sending, setSending] = useState(false);
   const images = entry.images ? `${entry.images} 张图片` : "";
   const actions: MenuAction[] = [
-    { id: "now", title: "立即发送", image: "arrow.up.circle" },
+    { id: "now", title: sendAction.label, subtitle: sendAction.detail, image: "arrow.up.circle", attributes: { disabled: sending } },
     { id: "edit", title: "编辑", image: "pencil" },
     { id: "up", title: "上移", image: "arrow.up", attributes: { disabled: index === 0 } },
     { id: "down", title: "下移", image: "arrow.down", attributes: { disabled: index === count - 1 } },
@@ -78,13 +83,19 @@ function Row({
       }}
     >
       <Text style={[type.caption, { width: 16, color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{index + 1}</Text>
-      <Text
-        numberOfLines={2}
-        style={[type.footnote, { flex: 1, paddingRight: 6, color: entry.text && !entry.pending ? colors.label : colors.secondaryLabel }]}
+      <Pressable
+        disabled={disabled || entry.pending}
+        onPress={() => { haptics.selection(); onEdit(); }}
+        accessibilityRole="button"
+        accessibilityLabel={`编辑待发送消息：${entry.text || images}`}
+        accessibilityState={{ disabled: disabled || !!entry.pending }}
+        style={{ flex: 1, minHeight: 44, justifyContent: "center", paddingRight: 6 }}
       >
-        {entry.text || images}
-        {entry.text && images ? <Text style={{ color: colors.secondaryLabel }}> · {images}</Text> : null}
-      </Text>
+        <Text numberOfLines={2} style={[type.footnote, { color: entry.text && !entry.pending ? colors.label : colors.secondaryLabel }]}>
+          {entry.text || images}
+          {entry.text && images ? <Text style={{ color: colors.secondaryLabel }}> · {images}</Text> : null}
+        </Text>
+      </Pressable>
       {entry.pending ? (
         // Not in the queue yet: nothing can be done with it until the computer has it.
         <View accessibilityLabel="正在排队" style={{ width: 36, height: 40, marginRight: 8, alignItems: "center", justifyContent: "center" }}>
@@ -95,29 +106,20 @@ function Row({
           <Pressable
             onPress={sendNow}
             accessibilityRole="button"
-            accessibilityLabel="立即发送"
+            disabled={sending}
+            accessibilityLabel={sendAction.label}
+            accessibilityHint={sendAction.detail}
+            accessibilityState={{ disabled: sending, busy: sending }}
             hitSlop={4}
-            style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
+            style={{ minWidth: 54, height: 44, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" }}
           >
-            <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
+            <View style={{ minHeight: 28, paddingHorizontal: 9, borderRadius: 14, backgroundColor: sendAction.interrupts ? colors.waitingSoft : colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
               {sending ? (
-                <ActivityIndicator size="small" color={colors.accent} style={{ transform: [{ scale: 0.7 }] }} />
+                <ActivityIndicator size="small" color={sendAction.interrupts ? colors.waiting : colors.accent} style={{ transform: [{ scale: 0.7 }] }} />
               ) : (
-                <Icon sf="arrow.up" md="arrow_upward" size={12} color={colors.accent} weight="bold" />
+                <Text style={[type.caption, { fontWeight: "600", color: sendAction.interrupts ? colors.waiting : colors.accent }]}>{sendAction.label}</Text>
               )}
             </View>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              haptics.selection();
-              onEdit();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="编辑"
-            hitSlop={4}
-            style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
-          >
-            <Icon sf="pencil" md="edit" size={15} color={colors.secondaryLabel} />
           </Pressable>
           <AppMenu
             actions={actions}
@@ -146,7 +148,7 @@ function Row({
  * go now, come back to be edited, move up or down, or be dropped. The queue
  * lives on the computer, so every device looking at the session sees it.
  */
-export function QueuePanel({ queue, disabled = false, contained = false, onSendNow, onEdit, onRemove, onReorder }: QueuePanelProps) {
+export function QueuePanel({ queue, disabled = false, contained = false, sendAction, status, onSendNow, onEdit, onRemove, onReorder }: QueuePanelProps) {
   const move = (index: number, by: -1 | 1) => {
     // (Only what the computer holds has an order to change.)
     const ids = queue.filter((entry) => !entry.pending).map((entry) => entry.clientMessageId);
@@ -161,6 +163,10 @@ export function QueuePanel({ queue, disabled = false, contained = false, onSendN
 
   return (
     <Glass style={{ borderRadius: 22, paddingHorizontal: 4, overflow: "hidden" }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 4 }}>
+        <Text style={[type.caption, { color: colors.secondaryLabel, fontWeight: "600" }]}>待发送 · {queue.length}</Text>
+        <Text style={[type.caption, { color: colors.secondaryLabel }]}>{status}</Text>
+      </View>
       <QueueBody contained={contained} count={queue.length}>
         {queue.map((entry, index) => (
           <Row
@@ -170,6 +176,7 @@ export function QueuePanel({ queue, disabled = false, contained = false, onSendN
             count={held}
             first={index === 0}
             disabled={disabled}
+            sendAction={sendAction}
             onSendNow={() => onSendNow(entry.clientMessageId)}
             onEdit={() => onEdit(entry.clientMessageId)}
             onRemove={() => {

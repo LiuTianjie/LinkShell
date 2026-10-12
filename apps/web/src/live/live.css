@@ -988,3 +988,100 @@
     color: var(--secondaryLabel);
   }
 }
+
+@layer components {
+  .screens-overview {
+    padding-inline: clamp(18px, 3vw, 48px);
+  }
+  .screens-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 350px), 1fr));
+    gap: 22px;
+    align-items: start;
+  }
+  .screen-card {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--separator);
+    border-radius: var(--radius-card);
+    background: var(--card);
+  }
+  .screen-card-heading {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 18px 18px 14px;
+  }
+  .screen-card-icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    background: var(--accentSoft);
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .screen-card-heading h2 {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 15px;
+  }
+  .screen-card-presence {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .screen-card-preview,
+  .screen-card-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: var(--fill);
+    color: var(--secondaryLabel);
+    border-radius: 14px;
+  }
+  .screen-card-preview {
+    aspect-ratio: 16 / 9;
+    margin-bottom: 18px;
+    color: var(--tertiaryLabel);
+  }
+  .screen-card-placeholder {
+    min-height: 280px;
+    margin: 0 18px 18px;
+    padding: 22px;
+    text-align: center;
+  }
+  .screen-card-placeholder strong { color: var(--label); }
+  .screen-card-placeholder p { margin: 0; font-size: 12px; }
+  .screen-page.screen-card-viewer {
+    height: auto;
+    min-height: 0;
+    padding: 0 18px 18px;
+  }
+  .screen-card-viewer .browser-toolbar:empty { display: none; }
+  .screen-card-viewer .browser-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 12px;
+  }
+  .screen-card-viewer .notice-card { margin: 0; padding: 0; background: none; }
+  .screen-card-viewer .notice-card > p { font-size: 12px; }
+  .screen-card-viewer .permission-buttons { flex-wrap: wrap; }
+  .screen-card-viewer iframe {
+    min-height: 320px;
+    aspect-ratio: 4 / 3;
+    flex: none;
+    border-radius: 14px;
+  }
+  .screen-card-viewer iframe:fullscreen { width: 100%; height: 100%; border-radius: 0; }
+}

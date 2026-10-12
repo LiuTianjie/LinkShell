@@ -1,3 +1,4 @@
+import CoreMedia
 import Foundation
 import WebRTC
 
@@ -19,8 +20,19 @@ final class ScreenEncoderFactory: NSObject, RTCVideoEncoderFactory {
     super.init()
   }
 
+  static let hevcName = "H265"
+
+  /// Probe the actual low-latency hardware path before advertising it. An Intel Mac or an
+  /// unavailable VideoToolbox encoder must keep H.264 in the offer, rather than fail after SDP.
+  static let supportsHEVC: Bool = {
+    guard let encoder = try? VideoCompressor(.init(width: 640, height: 360, fps: 30, bitrate: 1_000_000, codec: kCMVideoCodecType_HEVC)) else { return false }
+    return encoder.mode == "low-latency" && encoder.hardware
+  }()
+
+  /// HEVC, from this app's own encoder, is listed last: it goes first only for a viewer that
+  /// asked for it (`Codecs.preferences`), and every other viewer gets what it got before.
   func supportedCodecs() -> [RTCVideoCodecInfo] {
-    Self.browserCompatible(standard.supportedCodecs())
+    Self.browserCompatible(standard.supportedCodecs()) + (Engine.ownEncoder && Launch.lowLatency && Self.supportsHEVC ? [HEVCDecoder.codecInfo] : [])
   }
 
   /// Chrome advertises High (6400), while the ObjC factory only advertises Constrained High
@@ -40,6 +52,7 @@ final class ScreenEncoderFactory: NSObject, RTCVideoEncoderFactory {
   }
 
   func createEncoder(_ info: RTCVideoCodecInfo) -> RTCVideoEncoder? {
+    if info.name == Self.hevcName { return LowLatencyH264Encoder(info: info, maximumFrameRate: maximumFrameRate) }
     guard info.name == kRTCVideoCodecH264Name else { return standard.createEncoder(info) }
     return Engine.ownEncoder ? LowLatencyH264Encoder(info: info, maximumFrameRate: maximumFrameRate) : H264ScreenEncoder(info: info, maximumFrameRate: maximumFrameRate)
   }

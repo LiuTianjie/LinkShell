@@ -1,7 +1,7 @@
 {
   "name": "linkshell",
   "private": true,
-  "version": "0.10.24",
+  "version": "0.10.25",
   "packageManager": "pnpm@10.18.3",
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -11,7 +11,8 @@
     ],
     "patchedDependencies": {
       "react-native-enriched-markdown@1.0.2": "patches/react-native-enriched-markdown@1.0.2.patch",
-      "expo-screen-orientation@57.0.2": "patches/expo-screen-orientation@57.0.2.patch"
+      "expo-screen-orientation@57.0.2": "patches/expo-screen-orientation@57.0.2.patch",
+      "react-native-webrtc@124.0.8": "patches/react-native-webrtc@124.0.8.patch"
     },
     "overrides": {
       "@modelcontextprotocol/sdk": "1.32.1",

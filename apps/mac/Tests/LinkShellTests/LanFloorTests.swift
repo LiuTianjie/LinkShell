@@ -110,4 +110,12 @@ final class LanFloorTests: XCTestCase {
     queued.sendDelayMs = 30
     XCTAssertNil(applied(&floor, Array(repeating: queued, count: 20)))
   }
+
+  /// The log names the kind of path, never the addresses.
+  func testPathDescription() {
+    let lan = LanFloor.describe(local: .init(type: "host", address: "192.168.1.5"), remote: .init(type: "prflx", address: "abc.local"))
+    XCTAssertEqual(lan, "over the local network (host → prflx)")
+    XCTAssertEqual(LanFloor.describe(local: .init(type: "srflx", address: "58.48.8.16"), remote: .init(type: "srflx", address: "1.2.3.4")), "across the internet (srflx → srflx)")
+    XCTAssertEqual(LanFloor.describe(local: .init(type: "host", address: "10.0.0.2"), remote: .init(type: "relay", address: "1.2.3.4")), "through a TURN relay (host → relay)")
+  }
 }

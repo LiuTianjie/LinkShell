@@ -8,6 +8,7 @@ import { ABANDON, RpcError, questionReplies, updateAsyncQuestions, type AsyncQue
 import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
 import { parseCodexAccountStatus, parseCodexLoginStatus, runStatusCommand } from "../auth.js";
 import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
+import { behaviorCapabilities, type DriverBehavior } from "../behavior.js";
 import { CodexAppServer, CodexSharedServer, detectCodex, sharedServerSocket } from "./app-server.js";
 import {
   APPROVAL_METHODS,
@@ -188,15 +189,22 @@ interface PendingApproval {
 export class CodexDriver implements AgentDriver {
   readonly id = "codex";
   readonly label = "Codex";
-  readonly tier = "multi_client" as const;
+  readonly behavior: DriverBehavior = Object.freeze({
+    desktop: "multi_client",
+    history: "native-snapshot",
+    turnCompletion: "native-events",
+    busyInput: "native-steer",
+    fork: "native-turn",
+    detach: "native-unsubscribe",
+  });
+  get tier() { return this.behavior.desktop; }
   readonly capabilities = {
     interrupt: true,
-    steer: true,
     permissions: true,
     images: true,
-    fork: true,
     models: true,
     modes: true,
+    ...behaviorCapabilities(this.behavior),
   };
 
   private host?: DriverHost;

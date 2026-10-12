@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEvent, SessionUpdate } from "@linkshell/wire";
 import type { AgentDriver, DriverHost } from "../src/drivers/types.js";
+import type { DriverBehavior } from "../src/drivers/behavior.js";
 import { SessionHub } from "../src/hub.js";
 import { imageOf, parseImageUri, slimEvent } from "../src/slim.js";
 import { HostStore } from "../src/store.js";
@@ -16,6 +17,7 @@ class QuietDriver implements AgentDriver {
   readonly id = "fake";
   readonly label = "Fake";
   readonly tier = "multi_client" as const;
+  readonly behavior: DriverBehavior = { desktop: "multi_client", history: "native-snapshot", turnCompletion: "native-events", busyInput: "queue", fork: "context", detach: "local-only" };
   readonly capabilities = { interrupt: true, steer: false, permissions: true, images: false, fork: false, models: false, modes: false };
   host!: DriverHost;
   async start(host: DriverHost) {

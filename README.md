@@ -272,4 +272,4 @@ Sponsored by [AI18N](https://ai18n.chat/), an AI API gateway with OpenAI- and An
 
 [MIT](LICENSE).
 
-The gateway also serves the browser client at its root URL. Self-hosted gateways use pairing without Supabase; the official gateway enables account access. See [Web client](apps/web/README.md).
+The gateway also serves the browser client at its root URL. Self-hosted gateways use pairing without Supabase; the official gateway enables account access. See [Web client](apps/web/README.md). The Screens page shows a responsive grid of computers, with independent viewing, display selection and fullscreen controls for each online computer.

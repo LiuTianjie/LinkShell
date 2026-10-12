@@ -144,6 +144,9 @@ export async function runDoctor(version: string, gatewayUrl?: string): Promise<v
     const { screenAccess, describeScreen } = await import("./screen.js");
     const screen = describeScreen(await screenAccess().catch(() => undefined));
     if (screen) results.push({ name: "Screen (optional)", ok: true, detail: screen });
+    const { checkWifi } = await import("./wifi.js");
+    const wifi = await checkWifi();
+    if (wifi) results.push({ name: "Wi-Fi", ...wifi });
   }
 
   for (const r of results) {

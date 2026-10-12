@@ -114,4 +114,4 @@ try {
 }
 const failed = results.filter(([, ok]) => !ok).length;
 process.stdout.write(`\n${results.length - failed}/${results.length} checks passed\n`);
-process.exit(failed === 0 ? 0 : 1);
+process.exit(failed === 0 && results.length === 8 ? 0 : 1);

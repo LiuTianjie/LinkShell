@@ -1,5 +1,7 @@
 # 会话恢复与 ACP 兼容
 
+驱动行为的统一定义与新增 Agent 的接入约束见 [Agent 适配行为契约](agent-behavior.md)。
+
 基础恢复策略始于 Host 0.4.19 / CLI 0.10.19。本文同时说明 Host 0.4.20 / CLI 0.10.20 与 App 2.3.17 的 ACP 扩展；完整能力与验证边界见 [ACP 支持说明](acp-support.md)。
 
 ## 状态与历史是两件事

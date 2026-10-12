@@ -2,8 +2,8 @@ import CoreMedia
 import Foundation
 
 /// An encoded frame as a decoder off this Mac wants it: Annex B, each NAL unit behind a start
-/// code (00 00 00 01), and in front of a key frame the parameter sets (SPS, PPS) it is decoded
-/// with — so that any key frame is a place to begin.
+/// code (00 00 00 01), and in front of a key frame the parameter sets (SPS, PPS; and VPS for
+/// HEVC) it is decoded with — so that any key frame is a place to begin.
 enum AnnexB {
   private static let startCode: [UInt8] = [0, 0, 0, 1]
 
@@ -16,7 +16,7 @@ enum AnnexB {
   /// The frame's access unit, after `reserved` bytes left for the caller to write a header in.
   /// `statingNoReordering`: the sequence parameter set is made to say that frames come in the
   /// order they are shown (`SequenceParameters`), for an encoder that doesn't say it.
-  /// Nil for a sample that isn't the H.264 VideoToolbox makes (NAL units behind 4-byte lengths).
+  /// Nil for a sample that isn't the H.264 or HEVC VideoToolbox makes (NAL units behind 4-byte lengths).
   static func accessUnit(_ sample: CMSampleBuffer, key: Bool, reserved: Int = 0, statingNoReordering: Bool = false) -> Data? {
     guard let block = CMSampleBufferGetDataBuffer(sample) else { return nil }
     let length = CMBlockBufferGetDataLength(block)
@@ -25,16 +25,20 @@ enum AnnexB {
 
     if key {
       guard let format = CMSampleBufferGetFormatDescription(sample) else { return nil }
+      // HEVC has three sets (video, sequence, picture), H.264 two; both behind 4-byte lengths.
+      let hevc = CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_HEVC
+      let parameterSet = hevc ? CMVideoFormatDescriptionGetHEVCParameterSetAtIndex : CMVideoFormatDescriptionGetH264ParameterSetAtIndex
       var count = 0
       var lengthSize: Int32 = 0
-      guard CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, parameterSetIndex: 0, parameterSetPointerOut: nil, parameterSetSizeOut: nil, parameterSetCountOut: &count, nalUnitHeaderLengthOut: &lengthSize) == noErr, lengthSize == 4 else { return nil }
+      guard parameterSet(format, 0, nil, nil, &count, &lengthSize) == noErr, lengthSize == 4 else { return nil }
       for index in 0..<count {
         var pointer: UnsafePointer<UInt8>?
         var size = 0
-        guard CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, parameterSetIndex: index, parameterSetPointerOut: &pointer, parameterSetSizeOut: &size, parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil) == noErr, let pointer else { return nil }
+        guard parameterSet(format, index, &pointer, &size, nil, nil) == noErr, let pointer else { return nil }
         unit.append(contentsOf: startCode)
-        // The first set is the sequence's.
-        if index == 0, statingNoReordering, let stated = SequenceParameters.statingNoReordering(UnsafeBufferPointer(start: pointer, count: size)) {
+        // H.264's first set is the sequence's. (HEVC is only sent from the low-latency encoder,
+        // which says it doesn't reorder.)
+        if !hevc, index == 0, statingNoReordering, let stated = SequenceParameters.statingNoReordering(UnsafeBufferPointer(start: pointer, count: size)) {
           unit.append(contentsOf: stated)
         } else {
           unit.append(pointer, count: size)
