@@ -44,6 +44,7 @@ import { ContentHeight } from "@/lib/content-height";
 import { useHasComposerDraft } from "@/lib/use-composer-draft";
 import { useSessionCommands } from "@/lib/use-session-commands";
 import { GoalCard } from "@/components/goal-card";
+import { turnActivity } from "@/lib/turn-activity";
 
 // One array for "nothing yet": a new one on every render would make everything computed from the items run again.
 const NO_ITEMS: TimelineItem[] = [];
@@ -129,6 +130,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const online = useClient((state) => state.status === "online");
   const loadingEarlier = useClient((state) => !!state.loadingEarlier[id]);
   const queueing = useClient((state) => state.queueing[id]);
+  const promptProgress = useClient((state) => state.promptProgress[id]);
   const subagents = useClient((state) => state.subagents[id]);
   const workflows = useClient((state) => state.workflows[id]);
   const tasks = useClient((state) => state.tasks[id]);
@@ -185,6 +187,8 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   );
   // Reopened sessions show what we already have straight away.
   const [cachedAtOpen] = useState(() => items.length > 0);
+  const wasReady = useRef(ready);
+  if (ready) wasReady.current = true;
 
   const changeCount = useMemo(() => countChanges(items), [items]);
   // The host's summary is authoritative: an agent's own history can end mid-turn.
@@ -297,7 +301,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
 
   // A session with a title or preview has history, even before its first import.
   const hasHistory = summary.lastSeq > 0 || !!summary.preview || !!summary.title;
-  const loading = !ready && !cachedAtOpen && online && hasHistory;
+  const loading = !ready && !wasReady.current && !cachedAtOpen && online && hasHistory;
   // An empty session: the intro sits centred above the composer, outside the
   // list (which aligns its content to the bottom, as a chat should).
   // Notices ("the terminal quit") don't start a conversation; messages and tools do.
@@ -443,6 +447,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         items={timelineItems}
         planId={view?.planId}
         turnActive={turnActive}
+        activity={turnActivity({ session: summary, progress: promptProgress, online, ready, hasPermission: !!view?.permissions.length, queued: shownQueue(summary.queue, queueing).length })}
         composerInset={composerInset}
         keyboardOffset={keyboardOffset}
         onFailedMessage={onFailedMessage}

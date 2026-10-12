@@ -16,6 +16,8 @@ import { StepsSummary } from "./steps";
 import { ToolCall } from "./tool-call";
 import { FloatingComputerUse } from "../computer-use-preview";
 import { computerUseTopInset } from "@/lib/computer-use";
+import type { TurnActivityState } from "@/lib/turn-activity";
+import { TurnActivity } from "./turn-activity";
 
 /** How near the top (in screens) the page of history before it is asked for. */
 const EARLIER_SCREENS = 2;
@@ -57,6 +59,7 @@ export interface TimelineProps {
   previewHeaderConsumed?: boolean;
   planId?: string;
   turnActive: boolean;
+  activity?: TurnActivityState;
   composerInset: SharedValue<number>;
   keyboardOffset: number;
   onFailedMessage: (item: Extract<TimelineItem, { kind: "user" }>) => void;
@@ -71,7 +74,7 @@ export interface TimelineProps {
 }
 
 export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeline(
-  { items, computerPreview = false, previewHeaderConsumed = false, planId, turnActive, composerInset, keyboardOffset, onFailedMessage, onScroll, header, earlier, anchorEnd = true, alignEnd = anchorEnd },
+  { items, computerPreview = false, previewHeaderConsumed = false, planId, turnActive, activity, composerInset, keyboardOffset, onFailedMessage, onScroll, header, earlier, anchorEnd = true, alignEnd = anchorEnd },
   ref,
 ) {
   const headerHeight = useHeaderHeight();
@@ -360,6 +363,7 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
       keyboardDismissMode="interactive"
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ paddingBottom: 12 }}
+      ListFooterComponent={activity ? <TurnActivity activity={activity} onLayout={toEnd} /> : null}
       ListHeaderComponent={
         earlier ? (
           <>

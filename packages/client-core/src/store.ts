@@ -27,6 +27,7 @@ import {
   emptyView,
   findTool,
   markMessageFailed,
+  markMessageAccepted,
   prependEvents,
   removeItem,
   startWindow,
@@ -70,6 +71,14 @@ export interface ClientState {
    * shown at the end of it until the host has them.
    */
   queueing: Record<string, QueueEntry[]>;
+  /** Local feedback until the host reports a turn or a queue entry for this send. */
+  promptProgress: Record<string, PromptProgress>;
+}
+
+export interface PromptProgress {
+  clientMessageId: string;
+  phase: "sending" | "starting";
+  afterSeq: number;
 }
 
 /** A message in a session's queue, or (`pending`) one this device has sent there and the host hasn't confirmed. */
@@ -206,6 +215,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       let subagentViews = state.subagentViews;
       let workflows = state.workflows;
       let tasks = state.tasks;
+      let promptProgress = state.promptProgress;
       const bySession = new Map<string, SessionEvent[]>();
       for (const event of batch) {
         const records = tasks[event.sessionId] ?? {};
@@ -231,12 +241,20 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         }
       }
       for (const [sessionId, events] of bySession) {
+        const progress = promptProgress[sessionId];
+        if (progress && events.some(({ seq, update }) => seq > progress.afterSeq && !("parentToolCallId" in update && update.parentToolCallId) && (
+          update.sessionUpdate === "ls_turn" || update.sessionUpdate === "ls_status" || update.sessionUpdate === "ls_error" || update.sessionUpdate === "ls_notice" ||
+          (update.sessionUpdate === "ls_message" && update.role === "agent")
+        ))) {
+          promptProgress = { ...promptProgress };
+          delete promptProgress[sessionId];
+        }
         const current = views[sessionId];
         if (!current) continue;
         const next = applyEvents(current, events);
         if (next !== current) views = { ...views, [sessionId]: next };
       }
-      return views === state.views && subagentViews === state.subagentViews && workflows === state.workflows && tasks === state.tasks ? state : { views, subagentViews, workflows, tasks };
+      return views === state.views && subagentViews === state.subagentViews && workflows === state.workflows && tasks === state.tasks && promptProgress === state.promptProgress ? state : { views, subagentViews, workflows, tasks, promptProgress };
     });
   };
 
@@ -244,12 +262,26 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
    * A session's subscription was answered: the host sends the whole backlog
    * first, so apply it, then the session can show.
    */
-  const subscribed = (summary: SessionSummary) => {
+  const subscribed = (summary: SessionSummary, restored = false) => {
     const sessionId = summary.id;
     if (!store.getState().open[sessionId]) return;
     flushEvents();
+    // After reconnecting, an authoritative snapshot replaces any old local wait.
+    if (restored) updatePromptProgress(sessionId, (progress) => progress?.phase === "sending" ? progress : undefined);
     store.setState((state) => ({ sessions: { ...state.sessions, [sessionId]: summary }, ready: { ...state.ready, [sessionId]: true } }));
     void store.getState().loadTasks(sessionId).catch(() => {});
+  };
+
+  const updatePromptProgress = (sessionId: string, update: (current: PromptProgress | undefined) => PromptProgress | undefined) => {
+    store.setState((state) => {
+      const current = state.promptProgress[sessionId];
+      const next = update(current);
+      if (next === current) return state;
+      const promptProgress = { ...state.promptProgress };
+      if (next) promptProgress[sessionId] = next;
+      else delete promptProgress[sessionId];
+      return { promptProgress };
+    });
   };
 
   // Sub-agent conversations being fetched: live events that arrive meanwhile are applied after.
@@ -289,6 +321,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         ready: without(state.ready),
         loadingEarlier: without(state.loadingEarlier),
         queueing: without(state.queueing),
+        promptProgress: without(state.promptProgress),
         subagents: without(state.subagents),
         workflows: without(state.workflows),
         tasks: without(state.tasks),
@@ -309,6 +342,13 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     const deliver = async (clientMessageId: string, now = false) => {
       const pending = get().outbox[clientMessageId];
       if (!pending) return "failed" as const;
+      flushEvents();
+      const session = get().sessions[pending.sessionId];
+      if (session?.state !== "running" && session?.state !== "waiting" && !get().queueing[pending.sessionId]?.some((entry) => entry.clientMessageId === clientMessageId)) {
+        updatePromptProgress(pending.sessionId, () => ({ clientMessageId, phase: "sending", afterSeq: get().views[pending.sessionId]?.lastSeq ?? 0 }));
+      }
+      const finish = (phase?: PromptProgress["phase"]) => updatePromptProgress(pending.sessionId, (current) =>
+        current?.clientMessageId === clientMessageId ? (phase ? { ...current, phase } : undefined) : current);
       try {
         const result = await link.call("sessions.prompt", {
           sessionId: pending.sessionId,
@@ -316,6 +356,10 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
           content: pending.content,
           whenBusy: now ? undefined : "queue",
         });
+        // A fast turn may already have finished before the RPC response arrives.
+        flushEvents();
+        finish(result.delivery === "started" || result.delivery === "steered" ? "starting" : undefined);
+        if (result.delivery === "started" || result.delivery === "steered") updateView(pending.sessionId, (view) => markMessageAccepted(view, clientMessageId));
         if (result.delivery === "queued") rememberQueued(clientMessageId, pending.content);
         set((state) => {
           const outbox = { ...state.outbox };
@@ -324,6 +368,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         });
         return result.delivery;
       } catch {
+        finish();
         updateView(pending.sessionId, (view) => markMessageFailed(view, clientMessageId));
         return "failed" as const;
       }
@@ -346,6 +391,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       subagentViews: {},
       outbox: {},
       queueing: {},
+      promptProgress: {},
 
       connect() {
         link.start();
@@ -446,7 +492,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         });
         // The turn ended meanwhile and it went straight out, or it didn't go at all: a message like any other.
         if (delivery === "started" || delivery === "steered" || delivery === "failed") {
-          updateView(sessionId, (view) => (view.index[`local-${clientMessageId}`] === undefined ? addOptimisticMessage(view, clientMessageId, content) : view));
+          updateView(sessionId, (view) => (view.index[`local-${clientMessageId}`] === undefined ? addOptimisticMessage(view, clientMessageId, content, Date.now(), delivery !== "failed") : view));
           if (delivery === "failed") updateView(sessionId, (view) => markMessageFailed(view, clientMessageId));
         }
         return delivery;
@@ -706,7 +752,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
   link.onStatus((status, detail) => {
     if (status !== "online") resolvedInteractions.clear();
-    store.setState({ status, statusDetail: detail || undefined, ...(status !== "online" ? { notices: {}, interactions: {} } : {}) });
+    store.setState({ status, statusDetail: detail || undefined, ...(status !== "online" ? { notices: {}, interactions: {}, ready: {} } : {}) });
   });
   link.on("agent.interaction", ({ agent, request }) => {
     const key = `${agent}\n${request.requestId}`;
@@ -730,7 +776,17 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       return next === view ? state : { views: { ...state.views, [sessionId]: next } };
     });
   });
-  link.onSummary((summary) => store.setState((state) => ({ sessions: { ...state.sessions, [summary.id]: summary } })));
+  link.onSummary((summary) => {
+    store.setState((state) => {
+      const progress = state.promptProgress[summary.id];
+      let promptProgress = state.promptProgress;
+      if (progress && (["running", "waiting", "error", "offline"].includes(summary.state) || summary.queue?.some((entry) => entry.clientMessageId === progress.clientMessageId))) {
+        promptProgress = { ...promptProgress };
+        delete promptProgress[summary.id];
+      }
+      return { sessions: { ...state.sessions, [summary.id]: summary }, promptProgress };
+    });
+  });
   // Events arrive one per socket message; a history backlog is hundreds of
   // them. Apply them in batches, at most one store update per frame.
   link.onEvent((event) => {
@@ -738,7 +794,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     flushTimer ??= setTimeout(flushEvents, 16);
   });
   // Opened while the link was down, or back after a break: the backlog is in, the session can show.
-  link.onRestored((summary) => subscribed(summary));
+  link.onRestored((summary) => subscribed(summary, true));
   // Refresh the list after every (re)connect; retry unsent messages too.
   link.onOnline(() => {
     void store.getState().refresh();

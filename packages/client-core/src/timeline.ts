@@ -35,7 +35,7 @@ export type TimelineItem =
       ts: number;
       /** Sent from this device and not yet confirmed by the host. */
       pending?: boolean;
-      /** The host took it (a queued message sent now): it shows as said while the agent's own copy is on its way. */
+      /** The host took it: it shows as said while the agent's own copy is on its way. */
       accepted?: boolean;
       failed?: boolean;
     }
@@ -590,6 +590,11 @@ export function addOptimisticMessage(view: SessionView, clientMessageId: string,
 export function markMessageFailed(view: SessionView, clientMessageId: string): SessionView {
   const item = get(view, `local-${clientMessageId}`, "user");
   return item && item.pending ? upsert(view, { ...item, pending: false, failed: true }) : view;
+}
+
+export function markMessageAccepted(view: SessionView, clientMessageId: string): SessionView {
+  const item = get(view, `local-${clientMessageId}`, "user");
+  return item && item.pending && !item.accepted ? upsert(view, { ...item, accepted: true }) : view;
 }
 
 export function removeItem(view: SessionView, id: string): SessionView {
