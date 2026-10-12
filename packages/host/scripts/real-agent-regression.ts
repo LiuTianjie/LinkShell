@@ -15,7 +15,8 @@ for (const name of ["vitest.json", "summary.json", "versions.json"]) rmSync(join
 const root = realpathSync(mkdtempSync("/tmp/ls-ci-"));
 let child: ChildProcess | undefined;
 const kill = () => { if (child?.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch {} } };
-const interrupted = () => { kill(); };
+let interruptedReason: string | undefined;
+const interrupted = (signal: string) => { interruptedReason = signal; kill(); };
 process.once("SIGTERM", interrupted); process.once("SIGINT", interrupted);
 let timer: ReturnType<typeof setTimeout> | undefined;
 try {
@@ -26,9 +27,9 @@ try {
   child = spawn(process.execPath, [join(dirname(require.resolve("vitest/package.json")), "vitest.mjs"), "run", "--config", "vitest.real-agents.config.ts", "--reporter=default", "--reporter=json", `--outputFile.json=${reportPath}`], {
     cwd: hostDirectory, detached: true, stdio: "inherit", env: { ...process.env, LINKSHELL_REAL_AGENT_ROOT: root },
   });
-  timer = setTimeout(kill, 5 * 60_000);
+  timer = setTimeout(() => { interruptedReason = "timeout"; kill(); }, 5 * 60_000);
   const code = await new Promise<number | null>((resolve, reject) => { child!.once("error", reject); child!.once("close", resolve); });
-  if (code !== 0) throw new Error(`Real-agent process failed (${code ?? "signal/timeout"})`);
+  if (code !== 0 || interruptedReason) throw new Error(`Real-agent process failed (${interruptedReason ?? code ?? "signal"})`);
   const contracts = verifyReport(JSON.parse(readFileSync(reportPath, "utf8")));
   writeFileSync(join(reportDirectory, "summary.json"), JSON.stringify({ success: true, contracts, versions }, null, 2));
   console.log(`Verified ${contracts.length}/${contracts.length} real-agent contracts; reports: ${reportDirectory}`);

@@ -24,6 +24,7 @@ const steering = process.env.FAKE_ACP_STEERING === "1";
 const storePath = process.env.FAKE_ACP_STORE;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const claudeDir = process.env.FAKE_ACP_CLAUDE_DIR;
+let initialized = false;
 
 // ── Claude mode: transcripts are the store ──
 function transcriptPath(sessionId, cwd) {
@@ -250,8 +251,10 @@ async function runPrompt(sessionId, text) {
 }
 
 const handlers = {
-  initialize: (params) => {
+  initialize: async (params) => {
     if (params.clientCapabilities?._meta?.jetbrains?.air) throw { code: -32602, message: "AIR would break native sub-agent metadata" };
+    if (process.env.FAKE_ACP_INIT_DELAY) await sleep(Number(process.env.FAKE_ACP_INIT_DELAY));
+    initialized = true;
     return ({
     protocolVersion: process.env.FAKE_ACP_PROTOCOL_VERSION === "missing" ? undefined : Number(process.env.FAKE_ACP_PROTOCOL_VERSION ?? 1),
     agentCapabilities: {
@@ -381,6 +384,7 @@ process.stdin.on("data", (data) => {
     const handler = handlers[message.method];
     Promise.resolve()
       .then(() => {
+        if (process.env.FAKE_ACP_INIT_DELAY && message.method !== "initialize" && !initialized) throw { code: -32600, message: "request before initialize completed" };
         if (!handler) throw { code: -32601, message: `Method not found: ${message.method}` };
         return handler(message.params ?? {});
       })

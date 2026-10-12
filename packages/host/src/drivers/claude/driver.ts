@@ -160,8 +160,8 @@ export class ClaudeDriver extends AcpDriver {
   private readonly backgroundAgents = new Map<string, Set<string>>();
   /** Ids of the transcript lines read lately: Claude writes some again after compacting. */
   private readonly seenLines = new Map<string, Set<string>>();
-  /** Sessions whose SDK transcript is already represented by the ACP stream. */
-  private readonly streamedTranscripts = new Set<string>();
+  /** Native message times covered by this host's ACP stream, including late disk flushes. */
+  private readonly streamedTranscripts = new Map<string, { from: number; until: number }[]>();
   private readonly claudeCommand: string;
   private readonly configDir: string;
   private readonly busyWindowMs: number;
@@ -385,7 +385,7 @@ export class ClaudeDriver extends AcpDriver {
     if (config?.length) this.template = config;
     // Born on a device: this host is the writer from the start.
     this.modes.set(created.nativeId, "remote");
-    this.streamedTranscripts.add(created.nativeId);
+    this.beginTranscriptStream(created.nativeId);
     this.setWriter(created.nativeId, "remote");
     return created;
   }
@@ -399,6 +399,7 @@ export class ClaudeDriver extends AcpDriver {
     this.tails.get(nativeId)?.stop();
     this.tails.delete(nativeId);
     await super.detach(nativeId);
+    this.endTranscriptStream(nativeId);
   }
 
   /**
@@ -676,7 +677,8 @@ export class ClaudeDriver extends AcpDriver {
     const result = transcriptLine(line, { hidden, agents, seen });
     // Claude may flush SDK messages after session/close has returned and the
     // desktop has reclaimed it. Still record their UUIDs, but don't echo them.
-    if (this.streamedTranscripts.has(nativeId) && line.includes(REMOTE_ENTRYPOINT)) return;
+    if (result.ts !== undefined && line.includes(REMOTE_ENTRYPOINT) &&
+        this.streamedTranscripts.get(nativeId)?.some(({ from, until }) => result.ts! >= from && result.ts! <= until)) return;
     if (result.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: result.title });
     for (const update of result.updates) this.emit(nativeId, update);
     // Changed on the computer (another model, effort, permission mode): the phone shows it.
@@ -733,7 +735,7 @@ export class ClaudeDriver extends AcpDriver {
       }
     }
     if (Object.keys(pending).length) this.host?.state(this.id, nativeId).set("pendingConfig", "{}");
-    this.streamedTranscripts.add(nativeId);
+    this.beginTranscriptStream(nativeId);
     this.setWriter(nativeId, "remote");
     this.setMode(nativeId, "remote");
     this.emitConfig(nativeId, target);
@@ -828,10 +830,22 @@ export class ClaudeDriver extends AcpDriver {
       while (state.turnActive && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
     }
     await super.detach(nativeId);
+    this.endTranscriptStream(nativeId);
     this.setMode(nativeId, "idle");
     // What the remote turns wrote was already streamed live; anything another
     // Claude wrote in between (it was reopened on the computer) is new.
     this.tails.get(nativeId)?.resumeSkipping(() => false);
+  }
+
+  private beginTranscriptStream(nativeId: string): void {
+    const windows = this.streamedTranscripts.get(nativeId) ?? [];
+    windows.push({ from: Date.now(), until: Infinity });
+    this.streamedTranscripts.set(nativeId, windows);
+  }
+
+  private endTranscriptStream(nativeId: string): void {
+    const window = this.streamedTranscripts.get(nativeId)?.at(-1);
+    if (window?.until === Infinity) window.until = Date.now();
   }
 
   /**

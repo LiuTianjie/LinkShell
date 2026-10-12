@@ -36,6 +36,7 @@ describe("the same host behavior contract across native and ACP drivers", () => 
     const env = { ...process.env, FAKE_ACP_STORE: join(home, "agent.json"), FAKE_ACP_FORK: expected.kind === "claude" ? "0" : "1",
       FAKE_ACP_RESUME_ONLY: expected.kind === "resume-only" ? "1" : "0",
       FAKE_ACP_CALL_LOG: join(home, "calls.log"),
+      FAKE_ACP_INIT_DELAY: expected.kind === "acp" ? "200" : undefined,
       CLAUDE_CONFIG_DIR: join(home, "claude"),
       FAKE_ACP_CLAUDE_DIR: expected.kind === "claude" ? join(home, "claude") : undefined };
     let driver!: AgentDriver;
@@ -81,7 +82,7 @@ describe("the same host behavior contract across native and ACP drivers", () => 
     if (expected.kind === "acp") {
       await client.call("agents.configure", { agent: driver.id, settings: acpAgentSettingsSchema.parse({}) });
       expect(driver.behavior.fork).toBe("unresolved");
-      const forked = await host.hub.fork(session.id);
+      const [, forked] = await Promise.all([(driver as AcpDriver).acpInfo(), host.hub.fork(session.id)]);
       expect(forked.nativeId).not.toBe(session.nativeId);
       expect(readFileSync(join(home, "calls.log"), "utf8")).toContain("session/fork\n");
       expect(driver.behavior.fork).toBe("native-session");

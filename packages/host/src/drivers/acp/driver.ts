@@ -229,7 +229,7 @@ export class AcpDriver implements AgentDriver {
       return this.current;
     }
     this.current = { installed: true, version: version || undefined };
-    if (this.spec.discover) await this.boot();
+    if (this.spec.discover) await this.ensureStarted();
     return this.current;
   }
 
@@ -414,7 +414,7 @@ export class AcpDriver implements AgentDriver {
 
   /** ACP's session/fork, for agents that offer it: the whole conversation, in `cwd`. */
   async fork(nativeId: string, options: ForkOptions): Promise<DiscoveredSession> {
-    if (!this.connection?.alive) await this.ensureStarted();
+    await this.ensureStarted();
     if (this.acpBehavior.fork === "context") throw RpcError.app("not_supported", `${this.label} 不支持从会话分叉`);
     if (options.upTo) throw RpcError.app("not_supported", `${this.label} 只能分叉整个会话`);
     const settings = this.sessions.get(nativeId)?.settings ?? this.settings();
@@ -627,8 +627,12 @@ export class AcpDriver implements AgentDriver {
 
   /** Starts the agent process once; concurrent callers share the attempt. */
   protected ensureStarted(): Promise<void> {
+    // The transport becomes alive before initialize returns. Concurrent calls
+    // must wait for that handshake before reading capabilities or sending RPCs.
+    if (this.booting) return this.booting;
     const refresh = this.credentialsChanged && ![...this.sessions.values()].some((state) => state.turnActive);
     if (this.connection?.alive && !refresh) return Promise.resolve();
+    clearTimeout(this.restartTimer); this.restartTimer = undefined;
     this.booting ??= (async () => {
       if (refresh) {
         this.credentialsChanged = false;
@@ -704,7 +708,7 @@ export class AcpDriver implements AgentDriver {
     this.restartTimer = setTimeout(() => {
       this.restartTimer = undefined;
       void this.connection?.stop().finally(() => {
-        if (!this.stopped) void this.boot();
+        if (!this.stopped) void this.ensureStarted();
       });
     }, delay);
   }
