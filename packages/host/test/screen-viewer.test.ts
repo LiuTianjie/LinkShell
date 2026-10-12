@@ -6,6 +6,7 @@ import { VIEWER_LOGIC, viewerPage } from "../src/screen-viewer.js";
 type Rect = { x: number; y: number; w: number; h: number };
 
 interface Logic {
+  videoCodec(codec?: { mimeType?: string; sdpFmtpLine?: string }): string | null;
   interactionViewport(viewport: Rect, insets: { top: number; right: number; bottom: number; left: number }, divisions: Array<{ x: number; y: number; width: number; height: number; active: boolean }>, preferred: { x: number; y: number } | null): Rect;
   controlsMorph(progress: number, anchor: Rect, ball: Rect): Rect & { radius: number; shellOpacity: number; barOpacity: number; orbOpacity: number; contentScale: number };
   sheetPresentation(progress: number, width: number, height: number, dock: "left" | "right" | "top" | "bottom"): { x: number; y: number; opacity: number };
@@ -31,7 +32,19 @@ interface Logic {
 }
 
 // The page's own text, run as the page runs it.
-const logic = new Function(`${VIEWER_LOGIC}; return { interactionViewport, controlsMorph, sheetPresentation, presentationSpring, presentationFlip, usableViewport, containedBox, anchoredPanel, fromGray, stripTime, lateness, summary, synced, ownEcho, laneOf, keyboardIsUp, pieces, typingOf, keyKnown, modsOf, comboSign, cleanShortcuts };`)() as Logic;
+const logic = new Function(`${VIEWER_LOGIC}; return { videoCodec, interactionViewport, controlsMorph, sheetPresentation, presentationSpring, presentationFlip, usableViewport, containedBox, anchoredPanel, fromGray, stripTime, lateness, summary, synced, ownEcho, laneOf, keyboardIsUp, pieces, typingOf, keyKnown, modsOf, comboSign, cleanShortcuts };`)() as Logic;
+
+describe("the negotiated video format", () => {
+  it("distinguishes browser High, native Constrained High and Baseline", () => {
+    const codec = (profile: string) => ({ mimeType: "video/H264", sdpFmtpLine: `packetization-mode=1;profile-level-id=${profile};level-asymmetry-allowed=1` });
+    expect(logic.videoCodec(codec("64001f"))).toBe("H.264 High");
+    expect(logic.videoCodec(codec("640C33"))).toBe("H.264 Constrained High");
+    expect(logic.videoCodec(codec("42e01f"))).toBe("H.264 Baseline");
+    expect(logic.videoCodec(codec("bad"))).toBe("H.264");
+    expect(logic.videoCodec({ mimeType: "video/VP8" })).toBe("VP8");
+    expect(logic.videoCodec()).toBeNull();
+  });
+});
 
 /** A clock strip as the app draws it (apps/mac/README.md, Measuring), one pixel a cell. */
 function strip(time: number, white = 255, black = 0): Uint8Array {

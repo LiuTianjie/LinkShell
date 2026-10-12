@@ -157,6 +157,16 @@ const STYLE = String.raw`
  * exported so that they can be tried without a browser.
  */
 export const VIEWER_LOGIC = String.raw`
+/** The negotiated format, not the codecs the browser might be able to receive. */
+function videoCodec(codec) {
+  if (!codec || !codec.mimeType) return null;
+  const name = codec.mimeType.replace(/^video\//i, "");
+  if (name.toUpperCase() !== "H264") return name;
+  const profile = /(?:^|;)\s*profile-level-id=([0-9a-f]{6})(?:;|$)/i.exec(codec.sdpFmtpLine || "");
+  const prefix = profile && profile[1].slice(0, 4).toLowerCase();
+  const label = prefix === "640c" ? "Constrained High" : prefix === "6400" ? "High" : prefix && prefix.startsWith("42") ? "Baseline" : "";
+  return "H.264" + (label ? " " + label : "");
+}
 /** All controls share the same usable rectangle, including asymmetric system chrome. */
 function usableViewport(v, inset) {
   const left = Math.max(0, inset.left || 0), right = Math.max(0, inset.right || 0);
@@ -1990,23 +2000,29 @@ function drawKeys() {
 const RANK = ["host", "prflx", "srflx", "relay"];
 /** What the connection says of the track: the picture's size and pace, the round trip, the waits. */
 async function vitals(pc, before) {
-  const pairs = [], ends = new Map();
+  const pairs = [], ends = new Map(), codecs = new Map();
   let track = {}, transport = {};
   (await pc.getStats()).forEach((entry) => {
     if (entry.type === "inbound-rtp" && (entry.kind || entry.mediaType) === "video") track = entry;
     else if (entry.type === "transport") transport = entry;
     else if (entry.type === "candidate-pair") pairs.push(entry);
     else if (entry.type === "local-candidate" || entry.type === "remote-candidate") ends.set(entry.id, entry);
+    else if (entry.type === "codec") codecs.set(entry.id, entry);
   });
   const pair = pairs.find((one) => one.id === transport.selectedCandidatePairId) || pairs.find((one) => one.selected) || pairs.find((one) => one.nominated && one.state === "succeeded") || {};
   const near = ends.get(pair.localCandidateId), far = ends.get(pair.remoteCandidateId);
-  const was = before || {}, since = (field) => (track[field] || 0) - (was[field] || 0);
+  const was = before && before.id === track.id && track.timestamp > before.timestamp ? before : null;
+  const since = (field) => (track[field] || 0) - (was && was[field] || 0);
   const each = (total, count) => (since(count) > 0 ? (since(total) / since(count)) * 1000 : null);
   return {
     raw: track,
     width: track.frameWidth || video.videoWidth,
     height: track.frameHeight || video.videoHeight,
-    fps: round(before ? (since("framesDecoded") * 1000) / (track.timestamp - was.timestamp) : track.framesPerSecond),
+    fps: round(was ? (since("framesDecoded") * 1000) / (track.timestamp - was.timestamp) : track.framesPerSecond),
+    codec: videoCodec(codecs.get(track.codecId)),
+    bitrateMbps: was ? round(Math.max(0, since("bytesReceived")) * 8 / ((track.timestamp - was.timestamp) * 1000), 2) : null,
+    decoder: track.decoderImplementation || null,
+    powerEfficientDecoder: track.powerEfficientDecoder ?? null,
     rttMs: round(pair.currentRoundTripTime == null ? null : pair.currentRoundTripTime * 1000),
     jitterBufferMs: round(each("jitterBufferDelay", "jitterBufferEmittedCount")),
     decodeMs: round(each("totalDecodeTime", "framesDecoded"), 2),
@@ -2046,7 +2062,8 @@ async function status() {
   const now = pc && (await vitals(pc, statusWas).catch(() => null));
   if (!now || rtc === null || rtc.pc !== pc) return;
   statusWas = now.raw;
-  put(way + "\n" + [now.width + "×" + now.height, now.fps === null ? "" : Math.round(now.fps) + " 帧/秒", now.rttMs === null ? "" : "往返 " + Math.round(now.rttMs) + " 毫秒"].filter(Boolean).join(" · "));
+  const format = [now.codec, now.bitrateMbps === null ? null : now.bitrateMbps + " Mbps"].filter(Boolean).join(" · ");
+  put(way + "\n" + [now.width + "×" + now.height, now.fps === null ? "" : Math.round(now.fps) + " 帧/秒", now.rttMs === null ? "" : "往返 " + Math.round(now.rttMs) + " 毫秒"].filter(Boolean).join(" · ") + (format ? "\n" + format : ""));
 }
 
 const ICON = JSON.parse($("icons").textContent);
@@ -2522,6 +2539,10 @@ if (!nativePicture && query.get("measure")) meter = (() => {
       height: content.h,
       jitterBufferMs: said && said.jitterBufferMs,
       decodeMs: said && said.decodeMs,
+      codec: said && said.codec,
+      bitrateMbps: said && said.bitrateMbps,
+      decoder: said && said.decoder,
+      powerEfficientDecoder: said && said.powerEfficientDecoder,
       rttMs: said && said.rttMs,
       path: said ? said.path : relayed ? "relay" : "socket",
       dropped: said ? said.dropped : skipped,

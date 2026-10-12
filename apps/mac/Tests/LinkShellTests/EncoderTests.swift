@@ -8,6 +8,16 @@ final class EncoderTests: XCTestCase {
   private let info = RTCVideoCodecInfo(name: "H264", parameters: ["profile-level-id": "640c1f", "packetization-mode": "1"])
   private let delta = [NSNumber(value: RTCFrameType.videoFrameDelta.rawValue)]
 
+  func testBrowserHighUsesTheExistingHighEncoder() {
+    let browser = RTCVideoCodecInfo(name: "H264", parameters: ["profile-level-id": "64001f", "packetization-mode": "1"])
+    let encoder = LowLatencyH264Encoder(info: browser, makeCompressor: { setup in
+      XCTAssertEqual(setup.profile, .high)
+      return Compression()
+    })
+    XCTAssertEqual(encoder.startEncode(with: settings(), numberOfCores: 2), 0)
+    XCTAssertEqual(encoder.release(), 0)
+  }
+
   func testInitializationFailureUsesStockAndKeepsTheCallback() {
     let stock = Stock()
     let encoder = LowLatencyH264Encoder(info: info, makeCompressor: { _ in throw self.failure }, makeStock: { _, _ in stock })

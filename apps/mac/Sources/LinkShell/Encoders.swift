@@ -20,7 +20,23 @@ final class ScreenEncoderFactory: NSObject, RTCVideoEncoderFactory {
   }
 
   func supportedCodecs() -> [RTCVideoCodecInfo] {
-    standard.supportedCodecs()
+    Self.browserCompatible(standard.supportedCodecs())
+  }
+
+  /// Chrome advertises High (6400), while the ObjC factory only advertises Constrained High
+  /// (640c). WebRTC matches these as different profiles and otherwise falls back to Baseline.
+  /// Both use our existing High encoder. Keep the original first so native receivers retain
+  /// their negotiated profile; add High as another real capability, without rewriting SDP.
+  static func browserCompatible(_ codecs: [RTCVideoCodecInfo]) -> [RTCVideoCodecInfo] {
+    var supported = codecs
+    for codec in codecs where codec.name == kRTCVideoCodecH264Name {
+      guard let profile = codec.parameters["profile-level-id"], profile.lowercased().hasPrefix("640c"), profile.count == 6 else { continue }
+      var parameters = codec.parameters
+      parameters["profile-level-id"] = "6400" + profile.suffix(2)
+      guard !supported.contains(where: { $0.name == codec.name && $0.parameters == parameters }) else { continue }
+      supported.append(RTCVideoCodecInfo(name: codec.name, parameters: parameters))
+    }
+    return supported
   }
 
   func createEncoder(_ info: RTCVideoCodecInfo) -> RTCVideoEncoder? {
