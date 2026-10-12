@@ -32,7 +32,8 @@ def main():
     module = Path(__file__).resolve().parents[1]
     repo = module.parents[3]
     source = module / "ios"
-    frameworks = [module.parents[1] / f"ios/Pods/{pod}/WebRTC.xcframework/ios-arm64_x86_64-simulator" for pod in ("WebRTC-lib", "JitsiWebRTC")]
+    frameworks = [path for pod in ("WebRTC-lib", "JitsiWebRTC")
+                  for path in (module.parents[1] / f"ios/Pods/{pod}/WebRTC.xcframework").glob("ios-*-simulator")]
     framework = next((path for path in frameworks if path.is_dir()), None)
     if framework is None:
         raise RuntimeError("The client's simulator WebRTC pod is missing; install its native dependencies first.")
