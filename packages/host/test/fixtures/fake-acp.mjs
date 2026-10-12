@@ -41,7 +41,10 @@ function transcriptPath(sessionId, cwd) {
 function appendTranscript(sessionId, cwd, entry) {
   const path = transcriptPath(sessionId, cwd);
   mkdirSync(join(path, ".."), { recursive: true });
-  appendFileSync(path, JSON.stringify({ isSidechain: false, sessionId, cwd, entrypoint: "sdk-ts", timestamp: new Date().toISOString(), ...entry }) + "\n");
+  const line = JSON.stringify({ isSidechain: false, sessionId, cwd, entrypoint: "sdk-ts", timestamp: new Date().toISOString(), ...entry }) + "\n";
+  const flush = () => appendFileSync(path, line);
+  if (process.env.FAKE_ACP_TRANSCRIPT_DELAY) setTimeout(flush, Number(process.env.FAKE_ACP_TRANSCRIPT_DELAY));
+  else flush();
 }
 function claudeSessions() {
   const projects = join(claudeDir, "projects");

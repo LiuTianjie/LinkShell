@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ContentBlock, SessionUpdate } from "@linkshell/wire";
 import type { AgentDriver, DiscoveredSession, DriverHost, ForkOptions } from "../src/drivers/types.js";
+import type { DriverBehavior } from "../src/drivers/behavior.js";
 import { SessionHub } from "../src/hub.js";
 import { HostStore } from "../src/store.js";
 import { createWorktree, gitBranch, gitInfo, removeWorktree, worktreeState } from "../src/worktrees.js";
@@ -88,6 +89,7 @@ class ForkingDriver implements AgentDriver {
   readonly id = "fake";
   readonly label = "Fake";
   readonly tier = "multi_client" as const;
+  behavior: DriverBehavior = { desktop: "multi_client", history: "native-snapshot", turnCompletion: "native-events", busyInput: "queue", fork: "native-turn", detach: "local-only" };
   readonly capabilities = { interrupt: true, steer: false, permissions: true, images: false, fork: true, models: false, modes: false };
   host!: DriverHost;
   created: string[] = [];
@@ -183,6 +185,18 @@ describe("sessions in worktrees, and forks", () => {
   it("refuses a worktree outside a repository, without creating a session", async () => {
     await expect(hub.createSession({ agent: "fake", cwd: dir, worktree: true })).rejects.toMatchObject({ appCode: "not_a_repo" });
     expect(driver.created).toEqual([]);
+  });
+
+  it("uses host context for a partial fork when the native contract only allows whole sessions", async () => {
+    driver.behavior = { ...driver.behavior, fork: "native-session" };
+    await hub.subscribe("fake:s1", 0, { event: () => {} });
+    driver.emit({ sessionUpdate: "user_message_chunk", messageId: "u1", content: { type: "text", text: "question" } });
+    driver.emit({ sessionUpdate: "agent_message_chunk", messageId: "a1", content: { type: "text", text: "answer" } });
+    await hub.fork("fake:s1", { itemId: "a1" });
+    expect(driver.forks).toEqual([]);
+    expect(driver.created).toHaveLength(1);
+    await hub.fork("fake:s1");
+    expect(driver.forks).toHaveLength(1);
   });
 
   it("forks a session whole or through a turn, in place or into a worktree", async () => {

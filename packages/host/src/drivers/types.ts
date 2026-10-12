@@ -20,6 +20,7 @@ import type {
   EditorResult,
 } from "@linkshell/wire";
 import type { PreviewInput } from "../computer-preview.js";
+import type { DriverBehavior } from "./behavior.js";
 
 /** A session the agent knows about, however it was created. */
 export interface DiscoveredSession {
@@ -143,6 +144,8 @@ export interface LaunchSpec {
 export interface AgentDriver {
   readonly id: string;
   readonly label: string;
+  /** Read after initialization; protocol drivers refresh it from each negotiated connection. */
+  readonly behavior: DriverBehavior;
   readonly tier: AgentTier;
   readonly capabilities: AgentCapabilities;
 
@@ -164,8 +167,8 @@ export interface AgentDriver {
   archivedSessions?(): Promise<string[]>;
   createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession>;
   /**
-   * Starts live updates for a session and returns its full native history.
-   * Idempotent: attaching an attached session just returns the history again.
+   * Starts live updates and returns history according to behavior.history.
+   * Idempotent: an attached session may return no new items; the host keeps its cache.
    */
   attach(nativeId: string, context: AttachContext): Promise<HistoryItem[]>;
   detach(nativeId: string): Promise<void>;

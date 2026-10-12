@@ -36,6 +36,7 @@ import type {
   LaunchSpec,
 } from "./drivers/types.js";
 import { inOrder } from "./drivers/acp/driver.js";
+import { canForkNatively } from "./drivers/behavior.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PAGE, worktreeOf, type HostStore, type SessionPatch, type WorktreeRecord } from "./store.js";
@@ -573,7 +574,7 @@ export class SessionHub {
   async fork(sessionId: string, options: { itemId?: string; worktree?: boolean } = {}): Promise<SessionSummary> {
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
-    if (driver.tier === "terminal") throw RpcError.app("not_supported", `${driver.label} 不支持从会话分叉`);
+    if (driver.behavior.desktop === "terminal") throw RpcError.app("not_supported", `${driver.label} 不支持从会话分叉`);
     let upTo: { itemId: string; turn: number } | undefined;
     let cut = summary.lastSeq;
     if (options.itemId) {
@@ -588,7 +589,7 @@ export class SessionHub {
     const cwd = worktree?.cwd ?? summary.cwd;
     try {
       let discovered: DiscoveredSession | undefined;
-      if (driver.fork && driver.capabilities.fork) {
+      if (driver.fork && (driver.behavior.fork === "unresolved" || canForkNatively(driver.behavior, Boolean(upTo)))) {
         discovered = await driver.fork(summary.nativeId, { cwd, sourceCwd: summary.cwd, upTo }).catch((error: unknown) => {
           // The agent forks, but not this way (only whole sessions, say): the fork is made by us instead.
           if (error instanceof RpcError && error.appCode === "not_supported") return undefined;
@@ -719,7 +720,7 @@ export class SessionHub {
       }
     }
     const live = this.liveFor(sessionId);
-    if (driver?.tier === "handoff") this.lendCommands(this.getSession(sessionId));
+    if (driver?.behavior.desktop === "handoff") this.lendCommands(this.getSession(sessionId));
     const lastSeq = this.store.getSession(sessionId)?.lastSeq ?? 0;
     let startSeq = fromSeq;
     const missed = fromSeq > 0 && fromSeq <= lastSeq ? this.store.sizeAfter(sessionId, fromSeq) : undefined;
@@ -1035,7 +1036,7 @@ export class SessionHub {
       return;
     }
     live.held.splice(index, 1);
-    if (live.turnActive && !driver.capabilities.steer) {
+    if (live.turnActive && driver.behavior.busyInput === "queue") {
       // The turn has to end first: stop it, and this message is next.
       live.held.unshift(item);
       this.announce(sessionId);

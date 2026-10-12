@@ -33,6 +33,8 @@ import { AcpMcpBridge } from "./mcp.js";
 import { AcpEditor } from "./editor.js";
 import type { AgentDriver, AttachContext, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem } from "../types.js";
 import { AcpConnection, AcpProtocolError } from "./connection.js";
+import { acpBehavior } from "./behavior.js";
+import { behaviorCapabilities, type DriverBehavior } from "../behavior.js";
 import { mapAcpQuestions, questionMethod, type AcpQuestionRequest } from "./questions.js";
 import {
   AcpItemTracker,
@@ -135,17 +137,22 @@ export function describeAgentError(label: string, message: string): { message: s
 export class AcpDriver implements AgentDriver {
   readonly id: string;
   readonly label: string;
-  readonly tier: AgentTier;
-  capabilities: AgentCapabilities = {
+  protected capabilityState: Omit<AgentCapabilities, "steer" | "fork"> = {
     acp: true,
     interrupt: true,
-    steer: false,
     permissions: true,
     images: false,
-    fork: false,
     models: false,
     modes: false,
   };
+
+  protected get acpBehavior(): DriverBehavior {
+    return acpBehavior(this.spec.tier, this.connection?.alive ? this.connection.initializeResult : undefined);
+  }
+
+  get behavior(): DriverBehavior { return this.acpBehavior; }
+  get tier(): AgentTier { return this.behavior.desktop; }
+  get capabilities(): AgentCapabilities { return { ...this.capabilityState, ...behaviorCapabilities(this.behavior) }; }
 
   protected host?: DriverHost;
   /** Set when the agent refused a session for want of a login (ACP auth_required). */
@@ -174,7 +181,6 @@ export class AcpDriver implements AgentDriver {
   ) {
     this.id = spec.id;
     this.label = spec.label;
-    this.tier = spec.tier;
     this.services = new AcpClientServices({ env: this.env,
       scope: (id) => { const state = this.sessions.get(id); return state ? { cwd: state.cwd, additionalDirectories: state.settings.additionalDirectories } : undefined; },
       output: (id, terminalId, text, snapshot) => {
@@ -409,7 +415,7 @@ export class AcpDriver implements AgentDriver {
   /** ACP's session/fork, for agents that offer it: the whole conversation, in `cwd`. */
   async fork(nativeId: string, options: ForkOptions): Promise<DiscoveredSession> {
     if (!this.connection?.alive) await this.ensureStarted();
-    if (!this.connection?.capabilities.sessionCapabilities?.fork) throw RpcError.app("not_supported", `${this.label} 不支持从会话分叉`);
+    if (this.acpBehavior.fork === "context") throw RpcError.app("not_supported", `${this.label} 不支持从会话分叉`);
     if (options.upTo) throw RpcError.app("not_supported", `${this.label} 只能分叉整个会话`);
     const settings = this.sessions.get(nativeId)?.settings ?? this.settings();
     const response = await this.rpc<{ sessionId: string }>("session/fork", { sessionId: nativeId, ...await this.sessionParameters(options.cwd, settings) });
@@ -456,17 +462,17 @@ export class AcpDriver implements AgentDriver {
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: this.localState(nativeId), turnActive: state.turnActive });
       return [];
     }
-    const capabilities = this.connection?.capabilities;
+    const historyBehavior = this.acpBehavior.history;
     let history: HistoryItem[] = [];
     state.config = []; state.commands = undefined;
-    if (capabilities?.loadSession || this.connection.protocolVersion === 2) {
+    if (historyBehavior === "load-replay" || historyBehavior === "resume-replay") {
       state.replaying = [];
       state.updates = new AcpUpdates();
       try {
-        const response = await this.rpc<Record<string, unknown>>(this.connection.protocolVersion === 2 ? "session/resume" : "session/load", {
+        const response = await this.rpc<Record<string, unknown>>(historyBehavior === "resume-replay" ? "session/resume" : "session/load", {
           sessionId: nativeId,
           ...await this.sessionParameters(context.cwd, state.settings),
-          ...(this.connection.protocolVersion === 2 ? { replayFrom: { type: "start" } } : {}),
+          ...(historyBehavior === "resume-replay" ? { replayFrom: { type: "start" } } : {}),
         });
         if (response.configOptions !== undefined || response.modes !== undefined || response.models !== undefined) state.config = this.mergeConfig(state, toConfigOptions(response));
         this.sessionCommands(state, response);
@@ -477,7 +483,7 @@ export class AcpDriver implements AgentDriver {
       } finally {
         state.replaying = undefined;
       }
-    } else if (capabilities?.sessionCapabilities?.resume) {
+    } else if (historyBehavior === "resume-only") {
       const response = await this.rpc<Record<string, unknown>>("session/resume", {
         sessionId: nativeId,
         ...await this.sessionParameters(context.cwd, state.settings),
@@ -508,7 +514,7 @@ export class AcpDriver implements AgentDriver {
     await this.services.close(nativeId);
     await this.mcp.close(nativeId);
     for (const key of this.terminalCalls.keys()) if (key.startsWith(`${nativeId}\n`)) this.terminalCalls.delete(key);
-    if (this.connection?.capabilities.sessionCapabilities?.close) {
+    if (this.acpBehavior.detach === "protocol-close") {
       await this.rpc("session/close", { sessionId: nativeId }).catch(() => {});
     }
   }
@@ -523,7 +529,7 @@ export class AcpDriver implements AgentDriver {
     const prompt = toAcpPrompt(content);
     if (prompt.length === 0) throw RpcError.app("invalid_params", "nothing to send");
     if (state.turnActive) {
-      if (this.capabilities.steer) {
+      if (this.acpBehavior.busyInput === "concurrent-prompt") {
         this.echoUserMessage(nativeId, content, clientMessageId);
         void this.sendPrompt(nativeId, state, withContext(prompt, context), clientMessageId);
         return "steered";
@@ -672,16 +678,11 @@ export class AcpDriver implements AgentDriver {
     try {
       const init = await connection.start();
       const caps = init.agentCapabilities ?? {};
-      const meta = { ...(caps._meta ?? {}), ...(init._meta ?? {}) } as Record<string, unknown>;
-      const steering = (meta.steering as { supported?: boolean } | undefined)?.supported === true;
-      const queueing = (meta.claudeCode as { promptQueueing?: boolean } | undefined)?.promptQueueing === true;
-      this.capabilities = {
-        ...this.capabilities,
-        steer: steering || queueing,
+      this.capabilityState = {
+        ...this.capabilityState,
         images: caps.promptCapabilities?.image === true,
         audio: caps.promptCapabilities?.audio === true,
         embeddedContext: caps.promptCapabilities?.embeddedContext === true,
-        fork: Boolean(caps.sessionCapabilities?.fork),
       };
       this.current = { installed: true, version: this.current.version };
       this.restartDelay = 1000;
@@ -859,7 +860,7 @@ export class AcpDriver implements AgentDriver {
     const state = this.sessions.get(sessionId);
     if (record?.sessionUpdate === "subagent_update" && this.settings().experimental) { this.subagentUpdate(sessionId, raw); return; }
     const version = this.connection?.protocolVersion ?? 1;
-    if (version === 2 && state && record?.sessionUpdate === "state_update") {
+    if (this.acpBehavior.turnCompletion === "state-update" && state && record?.sessionUpdate === "state_update") {
       const status = raw as { state: string; stopReason?: string; usage?: unknown; message?: string };
       for (const parent of this.children.get(sessionId)?.keys() ?? []) this.subagentUpdate(parent, { sessionId, state: status });
       state.reportedState = status.state === "running" ? "running" : status.state === "requires_action" ? "waiting" : status.state === "idle" ? "idle" : "unknown";
@@ -1037,10 +1038,11 @@ export class AcpDriver implements AgentDriver {
 
   private async sendPrompt(nativeId: string, state: AcpSessionState, prompt: Record<string, unknown>[], clientMessageId: string): Promise<void> {
     state.inflight += 1;
+    const completion = this.acpBehavior.turnCompletion;
     let stopReason: StopReason | undefined;
     try {
       const result = await this.rpc<{ stopReason?: unknown; messageId?: string; usage?: unknown }>("session/prompt", { sessionId: nativeId, prompt }, 0);
-      if (this.connection?.protocolVersion === 2) {
+      if (completion === "state-update") {
         if (typeof result.messageId !== "string") throw new Error("ACP 2 未返回已接收的消息 ID");
         state.messageAliases.set(result.messageId, `local-${clientMessageId}`);
         this.host?.state(this.id, nativeId).set("acp-message-aliases", JSON.stringify([...state.messageAliases]));

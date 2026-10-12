@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RpcError } from "@linkshell/wire";
 import type { ContentBlock, SessionEvent, SessionSummary, SessionUpdate } from "@linkshell/wire";
 import type { AgentDriver, DiscoveredSession, DriverHost, HistoryItem } from "../src/drivers/types.js";
+import type { DriverBehavior } from "../src/drivers/behavior.js";
 import { SessionHub } from "../src/hub.js";
 import { HostStore } from "../src/store.js";
 
@@ -13,6 +14,9 @@ class FakeDriver implements AgentDriver {
   readonly label = "Fake";
   tier: "multi_client" | "handoff" = "multi_client";
   readonly capabilities = { interrupt: true, steer: false, permissions: true, images: false, fork: false, models: false, modes: false };
+  get behavior(): DriverBehavior {
+    return { desktop: this.tier, history: "native-snapshot", turnCompletion: "native-events", busyInput: this.capabilities.steer ? "native-steer" : "queue", fork: "context", detach: "local-only" };
+  }
   host!: DriverHost;
   history: HistoryItem[] = [];
   attachGate?: Promise<void>;

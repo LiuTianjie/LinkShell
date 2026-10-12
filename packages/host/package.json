@@ -33,6 +33,7 @@
     "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:real-agents": "tsc -p tsconfig.real-agents.json && tsx scripts/real-agent-regression.ts",
     "live:codex": "tsx scripts/live-codex-check.ts",
     "live:codex-api": "tsx scripts/live-codex-api-check.ts",
     "live:claude": "tsx scripts/live-claude-check.ts",

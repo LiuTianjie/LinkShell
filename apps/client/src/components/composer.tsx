@@ -18,6 +18,7 @@ import { useIsFocused } from "expo-router/react-navigation";
 import { commandDetail, commandQuery, matchCommands, normalizeCommandText } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
 import { imageMimeType } from "@/lib/image-type";
+import { queuedSendAction } from "@/lib/queued-send-action";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
@@ -366,6 +367,8 @@ export function Composer(props: ComposerProps) {
             contained
             queue={props.queue}
             disabled={inputDisabled}
+            sendAction={queuedSendAction(props.agentInfo, turnActive, driver)}
+            status={blocked?.title ?? (desktopDriving ? "接管后可调整队列" : turnActive ? "完成当前回合后依次发送" : "等待电脑接收")}
             onSendNow={props.onSendQueuedNow}
             onEdit={(clientMessageId) => void editQueued(clientMessageId)}
             onRemove={props.onUnqueue}

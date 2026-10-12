@@ -1,6 +1,6 @@
 import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import { ClaudeDriver } from "../src/drivers/claude/driver.js";
 import { connectHost, type HostClient } from "../src/rpc/client.js";
 import { startHost, type RunningHost } from "../src/host.js";
 import { HostStore } from "../src/store.js";
+import { findTranscript } from "../src/drivers/claude/transcript.js";
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 const FAKE_ACP = fileURLToPath(new URL("./fixtures/fake-acp.mjs", import.meta.url));
@@ -348,6 +349,24 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     expect(p2.userTexts(desk.id)).toEqual(["hello from desk", "from phone", "back at desk"]);
     expect(p2.agentTexts(desk.id)).toEqual(["echo: hello from desk", "echo: from phone", "echo: back at desk"]);
   }, 30_000);
+
+  it("does not replay SDK transcript messages flushed after desktop reclaim", async () => {
+    const e = makeEnv(); e.env.FAKE_ACP_TRANSCRIPT_DELAY = "800";
+    const host = await boot(e), p = await phone(host), desk = await terminal(host, e);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    desk.type("desktop seed");
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: desktop seed"));
+    await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "late-flush", content: text("phone turn") });
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: phone turn"));
+    await waitFor(() => p.of(desk.id).some((event) => event.update.sessionUpdate === "ls_turn" && event.update.state === "ended"));
+    await desk.reclaim();
+    const path = findTranscript(e.configDir, desk.id.slice(7), e.workDir)!;
+    await waitFor(() => readFileSync(path, "utf8").includes("echo: phone turn"));
+    desk.type("desktop after flush");
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: desktop after flush"));
+    expect(p.userTexts(desk.id)).toEqual(["desktop seed", "phone turn", "desktop after flush"]);
+    expect(p.agentTexts(desk.id)).toEqual(["echo: desktop seed", "echo: phone turn", "echo: desktop after flush"]);
+  });
 
   it("leaves a never-messaged terminal session alone when the phone tries to take it, and deletes it cleanly", async () => {
     const e = makeEnv();

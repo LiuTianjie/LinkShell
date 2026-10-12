@@ -1,0 +1,56 @@
+name: real agents
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-agents-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: real agents (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      LINKSHELL_REAL_AGENT_REPORT_DIR: ${{ github.workspace }}/packages/host/build/real-agents
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install the exact native CLI toolchain
+        run: npm ci --prefix packages/host/test/real-agents --no-audit --no-fund
+      - run: pnpm -r --filter "./packages/*" build
+      # No provider credentials: only inference HTTP is simulated. CLI, SDK,
+      # ACP, native history, processes, RPC, permissions and tools are real.
+      - name: Run every required native contract
+        run: pnpm --filter @linkshell/host test:real-agents
+      - name: Preserve version and regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-agents-${{ matrix.os }}
+          path: ${{ env.LINKSHELL_REAL_AGENT_REPORT_DIR }}/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Clean the isolated CLI installation and reports
+        if: always()
+        run: rm -rf packages/host/test/real-agents/node_modules "$LINKSHELL_REAL_AGENT_REPORT_DIR"
