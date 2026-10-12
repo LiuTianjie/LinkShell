@@ -149,6 +149,19 @@ export default function RootLayout() {
                     headerShown: true,
                   }}
                 />
+                <Stack.Screen
+                  name="computers"
+                  options={{
+                    presentation: "formSheet",
+                    sheetGrabberVisible: true,
+                    sheetAllowedDetents: [0.55, 0.92],
+                    sheetInitialDetentIndex: 0,
+                    sheetExpandsWhenScrolledToEdge: true,
+                    sheetCornerRadius: 32,
+                    contentStyle: sheetContent,
+                    headerShown: false,
+                  }}
+                />
                 <Stack.Screen name="account" options={{ title: "账号与电脑", headerLargeTitleEnabled: false, headerTransparent: false, headerShadowVisible: false }} />
                 <Stack.Screen
                   name="connect"

@@ -1,7 +1,7 @@
 import type { AgentInfo, GatewayStatus } from "@linkshell/wire";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Alert, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePageInsets } from "@/components/adaptive-page";
@@ -15,7 +15,6 @@ import { LiveDot } from "@/components/status";
 import { useAccount } from "@/lib/account";
 import { useActions, useClient, useConnection, useHasComputer } from "@/lib/client";
 import { Welcome } from "@/components/welcome";
-import { listComputers, useComputers } from "@/lib/computers";
 import { relativeTime } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { deviceIdentity } from "@/lib/identity";
@@ -23,7 +22,8 @@ import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 import { useFloatingTabInset } from "@/components/floating-tabs";
-import { AppMenu } from "@/components/app-menu";
+import { ComputerList } from "@/components/computer-list";
+import { ComputerArt } from "@/components/computer-art";
 import { PortRow } from "@/components/port-row";
 import { ListRow } from "@/components/session-row";
 import { usePorts } from "@/lib/ports";
@@ -330,6 +330,41 @@ function DevicesSection() {
   );
 }
 
+function ComputerPanel({ title, children, expanded = true, onToggle, onAdd, detail }: {
+  title: string;
+  children: ReactNode;
+  expanded?: boolean;
+  onToggle?: () => void;
+  onAdd?: () => void;
+  detail?: string;
+}) {
+  const heading = (
+    <>
+      <Text accessibilityRole="header" style={{ flex: 1, fontSize: 22, lineHeight: 28, fontWeight: "700", color: colors.label }}>{title}</Text>
+      {detail ? <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{detail}</Text> : null}
+    </>
+  );
+  const control = (icon: ReactNode) => <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}>{icon}</View>;
+  return (
+    <View style={{ backgroundColor: colors.card, borderRadius: 24, borderCurve: "continuous", paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 }}>
+      {onToggle ? (
+        <Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? "收起" : "展开"}${title}`} accessibilityState={{ expanded }} onPress={onToggle} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44, marginBottom: 6, opacity: pressed ? 0.6 : 1 })}>
+          {heading}
+          {control(<Icon sf={expanded ? "chevron.up" : "chevron.down"} md={expanded ? "expand_less" : "expand_more"} size={16} color={colors.label} />)}
+        </Pressable>
+      ) : (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44, marginBottom: 6 }}>
+          {heading}
+          {onAdd ? <Pressable accessibilityRole="button" accessibilityLabel="添加电脑" onPress={onAdd} hitSlop={4} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+            {control(<Icon sf="plus" md="add" size={22} color={colors.label} />)}
+          </Pressable> : null}
+        </View>
+      )}
+      {expanded ? children : null}
+    </View>
+  );
+}
+
 export function ComputerScreen() {
   const insets = usePageInsets();
   const systemInsets = useSafeAreaInsets();
@@ -353,16 +388,7 @@ export function ComputerScreen() {
     label: "账号与电脑",
     onPress: () => router.push("/account"),
   };
-  const saved = useComputers((state) => state.saved);
-  const live = useComputers((state) => state.live);
-  const relayStatus = useComputers((state) => state.relayStatus);
-  const computers = useMemo(() => listComputers({ saved, live }), [saved, live]);
-  // Offline paired computers would only clutter the switcher; 账号与电脑 lists
-  // them all and removes them. A LAN address has no presence to go by.
-  const reachable = computers.filter(
-    (entry) => entry.key === computer.key || entry.kind === "direct" || (entry.machine.online && relayStatus[entry.gateway] === "online"),
-  );
-  const hidden = computers.length - reachable.length;
+  const [agentsExpanded, setAgentsExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const hasComputer = useHasComputer();
   const online = status === "online";
@@ -409,48 +435,22 @@ export function ComputerScreen() {
           }}
         >
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
-            <View
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 13,
-                borderCurve: "continuous",
-                backgroundColor: colors.fill,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Icon sf={platform.sf} md="laptop_mac" size={22} color={colors.label} />
-            </View>
+            <ComputerArt name={machine?.hostname ?? (computer.kind === "relay" ? computer.machine.name : computer.name)} size={42} />
             <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
-              <AppMenu
-                title="切换电脑"
-                actions={[
-                  ...reachable.map((entry) => ({
-                    id: entry.key,
-                    title: entry.kind === "relay" ? entry.machine.name : entry.name,
-                    subtitle:
-                      entry.kind === "relay"
-                        ? `${entry.machine.via === "account" ? "同一账号" : "已配对"} · ${entry.machine.online ? "在线" : "离线"}`
-                        : "局域网",
-                    state: entry.key === computer.key ? ("on" as const) : ("off" as const),
-                  })),
-                  { id: "add", title: "添加电脑…" },
-                  { id: "manage", title: "管理电脑…", subtitle: hidden > 0 ? `另有 ${hidden} 台离线` : undefined },
-                ]}
-                onPressAction={({ nativeEvent }) => {
-                  if (nativeEvent.event === "add") router.push("/pair");
-                  else if (nativeEvent.event === "manage") router.push("/account");
-                  else useComputers.getState().select(nativeEvent.event);
-                }}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="切换电脑"
+                accessibilityHint="打开设备列表"
+                onPress={() => { haptics.selection(); router.push("/computers"); }}
+                style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44 }}>
                   <Text numberOfLines={1} style={[type.headline, { color: colors.label, flex: 1, minWidth: 0 }]}>
-                    {machine ? machine.hostname.replace(/\.local$/, "") : computer.kind === "relay" ? computer.machine.name : "我的电脑"}
+                    {machine ? machine.hostname.replace(/\.local$/, "") : computer.kind === "relay" ? computer.machine.name : computer.name}
                   </Text>
                   <Icon sf="chevron.up.chevron.down" md="unfold_more" size={12} color={colors.tertiaryLabel} weight="semibold" />
                 </View>
-              </AppMenu>
+              </Pressable>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <LiveDot size={7} color={online ? colors.ok : colors.tertiaryLabel} live={online} />
                 <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel, flexShrink: 1 }]}>
@@ -485,36 +485,29 @@ export function ComputerScreen() {
         </View>
 
         <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 20 }}>
-        <View style={{ gap: 8 }}>
-          <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: "600", color: colors.secondaryLabel, paddingHorizontal: 6 }}>Agent</Text>
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderRadius: 24,
-              borderCurve: "continuous",
-              paddingHorizontal: 16,
-              paddingVertical: 2,
-            }}
-          >
-            {!agents.some((agent) => agent.installed) ? (
-              <Text style={[type.subhead, { color: colors.secondaryLabel, paddingVertical: 14 }]}>
-                {online ? "这台电脑上还没有检测到 Agent" : "连上电脑后显示"}
-              </Text>
-            ) : (
-              agents.filter((agent) => agent.installed).map((agent, index) => <AgentRow key={agent.id} agent={agent} first={index === 0} />)
-            )}
-          </View>
+        <ComputerPanel title="设备" onAdd={() => { haptics.selection(); router.push("/pair"); }}>
+          <ComputerList />
+        </ComputerPanel>
+        <ComputerPanel
+          title="Agent"
+          expanded={agentsExpanded}
+          onToggle={() => { haptics.selection(); setAgentsExpanded((value) => !value); }}
+          detail={agents.some((agent) => agent.installed) ? `${agents.filter((agent) => agent.installed).length} 个` : !agentsExpanded ? (online ? "未检测到" : "未连接") : undefined}
+        >
+          {!agents.some((agent) => agent.installed) ? (
+            <Text style={[type.subhead, { color: colors.secondaryLabel, paddingTop: 6, paddingBottom: 16 }]}>
+              {online ? "这台电脑上还没有检测到 Agent" : "连上电脑后显示"}
+            </Text>
+          ) : (
+            agents.filter((agent) => agent.installed).map((agent, index) => <AgentRow key={agent.id} agent={agent} first={index === 0} />)
+          )}
           {online ? <Button title="自定义 ACP 连接" variant="plain" onPress={() => router.push("/acp")} /> : null}
           {agents.some((agent) => !agent.installed) ? (
-            <Text style={[type.footnote, { color: colors.tertiaryLabel, paddingHorizontal: 6 }]}>
-              未安装：
-              {agents
-                .filter((agent) => !agent.installed)
-                .map((agent) => agentLook(agent.id, agent.label).name)
-                .join("、")}
+            <Text style={[type.footnote, { color: colors.tertiaryLabel, paddingVertical: 12 }]}>
+              未安装：{agents.filter((agent) => !agent.installed).map((agent) => agentLook(agent.id, agent.label).name).join("、")}
             </Text>
           ) : null}
-        </View>
+        </ComputerPanel>
 
         {online ? <DevicesSection /> : null}
         </View>
