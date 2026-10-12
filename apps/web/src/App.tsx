@@ -29,7 +29,7 @@ import { AcpManager, AgentInteractions } from "./live/Acp";
 import { Files } from "./live/Files";
 import { Terminals } from "./live/Terminal";
 import { Worktrees } from "./live/Panels";
-import { Screen } from "./live/Video";
+import { Screens } from "./live/Screens";
 import { Ports } from "./live/Ports";
 import { readLocal, saveLocal } from "./live/storage";
 import "./live/live.css";
@@ -158,7 +158,7 @@ function LiveApp() {
                 );
                 if (computer) {
                   engine.select(computer);
-                  navigate("home");
+                  if (view !== "screen") navigate("home");
                 }
               }}
               options={state.computers.map((computer) => ({
@@ -242,6 +242,8 @@ function LiveApp() {
               在此标签页继续
             </button>
           </div>
+        ) : view === "screen" ? (
+          <Screens connect={() => setConnect(true)} />
         ) : state.connection ? (
           <Runtime value={state.connection}>
             <Workspace
@@ -386,7 +388,6 @@ function Workspace({
           )}
           {view === "worktrees" && <Worktrees />}
           {view === "ports" && <Ports />}
-          {view === "screen" && <Screen />}
           {![
             "home",
             "archive",

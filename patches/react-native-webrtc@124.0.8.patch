@@ -1,0 +1,28 @@
+diff --git a/ios/RCTWebRTC/RCTConvert+WebRTC.m b/ios/RCTWebRTC/RCTConvert+WebRTC.m
+index 9035b43a533090815333d4e22f12064a7939eaef..a4c7d8da63b52d2a322d15f7d74c0ab0507dd8b8 100644
+--- a/ios/RCTWebRTC/RCTConvert+WebRTC.m
++++ b/ios/RCTWebRTC/RCTConvert+WebRTC.m
+@@ -92,8 +92,12 @@ + (nonnull RTCConfiguration *)RTCConfiguration:(id)json {
+     config.enableImplicitRollback = YES;
+ 
+     // Enable GCM ciphers.
++    // M154's initializer (WebRTC-lib, shared with LinkShell's screen receiver): the same choice,
++    // with AES_CM_128_HMAC_SHA1_80 kept as libwebrtc's default and GCM not forced first.
+     RTCCryptoOptions *cryptoOptions = [[RTCCryptoOptions alloc] initWithSrtpEnableGcmCryptoSuites:YES
++                                                                        srtpPreferGcmCryptoSuites:NO
+                                                               srtpEnableAes128Sha1_32CryptoCipher:NO
++                                                              srtpEnableAes128Sha1_80CryptoCipher:YES
+                                                            srtpEnableEncryptedRtpHeaderExtensions:NO
+                                                                      sframeRequireFrameEncryption:NO];
+     config.cryptoOptions = cryptoOptions;
+diff --git a/react-native-webrtc.podspec b/react-native-webrtc.podspec
+index 51af1f00fdcdeac3dcfe74f10364a52152e558b9..5a97d2297a7fdca8f95983b228237c915cc3e222 100644
+--- a/react-native-webrtc.podspec
++++ b/react-native-webrtc.podspec
+@@ -19,5 +19,5 @@ Pod::Spec.new do |s|
+   s.libraries           = 'c', 'sqlite3', 'stdc++'
+   s.framework           = 'AudioToolbox','AVFoundation', 'CoreAudio', 'CoreGraphics', 'CoreVideo', 'GLKit', 'VideoToolbox'
+   s.dependency          'React-Core'
+-  s.dependency          'JitsiWebRTC', '~> 124.0.0'
++  s.dependency          'WebRTC-lib', '154.0.0'
+ end

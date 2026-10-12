@@ -14,6 +14,12 @@ pnpm --filter @linkshell/web test
 
 Output: `apps/web/dist`. The gateway Docker image and npm package bundle this client at `/`, alongside `/v2/connect` and `/healthz`. Run `pnpm --filter @linkshell/gateway build:web` when running the gateway from a checkout. Production uses `https://gateway.itool.tech`. No separate web deployment is required.
 
+The Screens page lists all discovered computers in a responsive grid. Each online card can
+start, stop or reconnect its viewer, choose a display and enter fullscreen independently.
+Screen cards and the current workspace share a tunnel per computer; changing the selected
+computer while on this page keeps the other viewers open. Leaving the page releases its
+viewers and unused connections. Offline computers remain visible without opening a tunnel.
+
 ## Functions
 
 - Official email/password and GitHub/Google sign-in, automatic account token refresh, account computer discovery and sign-out. OAuth redirect origins must be allowed in the existing Supabase project.

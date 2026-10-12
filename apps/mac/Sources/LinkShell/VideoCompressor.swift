@@ -3,8 +3,8 @@ import CoreVideo
 import Foundation
 import VideoToolbox
 
-/// H.264 for the shipping screen, with HEVC available only to the codec laboratory: one
-/// VideoToolbox compression session of one size.
+/// H.264, or HEVC for a receiver that decodes it (`ScreenEncoderFactory`): one VideoToolbox
+/// compression session of one size.
 ///
 /// It is asked for the low-latency rate control first. That mode keeps to the rate from one
 /// second to the next, holds no frame back, and encodes a 1080p frame in about 6 ms where the
@@ -39,7 +39,8 @@ final class VideoCompressor {
     var lowLatency = true
     /// Only the media laboratory currently supplies decoder acknowledgements for this mode.
     var longTermReferences = false
-    /// HEVC is used only by the codec laboratory; the shipping stream remains H.264.
+    /// HEVC only in the low-latency mode: the usual one reorders unless told otherwise, and
+    /// its parameter sets aren't rewritten to say it doesn't (`SequenceParameters` is H.264's).
     var codec: CMVideoCodecType = kCMVideoCodecType_H264
   }
 
@@ -62,7 +63,7 @@ final class VideoCompressor {
     /// for the caller's own header.
     func accessUnit(reserved: Int = 0) -> Data? {
       guard let format = CMSampleBufferGetFormatDescription(sample),
-            CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_H264 else { return nil }
+            [kCMVideoCodecType_H264, kCMVideoCodecType_HEVC].contains(CMFormatDescriptionGetMediaSubType(format)) else { return nil }
       return AnnexB.accessUnit(sample, key: key, reserved: reserved, statingNoReordering: silentOnOrder)
     }
   }
@@ -121,7 +122,8 @@ final class VideoCompressor {
   init(_ setup: Setup) throws {
     var made: (session: VTCompressionSession, lowLatency: Bool, profile: Profile)?
     var failure = Failure(what: "no encoder", status: kVTCouldNotFindVideoEncoderErr)
-    for lowLatency in setup.lowLatency && setup.codec == kCMVideoCodecType_H264 ? [true, false] : [false] {
+    let modes = setup.codec == kCMVideoCodecType_H264 ? (setup.lowLatency ? [true, false] : [false]) : [setup.lowLatency]
+    for lowLatency in modes {
       let profile = setup.profile ?? (lowLatency ? .high : .baseline)
       do {
         made = (try VideoCompressor.session(setup, lowLatency: lowLatency, profile: profile), lowLatency, profile)

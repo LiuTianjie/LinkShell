@@ -279,7 +279,9 @@ export class ScreenShare {
       const width = videoWidth(url.searchParams.get("width"));
       const maxFps = videoMaxFps(url.searchParams.get("maxFps"));
       const diagnostics = url.searchParams.get("diagnostics") === "1";
-      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video, width, maxFps, diagnostics));
+      // "hevc": the receiver decodes HEVC (the iOS app's native one); the app offers it first and H.264 after.
+      const codec = url.searchParams.get("codec") === "hevc" ? "hevc" : undefined;
+      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video, width, maxFps, diagnostics, codec));
     });
     this.server = server;
     return new Promise((resolve, reject) => {
@@ -418,7 +420,7 @@ export class ScreenShare {
    * Has the app offer the screen to this viewer as a video track. False when it can't (no app, an
    * app without the media engine): the picture then goes down the socket.
    */
-  private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, viewer: { closed(): boolean; tell(message: object): void; refuse(message: string): void; lost(): void }): Promise<{ app: HelperApp; id: string } | "refused" | undefined> {
+  private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, codec: "hevc" | undefined, viewer: { closed(): boolean; tell(message: object): void; refuse(message: string): void; lost(): void }): Promise<{ app: HelperApp; id: string } | "refused" | undefined> {
     // LINKSHELL_SCREEN_VIDEO=off: every viewer gets the picture down the socket (to compare the two, or should the track ever misbehave).
     const app = process.platform === "darwin" && process.env.LINKSHELL_SCREEN_VIDEO !== "off" ? inputApp(this.log) : undefined;
     if (!app) return undefined;
@@ -455,7 +457,7 @@ export class ScreenShare {
     viewer.tell({ rtc: { t: "config", iceServers } });
     // LINKSHELL_SCREEN_FPS: another frame rate than the app's own choice, to try one out.
     const fps = Number(process.env.LINKSHELL_SCREEN_FPS);
-    await app.offerVideo(id, { screen, iceServers, ...(fps >= 1 && fps <= 120 ? { fps } : {}), ...(maxWidth ? { maxWidth } : {}), ...(maxFps ? { maxFps } : {}) }, (message) => {
+    await app.offerVideo(id, { screen, iceServers, ...(fps >= 1 && fps <= 120 ? { fps } : {}), ...(maxWidth ? { maxWidth } : {}), ...(maxFps ? { maxFps } : {}), ...(codec ? { codec } : {}) }, (message) => {
       if (this.video !== mine) return;
       const kind = String(message.t);
       if (kind === "gone" || kind === "rtc.error") {
@@ -477,7 +479,7 @@ export class ScreenShare {
     return { app, id };
   }
 
-  private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false): void {
+  private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc"): void {
     const shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
     const tell = (message: object) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(message));
     // The viewer's hands: started when it first asks to control, for the display it is watching.
@@ -584,7 +586,7 @@ export class ScreenShare {
       void begin().catch(failed);
     };
     if (wantsVideo) {
-      this.offerVideo(shown?.screen ?? 0, width, maxFps, diagnostics, {
+      this.offerVideo(shown?.screen ?? 0, width, maxFps, diagnostics, codec, {
         closed: () => closed,
         tell,
         refuse: (message) => {

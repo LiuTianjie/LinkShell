@@ -96,6 +96,8 @@ export interface VideoOffer {
   maxFps?: number;
   /** The widest the picture may be, in pixels; the app's own choice (1920) when left out. */
   maxWidth?: number;
+  /** "hevc": offered first, H.264 after, for a receiver that decodes it. Older apps ignore it and send H.264. */
+  codec?: "hevc";
 }
 
 /** What a viewer answers the app's offer with, and the candidates it finds. */

@@ -9,6 +9,7 @@ import {
   useLoad,
 } from "./common";
 import { httpRequest, openWebSocket } from "./transport";
+import { Icon } from "../icons";
 
 export function ComputerPreview({ sessionId }: { sessionId: string }) {
   const { link, streams } = useConnection();
@@ -174,7 +175,7 @@ function writeStored(key: string, value: string): void {
   }
 }
 
-export function Screen() {
+export function Screen({ title = "电脑屏幕", embedded = false }: { title?: string; embedded?: boolean }) {
   const { link, streams } = useConnection();
   const job = useJob();
   const loaded = useLoad(() => link.call("screen.access", {}), [link]);
@@ -329,9 +330,9 @@ export function Screen() {
     };
   }, [started, display, retry, link, streams, view]);
   return (
-    <section className="screen-page">
+    <section className={`screen-page${embedded ? " screen-card-viewer" : ""}`}>
       <div className="browser-toolbar">
-        <h2>电脑屏幕</h2>
+        {!embedded && <h2>{title}</h2>}
         {displays.length > 1 && (
           <div className="w-48">
             <Choice
@@ -377,6 +378,7 @@ export function Screen() {
       <ErrorNotice error={error ?? job.error} />
       {!started && loaded.value && (
         <div className="notice-card">
+          {embedded && <div className="screen-card-preview" aria-hidden="true"><Icon name="computer" size={48} /></div>}
           <p>
             {loaded.value.problem ??
               (loaded.value.supported
@@ -427,7 +429,7 @@ export function Screen() {
       {html && (
         <iframe
           ref={frame}
-          title="电脑屏幕"
+          title={title === "电脑屏幕" ? title : `${title}的屏幕画面`}
           sandbox="allow-scripts allow-pointer-lock"
           allow="autoplay; fullscreen"
           srcDoc={html}

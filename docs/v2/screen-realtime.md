@@ -84,7 +84,7 @@ Mac 视频直连成功后，画面不经过 Node Host 或 Gateway。直连使用
 
 H.264 能力同时提供 Constrained High（`640c`）和 High（`6400`），均使用现有 High 编码实现。ObjC 工厂原本只列出前者，而 Chrome 的接收能力列出后者；libwebrtc 将两者视为不同 profile，只有前者时 Chrome 会退到 Baseline。新增 High 能力保留原生 profile 的优先顺序以及 Baseline 兼容选项，不改写 offer/answer，不调整采集、码率或帧率策略。网页连接信息显示实际协商的 codec/profile 和接收码率；诊断模式另外记录浏览器愿意提供的解码器信息，缺失时不推断是否硬解。
 
-`MaxFrameDelayCount=0` 只是尝试设置；历史硬件检查不支持该属性的设置/读取，不能据此声称编码零排队。当前 iOS 原生解码工厂只支持 H.264；HEVC、AV1、HDR、4:4:4 不是现行主链路能力。
+`MaxFrameDelayCount=0` 只是尝试设置；历史硬件检查不支持该属性的设置/读取，不能据此声称编码零排队。iOS 原生接收端在硬件支持时请求 HEVC（`?codec=hevc`）：Mac 在低延迟硬件编码器探测通过后，用同一低延迟 VideoToolbox 模式编 HEVC，不支持时保留 H.264；libwebrtc M154 负责 H.265 RTP 打包/拆包，两端的 VideoToolbox 解码器是 `apps/client/modules/link-screen/ios/HEVCDecoder.swift`（Mac 回环接收端链接同一文件）。旧主机或旧 Mac App 不认这个参数，照旧发 H.264；浏览器和 Android 不请求 HEVC。AV1、HDR、4:4:4 不是现行主链路能力。
 
 ### 3.3 网络、恢复与播放等待
 
@@ -97,7 +97,7 @@ Mac 使用未修改上游的 stasel/WebRTC M154 预编译框架。libwebrtc 负�
 
 ## 4. iOS 原生接收与显示
 
-`apps/client/modules/link-screen` 复用 `react-native-webrtc` 已安装的 JitsiWebRTC：pod 要求 `~>124.0.0`，本次核对的本地 Pod 锁定为 124.0.2。Mac M154、iOS M124 和 WKWebView 不能互相推定扩展能力。
+`apps/client/modules/link-screen` 和 `react-native-webrtc` 共用一份 libwebrtc：iOS 自 2026-10-12 起与 Mac 同为 M154（`WebRTC-lib 154.0.0`，stasel 的上游未改构建）。`react-native-webrtc` 124.0.8 只认 JitsiWebRTC 124，经 `patches/react-native-webrtc@124.0.8.patch` 改依赖并适配 M154 的 `RTCCryptoOptions` 初始化；Android 仍用它自带的 124。WKWebView 的能力仍不能由此推定。
 
 ### 4.1 解码、最新帧与 Metal
 
@@ -274,6 +274,18 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
 
 完整的聚合条件、样本数和实验二进制指纹见 [实验记录](screen-realtime-experiments.json)。复现工具见 [Mac README](../../apps/mac/README.md#media-experiments)。本次 Swift 单元测试、原生编译与模拟器检查是功能证据；Mac 回环和人工限速不是手机、公网或长时热稳定验收。
 
+### 2026-10-12：HEVC 经 WebRTC、发送节奏与采集队列
+
+同一 M3 Max 回环（`--loopback`，经 UDP 代理），1920 宽、最高 120 fps，每项 30 s。
+
+| 场景 | H.264 | HEVC | 说明 |
+| --- | --- | --- | --- |
+| 无断档 | 解码 119–120 fps；延迟 p50 15 ms、每秒 p95 中位 24–25 ms；约 20 Mbit/s | 116 fps；p50 18 ms、p95 中位 25 ms；14–19 Mbit/s | HEVC 编码约 13.8 ms（H.264 10.8 ms），p50 多约 3 ms；码率在同一估计下更低 |
+| 80 ms / 524 ms 周期断档 | p95 中位 77 ms，最差 256 ms；发送等待最差 37 ms | p95 中位 80 ms，最差 85 ms；发送等待最差 3.5 ms | 本轮单次：HEVC 的突变帧更小，排队更少 |
+| 20→0.7→20 Mbps | 三次：恢复到满帧 4–13 s | 两次（`--quality`）：4 s、8 s | 次间差异大于两者差异；不能据此说 HEVC 恢复更快 |
+
+否决：`WebRTC-ProbingScreenshareBwe=2.5,250,80,40,-60,3`（无断档 p95 27→22 ms，但收窄时队列丢包 1949→7580、恢复后停在 30 fps）；SCK `queueDepth` 3（与 5 在噪声内）。HEVC 不加 LTR：M154 的 H.264/H.265 接收端按序号找参考，补不回的丢包后一直扣帧直到关键帧，LTR 刷新帧送不到解码器。
+
 ### 测量口径
 
 分别记录采集新帧率、重复帧、编码/解码吞吐、真实新画面的显示间隔、冻结/恢复、画面年龄 p50/p95/p99、输入到真实结果、分辨率、码率和热状态。不能用降低画质或大量跳帧掩盖另一维度的退化。
@@ -306,7 +318,7 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
 - 将实验中的真实解码 ACK / LTR 恢复接到产品会话，处理跨设备时钟、代次与过期参考；当前仅在本机实验中完成闭环。
 - ScreenCaptureKit dirty rects 与局部块更新：需统一版本、依赖、补齐和拥塞预算，防止漏更新与撕裂。
 - iOS 显示期限反馈到 Mac：需跨端时间映射、误差界与过期回退；当前仅有 iOS 本地呈现预算。
-- HEVC/AV1 完整传输解码、HDR/4:4:4、slice 级流水线、输入线程进一步隔离：均需单独验证公开 API、兼容性与完整链路收益；HEVC 目前只有编码器探针。
+- HEVC 已接通 WebRTC（见 §3.2 与下方 2026-10-12 记录），仍缺 iPhone 真机的解码耗时、画质和弱网对比。AV1、HDR/4:4:4、slice 级流水线、输入线程进一步隔离：均需单独验证公开 API、兼容性与完整链路收益。
 - UPnP/PCP/NAT-PMP 与 TURN：当前均未接入；先测直连覆盖率，再决定是否改变网络路线。
 
 音频、自动双向剪贴板同步、桌面文件拖放和多人观看未实现。已有“发送文字”可读取手机剪贴板供用户确认后发送，这不等于剪贴板同步；会话文件上传是另一个功能。

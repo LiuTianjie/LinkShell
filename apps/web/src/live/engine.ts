@@ -26,6 +26,7 @@ import {
 import { accountClient, accountToken } from "./account";
 import { browserIdentity, readLocal, saveLocal } from "./storage";
 import { browserDirect } from "./direct";
+import { ComputerConnections } from "./computer-connections";
 
 export interface Computer {
   key: string;
@@ -74,6 +75,8 @@ export class BrowserEngine {
   private authUser?: string;
   private authSubscribed = false;
   private generation = 0;
+  private readonly connections = new ComputerConnections((computer) => this.openComputer(computer));
+  private releaseSelected?: () => void;
   private readonly channel =
     typeof BroadcastChannel !== "undefined"
       ? new BroadcastChannel("linkshell.web.owner")
@@ -275,8 +278,19 @@ export class BrowserEngine {
     }
   }
   select(computer: Computer) {
-    if (!this.identity) throw new Error("设备身份尚未就绪");
+    const selected = this.retainComputer(computer);
     this.disconnect();
+    this.releaseSelected = selected.release;
+    this.state.setState({ connection: selected.connection, error: undefined });
+    this.selected = computer.key;
+    saveLocal("selected", computer.key);
+  }
+  retainComputer(computer: Computer) {
+    if (!this.identity || !this.releaseLock) throw new Error("请先在本标签页启用连接");
+    return this.connections.acquire(computer);
+  }
+  private openComputer(computer: Computer) {
+    if (!this.identity) throw new Error("设备身份尚未就绪");
     const identity = this.identity;
     const relay = this.relay(computer.gateway);
     const link = new HostLink({
@@ -289,17 +303,14 @@ export class BrowserEngine {
       connector: browserDirect,
       iceServers: () => store.getState().machine?.direct?.iceServers,
     });
-    store.subscribe((state, previous) => {
+    const unsubscribe = store.subscribe((state, previous) => {
       if (state.machine !== previous.machine) streams.connect();
     });
-    this.state.setState({
-      connection: { computer, link, store, streams },
-      error: undefined,
-    });
-    this.selected = computer.key;
-    saveLocal("selected", computer.key);
     store.getState().connect();
     streams.start();
+    return { connection: { computer, link, store, streams }, close: () => {
+      unsubscribe(); streams.stop(); store.getState().disconnect();
+    } };
   }
   async pair(address: string, codeOrLink: string) {
     const link = codeOrLink.trim().startsWith("linkshell:")
@@ -336,6 +347,7 @@ export class BrowserEngine {
     saveLocal("paired", this.paired);
     if (this.state.getState().connection?.computer.key === computer.key)
       this.disconnect();
+    this.connections.remove(computer.key);
     this.state.setState((state) => ({
       computers: state.computers.filter((item) => item.key !== computer.key),
     }));
@@ -343,17 +355,17 @@ export class BrowserEngine {
   reconnect() {
     if (!this.releaseLock) return;
     for (const relay of this.relays.values()) relay.reconnectNow();
-    this.state.getState().connection?.link.reconnectNow();
+    for (const connection of this.connections.values()) connection.link.reconnectNow();
   }
   disconnect() {
-    const connection = this.state.getState().connection;
-    connection?.streams.stop();
-    connection?.store.getState().disconnect();
+    this.releaseSelected?.();
+    this.releaseSelected = undefined;
     this.state.setState({ connection: undefined });
   }
   stop() {
     this.generation++;
     this.disconnect();
+    this.connections.clear();
     for (const relay of this.relays.values()) relay.stop();
     this.relays.clear();
     this.releaseLock?.();

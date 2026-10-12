@@ -43,8 +43,10 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     target.scheme = "ws"
     target.path = "/stream"
     target.fragment = nil
-    target.queryItems = (target.queryItems ?? []).filter { !["video", "maxFps", "diagnostics"].contains($0.name) }
+    target.queryItems = (target.queryItems ?? []).filter { !["video", "maxFps", "diagnostics", "codec"].contains($0.name) }
       + [URLQueryItem(name: "video", value: "1"), URLQueryItem(name: "maxFps", value: String(maxFps)), URLQueryItem(name: "diagnostics", value: metrics.enabled ? "1" : "0")]
+      // The same picture in fewer bits; a host or Mac app that doesn't know it sends H.264.
+      + (HEVCDecoder.available ? [URLQueryItem(name: "codec", value: "hevc")] : [])
     guard let address = target.url else { return nil }
     self.url = address; self.maxFps = maxFps; self.renderer = renderer; self.metrics = metrics
     super.init()
@@ -300,6 +302,8 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
         stats["framesDropped"] = number(inbound, "framesDropped")
         stats["freezeCount"] = number(inbound, "freezeCount")
         stats["replacedFrames"] = self.renderer.takeReplacements()
+        stats["decoder"] = inbound?.values["decoderImplementation"] as? String
+        stats["codec"] = (records.first { $0.type == "codec" && $0.id == inbound?.values["codecId"] as? String }?.values["mimeType"] as? String)?.replacingOccurrences(of: "video/", with: "")
         stats["width"] = number(inbound, "frameWidth")
         stats["height"] = number(inbound, "frameHeight")
         stats["rttMs"] = number(pair, "currentRoundTripTime").map { $0 * 1000 }

@@ -4,7 +4,8 @@
 // not measure an iPhone, picture quality, or glass-to-glass latency.
 //
 //   TMPDIR=/tmp node tools/network-check.mjs --screen 1 --maxFps 120 --json /tmp/network.json
-//   --app <LinkShell.app> compares an installed build; --trial <name>=<value> is repeatable.
+//   --app <LinkShell.app> compares an installed build; --trial <name>=<value> is repeatable;
+//   --codec hevc asks for HEVC.
 //
 // For 48 seconds: 20 Mbps for 8 s, 0.7 Mbps for 16 s, then 20 Mbps for 24 s. Every outbound
 // SRTP packet (including RTX/FEC) pays serialization time. Queue overflow drops packets, with
@@ -123,7 +124,7 @@ try {
   });
   const status = await app.next("status", 5000);
   assert.equal(status.recording, true, "LinkShell.app needs its existing Screen Recording permission");
-  app.send({ t: "rtc.open", v: "network-check", iceServers: [], maxFps: conditions.maxFps, maxWidth: conditions.maxWidth, screen: conditions.screen });
+  app.send({ t: "rtc.open", v: "network-check", iceServers: [], maxFps: conditions.maxFps, maxWidth: conditions.maxWidth, screen: conditions.screen, ...(value("--codec") ? { codec: value("--codec") } : {}) });
   await app.next("rtc.offer", 10_000);
   started = performance.now();
   const duration = conditions.phaseSeconds.reduce((sum, seconds) => sum + seconds, 0) * 1000;

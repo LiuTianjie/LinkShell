@@ -32,8 +32,9 @@ def main():
     module = Path(__file__).resolve().parents[1]
     repo = module.parents[3]
     source = module / "ios"
-    framework = module.parents[1] / "ios/Pods/JitsiWebRTC/WebRTC.xcframework/ios-arm64_x86_64-simulator"
-    if not framework.is_dir():
+    frameworks = [module.parents[1] / f"ios/Pods/{pod}/WebRTC.xcframework/ios-arm64_x86_64-simulator" for pod in ("WebRTC-lib", "JitsiWebRTC")]
+    framework = next((path for path in frameworks if path.is_dir()), None)
+    if framework is None:
         raise RuntimeError("The client's simulator WebRTC pod is missing; install its native dependencies first.")
     sdk = run("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
     arch = run("uname", "-m")
@@ -73,7 +74,7 @@ def main():
             files = [*sorted((source / "Core").glob("*.swift")), source / "ScreenMetrics.swift", metal,
                      module / "tools/fixtures/RendererAudit.swift"]
             if options.connection:
-                files[-1:] = [source / "ScreenDecoder.swift", source / "ScreenConnection.swift", module / "tools/fixtures/ConnectionAudit.swift"]
+                files[-1:] = [source / "HEVCDecoder.swift", source / "ScreenDecoder.swift", source / "ScreenConnection.swift", module / "tools/fixtures/ConnectionAudit.swift"]
             run("xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "5", "-target", arch + "-apple-ios16.4-simulator",
                 "-sdk", sdk, "-F", str(framework), "-framework", "WebRTC", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",
                 *map(str, files), "-o", str(app / "RenderCheck"))

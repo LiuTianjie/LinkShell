@@ -116,7 +116,7 @@ cd ../cli                 && pnpm publish --access public
 > - Mac 上不再需要 ffmpeg（Linux 主机仍然用它）。
 > - 支持 Apple 芯片和 Intel Mac（npm `cpu: arm64, x64`），macOS 13 及以上。程序与 WebRTC 框架都必须包含 `arm64 x86_64`，由 macOS 自动选择本机架构。发布前验证双架构及签名；Intel 真机采集、控制、直连和回退另行验收，不能把 Rosetta 测试等同于真机测试。
 
-iOS 原生屏幕接收在 `apps/client/modules/link-screen`，与 Mac helper 分开交付。修改原生接收、Metal 或 WebKit 桥接后必须走正常 iOS 二进制发布；Metro 重载或只发 CLI 都不会把模块装进已有 App。它复用 App 的 JitsiWebRTC，不额外装第二份框架。协议或能力协商改动要同时检查新旧 Host/App 的兼容回退，详见[屏幕技术架构](v2/screen-realtime.md)。
+iOS 原生屏幕接收在 `apps/client/modules/link-screen`，与 Mac helper 分开交付。修改原生接收、Metal 或 WebKit 桥接后必须走正常 iOS 二进制发布；Metro 重载或只发 CLI 都不会把模块装进已有 App。它与 react-native-webrtc 共用 WebRTC-lib M154，不额外装第二份框架。协议或能力协商改动要同时检查新旧 Host/App 的兼容回退，详见[屏幕技术架构](v2/screen-realtime.md)。
 
 ### 4.1 发布后立即抽检 tarball
 

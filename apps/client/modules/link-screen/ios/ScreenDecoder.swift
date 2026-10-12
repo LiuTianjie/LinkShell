@@ -1,15 +1,18 @@
 import Foundation
 import WebRTC
 
-/// H.264 keeps the decoded picture in a CVPixelBuffer backed by the system video decoder.
-/// The receiver never converts it to I420/UIImage on the CPU to put it on the screen.
+/// H.264 and HEVC keep the decoded picture in a CVPixelBuffer backed by the system video
+/// decoder. The receiver never converts it to I420/UIImage on the CPU to put it on the screen.
+/// HEVC (`HEVCDecoder`) comes first where the hardware decodes it: the Mac then sends it, and
+/// a Mac app from before it could keeps to H.264.
 final class ScreenDecoderFactory: NSObject, RTCVideoDecoderFactory {
   let metrics: ScreenMetrics
   private let stock = RTCVideoDecoderFactoryH264()
   init(metrics: ScreenMetrics) { self.metrics = metrics }
-  func supportedCodecs() -> [RTCVideoCodecInfo] { stock.supportedCodecs() }
+  func supportedCodecs() -> [RTCVideoCodecInfo] { (HEVCDecoder.available ? [HEVCDecoder.codecInfo] : []) + stock.supportedCodecs() }
   func createDecoder(_ info: RTCVideoCodecInfo) -> RTCVideoDecoder? {
-    guard let decoder = stock.createDecoder(info) else { return nil }
+    let made: RTCVideoDecoder? = info.name == HEVCDecoder.codecInfo.name ? HEVCDecoder() : stock.createDecoder(info)
+    guard let decoder = made else { return nil }
     return metrics.enabled ? ScreenDecoder(decoder, metrics: metrics) : decoder
   }
 }

@@ -93,6 +93,14 @@ struct LanFloor {
   /// IPv4 range, loopback, link-local, an IPv6 unique-local address, or an mDNS name (a browser
   /// that hides its address). A server-reflexive or relayed candidate is never local, and
   /// 100.64/10 isn't counted: it is also what carrier-grade NAT and overlay networks use.
+  /// The path for the log, by kind only: a candidate's address is the phone's, not the log's.
+  static func describe(local: Endpoint, remote: Endpoint) -> String {
+    let kind = isLocal(local) && isLocal(remote) ? "over the local network"
+      : local.type == "relay" || remote.type == "relay" ? "through a TURN relay"
+      : "across the internet"
+    return "\(kind) (\(local.type) → \(remote.type))"
+  }
+
   static func isLocal(_ endpoint: Endpoint?) -> Bool {
     guard let endpoint, endpoint.type == "host" || endpoint.type == "prflx" else { return false }
     let address = endpoint.address.lowercased()
