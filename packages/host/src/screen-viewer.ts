@@ -2033,6 +2033,26 @@ async function vitals(pc, before) {
   };
 }
 
+// The desktop workspace shows real receive metrics without copying video frames into React.
+if (typeof window.__linkshellReport === "function") {
+  let previous = null, pending = false;
+  const reportTimer = setInterval(async () => {
+    if (document.hidden || pending) return;
+    pending = true;
+    try {
+      const pc = live && rtc && rtc.pc;
+      const stats = pc ? await vitals(pc, previous) : null;
+      if (pc && (!rtc || rtc.pc !== pc)) return;
+      previous = stats?.raw ?? null;
+      window.__linkshellReport(stats
+        ? { width: stats.width, height: stats.height, fps: stats.fps, codec: stats.codec, bitrateMbps: stats.bitrateMbps, live: true }
+        : { width: content.w, height: content.h, live: false });
+    } catch { /* A reconnect can close getStats while it is in flight. */ }
+    finally { pending = false; }
+  }, 2000);
+  addEventListener("pagehide", () => clearInterval(reportTimer), { once: true });
+}
+
 /** Connection details are requested separately from the control mode. */
 let statusTimer = 0, statusWas = null;
 async function status() {

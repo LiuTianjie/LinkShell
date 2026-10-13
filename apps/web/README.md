@@ -2,7 +2,7 @@
 
 A browser client for the existing LinkShell host and gateway. The normal entry point uses real pairing, encrypted tunnels and `@linkshell/client-core` state. `?demo=1` is a separate, explicitly labeled UI demonstration with local fixtures.
 
-The layout and light/dark colors follow the mobile app. Dropdowns, operation menus, command search and dialogs use shadcn/ui (Radix), with source in `src/components/ui`. `components.json` and the `@/*` alias configure the component CLI. Tailwind semantic colors map to the shared mobile palette in `src/theme.ts`; existing layout CSS stays in the base layer.
+The workspace uses shadcn/ui (Radix): sidebar, tables, cards, tabs, forms, menus, dialogs, status badges and loading/empty/error states. Its desktop visual system takes cues from Linear: quiet neutral surfaces, spacious grouped navigation, subtle selection states and restrained indigo actions with white text. The sidebar uses a 264px desktop width and explicit 40px navigation rows, shared by its desktop and mobile presentations. `src/theme.ts` provides separate light/dark desktop tokens without changing the mobile palette. `components.json` and the `@/*` alias configure the component CLI; layout stays in the existing CSS layers.
 
 ```bash
 pnpm install
@@ -15,7 +15,7 @@ pnpm --filter @linkshell/web test
 Output: `apps/web/dist`. The gateway Docker image and npm package bundle this client at `/`, alongside `/v2/connect` and `/healthz`. Run `pnpm --filter @linkshell/gateway build:web` when running the gateway from a checkout. Production uses `https://gateway.itool.tech`. No separate web deployment is required.
 
 The Screens page lists all discovered computers in a responsive grid. Each online card can
-start, stop or reconnect its viewer, choose a display and enter fullscreen independently.
+start, stop or reconnect its viewer, choose a display, resolution, frame-rate ceiling and codec preference. Focus mode enlarges the existing viewer without rebuilding its connection. Fullscreen keeps the toolbar and settings available; select menus are portaled into the fullscreen surface.
 Screen cards and the current workspace share a tunnel per computer; changing the selected
 computer while on this page keeps the other viewers open. Leaving the page releases its
 viewers and unused connections. Offline computers remain visible without opening a tunnel.
@@ -37,7 +37,7 @@ Browser UI does not independently reimplement authorization, agent execution or 
 
 `src/live/Video.tsx` calls `screen.start`, fetches the host viewer HTML through `HostStreams`
 and mounts it in a sandboxed iframe. Its WebSocket shim only forwards the selected loopback
-port's `/stream`. It keeps the page's controls, resolution choices and input behavior.
+port's `/stream`. It keeps the page's controls and input behavior. Only a small receive-statistics report crosses back to React every two seconds while visible; video frames stay in the browser media pipeline.
 
 On a Mac, that page receives a WebRTC video track directly from LinkShell.app into `<video>`;
 four DataChannels carry input and cursor state. This is a separate peer connection from the
@@ -46,11 +46,19 @@ host stream. A failed video connection falls back to H.264 bytes over that exist
 and WebCodecs/Canvas; it can use bulk direct transport or the encrypted gateway RPC path.
 There is no TURN. The iOS native receiver and its final forced-RPC step do not run here.
 
-The current browser entry does not set `q=low` or `maxFps`: it retains the standard media
-ceiling of 60 fps (bounded by the Mac display) and does not automatically select the mobile
-relay's 12 fps compatibility start. WebCodecs availability is required for byte-stream
-fallback. Runtime negotiation and real networks need separate validation; see the
-[current architecture](../../docs/v2/screen-realtime.md).
+New browser preferences request a 2560-pixel width and a ceiling of 120 fps. Previously saved
+resolution choices are retained; 1280/1920/native and 30/60 fps ceilings remain available.
+The host still adapts to the source display, encoder and network: these values are requests,
+not a promise of received frame rate. Automatic codec selection requests HEVC only when
+`RTCRtpReceiver.getCapabilities("video")` advertises H.265 RTP reception. H.264 remains in
+negotiation, and the user can explicitly select H.264 compatibility mode. File playback
+support is not used as evidence of WebRTC decoder support.
+
+The caption reports actual receive resolution, frame rate, codec and bitrate when the host
+supports the statistics bridge. Older hosts remain usable without that report. The browser
+does not automatically select the mobile relay's 12 fps compatibility start. WebCodecs
+availability is required for byte-stream fallback. Runtime negotiation and real networks
+need separate validation; see the [current architecture](../../docs/v2/screen-realtime.md).
 
 ## Official and private deployments
 
@@ -88,6 +96,8 @@ Port previews target ordinary development websites, same-origin assets/API reque
 
 ## Validation
 
+The current feature matrix, fixes and explicit gaps are maintained in [Web completeness](../../docs/v2/web-completeness.md). Session and archive pages support loading older pages. Terminals use stable tabs, retain the selected shell across reloads and separate directory/connection controls from output. Conversation details support code copying and returning to the newest message without interrupting history reading.
+
 `test/transport.test.ts` and `test/parity.test.ts` check HTTP response boundaries, incremental SSE/chunked decoding, WebSocket framing and fragmentation, host file/line links, and terminal replay geometry/parser completion. For an isolated UI integration environment:
 
 ```bash
@@ -96,7 +106,7 @@ pnpm --filter @linkshell/host exec tsx ../../apps/web/scripts/fixture.ts
 
 This starts a real local gateway on `5181`, a host with temporary state and an explicit test driver, plus a preview HTTP/WebSocket service on `5182`. Its printed pairing code connects the UI to that host. The driver simulates agent events; terminal/file transport uses the real host. Stop the process after testing. Do not expose its ports publicly.
 
-Browser integration checks cover pairing, commands/Skills, MCP output, permission questions, terminal I/O, files, HTTP/JavaScript/WebSocket preview and screen display. They are not proof of real-agent execution, production account/OAuth configuration, all network paths, camera permission behavior or iOS/Android device compatibility. Builds and local checks are not deployment; publication remains manual.
+Browser integration checks cover pairing, commands/Skills, MCP output, permission questions, terminal I/O, files, HTTP/JavaScript/WebSocket preview and screen display. They are not proof of real-agent execution, production account/OAuth configuration, all network paths, camera permission behavior or iOS/Android device compatibility. Builds and local checks are not deployment; release authorization follows the repository release workflow.
 
 ## Parity review (2026-10-08)
 

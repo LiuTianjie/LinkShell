@@ -1,6 +1,52 @@
 /* global clients */
 const sessions = new Map();
 const owners = new Map();
+const recovering = new Map();
+const viewPath = /^\/preview\/view\/([\w-]+)\/(.*)$/;
+
+async function restoreSession(token) {
+  if (sessions.has(token)) return sessions.get(token);
+  if (recovering.has(token)) return recovering.get(token);
+  const task = (async () => {
+    // A worker's memory can disappear between requests; the live bridge owns the session.
+    const windows = await clients.matchAll({
+      type: "window",
+      includeUncontrolled: true,
+    });
+    const owner = windows.find((client) => {
+      const url = new URL(client.url);
+      return (
+        url.origin === self.location.origin &&
+        url.pathname === "/preview/bridge.html" &&
+        url.hash === `#${token}`
+      );
+    });
+    if (!owner) return;
+    const wire = new MessageChannel();
+    const bootstrap = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        wire.port1.close();
+        resolve(undefined);
+      }, 5000);
+      wire.port1.onmessage = (event) => {
+        clearTimeout(timer);
+        wire.port1.close();
+        resolve(event.data?.bootstrap);
+      };
+      owner.postMessage({ type: "restore", token }, [wire.port2]);
+    });
+    if (typeof bootstrap !== "string") return;
+    const session = { owner: owner.id, bootstrap };
+    sessions.set(token, session);
+    return session;
+  })();
+  recovering.set(token, task);
+  try {
+    return await task;
+  } finally {
+    recovering.delete(token);
+  }
+}
 self.addEventListener("install", () => {
   void self.skipWaiting();
 });
@@ -60,13 +106,20 @@ function navigationBootstrap(prefix) {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
-  const match = /^\/preview\/view\/([\w-]+)\/(.*)$/.exec(url.pathname);
-  const token = match?.[1] ?? owners.get(event.clientId);
-  const session = sessions.get(token);
-  if (!session) return;
-  if (event.resultingClientId) owners.set(event.resultingClientId, token);
+  const match = viewPath.exec(url.pathname);
   event.respondWith(
     (async () => {
+      let token = match?.[1] ?? owners.get(event.clientId);
+      if (!token && event.clientId) {
+        const requester = await clients.get(event.clientId);
+        if (requester)
+          token = viewPath.exec(new URL(requester.url).pathname)?.[1];
+      }
+      if (!token) return fetch(event.request);
+      const session = await restoreSession(token);
+      if (!session)
+        return new Response("预览连接已关闭，请重新打开预览", { status: 503 });
+      if (event.resultingClientId) owners.set(event.resultingClientId, token);
       const client = await clients.get(session.owner);
       if (!client)
         return new Response("工作台已关闭，请重新打开预览", { status: 503 });

@@ -1,3 +1,7 @@
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useDialogs } from "@/components/Dialogs";
 import { Choice } from "../components/Choice";
 import {
@@ -24,6 +28,7 @@ import {
 import {
   Badge,
   ErrorNotice,
+  EmptyState,
   LoadState,
   Modal,
   useActions,
@@ -34,6 +39,7 @@ import {
 } from "./common";
 import { Diff, Timeline } from "./Timeline";
 import { AcpSettings } from "./Acp";
+import { GitBranch, FolderGit2, RefreshCw, Trash2 } from "lucide-react";
 
 export function Commands({
   commands,
@@ -97,11 +103,14 @@ export function Settings({
   const actions = useActions();
   const online = useClient((state) => state.status === "online");
   const job = useJob();
-  const acp = useClient((state) => state.machine?.agents.find((agent) => agent.id === session.agent)?.capabilities.acp);
+  const acp = useClient(
+    (state) =>
+      state.machine?.agents.find((agent) => agent.id === session.agent)
+        ?.capabilities.acp,
+  );
   const [advanced, setAdvanced] = useState(false);
   return (
     <div className="settings-panel">
-      <h3>会话设置</h3>
       <p className="muted">
         {session.agent} · {session.cwd}
       </p>
@@ -111,24 +120,44 @@ export function Settings({
             <FieldLabel htmlFor={`config-${option.id}`}>
               {option.name}
             </FieldLabel>
-            {option.description && <p className="muted">{option.description}</p>}
-            {option.type === "boolean" ? <input id={`config-${option.id}`} type="checkbox" checked={option.current === "on"} disabled={!online || job.busy} onChange={(event) => void job.run(() => actions.setConfig(session.id, option.id, event.target.checked ? "on" : "off"))} /> : <Choice
-              id={`config-${option.id}`}
-              label={option.name}
-              value={option.current}
-              disabled={!online || job.busy}
-              onValueChange={(value) =>
-                void job.run(() =>
-                  actions.setConfig(session.id, option.id, value),
-                )
-              }
-              options={option.values.map((value) => ({
-                value: value.value,
-                label:
-                  (value.group ? `${value.group} · ` : "") + value.name +
-                  (value.description ? ` · ${value.description}` : ""),
-              }))}
-            />}
+            {option.description && (
+              <p className="muted">{option.description}</p>
+            )}
+            {option.type === "boolean" ? (
+              <Checkbox
+                id={`config-${option.id}`}
+                checked={option.current === "on"}
+                disabled={!online || job.busy}
+                onCheckedChange={(checked) =>
+                  void job.run(() =>
+                    actions.setConfig(
+                      session.id,
+                      option.id,
+                      checked === true ? "on" : "off",
+                    ),
+                  )
+                }
+              />
+            ) : (
+              <Choice
+                id={`config-${option.id}`}
+                label={option.name}
+                value={option.current}
+                disabled={!online || job.busy}
+                onValueChange={(value) =>
+                  void job.run(() =>
+                    actions.setConfig(session.id, option.id, value),
+                  )
+                }
+                options={option.values.map((value) => ({
+                  value: value.value,
+                  label:
+                    (value.group ? `${value.group} · ` : "") +
+                    value.name +
+                    (value.description ? ` · ${value.description}` : ""),
+                }))}
+              />
+            )}
           </Field>
         ))}
       </FieldGroup>
@@ -136,9 +165,29 @@ export function Settings({
         <p className="muted">当前 Agent 尚未提供可调整的配置。</p>
       )}
       <ErrorNotice error={job.error} />
-      {view?.usage?.tokens && <p className="muted">输入 {view.usage.tokens.inputTokens.toLocaleString()} · 输出 {view.usage.tokens.outputTokens.toLocaleString()} · 总计 {view.usage.tokens.totalTokens.toLocaleString()} tokens</p>}
-      {view?.usage?.cost && <p className="muted">累计费用 {view.usage.cost.currency} {view.usage.cost.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>}
-      {acp && <button className="button secondary" onClick={() => setAdvanced((value) => !value)}>会话工具与附加目录</button>}
+      {view?.usage?.tokens && (
+        <p className="muted">
+          输入 {view.usage.tokens.inputTokens.toLocaleString()} · 输出{" "}
+          {view.usage.tokens.outputTokens.toLocaleString()} · 总计{" "}
+          {view.usage.tokens.totalTokens.toLocaleString()} tokens
+        </p>
+      )}
+      {view?.usage?.cost && (
+        <p className="muted">
+          累计费用 {view.usage.cost.currency}{" "}
+          {view.usage.cost.amount.toLocaleString(undefined, {
+            maximumFractionDigits: 6,
+          })}
+        </p>
+      )}
+      {acp && (
+        <Button
+          variant="outline"
+          onClick={() => setAdvanced((value) => !value)}
+        >
+          会话工具与附加目录
+        </Button>
+      )}
       {advanced && <AcpSettings agent={session.agent} sessionId={session.id} />}
     </div>
   );
@@ -154,7 +203,6 @@ export function Changes({ view }: { view?: SessionView }) {
     ) ?? [];
   return (
     <section>
-      <h3>文件变更</h3>
       <p className="muted">
         来自已加载的会话记录；加载更早历史可查看更多变更。
       </p>
@@ -228,6 +276,16 @@ export function Goal({
     <section className="settings-panel">
       <h3>持续目标</h3>
       <LoadState {...load} />
+      {load.error && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!online || load.loading}
+          onClick={load.reload}
+        >
+          重新加载目标
+        </Button>
+      )}
       {goal && (
         <div className="notice-card">
           <Badge state={goal.status} />
@@ -240,8 +298,8 @@ export function Goal({
           {goal.lastReason && <p>{goal.lastReason}</p>}
           <div className="permission-buttons">
             {codex && (
-              <button
-                className="button secondary"
+              <Button
+                variant="outline"
                 disabled={
                   disabled ||
                   ["complete", "budgetLimited"].includes(goal.status)
@@ -255,10 +313,10 @@ export function Goal({
                 }
               >
                 {goal.status === "active" ? "暂停" : "继续"}
-              </button>
+              </Button>
             )}
-            <button
-              className="button secondary"
+            <Button
+              variant="outline"
               disabled={disabled}
               onClick={async () => {
                 if (await dialogs.confirm("清除当前持续目标？"))
@@ -266,7 +324,7 @@ export function Goal({
               }}
             >
               清除目标
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -285,7 +343,7 @@ export function Goal({
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="goal-objective">目标</FieldLabel>
-            <textarea
+            <Textarea
               id="goal-objective"
               value={objective}
               onChange={(event) => {
@@ -295,17 +353,19 @@ export function Goal({
               rows={4}
               required
               maxLength={codex ? 4000 : undefined}
+              disabled={disabled}
               placeholder="你希望 Agent 持续完成什么？"
             />
           </Field>
           {codex && (
             <Field>
               <FieldLabel htmlFor="goal-budget">Token 预算（可选）</FieldLabel>
-              <input
+              <Input
                 id="goal-budget"
                 type="number"
                 min="1"
                 step="1"
+                disabled={disabled}
                 value={budget}
                 onChange={(event) => {
                   setEditing(true);
@@ -314,22 +374,20 @@ export function Goal({
               />
             </Field>
           )}
-          <button
-            className="button primary"
-            disabled={disabled || !objective.trim()}
-          >
+          <Button variant="default" disabled={disabled || !objective.trim()}>
             {goal ? "更新目标" : "设置目标"}
-          </button>
+          </Button>
         </FieldGroup>
       </form>
       {!codex && (
-        <button
-          className="text-button"
+        <Button
+          variant="link"
+          size="sm"
           disabled={disabled}
           onClick={() => void job.run(() => change({ action: "get" }))}
         >
           查询当前目标
-        </button>
+        </Button>
       )}
       {readOnly && (
         <p className="muted">会话由电脑端控制，请在电脑端修改目标。</p>
@@ -350,6 +408,7 @@ export function Tasks({
 }) {
   const actions = useActions();
   const { store } = useConnection();
+  const online = useClient((state) => state.status === "online");
   const records = useClient((state) => state.tasks[session.id]);
   const workflows = useClient((state) => state.workflows[session.id]);
   const job = useJob();
@@ -369,6 +428,16 @@ export function Tasks({
     <section>
       <h3>后台任务、子 Agent 与工作流</h3>
       <LoadState {...loaded} />
+      {loaded.error && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!online || loaded.loading}
+          onClick={loaded.reload}
+        >
+          重新加载任务
+        </Button>
+      )}
       <ErrorNotice error={job.error} />
       <div className="activity-list">
         {(records
@@ -376,7 +445,9 @@ export function Tasks({
           : (loaded.value?.tasks ?? [])
         ).map((task) => (
           <article key={task.id}>
-            <button
+            <Button
+              variant="ghost"
+              size="plain"
               onClick={() => {
                 setSelected({ kind: "task", id: task.id });
               }}
@@ -384,10 +455,12 @@ export function Tasks({
               <Badge state={task.state} />
               <strong>{task.title}</strong>
               <small>{task.command}</small>
-            </button>
+            </Button>
             {task.state === "running" && (
-              <button
-                className="text-button"
+              <Button
+                variant="link"
+                size="sm"
+                disabled={!online || job.busy}
                 onClick={() =>
                   void job.run(async () => {
                     await actions.stopTask(session.id, task.id);
@@ -396,13 +469,15 @@ export function Tasks({
                 }
               >
                 停止任务
-              </button>
+              </Button>
             )}
           </article>
         ))}
         {loaded.value?.subagents.map((agent) => (
           <article key={agent.toolCallId}>
-            <button
+            <Button
+              variant="ghost"
+              size="plain"
               onClick={() =>
                 setSelected({ kind: "agent", id: agent.toolCallId })
               }
@@ -421,7 +496,7 @@ export function Tasks({
               <small>
                 {agent.agentType ?? (agent.workflow ? "工作流" : "子 Agent")}
               </small>
-            </button>
+            </Button>
             {(workflows?.[agent.toolCallId]?.workflow ?? agent.workflow) && (
               <Workflow
                 workflow={
@@ -455,7 +530,10 @@ export function Tasks({
         !loaded.value.tasks.length &&
         !loaded.value.subagents.length &&
         !Object.keys(workflows ?? {}).length && (
-          <p className="muted">尚无后台任务或子 Agent。</p>
+          <EmptyState
+            title="没有后台任务"
+            description="Agent 启动后台命令或子 Agent 后，会在这里显示状态与输出。"
+          />
         )}
       {selected?.kind === "task" && (
         <TaskOutput
@@ -485,6 +563,7 @@ function TaskOutput({
 }) {
   const actions = useActions();
   const { store } = useConnection();
+  const online = useClient((state) => state.status === "online");
   const running = useClient(
     (state) => state.tasks[sessionId]?.[taskId]?.state === "running",
   );
@@ -501,24 +580,27 @@ function TaskOutput({
     <div className="task-output">
       <div className="browser-toolbar">
         <strong>任务输出</strong>
-        <button
-          className="text-button"
+        <Button
+          variant="link"
+          size="sm"
+          disabled={!online || output.loading}
           onClick={() => {
             setSnapshot(undefined);
             output.reload();
           }}
         >
           刷新
-        </button>
+        </Button>
       </div>
       <LoadState
         loading={!current && output.loading}
         error={output.error ?? job.error}
       />
       {!!current?.start && (
-        <button
-          className="text-button"
-          disabled={job.busy}
+        <Button
+          variant="link"
+          size="sm"
+          disabled={!online || job.busy}
           onClick={() => {
             setSnapshot(current);
             void job.run(async () => {
@@ -536,9 +618,13 @@ function TaskOutput({
           }}
         >
           加载更早输出
-        </button>
+        </Button>
       )}
-      <pre>{current?.text || (current ? "没有可读的输出" : "加载中…")}</pre>
+      {current && (
+        <pre tabIndex={0} aria-label="任务输出">
+          {current.text || "没有可读的输出"}
+        </pre>
+      )}
     </div>
   );
 }
@@ -570,6 +656,9 @@ function SubagentConversation({
       .openSubagent(session.id, id)
       .then((opened) => {
         if (alive) setMissing(!opened);
+      })
+      .catch(() => {
+        if (alive) setMissing(true);
       });
     return () => {
       alive = false;
@@ -590,12 +679,14 @@ function SubagentConversation({
       ) : missing ? (
         <div role="alert">
           <p>未能读取子 Agent 会话，它可能已关闭或暂时不可用。</p>
-          <button
-            className="text-button"
+          <Button
+            variant="link"
+            size="sm"
+            disabled={!online}
             onClick={() => setAttempt((value) => value + 1)}
           >
             重试
-          </button>
+          </Button>
         </div>
       ) : (
         <p className="muted">{online ? "正在加载…" : "等待电脑重新连接…"}</p>
@@ -643,12 +734,13 @@ function Workflow({
           </small>
           {agent.result && <p>{agent.result}</p>}
           {agent.toolCallId && (
-            <button
-              className="text-button"
+            <Button
+              variant="link"
+              size="sm"
               onClick={() => open(agent.toolCallId!)}
             >
               查看会话
-            </button>
+            </Button>
           )}
         </div>
       ))}
@@ -660,45 +752,98 @@ export function Worktrees() {
   const actions = useActions();
   const { store } = useConnection();
   const job = useJob();
+  const online = useClient((state) => state.status === "online");
+  const [removing, setRemoving] = useState<string>();
   const loaded = useLoad(() => actions.listWorktrees(), [store]);
   return (
-    <section>
-      <h2>工作目录与分支</h2>
+    <section className="worktrees-page">
+      <div className="page-heading">
+        <div>
+          <h1>工作目录与分支</h1>
+          <p className="muted">
+            查看会话的独立工作目录，管理分支与未提交改动。
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!online || loaded.loading || job.busy}
+          onClick={loaded.reload}
+        >
+          <RefreshCw data-icon="inline-start" />
+          刷新
+        </Button>
+      </div>
       <LoadState {...loaded} />
       <ErrorNotice error={job.error} />
-      {loaded.value?.map((entry) => (
-        <article className="notice-card" key={entry.path}>
-          <strong>{entry.branch}</strong>
-          <p>{entry.path}</p>
-          <p className="muted">
-            {entry.sessions.length} 个会话 ·{" "}
-            {entry.dirty ? "有未提交改动" : "工作区干净"} · {entry.ahead}{" "}
-            个新提交
-          </p>
-          <button
-            className="button secondary"
-            disabled={entry.sessions.length > 0 || job.busy}
-            onClick={async () => {
-              const force = entry.dirty || entry.ahead > 0;
-              if (
-                await dialogs.confirm(
-                  force
-                    ? "此 worktree 有未提交改动或新提交。确定永久删除它及分支？"
-                    : "移除此 worktree 及分支？",
-                )
-              )
-                void job.run(async () => {
-                  await actions.removeWorktree(entry.path, force);
-                  loaded.reload();
-                });
-            }}
-          >
-            移除 worktree
-          </button>
-        </article>
-      ))}
+      {!online && (
+        <p className="muted" role="status">
+          电脑离线，暂时无法更新或移除工作目录。
+        </p>
+      )}
+      <div className="worktree-list">
+        {loaded.value?.map((entry) => (
+          <article className="worktree-entry" key={entry.path}>
+            <span className="worktree-icon">
+              <FolderGit2 aria-hidden="true" />
+            </span>
+            <div className="worktree-info">
+              <h2>
+                <GitBranch aria-hidden="true" />
+                {entry.branch || "未命名分支"}
+              </h2>
+              <p className="worktree-path" title={entry.path}>
+                {entry.path}
+              </p>
+              <p className="muted worktree-meta">
+                {entry.sessions.length} 个会话 ·{" "}
+                {entry.dirty ? "有未提交改动" : "工作区干净"} · {entry.ahead}{" "}
+                个新提交
+              </p>
+            </div>
+            <div className="worktree-actions">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!online || entry.sessions.length > 0 || job.busy}
+                title={
+                  entry.sessions.length
+                    ? "工作目录仍被会话使用，请先删除关联会话"
+                    : "移除工作目录与分支"
+                }
+                onClick={async () => {
+                  const force = entry.dirty || entry.ahead > 0;
+                  if (
+                    await dialogs.confirm(
+                      force
+                        ? `「${entry.branch}」有未提交改动或新提交。确定永久删除此工作目录及分支？\n${entry.path}`
+                        : `移除「${entry.branch}」的工作目录及分支？\n${entry.path}`,
+                    )
+                  )
+                    void job.run(async () => {
+                      setRemoving(entry.path);
+                      try {
+                        await actions.removeWorktree(entry.path, force);
+                        loaded.reload();
+                      } finally {
+                        setRemoving(undefined);
+                      }
+                    });
+                }}
+              >
+                <Trash2 data-icon="inline-start" />
+                {removing === entry.path ? "正在移除…" : "移除"}
+              </Button>
+              {entry.sessions.length > 0 && <small>会话使用中</small>}
+            </div>
+          </article>
+        ))}
+      </div>
       {loaded.value?.length === 0 && (
-        <p className="muted">尚无由 LinkShell 创建的 worktree。</p>
+        <EmptyState
+          title="暂无独立工作目录"
+          description="新建或分叉会话时选择 worktree，即可在独立分支中工作。"
+        />
       )}
     </section>
   );

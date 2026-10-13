@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { RpcError, type GitInfo } from "@linkshell/wire";
@@ -87,7 +87,9 @@ export async function createWorktree(cwd: string, home: string, label: string): 
   } catch (error) {
     throw RpcError.app("git_failed", `创建 worktree 失败：${error instanceof Error ? error.message.split("\n").slice(-2).join(" ").trim() : String(error)}`);
   }
-  return { path, cwd: join(path, relative(info.root, cwd)), branch, source: info.root, base };
+  // Git resolves symlinks in its root (e.g. /var -> /private/var on macOS).
+  // Compare physical paths so an alias cannot turn the suffix into ../ segments.
+  return { path, cwd: join(path, relative(realpathSync(info.root), realpathSync(cwd))), branch, source: info.root, base };
 }
 
 /** Whether removing the worktree would lose work: uncommitted changes, and commits since it was made. */

@@ -33,8 +33,10 @@ type Request = {
   choices?: { value: string; label: string; destructive?: boolean }[];
   text: string;
   initial?: string;
+  submitLabel?: string;
 };
 type Ask = (request: Request) => Promise<string | null>;
+type ActiveRequest = Request & { opener: HTMLElement | null };
 const DialogContext = createContext<Ask | null>(null);
 export function useDialogs() {
   const ask = useContext(DialogContext);
@@ -44,19 +46,25 @@ export function useDialogs() {
       ask({ kind: "choice", text, choices }),
     confirm: (text: string) =>
       ask({ kind: "confirm", text }).then((value) => value !== null),
-    prompt: (text: string, initial = "") =>
-      ask({ kind: "prompt", text, initial }),
+    prompt: (text: string, initial = "", submitLabel = "保存") =>
+      ask({ kind: "prompt", text, initial, submitLabel }),
     alert: (text: string) => ask({ kind: "alert", text }),
   };
 }
 export function Dialogs({ children }: { children: ReactNode }) {
-  const [request, setRequest] = useState<Request | null>(null);
+  const [request, setRequest] = useState<ActiveRequest | null>(null);
   const [value, setValue] = useState("");
   const pending = useRef<((value: string | null) => void) | null>(null);
   const ask = useCallback<Ask>((request) => {
     if (pending.current) return Promise.resolve(null);
     setValue(request.initial ?? "");
-    setRequest(request);
+    setRequest({
+      ...request,
+      opener:
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null,
+    });
     return new Promise((resolve) => {
       pending.current = resolve;
     });
@@ -66,6 +74,12 @@ export function Dialogs({ children }: { children: ReactNode }) {
     pending.current = null;
     setRequest(null);
     resolve?.(value);
+  }
+  function restoreFocus(event: Event) {
+    event.preventDefault();
+    // A follow-up question may already be open by the time this dialog unmounts.
+    if (!pending.current && request?.opener?.isConnected)
+      request.opener.focus({ preventScroll: true });
   }
   useEffect(
     () => () => {
@@ -84,7 +98,7 @@ export function Dialogs({ children }: { children: ReactNode }) {
             if (!open) finish(null);
           }}
         >
-          <AlertDialogContent>
+          <AlertDialogContent onCloseAutoFocus={restoreFocus}>
             <AlertDialogHeader>
               <AlertDialogTitle>确认操作</AlertDialogTitle>
               <AlertDialogDescription>{request.text}</AlertDialogDescription>
@@ -117,7 +131,7 @@ export function Dialogs({ children }: { children: ReactNode }) {
               if (!open) finish(null);
             }}
           >
-            <DialogContent>
+            <DialogContent onCloseAutoFocus={restoreFocus}>
               <DialogHeader>
                 <DialogTitle>
                   {request.kind === "prompt" ? request.text : "上下文用量"}
@@ -126,7 +140,7 @@ export function Dialogs({ children }: { children: ReactNode }) {
                   className={request.kind === "prompt" ? "sr-only" : undefined}
                 >
                   {request.kind === "prompt"
-                    ? "填写后保存，取消不会修改。"
+                    ? "填写后确认，取消不会修改。"
                     : request.text}
                 </DialogDescription>
               </DialogHeader>
@@ -163,7 +177,9 @@ export function Dialogs({ children }: { children: ReactNode }) {
                       type="submit"
                       disabled={request.kind === "prompt" && !value.trim()}
                     >
-                      {request.kind === "prompt" ? "保存" : "知道了"}
+                      {request.kind === "prompt"
+                        ? request.submitLabel
+                        : "知道了"}
                     </Button>
                   </div>
                 </FieldGroup>

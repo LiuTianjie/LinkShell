@@ -1,15 +1,72 @@
 @layer base {
-  .acp-settings { display: grid; gap: 16px; margin: 20px 0; max-width: 760px; }
-  .acp-settings h3, .acp-settings h4 { margin: 0; }
-  .acp-settings form, .acp-section { display: grid; gap: 12px; padding: 16px; background: var(--card); border-radius: 18px; }
-  .acp-settings label { display: grid; gap: 7px; font-size: 13px; color: var(--secondaryLabel); }
-  .acp-settings input:not([type="checkbox"]), .acp-settings select, .acp-settings textarea { width: 100%; border: 1px solid var(--separator); border-radius: 10px; padding: 10px; color: var(--label); background: var(--background); }
-  .acp-settings .choice-option { display: flex; align-items: center; gap: 8px; }
-  .code-input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.6; resize: vertical; }
-  .protocol-asset { display: grid; gap: 8px; max-width: 100%; }
-  .protocol-asset audio { max-width: 100%; }
-  .acp-editor { display: grid; gap: 12px; padding: 16px; }
-  .acp-editor textarea { width: 100%; min-height: 320px; max-height: 65vh; padding: 14px; border: 1px solid var(--separator); border-radius: 12px; color: var(--label); background: var(--card); }
+  .acp-settings {
+    display: grid;
+    gap: 16px;
+    margin: 20px 0;
+    max-width: 760px;
+  }
+  .acp-settings h3,
+  .acp-settings h4 {
+    margin: 0;
+  }
+  .acp-settings form,
+  .acp-section {
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    background: var(--card);
+    border-radius: 8px;
+  }
+  .acp-settings label {
+    display: grid;
+    gap: 7px;
+    font-size: 13px;
+    color: var(--secondaryLabel);
+  }
+  .acp-settings input:not([type="checkbox"]),
+  .acp-settings select,
+  .acp-settings textarea {
+    width: 100%;
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    padding: 10px;
+    color: var(--label);
+    background: var(--background);
+  }
+  .acp-settings .choice-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .code-input {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    resize: vertical;
+  }
+  .protocol-asset {
+    display: grid;
+    gap: 8px;
+    max-width: 100%;
+  }
+  .protocol-asset audio {
+    max-width: 100%;
+  }
+  .acp-editor {
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+  }
+  .acp-editor textarea {
+    width: 100%;
+    min-height: 320px;
+    max-height: 65vh;
+    padding: 14px;
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    color: var(--label);
+    background: var(--card);
+  }
   .live-overview h2 {
     font-size: 21px;
     margin: 18px 0 12px;
@@ -33,7 +90,7 @@
     margin-top: 8px;
     padding: 10px;
     border: 0;
-    border-radius: 12px;
+    border-radius: 8px;
     background: var(--card);
     color: var(--label);
   }
@@ -58,7 +115,7 @@
   .welcome-live pre {
     background: var(--card);
     padding: 20px;
-    border-radius: 18px;
+    border-radius: 8px;
     font-size: 14px;
     line-height: 1.8;
     text-align: left;
@@ -90,7 +147,7 @@
     margin-top: 18px;
   }
   .new-form p a {
-    color: var(--accent);
+    color: var(--link);
   }
   .development-connect {
     margin-top: 20px;
@@ -140,7 +197,7 @@
     flex-shrink: 0;
     width: 16px;
     height: 16px;
-    accent-color: var(--accent);
+    accent-color: var(--link);
     margin-top: 4px;
   }
   .choice-option small {
@@ -186,7 +243,7 @@
   }
   .branch-chip {
     background: var(--accentSoft);
-    color: var(--accent);
+    color: var(--link);
     padding: 3px 6px;
     border-radius: 8px;
   }
@@ -235,7 +292,7 @@
     margin: 12px 0;
   }
   .markdown a {
-    color: var(--accent);
+    color: var(--link);
     text-decoration: underline;
     text-underline-offset: 3px;
   }
@@ -285,7 +342,7 @@
   .resource-chip {
     display: inline-flex;
     font-size: 12px;
-    color: var(--accent);
+    color: var(--link);
     background: var(--accentSoft);
     padding: 6px 9px;
     margin: 5px;
@@ -299,7 +356,7 @@
     margin-top: 8px;
   }
   .message-fork:hover {
-    color: var(--accent);
+    color: var(--link);
   }
   .thought-block {
     color: var(--secondaryLabel);
@@ -323,7 +380,7 @@
   }
   .notice-card {
     background: var(--card);
-    border-radius: 18px;
+    border-radius: 8px;
     padding: 18px;
     margin: 15px 0;
     overflow-wrap: anywhere;
@@ -348,7 +405,7 @@
     background: var(--code);
     color: var(--codeText);
     padding: 13px;
-    border-radius: 12px;
+    border-radius: 8px;
   }
   .notice-card.error {
     background: var(--dangerSoft);
@@ -374,7 +431,7 @@
     margin-top: 7px;
   }
   .plan-card li > span {
-    color: var(--accent);
+    color: var(--link);
   }
   .tool-record {
     background: var(--inset);
@@ -408,7 +465,7 @@
     color: var(--secondaryLabel);
   }
   .tool-state {
-    color: var(--accent);
+    color: var(--link);
     flex-shrink: 0;
   }
   .completed > .tool-state,
@@ -428,7 +485,7 @@
   }
   .diff-block {
     background: var(--inset);
-    border-radius: 12px;
+    border-radius: 8px;
     margin: 15px 0;
     overflow: hidden;
   }
@@ -589,7 +646,7 @@
     font-size: 10px;
   }
   .remote-file-list button svg {
-    color: var(--accent);
+    color: var(--link);
   }
   .remote-file-list button:hover,
   .remote-file-list button.selected {
@@ -646,7 +703,7 @@
     display: block;
     font-size: 11px;
     margin-bottom: 8px;
-    color: var(--accent);
+    color: var(--link);
   }
   .message-queue > div {
     display: flex;
@@ -662,7 +719,7 @@
   }
   .message-queue button {
     font-size: 10px;
-    color: var(--accent);
+    color: var(--link);
     flex-shrink: 0;
   }
 
@@ -703,36 +760,6 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  .terminal-tabs {
-    display: flex;
-    gap: 9px;
-    flex-wrap: wrap;
-    margin: 16px 0;
-  }
-  .terminal-tabs > div,
-  .terminal-tabs > button {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--card);
-    padding: 7px 12px;
-    border-radius: 12px;
-    font-size: 13px;
-  }
-  .terminal-tabs .selected {
-    color: var(--accent);
-    background: var(--accentSoft);
-  }
-  .terminal-tabs > div > button:first-child {
-    display: block;
-    text-align: left;
-  }
-  .terminal-tabs small {
-    display: block;
-    font-size: 10px;
-    color: var(--secondaryLabel);
-    margin-top: 5px;
-  }
   .terminal-live {
     background: var(--code);
     color: var(--codeText);
@@ -752,7 +779,7 @@
   }
   .terminal-live > .form-error {
     font-size: 12px;
-    color: #ff9a9a;
+    color: var(--danger);
   }
   .inline-terminal {
     margin: 0 20px;
@@ -790,7 +817,7 @@
   }
   .agent-list {
     background: var(--card);
-    border-radius: 18px;
+    border-radius: 8px;
     padding: 8px;
   }
   .agent-list article {
@@ -990,98 +1017,269 @@
 }
 
 @layer components {
-  .screens-overview {
-    padding-inline: clamp(18px, 3vw, 48px);
+  .console-main > .live-overview:has(.terminals-page) {
+    display: flex;
+    flex-direction: column;
   }
-  .screens-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 350px), 1fr));
-    gap: 22px;
-    align-items: start;
+  .terminals-page {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 440px;
+    gap: 12px;
   }
-  .screen-card {
-    min-width: 0;
-    overflow: hidden;
+  .console-main .terminals-page .page-heading {
+    margin-bottom: 10px;
+  }
+  .terminal-workspace {
+    flex: 1;
+    min-height: 0;
+    gap: 0;
     border: 1px solid var(--separator);
-    border-radius: var(--radius-card);
-    background: var(--card);
+    border-radius: 10px;
+    background: var(--plain);
+    overflow: hidden;
   }
-  .screen-card-heading {
+  .terminal-tab-bar {
     display: flex;
     align-items: center;
-    gap: 11px;
-    padding: 18px 18px 14px;
+    gap: 8px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--separator);
+    background: var(--background);
   }
-  .screen-card-icon {
-    display: grid;
-    place-items: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 11px;
-    background: var(--accentSoft);
-    color: var(--accent);
-    flex-shrink: 0;
-  }
-  .screen-card-heading h2 {
+  .terminal-tab-list[data-slot="tabs-list"] {
     flex: 1;
+    justify-content: flex-start;
+    height: 46px;
     min-width: 0;
-    margin: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-radius: 0;
+    padding: 0;
+    scrollbar-width: thin;
+  }
+  .terminal-tab-list [data-slot="tabs-trigger"] {
+    flex: 0 0 auto;
+    min-width: 108px;
+    max-width: 220px;
+    height: 46px;
+    gap: 8px;
+    padding: 0 14px;
+  }
+  .terminal-tab-list [data-slot="tabs-trigger"] > span:first-of-type {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .terminal-tab-list [data-slot="tabs-trigger"]::after {
+    bottom: 0;
+  }
+  .terminal-tab-number {
+    font-size: 11px;
+    color: var(--tertiaryLabel);
+  }
+  .terminal-directory {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 42px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--separator);
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .terminal-directory > span {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 15px;
+    min-width: 0;
   }
-  .screen-card-presence {
+  .terminal-directory > svg {
+    flex-shrink: 0;
+  }
+  .terminal-directory > div {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+  }
+  .terminal-session-panel {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+  }
+  .console-main .terminal-session-panel > .terminal-live {
+    flex: 1;
+    height: auto;
+    min-height: 300px;
+    border: 0;
+    border-radius: 0;
+    padding: 14px 16px 16px;
+  }
+  .terminal-controls {
+    flex-wrap: wrap;
+    padding-bottom: 10px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--separator);
+  }
+  .terminal-connection {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
+    margin-right: auto;
     color: var(--secondaryLabel);
     font-size: 12px;
     white-space: nowrap;
   }
-  .screen-card-preview,
-  .screen-card-placeholder {
+  .terminal-directory-input {
+    display: flex;
+    gap: 8px;
+  }
+  .terminal-directory-input input {
+    flex: 1;
+    min-width: 0;
+  }
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  @media (max-width: 767px) {
+    .terminal-tab-bar {
+      padding-inline: 6px;
+    }
+    .terminal-directory {
+      padding-inline: 12px;
+    }
+    .console-main .terminal-session-panel > .terminal-live {
+      padding: 10px;
+    }
+    .terminal-connection {
+      flex-basis: 100%;
+    }
+  }
+}
+
+@layer components {
+  .live-session .conversation {
+    scroll-behavior: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .live-session .composer-wrap {
+    position: relative;
+  }
+  .conversation-jump {
+    position: absolute;
+    left: 50%;
+    top: -48px;
+    transform: translateX(-50%);
+    z-index: 1;
+  }
+  .conversation-jump button {
+    border-radius: 999px;
+    box-shadow: 0 2px 8px var(--fillStrong);
+    white-space: nowrap;
+  }
+  .conversation-loading {
     display: flex;
     flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+    padding-block: 12px;
+  }
+  .console-main .live-session .session-title h1 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.35px;
+  }
+  .live-session .session-subtitle {
+    margin-top: 7px;
+  }
+  .live-session .markdown {
+    font-size: 14px;
+    line-height: 1.85;
+    overflow-wrap: anywhere;
+  }
+  .live-session .message-author {
+    margin-bottom: 10px;
+  }
+  .live-session .message-label {
+    font-size: 12px;
+  }
+  .live-session .user-message {
+    line-height: 1.75;
+  }
+  .code-surface {
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 16px 0;
+    background: var(--code);
+  }
+  .code-toolbar {
+    display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 10px;
-    background: var(--fill);
+    justify-content: space-between;
+    min-height: 38px;
+    padding: 0 10px 0 16px;
+    border-bottom: 1px solid var(--separator);
     color: var(--secondaryLabel);
-    border-radius: 14px;
+    font-size: 11px;
   }
-  .screen-card-preview {
-    aspect-ratio: 16 / 9;
-    margin-bottom: 18px;
-    color: var(--tertiaryLabel);
+  .markdown .code-surface pre {
+    border: 0;
+    border-radius: 0;
+    margin: 0;
+    padding: 16px;
+    max-height: 520px;
+    tab-size: 2;
   }
-  .screen-card-placeholder {
-    min-height: 280px;
-    margin: 0 18px 18px;
-    padding: 22px;
-    text-align: center;
+  .markdown .code-surface pre:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
-  .screen-card-placeholder strong { color: var(--label); }
-  .screen-card-placeholder p { margin: 0; font-size: 12px; }
-  .screen-page.screen-card-viewer {
-    height: auto;
-    min-height: 0;
-    padding: 0 18px 18px;
+  .live-session .conversation > .async-questions:not(:empty) {
+    border: 1px solid var(--separator);
+    background: var(--card);
+    border-radius: 10px;
+    padding: 18px;
+    gap: 20px;
   }
-  .screen-card-viewer .browser-toolbar:empty { display: none; }
-  .screen-card-viewer .browser-toolbar {
+  .live-session .conversation > .async-questions:empty {
+    display: none;
+  }
+  .live-session .live-side-panel {
+    width: 100%;
+    min-width: 0;
+  }
+  .live-session .live-side-panel > .browser-toolbar {
+    padding: 14px 18px;
+    min-height: 54px;
+    border-bottom: 1px solid var(--separator);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .live-session * {
+      scroll-behavior: auto;
+    }
+  }
+}
+
+@layer components {
+  .port-shortcuts {
+    display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin: 0 0 12px;
+    margin: 8px 0 20px;
   }
-  .screen-card-viewer .notice-card { margin: 0; padding: 0; background: none; }
-  .screen-card-viewer .notice-card > p { font-size: 12px; }
-  .screen-card-viewer .permission-buttons { flex-wrap: wrap; }
-  .screen-card-viewer iframe {
-    min-height: 320px;
-    aspect-ratio: 4 / 3;
-    flex: none;
-    border-radius: 14px;
+  .ports-page .page-heading {
+    flex-wrap: wrap;
+    gap: 20px;
   }
-  .screen-card-viewer iframe:fullscreen { width: 100%; height: 100%; border-radius: 0; }
+  .ports-page .page-heading .inline-form {
+    flex: 0 1 240px;
+  }
+  .ports-page .page-heading .inline-form input {
+    min-width: 0;
+  }
 }

@@ -84,7 +84,7 @@ Mac 视频直连成功后，画面不经过 Node Host 或 Gateway。直连使用
 
 H.264 能力同时提供 Constrained High（`640c`）和 High（`6400`），均使用现有 High 编码实现。ObjC 工厂原本只列出前者，而 Chrome 的接收能力列出后者；libwebrtc 将两者视为不同 profile，只有前者时 Chrome 会退到 Baseline。新增 High 能力保留原生 profile 的优先顺序以及 Baseline 兼容选项，不改写 offer/answer，不调整采集、码率或帧率策略。网页连接信息显示实际协商的 codec/profile 和接收码率；诊断模式另外记录浏览器愿意提供的解码器信息，缺失时不推断是否硬解。
 
-`MaxFrameDelayCount=0` 只是尝试设置；历史硬件检查不支持该属性的设置/读取，不能据此声称编码零排队。iOS 原生接收端在硬件支持时请求 HEVC（`?codec=hevc`）：Mac 在低延迟硬件编码器探测通过后，用同一低延迟 VideoToolbox 模式编 HEVC，不支持时保留 H.264；libwebrtc M154 负责 H.265 RTP 打包/拆包，两端的 VideoToolbox 解码器是 `apps/client/modules/link-screen/ios/HEVCDecoder.swift`（Mac 回环接收端链接同一文件）。旧主机或旧 Mac App 不认这个参数，照旧发 H.264；浏览器和 Android 不请求 HEVC。AV1、HDR、4:4:4 不是现行主链路能力。
+`MaxFrameDelayCount=0` 只是尝试设置；历史硬件检查不支持该属性的设置/读取，不能据此声称编码零排队。iOS 原生接收端在硬件支持时请求 HEVC（`?codec=hevc`）：Mac 在低延迟硬件编码器探测通过后，用同一低延迟 VideoToolbox 模式编 HEVC，不支持时保留 H.264；libwebrtc M154 负责 H.265 RTP 打包/拆包，两端的 VideoToolbox 解码器是 `apps/client/modules/link-screen/ios/HEVCDecoder.swift`（Mac 回环接收端链接同一文件）。旧主机或旧 Mac App 不认这个参数，照旧发 H.264；网页工作台仅在浏览器的 WebRTC 接收能力明确包含 H.265 时请求 HEVC，也可手动选择 H.264；Android 不请求 HEVC。AV1、HDR、4:4:4 不是现行主链路能力。
 
 ### 3.3 网络、恢复与播放等待
 
@@ -343,3 +343,11 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
 - [M154 pacer 配置](https://webrtc.googlesource.com/src/+/refs/branch-heads/8037/modules/pacing/pacing_controller.h)、[拥塞窗口配置](https://webrtc.googlesource.com/src/+/refs/branch-heads/8037/rtc_base/experiments/rate_control_settings.cc)：上述实验匹配的默认值。
 - [W3C totalPacketSendDelay](https://www.w3.org/TR/webrtc-stats/#dom-rtcoutboundrtpstreamstats-totalpacketsenddelay)：RTP 封包到交给系统 socket 的累计等待，除以同期发送包数得到区间均值，不是网络 RTT。
 - [DataChannel RFC 8831](https://www.rfc-editor.org/rfc/rfc8831.html)：SCTP 传输与拥塞控制语义。
+
+### 网页观看与全屏恢复补充
+
+- 网页工作台的新偏好默认为 2560 宽、最高 120 fps；已有分辨率偏好保留，可选 1280 / 1920 / 2560 / 原生及 30 / 60 / 120 帧上限。实际帧率仍受源显示器、编码器和网络约束。
+- 自动编码以 `RTCRtpReceiver.getCapabilities("video")` 的 H.265 RTP 能力为依据请求 HEVC，保留 H.264 协商和手动兼容档。不能用文件播放支持推断 WebRTC 能力。
+- 观看栏每两秒接收一次实际视频统计，隐藏页面暂停采样；帧不进入 React。专注观看只调整布局，不重建 iframe 或视频连接。浏览器全屏保留外层工具栏，选择菜单挂到全屏容器。
+- 手机进入全屏时保存当时的界面方向，退出或离开观看页时恢复。iOS 使用一次性的场景方向请求；Android 的临时请求在下一次物理转动或进入后台时释放，保留原方向策略。此修复需要新的 App 原生二进制。
+- 本轮完成工作区构建、类型检查、Web lint/测试、屏幕相关 Host 测试及 iOS/Android 原生编译。浏览器本地联调已收到 2560×1440 H.265，并验证专注观看前后播放时间连续；没有将其作为长时性能或公网效果证明。按用户要求不进行真机验收。

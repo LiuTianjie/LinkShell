@@ -1,4 +1,29 @@
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
+import type { ReactNode } from "react";
+import { AsyncQuestions } from "./AsyncQuestions";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupTextarea,
+} from "@/components/ui/input-group";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle,
+  EmptyDescription,
+  EmptyMedia,
+} from "@/components/ui/empty";
+import {
   Popover,
   PopoverAnchor,
   PopoverContent,
@@ -19,7 +44,22 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  ArrowDown,
+  LoaderCircle,
+  MessageSquare,
+  Paperclip,
+  Plus,
+  X,
+} from "lucide-react";
 import { shownQueue } from "@linkshell/client-core";
 import type { ContentBlock, SessionSummary } from "@linkshell/wire";
 import {
@@ -35,12 +75,14 @@ import {
   AgentMark,
   Badge,
   ErrorNotice,
+  LoadState,
   Modal,
   titleOf,
   useActions,
   useClient,
   useConnection,
   useJob,
+  useLoad,
 } from "./common";
 import { Permission } from "./Permission";
 import { AgentInteractions } from "./Acp";
@@ -50,6 +92,7 @@ import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
 import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
 import { ComputerPreview } from "./Video";
+import "./chat-polish.css";
 
 type Panel =
   | "commands"
@@ -74,6 +117,7 @@ export function Session({
   const { store, link } = connection;
   const actions = useActions();
   const job = useJob();
+  const sendJob = useJob();
   const view = useClient((state) => state.views[session.id]);
   const ready = useClient((state) => state.ready[session.id]);
   const online = useClient((state) => state.status === "online");
@@ -91,19 +135,54 @@ export function Session({
   const draftKey = `draft.${connection.computer.key}.${session.id}`;
   const [draft, setDraft] = useState(() => readLocal(draftKey, ""));
   const [files, setFiles] = useState<File[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string>();
+  const [dragging, setDragging] = useState(false);
+  const [sendingFile, setSendingFile] = useState<string>();
   const [blocks, setBlocks] = useState<ContentBlock[]>([]);
-  const [panel, setPanel] = useState<Panel>(null);
+  const [panel, commitPanel] = useState<Panel>(null);
   const [file, setFile] = useState<string>();
   const [fileLine, setFileLine] = useState<number>();
+  const fileDirty = useRef(false);
+  const onFileDirtyChange = useCallback((dirty: boolean) => {
+    fileDirty.current = dirty;
+  }, []);
+  const setPanel = useCallback(
+    async (next: Panel) => {
+      if (
+        panel === "files" &&
+        next !== "files" &&
+        fileDirty.current &&
+        !(await dialogs.confirm("文件有未保存的修改，放弃修改并离开文件面板？"))
+      )
+        return false;
+      if (panel === "files" && next !== "files") fileDirty.current = false;
+      commitPanel(next);
+      return true;
+    },
+    [dialogs, panel],
+  );
   const [terminal, setTerminal] = useState<string>();
   const [terminals, setTerminals] = useState(false);
   const [choice, setChoice] = useState(0);
   const [forkAt, setForkAt] = useState<string | null>();
   const [newWorktree, setNewWorktree] = useState(false);
+  const forkGit = useLoad(
+    () =>
+      forkAt !== undefined
+        ? actions.gitInfo(session.cwd)
+        : Promise.resolve(undefined),
+    [store, session.cwd, forkAt],
+  );
   const composer = useRef<HTMLTextAreaElement>(null);
   const upload = useRef<HTMLInputElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
+  const historyAnchor = useRef<{
+    height: number;
+    top: number;
+    firstId?: string;
+  } | null>(null);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const [dismissedSuggestions, setDismissedSuggestions] = useState<string>();
@@ -113,26 +192,42 @@ export function Session({
     query === undefined ? [] : matchCommands(commands, query).slice(0, 10);
   const queue = shownQueue(session.queue, queueing);
   const handleFile = (path: string, line?: number) => {
+    void changeFile(path, line);
+  };
+  async function changeFile(path?: string, line?: number) {
+    if (
+      file !== path &&
+      fileDirty.current &&
+      !(await dialogs.confirm("文件有未保存的修改，放弃修改并打开其他文件？"))
+    )
+      return;
+    if (file !== path) fileDirty.current = false;
     setFile(path);
     setFileLine(line);
-    setPanel("files");
-  };
+    commitPanel("files");
+  }
   useEffect(
     () =>
       link.on("session.preview.show", (event) => {
-        if (event.sessionId === session.id) setPanel("preview");
+        if (event.sessionId === session.id) void setPanel("preview");
       }),
-    [link, session.id],
+    [link, session.id, setPanel],
   );
   useEffect(() => {
     store.getState().openSession(session.id);
     return () => store.getState().closeSession(session.id);
   }, [store, session.id]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = scroll.current;
-    if (following.current && element)
-      element.scrollTo({ top: element.scrollHeight });
-  }, [view?.items, view?.permissions]);
+    if (!element) return;
+    const anchor = historyAnchor.current;
+    if (anchor && view?.items[0]?.id !== anchor.firstId) {
+      element.scrollTop = anchor.top + element.scrollHeight - anchor.height;
+      historyAnchor.current = null;
+    } else if (following.current) {
+      element.scrollTo({ top: element.scrollHeight, behavior: "instant" });
+    }
+  }, [view?.items, view?.permissions, session.asyncQuestions]);
   useEffect(() => {
     try {
       saveLocal(draftKey, draft);
@@ -143,6 +238,42 @@ export function Session({
   useEffect(() => {
     setChoice(0);
   }, [query]);
+  useLayoutEffect(() => {
+    const element = composer.current;
+    if (!element) return;
+    const resize = () => {
+      element.style.height = "auto";
+      element.style.height = `${element.scrollHeight}px`;
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [draft, panel]);
+  function addFiles(incoming: File[]) {
+    const rejected = incoming.filter(
+      (file) => file.size > 30_000_000 || file.name.length > 255,
+    );
+    setAttachmentError(
+      rejected.length
+        ? `未添加 ${rejected.map((file) => `「${file.name}」`).join("、")}。单个附件不能超过 30 MB，文件名不能超过 255 个字符。`
+        : undefined,
+    );
+    setFiles((previous) => {
+      const accepted = incoming.filter((file) => !rejected.includes(file));
+      return [
+        ...previous,
+        ...accepted.filter(
+          (file, index) =>
+            ![...previous, ...accepted.slice(0, index)].some(
+              (entry) =>
+                entry.name === file.name &&
+                entry.size === file.size &&
+                entry.lastModified === file.lastModified,
+            ),
+        ),
+      ];
+    });
+  }
   async function execute(text: string): Promise<boolean> {
     const parsed = parseCommand(text);
     const command =
@@ -151,13 +282,13 @@ export function Session({
     const args = parsed.args;
     switch (command.action) {
       case "commands":
-        setPanel("commands");
+        await setPanel("commands");
         break;
       case "tasks":
-        setPanel("tasks");
+        await setPanel("tasks");
         break;
       case "changes":
-        setPanel("changes");
+        await setPanel("changes");
         break;
       case "context":
         await dialogs.alert(
@@ -168,7 +299,7 @@ export function Session({
         break;
       case "goal":
         if (args && args !== "edit") return false;
-        setPanel("goal");
+        await setPanel("goal");
         break;
       case "settings": {
         const option = view?.config.find(
@@ -180,7 +311,7 @@ export function Session({
             option.id,
             option.id === "plan" ? "on" : "plan",
           );
-        else if (!args || !option) setPanel("settings");
+        else if (!args || !option) await setPanel("settings");
         else {
           const value = option.values.find(
             (value) =>
@@ -228,17 +359,18 @@ export function Session({
     }
     return true;
   }
-  function choose(command: Command) {
-    setPanel(null);
+  async function choose(command: Command) {
+    if (!(await setPanel(null))) return;
     if (command.action) {
-      void job.run(() => execute(`/${command.name}`));
-      setDraft("");
+      const executed = await job.run(() => execute(`/${command.name}`));
+      if (executed) setDraft("");
     } else {
       setDraft(`/${command.name} `);
       composer.current?.focus();
     }
   }
   async function send(now = false) {
+    setSendingFile(undefined);
     const text = normalizeCommandText(draftRef.current).trim();
     if (!online || (!text && !files.length && !blocks.length)) return;
     if (!files.length && !blocks.length && (await execute(text))) {
@@ -248,14 +380,33 @@ export function Session({
     const content: ContentBlock[] = [...blocks];
     if (text) content.unshift({ type: "text", text });
     for (const file of files) {
+      setSendingFile(file.name);
       const data = await fileBase64(file);
       if (
         /^image\/(png|jpe?g|webp|gif)$/.test(file.type) &&
         agent?.capabilities.images
       )
         content.push({ type: "image", mimeType: file.type, data });
-      else if (/^audio\//.test(file.type) && agent?.capabilities.audio && file.size <= 5 * 1024 * 1024) content.push({ type: "audio", mimeType: file.type, data });
-      else if (agent?.capabilities.embeddedContext && file.size <= 5 * 1024 * 1024) content.push({ type: "resource", resource: { uri: `attachment:${encodeURIComponent(file.name)}`, mimeType: file.type || "application/octet-stream", ...(/^text\//.test(file.type) || file.type === "application/json" ? { text: await file.text() } : { blob: data }) } });
+      else if (
+        /^audio\//.test(file.type) &&
+        agent?.capabilities.audio &&
+        file.size <= 5 * 1024 * 1024
+      )
+        content.push({ type: "audio", mimeType: file.type, data });
+      else if (
+        agent?.capabilities.embeddedContext &&
+        file.size <= 5 * 1024 * 1024
+      )
+        content.push({
+          type: "resource",
+          resource: {
+            uri: `attachment:${encodeURIComponent(file.name)}`,
+            mimeType: file.type || "application/octet-stream",
+            ...(/^text\//.test(file.type) || file.type === "application/json"
+              ? { text: await file.text() }
+              : { blob: data }),
+          },
+        });
       else {
         const result = await link.call(
           "fs.upload",
@@ -269,6 +420,7 @@ export function Session({
         });
       }
     }
+    setSendingFile(undefined);
     const parsed = parseCommand(text);
     const immediate =
       now ||
@@ -281,10 +433,17 @@ export function Session({
     if (draftRef.current.trim() === draft.trim()) setDraft("");
     setFiles((current) => current.filter((file) => !files.includes(file)));
     setBlocks((current) => current.filter((block) => !blocks.includes(block)));
+    setAttachmentError(undefined);
+    composer.current?.focus();
     following.current = true;
+    setAwayFromBottom(false);
+    scroll.current?.scrollTo({
+      top: scroll.current.scrollHeight,
+      behavior: "instant",
+    });
   }
-  function nativePanel(name: "mcp" | "apps") {
-    setPanel(name);
+  async function nativePanel(name: "mcp" | "apps") {
+    if (!(await setPanel(name))) return;
     void job.run(async () => {
       const result = await actions.send(
         session.id,
@@ -300,7 +459,7 @@ export function Session({
         <div className="session-heading">
           <div>
             <div className="session-title">
-              <h1>{titleOf(session)}</h1>
+              <h1 title={titleOf(session)}>{titleOf(session)}</h1>
               <Badge state={session.state} />
             </div>
             <div className="session-subtitle">
@@ -314,37 +473,34 @@ export function Session({
             </div>
           </div>
           <div className="session-actions">
-            <button
-              className="icon-button"
+            <Button
+              variant="ghost"
+              size="icon"
               aria-label="会话命令"
               onClick={() => setPanel("commands")}
             >
               <Icon name="terminal" />
-            </button>
-            <button
-              className="icon-button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               aria-label="会话设置"
               onClick={() => setPanel("settings")}
             >
               <Icon name="settings" />
-            </button>
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="icon-button" aria-label="会话操作">
+                <Button variant="ghost" size="icon" aria-label="会话操作">
                   •••
-                </button>
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onSelect={() => setPanel("changes")}>
                     文件变更
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      setFile(undefined);
-                      setPanel("files");
-                    }}
-                  >
+                  <DropdownMenuItem onSelect={() => void changeFile()}>
                     项目文件
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => setPanel("tasks")}>
@@ -455,8 +611,9 @@ export function Session({
                   : "空闲会话"}
               控制
             </span>
-            <button
-              className="text-button"
+            <Button
+              variant="link"
+              size="sm"
               disabled={!online || job.busy}
               onClick={() =>
                 void job.run(() =>
@@ -467,7 +624,7 @@ export function Session({
               }
             >
               {session.driver === "remote" ? "交回电脑" : "接管会话"}
-            </button>
+            </Button>
           </div>
         )}
         <div
@@ -477,30 +634,88 @@ export function Session({
             <div
               className="conversation"
               ref={scroll}
+              onLoadCapture={() => {
+                if (following.current && scroll.current)
+                  scroll.current.scrollTo({
+                    top: scroll.current.scrollHeight,
+                    behavior: "instant",
+                  });
+              }}
               onScroll={() => {
                 const node = scroll.current;
                 following.current =
                   !!node &&
                   node.scrollHeight - node.scrollTop - node.clientHeight < 100;
+                setAwayFromBottom(!following.current);
               }}
             >
-              {!ready && <p className="muted">正在加载会话…</p>}
+              {!ready && (
+                <div className="conversation-loading">
+                  <LoadState loading />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!online}
+                    onClick={() => {
+                      actions.closeSession(session.id);
+                      actions.openSession(session.id);
+                    }}
+                  >
+                    重新加载会话
+                  </Button>
+                </div>
+              )}
+              {ready &&
+                view &&
+                !view.items.length &&
+                !view.permissions.length &&
+                !session.asyncQuestions?.length && (
+                  <Empty className="conversation-empty">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <MessageSquare />
+                      </EmptyMedia>
+                      <EmptyTitle>从一个具体任务开始</EmptyTitle>
+                      <EmptyDescription>
+                        描述你要完成的工作，也可以添加文件作为上下文。Agent
+                        将在当前项目目录中继续。
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                )}
               {view && view.startSeq > 0 && (
-                <button
-                  className="text-button"
-                  disabled={loadingEarlier}
+                <Button
+                  variant="link"
+                  size="sm"
+                  disabled={!online || loadingEarlier}
                   onClick={() =>
-                    void job.run(() => actions.loadEarlier(session.id))
+                    void job.run(async () => {
+                      const element = scroll.current;
+                      if (element)
+                        historyAnchor.current = {
+                          height: element.scrollHeight,
+                          top: element.scrollTop,
+                          firstId: view.items[0]?.id,
+                        };
+                      try {
+                        if (!(await actions.loadEarlier(session.id)))
+                          historyAnchor.current = null;
+                      } catch (error) {
+                        historyAnchor.current = null;
+                        throw error;
+                      }
+                    })
                   }
                 >
-                  加载更早的历史
-                </button>
+                  {loadingEarlier ? "正在加载历史…" : "加载更早的历史"}
+                </Button>
               )}
               {view && (
                 <Timeline
                   items={view.items}
                   sessionId={session.id}
                   agent={session.agent}
+                  showAsyncQuestions={session.asyncQuestions === undefined}
                   onFile={handleFile}
                   onFork={setForkAt}
                   onTerminal={(id) => {
@@ -509,6 +724,10 @@ export function Session({
                   }}
                 />
               )}
+              <AsyncQuestions
+                sessionId={session.id}
+                questions={session.asyncQuestions ?? []}
+              />
               {view?.permissions.map((permission) => (
                 <Permission
                   key={permission.requestId}
@@ -517,31 +736,95 @@ export function Session({
                 />
               ))}
               <AgentInteractions agent={session.agent} />
-              {notices?.map((notice) => <section key={notice.id} className={`notice-card ${notice.severity === "error" ? "error" : ""}`} role="status"><div className="browser-toolbar"><strong>{notice.title}</strong><button className="text-button" onClick={() => actions.dismissNotice(session.id, notice.id)}>关闭</button></div>{notice.description && <p>{notice.description}</p>}</section>)}
+              {view?.turnActive && (
+                <div className="conversation-activity" role="status">
+                  <LoaderCircle aria-hidden="true" />
+                  <span>
+                    {view.permissions.length
+                      ? "等待你确认后继续"
+                      : session.asyncQuestions?.length
+                        ? "Agent 有问题需要你回答"
+                        : "Agent 正在处理任务"}
+                  </span>
+                </div>
+              )}
+              {notices?.map((notice) => (
+                <section
+                  key={notice.id}
+                  className={`notice-card ${notice.severity === "error" ? "error" : ""}`}
+                  role="status"
+                >
+                  <div className="browser-toolbar">
+                    <strong>{notice.title}</strong>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={() =>
+                        actions.dismissNotice(session.id, notice.id)
+                      }
+                    >
+                      关闭
+                    </Button>
+                  </div>
+                  {notice.description && <p>{notice.description}</p>}
+                </section>
+              ))}
             </div>
             {terminal && !terminals && (
               <div className="inline-terminal">
                 <div className="browser-toolbar">
                   <span>终端</span>
-                  <button
-                    className="text-button"
+                  <Button
+                    variant="link"
+                    size="sm"
                     onClick={() => setTerminal(undefined)}
                   >
                     收起
-                  </button>
+                  </Button>
                 </div>
                 <Terminal key={terminal} id={terminal} />
               </div>
             )}
             <div className="composer-wrap">
+              {awayFromBottom && (
+                <div className="conversation-jump">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      following.current = true;
+                      setAwayFromBottom(false);
+                      scroll.current?.scrollTo({
+                        top: scroll.current.scrollHeight,
+                        behavior: "instant",
+                      });
+                    }}
+                  >
+                    <ArrowDown data-icon="inline-start" />
+                    回到最新消息
+                  </Button>
+                </div>
+              )}
               <ErrorNotice error={job.error} />
+              <ErrorNotice error={sendJob.error} />
+              <ErrorNotice error={attachmentError} />
+              {sendJob.busy && (
+                <p className="composer-progress" role="status">
+                  <LoaderCircle aria-hidden="true" />
+                  {sendingFile ? `正在处理附件：${sendingFile}` : "正在发送…"}
+                </p>
+              )}
               {queue.length > 0 && (
                 <div className="message-queue">
                   <strong>待发送 · {queue.length}</strong>
                   {queue.map((item, index) => (
                     <div key={item.clientMessageId}>
-                      <span>{item.text || `${item.images} 张图片`}</span>
-                      <button
+                      <span title={item.text}>
+                        {item.text || `${item.images} 张图片`}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="plain"
                         disabled={job.busy || !online || item.pending}
                         onClick={() =>
                           void job.run(() =>
@@ -553,11 +836,20 @@ export function Session({
                         }
                       >
                         立即发送
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="plain"
                         disabled={job.busy || !online || item.pending}
                         onClick={() =>
                           void job.run(async () => {
+                            if (
+                              (draft.trim() || files.length || blocks.length) &&
+                              !(await dialogs.confirm(
+                                "编辑这条待发送消息会替换当前草稿，继续吗？",
+                              ))
+                            )
+                              return;
                             const content = await actions.takeQueued(
                               session.id,
                               item.clientMessageId,
@@ -574,31 +866,43 @@ export function Session({
                                   (block) => block.type !== "text",
                                 ),
                               );
+                              setFiles([]);
+                              composer.current?.focus();
                             }
                           })
                         }
                       >
                         编辑
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="plain"
                         aria-label="上移队列消息"
-                        disabled={!index || job.busy || !online || item.pending}
+                        disabled={
+                          !queue
+                            .slice(0, index)
+                            .some((entry) => !entry.pending) ||
+                          job.busy ||
+                          !online ||
+                          item.pending
+                        }
                         onClick={() =>
                           void job.run(() => {
                             const ids = queue
                               .filter((item) => !item.pending)
                               .map((item) => item.clientMessageId);
-                            [ids[index - 1], ids[index]] = [
-                              ids[index],
-                              ids[index - 1],
-                            ];
+                            const at = ids.indexOf(item.clientMessageId);
+                            if (at < 1) return Promise.resolve();
+                            [ids[at - 1], ids[at]] = [ids[at], ids[at - 1]];
                             return actions.reorderQueue(session.id, ids);
                           })
                         }
                       >
                         ↑
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="plain"
                         disabled={job.busy || !online || item.pending}
                         onClick={() =>
                           void job.run(() =>
@@ -607,7 +911,7 @@ export function Session({
                         }
                       >
                         移除
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -669,43 +973,81 @@ export function Session({
                   </CommandUI>
                 </PopoverContent>
                 <PopoverAnchor asChild>
-                  <div
+                  <InputGroup
                     className="composer"
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
+                    data-dragging={dragging || undefined}
+                    onDragOver={(event) => {
+                      if (!event.dataTransfer.types.includes("Files")) return;
                       event.preventDefault();
-                      setFiles((previous) => [
-                        ...previous,
-                        ...Array.from(event.dataTransfer.files),
-                      ]);
+                      setDragging(true);
+                    }}
+                    onDragLeave={(event) => {
+                      if (
+                        !event.currentTarget.contains(
+                          event.relatedTarget as Node | null,
+                        )
+                      )
+                        setDragging(false);
+                    }}
+                    onDrop={(event) => {
+                      if (!event.dataTransfer.files.length) return;
+                      event.preventDefault();
+                      setDragging(false);
+                      addFiles(Array.from(event.dataTransfer.files));
                     }}
                   >
+                    {dragging && (
+                      <div className="composer-drop-hint">
+                        <Plus aria-hidden="true" />
+                        松开以添加附件
+                      </div>
+                    )}
                     <div className="attachment-list">
                       {files.map((file, index) => (
                         <span key={`${file.name}-${index}`}>
-                          {file.name}
-                          <button
+                          <Paperclip aria-hidden="true" />
+                          <span className="attachment-name" title={file.name}>
+                            {file.name}
+                          </span>
+                          <small>
+                            {file.size < 1_000_000
+                              ? `${Math.max(1, Math.round(file.size / 1000))} KB`
+                              : `${(file.size / 1_000_000).toFixed(1)} MB`}
+                          </small>
+                          <Button
+                            variant="ghost"
+                            size="plain"
                             aria-label={`移除附件 ${file.name}`}
+                            disabled={sendJob.busy}
                             onClick={() =>
                               setFiles((previous) =>
                                 previous.filter((_, at) => at !== index),
                               )
                             }
                           >
-                            ×
-                          </button>
+                            <X />
+                          </Button>
                         </span>
                       ))}
                       {blocks.length > 0 && (
                         <span>
                           {blocks.length} 个已有附件
-                          <button onClick={() => setBlocks([])}>×</button>
+                          <Button
+                            variant="ghost"
+                            size="plain"
+                            aria-label="移除已有附件"
+                            disabled={sendJob.busy}
+                            onClick={() => setBlocks([])}
+                          >
+                            <X />
+                          </Button>
                         </span>
                       )}
                     </div>
-                    <textarea
+                    <InputGroupTextarea
                       ref={composer}
                       aria-label="消息"
+                      aria-describedby="composer-hint"
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
                       placeholder={
@@ -718,11 +1060,15 @@ export function Session({
                         const files = Array.from(event.clipboardData.files);
                         if (files.length) {
                           event.preventDefault();
-                          setFiles((previous) => [...previous, ...files]);
+                          addFiles(files);
                         }
                       }}
                       onKeyDown={(event) => {
-                        if (event.nativeEvent.isComposing) return;
+                        if (
+                          event.nativeEvent.isComposing ||
+                          event.nativeEvent.keyCode === 229
+                        )
+                          return;
                         if (event.key === "Escape" && query !== undefined) {
                           event.preventDefault();
                           setDismissedSuggestions(draft);
@@ -744,49 +1090,55 @@ export function Session({
                         } else if (event.key === "Enter" && !event.shiftKey) {
                           event.preventDefault();
                           if (suggestions.length)
-                            choose(suggestions[choice] ?? suggestions[0]);
+                            void choose(suggestions[choice] ?? suggestions[0]);
                           else
-                            void job.run(() =>
+                            void sendJob.run(() =>
                               send(event.metaKey || event.ctrlKey),
                             );
                         }
                       }}
                     />
-                    <div className="composer-toolbar">
+                    <InputGroupAddon
+                      align="block-end"
+                      className="composer-toolbar justify-between"
+                    >
                       <div>
-                        <input
+                        <Input
                           ref={upload}
                           type="file"
                           multiple
                           hidden
                           onChange={(event) => {
-                            setFiles((previous) => [
-                              ...previous,
-                              ...Array.from(event.target.files ?? []),
-                            ]);
+                            addFiles(Array.from(event.target.files ?? []));
                             event.target.value = "";
                           }}
                         />
-                        <button
-                          className="icon-button"
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           aria-label="添加附件"
+                          title="添加附件 · 单个文件最多 30 MB"
                           onClick={() => upload.current?.click()}
                         >
                           <Icon name="attach" />
-                        </button>
-                        <button
-                          className="icon-button"
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           aria-label="打开命令面板"
                           onClick={() => setPanel("commands")}
                         >
                           /
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="plain"
                           className="composer-agent"
+                          title={session.model ?? "模型与权限"}
                           onClick={() => setPanel("settings")}
                         >
                           {session.model ?? "模型与权限"}
-                        </button>
+                        </Button>
                         {view?.usage?.contextWindow && (
                           <span className="context-meter" title="上下文用量">
                             {Math.round(
@@ -799,77 +1151,81 @@ export function Session({
                         )}
                       </div>
                       <div>
-                        {(view?.turnActive || session.state === "unknown") && agent?.capabilities.interrupt && (
-                          <button
-                            className="icon-button"
-                            aria-label="停止当前回合"
-                            disabled={!online || job.busy}
-                            onClick={() =>
-                              void job.run(() => actions.cancel(session.id))
-                            }
-                          >
-                            <Icon name="stop" />
-                          </button>
-                        )}
+                        {(view?.turnActive || session.state === "unknown") &&
+                          agent?.capabilities.interrupt && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label="停止当前回合"
+                              disabled={!online || job.busy}
+                              onClick={() =>
+                                void job.run(() => actions.cancel(session.id))
+                              }
+                            >
+                              <Icon name="stop" />
+                            </Button>
+                          )}
                         {view?.turnActive && agent?.capabilities.steer && (
-                          <button
-                            className="text-button"
-                            disabled={!online || job.busy || !draft.trim()}
-                            onClick={() => void job.run(() => send(true))}
+                          <Button
+                            variant="link"
+                            size="sm"
+                            disabled={!online || sendJob.busy || !draft.trim()}
+                            onClick={() => void sendJob.run(() => send(true))}
                           >
                             插话
-                          </button>
+                          </Button>
                         )}
-                        <button
+                        <Button
+                          variant="default"
+                          size="icon"
                           className="send-button"
                           aria-label={
                             view?.turnActive ? "加入发送队列" : "发送消息"
                           }
                           disabled={
                             !online ||
-                            job.busy ||
+                            sendJob.busy ||
                             (!draft.trim() && !files.length && !blocks.length)
                           }
-                          onClick={() => void job.run(() => send())}
+                          onClick={() => void sendJob.run(() => send())}
                         >
-                          <Icon name="send" />
-                        </button>
+                          {sendJob.busy ? (
+                            <LoaderCircle className="animate-spin" />
+                          ) : (
+                            <Icon name="send" />
+                          )}
+                        </Button>
                       </div>
-                    </div>
-                  </div>
+                    </InputGroupAddon>
+                  </InputGroup>
                 </PopoverAnchor>
               </Popover>
-              <div className="composer-caption">
-                <span>Enter 发送 · Shift Enter 换行 · / 命令</span>
+              <div className="composer-caption" id="composer-hint">
+                <span>
+                  {view?.turnActive
+                    ? "Enter 加入队列 · ⌘/Ctrl Enter 立即发送"
+                    : "Enter 发送 · Shift Enter 换行 · / 命令"}
+                </span>
                 <span>{online ? "端到端加密" : "草稿已保留"}</span>
               </div>
             </div>
           </div>
           {panel && panel !== "commands" && (
-            <aside className="live-side-panel">
-              <div className="browser-toolbar">
-                <strong>
-                  {
-                    {
-                      settings: "会话设置",
-                      changes: "变更",
-                      files: "文件",
-                      tasks: "任务",
-                      goal: "目标",
-                      mcp: "MCP 服务",
-                      apps: "应用",
-                      preview: "电脑操作预览",
-                    }[panel]
-                  }
-                </strong>
-                <button
-                  className="icon-button"
-                  aria-label="关闭面板"
-                  onClick={() => setPanel(null)}
-                >
-                  <Icon name="close" />
-                </button>
-              </div>
+            <ConversationPanel
+              close={() => setPanel(null)}
+              title={
+                {
+                  settings: "会话设置",
+                  changes: "变更",
+                  files: "文件",
+                  tasks: "任务",
+                  goal: "目标",
+                  mcp: "MCP 服务",
+                  apps: "应用",
+                  preview: "电脑操作预览",
+                }[panel]
+              }
+            >
               <div className="side-panel-content">
                 {panel === "settings" && (
                   <Settings session={session} view={view} />
@@ -878,16 +1234,25 @@ export function Session({
                 {panel === "files" &&
                   (file ? (
                     <>
-                      <button
-                        className="text-button"
-                        onClick={() => setFile(undefined)}
+                      <Button
+                        variant="link"
+                        size="sm"
+                        onClick={() => void changeFile()}
                       >
                         返回文件列表
-                      </button>
-                      <FileView key={file} line={fileLine} path={file} />
+                      </Button>
+                      <FileView
+                        key={file}
+                        line={fileLine}
+                        path={file}
+                        onDirtyChange={onFileDirtyChange}
+                      />
                     </>
                   ) : (
-                    <Files start={session.cwd} />
+                    <Files
+                      start={session.cwd}
+                      onDirtyChange={onFileDirtyChange}
+                    />
                   ))}
                 {panel === "tasks" && (
                   <Tasks
@@ -906,13 +1271,13 @@ export function Session({
                       由电脑上的 {session.agent}{" "}
                       提供。完整结果、授权请求和错误同时显示在会话中。
                     </p>
-                    <button
-                      className="button secondary"
+                    <Button
+                      variant="outline"
                       disabled={!online || job.busy}
                       onClick={() => nativePanel(panel)}
                     >
                       刷新 /{panel}
-                    </button>
+                    </Button>
                     {view?.items
                       .filter(
                         (item) =>
@@ -930,7 +1295,7 @@ export function Session({
                   </>
                 )}
               </div>
-            </aside>
+            </ConversationPanel>
           )}
         </div>
         {panel === "commands" && (
@@ -948,23 +1313,23 @@ export function Session({
                 ? "从选中的消息开始一段新会话。"
                 : "保留当前上下文，创建独立的新会话。"}
             </p>
-            <label className="choice-option">
-              <input
-                type="checkbox"
-                checked={newWorktree}
-                onChange={(event) => setNewWorktree(event.target.checked)}
+            <Label className="choice-option">
+              <Checkbox
+                checked={!!forkGit.value && newWorktree}
+                disabled={forkGit.loading || !forkGit.value}
+                onCheckedChange={(checked) => setNewWorktree(checked === true)}
               />
               在新的 worktree 中工作
-            </label>
+            </Label>
             <ErrorNotice error={job.error} />
-            <button
-              className="button primary"
+            <Button
+              variant="default"
               disabled={job.busy || !online}
               onClick={() =>
                 void job.run(async () => {
                   const created = await actions.forkSession(session.id, {
                     itemId: forkAt ?? undefined,
-                    worktree: newWorktree,
+                    worktree: !!forkGit.value && newWorktree,
                   });
                   setForkAt(undefined);
                   navigate(created.id);
@@ -972,7 +1337,7 @@ export function Session({
               }
             >
               创建分叉
-            </button>
+            </Button>
           </Modal>
         )}
         {terminals && (
@@ -986,5 +1351,79 @@ export function Session({
         )}
       </div>
     </TimelineNavigation.Provider>
+  );
+}
+
+function ConversationPanel({
+  title,
+  close,
+  children,
+}: {
+  title: string;
+  close: () => void;
+  children: ReactNode;
+}) {
+  const compact = useIsMobile(991);
+  const panelElement = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (compact) return;
+    const element = panelElement.current;
+    const previous = document.activeElement;
+    (element?.querySelector("button") ?? element)?.focus({
+      preventScroll: true,
+    });
+    return () => {
+      if (
+        element?.contains(document.activeElement) &&
+        previous instanceof HTMLElement
+      )
+        previous.focus({ preventScroll: true });
+    };
+  }, [compact]);
+  const closeButton = (
+    <Button variant="ghost" size="icon" aria-label="关闭面板" onClick={close}>
+      <Icon name="close" />
+    </Button>
+  );
+  if (compact)
+    return (
+      <Sheet
+        open
+        onOpenChange={(open) => {
+          if (!open) close();
+        }}
+      >
+        <SheetContent
+          showCloseButton={false}
+          aria-describedby={undefined}
+          className="w-full! sm:max-w-[420px]! gap-0 overflow-hidden"
+        >
+          <SheetHeader className="flex-row items-center justify-between border-b">
+            <SheetTitle>{title}</SheetTitle>
+            {closeButton}
+          </SheetHeader>
+          {children}
+        </SheetContent>
+      </Sheet>
+    );
+  return (
+    <aside
+      ref={panelElement}
+      className="live-side-panel"
+      tabIndex={-1}
+      aria-label={title}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          close();
+        }
+      }}
+    >
+      <div className="browser-toolbar">
+        <strong>{title}</strong>
+        {closeButton}
+      </div>
+      {children}
+    </aside>
   );
 }

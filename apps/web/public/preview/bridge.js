@@ -5,6 +5,7 @@ const note = document.getElementById("note");
 const requests = new Map();
 let parentOrigin;
 let worker;
+let bootstrap;
 window.addEventListener("message", async (event) => {
   const message = event.data;
   if (!message || message.channel !== channel) return;
@@ -18,9 +19,10 @@ window.addEventListener("message", async (event) => {
       return;
     }
     parentOrigin = event.origin;
+    bootstrap = message.bootstrap;
     try {
       const registration = await navigator.serviceWorker.register(
-        "/preview/worker.js?v=2",
+        "/preview/worker.js?v=3",
         { scope: "/preview/" },
       );
       const next =
@@ -70,8 +72,16 @@ window.addEventListener("message", async (event) => {
   }
 });
 navigator.serviceWorker.addEventListener("message", (event) => {
-  if (event.data?.token !== channel || !parentOrigin || event.source !== worker)
+  if (
+    event.data?.token !== channel ||
+    !parentOrigin ||
+    event.source?.scriptURL !== worker?.scriptURL
+  )
     return;
+  if (event.data.type === "restore") {
+    event.ports[0]?.postMessage({ bootstrap });
+    return;
+  }
   requests.set(event.data.id, event.ports[0]);
   event.ports[0].onmessage = (message) => {
     if (message.data?.cancel) {

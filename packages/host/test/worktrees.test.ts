@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -82,6 +82,18 @@ describe("worktrees", () => {
 
   it("refuses outside a repository", async () => {
     await expect(createWorktree(dir, home, "x")).rejects.toMatchObject({ appCode: "not_a_repo" });
+  });
+
+  it("keeps sessions inside the new checkout when the source uses a symlink", async () => {
+    const alias = join(dir, "shop-alias");
+    symlinkSync(repo, alias, "dir");
+    for (const suffix of ["", "packages/api"]) {
+      const made = await createWorktree(join(alias, suffix), home, "via alias");
+      expect(made.cwd).toBe(join(made.path, suffix));
+      expect(realpathSync(git(made.cwd, "rev-parse", "--show-toplevel"))).toBe(realpathSync(made.path));
+      expect(git(made.cwd, "branch", "--show-current")).toBe(made.branch);
+      await removeWorktree(made);
+    }
   });
 });
 

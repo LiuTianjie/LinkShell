@@ -4,12 +4,31 @@ import { ComputerPreviewSubscription } from "@linkshell/client-core";
 import {
   ErrorNotice,
   LoadState,
+  messageOf,
   useConnection,
   useJob,
   useLoad,
 } from "./common";
 import { httpRequest, openWebSocket } from "./transport";
-import { Icon } from "../icons";
+import { Button } from "../components/ui/button";
+import {
+  ArrowDownLeft,
+  Expand,
+  Maximize,
+  Minimize,
+  Monitor,
+  LoaderCircle,
+  Play,
+  RotateCw,
+  Square,
+} from "lucide-react";
+import { cn } from "../lib/utils";
+import {
+  screenPreferences,
+  screenQuery,
+  type ScreenPreferences,
+} from "./screen-preferences";
+import "./connection-polish.css";
 
 export function ComputerPreview({ sessionId }: { sessionId: string }) {
   const { link, streams } = useConnection();
@@ -49,7 +68,47 @@ export function ComputerPreview({ sessionId }: { sessionId: string }) {
 }
 
 /** Runs inside the isolated screen viewer. Only a port-specific WebSocket bridge is exposed. */
-export function socketBootstrap(channel: string) {
+export function socketBootstrap(
+  channel: string,
+  stored?: Record<string, string>,
+) {
+  if (stored) {
+    // The opaque screen iframe gets only its own preferences, never account storage.
+    const keys = [
+      "linkshell.screen.shortcuts",
+      "linkshell.screen.mode",
+      "linkshell.screen.width",
+    ];
+    const values = new Map(
+      keys.flatMap((key) =>
+        typeof stored[key] === "string" ? [[key, stored[key]] as const] : [],
+      ),
+    );
+    Object.defineProperty(window, "localStorage", {
+      value: {
+        get length() {
+          return values.size;
+        },
+        key: (index: number) => [...values.keys()][index] ?? null,
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          if (
+            !keys.includes(key) ||
+            typeof value !== "string" ||
+            value.length > 32768
+          )
+            return;
+          values.set(key, value);
+          parent.postMessage(
+            { channel, type: "screen-storage", key, value },
+            "*",
+          );
+        },
+        removeItem: (key: string) => values.delete(key),
+        clear: () => values.clear(),
+      },
+    });
+  }
   const sockets = new Map<string, BridgeSocket>();
   class BridgeSocket extends EventTarget {
     static CONNECTING = 0;
@@ -151,11 +210,19 @@ export function socketBootstrap(channel: string) {
       { channel, type: "reload", width: to.width, mode: to.mode },
       "*",
     );
+  (
+    window as unknown as { __linkshellReport: (stats: unknown) => void }
+  ).__linkshellReport = (stats) =>
+    parent.postMessage({ channel, type: "screen-stats", stats }, "*");
   window.addEventListener("message", (event) => {
     if (event.source === parent && event.data?.channel === channel)
       sockets
         .get(event.data.id)
         ?.receive(event.data.type, event.data.data, event.data.reason);
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape")
+      parent.postMessage({ channel, type: "leave-focus" }, "*");
   });
 }
 
@@ -175,24 +242,94 @@ function writeStored(key: string, value: string): void {
   }
 }
 
-export function Screen({ title = "电脑屏幕", embedded = false }: { title?: string; embedded?: boolean }) {
+export function Screen({
+  title = "电脑屏幕",
+  embedded = false,
+}: {
+  title?: string;
+  embedded?: boolean;
+}) {
   const { link, streams } = useConnection();
   const job = useJob();
   const loaded = useLoad(() => link.call("screen.access", {}), [link]);
   const [started, setStarted] = useState(false);
   const [display, setDisplay] = useState(0);
   const [retry, setRetry] = useState(0);
+  const [focused, setFocused] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const surface = useRef<HTMLElement>(null);
+  const [slow, setSlow] = useState(false);
+  const [stats, setStats] = useState<{
+    width?: number;
+    height?: number;
+    fps?: number;
+    codec?: string;
+    bitrateMbps?: number;
+    live?: boolean;
+  }>();
   // What the viewer page last chose (its own storage is not its own in a sandboxed srcdoc): kept here.
-  const [view, setView] = useState(() => ({
-    width: readStored("linkshell.screen.width"),
-    mode: readStored("linkshell.screen.mode"),
-  }));
+  const [view, setView] = useState(() => screenPreferences(readStored));
+  function configure(key: keyof ScreenPreferences, value: string) {
+    writeStored(`linkshell.screen.${key}`, value);
+    setView((current) => ({ ...current, [key]: value }));
+  }
   const [displays, setDisplays] = useState<{ index: number; name: string }[]>(
     [],
   );
   const [html, setHtml] = useState<string>();
   const [error, setError] = useState<string>();
   const frame = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    if (!focused || !surface.current) return;
+    const previous = document.activeElement;
+    const hidden: { node: HTMLElement; inert: boolean }[] = [];
+    let node: HTMLElement | null = surface.current;
+    // Keep the existing iframe alive while isolating the expanded workspace from keyboard navigation.
+    while (node?.parentElement) {
+      for (const sibling of node.parentElement.children) {
+        if (sibling !== node && sibling instanceof HTMLElement) {
+          hidden.push({ node: sibling, inert: sibling.inert });
+          sibling.inert = true;
+        }
+      }
+      node = node.parentElement;
+    }
+    return () => {
+      for (const entry of hidden) entry.node.inert = entry.inert;
+      if (previous instanceof HTMLElement && previous.isConnected)
+        previous.focus({ preventScroll: true });
+    };
+  }, [focused]);
+  useEffect(() => {
+    setSlow(false);
+    if (!started || html || error) return;
+    const timer = window.setTimeout(() => setSlow(true), 10000);
+    return () => window.clearTimeout(timer);
+  }, [started, html, error, retry]);
+  useEffect(() => {
+    const changed = () =>
+      setFullscreen(document.fullscreenElement === surface.current);
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !document.fullscreenElement)
+        setFocused(false);
+    };
+    document.addEventListener("fullscreenchange", changed);
+    window.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("fullscreenchange", changed);
+      window.removeEventListener("keydown", escape);
+    };
+  }, []);
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (surface.current?.requestFullscreen && document.fullscreenEnabled)
+        await surface.current.requestFullscreen();
+      else setFocused((value) => !value);
+    } catch {
+      setFocused(true);
+    }
+  }
   useEffect(() => {
     if (!started) return;
     let alive = true;
@@ -220,7 +357,54 @@ export function Screen({ title = "电脑屏幕", embedded = false }: { title?: s
         data?: string | ArrayBuffer;
         width?: unknown;
         mode?: unknown;
+        key?: unknown;
+        value?: unknown;
+        stats?: {
+          width?: unknown;
+          height?: unknown;
+          fps?: unknown;
+          codec?: unknown;
+          bitrateMbps?: unknown;
+          live?: unknown;
+        };
       };
+      if (message.type === "leave-focus") {
+        if (!document.fullscreenElement) setFocused(false);
+        return;
+      }
+      if (message.type === "screen-storage") {
+        if (
+          typeof message.key === "string" &&
+          [
+            "linkshell.screen.shortcuts",
+            "linkshell.screen.mode",
+            "linkshell.screen.width",
+          ].includes(message.key) &&
+          typeof message.value === "string" &&
+          message.value.length <= 32768
+        )
+          writeStored(message.key, message.value);
+        return;
+      }
+      if (message.type === "screen-stats" && message.stats) {
+        const data = message.stats;
+        const number = (value: unknown) =>
+          typeof value === "number" && Number.isFinite(value) && value >= 0
+            ? value
+            : undefined;
+        setStats({
+          width: number(data.width),
+          height: number(data.height),
+          fps: number(data.fps),
+          bitrateMbps: number(data.bitrateMbps),
+          codec:
+            typeof data.codec === "string"
+              ? data.codec.slice(0, 50)
+              : undefined,
+          live: data.live === true,
+        });
+        return;
+      }
       if (message.type === "reload") {
         const width =
           typeof message.width === "string" &&
@@ -234,7 +418,11 @@ export function Screen({ title = "电脑屏幕", embedded = false }: { title?: s
             : undefined;
         if (width) writeStored("linkshell.screen.width", width);
         if (mode) writeStored("linkshell.screen.mode", mode);
-        setView({ width, mode });
+        setView((current) => ({
+          ...current,
+          ...(width ? { width } : {}),
+          ...(mode ? { mode } : {}),
+        }));
         return;
       }
       if (message.type === "ws-open") {
@@ -244,7 +432,13 @@ export function Screen({ title = "电脑屏幕", embedded = false }: { title?: s
           sockets.size + pending.size >= 4
         )
           return;
-        const target = new URL(message.url!);
+        let target: URL;
+        try {
+          if (typeof message.url !== "string") return;
+          target = new URL(message.url);
+        } catch {
+          return;
+        }
         if (
           !["ws:", "wss:"].includes(target.protocol) ||
           target.hostname !== "127.0.0.1" ||
@@ -295,15 +489,27 @@ export function Screen({ title = "电脑屏幕", embedded = false }: { title?: s
     window.addEventListener("message", listen);
     setHtml(undefined);
     setError(undefined);
+    setStats(undefined);
     void link
       .call("screen.start", {})
       .then(async (viewer) => {
+        if (!alive) return;
         port = viewer.port;
-        if (alive) setDisplays(viewer.displays);
-        const query =
-          `?token=${encodeURIComponent(viewer.token)}&display=${display}` +
-          (view.width ? `&width=${view.width}` : "") +
-          (view.mode ? `&mode=${view.mode}` : "");
+        setDisplays(viewer.displays);
+        if (
+          viewer.displays.length &&
+          !viewer.displays.some((entry) => entry.index === display)
+        ) {
+          setDisplay(viewer.displays[0].index);
+          return;
+        }
+        let codecs: { mimeType: string }[] = [];
+        try {
+          codecs = RTCRtpReceiver.getCapabilities("video")?.codecs ?? [];
+        } catch {
+          /* H.264 remains available on older browsers. */
+        }
+        const query = screenQuery(viewer.token, display, view, codecs);
         const response = await httpRequest(streams, port, "/" + query);
         if (response.status !== 200)
           throw new Error(`屏幕页面返回 ${response.status}`);
@@ -314,12 +520,20 @@ export function Screen({ title = "电脑屏幕", embedded = false }: { title?: s
           .replaceAll("location.protocol", '"http:"');
         source = source.replace(
           "<head>",
-          `<head><script>(${socketBootstrap.toString()})(${JSON.stringify(channel)})</script>`,
+          `<head><script>(${socketBootstrap.toString()})(${JSON.stringify(channel)},${JSON.stringify(
+            Object.fromEntries(
+              [
+                "linkshell.screen.shortcuts",
+                "linkshell.screen.mode",
+                "linkshell.screen.width",
+              ].map((key) => [key, readStored(key)]),
+            ),
+          ).replaceAll("<", "\\u003c")})</script>`,
         );
         if (alive) setHtml(source);
       })
       .catch((error) => {
-        if (alive) setError(String(error));
+        if (alive) setError(messageOf(error));
       });
     return () => {
       alive = false;
@@ -330,111 +544,279 @@ export function Screen({ title = "电脑屏幕", embedded = false }: { title?: s
     };
   }, [started, display, retry, link, streams, view]);
   return (
-    <section className={`screen-page${embedded ? " screen-card-viewer" : ""}`}>
-      <div className="browser-toolbar">
-        {!embedded && <h2>{title}</h2>}
-        {displays.length > 1 && (
-          <div className="w-48">
+    <section
+      ref={surface}
+      className={cn(
+        "screen-page",
+        embedded && "screen-card-viewer",
+        focused && "screen-focused",
+      )}
+      aria-label={`${title}观看区域`}
+      role={focused ? "dialog" : undefined}
+      aria-modal={focused || undefined}
+    >
+      <div className="screen-toolbar">
+        {(focused || fullscreen || !embedded) && (
+          <strong className="screen-view-title">
+            <Monitor size={17} />
+            <span title={title}>{title}</span>
+          </strong>
+        )}
+        <div className="screen-settings">
+          {displays.length > 1 && (
             <Choice
+              container={fullscreen || focused ? surface.current : undefined}
+              className="w-auto"
               label="选择显示器"
               value={String(display)}
               onValueChange={(value) => setDisplay(Number(value))}
-              options={displays.map((display) => ({
-                value: String(display.index),
-                label: display.name,
+              options={displays.map((entry) => ({
+                value: String(entry.index),
+                label: entry.name,
               }))}
             />
-          </div>
-        )}
-        {started && (
-          <>
-            <button
-              className="button secondary"
+          )}
+          <Choice
+            container={fullscreen || focused ? surface.current : undefined}
+            className="w-auto"
+            label="画面清晰度"
+            value={view.width}
+            onValueChange={(value) => configure("width", value)}
+            options={[
+              { value: "1280", label: "省带宽 · 1280" },
+              { value: "1920", label: "标准 · 1920" },
+              { value: "2560", label: "高清 · 2560" },
+              { value: "native", label: "原生分辨率" },
+            ]}
+          />
+          <Choice
+            container={fullscreen || focused ? surface.current : undefined}
+            className="w-auto"
+            label="帧率上限"
+            value={view.maxFps}
+            onValueChange={(value) => configure("maxFps", value)}
+            options={[
+              { value: "120", label: "自适应 · 最高 120 帧" },
+              { value: "60", label: "最高 60 帧" },
+              { value: "30", label: "最高 30 帧" },
+            ]}
+          />
+          <Choice
+            container={fullscreen || focused ? surface.current : undefined}
+            className="w-auto"
+            label="视频编码"
+            value={view.codec}
+            onValueChange={(value) => configure("codec", value)}
+            options={[
+              { value: "auto", label: "自动编码" },
+              { value: "h264", label: "兼容编码 · H.264" },
+            ]}
+          />
+        </div>
+        <div className="screen-actions">
+          {started && (
+            <Button
+              variant="ghost"
+              size="icon"
+              title="重新连接"
+              aria-label="重新连接"
               onClick={() => setRetry((value) => value + 1)}
             >
-              重新连接
-            </button>
-            <button
-              className="button secondary"
-              onClick={() =>
-                void frame.current?.requestFullscreen().catch(() => {})
-              }
+              <RotateCw />
+            </Button>
+          )}
+          {!fullscreen && (
+            <Button
+              variant="outline"
+              title={focused ? "返回屏幕列表" : "专注观看"}
+              onClick={() => setFocused((value) => !value)}
             >
-              全屏
-            </button>
-            <button
-              className="text-button"
-              onClick={() => {
-                setStarted(false);
-                setHtml(undefined);
-              }}
-            >
-              停止观看
-            </button>
-          </>
-        )}
-      </div>
-      <LoadState {...loaded} />
-      <ErrorNotice error={error ?? job.error} />
-      {!started && loaded.value && (
-        <div className="notice-card">
-          {embedded && <div className="screen-card-preview" aria-hidden="true"><Icon name="computer" size={48} /></div>}
-          <p>
-            {loaded.value.problem ??
-              (loaded.value.supported
-                ? "电脑支持屏幕共享"
-                : "此电脑暂不支持屏幕共享")}
-          </p>
-          <p className="muted">
-            屏幕录制：
-            {loaded.value.recording === null
-              ? "未知"
-              : loaded.value.recording
-                ? "已授权"
-                : "未授权"}{" "}
-            · 操作控制：
-            {loaded.value.control === null
-              ? "未知"
-              : loaded.value.control
-                ? "已授权"
-                : "未授权"}
-          </p>
-          {loaded.value.supported && (
-            <div className="permission-buttons">
-              <button
-                className="button primary"
-                onClick={() => setStarted(true)}
+              {focused ? (
+                <ArrowDownLeft data-icon="inline-start" />
+              ) : (
+                <Expand data-icon="inline-start" />
+              )}
+              {focused ? "返回列表" : "专注观看"}
+            </Button>
+          )}
+          {started && (
+            <>
+              <Button variant="outline" onClick={() => void toggleFullscreen()}>
+                {fullscreen ? (
+                  <Minimize data-icon="inline-start" />
+                ) : (
+                  <Maximize data-icon="inline-start" />
+                )}
+                {fullscreen ? "退出全屏" : "全屏"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="停止观看"
+                title="停止观看"
+                onClick={() => {
+                  if (document.fullscreenElement === surface.current)
+                    void document.exitFullscreen().catch(() => {});
+                  setStarted(false);
+                  setHtml(undefined);
+                  setStats(undefined);
+                  setError(undefined);
+                }}
               >
-                开始观看
-              </button>
-              <button
-                className="button secondary"
-                disabled={job.busy}
-                onClick={() =>
-                  void job.run(async () => {
-                    await link.call("screen.access", { ask: true });
-                    loaded.reload();
-                  })
-                }
-              >
-                在电脑上检查权限
-              </button>
-            </div>
+                <Square />
+              </Button>
+            </>
           )}
         </div>
-      )}
-      {started && !html && !error && (
-        <p className="muted">正在打开加密屏幕通道…</p>
-      )}
-      {html && (
-        <iframe
-          ref={frame}
-          title={title === "电脑屏幕" ? title : `${title}的屏幕画面`}
-          sandbox="allow-scripts allow-pointer-lock"
-          allow="autoplay; fullscreen"
-          srcDoc={html}
-        />
-      )}
+      </div>
+      <div className="screen-stage">
+        {!started && (
+          <div className="screen-start">
+            <div className="screen-display-mark" aria-hidden="true">
+              <Monitor size={48} strokeWidth={1} />
+            </div>
+            <LoadState {...loaded} />
+            {loaded.error && (
+              <Button variant="outline" onClick={loaded.reload}>
+                <RotateCw data-icon="inline-start" />
+                重新检查
+              </Button>
+            )}
+            <ErrorNotice error={job.error} />
+            {loaded.value && (
+              <>
+                <h3>
+                  {loaded.value.supported
+                    ? "你的桌面，就在这里"
+                    : "此电脑暂不支持屏幕共享"}
+                </h3>
+                <p>{loaded.value.problem ?? "打开画面，继续电脑上的工作。"}</p>
+                <div className="screen-permissions">
+                  <span>
+                    屏幕录制 ·{" "}
+                    {loaded.value.recording === null
+                      ? "待检查"
+                      : loaded.value.recording
+                        ? "已授权"
+                        : "未授权"}
+                  </span>
+                  <span>
+                    操作控制 ·{" "}
+                    {loaded.value.control === null
+                      ? "待检查"
+                      : loaded.value.control
+                        ? "已授权"
+                        : "未授权"}
+                  </span>
+                </div>
+                {loaded.value.supported && (
+                  <div className="screen-start-actions">
+                    <Button size="lg" onClick={() => setStarted(true)}>
+                      <Play data-icon="inline-start" />
+                      {loaded.value.control === false
+                        ? "开始观看（只读）"
+                        : "开始观看"}
+                    </Button>
+                    {(!loaded.value.recording || !loaded.value.control) && (
+                      <Button
+                        variant="outline"
+                        disabled={job.busy}
+                        onClick={() =>
+                          void job.run(async () => {
+                            await link.call("screen.access", { ask: true });
+                            loaded.reload();
+                          })
+                        }
+                      >
+                        {job.busy ? "正在请求权限…" : "在电脑上检查权限"}
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={job.busy || loaded.loading}
+                      onClick={loaded.reload}
+                    >
+                      刷新权限状态
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        {started && !html && (
+          <div className="screen-start" role="status">
+            {error ? (
+              <Monitor size={40} strokeWidth={1} />
+            ) : (
+              <LoaderCircle size={32} className="animate-spin" />
+            )}
+            <h3>{error ? "暂时无法打开画面" : "正在连接屏幕"}</h3>
+            {error ? (
+              <>
+                <ErrorNotice error={error} />
+                <Button
+                  variant="outline"
+                  onClick={() => setRetry((value) => value + 1)}
+                >
+                  重试
+                </Button>
+              </>
+            ) : (
+              <>
+                <p>
+                  {slow
+                    ? "连接耗时较长，请确认电脑在线且已允许屏幕录制。"
+                    : "正在建立屏幕连接，画面准备好后会自动显示。"}
+                </p>
+                {slow && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setRetry((value) => value + 1)}
+                  >
+                    重新连接
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        {html && (
+          <iframe
+            ref={frame}
+            title={title === "电脑屏幕" ? title : `${title}的屏幕画面`}
+            sandbox="allow-scripts allow-pointer-lock"
+            allow="autoplay; fullscreen"
+            srcDoc={html}
+          />
+        )}
+      </div>
+      <div className="screen-caption">
+        <span className="screen-signal">
+          <span className={stats?.width ? "online-dot" : "screen-idle-dot"} />
+          {stats?.width
+            ? stats.live
+              ? "视频直连"
+              : "兼容画面"
+            : error && started
+              ? "连接失败，可重试"
+              : started
+                ? "正在接收画面"
+                : "尚未开始观看"}
+        </span>
+        {stats?.width ? (
+          <span className="screen-metrics">
+            {stats.width} × {stats.height}
+            {stats.fps !== undefined &&
+              ` · 接收 ${Math.round(stats.fps)} 帧/秒`}
+            {stats.codec && ` · ${stats.codec}`}
+            {stats.bitrateMbps !== undefined && ` · ${stats.bitrateMbps} Mbps`}
+          </span>
+        ) : (
+          <span>画质与帧率会随电脑和网络条件调整</span>
+        )}
+      </div>
     </section>
   );
 }

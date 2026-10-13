@@ -1,3 +1,7 @@
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { Choice } from "./components/Choice";
 import { Modal as SharedModal } from "./live/common";
 import {
@@ -112,7 +116,9 @@ function ConnectDialog({
     >
       {deployment === "official" ? (
         <div className="source-options">
-          <button
+          <Button
+            variant="ghost"
+            size="plain"
             className={
               choice === "official" ? "source-option selected" : "source-option"
             }
@@ -126,8 +132,10 @@ function ConnectDialog({
             <strong>官方服务</strong>
             <span>登录账号，发现你的电脑</span>
             <span className="selection-dot" />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="plain"
             className={
               choice === "self-hosted"
                 ? "source-option selected"
@@ -143,7 +151,7 @@ function ConnectDialog({
             <strong>自托管网关</strong>
             <span>使用自己的服务器与配对码</span>
             <span className="selection-dot" />
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="private-note">
@@ -172,8 +180,8 @@ function ConnectDialog({
           </div>
         ) : (
           <div className="pairing-form">
-            <label htmlFor="gateway">网关地址</label>
-            <input
+            <Label htmlFor="gateway">网关地址</Label>
+            <Input
               id="gateway"
               placeholder="wss://gateway.example.com"
               value={address}
@@ -188,8 +196,8 @@ function ConnectDialog({
             <p className="field-hint">
               填写部署网关的地址，不是当前网页的地址。
             </p>
-            <label htmlFor="pairing-code">电脑上的配对码</label>
-            <input
+            <Label htmlFor="pairing-code">电脑上的配对码</Label>
+            <Input
               id="pairing-code"
               className="code-input"
               inputMode="numeric"
@@ -220,12 +228,12 @@ function ConnectDialog({
             {error}
           </p>
         )}
-        <button className="button primary full" type="submit">
+        <Button variant="default" className="w-full" type="submit">
           {choice === "official"
             ? "预览账号登录后的工作台"
             : "预览配对后的工作台"}
           <Icon name="arrow" />
-        </button>
+        </Button>
         <p className="prototype-note">
           交互原型 · 不发起真实登录、配对或网络连接
         </p>
@@ -257,8 +265,8 @@ function NewTaskDialog({
           if (title.trim()) create(title.trim(), project, agent);
         }}
       >
-        <label htmlFor="task-prompt">任务描述</label>
-        <textarea
+        <Label htmlFor="task-prompt">任务描述</Label>
+        <Textarea
           id="task-prompt"
           autoFocus
           value={title}
@@ -268,7 +276,7 @@ function NewTaskDialog({
           rows={4}
         />
         <div className="form-columns">
-          <label>
+          <Label>
             项目
             <Choice
               label="项目"
@@ -279,8 +287,8 @@ function NewTaskDialog({
                 { value: "itool", label: "itool" },
               ]}
             />
-          </label>
-          <label>
+          </Label>
+          <Label>
             Agent
             <Choice
               label="Agent"
@@ -291,7 +299,7 @@ function NewTaskDialog({
                 { value: "Codex", label: "Codex" },
               ]}
             />
-          </label>
+          </Label>
         </div>
         <div className="computer-inline">
           <Icon name="computer" />
@@ -299,10 +307,10 @@ function NewTaskDialog({
           <span className="online-dot" />
           演示电脑
         </div>
-        <button className="button primary full" disabled={!title.trim()}>
+        <Button variant="default" className="w-full" disabled={!title.trim()}>
           创建演示任务
           <Icon name="arrow" />
-        </button>
+        </Button>
         <p className="prototype-note">任务仅保存在本页，不会启动真实 Agent</p>
       </form>
     </Modal>
@@ -445,7 +453,9 @@ export function Prototype() {
   return (
     <div className={`app-shell ${mobileNav ? "nav-open" : ""}`}>
       {mobileNav && (
-        <button
+        <Button
+          variant="ghost"
+          size="plain"
           className="nav-backdrop"
           aria-label="关闭导航"
           onClick={() => setMobileNav(false)}
@@ -464,7 +474,9 @@ export function Prototype() {
           <img className="brand-symbol" src={appMark} alt="" />
           LinkShell<span className="brand-web">web</span>
         </a>
-        <button
+        <Button
+          variant="ghost"
+          size="plain"
           className="connection-switch"
           onClick={() => setDialog("connect")}
         >
@@ -480,13 +492,19 @@ export function Prototype() {
             </small>
           </span>
           <Icon name="down" size={15} />
-        </button>
-        <button className="button new-task" onClick={() => setDialog("new")}>
+        </Button>
+        <Button
+          variant="ghost"
+          className="new-task"
+          onClick={() => setDialog("new")}
+        >
           <Icon name="plus" />
           新建任务<span className="new-task-corner">↗</span>
-        </button>
+        </Button>
         <nav aria-label="主导航">
-          <button
+          <Button
+            variant="ghost"
+            size="plain"
             className={`nav-item ${view === "home" && !project ? "active" : ""}`}
             onClick={() => {
               setProject(null);
@@ -496,22 +514,26 @@ export function Prototype() {
           >
             <Icon name="grid" />
             首页<span className="nav-count">{tasks.length}</span>
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="plain"
             className={`nav-item ${view === "computers" ? "active" : ""}`}
             onClick={() => navigate("computers")}
           >
             <Icon name="computer" />
             我的电脑
             <span className="online-dot" />
-          </button>
+          </Button>
         </nav>
         <div className="nav-section-label">
           项目<span>2</span>
         </div>
         {(["linkshell", "itool"] as const).map((name) => (
           <div key={name}>
-            <button
+            <Button
+              variant="ghost"
+              size="plain"
               className={`nav-item project-nav ${project === name && view === "home" ? "active" : ""}`}
               onClick={() => {
                 setProject(name);
@@ -522,20 +544,22 @@ export function Prototype() {
               <Icon name="folder" />
               {name}
               <Icon name="down" size={13} />
-            </button>
+            </Button>
             <div className="recent-list">
               {tasks
                 .filter((item) => item.project === name)
                 .slice(0, 2)
                 .map((item) => (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="plain"
                     key={item.id}
                     className={`recent-task ${view === item.id ? "selected" : ""}`}
                     onClick={() => navigate(item.id)}
                   >
                     <span className={`tiny-status ${item.status}`} />
                     <span>{item.title}</span>
-                  </button>
+                  </Button>
                 ))}
             </div>
           </div>
@@ -546,7 +570,9 @@ export function Prototype() {
             <span>Studio Mac</span>
             <small>{available ? "演示在线" : "连接待恢复"}</small>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="plain"
             className="profile-button"
             onClick={() => setDialog("connect")}
           >
@@ -564,20 +590,22 @@ export function Prototype() {
               </small>
             </span>
             <Icon name="settings" size={17} />
-          </button>
+          </Button>
         </div>
       </aside>
 
       <main className="main">
         <header className="topbar">
           <div className="breadcrumbs">
-            <button
-              className="icon-button mobile-menu"
+            <Button
+              variant="ghost"
+              size="icon"
+              className="mobile-menu"
               onClick={() => setMobileNav(true)}
               aria-label="打开导航"
             >
               <Icon name="menu" />
-            </button>
+            </Button>
             <span>工作空间</span>
             <span className="breadcrumb-slash">/</span>
             <strong>
@@ -595,13 +623,15 @@ export function Prototype() {
             )}
           </div>
           <div className="topbar-right">
-            <button
-              className="icon-button theme-switch"
+            <Button
+              variant="ghost"
+              size="icon"
+              className="theme-switch"
               aria-label={theme === "light" ? "切换深色外观" : "切换浅色外观"}
               onClick={() => setTheme(theme === "light" ? "dark" : "light")}
             >
               <Icon name="moon" />
-            </button>
+            </Button>
             <span className="demo-tag">
               <span />
               交互原型
@@ -622,13 +652,15 @@ export function Prototype() {
                   : []),
               ]}
             />
-            <button
-              className="icon-button"
+            <Button
+              variant="ghost"
+              size="icon"
+
               aria-label="连接设置"
               onClick={() => setDialog("connect")}
             >
               <Icon name="settings" />
-            </button>
+            </Button>
           </div>
         </header>
         {scenario !== "online" && (
@@ -643,7 +675,9 @@ export function Prototype() {
                     ? "演示：登录凭证已失效，需要重新登录。"
                     : "演示：此浏览器的配对已被撤销，需要重新配对。"}
             </span>
-            <button
+            <Button
+              variant="ghost"
+              size="plain"
               onClick={() =>
                 scenario === "offline"
                   ? (setScenario("online"), setToast("已恢复演示连接"))
@@ -651,7 +685,7 @@ export function Prototype() {
               }
             >
               {scenario === "offline" ? "模拟恢复" : "查看连接设置"}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -670,18 +704,19 @@ export function Prototype() {
                   )}
                 </p>
               </div>
-              <button
-                className="button primary"
+              <Button
+                variant="default"
+
                 onClick={() => setDialog("new")}
               >
                 <Icon name="plus" />
                 新建任务
-              </button>
+              </Button>
             </div>
             <div className="home-controls">
-              <label className="search-box">
+              <Label className="search-box">
                 <Icon name="search" size={18} />
-                <input
+                <Input
                   ref={searchRef}
                   aria-label="搜索任务"
                   placeholder="搜索会话、项目或 Agent"
@@ -689,18 +724,20 @@ export function Prototype() {
                   onChange={(event) => setSearch(event.target.value)}
                 />
                 <kbd>⌘ K</kbd>
-              </label>
+              </Label>
               <div className="filters" role="group" aria-label="任务状态筛选">
                 {(["all", "running", "waiting", "done"] as const).map(
                   (status) => (
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="plain"
                       key={status}
                       aria-pressed={filter === status}
                       className={filter === status ? "selected" : ""}
                       onClick={() => setFilter(status)}
                     >
                       {status === "all" ? "全部" : statusLabels[status]}
-                    </button>
+                    </Button>
                   ),
                 )}
               </div>
@@ -726,7 +763,9 @@ export function Prototype() {
                   {status === "waiting" ? (
                     group.map((item) => (
                       <article className="attention-card" key={item.id}>
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="plain"
                           className="attention-title"
                           onClick={() => navigate(item.id)}
                         >
@@ -739,7 +778,7 @@ export function Prototype() {
                           </span>
                           <time>{item.time}</time>
                           <Icon name="chevron" size={16} />
-                        </button>
+                        </Button>
                         <div className="permission-preview">
                           <div>
                             <Icon name="shield" size={17} />
@@ -748,34 +787,40 @@ export function Prototype() {
                           <code>pnpm --filter @linkshell/client-core test</code>
                         </div>
                         <div className="attention-actions">
-                          <button
-                            className="text-button"
+                          <Button
+                            variant="link"
+                            size="sm"
+
                             onClick={() => navigate(item.id)}
                           >
                             查看会话
                             <Icon name="chevron" size={13} />
-                          </button>
-                          <button
-                            className="button secondary"
+                          </Button>
+                          <Button
+                            variant="outline"
+
                             disabled={!available}
                             onClick={() => respond(item.id, false)}
                           >
                             拒绝
-                          </button>
-                          <button
-                            className="button primary"
+                          </Button>
+                          <Button
+                            variant="default"
+
                             disabled={!available}
                             onClick={() => respond(item.id, true)}
                           >
                             允许本次
-                          </button>
+                          </Button>
                         </div>
                       </article>
                     ))
                   ) : (
                     <div className="task-list">
                       {group.map((item) => (
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="plain"
                           className="task-row"
                           key={item.id}
                           onClick={() => navigate(item.id)}
@@ -807,7 +852,7 @@ export function Prototype() {
                             <span>{item.agent}</span>
                           </span>
                           <Icon name="chevron" size={14} />
-                        </button>
+                        </Button>
                       ))}
                     </div>
                   )}
@@ -819,15 +864,17 @@ export function Prototype() {
                 <Icon name="search" size={28} />
                 <h3>没有找到会话</h3>
                 <p>试试其他关键词或筛选条件。</p>
-                <button
-                  className="text-button"
+                <Button
+                  variant="link"
+                  size="sm"
+
                   onClick={() => {
                     setFilter("all");
                     setSearch("");
                   }}
                 >
                   清除筛选
-                </button>
+                </Button>
               </div>
             )}
             <footer className="page-footer">
@@ -849,13 +896,14 @@ export function Prototype() {
                 <h1>我的电脑</h1>
                 <p className="muted">管理你的电脑与连接方式。</p>
               </div>
-              <button
-                className="button primary"
+              <Button
+                variant="default"
+
                 onClick={() => setDialog("connect")}
               >
                 <Icon name="plus" />
                 连接电脑
-              </button>
+              </Button>
             </div>
             <div className="connection-detail-card">
               <span className="large-source-icon">
@@ -882,12 +930,13 @@ export function Prototype() {
                     : "通过设备配对授权，无需官方账号或订阅。网关与数据由你管理。"}
                 </p>
               </div>
-              <button
-                className="button secondary"
+              <Button
+                variant="outline"
+
                 onClick={() => setDialog("connect")}
               >
                 连接设置
-              </button>
+              </Button>
             </div>
             <div className="computer-table">
               <div>
@@ -903,8 +952,9 @@ export function Prototype() {
                 <span className="muted">
                   {source === "official" ? "账号关联" : "已配对（演示）"}
                 </span>
-                <button
-                  className="button secondary"
+                <Button
+                  variant="outline"
+
                   onClick={() => {
                     setProject(null);
                     navigate("home");
@@ -912,7 +962,7 @@ export function Prototype() {
                 >
                   查看任务
                   <Icon name="arrow" size={16} />
-                </button>
+                </Button>
               </div>
             </div>
             <div className="deployment-note">
@@ -947,22 +997,26 @@ export function Prototype() {
                 </div>
               </div>
               <div className="session-actions">
-                <button
-                  className={`icon-button ${terminal ? "pressed" : ""}`}
+                <Button
+                  variant="ghost"
+                  size="plain"
+                  className={terminal ? "pressed" : ""}
                   aria-label="切换终端"
                   aria-pressed={terminal}
                   onClick={() => setTerminal(!terminal)}
                 >
                   <Icon name="terminal" />
-                </button>
-                <button
-                  className={`icon-button ${panel ? "pressed" : ""}`}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="plain"
+                  className={panel ? "pressed" : ""}
                   aria-label="切换文件面板"
                   aria-pressed={!!panel}
                   onClick={() => setPanel(panel ? null : "changes")}
                 >
                   <Icon name="panel" />
-                </button>
+                </Button>
               </div>
             </div>
             <div className={`session-layout ${panel ? "with-panel" : ""}`}>
@@ -1000,7 +1054,9 @@ export function Prototype() {
                           <li>恢复连接时自动续期，重新订阅会话。</li>
                           <li>补齐断线期间的事件，避免消息重复。</li>
                         </ol>
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="plain"
                           className="tool-call"
                           onClick={() => setOpenTool(!openTool)}
                           aria-expanded={openTool}
@@ -1014,7 +1070,7 @@ export function Prototype() {
                             name={openTool ? "down" : "chevron"}
                             size={14}
                           />
-                        </button>
+                        </Button>
                         {openTool && (
                           <div className="tool-output">
                             <code>
@@ -1029,9 +1085,13 @@ export function Prototype() {
                         )}
                         <div className="change-summary">
                           <Icon name="file" size={16} />
-                          <button onClick={() => setPanel("changes")}>
+                          <Button
+                            variant="ghost"
+                            size="plain"
+                            onClick={() => setPanel("changes")}
+                          >
                             查看 3 个文件变更
-                          </button>
+                          </Button>
                           <span className="added">+42</span>
                           <span className="removed">−12</span>
                         </div>
@@ -1053,21 +1113,23 @@ export function Prototype() {
                             <pre>pnpm --filter @linkshell/client-core test</pre>
                             <div className="approval-footer">
                               <span>仅允许本次操作</span>
-                              <button
-                                className="button secondary"
+                              <Button
+                                variant="outline"
+
                                 onClick={() => respond(task.id, false)}
                                 disabled={!available}
                               >
                                 拒绝
-                              </button>
-                              <button
-                                className="button primary"
+                              </Button>
+                              <Button
+                                variant="default"
+
                                 onClick={() => respond(task.id, true)}
                                 disabled={!available}
                               >
                                 <Icon name="check" size={15} />
                                 允许执行
-                              </button>
+                              </Button>
                             </div>
                           </div>
                         )}
@@ -1106,13 +1168,15 @@ export function Prototype() {
                           只演示 · 不执行命令
                         </span>
                       </span>
-                      <button
-                        className="icon-button"
+                      <Button
+                        variant="ghost"
+                        size="icon"
+
                         aria-label="关闭终端"
                         onClick={() => setTerminal(false)}
                       >
                         <Icon name="close" size={15} />
-                      </button>
+                      </Button>
                     </div>
                     <div className="terminal-output">
                       <p>
@@ -1140,7 +1204,7 @@ export function Prototype() {
                         }}
                       >
                         <span>❯</span>
-                        <input
+                        <Input
                           aria-label="演示终端命令"
                           value={terminalInput}
                           onChange={(event) =>
@@ -1161,7 +1225,9 @@ export function Prototype() {
                           <span key={`${name}-${index}`}>
                             <Icon name="file" size={13} />
                             {name}
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="plain"
                               aria-label={`移除附件 ${name}`}
                               onClick={() =>
                                 setAttachments((previous) => ({
@@ -1173,12 +1239,12 @@ export function Prototype() {
                               }
                             >
                               <Icon name="close" size={12} />
-                            </button>
+                            </Button>
                           </span>
                         ))}
                       </div>
                     )}
-                    <textarea
+                    <Textarea
                       ref={inputRef}
                       aria-label="发送消息"
                       value={drafts[view] ?? ""}
@@ -1207,7 +1273,7 @@ export function Prototype() {
                     />
                     <div className="composer-toolbar">
                       <div>
-                        <input
+                        <Input
                           ref={uploadRef}
                           type="file"
                           multiple
@@ -1223,13 +1289,15 @@ export function Prototype() {
                             event.target.value = "";
                           }}
                         />
-                        <button
-                          className="icon-button"
+                        <Button
+                          variant="ghost"
+                          size="icon"
+
                           aria-label="添加演示附件"
                           onClick={() => uploadRef.current?.click()}
                         >
                           <Icon name="attach" size={17} />
-                        </button>
+                        </Button>
                         <span className="composer-agent">
                           {task.agent}
                           <span className="separator">·</span>默认模型
@@ -1237,8 +1305,10 @@ export function Prototype() {
                       </div>
                       <div>
                         {task.status === "running" && (
-                          <button
-                            className="icon-button"
+                          <Button
+                            variant="ghost"
+                            size="icon"
+
                             aria-label="停止演示任务"
                             disabled={!available}
                             onClick={() => {
@@ -1247,9 +1317,11 @@ export function Prototype() {
                             }}
                           >
                             <Icon name="stop" size={16} />
-                          </button>
+                          </Button>
                         )}
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="plain"
                           className="send-button"
                           aria-label="发送演示消息"
                           disabled={
@@ -1260,7 +1332,7 @@ export function Prototype() {
                           onClick={send}
                         >
                           <Icon name="send" size={19} />
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -1273,25 +1345,31 @@ export function Prototype() {
               {panel && (
                 <aside className="file-panel">
                   <div className="panel-tabs">
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="plain"
                       className={panel === "changes" ? "selected" : ""}
                       onClick={() => setPanel("changes")}
                     >
                       变更<span>3</span>
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="plain"
                       className={panel === "files" ? "selected" : ""}
                       onClick={() => setPanel("files")}
                     >
                       文件
-                    </button>
-                    <button
-                      className="icon-button"
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+
                       aria-label="关闭文件面板"
                       onClick={() => setPanel(null)}
                     >
                       <Icon name="close" size={15} />
-                    </button>
+                    </Button>
                   </div>
                   <div className="panel-project">
                     <Icon name="folder" size={15} />
@@ -1300,7 +1378,9 @@ export function Prototype() {
                   </div>
                   <div className="file-list">
                     {fileNames.map((name, index) => (
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="plain"
                         key={name}
                         className={file === name ? "selected" : ""}
                         onClick={() => setFile(name)}
@@ -1310,7 +1390,7 @@ export function Prototype() {
                         {panel === "changes" && (
                           <small className="added">+{[18, 16, 8][index]}</small>
                         )}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                   <div className="diff-heading">

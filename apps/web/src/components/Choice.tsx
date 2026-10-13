@@ -6,6 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 export function Choice({
   value,
   onValueChange,
@@ -14,6 +15,8 @@ export function Choice({
   placeholder = "请选择",
   disabled,
   id,
+  className,
+  container,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -22,6 +25,8 @@ export function Choice({
   placeholder?: string;
   disabled?: boolean;
   id?: string;
+  className?: string;
+  container?: HTMLElement | null;
 }) {
   return (
     <Select
@@ -32,10 +37,15 @@ export function Choice({
       onValueChange={(value) => onValueChange(value.slice(5))}
       disabled={disabled || !options.length}
     >
-      <SelectTrigger id={id} aria-label={label} className="w-full min-w-0">
+      <SelectTrigger
+        id={id}
+        aria-label={label}
+        className={cn("w-full min-w-0", className)}
+      >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent
+        container={container}
         position="popper"
         align="start"
         className="max-w-[calc(100vw-2rem)]"

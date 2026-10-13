@@ -1,0 +1,146 @@
+@layer components {
+  .connection-form {
+    min-width: 0;
+  }
+  .connection-form [data-slot="field"] {
+    min-width: 0;
+  }
+  .connection-form [data-slot="alert-title"],
+  .connection-form [data-slot="alert-description"] {
+    overflow-wrap: anywhere;
+  }
+  .connection-provider-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .connection-registration {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px 12px;
+  }
+  .connection-scanner.qr-scan {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0;
+    min-width: 0;
+  }
+  .connection-scan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .connection-scan-actions > button {
+    flex: 1;
+  }
+  .connection-camera {
+    min-width: 0;
+    text-align: center;
+  }
+  .connection-camera .qr-video {
+    margin: 0 0 10px;
+    border-radius: 8px;
+    aspect-ratio: 4 / 3;
+    background: var(--inset);
+  }
+  .connection-scan-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .connection-scan-status > svg {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+  }
+  .screens-overview .screen-card-heading,
+  .screen-page .screen-toolbar,
+  .screen-page .screen-settings,
+  .screen-page .screen-actions {
+    min-width: 0;
+  }
+  .screen-page .screen-settings {
+    flex-basis: 300px;
+  }
+  .screen-page .screen-settings > button {
+    max-width: 100%;
+  }
+  .screen-page .screen-view-title {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .screen-page .screen-view-title > svg {
+    flex-shrink: 0;
+  }
+  .screen-page .screen-view-title > span {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .screen-page .screen-start > [role="alert"] {
+    max-width: 36rem;
+    overflow-wrap: anywhere;
+  }
+  .screens-overview .screen-card-placeholder > p {
+    max-width: 30em;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+  }
+  .screens-overview .screen-card-placeholder > [role="alert"] {
+    max-width: 36rem;
+    overflow-wrap: anywhere;
+  }
+  .screen-page .screen-caption {
+    overflow-wrap: anywhere;
+  }
+  .screen-page.screen-focused .screen-view-title,
+  .screen-page:fullscreen .screen-view-title {
+    flex-basis: 100%;
+  }
+  @media (max-width: 720px) {
+    .screens-overview .screens-summary {
+      flex-wrap: wrap;
+      gap: 8px 16px;
+    }
+    .screen-page .screen-settings {
+      flex-basis: 100%;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .screen-page .screen-settings > button {
+      min-width: 0;
+      width: 100%;
+    }
+    .screen-page .screen-actions {
+      width: 100%;
+    }
+    .screen-page .screen-actions > button:first-child {
+      margin-right: auto;
+    }
+    .screen-page .screen-start {
+      padding: 20px 16px;
+      justify-content: safe center;
+    }
+    .screen-page.screen-focused .screen-toolbar,
+    .screen-page:fullscreen .screen-toolbar {
+      flex-shrink: 0;
+    }
+    .screen-page .screen-permissions {
+      gap: 6px 12px;
+    }
+  }
+  @media (max-width: 380px) {
+    .connection-provider-actions {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+}

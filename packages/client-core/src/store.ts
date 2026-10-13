@@ -43,6 +43,8 @@ export interface ClientState {
   /** True once the first session list has arrived (distinguishes "loading" from "empty"). */
   sessionsLoaded: boolean;
   sessionsError?: string;
+  sessionsNextBefore?: number;
+  archivedNextBefore?: number;
   notices: Record<string, (SessionNotice & { id: string })[]>;
   interactions: Record<string, PendingPermissionSummary[]>;
   projects: ProjectSummary[];
@@ -145,7 +147,8 @@ export interface ClientActions {
   /** `worktree`: what to do with a worktree only this session used ("remove" even if work in it is lost, "keep"; default: removed when nothing would be lost). */
   deleteSession(sessionId: string, worktree?: "keep" | "remove"): Promise<void>;
   /** Adds archived sessions to `sessions` (the regular list leaves them out). */
-  loadArchived(): Promise<void>;
+  loadArchived(before?: number): Promise<void>;
+  loadMoreSessions(): Promise<void>;
   /**
    * Adds the page of history before what the session shows (its view's
    * `startSeq` says whether there is any). Resolves false when it couldn't.
@@ -427,7 +430,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
               for (const [id, session] of Object.entries(sessions)) if (!session.archived && !listed.has(id)) delete sessions[id];
             }
             for (const session of list.sessions) sessions[session.id] = session;
-            return { machine, sessions, projects: projects.projects, sessionsLoaded: true, sessionsError: undefined };
+            return { machine, sessions, sessionsNextBefore: list.nextBefore, projects: projects.projects, sessionsLoaded: true, sessionsError: undefined };
           });
         } catch (error) {
           set({ sessionsError: describeError(error) });
@@ -627,12 +630,29 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         await link.call("worktrees.remove", { path, force }, 60_000);
       },
 
-      async loadArchived() {
-        const list = await link.call("sessions.list", { limit: 200, includeArchived: true });
+      async loadMoreSessions() {
+        const before = get().sessionsNextBefore;
+        if (before === undefined) return;
+        const list = await link.call("sessions.list", { limit: 200, before });
         set((state) => {
           const sessions = { ...state.sessions };
-          for (const session of list.sessions) sessions[session.id] = session;
-          return { sessions };
+          for (const session of list.sessions) {
+            if (!sessions[session.id] || sessions[session.id]!.updatedAt <= session.updatedAt)
+              sessions[session.id] = session;
+          }
+          return { sessions, sessionsNextBefore: list.nextBefore };
+        });
+      },
+
+      async loadArchived(before) {
+        const list = await link.call("sessions.list", { limit: 200, includeArchived: true, before });
+        set((state) => {
+          const sessions = { ...state.sessions };
+          for (const session of list.sessions) {
+            if (!sessions[session.id] || sessions[session.id]!.updatedAt <= session.updatedAt)
+              sessions[session.id] = session;
+          }
+          return { sessions, archivedNextBefore: list.nextBefore };
         });
       },
 

@@ -18,6 +18,17 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { Badge as StatusBadge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle,
+  EmptyDescription,
+  EmptyContent,
+} from "@/components/ui/empty";
+import { CircleAlert } from "lucide-react";
 
 export const Runtime = createContext<Connection | null>(null);
 export function useConnection() {
@@ -77,20 +88,50 @@ export function AgentMark({ agent }: { agent: string }) {
 }
 export function Badge({ state }: { state: string }) {
   return (
-    <span
-      className={`badge ${state === "idle" || state === "completed" ? "done" : state}`}
+    <StatusBadge
+      variant={
+        ["error", "failed"].includes(state)
+          ? "destructive"
+          : ["waiting", "pending", "blocked"].includes(state)
+            ? "warning"
+            : ["running", "active"].includes(state)
+              ? "info"
+              : ["idle", "completed", "complete"].includes(state)
+                ? "success"
+                : "secondary"
+      }
     >
       <span className="status-dot" />
       {stateLabel(state)}
-    </span>
+    </StatusBadge>
   );
 }
 export function ErrorNotice({ error }: { error?: string }) {
   return error ? (
-    <p role="alert" className="form-error">
-      {error}
-    </p>
+    <Alert variant="destructive">
+      <CircleAlert />
+      <AlertDescription>{error}</AlertDescription>
+    </Alert>
   ) : null;
+}
+export function EmptyState({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyTitle>{title}</EmptyTitle>
+        {description && <EmptyDescription>{description}</EmptyDescription>}
+      </EmptyHeader>
+      {children && <EmptyContent>{children}</EmptyContent>}
+    </Empty>
+  );
 }
 export function Modal({
   title,
@@ -105,6 +146,10 @@ export function Modal({
   wide?: boolean;
   returnFocus?: () => void;
 }) {
+  // These dialogs are mounted directly, so Radix has no trigger to restore.
+  const [opener] = useState(() =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
   return (
     <Dialog
       open
@@ -113,14 +158,11 @@ export function Modal({
       }}
     >
       <DialogContent
-        onCloseAutoFocus={
-          returnFocus
-            ? (event) => {
-                event.preventDefault();
-                returnFocus();
-              }
-            : undefined
-        }
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (returnFocus) returnFocus();
+          else if (opener?.isConnected) opener.focus({ preventScroll: true });
+        }}
         className={cn(
           "max-h-[85dvh] overflow-y-auto p-6 sm:max-w-xl",
           wide && "sm:max-w-5xl",
@@ -213,9 +255,15 @@ export function LoadState({
   return (
     <>
       {loading && (
-        <p className="muted loading-copy" role="status">
-          正在加载…
-        </p>
+        <div
+          className="loading-copy flex w-full flex-col gap-3"
+          role="status"
+          aria-label="正在加载"
+        >
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="h-4 w-full max-w-md" />
+          <span className="sr-only">正在加载…</span>
+        </div>
       )}
       <ErrorNotice error={error} />
     </>
