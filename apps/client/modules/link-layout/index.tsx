@@ -34,6 +34,7 @@ export function requestLandscape(): Promise<void> {
   return nativeLayout?.requestLandscape?.() ?? Promise.resolve();
 }
 
+/** Restore the presentation from before fullscreen, without locking future rotations. */
 export function clearOrientationRequest(): Promise<void> {
   return nativeLayout?.clearOrientationRequest?.() ?? Promise.resolve();
 }

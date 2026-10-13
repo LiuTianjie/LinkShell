@@ -6,6 +6,7 @@ import android.content.res.Configuration
 import android.os.Handler
 import android.os.Looper
 import android.view.OrientationEventListener
+import android.view.Surface
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
@@ -17,11 +18,13 @@ class LinkLayoutModule : Module() {
   private var listener: OrientationEventListener? = null
   private var requestedActivity: WeakReference<Activity>? = null
   private var previousOrientation: Int? = null
+  private var fullscreenActivity: WeakReference<Activity>? = null
+  private var fullscreenOrientation: Int? = null
 
   override fun definition() = ModuleDefinition {
     Name("LinkLayout")
     AsyncFunction("requestLandscape") { requestLandscape() }.runOnQueue(Queues.MAIN)
-    AsyncFunction("clearOrientationRequest") { clearRequest() }.runOnQueue(Queues.MAIN)
+    AsyncFunction("clearOrientationRequest") { restoreOrientation() }.runOnQueue(Queues.MAIN)
     OnActivityEntersBackground { onMain { clearRequest() } }
     OnDestroy { onMain { clearRequest() } }
   }
@@ -32,10 +35,40 @@ class LinkLayoutModule : Module() {
   }
 
   private fun requestLandscape() {
-    if (listener != null) return
+    if (fullscreenOrientation != null) return
     clearRequest()
     val activity = appContext.currentActivity ?: throw Exceptions.MissingActivity()
+    fullscreenActivity = WeakReference(activity)
+    fullscreenOrientation = interfaceOrientation(activity)
     if (activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) return
+    requestOnce(activity, ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
+  }
+
+  private fun restoreOrientation() {
+    val orientation = fullscreenOrientation ?: return
+    val activity = fullscreenActivity?.get()
+    fullscreenOrientation = null
+    fullscreenActivity = null
+    clearRequest()
+    if (activity != null && interfaceOrientation(activity) != orientation) requestOnce(activity, orientation)
+  }
+
+  @Suppress("DEPRECATION")
+  private fun interfaceOrientation(activity: Activity): Int {
+    val rotation = activity.windowManager.defaultDisplay.rotation
+    val portrait = activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+    val naturalPortrait = if (rotation == Surface.ROTATION_0 || rotation == Surface.ROTATION_180) portrait else !portrait
+    val orientations = if (naturalPortrait) intArrayOf(
+      ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+      ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT, ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+    ) else intArrayOf(
+      ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT,
+      ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    )
+    return orientations[rotation]
+  }
+
+  private fun requestOnce(activity: Activity, orientation: Int) {
     var initialQuadrant: Int? = null
     val tracker = object : OrientationEventListener(activity) {
       override fun onOrientationChanged(angle: Int) {
@@ -54,7 +87,7 @@ class LinkLayoutModule : Module() {
     previousOrientation = activity.requestedOrientation
     listener = tracker
     tracker.enable()
-    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    activity.requestedOrientation = orientation
   }
 
   private fun clearRequest() {

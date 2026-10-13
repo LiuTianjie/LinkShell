@@ -2,15 +2,39 @@ import ExpoModulesCore
 import UIKit
 
 public class LinkLayoutModule: Module {
+  private weak var presentationScene: UIWindowScene?
+  private var previousOrientation: UIInterfaceOrientation?
+
   public func definition() -> ModuleDefinition {
     Name("LinkLayout")
     Constants([
       "viewControllerStatusBarAppearance": Bundle.main.object(forInfoDictionaryKey: "UIViewControllerBasedStatusBarAppearance") as? Bool ?? true
     ])
     AsyncFunction("requestLandscape") { [weak self] in
-      guard let scene = self?.appContext?.utilities?.currentViewController()?.view.window?.windowScene else { return }
+      guard let self, let scene = self.appContext?.utilities?.currentViewController()?.view.window?.windowScene else { return }
+      // Keep the interface orientation, not the device sensor (which may be locked or flat).
+      if self.previousOrientation == nil {
+        self.previousOrientation = scene.interfaceOrientation
+        self.presentationScene = scene
+      }
       // Request the initial wide presentation without restricting later device rotations.
       scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+    }.runOnQueue(.main)
+    AsyncFunction("clearOrientationRequest") { [weak self] in
+      guard let self, let orientation = self.previousOrientation else { return }
+      let scene = self.presentationScene
+      self.previousOrientation = nil
+      self.presentationScene = nil
+      let mask: UIInterfaceOrientationMask
+      switch orientation {
+      case .portrait: mask = .portrait
+      case .portraitUpsideDown: mask = .portraitUpsideDown
+      case .landscapeLeft: mask = .landscapeLeft
+      case .landscapeRight: mask = .landscapeRight
+      default: return
+      }
+      // Removing a lock does not rotate UIKit back; restore once without imposing a lock.
+      scene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
     }.runOnQueue(.main)
     View(LinkLayoutView.self) {
       Events("onMetrics")
