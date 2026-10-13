@@ -6,8 +6,14 @@ const source = readFileSync(
   new URL("../public/preview/worker.js", import.meta.url),
   "utf8",
 );
+type WorkerFetchEvent = {
+  request: Request;
+  clientId: string;
+  resultingClientId: string;
+  respondWith: (response: Promise<Response>) => void;
+};
 function worker(hasBridge = true) {
-  const listeners = new Map<string, (event: any) => void>();
+  const listeners = new Map<string, (event: WorkerFetchEvent) => void>();
   const postMessage = vi.fn((message, ports) => {
     if (message.type === "restore")
       ports[0].postMessage({ bootstrap: "function() {}" });
@@ -35,7 +41,7 @@ function worker(hasBridge = true) {
   runInNewContext(source, {
     self: {
       location: { origin: "https://preview.test" },
-      addEventListener: (name: string, listener: any) =>
+      addEventListener: (name: string, listener: (event: WorkerFetchEvent) => void) =>
         listeners.set(name, listener),
     },
     clients: {

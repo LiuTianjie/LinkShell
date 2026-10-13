@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +39,7 @@ try {
   writeFileSync(join(reportDirectory, "summary.json"), JSON.stringify({ success: false, error: message }, null, 2));
   console.error(message); process.exitCode = 1;
 } finally {
-  clearTimeout(timer); kill(); rmSync(root, { recursive: true, force: true });
+  clearTimeout(timer); kill();
+  await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   process.off("SIGTERM", interrupted); process.off("SIGINT", interrupted);
 }

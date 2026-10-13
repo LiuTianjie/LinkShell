@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { SessionEvent } from "@linkshell/wire";
 import { startHost, type RunningHost } from "../../src/host.js";
@@ -48,7 +49,8 @@ export async function harness(agent: "codex" | "claude", reply: (request: ModelR
       log: (message) => logs.push(message),
     });
   }
-  try { host = await boot(); } catch (error) { await api.close(); rmSync(root, { recursive: true, force: true }); throw error; }
+  const removeRoot = () => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  try { host = await boot(); } catch (error) { await api.close(); await removeRoot(); throw error; }
   return { root, workspace, env, api, logs, get host() { return host; },
     async connect() {
       const client = await connectHost(host.paths.hostSocket); clients.push(client);
@@ -69,7 +71,9 @@ export async function harness(agent: "codex" | "claude", reply: (request: ModelR
       })));
       for (const client of clients) client.close();
       try { await host.stop(); } finally {
-        try { await api.close(); } finally { rmSync(root, { recursive: true, force: true }); }
+        // Native CLI descendants may still be exiting after their launcher closes.
+        // Retry transient filesystem races, but keep persistent cleanup failures visible.
+        try { await api.close(); } finally { await removeRoot(); }
       }
     },
   };
