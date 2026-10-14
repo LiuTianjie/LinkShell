@@ -51,7 +51,6 @@ import {
   readFileAtLine,
   splitFileAtLine,
 } from "./file-content";
-import "./resources-polish.css";
 
 export async function fileBase64(file: File): Promise<string> {
   if (file.size > 30_000_000) throw new Error(`${file.name} 超过 30 MB`);
@@ -743,7 +742,7 @@ export function Files({
                   <Button
                     variant={file === entry.path ? "secondary" : "ghost"}
                     key={entry.path}
-                    className="resource-entry"
+                    className="resource-entry h-10 gap-2.5 rounded-none px-2"
                     aria-current={file === entry.path ? "true" : undefined}
                     title={entry.path}
                     disabled={job.busy}

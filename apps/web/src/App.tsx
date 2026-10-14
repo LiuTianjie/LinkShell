@@ -1,21 +1,6 @@
 import { sessionGroup, sessionNeedsAttention } from "./live/session-list";
 import { sessionTime } from "./live/session-time";
-import { Badge as StatusBadge } from "@/components/ui/badge";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-  CardDescription,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { StatusText } from "./live/StatusText";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   InputGroup,
@@ -33,12 +18,22 @@ import {
   FieldDescription,
 } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
-import { RefreshCw, X, Plus, FolderOpen, LoaderCircle } from "lucide-react";
+import {
+  RefreshCw,
+  X,
+  Plus,
+  FolderOpen,
+  LoaderCircle,
+  Search,
+  Clock,
+  MessageSquarePlus,
+  MonitorSmartphone,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { deployment } from "./config";
 import { useDialogs } from "@/components/Dialogs";
 import { Choice } from "./components/Choice";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import type { SessionSummary } from "@linkshell/wire";
 import appMark from "../../client/assets/mark.png";
@@ -54,7 +49,6 @@ import {
 import { Connect } from "./live/Connect";
 import {
   AgentMark,
-  Badge,
   EmptyState,
   ErrorNotice,
   LoadState,
@@ -83,19 +77,8 @@ import type { Computer } from "./live/engine";
 import { useNavigationGuard } from "./live/use-navigation-guard";
 import { SessionLookup } from "./live/SessionLookup";
 import { Projects } from "./live/Projects";
-import "./live/live.css";
-import "./live/workspace-polish.css";
 
-const Prototype = lazy(() =>
-  import("./Prototype").then((module) => ({ default: module.Prototype })),
-);
 export function App() {
-  if (new URLSearchParams(location.search).get("demo") === "1")
-    return (
-      <Suspense fallback={<p>加载原型…</p>}>
-        <Prototype />
-      </Suspense>
-    );
   return <LiveApp />;
 }
 function LiveApp() {
@@ -244,9 +227,6 @@ function LiveApp() {
               {computerOption(computer, names)}
             </Button>
           ))}
-          <a className="text-button" href="?demo=1">
-            查看独立 UI 演示
-          </a>
         </div>
       )}
       {connect && <Connect close={() => setConnect(false)} />}
@@ -362,20 +342,14 @@ function SessionTable({
   );
   return (
     <>
-      <Table className="session-table session-list-table">
-        <TableHeader>
-          <TableRow>
-            <TableHead>会话</TableHead>
-            <TableHead className="session-project-column">项目</TableHead>
-            <TableHead>状态</TableHead>
-            <TableHead>最近更新</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sessions.map((session) => (
-            <TableRow
+      <div role="list">
+        {sessions.map((session) => {
+          const project = baseName(session.worktree?.source ?? session.cwd);
+          return (
+            <div
+              role="listitem"
               key={session.id}
-              className="session-table-row"
+              className="list-row"
               onClick={(event) => {
                 if (
                   (event.target as HTMLElement).closest("button, a") ||
@@ -385,78 +359,55 @@ function SessionTable({
                 navigate(session.id);
               }}
             >
-              <TableCell>
-                <div className="session-table-primary">
-                  <span className="session-agent-icon" title={session.agent}>
-                    <AgentMark agent={session.agent} />
-                  </span>
-                  <div className="session-table-name">
-                    <Button
-                      variant="ghost"
-                      size="plain"
-                      onClick={() => navigate(session.id)}
-                    >
-                      <span title={titleOf(session)}>{titleOf(session)}</span>
-                    </Button>
-                    <small>
-                      {session.activity?.title ??
-                        session.preview ??
-                        "打开会话继续工作"}
-                    </small>
-                    <span className="session-table-inline-meta">
-                      <span>
-                        {baseName(session.worktree?.source ?? session.cwd)}
-                      </span>
-                      <span>·</span>
-                      <time
-                        dateTime={new Date(session.updatedAt).toISOString()}
-                      >
-                        {sessionTime(session.updatedAt)}
-                      </time>
-                    </span>
-                  </div>
-                </div>
-              </TableCell>
-              <TableCell className="session-project-column">
-                <span
-                  className="session-project"
-                  title={session.worktree?.source ?? session.cwd}
+              <span title={session.agent} className="flex shrink-0">
+                <AgentMark agent={session.agent} />
+              </span>
+              <Button
+                variant="ghost"
+                size="plain"
+                className="list-row-title"
+                title={titleOf(session)}
+                onClick={() => navigate(session.id)}
+              >
+                {titleOf(session)}
+              </Button>
+              <span className="list-row-detail">
+                {session.activity?.title ??
+                  session.preview ??
+                  "打开会话继续工作"}
+              </span>
+              <span
+                className="list-row-meta list-row-project max-w-32 truncate"
+                title={session.worktree?.source ?? session.cwd}
+              >
+                {project}
+              </span>
+              <StatusText
+                state={
+                  sessionNeedsAttention(session) ? "waiting" : session.state
+                }
+              />
+              {session.permission && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={`处理 ${titleOf(session)}`}
+                  onClick={() => setPermissionId(session.id)}
                 >
-                  <Icon name="folder" size={14} />
-                  {baseName(session.worktree?.source ?? session.cwd)}
-                </span>
-              </TableCell>
-              <TableCell>
-                <div className="session-status-cell">
-                  <Badge
-                    state={
-                      sessionNeedsAttention(session) ? "waiting" : session.state
-                    }
-                  />
-                  {session.permission && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`处理 ${titleOf(session)}`}
-                      onClick={() => setPermissionId(session.id)}
-                    >
-                      处理
-                    </Button>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell>
-                <time
-                  dateTime={new Date(session.updatedAt).toISOString()}
-                  title={new Date(session.updatedAt).toLocaleString()}
-                >
-                  {sessionTime(session.updatedAt)}
-                </time>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                  处理
+                </Button>
+              )}
+              <time
+                className="list-row-meta w-14 text-right"
+                dateTime={new Date(session.updatedAt).toISOString()}
+                title={new Date(session.updatedAt).toLocaleString()}
+              >
+                {sessionTime(session.updatedAt)}
+              </time>
+            </div>
+          );
+        })}
+      </div>
       {permissionSession?.permission && (
         <Modal title="处理请求" close={() => setPermissionId(undefined)}>
           <Permission
@@ -529,25 +480,35 @@ function Home({
           ? b.createdAt - a.createdAt
           : b.updatedAt - a.updatedAt,
     );
+  const counts = {
+    all: Object.values(state.sessions).filter((session) => !session.archived)
+      .length,
+    running: Object.values(state.sessions).filter(
+      (session) => !session.archived && sessionGroup(session) === "running",
+    ).length,
+    waiting: Object.values(state.sessions).filter(
+      (session) => !session.archived && sessionNeedsAttention(session),
+    ).length,
+  } as Record<string, number | undefined>;
+  const clearFilters = () => {
+    setQuery("");
+    setFilter("all");
+  };
+  const pending = allSessions.filter(sessionNeedsAttention).length;
   return (
-    <>
-      <div className="page-heading">
-        <div>
-          <h1>{archived ? "已归档会话" : "会话概览"}</h1>
-          <p className="host-summary">
-            <span
-              className={
-                state.status === "online" ? "online-dot" : "offline-dot"
-              }
+    <section className="flex min-w-0 flex-col gap-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold">
+            {archived ? "已归档会话" : "会话概览"}
+          </h1>
+          <p className="mt-1 flex items-center gap-1.5 text-[13px] text-[var(--secondaryLabel)]">
+            <StatusText
+              state={state.status === "online" ? "idle" : "pending"}
+              label={state.machine?.hostname ?? "正在连接"}
             />
-            <span className="host-name">
-              {state.machine?.hostname ?? "正在连接"}
-            </span>
-            <span className="host-state">
-              {allSessions.some(sessionNeedsAttention)
-                ? `${allSessions.filter(sessionNeedsAttention).length} 项需要你`
-                : "暂无待处理事项"}
-            </span>
+            <span aria-hidden>·</span>
+            <span>{pending ? `${pending} 项需要你` : "暂无待处理事项"}</span>
           </p>
         </div>
         <Button
@@ -559,48 +520,7 @@ function Home({
           新建会话
         </Button>
       </div>
-      {!archived && (
-        <div className="console-summary">
-          {[
-            {
-              title: "全部会话",
-              value: Object.values(state.sessions).filter(
-                (session) => !session.archived,
-              ).length,
-              detail: "保存在当前电脑",
-            },
-            {
-              title: "进行中",
-              value: Object.values(state.sessions).filter(
-                (session) =>
-                  !session.archived && sessionGroup(session) === "running",
-              ).length,
-              detail: "Agent 正在执行",
-            },
-            {
-              title: "需要你",
-              value: Object.values(state.sessions).filter(
-                (session) =>
-                  !session.archived && sessionNeedsAttention(session),
-              ).length,
-              detail: "等待回答或批准",
-            },
-          ].map((item) => (
-            <Card key={item.title} variant="flat" size="sm">
-              <CardHeader>
-                <CardDescription>{item.title}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="console-summary-value">
-                  <strong>{item.value}</strong>
-                  <span>{item.detail}</span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-      <div className="home-controls">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs value={filter} onValueChange={setFilter}>
           <TabsList variant="line" aria-label="筛选会话">
             {[
@@ -612,12 +532,17 @@ function Home({
             ].map((item) => (
               <TabsTrigger key={item.id} value={item.id}>
                 {item.name}
+                {!archived && counts[item.id] !== undefined && (
+                  <span className="text-[var(--tertiaryLabel)] tabular-nums">
+                    {counts[item.id]}
+                  </span>
+                )}
               </TabsTrigger>
             ))}
           </TabsList>
         </Tabs>
-        <div className="session-toolbar-actions">
-          <InputGroup className="session-search">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2 max-sm:w-full max-sm:flex-none">
+          <InputGroup className="w-full max-w-72">
             <InputGroupAddon>
               <Icon name="search" />
             </InputGroupAddon>
@@ -640,7 +565,7 @@ function Home({
             )}
           </InputGroup>
           <Choice
-            className="w-[142px]"
+            className="w-[130px]"
             label="会话排序"
             value={sort}
             onValueChange={setSort}
@@ -673,6 +598,7 @@ function Home({
       <ErrorNotice error={loadError ?? job.error} />
       {loadError && (
         <Button
+          className="self-start"
           variant="outline"
           size="sm"
           disabled={state.status !== "online" || job.busy}
@@ -684,37 +610,21 @@ function Home({
         </Button>
       )}
       {!loaded && !loadError && (
-        <div
-          className="session-loading"
-          role="status"
-          aria-label="正在加载会话"
-        >
+        <div role="status" aria-label="正在加载会话">
           {[0, 1, 2, 3].map((index) => (
-            <div className="session-loading-row" key={index}>
-              <Skeleton className="size-8 rounded-lg" />
-              <div>
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-3 w-1/2" />
-              </div>
-              <Skeleton className="h-5 w-14" />
+            <div className="list-skeleton" key={index}>
+              <Skeleton className="h-4 w-2/3" />
             </div>
           ))}
         </div>
       )}
       {loaded && (query.trim() || filter !== "all") && (
-        <div className="session-results-summary">
+        <div className="flex items-center justify-between text-xs text-[var(--secondaryLabel)]">
           <span>
             找到 {sessions.length} 个会话
             {nextBefore !== undefined ? " · 仅搜索当前记录" : ""}
           </span>
-          <Button
-            variant="link"
-            size="sm"
-            onClick={() => {
-              setQuery("");
-              setFilter("all");
-            }}
-          >
+          <Button variant="link" size="sm" onClick={clearFilters}>
             清除筛选
           </Button>
         </div>
@@ -724,25 +634,32 @@ function Home({
           (session) => sessionGroup(session) === group,
         );
         return shown.length ? (
-          <Card className="session-group" key={group}>
-            <CardHeader>
-              <CardTitle>
-                {group === "waiting"
-                  ? "需要你"
-                  : group === "running"
-                    ? "进行中"
-                    : "最近会话"}{" "}
-                <span className="muted">{shown.length}</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-0">
-              <SessionTable sessions={shown} navigate={navigate} />
-            </CardContent>
-          </Card>
+          <div key={group}>
+            <h2 className="list-section-title">
+              {group === "waiting"
+                ? "需要你"
+                : group === "running"
+                  ? "进行中"
+                  : "最近会话"}
+              <span className="font-normal text-[var(--tertiaryLabel)]">
+                {shown.length}
+              </span>
+            </h2>
+            <SessionTable sessions={shown} navigate={navigate} />
+          </div>
         ) : null;
       })}
       {loaded && !loadError && !sessions.length && (
         <EmptyState
+          icon={
+            query || filter !== "all" ? (
+              <Search />
+            ) : archived ? (
+              <Clock />
+            ) : (
+              <MessageSquarePlus />
+            )
+          }
           title={
             query || filter !== "all"
               ? "没有找到会话"
@@ -759,13 +676,7 @@ function Home({
           }
         >
           {query || filter !== "all" ? (
-            <Button
-              variant="outline"
-              onClick={() => {
-                setQuery("");
-                setFilter("all");
-              }}
-            >
+            <Button variant="outline" onClick={clearFilters}>
               显示全部会话
             </Button>
           ) : !archived ? (
@@ -781,23 +692,22 @@ function Home({
         </EmptyState>
       )}
       {nextBefore !== undefined && (
-        <div className="session-pagination">
-          <Button
-            variant="outline"
-            disabled={job.busy || archive.loading || state.status !== "online"}
-            onClick={() =>
-              void job.run(() =>
-                archived
-                  ? actions.loadArchived(nextBefore)
-                  : actions.loadMoreSessions(),
-              )
-            }
-          >
-            {job.busy ? "正在加载…" : "加载更早的会话"}
-          </Button>
-        </div>
+        <button
+          type="button"
+          className="list-row-more"
+          disabled={job.busy || archive.loading || state.status !== "online"}
+          onClick={() =>
+            void job.run(() =>
+              archived
+                ? actions.loadArchived(nextBefore)
+                : actions.loadMoreSessions(),
+            )
+          }
+        >
+          {job.busy ? "正在加载…" : "加载更早的会话"}
+        </button>
       )}
-    </>
+    </section>
   );
 }
 function NewSession({
@@ -1038,12 +948,22 @@ function Computers({
   const { link } = useConnection();
   const job = useJob();
   const gateway = useLoad(() => link.call("gateway.status", {}), [link], 10000);
+  const heading = (title: string, hint?: string) => (
+    <div className="px-3 pb-2">
+      <h2 className="text-xs font-semibold text-[var(--secondaryLabel)]">
+        {title}
+      </h2>
+      {hint && <p className="text-xs text-[var(--tertiaryLabel)]">{hint}</p>}
+    </div>
+  );
   return (
-    <section className="flex flex-col gap-6">
-      <div className="page-heading">
+    <section className="flex min-w-0 flex-col gap-6">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <h1>电脑</h1>
-          <p className="muted">管理已连接的电脑、Agent 和配对设备。</p>
+          <h1 className="text-xl font-semibold">电脑</h1>
+          <p className="mt-1 text-[13px] text-[var(--secondaryLabel)]">
+            管理已连接的电脑、Agent 和配对设备。
+          </p>
         </div>
         <Button onClick={connect}>
           <Icon name="plus" data-icon="inline-start" />
@@ -1051,189 +971,142 @@ function Computers({
         </Button>
       </div>
       <ErrorNotice error={job.error} />
-      <Card>
-        <CardHeader>
-          <CardTitle>已连接的电脑</CardTitle>
-          <CardDescription>
-            切换电脑后，文件、终端和会话会随之切换。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="px-0">
-          <Table className="session-table computer-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead>电脑</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {state.computers.map((computer) => (
-                <TableRow key={computer.key}>
-                  <TableCell>
-                    <span className="computer-name">
-                      <Icon name="computer" />
-                      <span>
-                        <strong title={computerName(computer, names)}>
-                          {computerName(computer, names)}
-                        </strong>
-                        <small title={computer.gateway}>
-                          {computer.machine.name} · {computerIdentity(computer)}
-                        </small>
-                      </span>
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge
-                      variant={
-                        computer.machine.online ? "success" : "secondary"
-                      }
-                    >
-                      {computer.machine.online ? "在线" : "离线"}
-                    </StatusBadge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="computer-actions flex justify-end gap-2">
-                      <ComputerName computer={computer} />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={
-                          state.connection?.computer.key === computer.key
-                        }
-                        onClick={() => selectComputer(computer)}
-                      >
-                        {state.connection?.computer.key === computer.key
-                          ? "当前电脑"
-                          : "切换"}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={job.busy}
-                        onClick={async () => {
-                          if (
-                            await dialogs.confirm(
-                              `移除「${computerName(computer, names)}」的连接关系？需要时可重新登录或配对。`,
-                            )
-                          )
-                            void job.run(() => engine.forget(computer));
-                        }}
-                      >
-                        移除
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>当前电脑的 Agent</CardTitle>
-          <CardDescription>
-            {machine?.hostname} · {machine?.platform} · Host{" "}
-            {machine?.hostVersion}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="px-0">
-          {!machine && <LoadState loading />}
-          <Table className="session-table agent-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Agent</TableHead>
-                <TableHead>版本</TableHead>
-                <TableHead>认证状态</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {machine?.agents.map((agent) => (
-                <TableRow key={agent.id}>
-                  <TableCell>
-                    <span className="session-table-title">
-                      <AgentMark agent={agent.id} />
-                      {agent.label}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {agent.installed ? (agent.version ?? "已安装") : "未安装"}
-                  </TableCell>
-                  <TableCell>
-                    {agent.auth?.state === "ok"
-                      ? agent.id === "codex"
-                        ? "使用电脑认证配置"
-                        : "已登录"
-                      : agent.auth?.state === "missing"
-                        ? "需要登录"
-                        : agent.id === "codex"
-                          ? "使用电脑认证配置"
-                          : "登录状态未知"}
-                    {(agent.problem || agent.auth?.hint) && (
-                      <p className="muted">
-                        {agent.problem ?? agent.auth?.hint}
-                      </p>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>配对设备</CardTitle>
-          <CardDescription>
-            撤销后，该设备需要重新配对才能连接。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LoadState {...gateway} />
-          {gateway.error && (
+      <div>
+        {heading("已连接的电脑", "切换电脑后，文件、终端和会话会随之切换。")}
+        {state.computers.map((computer) => {
+          const current = state.connection?.computer.key === computer.key;
+          return (
+            <div className="list-row list-row-static" key={computer.key}>
+              <Icon name="computer" />
+              <div className="min-w-0 flex-1">
+                <div
+                  className="truncate font-medium"
+                  title={computerName(computer, names)}
+                >
+                  {computerName(computer, names)}
+                </div>
+                <div
+                  className="truncate text-xs text-[var(--tertiaryLabel)]"
+                  title={computer.gateway}
+                >
+                  {computer.machine.name} · {computerIdentity(computer)}
+                </div>
+              </div>
+              <StatusText
+                state={computer.machine.online ? "idle" : "offline"}
+                label={computer.machine.online ? "在线" : "离线"}
+              />
+              <div className="flex shrink-0 items-center gap-1">
+                <ComputerName computer={computer} />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={current}
+                  onClick={() => selectComputer(computer)}
+                >
+                  {current ? "当前电脑" : "切换"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={job.busy}
+                  onClick={async () => {
+                    if (
+                      await dialogs.confirm(
+                        `移除「${computerName(computer, names)}」的连接关系？需要时可重新登录或配对。`,
+                      )
+                    )
+                      void job.run(() => engine.forget(computer));
+                  }}
+                >
+                  移除
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div>
+        {heading(
+          "当前电脑的 Agent",
+          `${machine?.hostname ?? ""} · ${machine?.platform ?? ""} · Host ${machine?.hostVersion ?? ""}`,
+        )}
+        {!machine && <LoadState loading />}
+        {machine?.agents.map((agent) => (
+          <div className="list-row list-row-static" key={agent.id}>
+            <AgentMark agent={agent.id} />
+            <span className="w-32 shrink-0 font-medium">{agent.label}</span>
+            <span className="w-28 shrink-0 text-xs text-[var(--secondaryLabel)]">
+              {agent.installed ? (agent.version ?? "已安装") : "未安装"}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-xs text-[var(--secondaryLabel)]">
+              {agent.auth?.state === "ok"
+                ? agent.id === "codex"
+                  ? "使用电脑认证配置"
+                  : "已登录"
+                : agent.auth?.state === "missing"
+                  ? "需要登录"
+                  : agent.id === "codex"
+                    ? "使用电脑认证配置"
+                    : "登录状态未知"}
+              {(agent.problem || agent.auth?.hint) && (
+                <span className="text-[var(--tertiaryLabel)]">
+                  {" · "}
+                  {agent.problem ?? agent.auth?.hint}
+                </span>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div>
+        {heading("配对设备", "撤销后，该设备需要重新配对才能连接。")}
+        <LoadState {...gateway} />
+        {gateway.error && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!online || gateway.loading}
+            onClick={gateway.reload}
+          >
+            重新加载设备
+          </Button>
+        )}
+        {gateway.value && !gateway.value.devices.length && (
+          <EmptyState icon={<MonitorSmartphone />} title="暂无配对设备" />
+        )}
+        {gateway.value?.devices.map((device) => (
+          <div className="list-row list-row-static" key={device.id}>
+            <strong className="min-w-0 flex-1 truncate font-medium">
+              {device.name}
+            </strong>
+            <StatusText
+              state={device.online ? "idle" : "offline"}
+              label={device.online ? "在线" : "离线"}
+            />
             <Button
               variant="outline"
               size="sm"
-              disabled={!online || gateway.loading}
-              onClick={gateway.reload}
-            >
-              重新加载设备
-            </Button>
-          )}
-          {gateway.value && !gateway.value.devices.length && (
-            <EmptyState title="暂无配对设备" />
-          )}
-          {gateway.value?.devices.map((device) => (
-            <div className="computer-device-row" key={device.id}>
-              <strong>{device.name}</strong>
-              <StatusBadge variant={device.online ? "success" : "secondary"}>
-                {device.online ? "在线" : "离线"}
-              </StatusBadge>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!online || job.busy}
-                onClick={async () => {
-                  if (
-                    await dialogs.confirm(
-                      `撤销「${device.name}」的配对？该设备将需要重新配对。`,
-                    )
+              disabled={!online || job.busy}
+              onClick={async () => {
+                if (
+                  await dialogs.confirm(
+                    `撤销「${device.name}」的配对？该设备将需要重新配对。`,
                   )
-                    void job.run(async () => {
-                      await link.call("devices.revoke", {
-                        deviceId: device.id,
-                      });
-                      gateway.reload();
+                )
+                  void job.run(async () => {
+                    await link.call("devices.revoke", {
+                      deviceId: device.id,
                     });
-                }}
-              >
-                撤销配对
-              </Button>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+                    gateway.reload();
+                  });
+              }}
+            >
+              撤销配对
+            </Button>
+          </div>
+        ))}
+      </div>
       <AcpManager />
     </section>
   );

@@ -1,10 +1,3 @@
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-  CardDescription,
-} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -35,14 +28,13 @@ import {
   useClient,
   useConnection,
 } from "./common";
-import { Screen } from "./Video";
+import { Screen, StatusDot } from "./Video";
 import { ComputerName } from "./ComputerName";
 import {
   computerName,
   computerIdentity,
   computerNames,
 } from "./computer-names";
-import "./connection-polish.css";
 
 export function Screens({
   connect,
@@ -66,29 +58,33 @@ export function Screens({
     ].some((value) => value.toLocaleLowerCase().includes(search));
   const found = computers.filter(matches).length;
   return (
-    <div className="overview live-overview screens-overview">
-      <div className="page-heading">
-        <div>
-          <h1>远程桌面</h1>
-          <p className="host-summary">连接你的电脑，继续手边的工作。</p>
+    <div className="screens-page">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold">远程桌面</h1>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            连接你的电脑，继续手边的工作。
+          </p>
         </div>
         <Button onClick={connect}>
           <Icon name="plus" data-icon="inline-start" />
           连接电脑
         </Button>
       </div>
-      <div className="screens-collection-toolbar">
-        <div className="screens-summary">
-          <h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <h2 className="text-xs font-semibold text-muted-foreground">
             {search ? "搜索结果" : "所有电脑"}{" "}
-            <span>{search ? found : computers.length}</span>
+            <span className="tabular-nums">
+              {search ? found : computers.length}
+            </span>
           </h2>
-          <span>
-            <span className={online ? "online-dot" : "screen-idle-dot"} />
+          <span className="inline-flex items-center gap-1.5">
+            <StatusDot on={!!online} />
             {online} 台在线
           </span>
         </div>
-        <InputGroup className="screens-search w-full sm:w-[240px]">
+        <InputGroup className="w-full sm:w-[240px]">
           <InputGroupAddon>
             <Search />
           </InputGroupAddon>
@@ -112,21 +108,21 @@ export function Screens({
         </InputGroup>
       </div>
       {!ready ? (
-        <div className="screens-grid" role="status" aria-label="正在加载电脑">
+        <div
+          className="flex flex-col border-y border-border"
+          role="status"
+          aria-label="正在加载电脑"
+        >
           {[0, 1].map((key) => (
-            <Card key={key} className="gap-0 py-0">
-              <CardHeader>
-                <Skeleton className="h-5 w-40" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-64 w-full" />
-              </CardContent>
-            </Card>
+            <div key={key} className="flex h-14 items-center gap-3 px-1">
+              <Skeleton className="size-4" />
+              <Skeleton className="h-4 w-40" />
+            </div>
           ))}
           <span className="sr-only">正在加载电脑…</span>
         </div>
       ) : computers.length ? (
-        <div className="screens-grid">
+        <div className="flex flex-col border-t border-border">
           {!found && (
             <EmptyState
               title="没有找到这台电脑"
@@ -155,8 +151,8 @@ export function Screens({
         </EmptyState>
       )}
       {!!computers.length && (
-        <div className="screens-collection-note">
-          <span>
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
             <LockKeyhole size={13} />
             端到端加密连接
           </span>
@@ -184,28 +180,28 @@ function ScreenCard({
   const name = computerName(computer, names);
   const { connection, error, retry } = useScreenConnection(computer);
   return (
-    <Card
+    <section
       className={cn(
-        "screen-card grid gap-0 rounded-none px-[24px] py-[18px] ring-0",
+        "screen-row border-b border-border px-1 py-2.5 hover:bg-muted/50",
         hidden && "hidden",
       )}
       data-current={selected || undefined}
       aria-label={`${name}的屏幕`}
     >
-      <CardHeader className="screen-card-heading flex items-center gap-4 px-0">
-        <span className="screen-card-icon">
-          <Icon name="computer" size={20} />
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="shrink-0 text-muted-foreground">
+          <Icon name="computer" size={16} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="screen-device-title">
-            <CardTitle className="truncate" title={name}>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[13px] font-medium" title={name}>
               {name}
-            </CardTitle>
+            </span>
             {selected && <Badge variant="secondary">当前</Badge>}
             <ComputerName computer={computer} iconOnly />
           </div>
-          <CardDescription
-            className="truncate"
+          <div
+            className="truncate text-xs text-muted-foreground tabular-nums"
             title={`${computer.machine.name} · ${computer.machine.id}`}
           >
             {names[computer.key] && (
@@ -215,51 +211,50 @@ function ScreenCard({
               </>
             )}
             {computerIdentity(computer)}
-          </CardDescription>
+          </div>
         </div>
-      </CardHeader>
-      <CardContent className="px-0">
-        {connection && computer.machine.online ? (
-          <Runtime value={connection}>
-            <ConnectedScreen name={name} primaryAction={selected} open={open} />
-          </Runtime>
-        ) : (
-          <div className="screen-card-placeholder" role="status">
-            <div className="screen-connection-copy">
-              <strong>
+      </div>
+      {connection && computer.machine.online ? (
+        <Runtime value={connection}>
+          <ConnectedScreen name={name} primaryAction={selected} open={open} />
+        </Runtime>
+      ) : (
+        <div className="screen-idle" role="status">
+          <div className="flex min-w-0 items-center gap-2">
+            <StatusDot on={false} />
+            <div className="flex min-w-0 flex-col">
+              <span className="text-[13px]">
                 {error
                   ? "暂时无法连接"
                   : computer.machine.online
                     ? "正在连接电脑…"
                     : "电脑离线"}
-              </strong>
-              <p>
+              </span>
+              <span className="text-xs text-muted-foreground">
                 {computer.machine.online
                   ? "正在建立加密连接"
                   : "电脑开机并运行 LinkShell 后即可连接"}
-              </p>
+              </span>
               <ErrorNotice error={error} />
             </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
             {error && (
-              <Button variant="outline" size="sm" onClick={retry}>
+              <Button variant="outline" onClick={retry}>
                 <RefreshCw data-icon="inline-start" />
                 重新连接
               </Button>
             )}
             {!computer.machine.online && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => engine.reconnect()}
-              >
+              <Button variant="outline" onClick={() => engine.reconnect()}>
                 <RefreshCw data-icon="inline-start" />
                 刷新连接
               </Button>
             )}
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -288,21 +283,27 @@ function ConnectedScreen({
       />
     );
   return (
-    <div className="screen-card-placeholder" role="status">
-      {status === "connecting" || status === "reconnecting" ? (
-        <LoaderCircle className="animate-spin" size={32} />
-      ) : (
-        <Icon name="computer" size={20} />
-      )}
-      <strong>
-        {status === "stopped"
-          ? "连接已断开"
-          : status === "reconnecting"
-            ? "正在恢复连接…"
-            : "正在连接电脑…"}
-      </strong>
-      <p>{statusDetail ?? "正在建立加密连接"}</p>
-      <Button variant="link" size="sm" onClick={() => link.reconnectNow()}>
+    <div className="screen-idle" role="status">
+      <div className="flex min-w-0 items-center gap-2">
+        {status === "connecting" || status === "reconnecting" ? (
+          <LoaderCircle className="shrink-0 animate-spin" size={14} />
+        ) : (
+          <StatusDot on={false} />
+        )}
+        <div className="flex min-w-0 flex-col">
+          <span className="text-[13px]">
+            {status === "stopped"
+              ? "连接已断开"
+              : status === "reconnecting"
+                ? "正在恢复连接…"
+                : "正在连接电脑…"}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {statusDetail ?? "正在建立加密连接"}
+          </span>
+        </div>
+      </div>
+      <Button variant="outline" onClick={() => link.reconnectNow()}>
         重新连接
       </Button>
     </div>
@@ -358,8 +359,8 @@ export function ScreenDetail({
   const name = computer ? computerName(computer, names) : "远程桌面";
   return (
     <div className="screen-detail-page">
-      <header className="screen-detail-heading">
-        <div className="screen-detail-identity">
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
           <Button
             variant="ghost"
             size="icon"
@@ -369,9 +370,13 @@ export function ScreenDetail({
           >
             <ArrowLeft />
           </Button>
-          <div>
-            <h1>{name}</h1>
-            {computer && <p>{computerIdentity(computer)}</p>}
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold">{name}</h1>
+            {computer && (
+              <p className="truncate text-xs text-muted-foreground">
+                {computerIdentity(computer)}
+              </p>
+            )}
           </div>
         </div>
         {computer && <ComputerName computer={computer} />}

@@ -27,6 +27,7 @@ import {
   EmptyTitle,
   EmptyDescription,
   EmptyContent,
+  EmptyMedia,
 } from "@/components/ui/empty";
 import { CircleAlert } from "lucide-react";
 
@@ -69,10 +70,18 @@ export const stateLabel = (state: string) =>
     budgetLimited: "预算已用完",
     unknown: "未知",
   })[state] ?? state;
-export function AgentMark({ agent }: { agent: string }) {
+/** sm = list rows (18px), md = headings (24px). The size lives here so no row can crowd its title. */
+export function AgentMark({
+  agent,
+  size = "sm",
+}: {
+  agent: string;
+  size?: "sm" | "md";
+}) {
   const mark = agentMarks[agent.toLowerCase()];
   return (
     <span
+      data-size={size}
       className={`agent-mark ${agent.toLowerCase()} ${mark?.full ? "full-mark" : ""}`}
     >
       {mark ? (
@@ -115,10 +124,12 @@ export function ErrorNotice({ error }: { error?: string }) {
   ) : null;
 }
 export function EmptyState({
+  icon,
   title,
   description,
   children,
 }: {
+  icon?: ReactNode;
   title: string;
   description?: string;
   children?: ReactNode;
@@ -126,6 +137,7 @@ export function EmptyState({
   return (
     <Empty>
       <EmptyHeader>
+        {icon && <EmptyMedia variant="icon">{icon}</EmptyMedia>}
         <EmptyTitle>{title}</EmptyTitle>
         {description && <EmptyDescription>{description}</EmptyDescription>}
       </EmptyHeader>

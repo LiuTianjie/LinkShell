@@ -35,7 +35,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal as Xterm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import "./terminal-polish.css";
 import {
   ErrorNotice,
   EmptyState,
@@ -144,16 +143,15 @@ export function Terminal({
   useEffect(() => {
     if (!mount.current) return;
     const term = new Xterm({
-      fontFamily: "Menlo, Consolas, monospace",
+      fontFamily:
+        '"Berkeley Mono", "SF Mono", ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace',
       fontSize: fontRef.current,
+      lineHeight: 1.3,
+      letterSpacing: 0,
       cursorBlink: true,
+      cursorStyle: "bar",
       scrollback: 10000,
       disableStdin: true,
-      theme: {
-        background: "#17181d",
-        foreground: "#e4e4ec",
-        cursor: "#7d95ff",
-      },
       allowProposedApi: false,
     });
     const fit = new FitAddon();
@@ -161,12 +159,38 @@ export function Terminal({
     activeTerm.current = term;
     fitRef.current = fit;
     term.open(mount.current);
+    // A considered 16-colour palette in Ghostty's muted spirit — soft, legible,
+    // never the harsh VGA primaries. Background/foreground track the app theme.
+    const ansi = {
+      black: "#3b3b45",
+      red: "#e06c75",
+      green: "#8cc265",
+      yellow: "#d8b76c",
+      blue: "#7d95ff",
+      magenta: "#c792ea",
+      cyan: "#5fb3c9",
+      white: "#c7c7d1",
+      brightBlack: "#5c5c68",
+      brightRed: "#ff9a9a",
+      brightGreen: "#a5e075",
+      brightYellow: "#e6c384",
+      brightBlue: "#9aa5ff",
+      brightMagenta: "#ddb2f4",
+      brightCyan: "#7fd3e0",
+      brightWhite: "#f2f2f7",
+    };
     const syncTheme = () => {
       const styles = getComputedStyle(document.documentElement);
+      const bg = styles.getPropertyValue("--code").trim();
+      const fg = styles.getPropertyValue("--codeText").trim();
+      const accent = styles.getPropertyValue("--accent").trim();
       term.options.theme = {
-        background: styles.getPropertyValue("--code").trim(),
-        foreground: styles.getPropertyValue("--codeText").trim(),
-        cursor: styles.getPropertyValue("--accent").trim(),
+        background: bg,
+        foreground: fg,
+        cursor: accent,
+        cursorAccent: bg,
+        selectionBackground: accent + "40",
+        ...ansi,
       };
     };
     syncTheme();
@@ -471,12 +495,12 @@ export function Terminal({
         }
       }}
     >
-      <div className="browser-toolbar terminal-controls">
+      <div className="terminal-controls">
         <span className="terminal-connection" role="status">
           {onlineStatus && restoring ? (
             <LoaderCircle className="animate-spin" size={14} />
           ) : (
-            <span className={canInput ? "online-dot" : "offline-dot"} />
+            <span className={canInput ? "online-dot" : "offline-dot"} aria-hidden="true" />
           )}
           {!onlineStatus
             ? "连接已断开"
@@ -891,7 +915,7 @@ export function Terminals({
           <h1>终端</h1>
           <p className="muted">在电脑上运行，在这里继续。</p>
         </div>
-        <Button disabled={!online} onClick={openCreate}>
+        <Button size="sm" disabled={!online} onClick={openCreate}>
           <Plus data-icon="inline-start" />
           新建终端
         </Button>
@@ -930,12 +954,12 @@ export function Terminals({
             <TabsList
               ref={tabList}
               variant="line"
-              className="terminal-tab-list h-[46px]! min-w-0 flex-1 justify-start overflow-x-auto p-0"
+              className="terminal-tab-list min-w-0 flex-1 justify-start overflow-x-auto p-0"
               aria-label="打开的终端"
             >
               {terminals.map((terminal, index) => (
                 <TabsTrigger
-                  className="h-[46px] flex-none px-4 after:bottom-0!"
+                  className="h-7 flex-none px-3"
                   key={terminal.id}
                   value={terminal.id}
                   title={`${terminal.title || "Shell"} · ${terminal.cwd}${terminal.interrupted ? " · 已中断" : terminal.exitCode != null ? ` · 已退出 ${terminal.exitCode}` : ""}`}
@@ -952,7 +976,7 @@ export function Terminals({
             </TabsList>
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               aria-label="新建另一个终端"
               disabled={!online}
               onClick={openCreate}
@@ -961,7 +985,7 @@ export function Terminals({
             </Button>
           </div>
           <div className="terminal-directory">
-            <FolderOpen aria-hidden="true" size={15} />
+            <FolderOpen aria-hidden="true" size={14} />
             <span title={current?.cwd}>{current?.cwd ?? "正在载入终端…"}</span>
             {stopped && (
               <Badge variant={current.interrupted ? "warning" : current.exitCode ? "destructive" : "secondary"}>
@@ -997,7 +1021,7 @@ export function Terminals({
               )}
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 aria-label={stopped ? "删除当前终端记录" : "关闭当前终端"}
                 title={stopped ? "删除当前终端记录" : "关闭当前终端"}
                 disabled={!current || job.busy || !online}
@@ -1028,7 +1052,7 @@ export function Terminals({
           title="一个随时能回来的终端"
           description="Shell 持续运行在当前电脑。刷新网页后，也能继续查看输出和执行命令。"
         >
-          <Button variant="outline" disabled={!online} onClick={openCreate}>
+          <Button size="sm" disabled={!online} onClick={openCreate}>
             <Plus data-icon="inline-start" />
             创建第一个终端
           </Button>

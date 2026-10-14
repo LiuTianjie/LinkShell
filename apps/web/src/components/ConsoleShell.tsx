@@ -19,8 +19,6 @@ import { readLocal, saveLocal } from "../live/storage";
 import { Icon, type IconName } from "../icons";
 import { Choice } from "./Choice";
 import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
-import { Separator } from "./ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import {
   Sidebar,
@@ -77,35 +75,36 @@ function Navigation({
   const names = useStore(computerNames.store);
   const { setOpenMobile } = useSidebar();
   return (
-    <Sidebar className="console-sidebar top-[56px] bottom-0 h-auto">
-      <SidebarHeader className="console-navigation-header px-3 py-3 [@media(max-height:800px)]:py-2">
+    <Sidebar className="console-sidebar">
+      <SidebarHeader className="console-navigation-header gap-1 px-2 pt-3 pb-1">
         <Button
           variant="ghost"
-          className="workspace-picker h-auto w-full justify-start gap-3 p-3 [@media(max-height:800px)]:min-h-[56px] [@media(max-height:800px)]:p-2"
+          className="workspace-picker h-auto w-full justify-start gap-2 p-1.5"
           onClick={connect}
+          aria-label="连接设置与账号"
         >
-          <span className="workspace-letter">L</span>
+          <img className="workspace-mark" src={appMark} alt="" />
           <span>
-            <strong>
-              {state.source === "official" ? "我的工作空间" : "配对工作空间"}
-            </strong>
+            <strong>LinkShell</strong>
             <small>
               {state.account ??
                 (state.gateway
                   ? state.gateway.replace(/^wss?:\/\//, "")
-                  : "连接你的电脑")}
+                  : state.source === "official"
+                    ? "我的工作空间"
+                    : "连接你的电脑")}
             </small>
           </span>
           <Icon name="down" />
         </Button>
       </SidebarHeader>
-      <SidebarContent className="console-navigation-content gap-[22px] px-3 [@media(max-height:800px)]:gap-5">
+      <SidebarContent className="console-navigation-content gap-4 px-2 pt-2">
         {groups.map((group) => (
-          <SidebarGroup className="gap-2 p-0" key={group.title}>
-            <SidebarGroupLabel className="h-[24px] px-3">
+          <SidebarGroup className="gap-1 p-0" key={group.title}>
+            <SidebarGroupLabel className="h-6 px-2">
               {group.title}
             </SidebarGroupLabel>
-            <SidebarMenu className="gap-1">
+            <SidebarMenu className="gap-px">
               {group.items.map((item) => (
                 <SidebarMenuItem key={item.id}>
                   <SidebarMenuButton
@@ -126,8 +125,7 @@ function Navigation({
           </SidebarGroup>
         ))}
       </SidebarContent>
-      <SidebarFooter className="console-navigation-footer gap-2 px-4 py-3 [@media(max-height:800px)]:py-2">
-        <Separator />
+      <SidebarFooter className="console-navigation-footer gap-2 px-2 pt-2 pb-3">
         <div className="console-computer-picker">
           <span>当前电脑</span>
           <Choice
@@ -207,60 +205,9 @@ export function ConsoleShell({
       >
         跳到内容
       </a>
-      <header className="console-header">
-        <a
-          className="console-brand"
-          href="#view=home"
-          onClick={(event) => {
-            event.preventDefault();
-            navigate("home");
-          }}
-        >
-          <img src={appMark} alt="" />
-          <strong>LinkShell</strong>
-        </a>
-        <div className="console-header-actions">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="切换外观"
-                onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              >
-                {theme === "light" ? <Moon /> : <Sun />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>切换明暗外观</TooltipContent>
-          </Tooltip>
-          <Button variant="ghost" size="icon" aria-label="打开使用文档" asChild>
-            <a
-              href="https://liutianjie.github.io/LinkShell/docs/"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <CircleHelp />
-            </a>
-          </Button>
-          <Separator orientation="vertical" className="h-5" />
-          <Button variant="outline" onClick={connect}>
-            连接设置
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="账号与配对设置"
-            onClick={connect}
-          >
-            <span className="console-avatar">
-              {state.account?.slice(0, 1).toUpperCase() ?? "L"}
-            </span>
-          </Button>
-        </div>
-      </header>
       <SidebarProvider
         className="console-body min-h-0"
-        style={{ "--sidebar-width": "264px" } as CSSProperties}
+        style={{ "--sidebar-width": "232px" } as CSSProperties}
       >
         <Navigation
           view={view}
@@ -276,22 +223,57 @@ export function ConsoleShell({
           <div className="console-context">
             <div>
               <SidebarTrigger aria-label="切换导航" />
-              <span>工作空间</span>
-              <ChevronRight size={13} />
               <strong>{title}</strong>
             </div>
-            <div className="console-current-computer">
-              <Monitor size={14} />
-              <span>
-                {state.connection
-                  ? computerName(state.connection.computer, names)
-                  : "未选择电脑"}
-              </span>
-              {state.connection && (
-                <Badge variant="outline">
-                  {currentComputer?.machine.online ? "在线" : "离线"}
-                </Badge>
-              )}
+            <div className="console-context-actions">
+              <div className="console-current-computer">
+                <Monitor size={14} />
+                <span>
+                  {state.connection
+                    ? computerName(state.connection.computer, names)
+                    : "未选择电脑"}
+                </span>
+                {state.connection && (
+                  <span
+                    className="console-presence"
+                    data-online={currentComputer?.machine.online ? "" : undefined}
+                    role="img"
+                    aria-label={currentComputer?.machine.online ? "在线" : "离线"}
+                  />
+                )}
+              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="切换外观"
+                    onClick={() =>
+                      setTheme(theme === "light" ? "dark" : "light")
+                    }
+                  >
+                    {theme === "light" ? <Moon /> : <Sun />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>切换明暗外观</TooltipContent>
+              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="打开使用文档"
+                asChild
+              >
+                <a
+                  href="https://liutianjie.github.io/LinkShell/docs/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <CircleHelp />
+                </a>
+              </Button>
+              <Button variant="outline" size="sm" onClick={connect}>
+                连接设置
+              </Button>
             </div>
           </div>
           {children}

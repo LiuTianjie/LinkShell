@@ -1,0 +1,376 @@
+@layer components {
+/* Computer list */
+.screens-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px max(20px, calc((100% - 1040px) / 2)) 32px;
+  }
+.screen-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px 24px;
+    min-width: 0;
+    transition: background var(--transition);
+  }
+  /* The status + action group sits flush right, not floating in a wide column. */
+  .screen-row > .screen-idle,
+  .screen-row > .screen-page {
+    justify-self: end;
+  }
+.screen-row[data-current] {
+    background: var(--sidebarAccent);
+  }
+.screen-dot {
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--tertiaryLabel);
+    transition: background 0.14s ease;
+  }
+.screen-dot[data-on] {
+    background: var(--success);
+  }
+.screen-idle,
+  .screen-idle-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+.screen-idle-status {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+.screen-idle-status > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--secondaryLabel);
+  }
+.screen-idle-status strong {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--label);
+  }
+.screen-idle-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+.screen-idle [role="alert"],
+  .screen-start [role="alert"] {
+    max-width: 36rem;
+    overflow-wrap: anywhere;
+  }
+.screen-permission-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-top: 1px solid var(--separator);
+    padding-top: 12px;
+    font-size: 12px;
+    color: var(--secondaryLabel);
+  }
+.screen-permission-details p {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+.screen-permission-details strong {
+    font-weight: 400;
+    color: var(--label);
+  }
+
+/* Viewer */
+.screen-page {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  /* Compact (list-row) viewer: status on the left, actions on the right, one
+     centered row — not the stacked column the full viewer uses. */
+  .screen-page.screen-is-idle {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .screen-is-idle .screen-idle-status {
+    align-items: center;
+  }
+.screen-embedded {
+    min-height: 0;
+  }
+.screen-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    min-width: 0;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--separator);
+  }
+.screen-settings,
+  .screen-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+  }
+.screen-settings {
+    flex: 1 1 300px;
+  }
+.screen-settings > button {
+    max-width: 100%;
+  }
+.screen-view-title {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+    margin-right: auto;
+    font-size: 13px;
+  }
+.screen-view-title > svg {
+    flex-shrink: 0;
+  }
+.screen-view-title > span {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+.screen-stage {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 320px;
+    overflow: hidden;
+    background: var(--fill);
+  }
+.screen-stage iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #000;
+  }
+.screen-start {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: safe center;
+    align-items: center;
+    gap: 12px;
+    padding: 24px;
+    overflow: auto;
+    text-align: center;
+    color: var(--secondaryLabel);
+  }
+.screen-display-mark {
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    background: var(--plain);
+  }
+.screen-start h3 {
+    margin: 0;
+    color: var(--label);
+    font-size: 15px;
+    font-weight: 600;
+  }
+.screen-start p {
+    max-width: 40em;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+.screen-permissions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 16px;
+    font-size: 12px;
+  }
+.screen-start-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+.screen-caption {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--separator);
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+.screen-caption > span:first-child {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+.screen-caption > span:last-child {
+    margin-left: auto;
+  }
+.screen-metrics {
+    font-family: var(--font-mono);
+  }
+.screen-page.screen-focused,
+  .screen-page:fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    width: 100%;
+    height: 100dvh;
+    background: var(--plain);
+  }
+.screen-focused .screen-view-title,
+  .screen-page:fullscreen .screen-view-title {
+    display: flex;
+    flex-basis: 100%;
+  }
+.screen-focused .screen-toolbar,
+  .screen-page:fullscreen .screen-toolbar {
+    flex-shrink: 0;
+  }
+.screen-focused .screen-stage,
+  .screen-page:fullscreen .screen-stage {
+    min-height: 0;
+  }
+
+/* Detail page */
+.screen-detail-page {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    gap: 16px;
+    padding: 20px;
+  }
+.screen-detail-page > .screen-page {
+    flex: 1;
+    min-height: 480px;
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+.screen-detail-page > .screen-page.screen-focused,
+  .screen-detail-page > .screen-page:fullscreen {
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+/* Rows shared with the computer table and device list in App.tsx */
+.computer-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+.computer-name > svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: var(--secondaryLabel);
+  }
+.computer-name > span {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+  }
+.computer-name strong {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 13px;
+    font-weight: 500;
+  }
+.computer-name small {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    color: var(--secondaryLabel);
+  }
+.computer-device-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+  }
+.computer-device-row + .computer-device-row {
+    border-top: 1px solid var(--separator);
+  }
+.computer-device-row > strong {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+@media (max-width: 1050px) {
+.screen-row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+}
+@media (max-width: 720px) {
+.screens-page {
+      padding: 16px;
+    }
+.screen-detail-page {
+      padding: 12px 16px 16px;
+    }
+.screen-stage {
+      min-height: 280px;
+    }
+.screen-settings {
+      flex-basis: 100%;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+.screen-settings > button {
+      width: 100%;
+    }
+.screen-actions {
+      width: 100%;
+    }
+.screen-actions > button:first-child {
+      margin-right: auto;
+    }
+.screen-caption > span:last-child {
+      margin-left: 0;
+    }
+.computer-name > svg {
+      display: none;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+.screen-row {
+      transition: none;
+    }
+}
+}

@@ -44,9 +44,9 @@ export function SessionLookup({
   }, [store, id, lookup.value]);
   if (!lookup.error)
     return (
-      <div className="workspace-load">
+      <div className="flex flex-col items-center gap-2 py-16">
         <LoadState loading />
-        <p className="muted">
+        <p className="text-[13px] text-[var(--secondaryLabel)]">
           {online ? "正在打开会话…" : "连接恢复后将继续打开此会话。"}
         </p>
       </div>

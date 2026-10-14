@@ -1,0 +1,443 @@
+/* Workspace shell: full-height sidebar, inset content panel, 44px context bar, page headings. */
+@layer components {
+  .skip-navigation {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 60;
+    padding: 8px 14px;
+    background: var(--card);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    transform: translateY(-160%);
+  }
+  .skip-navigation:focus {
+    transform: none;
+  }
+
+  .console-root {
+    display: flex;
+    height: 100dvh;
+    overflow: hidden;
+    background: var(--background);
+    font-size: 13px;
+    letter-spacing: -0.003em;
+    -webkit-font-smoothing: antialiased;
+  }
+  .console-body {
+    flex: 1;
+    min-width: 0;
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  /* Sidebar */
+  .console-sidebar {
+    top: 0;
+    bottom: 0;
+    height: auto;
+  }
+  .console-sidebar [data-sidebar="sidebar"] {
+    background: var(--sidebarBackground);
+  }
+  .workspace-picker {
+    min-height: 0;
+    padding: 6px;
+    border-radius: 6px;
+    gap: 8px;
+  }
+  .workspace-mark {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .workspace-picker > span {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+  }
+  .workspace-picker strong {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  .workspace-picker small {
+    display: block;
+    margin-top: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--tertiaryLabel);
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.25;
+  }
+  .workspace-picker > svg {
+    color: var(--tertiaryLabel);
+  }
+  .console-navigation-content [data-slot="sidebar-group-label"] {
+    height: 24px;
+    padding-inline: 8px;
+    color: var(--tertiaryLabel);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .console-navigation-content [data-slot="sidebar-menu-button"] {
+    height: 28px;
+    padding-inline: 8px;
+    gap: 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--secondaryLabel);
+    transition:
+      background-color var(--transition),
+      color var(--transition);
+  }
+  .console-navigation-content [data-slot="sidebar-menu-button"] svg {
+    width: 16px;
+    height: 16px;
+    color: var(--secondaryLabel);
+  }
+  .console-navigation-content [data-slot="sidebar-menu-button"]:hover {
+    background: var(--fill);
+    color: var(--label);
+  }
+  .console-navigation-content [data-slot="sidebar-menu-button"]:hover svg {
+    color: var(--label);
+  }
+  /* Current item: neutral fill plus a short accent bar at the left edge, the
+     Linear way of showing "you are here". */
+  .console-navigation-content
+    [data-slot="sidebar-menu-button"][data-active="true"] {
+    position: relative;
+    background: var(--sidebarAccent);
+    color: var(--label);
+  }
+  .console-navigation-content
+    [data-slot="sidebar-menu-button"][data-active="true"]::before {
+    content: "";
+    position: absolute;
+    left: -2px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 16px;
+    border-radius: 0 2px 2px 0;
+    background: var(--accent);
+  }
+  .console-navigation-content
+    [data-slot="sidebar-menu-button"][data-active="true"]
+    svg {
+    color: var(--label);
+  }
+  .console-navigation-footer {
+    border-top: 0;
+  }
+  .console-computer-picker {
+    display: grid;
+    gap: 4px;
+  }
+  .console-computer-picker > span {
+    padding-inline: 8px;
+    font-size: 11px;
+    color: var(--tertiaryLabel);
+  }
+  .console-help {
+    width: 100%;
+    height: 28px;
+    justify-content: flex-start;
+    gap: 8px;
+    padding-inline: 8px;
+    font-size: 12px;
+    color: var(--secondaryLabel);
+  }
+  .console-help > svg:last-child {
+    margin-left: auto;
+  }
+
+  /* Content panel */
+  .console-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    height: calc(100dvh - 16px);
+    /* The panel floats with an even 8px gutter on every side; the sidebar sits
+       on the app background, so the left gutter reads as one clean seam. */
+    margin: 8px;
+    border: 1px solid var(--separatorStrong);
+    border-radius: 10px;
+    background: var(--plain);
+    /* A whisper of shadow + a top inner highlight so the panel reads as
+       floating above the frame, not pasted onto it. */
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.04),
+      0 4px 16px rgb(0 0 0 / 0.04);
+    /* The panel itself never scrolls; each page scrolls its own region so the
+       composer and tool chrome can stay pinned. */
+    overflow: hidden;
+  }
+  /* List/overview pages (home, projects, computers, resources) scroll as a
+     whole inside the panel; tool pages that manage their own height opt out. */
+  .console-main > .live-overview {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+  .console-context {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    height: 44px;
+    padding: 0 12px 0 16px;
+    background: var(--plain);
+    border-bottom: 1px solid var(--separator);
+    color: var(--secondaryLabel);
+    font-size: 13px;
+  }
+  .console-context > div {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .console-context strong {
+    color: var(--label);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .console-context-actions {
+    gap: 4px;
+  }
+  .console-context [data-slot="button"][data-size="icon"] {
+    width: 28px;
+    height: 28px;
+  }
+  .console-context [data-slot="button"][data-size="sm"] {
+    height: 28px;
+    margin-left: 4px;
+    font-size: 12px;
+  }
+  .console-current-computer {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    margin-right: 6px;
+    padding: 0 8px;
+    gap: 7px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .console-current-computer > span:not(.console-presence) {
+    overflow: hidden;
+    max-width: 240px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .console-presence {
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--tertiaryLabel);
+  }
+  .console-presence[data-online] {
+    background: var(--success);
+  }
+
+  /* Pages */
+  .main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .overview,
+  .live-overview {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 20px max(20px, calc((100% - 1040px) / 2)) 40px;
+  }
+  /* Tool pages that own their height (terminal, ports) fill the panel and let
+     their inner regions scroll, instead of leaving dead space below. */
+  .live-overview:has(> .terminals-page),
+  .live-overview:has(> .ports-page) {
+    padding-bottom: 20px;
+  }
+  .live-overview > .terminals-page,
+  .live-overview > .ports-page {
+    flex: 1;
+    min-height: 0;
+  }
+  .page-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .page-heading h1 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.3;
+  }
+  .page-heading p {
+    margin-top: 4px;
+    color: var(--secondaryLabel);
+    font-size: 13px;
+  }
+  /* The conversation scrolls inside; the composer stays pinned to the panel bottom. */
+  .session-page {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--plain);
+  }
+  .muted {
+    color: var(--secondaryLabel);
+    line-height: 1.6;
+  }
+  .live-overview h2 {
+    margin: 18px 0 8px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .live-overview h3 {
+    margin: 14px 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .form-error {
+    margin-bottom: 12px;
+    color: var(--danger);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .field-hint {
+    margin: 8px 0 16px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .modal-subtitle {
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .console-root [data-slot="card"] {
+    box-shadow: none;
+  }
+  .console-root [data-slot="alert-description"] {
+    overflow-wrap: anywhere;
+  }
+
+  /* Controls inside the panel share one 28px rhythm. */
+  .console-main [data-slot="badge"] {
+    height: 20px;
+    padding: 0;
+    gap: 6px;
+    border: 0;
+    background: transparent;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .console-main [data-slot="badge"][data-variant="info"] {
+    color: var(--running);
+  }
+  .console-main [data-slot="badge"][data-variant="success"] {
+    color: var(--success);
+  }
+  .console-main [data-slot="badge"][data-variant="warning"] {
+    color: var(--warning);
+  }
+  .console-main [data-slot="badge"][data-variant="destructive"] {
+    color: var(--danger);
+  }
+  .console-main [data-slot="badge"][data-variant="outline"] {
+    padding: 0 6px;
+    border: 1px solid var(--separator);
+    border-radius: 4px;
+  }
+  .console-main [data-slot="input-group"] {
+    height: 28px;
+    border-radius: 6px;
+    background: transparent;
+    font-size: 13px;
+  }
+  .console-main [data-slot="button"][data-size="default"] {
+    height: 28px;
+    padding-inline: 10px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .console-main [data-slot="button"][data-size="icon"] {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+  }
+  .console-main [data-slot="tabs-list"][data-variant="line"] {
+    gap: 2px;
+  }
+  .console-main [data-slot="tabs-trigger"] {
+    height: 28px;
+    padding-inline: 10px;
+    font-size: 13px;
+  }
+
+  @media (max-width: 900px) {
+    .console-current-computer > span:not(.console-presence) {
+      max-width: 120px;
+    }
+    .overview,
+    .live-overview {
+      padding-inline: 18px;
+    }
+  }
+  @media (max-width: 767px) {
+    .console-main {
+      height: 100dvh;
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+    }
+    .console-context {
+      padding-inline: 8px 12px;
+    }
+    .console-current-computer {
+      display: none;
+    }
+    .overview,
+    .live-overview {
+      padding-inline: 16px;
+    }
+    .page-heading h1 {
+      font-size: 18px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .live-session * {
+      scroll-behavior: auto;
+    }
+  }
+}

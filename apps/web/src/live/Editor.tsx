@@ -33,7 +33,6 @@ import { AgentInteractions } from "./Acp";
 import { Diff } from "./Timeline";
 import { formatFileSize } from "./file-content";
 import { registerUnsavedWork } from "./unsaved-work";
-import "./resources-polish.css";
 
 export function FileEditor({
   path,

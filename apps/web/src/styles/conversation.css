@@ -1,0 +1,1402 @@
+/* Chat detail: heading, message timeline, markdown, tool/diff/plan cards, async
+   questions, approvals, pinned composer, side panel. Modeled on Claude / Codex
+   Desktop — assistant text flows full width, the user speaks in a quiet bubble,
+   tool work folds into flat hairline rows. One authored value per rule; the
+   markup always renders inside .console-main, so there are no override layers. */
+@layer components {
+  /* ---- Page frame: heading pinned, conversation scrolls, composer pinned ---- */
+  /* One slim header spanning the panel, flush with the context bar above it. */
+  .session-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    gap: 16px;
+    min-height: 48px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--separator);
+    background: var(--plain);
+  }
+  .session-heading > div:first-child {
+    min-width: 0;
+  }
+  .session-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .session-title h1 {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  .session-subtitle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    max-width: 640px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .session-subtitle > span:not(.agent-mark):not(.separator):not(.branch-chip) {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .session-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .session-actions [data-slot="button"] svg {
+    width: 15px;
+    height: 15px;
+  }
+  /* The toolbar button whose panel is open reads as selected (neutral fill). */
+  .session-actions [data-slot="button"][data-active] {
+    background: var(--sidebarAccent);
+    color: var(--label);
+  }
+  @media (max-width: 860px) {
+    /* Keep the labelled panel buttons icon-only when the bar gets tight. */
+    .session-actions [data-slot="button"][data-size="sm"] {
+      font-size: 0;
+      padding-inline: 7px;
+      gap: 0;
+    }
+    .session-actions [data-slot="button"][data-size="sm"] svg {
+      margin: 0;
+    }
+  }
+
+  .handoff-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding: 7px 16px;
+    border-bottom: 1px solid var(--separator);
+    background: var(--inset);
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+
+  .session-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    flex: 1;
+    min-height: 0;
+  }
+  .conversation-column {
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  /* The Virtuoso scroller. Horizontal padding centers the reading column;
+     vertical breathing room lives on the header/footer and item margins so it
+     doesn't confuse Virtuoso's size measurement. */
+  .conversation {
+    flex: 1;
+    min-height: 0;
+    overscroll-behavior: contain;
+  }
+  .conversation > div[data-testid="virtuoso-scroller"],
+  .conversation {
+    scrollbar-gutter: stable;
+  }
+  [data-testid="virtuoso-item-list"] {
+    padding: 20px max(20px, calc((100% - 820px) / 2));
+  }
+  [data-testid="virtuoso-item-list"] > div {
+    padding-bottom: 3px;
+  }
+  /* The header (history loader) and footer (permissions / activity / notices /
+     async) are siblings of the item list, so they need the same centered
+     column padding or their content hugs the far-left edge. */
+  .conversation-history-top,
+  .conversation-footer {
+    padding: 0 max(20px, calc((100% - 820px) / 2));
+  }
+  .conversation-footer:empty {
+    display: none;
+  }
+
+  /* ---- Timeline rhythm ---- */
+  .live-timeline > article,
+  .live-timeline > section,
+  .live-timeline > .notice-card,
+  .live-timeline > [data-slot="alert"] {
+    margin-bottom: 20px;
+  }
+  /* Tool rows and folded summaries stack tightly, like Desktop's working log. */
+  .live-timeline > .tool-record,
+  .live-timeline > .steps-summary,
+  .live-timeline > .thought-block {
+    margin-bottom: 3px;
+  }
+  /* A working row that follows a message gets a little air above it. */
+  .live-timeline > .assistant-message + .tool-record,
+  .live-timeline > .assistant-message + .steps-summary,
+  .live-timeline > .assistant-message + .thought-block,
+  .live-timeline > .user-message + .tool-record,
+  .live-timeline > .user-message + .steps-summary {
+    margin-top: 14px;
+  }
+  /* A message after a working row needs the same breathing space. */
+  .live-timeline > .tool-record + .assistant-message,
+  .live-timeline > .steps-summary + .assistant-message,
+  .live-timeline > .thought-block + .assistant-message {
+    margin-top: 14px;
+  }
+  .live-timeline > article:last-child,
+  .live-timeline > details:last-child {
+    margin-bottom: 0;
+  }
+  .timeline-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 24px 0;
+    color: var(--tertiaryLabel);
+    font-size: 11px;
+  }
+  .timeline-divider::before,
+  .timeline-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--separator);
+  }
+
+  /* ---- User message: a quiet bubble on the right ---- */
+  .user-message {
+    width: fit-content;
+    max-width: 90%;
+    margin-left: auto;
+    padding: 10px 14px;
+    border-radius: 14px 14px 4px 14px;
+    background: var(--userBubble);
+    color: var(--label);
+  }
+  .user-message .markdown {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .user-message .question-reply + .question-reply {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--separator);
+  }
+  .question-reply small {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .question-reply p {
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  /* Actions reveal on hover and take NO vertical space when hidden, so a
+     finished message doesn't leave a dead band beneath it. */
+  .message-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+    max-height: 0;
+    margin-top: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition:
+      opacity var(--transition),
+      max-height var(--transition),
+      margin-top var(--transition);
+  }
+  .user-message:hover + .message-actions,
+  .message-actions:hover,
+  .message-actions:focus-within,
+  .assistant-message:hover .message-actions,
+  .assistant-message:focus-within .message-actions {
+    max-height: 32px;
+    margin-top: 4px;
+    opacity: 1;
+    overflow: visible;
+  }
+  .assistant-message .message-actions {
+    justify-content: flex-start;
+  }
+  .message-time {
+    color: var(--tertiaryLabel);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    padding: 0 4px;
+  }
+  .message-copy,
+  .message-fork {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .message-fork:hover {
+    color: var(--link);
+  }
+  .failed-message-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 12px;
+  }
+  .failed-message-actions > span {
+    flex: 1 1 auto;
+  }
+  .form-error {
+    color: var(--danger);
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---- Assistant message: text flows full width, no container ---- */
+  .assistant-message {
+    max-width: 100%;
+  }
+  .assistant-message > small.muted {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .message-author {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .message-author .agent-mark {
+    animation: author-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes author-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* Agent-to-agent relay message, folded by default. */
+  .agent-message > details {
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--card);
+    font-size: 13px;
+  }
+  .agent-message summary {
+    cursor: pointer;
+    color: var(--secondaryLabel);
+    overflow-wrap: anywhere;
+  }
+  .agent-message .message-label {
+    font-weight: 500;
+    color: var(--label);
+  }
+  .agent-message .markdown {
+    margin-top: 10px;
+  }
+
+  /* ---- Markdown ---- */
+  .markdown {
+    font-size: 14px;
+    line-height: 1.75;
+    color: var(--label);
+    overflow-wrap: anywhere;
+  }
+  .markdown > :first-child { margin-top: 0; }
+  .markdown > :last-child { margin-bottom: 0; }
+  .markdown p { margin: 0 0 12px; }
+  .markdown h1,
+  .markdown h2,
+  .markdown h3,
+  .markdown h4 {
+    margin: 22px 0 10px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .markdown h1 { font-size: 17px; }
+  .markdown h2 { font-size: 15px; }
+  .markdown h3,
+  .markdown h4 { font-size: 14px; }
+  .markdown ul,
+  .markdown ol {
+    margin: 12px 0;
+    padding-left: 22px;
+  }
+  .markdown li { margin: 4px 0; }
+  .markdown li::marker { color: var(--tertiaryLabel); }
+  .markdown a {
+    color: var(--link);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: color-mix(in srgb, var(--link) 40%, transparent);
+  }
+  .markdown a:hover {
+    text-decoration-color: var(--link);
+  }
+  .markdown :not(pre) > code {
+    font-size: 0.86em;
+    font-family: var(--font-mono);
+    background: var(--fill);
+    padding: 1px 5px;
+    border-radius: 5px;
+  }
+  .markdown blockquote {
+    margin: 12px 0;
+    padding: 2px 0 2px 14px;
+    border-left: 2px solid var(--separator);
+    color: var(--secondaryLabel);
+  }
+  .markdown hr {
+    margin: 20px 0;
+    border: 0;
+    border-top: 1px solid var(--separator);
+  }
+  .markdown table {
+    display: block;
+    overflow: auto;
+    width: fit-content;
+    max-width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 13px;
+  }
+  .markdown th,
+  .markdown td {
+    border: 1px solid var(--separator);
+    padding: 7px 12px;
+    text-align: left;
+  }
+  .markdown th {
+    background: var(--fill);
+    font-weight: 600;
+  }
+  .markdown pre {
+    white-space: pre;
+    overflow: auto;
+    max-width: 100%;
+  }
+
+  /* Fenced code: a titled surface with its own copy button. */
+  .code-surface {
+    margin: 14px 0;
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--code);
+  }
+  .code-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 34px;
+    padding: 0 6px 0 14px;
+    border-bottom: 1px solid var(--separator);
+    color: var(--secondaryLabel);
+    font-size: 11px;
+    font-family: var(--font-mono);
+  }
+  .markdown .code-surface pre {
+    margin: 0;
+    padding: 14px;
+    max-height: 520px;
+    tab-size: 2;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--codeText);
+  }
+  .markdown .code-surface pre:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .message-image {
+    max-width: 100%;
+    max-height: 480px;
+    object-fit: contain;
+    border-radius: 10px;
+    margin: 12px 0;
+    border: 1px solid var(--separator);
+  }
+  .message-image-trigger {
+    display: inline-flex;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: zoom-in;
+    border-radius: 10px;
+    transition: opacity var(--transition);
+  }
+  .message-image-trigger:hover {
+    opacity: 0.9;
+  }
+  .message-image-trigger:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .image-lightbox-image {
+    display: block;
+    max-width: 92vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 12px;
+  }
+  .image-lightbox-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 10px;
+    background: var(--plain);
+    box-shadow: var(--shadow-popover);
+  }
+  .message-asset-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .protocol-asset {
+    display: grid;
+    gap: 8px;
+    max-width: 100%;
+  }
+  .protocol-asset audio { max-width: 100%; }
+
+  /* ---- Thought block: a muted quote the reader can expand ---- */
+  .thought-block {
+    margin: 2px 0;
+    color: var(--secondaryLabel);
+    font-size: 13px;
+  }
+  .thought-block > summary {
+    cursor: pointer;
+    padding: 4px 0;
+    color: var(--tertiaryLabel);
+    list-style: none;
+  }
+  .thought-block > summary::-webkit-details-marker { display: none; }
+  .thought-block > summary::before {
+    content: "›";
+    display: inline-block;
+    margin-right: 8px;
+    transition: transform 150ms ease;
+  }
+  .thought-block[open] > summary::before { transform: rotate(90deg); }
+  .thought-block .markdown {
+    margin-top: 6px;
+    padding-left: 13px;
+    border-left: 2px solid var(--separator);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--secondaryLabel);
+  }
+
+  /* ---- Folded run of finished steps: one quiet summary line ---- */
+  .steps-summary {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: 30px;
+    padding: 4px 2px;
+    color: var(--secondaryLabel);
+    font-size: 13px;
+    text-align: left;
+    border-radius: 6px;
+    transition: color 120ms ease;
+  }
+  .steps-summary:hover {
+    color: var(--label);
+  }
+  .steps-summary-icon {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    color: var(--tertiaryLabel);
+  }
+  .steps-summary-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .steps-summary-failed {
+    flex-shrink: 0;
+    color: var(--danger);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .steps-summary-diff {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .steps-summary-diff .diff-add { color: var(--diffAddText); }
+  .steps-summary-diff .diff-del { color: var(--diffDelText); }
+  .steps-summary-chevron {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    color: var(--tertiaryLabel);
+    transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .steps-summary[aria-expanded="true"] .steps-summary-chevron {
+    transform: rotate(90deg);
+  }
+
+  /* ---- Tool record: a flat inline row, like Claude Desktop. No box when
+     folded; a hairline frame appears only once it's open. ---- */
+  .tool-record {
+    border: 1px solid transparent;
+    border-radius: 8px;
+  }
+  .tool-record[open] {
+    border-color: var(--separator);
+    background: var(--card);
+  }
+  .tool-record > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 26px;
+    padding: 3px 6px;
+    margin: 0 -6px;
+    border-radius: 6px;
+    cursor: pointer;
+    list-style: none;
+    color: var(--secondaryLabel);
+    font-size: 13px;
+  }
+  .tool-record > summary::-webkit-details-marker { display: none; }
+  .tool-record > summary:hover {
+    background: var(--fill);
+    color: var(--label);
+  }
+  .tool-record[open] > summary {
+    margin: 0;
+    border-bottom: 1px solid var(--separator);
+    border-radius: 8px 8px 0 0;
+  }
+  .tool-record > summary > strong {
+    flex: 1;
+    min-width: 0;
+    font-weight: 500;
+    color: var(--label);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .tool-record > summary > small {
+    flex-shrink: 0;
+    color: var(--tertiaryLabel);
+    font-size: 11px;
+  }
+  .tool-state {
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    color: var(--tertiaryLabel);
+    font-size: 11px;
+  }
+  .tool-record.in_progress .tool-state {
+    color: var(--running);
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .tool-record.completed > summary > .tool-state { color: var(--success); }
+  .tool-record.failed > summary > .tool-state { color: var(--danger); }
+  /* The opened body is padded; the folded row needs none. */
+  .tool-record[open] > :not(summary) {
+    margin: 12px;
+  }
+  .tool-record > p { font-size: 12px; }
+  .tool-record .muted { font-size: 12px; }
+  .tool-record details {
+    font-size: 12px;
+  }
+  .tool-record details > summary {
+    cursor: pointer;
+    color: var(--secondaryLabel);
+    padding: 2px 0;
+  }
+
+  /* Shared code/output block look (tool output, raw json, notices, service). */
+  .tool-record pre,
+  .notice-card pre,
+  .task-output pre,
+  .service-status,
+  [data-slot="alert"] pre {
+    margin: 8px 0 0;
+    padding: 12px;
+    max-height: 420px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    tab-size: 2;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.65;
+    background: var(--code);
+    color: var(--codeText);
+    border-radius: 6px;
+  }
+  .tool-output-text:first-of-type { margin-top: 0; }
+
+  .resource-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 4px 9px;
+    border: 1px solid var(--separator);
+    border-radius: 6px;
+    background: var(--plain);
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+  .resource-chip:hover {
+    color: var(--link);
+    border-color: color-mix(in srgb, var(--link) 40%, var(--separator));
+  }
+
+  /* ---- Diff ---- */
+  .diff-block {
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--code);
+  }
+  .diff-block > summary {
+    cursor: pointer;
+    min-height: 36px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--secondaryLabel);
+    overflow-wrap: anywhere;
+  }
+  .diff-block[open] > summary { border-bottom: 1px solid var(--separator); }
+  .diff-block > pre {
+    margin: 0;
+    padding: 10px 0;
+    max-height: 460px;
+    overflow: auto;
+    white-space: pre;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--codeText);
+  }
+  .diff-add-line,
+  .diff-remove-line {
+    display: inline-block;
+    min-width: 100%;
+    padding: 0 12px;
+  }
+  .diff-add-line { background: var(--diffAdd); color: var(--diffAddText); }
+  .diff-remove-line { background: var(--diffDel); color: var(--diffDelText); }
+  .before-after {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--separator);
+  }
+  .before-after > div {
+    min-width: 0;
+    background: var(--code);
+  }
+  .before-after small {
+    display: block;
+    padding: 7px 12px;
+    color: var(--secondaryLabel);
+    font-size: 11px;
+    background: var(--card);
+  }
+  .before-after pre {
+    margin: 0;
+    padding: 12px;
+    max-height: 420px;
+    overflow: auto;
+    white-space: pre;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--codeText);
+  }
+
+  /* ---- Plan card ---- */
+  .plan-card {
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: var(--card);
+    font-size: 13px;
+  }
+  .plan-card > strong {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .plan-card ul {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+  }
+  .plan-card li {
+    display: flex;
+    gap: 10px;
+    line-height: 1.6;
+    padding: 3px 0;
+  }
+  .plan-card li > span {
+    flex-shrink: 0;
+    color: var(--running);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- Notice / alert cards ---- */
+  .notice-card {
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: var(--card);
+    overflow-wrap: anywhere;
+  }
+  .notice-card.error { border-color: color-mix(in srgb, var(--danger) 35%, var(--separator)); background: var(--dangerSoft); }
+  .notice-card.warning { border-color: color-mix(in srgb, var(--warning) 35%, var(--separator)); background: var(--waitingSoft); }
+  .notice-card > strong,
+  .notice-card > summary {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .notice-card > summary { cursor: pointer; }
+  .notice-card > p {
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--secondaryLabel);
+  }
+  .notice-card .browser-toolbar {
+    margin: 0 0 2px;
+    gap: 8px;
+  }
+
+  /* ---- Async questions (Codex Desktop) ---- */
+  .live-session .conversation > .async-questions:not(:empty) {
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    padding: 18px;
+    background: var(--card);
+    gap: 18px;
+    margin: 20px 0;
+  }
+  .async-questions:empty { display: none; }
+  .async-questions {
+    display: grid;
+    gap: 14px;
+  }
+  .async-questions small {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .async-question + .async-question {
+    padding-top: 18px;
+    border-top: 1px solid var(--separator);
+  }
+  .async-question [data-slot="field-label"] {
+    align-items: flex-start;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  .async-question [data-slot="field-label"] > svg {
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    flex-shrink: 0;
+    color: var(--secondaryLabel);
+  }
+  .async-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .async-options button {
+    min-height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--separator);
+    border-radius: 6px;
+    background: var(--plain);
+    color: var(--label);
+    font-size: 13px;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .async-options button:hover:not(:disabled) { background: var(--fill); }
+  .async-options button:disabled:not(.chosen) { opacity: 0.45; }
+  .async-options button.chosen {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--primaryForeground);
+  }
+  .async-answer {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0;
+    color: var(--secondaryLabel);
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .async-answer > svg {
+    margin-top: 3px;
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    color: var(--success);
+  }
+
+  /* ---- Approval / permission card ---- */
+  .approval-card {
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    padding: 16px;
+    background: var(--card);
+  }
+  .approval-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    margin-bottom: 13px;
+  }
+  .approval-icon {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    color: var(--warning);
+    background: var(--waitingSoft);
+  }
+  .approval-heading > div {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .approval-heading strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .approval-heading > div > span {
+    display: block;
+    margin-top: 4px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .approval-card pre {
+    margin: 0 0 14px;
+    padding: 12px;
+    max-height: 420px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    tab-size: 2;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--codeText);
+    background: var(--code);
+    border-radius: 6px;
+  }
+  .approval-url,
+  .approval-card > code {
+    overflow-wrap: anywhere;
+  }
+  .question-required {
+    margin-left: 8px;
+    color: var(--secondaryLabel);
+    font-size: 11px;
+    font-weight: 400;
+    white-space: nowrap;
+  }
+  .approval-card .choice-option {
+    border: 1px solid var(--separator);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 0;
+    cursor: pointer;
+    min-width: 0;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .approval-card .choice-option:has([data-state="checked"]) {
+    border-color: var(--accent);
+    background: var(--accentSoft);
+  }
+  .approval-card .choice-option > span:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .approval-card .choice-option [role="radio"],
+  .approval-card .choice-option [role="checkbox"] {
+    margin-top: 3px;
+    flex-shrink: 0;
+  }
+  .live-timeline details > summary,
+  .approval-card details > summary {
+    overflow-wrap: anywhere;
+  }
+  .live-timeline summary:focus-visible,
+  .approval-card summary:focus-visible,
+  .live-timeline pre:focus-visible,
+  .approval-card pre:focus-visible,
+  .task-output pre:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  .question-field {
+    border: 0;
+    margin: 18px 0;
+    padding: 0;
+  }
+  .question-field legend {
+    margin-bottom: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .question-field legend small {
+    font-weight: 400;
+    color: var(--secondaryLabel);
+  }
+  .permission-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 15px;
+  }
+
+  /* ---- Turn activity line ---- */
+  .conversation-activity,
+  .composer-progress {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  .conversation-activity { padding: 12px 0 4px; }
+  .conversation-history-top {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    padding-bottom: 8px;
+  }
+  .conversation-history-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .conversation-history-status > svg {
+    width: 14px;
+    height: 14px;
+    animation: spin 1s linear infinite;
+  }
+  .composer-progress { margin: 0; padding: 0 2px 10px; }
+  .conversation-activity > svg,
+  .composer-progress > svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    animation: spin 1s linear infinite;
+  }
+
+  /* ---- Empty / loading states ---- */
+  /* Loading and empty states fill the column so the composer stays pinned to
+     the bottom instead of floating up to meet the short content. */
+  .conversation-loading {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 0;
+    padding: 24px;
+    color: var(--secondaryLabel);
+  }
+  .conversation-loading-spinner {
+    width: 22px;
+    height: 22px;
+    color: var(--tertiaryLabel);
+    animation: spin 1s linear infinite;
+  }
+  .conversation-loading-label {
+    font-size: 13px;
+    color: var(--secondaryLabel);
+  }
+  .conversation-column > [data-slot="empty"] {
+    flex: 1;
+    min-height: 0;
+  }
+  .conversation-empty {
+    min-height: 260px;
+    max-width: 520px;
+    margin: 6vh auto;
+  }
+
+  /* ---- Composer: pinned to the panel bottom ---- */
+  .composer-wrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex-shrink: 0;
+    padding: 12px max(16px, calc((100% - 820px) / 2)) 14px;
+    background: var(--plain);
+    border-top: 1px solid var(--separator);
+  }
+  /* ErrorNotice renders nothing when empty — don't let it add a gap row. */
+  .composer-wrap > :empty {
+    display: none;
+  }
+  /* Floats just above the composer, pinned to the bottom of the scroll column. */
+  .conversation-jump {
+    position: absolute;
+    left: 50%;
+    bottom: 12px;
+    transform: translateX(-50%);
+    z-index: 2;
+  }
+  .conversation-jump button {
+    border-radius: 999px;
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.14);
+    white-space: nowrap;
+  }
+  .message-queue {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--accentSoft);
+    font-size: 12px;
+    max-height: 16dvh;
+    overflow: auto;
+  }
+  .message-queue > strong {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--link);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .message-queue > div {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 0;
+  }
+  .message-queue > div > span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* The InputGroup supplies radius, border, background and the accent focus
+     ring as utilities; the dashed drag state is the one thing left to CSS. */
+  .composer[data-dragging] {
+    border-color: var(--accent);
+    border-style: dashed;
+  }
+  /* Sizing/scroll the utilities don't cover; padding + font come from the
+     textarea's own utility classes. */
+  .composer textarea {
+    min-height: 46px;
+    max-height: min(240px, 28dvh);
+    overflow-y: auto;
+    field-sizing: fixed;
+  }
+  .composer-drop-hint {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    z-index: 2;
+    border-radius: inherit;
+    background: color-mix(in srgb, var(--plain) 88%, transparent);
+    color: var(--accent);
+    font-size: 14px;
+    pointer-events: none;
+  }
+  .composer-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 8px 8px;
+  }
+  .composer-toolbar > div {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+  }
+  .composer-agent {
+    max-width: 210px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .context-meter {
+    padding: 0 6px;
+    color: var(--tertiaryLabel);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .send-button {
+    border-radius: 8px;
+  }
+  .composer-caption {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 4px 0;
+    color: var(--tertiaryLabel);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .composer-caption > span:last-child { flex-shrink: 0; }
+
+  .attachment-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 12px 0;
+    max-height: 12dvh;
+    overflow: auto;
+  }
+  .attachment-list:empty { display: none; }
+  .attachment-list > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 4px 6px 4px 8px;
+    border: 1px solid var(--separator);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--label);
+    font-size: 12px;
+  }
+  .attachment-list > span > svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    color: var(--secondaryLabel);
+  }
+  .attachment-name {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+  .attachment-list small {
+    color: var(--secondaryLabel);
+    white-space: nowrap;
+  }
+  .attachment-list button {
+    width: 22px;
+    height: 22px;
+    padding: 2px;
+    flex-shrink: 0;
+  }
+
+  .inline-terminal {
+    margin: 0 16px 12px;
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  /* ---- Side panel ---- */
+  .live-side-panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border-left: 1px solid var(--separator);
+    background: var(--plain);
+  }
+  .side-panel-content {
+    flex: 1;
+    min-height: 0;
+    padding: 16px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    overflow-wrap: anywhere;
+  }
+  .side-panel-content h3 {
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .settings-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .settings-panel > p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .settings-panel input,
+  .settings-panel textarea,
+  .settings-panel select,
+  .settings-panel > label,
+  .settings-panel form > label {
+    display: block;
+    margin: 14px 0 8px;
+    font-size: 13px;
+  }
+  .settings-panel label > input,
+  .settings-panel label > select,
+  .settings-panel label > textarea {
+    margin-top: 8px;
+  }
+  .settings-panel textarea { resize: vertical; }
+  .code-input {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    resize: vertical;
+  }
+  .activity-list article {
+    margin: 10px 0;
+    padding: 12px;
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    background: var(--card);
+    transition: border-color var(--transition), background var(--transition);
+  }
+  .activity-list article:hover {
+    border-color: var(--separatorStrong);
+  }
+  .activity-list article[data-selected] {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--separator));
+    background: var(--accentSoft);
+  }
+  .activity-list article > button:first-child {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    min-height: 44px;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .activity-list strong {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.6;
+  }
+  .activity-list small {
+    color: var(--secondaryLabel);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+  .activity-list details { margin-top: 10px; font-size: 12px; }
+  .activity-list pre {
+    font-size: 11px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 990px) {
+    .live-side-panel {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: min(380px, 100%);
+      z-index: 5;
+      box-shadow: -12px 0 32px rgb(0 0 0 / 0.18);
+    }
+  }
+  @media (max-width: 767px) {
+    .session-heading { padding: 10px 14px; }
+    .conversation { padding: 18px 16px 22px; }
+    .composer-wrap { padding: 8px 12px 12px; }
+    .user-message { max-width: 94%; }
+    .live-side-panel { width: 100%; }
+    .composer-agent { max-width: 120px; }
+  }
+  @media (max-width: 640px) {
+    .message-queue > div { flex-wrap: wrap; }
+    .message-queue > div > span { min-width: 100%; }
+    .context-meter { display: none; }
+    .before-after { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .conversation { scroll-behavior: auto; }
+    .message-author .agent-mark,
+    .tool-record.in_progress .tool-state,
+    .conversation-activity > svg,
+    .composer-progress > svg,
+    .conversation-history-status > svg,
+    .conversation-loading-spinner { animation: none; }
+    .steps-summary-chevron { transition: none; }
+  }
+}

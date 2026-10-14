@@ -2,6 +2,13 @@ import { AsyncQuestions } from "./AsyncQuestions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Download, X } from "lucide-react";
+import {
   Children,
   isValidElement,
   createContext,
@@ -18,9 +25,15 @@ import remarkGfm from "remark-gfm";
 import type { ContentBlock, ToolCallContent } from "@linkshell/wire";
 import {
   answeredQuestions,
+  describeSteps,
+  foldStepRuns,
   questionReplies,
+  tallySteps,
+  userMessageText,
+  type Step,
   type TimelineItem,
 } from "@linkshell/client-core";
+import { ChevronRight, Layers } from "lucide-react";
 import {
   AgentMark,
   ErrorNotice,
@@ -29,6 +42,40 @@ import {
   useClient,
   useJob,
 } from "./common";
+
+
+/** A folded run of finished steps — "运行 5 条命令 · 读取 3 个文件", one click open. */
+export function StepsSummary({
+  steps,
+  open,
+  onToggle,
+}: {
+  steps: Step[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const t = tallySteps(steps);
+  const label = describeSteps(t) || `${steps.length} 个步骤`;
+  return (
+    <button
+      type="button"
+      className="steps-summary"
+      aria-expanded={open}
+      onClick={onToggle}
+    >
+      <Layers className="steps-summary-icon" aria-hidden="true" />
+      <span className="steps-summary-label">{label}</span>
+      {t.failed > 0 && <span className="steps-summary-failed">{t.failed} 个失败</span>}
+      {(t.added > 0 || t.removed > 0) && (
+        <span className="steps-summary-diff">
+          <span className="diff-add">+{t.added}</span>{" "}
+          <span className="diff-del">−{t.removed}</span>
+        </span>
+      )}
+      <ChevronRight className="steps-summary-chevron" aria-hidden="true" />
+    </button>
+  );
+}
 
 function CopyText({
   text,
@@ -175,6 +222,76 @@ export function RichText({ text }: { text: string }) {
     </div>
   );
 }
+/** Click any `.message-image` to open it full-size in a centered lightbox.
+    Keeps the download as a corner action rather than the default click. */
+function ImageLightbox({
+  uri,
+  alt,
+  download,
+  onError,
+}: {
+  uri: string;
+  alt: string;
+  download?: string;
+  onError?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <button
+        type="button"
+        className="message-image-trigger"
+        aria-label="查看大图"
+        onClick={() => setOpen(true)}
+      >
+        <img
+          className="message-image"
+          src={uri}
+          alt={alt}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={onError}
+        />
+      </button>
+      <DialogContent
+        className="image-lightbox-content w-auto max-w-[92vw] gap-0 bg-transparent p-0 shadow-none ring-0 sm:max-w-[92vw]"
+        showCloseButton={false}
+      >
+        <DialogTitle className="sr-only">{alt}</DialogTitle>
+        <img
+          className="image-lightbox-image"
+          src={uri}
+          alt={alt}
+          referrerPolicy="no-referrer"
+        />
+        <div className="image-lightbox-actions">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            asChild
+            title="下载原图"
+            aria-label="下载原图"
+          >
+            <a
+              href={uri}
+              download={download ?? (uri.startsWith("data:") ? "image" : undefined)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Download />
+            </a>
+          </Button>
+          <DialogClose asChild>
+            <Button variant="ghost" size="icon-sm" aria-label="关闭">
+              <X />
+            </Button>
+          </DialogClose>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function Picture({
   block,
   sessionId,
@@ -217,24 +334,14 @@ function Picture({
     };
   }, [loadImage, block.uri, block.data, block.mimeType, sessionId, attempt]);
   return uri ? (
-    <a
-      href={uri}
-      download={uri.startsWith("data:") ? "image" : undefined}
-      target="_blank"
-      rel="noreferrer"
-    >
-      <img
-        className="message-image"
-        src={uri}
-        alt="会话图片"
-        loading="lazy"
-        referrerPolicy="no-referrer"
-        onError={() => {
-          setUri(undefined);
-          setError("图片加载失败");
-        }}
-      />
-    </a>
+    <ImageLightbox
+      uri={uri}
+      alt="会话图片"
+      onError={() => {
+        setUri(undefined);
+        setError("图片加载失败");
+      }}
+    />
   ) : (
     <span className="message-asset-state" role="status">
       {error ?? "图片加载中…"}
@@ -300,7 +407,7 @@ function Asset({
       {block.mimeType.startsWith("audio/") ? (
         <audio controls preload="metadata" src={uri} />
       ) : block.mimeType.startsWith("image/") ? (
-        <img src={uri} className="message-image" alt={download ?? "附件"} />
+        <ImageLightbox uri={uri} alt={download ?? "附件"} download={download} />
       ) : null}
       <a className="resource-chip" href={uri} download={download ?? "audio"}>
         下载{download ? ` ${download}` : "音频"}
@@ -445,18 +552,34 @@ function UserBlocks({
       ? blocks[0]!.text
       : undefined;
   const replies = text === undefined ? undefined : questionReplies(text);
-  if (!replies)
-    return <Blocks blocks={blocks} sessionId={sessionId} onFile={onFile} />;
-  return (
-    <>
-      {replies.map((reply, index) => (
-        <div className="question-reply" key={index}>
-          <small>{reply.question}</small>
-          <p>{reply.answer}</p>
-        </div>
-      ))}
-    </>
-  );
+  if (replies)
+    return (
+      <>
+        {replies.map((reply, index) => (
+          <div className="question-reply" key={index}>
+            <small>{reply.question}</small>
+            <p>{reply.answer}</p>
+          </div>
+        ))}
+      </>
+    );
+  // Strip Codex Desktop's image envelope so we show what the user actually
+  // typed, then the images themselves — never the raw "# Files mentioned…" text.
+  const hasImage = blocks.some((block) => block.type === "image");
+  if (hasImage) {
+    const request = userMessageText(blocks);
+    return (
+      <>
+        {request && <RichText text={request} />}
+        {blocks.map((block, index) =>
+          block.type === "image" ? (
+            <Picture key={index} block={block} sessionId={sessionId} />
+          ) : null,
+        )}
+      </>
+    );
+  }
+  return <Blocks blocks={blocks} sessionId={sessionId} onFile={onFile} />;
 }
 
 export function Timeline({
@@ -467,6 +590,7 @@ export function Timeline({
   onFork,
   onTerminal,
   showAsyncQuestions = true,
+  answeredOverride,
 }: {
   items: TimelineItem[];
   sessionId: string;
@@ -475,33 +599,40 @@ export function Timeline({
   onFork?: (id: string) => void;
   onTerminal?: (id: string) => void;
   showAsyncQuestions?: boolean;
+  /** When a parent virtualizes rows, it computes the whole-conversation
+      answered-question map once and passes it so single-item slices still dedup. */
+  answeredOverride?: Map<string, string>;
 }) {
   const actions = useActions();
   const { link } = useConnection();
   const job = useJob();
   const online = useClient((state) => state.status === "online");
   const tail = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const shown = expanded ? items : items.slice(-180);
+  // Which folded step runs the reader has opened in place.
+  const [openSteps, setOpenSteps] = useState<ReadonlySet<string>>(new Set());
+  const toggleSteps = (key: string) =>
+    setOpenSteps((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  // Finished runs of tool/thought steps fold into one summary line, Desktop-style.
+  const rows = foldStepRuns(items, openSteps);
   // The agent's async questions (Codex Desktop) are answered by a message quoting them, here or on the computer.
-  const answered = new Map(
-    items.flatMap((item) =>
-      item.kind === "user" && !item.failed && !item.pending
-        ? item.blocks.flatMap((block) =>
-            block.type === "text" ? answeredQuestions(block.text) : [],
-          )
-        : [],
-    ),
-  );
-  return (
-    <div className="live-timeline">
-      {items.length > shown.length && (
-        <Button variant="link" size="sm" onClick={() => setExpanded(true)}>
-          显示本次已加载的更早消息（{items.length - shown.length}）
-        </Button>
-      )}
-      {shown.map((item) => {
-        if (item.kind === "turn-end" || item.kind === "driver")
+  const answered =
+    answeredOverride ??
+    new Map(
+      items.flatMap((item) =>
+        item.kind === "user" && !item.failed && !item.pending
+          ? item.blocks.flatMap((block) =>
+              block.type === "text" ? answeredQuestions(block.text) : [],
+            )
+          : [],
+      ),
+    );
+  const renderItem = (item: TimelineItem) => {
+    if (item.kind === "turn-end" || item.kind === "driver")
           return (
             <p className="timeline-divider" key={item.id}>
               {item.kind === "driver"
@@ -542,16 +673,6 @@ export function Timeline({
         if (item.kind === "user")
           return (
             <article className="user-message" key={item.id}>
-              <span className="message-label">
-                你{" "}
-                <small title={new Date(item.ts).toLocaleString()}>
-                  {new Date(item.ts).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                  {item.pending ? " · 发送中" : ""}
-                </small>
-              </span>
               <UserBlocks
                 blocks={item.blocks}
                 sessionId={sessionId}
@@ -579,6 +700,17 @@ export function Timeline({
                 </div>
               )}
               <div className="message-actions">
+                <time
+                  className="message-time"
+                  dateTime={new Date(item.ts).toISOString()}
+                  title={new Date(item.ts).toLocaleString()}
+                >
+                  {new Date(item.ts).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                  {item.pending ? " · 发送中" : ""}
+                </time>
                 {item.blocks.some(
                   (block) => block.type === "text" && block.text,
                 ) && (
@@ -612,11 +744,12 @@ export function Timeline({
                   {item.recipientSessionId ?? "当前会话"}
                 </small>
               ) : null}
-              <div className="message-author">
-                <AgentMark agent={agent} />
-                <strong>{agent}</strong>
-                {item.streaming && <span>正在回复…</span>}
-              </div>
+              {item.streaming && (
+                <div className="message-author" role="status">
+                  <AgentMark agent={agent} />
+                  <span>正在回复…</span>
+                </div>
+              )}
               <RichText text={item.text} />
               {showAsyncQuestions && item.questions && !item.streaming && (
                 <AsyncQuestions
@@ -657,20 +790,24 @@ export function Timeline({
               <RichText text={item.text} />
             </details>
           );
-        if (item.kind === "notice" || item.kind === "error")
+        if (item.kind === "notice" || item.kind === "error") {
+          const body = item.kind === "notice" ? item.detail : item.hint;
           return (
             <Alert
-              variant={item.kind === "error" ? "destructive" : "default"}
+              variant={item.kind === "error" ? "destructive" : "info"}
               key={item.id}
             >
               <AlertTitle>
                 {item.kind === "notice" ? item.title : item.message}
               </AlertTitle>
-              <AlertDescription>
-                <pre>{item.kind === "notice" ? item.detail : item.hint}</pre>
-              </AlertDescription>
+              {body ? (
+                <AlertDescription>
+                  <pre>{body}</pre>
+                </AlertDescription>
+              ) : null}
             </Alert>
           );
+        }
         if (item.kind === "plan")
           return (
             <section className="plan-card" key={item.id}>
@@ -731,25 +868,30 @@ export function Timeline({
                       : "◌"}
               </span>
               <strong title={item.title}>{item.title}</strong>
-              <small>
-                {item.detail?.type === "mcp"
-                  ? `MCP · ${item.detail.server}`
-                  : item.detail?.type === "subagent" && item.detail.state
-                    ? {
-                        pending: "待开始",
-                        running: "运行中",
-                        paused: "等待操作",
-                        completed: "已完成",
-                        failed: "失败",
-                        stopped: "已停止",
-                        unknown: "状态未确认",
-                      }[item.detail.state]
-                    : item.status === "in_progress"
-                      ? "执行中"
-                      : item.status === "failed"
-                        ? "执行失败"
-                        : "已完成"}
-              </small>
+              {(() => {
+                // Only show meta when it adds something: the MCP server, a
+                // sub-agent's state, or a non-success outcome. A plain
+                // "completed" badge on every row is just noise (Desktop omits it).
+                const meta =
+                  item.detail?.type === "mcp"
+                    ? `MCP · ${item.detail.server}`
+                    : item.detail?.type === "subagent" && item.detail.state
+                      ? {
+                          pending: "待开始",
+                          running: "运行中",
+                          paused: "等待操作",
+                          completed: null,
+                          failed: "失败",
+                          stopped: "已停止",
+                          unknown: "状态未确认",
+                        }[item.detail.state]
+                      : item.status === "in_progress"
+                        ? "执行中"
+                        : item.status === "failed"
+                          ? "执行失败"
+                          : null;
+                return meta ? <small>{meta}</small> : null;
+              })()}
             </summary>
             {item.detail?.type === "subagent" &&
             item.detail.canCancel &&
@@ -851,7 +993,21 @@ export function Timeline({
             )}
           </details>
         );
-      })}
+  };
+  return (
+    <div className="live-timeline">
+      {rows.map((row) =>
+        row.type === "steps" ? (
+          <StepsSummary
+            key={row.key}
+            steps={row.steps}
+            open={openSteps.has(row.key)}
+            onToggle={() => toggleSteps(row.key)}
+          />
+        ) : (
+          renderItem(row.item)
+        ),
+      )}
       <ErrorNotice error={job.error} />
       <div ref={tail} />
     </div>

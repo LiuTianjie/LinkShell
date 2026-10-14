@@ -1,4 +1,13 @@
-import "./styles.css";
+import "./styles/theme.css";
+import "./styles/base.css";
+import "./styles/common.css";
+import "./styles/shell.css";
+import "./styles/lists.css";
+import "./styles/conversation.css";
+import "./styles/screens.css";
+import "./styles/resources.css";
+import "./styles/terminal.css";
+import "./styles/connect.css";
 import { Dialogs } from "./components/Dialogs";
 import React from "react";
 import { TooltipProvider } from "./components/ui/tooltip";

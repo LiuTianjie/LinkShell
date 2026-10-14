@@ -32,7 +32,6 @@ import {
 } from "./common";
 import { socketBootstrap } from "./Video";
 import { openWebSocket } from "./transport";
-import "./resources-polish.css";
 
 function previewOrigin() {
   const configured = window.__LINKSHELL_CONFIG__?.previewOrigin;

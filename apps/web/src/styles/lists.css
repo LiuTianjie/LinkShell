@@ -1,0 +1,94 @@
+@layer components {
+  /* Dense one-line rows shared by sessions, projects and computers. */
+  .list-row {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    border-top: 1px solid var(--separator);
+    cursor: pointer;
+    transition: background 0.14s ease;
+  }
+  .list-row > * + * {
+    margin-left: 12px;
+  }
+  .list-row:hover,
+  .list-row:focus-within {
+    background: var(--fill);
+  }
+  .list-row-static {
+    cursor: default;
+  }
+  .list-row-title {
+    flex: none;
+    max-width: 46ch;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+    color: var(--label);
+  }
+  .list-row-detail {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--tertiaryLabel);
+  }
+  .list-row-meta {
+    flex: none;
+    font-size: 12px;
+    color: var(--tertiaryLabel);
+    white-space: nowrap;
+  }
+  .list-section-title {
+    display: flex;
+    gap: 6px;
+    padding: 0 12px 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--secondaryLabel);
+  }
+  .list-skeleton {
+    display: grid;
+    gap: 14px;
+    padding: 14px 12px;
+    border-top: 1px solid var(--separator);
+  }
+  /* "Load earlier" reads as a continuation of the list, not a stray button:
+     a full-width quiet row with a hairline above, centered label. */
+  .list-row-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 40px;
+    margin-top: 4px;
+    padding: 0 12px;
+    border-top: 1px solid var(--separator);
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+  }
+  .list-row-more:hover:not(:disabled) {
+    background: var(--fill);
+    color: var(--label);
+  }
+  .list-row-more:disabled {
+    color: var(--tertiaryLabel);
+    cursor: default;
+  }
+  @media (max-width: 720px) {
+    .list-row-detail,
+    .list-row-project {
+      display: none;
+    }
+    .list-row-title {
+      flex: 1;
+    }
+  }
+}

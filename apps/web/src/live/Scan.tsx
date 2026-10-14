@@ -14,6 +14,9 @@ export function Scan({
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const [camera, setCamera] = useState(false);
+  // Camera scanning only makes sense where there's a camera — hide it on
+  // desktops (where it just errors) and show "从图片识别" as the primary way.
+  const [hasCamera, setHasCamera] = useState(false);
   const [starting, setStarting] = useState(false);
   const [reading, setReading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -30,6 +33,22 @@ export function Scan({
     },
     [],
   );
+  useEffect(() => {
+    let alive = true;
+    // A touch device with a camera is the realistic place to scan a QR code;
+    // treat fine-pointer (desktop) devices as camera-less for this flow.
+    const touch = window.matchMedia("(pointer: coarse)").matches;
+    if (!touch || !navigator.mediaDevices?.enumerateDevices) return;
+    void navigator.mediaDevices.enumerateDevices().then(
+      (devices) => {
+        if (alive) setHasCamera(devices.some((d) => d.kind === "videoinput"));
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
   function accept(text: string) {
     if (accepted.current || disabledRef.current) return;
     if (!decodePairingLink(text)) {
@@ -82,28 +101,30 @@ export function Scan({
     };
   }, [camera, disabled]);
   return (
-    <div className="qr-scan connection-scanner">
-      <div className="connection-scan-actions">
-        <Button
-          variant="outline"
-          type="button"
-          disabled={disabled || reading}
-          aria-expanded={camera && !disabled}
-          onClick={() => {
-            accepted.current = false;
-            setSuccess(false);
-            setError(undefined);
-            setStarting(!camera);
-            setCamera(!camera);
-          }}
-        >
-          {camera ? (
-            <X data-icon="inline-start" />
-          ) : (
-            <Camera data-icon="inline-start" />
-          )}
-          {camera ? "关闭摄像头" : "扫描二维码"}
-        </Button>
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap gap-2 [&>*]:flex-1">
+        {hasCamera && (
+          <Button
+            variant="outline"
+            type="button"
+            disabled={disabled || reading}
+            aria-expanded={camera && !disabled}
+            onClick={() => {
+              accepted.current = false;
+              setSuccess(false);
+              setError(undefined);
+              setStarting(!camera);
+              setCamera(!camera);
+            }}
+          >
+            {camera ? (
+              <X data-icon="inline-start" />
+            ) : (
+              <Camera data-icon="inline-start" />
+            )}
+            {camera ? "关闭摄像头" : "扫描二维码"}
+          </Button>
+        )}
         <FilePicker
           accept="image/*"
           disabled={disabled || reading}
@@ -145,27 +166,27 @@ export function Scan({
         </FilePicker>
       </div>
       {camera && !disabled && (
-        <div className="connection-camera">
+        <div className="min-w-0 text-center">
           <video
             ref={video}
-            className="qr-video"
+            className="mb-2 block aspect-[4/3] w-full rounded-lg bg-muted object-cover"
             muted
             playsInline
             aria-label="配对二维码扫描画面"
           />
-          <p className="field-hint" role="status">
+          <p className="text-xs text-muted-foreground" role="status">
             {starting ? "正在打开摄像头…" : "将电脑上的配对二维码放入取景框"}
           </p>
         </div>
       )}
       {reading && (
-        <p className="connection-scan-status" role="status">
+        <p className="flex items-center gap-2 text-xs text-muted-foreground [&>svg]:size-4 [&>svg]:shrink-0" role="status">
           <LoaderCircle className="animate-spin" />
           正在读取二维码图片…
         </p>
       )}
       {success && (
-        <p className="connection-scan-status" role="status">
+        <p className="flex items-center gap-2 text-xs text-muted-foreground [&>svg]:size-4 [&>svg]:shrink-0" role="status">
           <CheckCircle2 />
           已读取二维码，请确认后连接。
         </p>

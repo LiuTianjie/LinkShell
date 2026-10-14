@@ -39,7 +39,7 @@ import {
 } from "./common";
 import { Diff, Timeline } from "./Timeline";
 import { AcpSettings } from "./Acp";
-import { GitBranch, FolderGit2, RefreshCw, Trash2 } from "lucide-react";
+import { GitBranch, RefreshCw, Trash2 } from "lucide-react";
 
 export function Commands({
   commands,
@@ -444,13 +444,26 @@ export function Tasks({
           ? Object.values(records).sort((a, b) => b.startedAt - a.startedAt)
           : (loaded.value?.tasks ?? [])
         ).map((task) => (
-          <article key={task.id}>
+          <article
+            key={task.id}
+            data-selected={
+              (selected?.kind === "task" && selected.id === task.id) ||
+              undefined
+            }
+          >
             <Button
               variant="ghost"
               size="plain"
-              onClick={() => {
-                setSelected({ kind: "task", id: task.id });
-              }}
+              aria-expanded={
+                selected?.kind === "task" && selected.id === task.id
+              }
+              onClick={() =>
+                setSelected((current) =>
+                  current?.kind === "task" && current.id === task.id
+                    ? undefined
+                    : { kind: "task", id: task.id },
+                )
+              }
             >
               <Badge state={task.state} />
               <strong>{task.title}</strong>
@@ -471,15 +484,37 @@ export function Tasks({
                 停止任务
               </Button>
             )}
+            {selected?.kind === "task" && selected.id === task.id && (
+              <TaskOutput
+                key={task.id}
+                sessionId={session.id}
+                taskId={task.id}
+              />
+            )}
           </article>
         ))}
         {loaded.value?.subagents.map((agent) => (
-          <article key={agent.toolCallId}>
+          <article
+            key={agent.toolCallId}
+            data-selected={
+              (selected?.kind === "agent" &&
+                selected.id === agent.toolCallId) ||
+              undefined
+            }
+          >
             <Button
               variant="ghost"
               size="plain"
+              aria-expanded={
+                selected?.kind === "agent" && selected.id === agent.toolCallId
+              }
               onClick={() =>
-                setSelected({ kind: "agent", id: agent.toolCallId })
+                setSelected((current) =>
+                  current?.kind === "agent" &&
+                  current.id === agent.toolCallId
+                    ? undefined
+                    : { kind: "agent", id: agent.toolCallId },
+                )
               }
             >
               <Badge
@@ -535,13 +570,6 @@ export function Tasks({
             description="Agent 启动后台命令或子 Agent 后，会在这里显示状态与输出。"
           />
         )}
-      {selected?.kind === "task" && (
-        <TaskOutput
-          key={selected.id}
-          sessionId={session.id}
-          taskId={selected.id}
-        />
-      )}
       {selected?.kind === "agent" && (
         <SubagentConversation
           key={selected.id}
@@ -784,9 +812,6 @@ export function Worktrees() {
       <div className="worktree-list">
         {loaded.value?.map((entry) => (
           <article className="worktree-entry" key={entry.path}>
-            <span className="worktree-icon">
-              <FolderGit2 aria-hidden="true" />
-            </span>
             <div className="worktree-info">
               <h2>
                 <GitBranch aria-hidden="true" />
@@ -795,10 +820,12 @@ export function Worktrees() {
               <p className="worktree-path" title={entry.path}>
                 {entry.path}
               </p>
-              <p className="muted worktree-meta">
-                {entry.sessions.length} 个会话 ·{" "}
-                {entry.dirty ? "有未提交改动" : "工作区干净"} · {entry.ahead}{" "}
-                个新提交
+              <p className="worktree-meta">
+                <span className={entry.dirty ? "is-dirty" : undefined}>
+                  {entry.dirty ? "有未提交改动" : "工作区干净"}
+                </span>
+                <span>{entry.sessions.length} 个会话</span>
+                <span>{entry.ahead} 个新提交</span>
               </p>
             </div>
             <div className="worktree-actions">

@@ -53,7 +53,6 @@ import {
   useState,
 } from "react";
 import {
-  ArrowDown,
   LoaderCircle,
   MessageSquare,
   Paperclip,
@@ -75,7 +74,6 @@ import {
   AgentMark,
   Badge,
   ErrorNotice,
-  LoadState,
   Modal,
   titleOf,
   useActions,
@@ -86,13 +84,13 @@ import {
 } from "./common";
 import { Permission } from "./Permission";
 import { AgentInteractions } from "./Acp";
-import { Timeline, TimelineNavigation } from "./Timeline";
+import { TimelineNavigation } from "./Timeline";
+import { Conversation } from "./Conversation";
 import { FileView, Files, fileBase64 } from "./Files";
 import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
 import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
 import { ComputerPreview } from "./Video";
-import "./chat-polish.css";
 
 type Panel =
   | "commands"
@@ -175,14 +173,13 @@ export function Session({
   );
   const composer = useRef<HTMLTextAreaElement>(null);
   const upload = useRef<HTMLInputElement>(null);
-  const scroll = useRef<HTMLDivElement>(null);
-  const following = useRef(true);
-  const [awayFromBottom, setAwayFromBottom] = useState(false);
-  const historyAnchor = useRef<{
-    height: number;
-    top: number;
-    firstId?: string;
-  } | null>(null);
+  // The conversation renders even with no messages when something in the footer
+  // needs the user: a pending permission, an async question, or a live turn.
+  const footerActive =
+    !!view?.permissions.length ||
+    !!session.asyncQuestions?.length ||
+    !!view?.turnActive ||
+    !!notices?.length;
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const [dismissedSuggestions, setDismissedSuggestions] = useState<string>();
@@ -217,17 +214,6 @@ export function Session({
     store.getState().openSession(session.id);
     return () => store.getState().closeSession(session.id);
   }, [store, session.id]);
-  useLayoutEffect(() => {
-    const element = scroll.current;
-    if (!element) return;
-    const anchor = historyAnchor.current;
-    if (anchor && view?.items[0]?.id !== anchor.firstId) {
-      element.scrollTop = anchor.top + element.scrollHeight - anchor.height;
-      historyAnchor.current = null;
-    } else if (following.current) {
-      element.scrollTo({ top: element.scrollHeight, behavior: "instant" });
-    }
-  }, [view?.items, view?.permissions, session.asyncQuestions]);
   useEffect(() => {
     try {
       saveLocal(draftKey, draft);
@@ -435,12 +421,7 @@ export function Session({
     setBlocks((current) => current.filter((block) => !blocks.includes(block)));
     setAttachmentError(undefined);
     composer.current?.focus();
-    following.current = true;
-    setAwayFromBottom(false);
-    scroll.current?.scrollTo({
-      top: scroll.current.scrollHeight,
-      behavior: "instant",
-    });
+    // Virtuoso's followOutput keeps us pinned to the newest message after send.
   }
   async function nativePanel(name: "mcp" | "apps") {
     if (!(await setPanel(name))) return;
@@ -463,7 +444,7 @@ export function Session({
               <Badge state={session.state} />
             </div>
             <div className="session-subtitle">
-              <AgentMark agent={session.agent} />
+              <AgentMark agent={session.agent} size="md" />
               <span>{session.agent}</span>
               <span className="separator">/</span>
               <span title={session.cwd}>{session.cwd}</span>
@@ -473,10 +454,49 @@ export function Session({
             </div>
           </div>
           <div className="session-actions">
+            {/* Common panels live right on the bar — the web has the room, so
+                they don't hide inside a ••• menu. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              data-active={panel === "changes" || undefined}
+              onClick={() => setPanel("changes")}
+            >
+              <Icon name="branch" />
+              变更
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              data-active={panel === "files" || undefined}
+              onClick={() => void changeFile()}
+            >
+              <Icon name="folder" />
+              文件
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              data-active={panel === "tasks" || undefined}
+              onClick={() => setPanel("tasks")}
+            >
+              <Icon name="server" />
+              任务
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              data-active={panel === "preview" || undefined}
+              onClick={() => setPanel("preview")}
+            >
+              <Icon name="computer" />
+              预览
+            </Button>
             <Button
               variant="ghost"
               size="icon"
               aria-label="会话命令"
+              title="会话命令"
               onClick={() => setPanel("commands")}
             >
               <Icon name="terminal" />
@@ -485,30 +505,20 @@ export function Session({
               variant="ghost"
               size="icon"
               aria-label="会话设置"
+              title="模型与权限"
+              data-active={panel === "settings" || undefined}
               onClick={() => setPanel("settings")}
             >
               <Icon name="settings" />
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="会话操作">
+                <Button variant="ghost" size="icon" aria-label="更多会话操作">
                   •••
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onSelect={() => setPanel("changes")}>
-                    文件变更
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => void changeFile()}>
-                    项目文件
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setPanel("tasks")}>
-                    后台任务与子 Agent
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setPanel("preview")}>
-                    电脑操作预览
-                  </DropdownMenuItem>
                   {commands.some((command) => command.name === "goal") && (
                     <DropdownMenuItem onSelect={() => setPanel("goal")}>
                       持续目标
@@ -631,145 +641,111 @@ export function Session({
           className={`session-layout ${panel && panel !== "commands" ? "with-panel" : ""}`}
         >
           <div className="conversation-column">
-            <div
-              className="conversation"
-              ref={scroll}
-              onLoadCapture={() => {
-                if (following.current && scroll.current)
-                  scroll.current.scrollTo({
-                    top: scroll.current.scrollHeight,
-                    behavior: "instant",
-                  });
-              }}
-              onScroll={() => {
-                const node = scroll.current;
-                following.current =
-                  !!node &&
-                  node.scrollHeight - node.scrollTop - node.clientHeight < 100;
-                setAwayFromBottom(!following.current);
-              }}
-            >
-              {!ready && (
-                <div className="conversation-loading">
-                  <LoadState loading />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={!online}
-                    onClick={() => {
-                      actions.closeSession(session.id);
-                      actions.openSession(session.id);
-                    }}
-                  >
-                    重新加载会话
-                  </Button>
-                </div>
-              )}
-              {ready &&
-                view &&
-                !view.items.length &&
-                !view.permissions.length &&
-                !session.asyncQuestions?.length && (
-                  <Empty className="conversation-empty">
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">
-                        <MessageSquare />
-                      </EmptyMedia>
-                      <EmptyTitle>从一个具体任务开始</EmptyTitle>
-                      <EmptyDescription>
-                        描述你要完成的工作，也可以添加文件作为上下文。Agent
-                        将在当前项目目录中继续。
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                )}
-              {view && view.startSeq > 0 && (
+            {!ready && (
+              <div className="conversation-loading" role="status">
+                <LoaderCircle className="conversation-loading-spinner" aria-hidden="true" />
+                <span className="conversation-loading-label">正在载入会话…</span>
                 <Button
                   variant="link"
                   size="sm"
-                  disabled={!online || loadingEarlier}
-                  onClick={() =>
-                    void job.run(async () => {
-                      const element = scroll.current;
-                      if (element)
-                        historyAnchor.current = {
-                          height: element.scrollHeight,
-                          top: element.scrollTop,
-                          firstId: view.items[0]?.id,
-                        };
-                      try {
-                        if (!(await actions.loadEarlier(session.id)))
-                          historyAnchor.current = null;
-                      } catch (error) {
-                        historyAnchor.current = null;
-                        throw error;
-                      }
-                    })
-                  }
-                >
-                  {loadingEarlier ? "正在加载历史…" : "加载更早的历史"}
-                </Button>
-              )}
-              {view && (
-                <Timeline
-                  items={view.items}
-                  sessionId={session.id}
-                  agent={session.agent}
-                  showAsyncQuestions={session.asyncQuestions === undefined}
-                  onFile={handleFile}
-                  onFork={setForkAt}
-                  onTerminal={(id) => {
-                    setTerminal(id);
-                    setTerminals(true);
+                  disabled={!online}
+                  onClick={() => {
+                    actions.closeSession(session.id);
+                    actions.openSession(session.id);
                   }}
-                />
-              )}
-              <AsyncQuestions
-                sessionId={session.id}
-                questions={session.asyncQuestions ?? []}
-              />
-              {view?.permissions.map((permission) => (
-                <Permission
-                  key={permission.requestId}
-                  permission={permission}
-                  sessionId={session.id}
-                />
-              ))}
-              <AgentInteractions agent={session.agent} />
-              {view?.turnActive && (
-                <div className="conversation-activity" role="status">
-                  <LoaderCircle aria-hidden="true" />
-                  <span>
-                    {view.permissions.length
-                      ? "等待你确认后继续"
-                      : session.asyncQuestions?.length
-                        ? "Agent 有问题需要你回答"
-                        : "Agent 正在处理任务"}
-                  </span>
-                </div>
-              )}
-              {notices?.map((notice) => (
-                <section
-                  key={notice.id}
-                  className={`notice-card ${notice.severity === "error" ? "error" : ""}`}
-                  role="status"
                 >
-                  <div className="browser-toolbar">
-                    <strong>{notice.title}</strong>
-                    <Button
-                      variant="link"
-                      size="sm"
-                      onClick={() =>
-                        actions.dismissNotice(session.id, notice.id)
-                      }
-                    >
-                      关闭
-                    </Button>
-                  </div>
-                  {notice.description && <p>{notice.description}</p>}
-                </section>
-              ))}
-            </div>
+                  重新加载
+                </Button>
+              </div>
+            )}
+            {ready &&
+              view &&
+              !view.items.length &&
+              !view.permissions.length &&
+              !session.asyncQuestions?.length && (
+                <Empty className="conversation-empty">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <MessageSquare />
+                    </EmptyMedia>
+                    <EmptyTitle>从一个具体任务开始</EmptyTitle>
+                    <EmptyDescription>
+                      描述你要完成的工作，也可以添加文件作为上下文。Agent
+                      将在当前项目目录中继续。
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+            {ready && view && (view.items.length > 0 || footerActive) && (
+              <Conversation
+                view={view}
+                sessionId={session.id}
+                agent={session.agent}
+                showAsyncQuestions={session.asyncQuestions === undefined}
+                online={online}
+                loadingEarlier={!!loadingEarlier}
+                loadEarlier={() => actions.loadEarlier(session.id)}
+                onFile={handleFile}
+                onFork={setForkAt}
+                onTerminal={(id) => {
+                  setTerminal(id);
+                  setTerminals(true);
+                }}
+                footer={
+                  <>
+                    <AsyncQuestions
+                      sessionId={session.id}
+                      questions={session.asyncQuestions ?? []}
+                    />
+                    {view.permissions.map((permission) => (
+                      <Permission
+                        key={permission.requestId}
+                        permission={permission}
+                        sessionId={session.id}
+                      />
+                    ))}
+                    <AgentInteractions agent={session.agent} />
+                    {view.turnActive &&
+                      online &&
+                      !["idle", "error", "offline"].includes(
+                        session.state,
+                      ) && (
+                        <div className="conversation-activity" role="status">
+                          <LoaderCircle aria-hidden="true" />
+                          <span>
+                            {view.permissions.length
+                              ? "等待你确认后继续"
+                              : session.asyncQuestions?.length
+                                ? "Agent 有问题需要你回答"
+                                : "Agent 正在处理任务"}
+                          </span>
+                        </div>
+                      )}
+                    {notices?.map((notice) => (
+                      <section
+                        key={notice.id}
+                        className={`notice-card ${notice.severity === "error" ? "error" : ""}`}
+                        role="status"
+                      >
+                        <div className="browser-toolbar">
+                          <strong>{notice.title}</strong>
+                          <Button
+                            variant="link"
+                            size="sm"
+                            onClick={() =>
+                              actions.dismissNotice(session.id, notice.id)
+                            }
+                          >
+                            关闭
+                          </Button>
+                        </div>
+                        {notice.description && <p>{notice.description}</p>}
+                      </section>
+                    ))}
+                  </>
+                }
+              />
+            )}
             {terminal && !terminals && (
               <div className="inline-terminal">
                 <div className="browser-toolbar">
@@ -786,25 +762,6 @@ export function Session({
               </div>
             )}
             <div className="composer-wrap">
-              {awayFromBottom && (
-                <div className="conversation-jump">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      following.current = true;
-                      setAwayFromBottom(false);
-                      scroll.current?.scrollTo({
-                        top: scroll.current.scrollHeight,
-                        behavior: "instant",
-                      });
-                    }}
-                  >
-                    <ArrowDown data-icon="inline-start" />
-                    回到最新消息
-                  </Button>
-                </div>
-              )}
               <ErrorNotice error={job.error} />
               <ErrorNotice error={sendJob.error} />
               <ErrorNotice error={attachmentError} />
@@ -974,7 +931,7 @@ export function Session({
                 </PopoverContent>
                 <PopoverAnchor asChild>
                   <InputGroup
-                    className="composer"
+                    className="composer rounded-xl bg-[var(--plain)] dark:bg-[var(--plain)]"
                     data-dragging={dragging || undefined}
                     onDragOver={(event) => {
                       if (!event.dataTransfer.types.includes("Files")) return;
@@ -1046,6 +1003,7 @@ export function Session({
                     </div>
                     <InputGroupTextarea
                       ref={composer}
+                      className="px-3.5 pt-3 pb-1 text-sm leading-relaxed"
                       aria-label="消息"
                       aria-describedby="composer-hint"
                       value={draft}

@@ -2,14 +2,6 @@ import { useState } from "react";
 import { Folder, GitBranch, Plus, Search, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardAction,
-} from "@/components/ui/card";
-import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
@@ -17,7 +9,6 @@ import {
 } from "@/components/ui/input-group";
 import {
   AgentMark,
-  Badge,
   EmptyState,
   ErrorNotice,
   LoadState,
@@ -28,6 +19,7 @@ import {
 } from "./common";
 import { sessionNeedsAttention } from "./session-list";
 import { sessionTime } from "./session-time";
+import { StatusText } from "./StatusText";
 
 export function Projects({
   create,
@@ -67,18 +59,20 @@ export function Projects({
     )
     .sort((a, b) => b.lastActiveAt - a.lastActiveAt);
   return (
-    <section className="projects-page">
-      <div className="page-heading">
+    <section className="flex min-w-0 flex-col gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <h1>项目</h1>
-          <p className="muted">按工作目录整理会话，随时接着上次的工作。</p>
+          <h1 className="text-xl font-semibold">项目</h1>
+          <p className="mt-1 text-[13px] text-[var(--secondaryLabel)]">
+            按工作目录整理会话，随时接着上次的工作。
+          </p>
         </div>
         <Button disabled={state.status !== "online"} onClick={() => create()}>
           <Plus data-icon="inline-start" />
           新建会话
         </Button>
       </div>
-      <div className="resource-list-controls">
+      <div className="flex flex-wrap items-center gap-3">
         <InputGroup className="max-w-md">
           <InputGroupAddon>
             <Search />
@@ -101,7 +95,9 @@ export function Projects({
             </InputGroupAddon>
           )}
         </InputGroup>
-        <span className="muted">{projects.length} 个项目</span>
+        <span className="text-xs text-[var(--secondaryLabel)]">
+          {projects.length} 个项目
+        </span>
         <Button
           variant="ghost"
           size="sm"
@@ -113,42 +109,37 @@ export function Projects({
       </div>
       <ErrorNotice error={state.sessionsError ?? job.error} />
       {!state.sessionsLoaded && !state.sessionsError && <LoadState loading />}
-      <div className="project-list">
+      <div>
         {projects.map((project) => {
           const shown =
             query.trim() || expanded[project.cwd]
               ? project.sessions
               : project.sessions.slice(0, 3);
           return (
-            <Card key={project.cwd} className="project-card">
-              <CardHeader>
-                <CardTitle className="project-title">
-                  <Folder />
-                  <span>{project.name}</span>
-                </CardTitle>
-                <CardDescription
-                  className="project-directory"
-                  title={project.cwd}
-                >
-                  {project.cwd}
-                </CardDescription>
-                <CardAction>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={state.status !== "online"}
-                    onClick={() => create(project.cwd)}
+            <section
+              key={project.cwd}
+              className="border-t border-[var(--separator)] py-3"
+            >
+              <div className="flex items-center gap-3 px-3">
+                <Folder className="size-4 shrink-0 text-[var(--secondaryLabel)]" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-[13px] font-semibold">
+                    {project.name}
+                  </h2>
+                  <p
+                    className="truncate font-mono text-xs text-[var(--tertiaryLabel)]"
+                    title={project.cwd}
                   >
-                    <Plus data-icon="inline-start" />
-                    新建会话
-                  </Button>
-                </CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className="project-metadata">
+                    {project.cwd}
+                  </p>
+                </div>
+                <div className="hidden shrink-0 items-center gap-3 text-xs text-[var(--secondaryLabel)] sm:flex">
                   {project.branch && (
-                    <span title={project.branch}>
-                      <GitBranch />
+                    <span
+                      className="flex max-w-40 items-center gap-1 truncate"
+                      title={project.branch}
+                    >
+                      <GitBranch className="size-3.5 shrink-0" />
                       {project.branch}
                     </span>
                   )}
@@ -157,68 +148,82 @@ export function Projects({
                     更新于{sessionTime(project.lastActiveAt)}
                   </time>
                 </div>
-                {shown.length ? (
-                  <div className="project-sessions">
-                    {shown.map((session) => (
-                      <Button
-                        key={session.id}
-                        variant="ghost"
-                        size="plain"
-                        className="project-session-row"
-                        onClick={() => navigate(session.id)}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={state.status !== "online"}
+                  onClick={() => create(project.cwd)}
+                >
+                  <Plus data-icon="inline-start" />
+                  新建会话
+                </Button>
+              </div>
+              {shown.length ? (
+                <div className="mt-2">
+                  {shown.map((session) => (
+                    <Button
+                      key={session.id}
+                      variant="ghost"
+                      size="plain"
+                      className="list-row h-10 min-h-10 w-full justify-start rounded-none text-left font-normal"
+                      onClick={() => navigate(session.id)}
+                    >
+                      <AgentMark agent={session.agent} />
+                      <strong
+                        className="list-row-title"
+                        title={titleOf(session)}
                       >
-                        <AgentMark agent={session.agent} />
-                        <span className="project-session-copy">
-                          <strong title={titleOf(session)}>
-                            {titleOf(session)}
-                          </strong>
-                          <small>
-                            {session.activity?.title ??
-                              session.preview ??
-                              "打开会话继续工作"}
-                          </small>
-                        </span>
-                        <Badge
-                          state={
-                            sessionNeedsAttention(session)
-                              ? "waiting"
-                              : session.state
-                          }
-                        />
-                        <time
-                          dateTime={new Date(session.updatedAt).toISOString()}
-                        >
-                          {sessionTime(session.updatedAt)}
-                        </time>
-                      </Button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="project-empty muted">
-                    当前已加载的记录中没有会话。可以新建会话，或在会话概览加载更早记录。
-                  </p>
-                )}
-                {project.sessions.length > 3 && !query.trim() && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="project-expand"
-                    aria-expanded={!!expanded[project.cwd]}
-                    onClick={() =>
-                      setExpanded((current) => ({
-                        ...current,
-                        [project.cwd]: !current[project.cwd],
-                      }))
-                    }
-                  >
-                    <ChevronDown data-icon="inline-start" />
-                    {expanded[project.cwd]
-                      ? "收起会话"
-                      : `查看其余 ${project.sessions.length - 3} 个会话`}
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+                        {titleOf(session)}
+                      </strong>
+                      <span className="list-row-detail">
+                        {session.activity?.title ??
+                          session.preview ??
+                          "打开会话继续工作"}
+                      </span>
+                      <StatusText
+                        state={
+                          sessionNeedsAttention(session)
+                            ? "waiting"
+                            : session.state
+                        }
+                      />
+                      <time
+                        className="list-row-meta w-14 text-right"
+                        dateTime={new Date(session.updatedAt).toISOString()}
+                      >
+                        {sessionTime(session.updatedAt)}
+                      </time>
+                    </Button>
+                  ))}
+                </div>
+              ) : (
+                <p className="px-3 pt-2 text-[13px] text-[var(--secondaryLabel)]">
+                  当前已加载的记录中没有会话。可以新建会话，或在会话概览加载更早记录。
+                </p>
+              )}
+              {project.sessions.length > 3 && !query.trim() && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1 ml-1"
+                  aria-expanded={!!expanded[project.cwd]}
+                  onClick={() =>
+                    setExpanded((current) => ({
+                      ...current,
+                      [project.cwd]: !current[project.cwd],
+                    }))
+                  }
+                >
+                  <ChevronDown
+                    data-icon="inline-start"
+                    className={expanded[project.cwd] ? "rotate-180" : undefined}
+                  />
+                  {expanded[project.cwd]
+                    ? "收起会话"
+                    : `查看其余 ${project.sessions.length - 3} 个会话`}
+                </Button>
+              )}
+            </section>
           );
         })}
       </div>

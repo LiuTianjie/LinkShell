@@ -1,0 +1,50 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@theme inline {
+  --text-sm: 14px;
+  --text-xs: 12px;
+  --text-base: 16px;
+  --color-background: var(--background);
+  --color-foreground: var(--label);
+  --color-card: var(--card);
+  --color-card-foreground: var(--label);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--label);
+  --color-primary: var(--accent);
+  --color-primary-hover: var(--accentHover);
+  --color-primary-foreground: var(--primaryForeground);
+  --color-link: var(--link);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-sidebar: var(--sidebarBackground);
+  --color-sidebar-foreground: var(--label);
+  --color-sidebar-border: var(--separator);
+  --color-sidebar-accent: var(--sidebarAccent);
+  --color-sidebar-accent-foreground: var(--label);
+  --color-sidebar-ring: var(--accent);
+  --color-sidebar-primary: var(--accent);
+  --color-sidebar-primary-foreground: var(--primaryForeground);
+  --color-secondary: var(--fill);
+  --color-secondary-foreground: var(--label);
+  --color-muted: var(--fill);
+  --color-muted-foreground: var(--secondaryLabel);
+  --color-accent: var(--accentSoft);
+  --color-accent-foreground: var(--label);
+  --color-destructive: var(--danger);
+  --color-border: var(--separator);
+  /* Inputs and other framed controls use the stronger hairline. */
+  --color-input: var(--separatorStrong);
+  --color-ring: var(--accent);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  /* One shared motion curve and a layered popover shadow (Linear-style). */
+  --transition: 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  --shadow-popover:
+    0 0 0 1px var(--separatorStrong), 0 2px 4px rgb(0 0 0 / 0.04),
+    0 8px 24px rgb(0 0 0 / 0.12), 0 16px 48px rgb(0 0 0 / 0.1);
+}

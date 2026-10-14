@@ -38,7 +38,6 @@ import {
   screenQuery,
   type ScreenPreferences,
 } from "./screen-preferences";
-import "./connection-polish.css";
 
 export function ComputerPreview({ sessionId }: { sessionId: string }) {
   const { link, streams } = useConnection();
@@ -66,12 +65,12 @@ export function ComputerPreview({ sessionId }: { sessionId: string }) {
   }, [link, streams, sessionId]);
   return image ? (
     <img
-      className="computer-live-preview"
+      className="w-full rounded-md"
       src={image}
       alt="Agent 当前电脑操作画面"
     />
   ) : (
-    <p className="muted">
+    <p className="text-[13px] text-muted-foreground">
       等待 Agent 的电脑操作画面。当前会话没有画面时，此处保持等待。
     </p>
   );
@@ -250,6 +249,22 @@ function writeStored(key: string, value: string): void {
   } catch {
     // Not kept: the next visit starts at the page's own choice.
   }
+}
+
+export function StatusDot({
+  on,
+  className,
+}: {
+  on: boolean;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn("screen-dot", className)}
+      data-on={on || undefined}
+      aria-hidden="true"
+    />
+  );
 }
 
 export function Screen({
@@ -618,20 +633,14 @@ export function Screen({
     const needsPermission = access?.recording === false;
     return (
       <section
-        className="screen-page screen-card-viewer screen-is-idle"
+        className="screen-page screen-is-idle"
         aria-label={`${title}观看区域`}
       >
         <div className="screen-idle-status" role="status">
           <LoadState {...loaded} />
           {access && (
             <>
-              <span
-                className={
-                  access.supported && !needsPermission
-                    ? "online-dot"
-                    : "screen-idle-dot"
-                }
-              />
+              <StatusDot on={access.supported && !needsPermission} />
               <div>
                 <strong>
                   {!access.supported
@@ -667,7 +676,7 @@ export function Screen({
             </PopoverTrigger>
             <PopoverContent
               align="end"
-              className="screen-options-popover w-80 max-w-[calc(100vw-32px)] gap-4 p-4"
+              className="w-80 max-w-[calc(100vw-32px)] gap-4 p-4"
             >
               <PopoverHeader>
                 <PopoverTitle>画质与权限</PopoverTitle>
@@ -762,8 +771,7 @@ export function Screen({
       ref={surface}
       className={cn(
         "screen-page",
-        embedded && "screen-card-viewer",
-        compact && "screen-is-idle",
+        embedded && "screen-embedded",
         started && "screen-is-started",
         focused && "screen-focused",
       )}
@@ -848,7 +856,7 @@ export function Screen({
           <div className="screen-start">
             {!compact && (
               <div className="screen-display-mark" aria-hidden="true">
-                <Monitor size={48} strokeWidth={1} />
+                <Monitor size={32} strokeWidth={1.5} />
               </div>
             )}
             <LoadState {...loaded} />
@@ -900,7 +908,6 @@ export function Screen({
                 {loaded.value.supported && (
                   <div className="screen-start-actions">
                     <Button
-                      size={compact ? "default" : "lg"}
                       onClick={() => setStarted(true)}
                     >
                       <Play data-icon="inline-start" />
@@ -988,7 +995,7 @@ export function Screen({
       {!compact && (
         <div className="screen-caption">
           <span className="screen-signal">
-            <span className={stats?.width ? "online-dot" : "screen-idle-dot"} />
+            <StatusDot on={!!stats?.width} />
             {stats?.width
               ? stats.live
                 ? "视频直连"

@@ -12,14 +12,13 @@ import { Button } from "@/components/ui/button";
 import { useId, useState } from "react";
 import { useStore } from "zustand";
 import { decodePairingLink } from "@linkshell/wire";
-import { LoaderCircle, LockKeyhole, ShieldCheck } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { engine } from "./engine";
 import { accountClient } from "./account";
 import { deployment, validateGateway, type Source } from "../config";
 import { ErrorNotice, Modal, useJob } from "./common";
 import { Icon } from "../icons";
 import { Scan } from "./Scan";
-import "./connection-polish.css";
 
 export function Connect({ close }: { close: () => void }) {
   const state = useStore(engine.state);
@@ -47,7 +46,7 @@ export function Connect({ close }: { close: () => void }) {
   }
   const accountForm = (
     <form
-      className="connection-form"
+      className="min-w-0 [&_[data-slot=alert-description]]:break-words [&_[data-slot=alert-title]]:break-words [&_[data-slot=field]]:min-w-0"
       aria-busy={job.busy}
       onSubmit={(event) => {
         event.preventDefault();
@@ -67,7 +66,6 @@ export function Connect({ close }: { close: () => void }) {
         {state.account ? (
           <>
             <Alert role="status">
-              <ShieldCheck />
               <AlertTitle className="break-words">{state.account}</AlertTitle>
               <AlertDescription>
                 在电脑运行 <code>linkshell login</code>
@@ -153,7 +151,7 @@ export function Connect({ close }: { close: () => void }) {
               )}
               {job.busy ? "正在连接…" : "登录并连接"}
             </Button>
-            <div className="connection-provider-actions">
+            <div className="grid grid-cols-1 gap-2 min-[381px]:grid-cols-2">
               {(["github", "google"] as const).map((provider) => (
                 <Button
                   variant="outline"
@@ -180,7 +178,7 @@ export function Connect({ close }: { close: () => void }) {
                 </Button>
               ))}
             </div>
-            <p className="field-hint connection-registration">
+            <p className="field-hint flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
               登录状态会自动续期。
               <a
                 href="https://itool.tech/zh/register"
@@ -197,7 +195,7 @@ export function Connect({ close }: { close: () => void }) {
   );
   const pairingForm = (
     <form
-      className="connection-form"
+      className="min-w-0 [&_[data-slot=alert-description]]:break-words [&_[data-slot=alert-title]]:break-words [&_[data-slot=field]]:min-w-0"
       aria-busy={job.busy}
       onSubmit={(event) => {
         event.preventDefault();
@@ -232,7 +230,6 @@ export function Connect({ close }: { close: () => void }) {
     >
       <FieldGroup>
         <Alert role="note">
-          <Icon name="computer" />
           <AlertTitle>先在电脑上生成配对码</AlertTitle>
           <AlertDescription>
             运行 <code>linkshell pair</code>
@@ -320,7 +317,6 @@ export function Connect({ close }: { close: () => void }) {
       </p>
       {state.locked && (
         <Alert>
-          <LockKeyhole />
           <AlertTitle>连接正在另一个标签页中使用</AlertTitle>
           <AlertDescription>
             <p>切换到此页后，另一个标签页会断开连接。</p>

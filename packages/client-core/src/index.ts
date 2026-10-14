@@ -1,4 +1,6 @@
 export * from "./timeline.js";
+export * from "./steps.js";
+export * from "./user-message.js";
 export * from "./agent-messages.js";
 export * from "./host-link.js";
 export * from "./store.js";
