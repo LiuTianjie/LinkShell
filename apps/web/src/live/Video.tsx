@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import {
+  autoScreenWidth,
   screenPreferences,
   screenQuery,
   type ScreenPreferences,
@@ -290,6 +291,11 @@ export function Screen({
   const [fullscreen, setFullscreen] = useState(false);
   const compact = embedded && !started && !focused;
   const surface = useRef<HTMLElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  // What "auto" resolved to for the track now running: shown beside the choice,
+  // and only read when a stream starts — a window being resized must not
+  // renegotiate the picture under the hands using it.
+  const [fitted, setFitted] = useState<string>();
   const [slow, setSlow] = useState(false);
   const [stats, setStats] = useState<{
     width?: number;
@@ -297,6 +303,7 @@ export function Screen({
     fps?: number;
     codec?: string;
     bitrateMbps?: number;
+    presented?: boolean;
     live?: boolean;
   }>();
   // What the viewer page last chose (its own storage is not its own in a sandboxed srcdoc): kept here.
@@ -397,6 +404,7 @@ export function Screen({
           fps?: unknown;
           codec?: unknown;
           bitrateMbps?: unknown;
+          presented?: unknown;
           live?: unknown;
         };
       };
@@ -433,6 +441,7 @@ export function Screen({
             typeof data.codec === "string"
               ? data.codec.slice(0, 50)
               : undefined,
+          presented: data.presented === "gpu",
           live: data.live === true,
         });
         return;
@@ -541,7 +550,22 @@ export function Screen({
         } catch {
           /* H.264 remains available on older browsers. */
         }
-        const query = screenQuery(viewer.token, display, view, codecs);
+        // The stage is measured once, as the stream starts: the picture the
+        // viewer is about to show is the one it has to cover.
+        const width =
+          view.width === "auto"
+            ? autoScreenWidth({
+                width: stage.current?.clientWidth ?? 0,
+                ratio: window.devicePixelRatio,
+              })
+            : view.width;
+        setFitted(view.width === "auto" ? width : undefined);
+        const query = screenQuery(
+          viewer.token,
+          display,
+          { ...view, width },
+          codecs,
+        );
         const response = await httpRequest(streams, port, "/" + query);
         if (response.status !== 200)
           throw new Error(`屏幕页面返回 ${response.status}`);
@@ -597,6 +621,10 @@ export function Screen({
         value={view.width}
         onValueChange={(value) => configure("width", value)}
         options={[
+          {
+            value: "auto",
+            label: fitted ? `随窗口 · ${fitted}` : "随窗口大小",
+          },
           { value: "1280", label: "省带宽 · 1280" },
           { value: "1920", label: "标准 · 1920" },
           { value: "2560", label: "高清 · 2560" },
@@ -610,9 +638,9 @@ export function Screen({
         value={view.maxFps}
         onValueChange={(value) => configure("maxFps", value)}
         options={[
-          { value: "120", label: "自适应 · 最高 120 帧" },
-          { value: "60", label: "最高 60 帧" },
-          { value: "30", label: "最高 30 帧" },
+          { value: "60", label: "流畅 · 最高 60 帧" },
+          { value: "120", label: "高刷 · 最高 120 帧" },
+          { value: "30", label: "省带宽 · 最高 30 帧" },
         ]}
       />
       <Choice
@@ -851,7 +879,7 @@ export function Screen({
           )}
         </div>
       )}
-      <div className="screen-stage">
+      <div className="screen-stage" ref={stage}>
         {!started && (
           <div className="screen-start">
             {!compact && (
@@ -998,7 +1026,9 @@ export function Screen({
             <StatusDot on={!!stats?.width} />
             {stats?.width
               ? stats.live
-                ? "视频直连"
+                ? stats.presented
+                  ? "视频直连 · 自绘"
+                  : "视频直连"
                 : "兼容画面"
               : error && started
                 ? "连接失败，可重试"

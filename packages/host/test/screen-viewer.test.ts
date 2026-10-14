@@ -348,9 +348,9 @@ describe("anchored screen controls", () => {
 });
 
 /** Exercise the shipped layout function, keeping its DOM state between every resize. */
-function changingViewer(native = false) {
+function changingViewer(native = false, presenting = false, ratio = 1) {
   const source = /function layout\(\) \{[\s\S]*?\n\}\n\nfunction place/.exec(viewerPage())![0].replace(/\n\nfunction place$/, "");
-  return new Function("nativePicture", `${VIEWER_LOGIC}
+  return new Function("nativePicture", "presenting", "ratio", `${VIEWER_LOGIC}
     let nativeFrame;
     const nativePost = (message) => { if (message.kind === 'frame') nativeFrame = message.rect; };
     function element(kind) {
@@ -371,8 +371,10 @@ function changingViewer(native = false) {
     const document = { activeElement: null, documentElement: { style: { setProperty() {} } } }, naming = {};
     const bar = element('bar'), menu = element('menu'), connection = element('connection');
     const sheet = element('sheet'), composer = element('composer'), keys = element('keys'), toast = element('toast'), words = { style: {}, scrollHeight: 44 };
-    const video = element('video'), canvas = element('canvas');
+    const video = element('video'), canvas = element('canvas'), gpu = element('gpu');
     const content = { w: 1920, h: 1080 }, pan = { x: 0, y: 0 };
+    const devicePixelRatio = ratio;
+    let presenter = presenting ? { w: content.w, h: content.h, dropped: 0 } : null;
     let area = {}, shown = {}, zoom = 1, fit = 1, live = true, composerOpen = false, keysOpen = false, sheetOpen = false;
     ${source}
     return (next, insets, open = 'menu', fontScale = 1, fullscreen = false, divisions = [], preferred = null) => {
@@ -380,10 +382,10 @@ function changingViewer(native = false) {
       sheetOpen = open === 'sheet'; keysOpen = open === 'keys'; composerOpen = open === 'composer';
       menu.classList.toggle('gone', open !== 'menu'); connection.classList.toggle('gone', true);
       layout();
-      return { area: { ...area }, shown: { ...shown }, nativeFrame, bar: { ...bar.style }, menu: { ...menu.style }, sheet: { ...sheet.style }, keys: { ...keys.style }, composer: { ...composer.style }, video: { ...video.style }, horizontal: menu.classList.contains('horizontal') };
+      return { area: { ...area }, shown: { ...shown }, nativeFrame, bar: { ...bar.style }, menu: { ...menu.style }, sheet: { ...sheet.style }, keys: { ...keys.style }, composer: { ...composer.style }, video: { ...video.style }, gpu: { ...gpu.style }, horizontal: menu.classList.contains('horizontal') };
     };
-  `)(native) as (viewport: Rect, insets: { top: number; right: number; bottom: number; left: number }, open?: string, fontScale?: number, fullscreen?: boolean, divisions?: Array<{ x: number; y: number; width: number; height: number; active: boolean }>, preferred?: { u: number; v: number } | null) => {
-    area: Rect; shown: Rect; nativeFrame?: Rect; bar: Record<string, string>; menu: Record<string, string>; sheet: Record<string, string>; keys: Record<string, string>; composer: Record<string, string>; video: Record<string, string>; horizontal: boolean;
+  `)(native, presenting, ratio) as (viewport: Rect, insets: { top: number; right: number; bottom: number; left: number }, open?: string, fontScale?: number, fullscreen?: boolean, divisions?: Array<{ x: number; y: number; width: number; height: number; active: boolean }>, preferred?: { u: number; v: number } | null) => {
+    area: Rect; shown: Rect; nativeFrame?: Rect; bar: Record<string, string>; menu: Record<string, string>; sheet: Record<string, string>; keys: Record<string, string>; composer: Record<string, string>; video: Record<string, string>; gpu: Record<string, string>; horizontal: boolean;
   };
 }
 
@@ -400,6 +402,35 @@ describe("continuous screen layout changes", () => {
       }
     }
   });
+  it("puts the picture's box on whole device pixels, so the compositor does not resample the text", () => {
+    // A viewport whose fit lands the 1920×1080 picture on fractions of a CSS pixel.
+    const viewport = { x: 0, y: 0, w: 877, h: 611 }, insets = { top: 0, right: 0, bottom: 0, left: 0 };
+    const plain = changingViewer(false, false, 1)(viewport, insets);
+    const retina = changingViewer(false, false, 2)(viewport, insets);
+    for (const [ratio, box] of [[1, plain.video], [2, retina.video]] as const)
+      for (const side of ["width", "height", "left", "top"] as const) {
+        const value = side === "left" || side === "top" ? /translate\(([-\d.]+)px,([-\d.]+)px\)/.exec(box.transform ?? "")?.[side === "left" ? 1 : 2] : box[side]?.replace("px", "");
+        if (value === undefined) continue;
+        // Whole device pixels: the value times the ratio is an integer.
+        expect(Math.abs(Number(value) * ratio - Math.round(Number(value) * ratio))).toBeLessThan(1e-9);
+      }
+    // The place it is given is still the place the controls are laid out against.
+    expect(retina.area).toEqual(plain.area);
+  });
+
+  it("gives this page's own presenter the same place it gives the browser's video", () => {
+    const viewport = { x: 0, y: 0, w: 950, h: 670 }, insets = { top: 66, right: 0, bottom: 34, left: 0 };
+    const browser = changingViewer(false, false, 2)(viewport, insets);
+    const own = changingViewer(false, true, 2)(viewport, insets);
+    // The canvas that draws the frames gets exactly what the <video> would have got, and the
+    // picture's place on the page (what the pointer and controls are measured against) is unchanged.
+    expect(own.gpu).toEqual(browser.video);
+    expect(own.shown).toEqual(browser.shown);
+    expect(own.area).toEqual(browser.area);
+    // The element that is not showing is left alone rather than given a stale box.
+    expect(own.video).toEqual({});
+  });
+
   it("keeps authored control sizes when system text size changes", () => {
     const run = changingViewer();
     const viewport = { x: 0, y: 0, w: 950, h: 670 }, insets = { top: 0, right: 70, bottom: 0, left: 0 };
@@ -960,4 +991,177 @@ it("moves the orb between tabletop panes and preserves its position when unfolde
   ui.set({ divisions: [{ ...division, active: false }] });
   expect(ui.state().orb.x).toBeCloseTo(ball.x);
   expect(ui.state().orb.y).toBeCloseTo(ball.y);
+});
+
+/**
+ * Drive the shipped presenter (the frames taken from the decoder and drawn by this page) against a
+ * stand-in WebGPU and MediaStreamTrackProcessor: what matters is which frames reach the screen,
+ * which are dropped, and that every frame is closed.
+ */
+function viewerPresenter({ gpuAvailable = true, processorAvailable = true, failDraw = false } = {}) {
+  const page = viewerPage(), start = page.indexOf("// ---- Presenting the track's frames");
+  const source = page.slice(start, page.indexOf("\n/** Which of the three the picture", start));
+  return new Function("gpuAvailable", "processorAvailable", "failDraw", `${VIEWER_LOGIC}
+    const drawn = [], closed = [], diagnoses = [];
+    let frames = [], waiting = null, beats = [], ended = null;
+    const requestAnimationFrame = (fn) => { beats.push(fn); return beats.length; };
+    function element(id) {
+      const classes = new Set(id === 'gpu' ? ['gone'] : []);
+      return { style: {}, width: 0, height: 0,
+        classList: { contains: (n) => classes.has(n), add: (n) => classes.add(n), remove: (n) => classes.delete(n), toggle: (n, on) => { if (on) classes.add(n); else classes.delete(n); } },
+        getContext: (kind) => kind === 'webgpu' && gpuAvailable ? { configure() {}, getCurrentTexture: () => ({ createView: () => ({}) }) } : null };
+    }
+    const gpu = element('gpu'), video = element('video'), canvas = element('canvas');
+    const content = { w: 0, h: 0 };
+    let live = false, blocked = true, rtc = { pc: {} }, said = null, laidOut = 0, patienceCleared = 0, patience = 0;
+    const say = (text) => { said = text; }, layout = () => { laidOut += 1; }, play = () => {};
+    const clearTimeout = () => { patienceCleared += 1; };
+    const send = (message) => { if (message.t === 'rtc.diagnosis') diagnoses.push(message.reason); };
+    const nativePicture = false, query = new URLSearchParams();
+    const refresh = () => {};
+    const show = (track) => { live = track; video.classList.toggle('gone', !track || !!presenter); gpu.classList.toggle('gone', !presenter); };
+    const device = {
+      createShaderModule: () => ({}), createRenderPipeline: () => ({ getBindGroupLayout: () => ({}) }),
+      createSampler: () => ({}), createBindGroup: () => ({}),
+      importExternalTexture: ({ source }) => { if (failDraw) throw new Error('no external texture'); return { source }; },
+      createCommandEncoder: () => ({ beginRenderPass: () => ({ setPipeline() {}, setBindGroup() {}, draw() {}, end() {} }), finish: () => ({}) }),
+      queue: { submit() {} },
+    };
+    // Absent pieces are absent properties, the way a browser without them presents itself.
+    const navigator = gpuAvailable ? { gpu: { requestAdapter: async () => ({ requestDevice: async () => device }), getPreferredCanvasFormat: () => 'bgra8unorm' } } : {};
+    const window = processorAvailable ? { MediaStreamTrackProcessor: true } : {};
+    class MediaStreamTrackProcessor {
+      constructor() {
+        this.readable = { getReader: () => ({ read: () => new Promise((resolve) => {
+          if (frames.length) return resolve(frames.shift());
+          waiting = resolve;
+        }) }) };
+      }
+    }
+    const track = { addEventListener: (name, fn) => { if (name === 'ended') ended = fn; } };
+    ${source}
+    const arrive = (w, h) => {
+      const frame = { displayWidth: w, displayHeight: h, close() { closed.push(this); } };
+      const message = { value: frame, done: false };
+      if (waiting) { const resolve = waiting; waiting = null; resolve(message); } else frames.push(message);
+      return frame;
+    };
+    const beat = () => { const due = beats; beats = []; for (const fn of due) fn(); };
+    return {
+      begin: () => presentTrack(track),
+      arrive, beat, end: () => ended && ended(),
+      stop: (reason) => stopPresenting(reason),
+      state: () => ({ presenting: !!presenter, dropped: presenter && presenter.dropped, shown: presenter && presenter.shown,
+        gpuSize: { w: gpu.width, h: gpu.height }, content: { ...content }, live,
+        gpuHidden: gpu.classList.contains('gone'), videoHidden: video.classList.contains('gone'),
+        closed: closed.length, diagnoses: [...diagnoses], said, laidOut, patienceCleared }),
+      settle: () => new Promise((resolve) => setTimeout(resolve, 0)),
+    };
+  `)(gpuAvailable, processorAvailable, failDraw) as {
+    begin: () => Promise<boolean>;
+    arrive: (w: number, h: number) => { close: () => void };
+    beat: () => void;
+    end: () => void;
+    stop: (reason?: string) => void;
+    state: () => { presenting: boolean; dropped: number | null; shown: number | null; gpuSize: { w: number; h: number }; content: { w: number; h: number }; live: boolean; gpuHidden: boolean; videoHidden: boolean; closed: number; diagnoses: string[]; said: string | null; laidOut: number; patienceCleared: number };
+    settle: () => Promise<void>;
+  };
+}
+
+describe("presenting the track's frames from the decoder", () => {
+  it("shows the newest frame and drops the ones the display never asked for", async () => {
+    const own = viewerPresenter();
+    expect(await own.begin()).toBe(true);
+    await own.settle();
+    // Three frames arrive between two refreshes of the screen: only the last is drawn.
+    own.arrive(1920, 1080);
+    await own.settle();
+    own.arrive(1920, 1080);
+    own.arrive(1920, 1080);
+    await own.settle();
+    own.beat();
+    expect(own.state().shown).toBe(1);
+    expect(own.state().dropped).toBe(2);
+    // Every frame is released, drawn or not: a VideoFrame left open holds a decoder buffer.
+    expect(own.state().closed).toBe(3);
+  });
+
+  it("takes the picture's size from the frame, ends the wait, and lays the page out again", async () => {
+    const own = viewerPresenter();
+    await own.begin();
+    await own.settle();
+    own.arrive(2560, 1440);
+    await own.settle();
+    own.beat();
+    const after = own.state();
+    expect(after.content).toEqual({ w: 2560, h: 1440 });
+    expect(after.gpuSize).toEqual({ w: 2560, h: 1440 });
+    // A frame of its own is the picture arriving: the "connecting" note goes and the wait is cleared.
+    expect(after.said).toBe("");
+    expect(after.patienceCleared).toBeGreaterThan(0);
+    expect(after.live).toBe(true);
+    expect(after.gpuHidden).toBe(false);
+    expect(after.videoHidden).toBe(true);
+    // The sender changing resolution moves the canvas, without a second layout for the same size.
+    const laidOut = after.laidOut;
+    own.arrive(2560, 1440);
+    await own.settle();
+    own.beat();
+    expect(own.state().laidOut).toBe(laidOut);
+    own.arrive(1280, 720);
+    await own.settle();
+    own.beat();
+    expect(own.state().gpuSize).toEqual({ w: 1280, h: 720 });
+    expect(own.state().laidOut).toBeGreaterThan(laidOut);
+  });
+
+  it("leaves the browser's own video in place where the pieces are missing", async () => {
+    for (const missing of [{ gpuAvailable: false }, { processorAvailable: false }]) {
+      const own = viewerPresenter(missing);
+      expect(await own.begin()).toBe(false);
+      expect(own.state().presenting).toBe(false);
+      expect(own.state().gpuHidden).toBe(true);
+    }
+  });
+
+  it("falls back to the video when a draw fails or the track ends, and says why", async () => {
+    const own = viewerPresenter({ failDraw: true });
+    expect(await own.begin()).toBe(true);
+    await own.settle();
+    own.arrive(1920, 1080);
+    await own.settle();
+    own.beat();
+    const after = own.state();
+    expect(after.presenting).toBe(false);
+    expect(after.gpuHidden).toBe(true);
+    expect(after.closed).toBe(1);
+    expect(after.diagnoses.join(" ")).toContain("gpu presentation stopped");
+
+    const ending = viewerPresenter();
+    await ending.begin();
+    await ending.settle();
+    ending.arrive(1920, 1080);
+    await ending.settle();
+    ending.beat();
+    expect(ending.state().presenting).toBe(true);
+    ending.end();
+    expect(ending.state().presenting).toBe(false);
+    expect(ending.state().gpuHidden).toBe(true);
+  });
+
+  it("closes a frame still in the mailbox when it stops, and stopping twice is harmless", async () => {
+    const own = viewerPresenter();
+    await own.begin();
+    await own.settle();
+    own.arrive(1920, 1080);
+    await own.settle();
+    // Not drawn yet: the frame is in the mailbox when the presenter goes.
+    expect(own.state().closed).toBe(0);
+    own.stop("a reconnect");
+    expect(own.state().closed).toBe(1);
+    expect(own.state().presenting).toBe(false);
+    const diagnoses = own.state().diagnoses.length;
+    own.stop("again");
+    expect(own.state().diagnoses.length).toBe(diagnoses);
+  });
 });

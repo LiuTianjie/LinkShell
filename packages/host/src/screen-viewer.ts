@@ -47,6 +47,8 @@ const STYLE = String.raw`
   #stage.presenting #pointer { opacity: 0 !important; }
   canvas, video { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
   video { object-fit: fill; pointer-events: none; }
+  #gpu { pointer-events: none; }
+  .native-picture #gpu { visibility: hidden; }
   #pointer { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 50%; pointer-events: none;
     border: 2px solid rgba(255,255,255,0.95); box-shadow: 0 0 0 1px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(0,0,0,0.35);
     opacity: 0; transition: opacity 0.3s; will-change: transform; }
@@ -428,7 +430,7 @@ function cleanShortcuts(list) {
 
 const BODY = String.raw`
 const $ = (id) => document.getElementById(id);
-const stage = $("stage"), picture = $("picture"), canvas = $("screen"), ctx = canvas.getContext("2d"), video = $("video"), pointer = $("pointer");
+const stage = $("stage"), picture = $("picture"), canvas = $("screen"), ctx = canvas.getContext("2d"), video = $("video"), gpu = $("gpu"), pointer = $("pointer");
 const note = $("note"), bar = $("bar"), controlShell = $("control-shell"), orb = $("orb"), menu = $("menu"), connection = $("connection"), toast = $("toast"), keys = $("keys"), typing = $("typing"), shortcut = $("shortcut");
 const sheet = $("sheet"), actions = $("actions"), maker = $("maker"), naming = $("makername"), composer = $("composer"), words = $("words");
 const query = new URLSearchParams(location.search);
@@ -668,7 +670,18 @@ function connect(iceServers) {
     if ("jitterBufferTarget" in receiver) receiver.jitterBufferTarget = 0;
     if ("playoutDelayHint" in receiver) receiver.playoutDelayHint = 0;
     video.srcObject = streams[0] || new MediaStream([track]);
+    // The <video> starts either way: it is what shows the picture where this page cannot present
+    // the frames itself, and what it falls back to if the presenter stops. Taking the frames is
+    // tried alongside it, and the <video> is hidden only once frames are actually coming.
     play();
+    presentTrack(track).then(
+      (presenting) => {
+        if (!presenting || rtc !== mine) return stopPresenting();
+        video.classList.add("gone");
+        gpu.classList.remove("gone");
+      },
+      () => stopPresenting(),
+    );
   };
   pc.ondatachannel = ({ channel }) => {
     mine.channels[channel.label] = channel;
@@ -735,6 +748,7 @@ function requestRelay() {
 
 function drop() {
   clearTimeout(patience);
+  stopPresenting();
   if (!rtc) return;
   clearTimeout(rtc.away);
   const pc = rtc.pc;
@@ -776,6 +790,13 @@ if (wantVideo) for (const name of ["pointerup", "touchend", "click", "keydown"])
 /** The track's picture has a size: at its first frame, and whenever the sender changes its resolution. */
 function sized() {
   if (!rtc || !video.videoWidth) return;
+  // While this page presents the frames itself, the size that counts is the frame's own: the
+  // <video> is kept running as the fallback but is not what is on screen.
+  if (presenter) {
+    clearTimeout(patience);
+    if (!live) show(true);
+    return;
+  }
   content.w = video.videoWidth;
   content.h = video.videoHeight;
   if (!blocked) say("");
@@ -786,12 +807,162 @@ function sized() {
 video.addEventListener("resize", sized);
 video.addEventListener("loadedmetadata", sized);
 
-/** Which of the two the picture is on: the video while its track runs, the canvas otherwise. */
+// ---- Presenting the track's frames this page's own way --------------------
+
+// The browser's own <video> is decoded in hardware, but what happens after the decoder is the
+// compositor's: it holds each frame for its own schedule, and a box that does not land on whole
+// device pixels is resampled. Where the pieces exist (Chromium: MediaStreamTrackProcessor and
+// WebGPU's importExternalTexture) the frames are taken straight from the decoder instead, the
+// newest one is kept and the older ones dropped, and it is drawn at the moment the display asks
+// for it. Nothing is copied through JS and no pixels leave the GPU. Everywhere else (Safari,
+// Firefox) the <video> stays exactly as it was.
+const canPresent = "MediaStreamTrackProcessor" in window && "gpu" in navigator && !nativePicture && !query.has("noGpu");
+let presenter = null;
+
+async function presentTrack(track) {
+  if (!canPresent) return false;
+  let adapter, device;
+  try {
+    adapter = await navigator.gpu.requestAdapter();
+    device = adapter && (await adapter.requestDevice());
+  } catch { device = null; }
+  if (!device) return false;
+  const context = gpu.getContext("webgpu");
+  if (!context) return false;
+  const format = navigator.gpu.getPreferredCanvasFormat();
+  context.configure({ device, format, alphaMode: "opaque" });
+  // One triangle pair, the frame sampled onto it. An external texture is bound per frame: its
+  // group cannot outlive the frame it was made from, so it is made in the draw and dropped after.
+  const shader = device.createShaderModule({ code: [
+    "@group(0) @binding(0) var sampler0: sampler;",
+    "@group(0) @binding(1) var frame: texture_external;",
+    "struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }",
+    "@vertex fn vs(@builtin(vertex_index) i: u32) -> Out {",
+    "  var p = array(vec2f(-1,-1), vec2f(1,-1), vec2f(-1,1), vec2f(1,1));",
+    "  var out: Out;",
+    "  out.pos = vec4f(p[i], 0, 1);",
+    "  out.uv = vec2f((p[i].x + 1) * 0.5, (1 - p[i].y) * 0.5);",
+    "  return out;",
+    "}",
+    "@fragment fn fs(in: Out) -> @location(0) vec4f {",
+    "  return textureSampleBaseClampToEdge(frame, sampler0, in.uv);",
+    "}",
+  ].join("\n") });
+  const pipeline = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: shader, entryPoint: "vs" },
+    fragment: { module: shader, entryPoint: "fs", targets: [{ format }] },
+    primitive: { topology: "triangle-strip" },
+  });
+  const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
+  const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  // The mailbox: one frame, the newest. A frame that arrives before the display asked for the
+  // last one replaces it — the old one is closed, not queued, so the picture never shows the past.
+  const mine = { stopped: false, latest: null, drawing: false, shown: 0, dropped: 0, w: 0, h: 0 };
+  presenter = mine;
+
+  const draw = () => {
+    if (mine.stopped || !mine.latest) return;
+    const frame = mine.latest;
+    mine.latest = null;
+    try {
+      // The canvas carries the frame's own pixels; the layout gives it its place on the page.
+      if (gpu.width !== frame.displayWidth || gpu.height !== frame.displayHeight) {
+        gpu.width = frame.displayWidth;
+        gpu.height = frame.displayHeight;
+      }
+      const external = device.importExternalTexture({ source: frame });
+      const pass = device.createCommandEncoder();
+      const draws = pass.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 1 } }] });
+      draws.setPipeline(pipeline);
+      draws.setBindGroup(0, device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: sampler }, { binding: 1, resource: external }] }));
+      draws.draw(4);
+      draws.end();
+      device.queue.submit([pass.finish()]);
+      mine.shown += 1;
+      if (mine.w !== frame.displayWidth || mine.h !== frame.displayHeight) {
+        mine.w = frame.displayWidth;
+        mine.h = frame.displayHeight;
+        content.w = frame.displayWidth;
+        content.h = frame.displayHeight;
+        // Frames of its own are the picture arriving: the wait for one ends here, whether or not
+        // the <video> beside it was allowed to start playing.
+        clearTimeout(patience);
+        blocked = false;
+        say("");
+        if (!live) show(true);
+        else layout();
+      }
+    } catch (error) {
+      frame.close();
+      return stopPresenting("the frame could not be drawn: " + error.message);
+    }
+    frame.close();
+  };
+  // One draw in flight at a time, on the display's own beat: more submissions than the screen can
+  // show would only queue work on the GPU, which is the delay this path exists to remove.
+  const beat = () => {
+    if (mine.stopped) return;
+    mine.drawing = false;
+    draw();
+  };
+  const wake = () => {
+    if (mine.drawing || mine.stopped) return;
+    mine.drawing = true;
+    requestAnimationFrame(beat);
+  };
+
+  void (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done || mine.stopped) {
+          if (value) value.close();
+          break;
+        }
+        if (mine.latest) {
+          mine.latest.close();
+          mine.dropped += 1;
+        }
+        mine.latest = value;
+        wake();
+      }
+    } catch (error) {
+      if (!mine.stopped) stopPresenting("the frames stopped arriving: " + error.message);
+    }
+  })();
+  // A track that ends (a reconnect, the sender stopping) takes its presenter with it.
+  track.addEventListener("ended", () => { if (presenter === mine) stopPresenting("the track ended"); }, { once: true });
+  return true;
+}
+
+/** Back to the browser's own <video>, keeping the track that is already running. */
+function stopPresenting(reason) {
+  const mine = presenter;
+  if (!mine || mine.stopped) return;
+  mine.stopped = true;
+  presenter = null;
+  if (mine.latest) mine.latest.close();
+  mine.latest = null;
+  gpu.classList.add("gone");
+  if (reason) send({ t: "rtc.diagnosis", reason: "gpu presentation stopped: " + reason, ice: "" });
+  // The track is still there: the <video> shows it from here on.
+  if (live && rtc) {
+    video.classList.remove("gone");
+    if (video.srcObject) play();
+    layout();
+  }
+}
+
+/** Which of the three the picture is on: this page's own presenter or the <video> while a track runs, the canvas otherwise. */
 function show(track) {
   live = track;
-  video.classList.toggle("gone", !track);
+  const own = track && !!presenter;
+  video.classList.toggle("gone", !track || own);
+  gpu.classList.toggle("gone", !own);
   canvas.classList.toggle("gone", track);
   if (!track) {
+    stopPresenting();
     video.srcObject = null;
     content.w = content.h = 0;
     pointer.classList.remove("on");
@@ -1285,11 +1456,15 @@ function layout() {
     pan.y = h <= area.h ? area.y + (area.h - h) / 2 : clamp(pan.y, area.y + area.h - h, area.y);
     shown = { x: pan.x, y: pan.y, w, h };
     if (live) {
-      // The video's box is the picture's place, not its pixels: the sender changes the resolution as the
+      // The picture's box is its place, not its pixels: the sender changes the resolution as the
       // network changes, and the picture stays where it is and as large, only sharper or softer.
-      video.style.width = content.w * fit + "px";
-      video.style.height = content.h * fit + "px";
-      video.style.transform = "translate(" + pan.x + "px," + pan.y + "px) scale(" + zoom + ")";
+      // The box and its corner are put on whole device pixels: one that falls between two of them is
+      // resampled by the compositor, which costs the text its edges for a fraction of a pixel's accuracy.
+      const grid = devicePixelRatio || 1, snap = (value) => Math.round(value * grid) / grid;
+      const shows = presenter ? gpu : video;
+      shows.style.width = snap(content.w * fit) + "px";
+      shows.style.height = snap(content.h * fit) + "px";
+      shows.style.transform = "translate(" + snap(pan.x) + "px," + snap(pan.y) + "px) scale(" + zoom + ")";
     } else canvas.style.transform = "translate(" + pan.x + "px," + pan.y + "px) scale(" + fit * zoom + ")";
   }
   // The toolbar stands in the black beside the picture when there is some, under it otherwise; whatever opens takes its place.
@@ -2016,8 +2191,13 @@ async function vitals(pc, before) {
   const each = (total, count) => (since(count) > 0 ? (since(total) / since(count)) * 1000 : null);
   return {
     raw: track,
-    width: track.frameWidth || video.videoWidth,
-    height: track.frameHeight || video.videoHeight,
+    width: track.frameWidth || (presenter ? presenter.w : video.videoWidth),
+    height: track.frameHeight || (presenter ? presenter.h : video.videoHeight),
+    // Whether this page took the frames from the decoder and drew them itself.
+    presented: presenter ? "gpu" : null,
+    // Frames the mailbox replaced before the display asked for them: the picture's way of
+    // staying live when the decoder runs ahead of the screen.
+    presentDropped: presenter ? presenter.dropped : null,
     fps: round(was ? (since("framesDecoded") * 1000) / (track.timestamp - was.timestamp) : track.framesPerSecond),
     codec: videoCodec(codecs.get(track.codecId)),
     bitrateMbps: was ? round(Math.max(0, since("bytesReceived")) * 8 / ((track.timestamp - was.timestamp) * 1000), 2) : null,
@@ -2045,7 +2225,7 @@ if (typeof window.__linkshellReport === "function") {
       if (pc && (!rtc || rtc.pc !== pc)) return;
       previous = stats?.raw ?? null;
       window.__linkshellReport(stats
-        ? { width: stats.width, height: stats.height, fps: stats.fps, codec: stats.codec, bitrateMbps: stats.bitrateMbps, live: true }
+        ? { width: stats.width, height: stats.height, fps: stats.fps, codec: stats.codec, bitrateMbps: stats.bitrateMbps, presented: stats.presented, live: true }
         : { width: content.w, height: content.h, live: false });
     } catch { /* A reconnect can close getStats while it is in flight. */ }
     finally { pending = false; }
@@ -2631,7 +2811,7 @@ export function viewerPage(): string {
 <title>屏幕</title>
 <style>${STYLE}</style></head>
 <body>
-<div id="stage"><div id="picture"><canvas id="screen"></canvas><video id="video" class="gone" autoplay playsinline muted></video><div id="pointer"></div></div></div>
+<div id="stage"><div id="picture"><canvas id="screen"></canvas><canvas id="gpu" class="gone"></canvas><video id="video" class="gone" autoplay playsinline muted></video><div id="pointer"></div></div></div>
 <div id="note">正在连接电脑屏幕…</div>
 <div id="toast" class="glass"></div>
 <div id="menu" class="glass gone">
