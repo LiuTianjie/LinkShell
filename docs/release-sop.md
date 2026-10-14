@@ -18,6 +18,8 @@
 
 `@linkshell/client-core` 和 `apps/client` 是私有包，不发 npm。`@linkshell/protocol`、`@linkshell/gateway-v2` 是已经删除的 1.x / 过渡包，不再发布。
 
+**只有 `apps/web` 改动时，发布 gateway → cli。** Web 静态资源由 Gateway 的 npm 包和 Docker 镜像内置，Gateway 的 `prepack` 会构建并打包 `web-client/`；CLI 依赖 Gateway 的确切版本。同步根 CLI 版本、Homebrew、Gateway Docker tag 与官方网关部署，不触发移动端或 Mac helper 发版。上线后核对 `/healthz` 和首页引用的新 Web 资源；构建成功不等于线上页面已更新。
+
 三种 tag，各管各的：
 
 - `cli-vX.Y.Z`：标记一次 CLI 发版，不触发 CI。
