@@ -10,6 +10,11 @@ import {
 } from "lucide-react";
 import appMark from "../../../client/assets/mark.png";
 import { engine, type Computer } from "../live/engine";
+import {
+  computerName,
+  computerOption,
+  computerNames,
+} from "../live/computer-names";
 import { readLocal, saveLocal } from "../live/storage";
 import { Icon, type IconName } from "../icons";
 import { Choice } from "./Choice";
@@ -69,6 +74,7 @@ function Navigation({
   selectComputer: (computer: Computer) => void;
 }) {
   const state = useStore(engine.state);
+  const names = useStore(computerNames.store);
   const { setOpenMobile } = useSidebar();
   return (
     <Sidebar className="console-sidebar top-[56px] bottom-0 h-auto">
@@ -130,7 +136,7 @@ function Navigation({
             placeholder="选择电脑"
             options={state.computers.map((computer) => ({
               value: computer.key,
-              label: `${computer.machine.name} · ${computer.machine.online ? "在线" : "离线"}`,
+              label: computerOption(computer, names),
             }))}
             onValueChange={(key) => {
               const computer = state.computers.find(
@@ -172,6 +178,7 @@ export function ConsoleShell({
   children: ReactNode;
 }) {
   const state = useStore(engine.state);
+  const names = useStore(computerNames.store);
   const [theme, setTheme] = useState(() =>
     readLocal(
       "theme",
@@ -276,7 +283,9 @@ export function ConsoleShell({
             <div className="console-current-computer">
               <Monitor size={14} />
               <span>
-                {state.connection?.computer.machine.name ?? "未选择电脑"}
+                {state.connection
+                  ? computerName(state.connection.computer, names)
+                  : "未选择电脑"}
               </span>
               {state.connection && (
                 <Badge variant="outline">

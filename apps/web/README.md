@@ -14,11 +14,17 @@ pnpm --filter @linkshell/web test
 
 Output: `apps/web/dist`. The gateway Docker image and npm package bundle this client at `/`, alongside `/v2/connect` and `/healthz`. Run `pnpm --filter @linkshell/gateway build:web` when running the gateway from a checkout. Production uses `https://gateway.itool.tech`. No separate web deployment is required.
 
-The Screens page lists all discovered computers in a responsive grid. Each online card can
-start, stop or reconnect its viewer, choose a display, resolution, frame-rate ceiling and codec preference. Focus mode enlarges the existing viewer without rebuilding its connection. Fullscreen keeps the toolbar and settings available; select menus are portaled into the fullscreen surface.
-Screen cards and the current workspace share a tunnel per computer; changing the selected
-computer while on this page keeps the other viewers open. Leaving the page releases its
-viewers and unused connections. Offline computers remain visible without opening a tunnel.
+The Screens page shows a searchable, aligned list of computers with connection status and
+quality/permission controls. The pencil beside a name lets users name each computer, edit
+that name or restore the original. Names persist in the current browser, keyed by gateway
+and device identity; they do not rename the system or sync to other browsers or phones.
+Opening a desktop navigates to its own detail URL and starts its viewer. Reloading preserves
+the target computer; the back control returns to the list. The detail page can stop or
+reconnect, select a display, resolution, frame-rate ceiling and codec preference, or enter
+focus/fullscreen. Focus mode retains the existing viewer connection, and fullscreen keeps
+settings available. The list and workspace share a tunnel per computer; leaving the detail
+page releases its viewer and unused connections. Offline computers remain visible without
+opening a tunnel.
 
 ## Functions
 

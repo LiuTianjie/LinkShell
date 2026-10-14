@@ -1,3 +1,11 @@
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverDescription,
+} from "@/components/ui/popover";
 import { Choice } from "../components/Choice";
 import { useEffect, useRef, useState } from "react";
 import { ComputerPreviewSubscription } from "@linkshell/client-core";
@@ -21,6 +29,8 @@ import {
   Play,
   RotateCw,
   Square,
+  SlidersHorizontal,
+  ArrowUpRight,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import {
@@ -245,18 +255,25 @@ function writeStored(key: string, value: string): void {
 export function Screen({
   title = "电脑屏幕",
   embedded = false,
+  primaryAction = false,
+  onOpen,
+  autoStart = false,
 }: {
   title?: string;
   embedded?: boolean;
+  primaryAction?: boolean;
+  onOpen?: () => void;
+  autoStart?: boolean;
 }) {
   const { link, streams } = useConnection();
   const job = useJob();
   const loaded = useLoad(() => link.call("screen.access", {}), [link]);
-  const [started, setStarted] = useState(false);
+  const [started, setStarted] = useState(autoStart);
   const [display, setDisplay] = useState(0);
   const [retry, setRetry] = useState(0);
   const [focused, setFocused] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const compact = embedded && !started && !focused;
   const surface = useRef<HTMLElement>(null);
   const [slow, setSlow] = useState(false);
   const [stats, setStats] = useState<{
@@ -543,138 +560,297 @@ export function Screen({
       pending.clear();
     };
   }, [started, display, retry, link, streams, view]);
+  const settings = (
+    <div className="screen-settings">
+      {displays.length > 1 && (
+        <Choice
+          container={fullscreen || focused ? surface.current : undefined}
+          className="w-auto"
+          label="选择显示器"
+          value={String(display)}
+          onValueChange={(value) => setDisplay(Number(value))}
+          options={displays.map((entry) => ({
+            value: String(entry.index),
+            label: entry.name,
+          }))}
+        />
+      )}
+      <Choice
+        container={fullscreen || focused ? surface.current : undefined}
+        className="w-auto"
+        label="画面清晰度"
+        value={view.width}
+        onValueChange={(value) => configure("width", value)}
+        options={[
+          { value: "1280", label: "省带宽 · 1280" },
+          { value: "1920", label: "标准 · 1920" },
+          { value: "2560", label: "高清 · 2560" },
+          { value: "native", label: "原生分辨率" },
+        ]}
+      />
+      <Choice
+        container={fullscreen || focused ? surface.current : undefined}
+        className="w-auto"
+        label="帧率上限"
+        value={view.maxFps}
+        onValueChange={(value) => configure("maxFps", value)}
+        options={[
+          { value: "120", label: "自适应 · 最高 120 帧" },
+          { value: "60", label: "最高 60 帧" },
+          { value: "30", label: "最高 30 帧" },
+        ]}
+      />
+      <Choice
+        container={fullscreen || focused ? surface.current : undefined}
+        className="w-auto"
+        label="视频编码"
+        value={view.codec}
+        onValueChange={(value) => configure("codec", value)}
+        options={[
+          { value: "auto", label: "自动编码" },
+          { value: "h264", label: "兼容编码 · H.264" },
+        ]}
+      />
+    </div>
+  );
+  if (compact) {
+    const access = loaded.value;
+    const needsPermission = access?.recording === false;
+    return (
+      <section
+        className="screen-page screen-card-viewer screen-is-idle"
+        aria-label={`${title}观看区域`}
+      >
+        <div className="screen-idle-status" role="status">
+          <LoadState {...loaded} />
+          {access && (
+            <>
+              <span
+                className={
+                  access.supported && !needsPermission
+                    ? "online-dot"
+                    : "screen-idle-dot"
+                }
+              />
+              <div>
+                <strong>
+                  {!access.supported
+                    ? "暂不支持共享"
+                    : needsPermission
+                      ? "等待授权"
+                      : "在线"}
+                </strong>
+                <span>
+                  {!access.supported
+                    ? "此系统无法共享屏幕"
+                    : needsPermission
+                      ? "需要屏幕录制权限"
+                      : access.control
+                        ? "可观看与控制"
+                        : "仅观看桌面"}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="screen-idle-actions">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="画质与权限"
+                title="画质与权限"
+              >
+                <SlidersHorizontal />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              className="screen-options-popover w-80 max-w-[calc(100vw-32px)] gap-4 p-4"
+            >
+              <PopoverHeader>
+                <PopoverTitle>画质与权限</PopoverTitle>
+                <PopoverDescription>
+                  根据网络情况调整观看体验。
+                </PopoverDescription>
+              </PopoverHeader>
+              {settings}
+              {access && (
+                <div className="screen-permission-details">
+                  {access.problem && <p>{access.problem}</p>}
+                  <p>
+                    屏幕录制{" "}
+                    <strong>
+                      {access.recording === null
+                        ? "待检查"
+                        : access.recording
+                          ? "已授权"
+                          : "未授权"}
+                    </strong>
+                  </p>
+                  <p>
+                    操作控制{" "}
+                    <strong>
+                      {access.control === null
+                        ? "待检查"
+                        : access.control
+                          ? "已授权"
+                          : "未授权"}
+                    </strong>
+                  </p>
+                  {access.supported &&
+                    (!access.recording || !access.control) && (
+                      <Button
+                        variant="outline"
+                        disabled={job.busy}
+                        onClick={() =>
+                          void job.run(async () => {
+                            await link.call("screen.access", { ask: true });
+                            loaded.reload();
+                          })
+                        }
+                      >
+                        在电脑上检查权限
+                      </Button>
+                    )}
+                </div>
+              )}
+              <Button
+                variant="outline"
+                disabled={loaded.loading || job.busy}
+                onClick={loaded.reload}
+              >
+                <RotateCw data-icon="inline-start" />
+                刷新权限状态
+              </Button>
+            </PopoverContent>
+          </Popover>
+          {loaded.error ? (
+            <Button variant="outline" onClick={loaded.reload}>
+              重新检查
+            </Button>
+          ) : (
+            <Button
+              variant={primaryAction ? "default" : "outline"}
+              disabled={!access?.supported || job.busy}
+              onClick={() => {
+                if (needsPermission)
+                  void job.run(async () => {
+                    await link.call("screen.access", { ask: true });
+                    loaded.reload();
+                  });
+                else if (onOpen) onOpen();
+                else setStarted(true);
+              }}
+            >
+              {needsPermission
+                ? job.busy
+                  ? "正在请求…"
+                  : "检查权限"
+                : "打开桌面"}
+              <ArrowUpRight data-icon="inline-end" />
+            </Button>
+          )}
+        </div>
+        <ErrorNotice error={job.error} />
+      </section>
+    );
+  }
   return (
     <section
       ref={surface}
       className={cn(
         "screen-page",
         embedded && "screen-card-viewer",
+        compact && "screen-is-idle",
+        started && "screen-is-started",
         focused && "screen-focused",
       )}
       aria-label={`${title}观看区域`}
       role={focused ? "dialog" : undefined}
       aria-modal={focused || undefined}
     >
-      <div className="screen-toolbar">
-        {(focused || fullscreen || !embedded) && (
-          <strong className="screen-view-title">
-            <Monitor size={17} />
-            <span title={title}>{title}</span>
-          </strong>
-        )}
-        <div className="screen-settings">
-          {displays.length > 1 && (
-            <Choice
-              container={fullscreen || focused ? surface.current : undefined}
-              className="w-auto"
-              label="选择显示器"
-              value={String(display)}
-              onValueChange={(value) => setDisplay(Number(value))}
-              options={displays.map((entry) => ({
-                value: String(entry.index),
-                label: entry.name,
-              }))}
-            />
+      {!compact && (
+        <div className="screen-toolbar">
+          {(focused || fullscreen || !embedded) && (
+            <strong className="screen-view-title">
+              <Monitor size={17} />
+              <span title={title}>{title}</span>
+            </strong>
           )}
-          <Choice
-            container={fullscreen || focused ? surface.current : undefined}
-            className="w-auto"
-            label="画面清晰度"
-            value={view.width}
-            onValueChange={(value) => configure("width", value)}
-            options={[
-              { value: "1280", label: "省带宽 · 1280" },
-              { value: "1920", label: "标准 · 1920" },
-              { value: "2560", label: "高清 · 2560" },
-              { value: "native", label: "原生分辨率" },
-            ]}
-          />
-          <Choice
-            container={fullscreen || focused ? surface.current : undefined}
-            className="w-auto"
-            label="帧率上限"
-            value={view.maxFps}
-            onValueChange={(value) => configure("maxFps", value)}
-            options={[
-              { value: "120", label: "自适应 · 最高 120 帧" },
-              { value: "60", label: "最高 60 帧" },
-              { value: "30", label: "最高 30 帧" },
-            ]}
-          />
-          <Choice
-            container={fullscreen || focused ? surface.current : undefined}
-            className="w-auto"
-            label="视频编码"
-            value={view.codec}
-            onValueChange={(value) => configure("codec", value)}
-            options={[
-              { value: "auto", label: "自动编码" },
-              { value: "h264", label: "兼容编码 · H.264" },
-            ]}
-          />
-        </div>
-        <div className="screen-actions">
-          {started && (
-            <Button
-              variant="ghost"
-              size="icon"
-              title="重新连接"
-              aria-label="重新连接"
-              onClick={() => setRetry((value) => value + 1)}
-            >
-              <RotateCw />
-            </Button>
-          )}
-          {!fullscreen && (
-            <Button
-              variant="outline"
-              title={focused ? "返回屏幕列表" : "专注观看"}
-              onClick={() => setFocused((value) => !value)}
-            >
-              {focused ? (
-                <ArrowDownLeft data-icon="inline-start" />
-              ) : (
-                <Expand data-icon="inline-start" />
+          {settings}
+          {!compact && (
+            <div className="screen-actions">
+              {started && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  title="重新连接"
+                  aria-label="重新连接"
+                  onClick={() => setRetry((value) => value + 1)}
+                >
+                  <RotateCw />
+                </Button>
               )}
-              {focused ? "返回列表" : "专注观看"}
-            </Button>
-          )}
-          {started && (
-            <>
-              <Button variant="outline" onClick={() => void toggleFullscreen()}>
-                {fullscreen ? (
-                  <Minimize data-icon="inline-start" />
-                ) : (
-                  <Maximize data-icon="inline-start" />
-                )}
-                {fullscreen ? "退出全屏" : "全屏"}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="停止观看"
-                title="停止观看"
-                onClick={() => {
-                  if (document.fullscreenElement === surface.current)
-                    void document.exitFullscreen().catch(() => {});
-                  setStarted(false);
-                  setHtml(undefined);
-                  setStats(undefined);
-                  setError(undefined);
-                }}
-              >
-                <Square />
-              </Button>
-            </>
+              {!fullscreen && (
+                <Button
+                  variant="outline"
+                  title={focused ? "退出专注观看" : "专注观看"}
+                  onClick={() => setFocused((value) => !value)}
+                >
+                  {focused ? (
+                    <ArrowDownLeft data-icon="inline-start" />
+                  ) : (
+                    <Expand data-icon="inline-start" />
+                  )}
+                  {focused ? "退出专注" : "专注观看"}
+                </Button>
+              )}
+              {started && (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => void toggleFullscreen()}
+                  >
+                    {fullscreen ? (
+                      <Minimize data-icon="inline-start" />
+                    ) : (
+                      <Maximize data-icon="inline-start" />
+                    )}
+                    {fullscreen ? "退出全屏" : "全屏"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="停止观看"
+                    title="停止观看"
+                    onClick={() => {
+                      if (document.fullscreenElement === surface.current)
+                        void document.exitFullscreen().catch(() => {});
+                      setStarted(false);
+                      setFocused(false);
+                      setHtml(undefined);
+                      setStats(undefined);
+                      setError(undefined);
+                    }}
+                  >
+                    <Square />
+                  </Button>
+                </>
+              )}
+            </div>
           )}
         </div>
-      </div>
+      )}
       <div className="screen-stage">
         {!started && (
           <div className="screen-start">
-            <div className="screen-display-mark" aria-hidden="true">
-              <Monitor size={48} strokeWidth={1} />
-            </div>
+            {!compact && (
+              <div className="screen-display-mark" aria-hidden="true">
+                <Monitor size={48} strokeWidth={1} />
+              </div>
+            )}
             <LoadState {...loaded} />
             {loaded.error && (
               <Button variant="outline" onClick={loaded.reload}>
@@ -687,35 +863,50 @@ export function Screen({
               <>
                 <h3>
                   {loaded.value.supported
-                    ? "你的桌面，就在这里"
+                    ? loaded.value.recording === false
+                      ? "需要屏幕录制权限"
+                      : loaded.value.control === false
+                        ? "可以观看桌面"
+                        : "可以连接桌面"
                     : "此电脑暂不支持屏幕共享"}
                 </h3>
-                <p>{loaded.value.problem ?? "打开画面，继续电脑上的工作。"}</p>
-                <div className="screen-permissions">
-                  <span>
-                    屏幕录制 ·{" "}
-                    {loaded.value.recording === null
-                      ? "待检查"
-                      : loaded.value.recording
-                        ? "已授权"
-                        : "未授权"}
-                  </span>
-                  <span>
-                    操作控制 ·{" "}
-                    {loaded.value.control === null
-                      ? "待检查"
-                      : loaded.value.control
-                        ? "已授权"
-                        : "未授权"}
-                  </span>
-                </div>
+                {(loaded.value.problem || !compact) && (
+                  <p>
+                    {loaded.value.problem ?? "打开画面，继续电脑上的工作。"}
+                  </p>
+                )}
+                {(!compact ||
+                  loaded.value.recording !== true ||
+                  loaded.value.control !== true) && (
+                  <div className="screen-permissions">
+                    <span>
+                      屏幕录制 ·{" "}
+                      {loaded.value.recording === null
+                        ? "待检查"
+                        : loaded.value.recording
+                          ? "已授权"
+                          : "未授权"}
+                    </span>
+                    <span>
+                      操作控制 ·{" "}
+                      {loaded.value.control === null
+                        ? "待检查"
+                        : loaded.value.control
+                          ? "已授权"
+                          : "未授权"}
+                    </span>
+                  </div>
+                )}
                 {loaded.value.supported && (
                   <div className="screen-start-actions">
-                    <Button size="lg" onClick={() => setStarted(true)}>
+                    <Button
+                      size={compact ? "default" : "lg"}
+                      onClick={() => setStarted(true)}
+                    >
                       <Play data-icon="inline-start" />
                       {loaded.value.control === false
                         ? "开始观看（只读）"
-                        : "开始观看"}
+                        : "打开桌面"}
                     </Button>
                     {(!loaded.value.recording || !loaded.value.control) && (
                       <Button
@@ -731,14 +922,16 @@ export function Screen({
                         {job.busy ? "正在请求权限…" : "在电脑上检查权限"}
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={job.busy || loaded.loading}
-                      onClick={loaded.reload}
-                    >
-                      刷新权限状态
-                    </Button>
+                    {!compact && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={job.busy || loaded.loading}
+                        onClick={loaded.reload}
+                      >
+                        刷新权限状态
+                      </Button>
+                    )}
                   </div>
                 )}
               </>
@@ -792,31 +985,34 @@ export function Screen({
           />
         )}
       </div>
-      <div className="screen-caption">
-        <span className="screen-signal">
-          <span className={stats?.width ? "online-dot" : "screen-idle-dot"} />
-          {stats?.width
-            ? stats.live
-              ? "视频直连"
-              : "兼容画面"
-            : error && started
-              ? "连接失败，可重试"
-              : started
-                ? "正在接收画面"
-                : "尚未开始观看"}
-        </span>
-        {stats?.width ? (
-          <span className="screen-metrics">
-            {stats.width} × {stats.height}
-            {stats.fps !== undefined &&
-              ` · 接收 ${Math.round(stats.fps)} 帧/秒`}
-            {stats.codec && ` · ${stats.codec}`}
-            {stats.bitrateMbps !== undefined && ` · ${stats.bitrateMbps} Mbps`}
+      {!compact && (
+        <div className="screen-caption">
+          <span className="screen-signal">
+            <span className={stats?.width ? "online-dot" : "screen-idle-dot"} />
+            {stats?.width
+              ? stats.live
+                ? "视频直连"
+                : "兼容画面"
+              : error && started
+                ? "连接失败，可重试"
+                : started
+                  ? "正在接收画面"
+                  : "尚未开始观看"}
           </span>
-        ) : (
-          <span>画质与帧率会随电脑和网络条件调整</span>
-        )}
-      </div>
+          {stats?.width ? (
+            <span className="screen-metrics">
+              {stats.width} × {stats.height}
+              {stats.fps !== undefined &&
+                ` · 接收 ${Math.round(stats.fps)} 帧/秒`}
+              {stats.codec && ` · ${stats.codec}`}
+              {stats.bitrateMbps !== undefined &&
+                ` · ${stats.bitrateMbps} Mbps`}
+            </span>
+          ) : (
+            <span>画质与帧率会随电脑和网络条件调整</span>
+          )}
+        </div>
+      )}
     </section>
   );
 }

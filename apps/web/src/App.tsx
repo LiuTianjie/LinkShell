@@ -44,6 +44,13 @@ import type { SessionSummary } from "@linkshell/wire";
 import appMark from "../../client/assets/mark.png";
 import { Icon } from "./icons";
 import { engine } from "./live/engine";
+import { ComputerName } from "./live/ComputerName";
+import {
+  computerName,
+  computerOption,
+  computerIdentity,
+  computerNames,
+} from "./live/computer-names";
 import { Connect } from "./live/Connect";
 import {
   AgentMark,
@@ -67,7 +74,8 @@ import { AcpManager, AgentInteractions } from "./live/Acp";
 import { Files } from "./live/Files";
 import { Terminals } from "./live/Terminal";
 import { Worktrees } from "./live/Panels";
-import { Screens } from "./live/Screens";
+import { Screens, ScreenDetail } from "./live/Screens";
+import { screenView, screenComputerKey } from "./live/screen-route";
 import { Ports } from "./live/Ports";
 import { ConsoleShell } from "./components/ConsoleShell";
 import { readLocal, saveLocal } from "./live/storage";
@@ -92,6 +100,7 @@ export function App() {
 }
 function LiveApp() {
   const state = useStore(engine.state);
+  const names = useStore(computerNames.store);
   const guard = useNavigationGuard();
   const [connect, setConnect] = useState(false);
   const [view, setView] = useState(
@@ -134,13 +143,14 @@ function LiveApp() {
     if (computer.key === state.connection?.computer.key) return;
     void guard(() => {
       engine.select(computer);
-      if (view !== "screen") commitView("home");
+      if (screenComputerKey(view)) commitView(screenView(computer.key));
+      else if (view !== "screen") commitView("home");
     });
   }
   const openConnect = () => void guard(() => setConnect(true));
   return (
     <ConsoleShell
-      view={view}
+      view={screenComputerKey(view) ? "screen" : view}
       navigate={navigate}
       connect={openConnect}
       selectComputer={selectComputer}
@@ -178,7 +188,19 @@ function LiveApp() {
           </Button>
         </div>
       ) : view === "screen" ? (
-        <Screens connect={() => setConnect(true)} />
+        <Screens
+          connect={() => setConnect(true)}
+          open={(computer) => {
+            engine.select(computer);
+            navigate(screenView(computer.key));
+          }}
+        />
+      ) : screenComputerKey(view) ? (
+        <ScreenDetail
+          key={view}
+          computerKey={screenComputerKey(view)!}
+          back={() => navigate("screen")}
+        />
       ) : state.connection ? (
         <Runtime value={state.connection}>
           <Workspace
@@ -219,8 +241,7 @@ function LiveApp() {
               key={computer.key}
               onClick={() => engine.select(computer)}
             >
-              {computer.machine.name} ·{" "}
-              {computer.machine.online ? "在线" : "离线"}
+              {computerOption(computer, names)}
             </Button>
           ))}
           <a className="text-button" href="?demo=1">
@@ -1011,6 +1032,7 @@ function Computers({
 }) {
   const dialogs = useDialogs();
   const state = useStore(engine.state);
+  const names = useStore(computerNames.store);
   const machine = useClient((state) => state.machine);
   const online = useClient((state) => state.status === "online");
   const { link } = useConnection();
@@ -1052,11 +1074,11 @@ function Computers({
                     <span className="computer-name">
                       <Icon name="computer" />
                       <span>
-                        <strong title={computer.machine.name}>
-                          {computer.machine.name}
+                        <strong title={computerName(computer, names)}>
+                          {computerName(computer, names)}
                         </strong>
                         <small title={computer.gateway}>
-                          {computer.gateway.replace(/^wss?:\/\//, "")}
+                          {computer.machine.name} · {computerIdentity(computer)}
                         </small>
                       </span>
                     </span>
@@ -1072,6 +1094,7 @@ function Computers({
                   </TableCell>
                   <TableCell>
                     <div className="computer-actions flex justify-end gap-2">
+                      <ComputerName computer={computer} />
                       <Button
                         variant="outline"
                         size="sm"
@@ -1091,7 +1114,7 @@ function Computers({
                         onClick={async () => {
                           if (
                             await dialogs.confirm(
-                              `移除「${computer.machine.name}」的连接关系？需要时可重新登录或配对。`,
+                              `移除「${computerName(computer, names)}」的连接关系？需要时可重新登录或配对。`,
                             )
                           )
                             void job.run(() => engine.forget(computer));

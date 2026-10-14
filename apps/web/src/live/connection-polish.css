@@ -1,4 +1,88 @@
 @layer components {
+  .screen-detail-page {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    gap: 20px;
+    padding: 20px 28px 28px;
+  }
+  .screen-detail-heading,
+  .screen-detail-identity {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
+  .screen-detail-heading {
+    justify-content: space-between;
+  }
+  .screen-detail-identity > div {
+    min-width: 0;
+  }
+  .screen-detail-identity h1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 20px;
+  }
+  .screen-detail-identity p {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--secondaryLabel);
+  }
+  .screen-detail-page > .screen-page {
+    flex: 1;
+    min-height: 480px;
+    height: auto;
+    border: 1px solid var(--separator);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .screen-detail-page .screen-stage {
+    flex: 1;
+    aspect-ratio: auto;
+    min-height: 340px;
+  }
+  .screen-detail-page > .screen-page.screen-focused,
+  .screen-detail-page > .screen-page:fullscreen {
+    height: 100dvh;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  .screen-detail-page .screen-focused .screen-stage,
+  .screen-detail-page .screen-page:fullscreen .screen-stage {
+    min-height: 0;
+  }
+  .screen-detail-page .screen-toolbar {
+    padding: 14px 16px;
+  }
+  .screen-detail-page .screen-view-title {
+    display: none;
+  }
+  .screen-detail-page .screen-focused .screen-view-title,
+  .screen-detail-page .screen-page:fullscreen .screen-view-title {
+    display: flex;
+  }
+  @media (max-width: 720px) {
+    .screen-detail-page {
+      padding: 12px 16px 20px;
+      gap: 16px;
+    }
+    .screen-detail-page .screen-toolbar {
+      padding: 12px;
+    }
+    .screen-detail-identity {
+      gap: 6px;
+    }
+    .screen-detail-identity h1 {
+      font-size: 18px;
+    }
+    .screen-detail-heading {
+      gap: 8px;
+    }
+  }
   .connection-form {
     min-width: 0;
   }
@@ -105,7 +189,278 @@
   .screen-page:fullscreen .screen-view-title {
     flex-basis: 100%;
   }
+  .console-main > .screens-overview {
+    padding: 30px max(32px, calc((100% - 1160px) / 2)) 40px;
+  }
+  .screens-overview .page-heading {
+    align-items: center;
+    margin-bottom: 36px;
+  }
+  .screens-overview .page-heading h1 {
+    font-size: 30px;
+    letter-spacing: -0.8px;
+  }
+  .screens-collection-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 16px;
+  }
+  .screens-overview .screens-summary {
+    margin: 0;
+    gap: 20px;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .screens-summary h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--label);
+  }
+  .screens-summary h2 > span {
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .screens-collection-toolbar .screens-search {
+    width: 240px;
+    height: 34px;
+  }
+  .screens-overview .screens-grid {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--separator);
+    border-radius: 12px;
+    background: var(--card);
+  }
+  .screens-overview .screen-card {
+    grid-template-columns: minmax(0, 1fr) minmax(330px, 0.85fr);
+    align-items: center;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    transition: background-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .screens-overview .screen-card + .screen-card {
+    border-top: 1px solid var(--separator);
+  }
+  .screens-overview .screen-card:hover {
+    background: color-mix(in srgb, var(--card), var(--inset) 55%);
+  }
+  .screens-overview .screen-card-heading {
+    border: 0;
+    padding-block: 0;
+    min-width: 0;
+  }
+  .screens-overview .screen-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: var(--inset);
+    border: 1px solid var(--separator);
+    box-shadow: inset 0 1px 0 var(--card);
+  }
+  .screens-overview .screen-card[data-current] .screen-card-icon {
+    color: var(--link);
+    background: var(--accentSoft);
+    border-color: color-mix(in srgb, var(--accent) 18%, var(--separator));
+  }
+  .screens-overview .screen-card-icon svg {
+    width: 23px;
+    height: 23px;
+    stroke-width: 1.4;
+  }
+  .screen-device-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .screen-device-title > [data-slot="button"] {
+    color: var(--tertiaryLabel);
+  }
+  .screen-device-title > [data-slot="button"]:hover,
+  .screen-device-title > [data-slot="button"]:focus-visible {
+    color: var(--label);
+  }
+  .screen-device-title > [data-slot="badge"] {
+    flex-shrink: 0;
+  }
+  .screens-overview .screen-card-heading [data-slot="card-title"] {
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .screens-overview .screen-card-heading [data-slot="card-description"] {
+    margin-top: 5px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .screens-overview .screen-is-idle {
+    display: flex;
+    align-items: center;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 0;
+    height: auto;
+  }
+  .screen-idle-status {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+    margin-left: 24px;
+  }
+  .screen-idle-status > .online-dot,
+  .screen-idle-status > .screen-idle-dot {
+    margin-top: 6px;
+    flex-shrink: 0;
+  }
+  .screen-idle-status > div {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .screen-idle-status strong {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--label);
+  }
+  .screen-idle-status > div > span {
+    font-size: 12px;
+    color: var(--secondaryLabel);
+  }
+  .screen-is-idle > [role="alert"] {
+    flex-basis: 100%;
+  }
+  .screens-overview .screen-is-idle:has(> [role="alert"]) {
+    flex-wrap: wrap;
+  }
+  .screen-idle-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .screen-idle-actions > [data-slot="button"],
+  .screen-idle-actions > [data-slot="popover-trigger"] {
+    height: 34px;
+  }
+  .screen-idle-actions > button:last-child {
+    min-width: 108px;
+  }
+  .screen-options-popover .screen-settings {
+    display: grid;
+    gap: 8px;
+  }
+  .screen-options-popover .screen-settings > button {
+    width: 100%;
+  }
+  .screen-permission-details {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-top: 1px solid var(--separator);
+    padding-top: 14px;
+    font-size: 12px;
+    color: var(--secondaryLabel);
+  }
+  .screen-permission-details p {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .screen-permission-details strong {
+    font-weight: 400;
+    color: var(--label);
+  }
+  .screens-overview .screen-card-placeholder {
+    min-height: 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    text-align: left;
+    padding: 0 0 0 24px;
+    gap: 16px;
+  }
+  .screen-connection-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+  .screens-overview .screen-card-placeholder strong {
+    font-size: 13px;
+    font-weight: 400;
+  }
+  .screens-overview .screen-card-placeholder p {
+    font-size: 12px;
+    max-width: 20em;
+  }
+  .screens-collection-note {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 18px;
+    font-size: 12px;
+    color: var(--tertiaryLabel);
+  }
+  .screens-collection-note > span {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .screens-overview .screen-card {
+      transition: none;
+    }
+  }
+  @media (max-width: 1050px) {
+    .screens-overview .screen-card {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: 18px;
+    }
+    .screen-idle-status {
+      margin-left: 0;
+    }
+    .screens-overview .screen-card-placeholder {
+      padding-left: 0;
+    }
+  }
   @media (max-width: 720px) {
+    .console-main > .screens-overview {
+      padding: 20px 16px 32px;
+    }
+    .screens-overview .page-heading {
+      margin-bottom: 28px;
+    }
+    .screens-overview .page-heading h1 {
+      font-size: 26px;
+    }
+    .screens-collection-toolbar {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .screens-collection-toolbar .screens-search {
+      width: 100%;
+    }
+    .screens-overview .screen-card {
+      padding: 18px 16px;
+    }
+    .screens-overview .screen-card-icon {
+      width: 40px;
+      height: 40px;
+    }
     .screens-overview .screens-summary {
       flex-wrap: wrap;
       gap: 8px 16px;
