@@ -134,7 +134,7 @@ extension LinkShellAttentionAttributes.ContentState {
     case "completed":
       return "已完成"
     default:
-      return "已离线"
+      return "待刷新"
     }
   }
 
@@ -166,6 +166,7 @@ extension LinkShellAttentionAttributes.ContentState {
   }
 
   var effectiveSubtitle: String {
+    if phase == "stale" { return "状态已过期，打开 App 刷新" }
     let trimmed = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
     if !trimmed.isEmpty { return trimmed }
     switch phase {
@@ -175,6 +176,16 @@ extension LinkShellAttentionAttributes.ContentState {
     case "running", "starting": return "Agent 正在后台执行任务…"
     default: return project
     }
+  }
+}
+
+@available(iOS 16.2, *)
+extension ActivityViewContext where Attributes == LinkShellAttentionAttributes {
+  var displayState: LinkShellAttentionAttributes.ContentState {
+    // The system can expire content while the app is suspended and cannot send an update.
+    var display = state
+    if isStale { display.phase = "stale" }
+    return display
   }
 }
 
@@ -202,7 +213,7 @@ struct LockScreenBannerView: View {
   let context: ActivityViewContext<LinkShellAttentionAttributes>
 
   var body: some View {
-    let state = context.state
+    let state = context.displayState
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 8) {
         AgentBadgeView(state: state, size: 24)
@@ -260,7 +271,7 @@ struct LinkShellAttentionWidget: Widget {
       LockScreenBannerView(context: context)
         .widgetURL(URL(string: context.state.deepLink))
     } dynamicIsland: { context in
-      let state = context.state
+      let state = context.displayState
       return DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
           HStack(spacing: 7) {
@@ -307,7 +318,7 @@ struct LinkShellAttentionWidget: Widget {
                 .foregroundColor(.white.opacity(0.8))
                 .lineLimit(1)
               Spacer(minLength: 4)
-              if state.waitingCount + state.runningCount > 1 {
+              if state.phase != "stale" && state.waitingCount + state.runningCount > 1 {
                 Text("\\(state.runningCount) 运行 · \\(state.waitingCount) 待处理")
                   .font(.system(size: 11, weight: .medium))
                   .foregroundColor(.white.opacity(0.55))

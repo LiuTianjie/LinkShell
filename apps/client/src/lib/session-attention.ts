@@ -397,12 +397,19 @@ export function useIOSAttentionSync(
       void syncNativeLiveActivity(payload);
     };
     sync();
+    // Keep unchanged foreground sessions fresh; iOS owns expiry once the app is suspended.
+    const heartbeat = setInterval(() => {
+      if (AppState.currentState === "active") sync();
+    }, 60_000);
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "inactive" || nextState === "background" || nextState === "active") {
         sync();
       }
     });
-    return () => sub.remove();
+    return () => {
+      clearInterval(heartbeat);
+      sub.remove();
+    };
   }, [computerName, sessions, terminals, online, views, promptProgress]);
 }
 
